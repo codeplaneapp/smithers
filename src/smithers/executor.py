@@ -42,10 +42,114 @@ from smithers.types import (
     WorkflowNode,
     WorkflowResult,
 )
+from smithers.types import RetryPolicy
 from smithers.workflow import SkipResult, Workflow, get_workflow_by_output
 
 if TYPE_CHECKING:
     pass
+
+
+async def _execute_with_retry(
+    wf: Workflow,
+    kwargs: dict[str, Any],
+    *,
+    run_id: str,
+    node_id: str,
+    store: SqliteStore,
+    on_progress: Callable[[WorkflowEvent], Awaitable[None]] | None = None,
+) -> tuple[Any, float, int]:
+    """
+    Execute a workflow function with retry logic.
+
+    Returns:
+        Tuple of (output, total_duration_ms, attempt_count)
+
+    Raises:
+        The last exception if all retries are exhausted.
+    """
+    policy = wf.retry_policy
+    last_exception: BaseException | None = None
+    total_duration_ms = 0.0
+    attempt = 0
+
+    while attempt < policy.max_attempts:
+        attempt += 1
+
+        # Emit retry event if this is not the first attempt
+        if attempt > 1:
+            delay = policy.get_delay(attempt - 1)
+            await store.emit_event(
+                run_id,
+                node_id,
+                "NodeRetrying",
+                {
+                    "attempt": attempt,
+                    "max_attempts": policy.max_attempts,
+                    "delay_seconds": delay,
+                    "last_error": str(last_exception) if last_exception else None,
+                    "last_error_type": type(last_exception).__name__ if last_exception else None,
+                },
+            )
+            if on_progress:
+                await on_progress(
+                    WorkflowEvent(
+                        type="retrying",
+                        workflow_name=node_id,
+                        message=f"Retry {attempt}/{policy.max_attempts} after {delay:.1f}s",
+                    )
+                )
+            # Wait before retry
+            await asyncio.sleep(delay)
+
+        try:
+            start = time.perf_counter()
+
+            # Set up RuntimeContext for LLM and tool call tracking
+            rt_ctx = RuntimeContext(run_id=run_id, node_id=node_id, store=store)
+            with runtime_context(rt_ctx):
+                output = await wf(**kwargs)
+
+            duration_ms = (time.perf_counter() - start) * 1000.0
+            total_duration_ms += duration_ms
+
+            # Success - return the output
+            return output, total_duration_ms, attempt
+
+        except PauseExecution:
+            # Never retry pause requests
+            raise
+
+        except ApprovalRejected:
+            # Never retry approval rejections
+            raise
+
+        except BaseException as exc:
+            duration_ms = (time.perf_counter() - start) * 1000.0
+            total_duration_ms += duration_ms
+            last_exception = exc
+
+            # Check if we should retry
+            if not policy.should_retry(exc, attempt):
+                # Either exhausted retries or exception type not retryable
+                if attempt < policy.max_attempts:
+                    # Exception type not retryable
+                    await store.emit_event(
+                        run_id,
+                        node_id,
+                        "NodeRetrySkipped",
+                        {
+                            "attempt": attempt,
+                            "error": str(exc),
+                            "error_type": type(exc).__name__,
+                            "reason": "exception_not_retryable",
+                        },
+                    )
+                raise
+
+    # Should not reach here, but for type safety
+    if last_exception is not None:
+        raise last_exception
+    raise RuntimeError("Unexpected state: no result and no exception")
 
 
 @dataclass
@@ -242,19 +346,26 @@ async def run_graph_with_store(
                     )
                 return
 
-            # Execute the workflow with RuntimeContext for LLM/tool tracking
+            # Execute the workflow with retry support
             await store.update_node_status(run_id, name, NodeStatus.RUNNING)
-            await store.emit_event(run_id, name, "NodeStarted", {})
+            await store.emit_event(
+                run_id,
+                name,
+                "NodeStarted",
+                {"max_attempts": wf.retry_policy.max_attempts},
+            )
 
-            start = time.perf_counter()
             kwargs = _build_kwargs(wf, ctx.outputs)
 
-            # Set up RuntimeContext for LLM and tool call tracking
-            rt_ctx = RuntimeContext(run_id=run_id, node_id=name, store=store)
-            with runtime_context(rt_ctx):
-                output = await wf(**kwargs)
-
-            duration_ms = (time.perf_counter() - start) * 1000.0
+            # Execute with retry wrapper
+            output, duration_ms, attempts = await _execute_with_retry(
+                wf,
+                kwargs,
+                run_id=run_id,
+                node_id=name,
+                store=store,
+                on_progress=on_progress,
+            )
 
             if isinstance(output, SkipResult):
                 ctx.outputs[name] = None
@@ -318,7 +429,7 @@ async def run_graph_with_store(
                 run_id,
                 name,
                 "NodeFinished",
-                {"duration_ms": duration_ms, "cached": False},
+                {"duration_ms": duration_ms, "cached": False, "attempts": attempts},
             )
 
             if on_progress:
@@ -841,19 +952,26 @@ async def resume_run(
                     )
                 return
 
-            # Execute the workflow with RuntimeContext for LLM/tool tracking
+            # Execute the workflow with retry support
             await store.update_node_status(run_id, name, NodeStatus.RUNNING)
-            await store.emit_event(run_id, name, "NodeStarted", {})
+            await store.emit_event(
+                run_id,
+                name,
+                "NodeStarted",
+                {"max_attempts": wf.retry_policy.max_attempts},
+            )
 
-            start = time.perf_counter()
             kwargs = _build_kwargs(wf, ctx.outputs)
 
-            # Set up RuntimeContext for LLM and tool call tracking
-            rt_ctx = RuntimeContext(run_id=run_id, node_id=name, store=store)
-            with runtime_context(rt_ctx):
-                output = await wf(**kwargs)
-
-            duration_ms = (time.perf_counter() - start) * 1000.0
+            # Execute with retry wrapper
+            output, duration_ms, attempts = await _execute_with_retry(
+                wf,
+                kwargs,
+                run_id=run_id,
+                node_id=name,
+                store=store,
+                on_progress=on_progress,
+            )
 
             if isinstance(output, SkipResult):
                 ctx.outputs[name] = None
@@ -917,7 +1035,7 @@ async def resume_run(
                 run_id,
                 name,
                 "NodeFinished",
-                {"duration_ms": duration_ms, "cached": False},
+                {"duration_ms": duration_ms, "cached": False, "attempts": attempts},
             )
 
             if on_progress:
