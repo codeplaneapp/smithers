@@ -104,11 +104,25 @@ from smithers.ralph_loop import (
     is_ralph_loop,
     ralph_loop,
 )
+from smithers.visualization import (
+    GraphVisualization,
+    NodeState,
+    NodeStatus,
+    print_graph,
+    visualize_graph,
+)
 from smithers.workflow import require_approval, require_approval_async, retry, skip, workflow
 
 __version__ = "0.1.0"
 
 __all__ = [
+    # Visualization
+    "GraphVisualization",
+    "NodeState",
+    "NodeStatus",
+    "print_graph",
+    "visualize_graph",
+    # Other exports
     "ApprovalRejected",
     "BudgetExceededAction",
     "BudgetExceededError",
