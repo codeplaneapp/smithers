@@ -157,6 +157,19 @@ from smithers.websocket import (
     status_message,
 )
 from smithers.workflow import require_approval, require_approval_async, retry, skip, workflow
+from smithers.composition import (
+    CompositionError,
+    GraphMergeConflict,
+    branch,
+    chain,
+    compose_graphs,
+    get_composition_info,
+    map_workflow,
+    parallel,
+    pipeline,
+    reduce_workflow,
+    subgraph,
+)
 from smithers.conditions import (
     Condition,
     ConditionNotMetError,
@@ -353,4 +366,16 @@ __all__ = [
     "run_if",
     "skip_if",
     "when",
+    # Composition
+    "CompositionError",
+    "GraphMergeConflict",
+    "branch",
+    "chain",
+    "compose_graphs",
+    "get_composition_info",
+    "map_workflow",
+    "parallel",
+    "pipeline",
+    "reduce_workflow",
+    "subgraph",
 ]
