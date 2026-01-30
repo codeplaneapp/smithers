@@ -3,8 +3,21 @@ name = "smithers"
 version = "0.1.0"
 description = "Build AI agent workflows the way you build software"
 readme = "README.md"
+license = { text = "MIT" }
 authors = [
     { name = "William Cory", email = "willcory10@gmail.com" }
+]
+keywords = ["ai", "agents", "llm", "workflows", "pydantic", "claude", "anthropic"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
 requires-python = ">=3.12"
 dependencies = [
@@ -19,23 +32,56 @@ dev = [
     "pytest-asyncio>=0.24",
     "pyright>=1.1",
     "ruff>=0.8",
+    "pytest-cov>=4.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/evmts/smithers"
+Documentation = "https://github.com/evmts/smithers#readme"
+Repository = "https://github.com/evmts/smithers"
+Issues = "https://github.com/evmts/smithers/issues"
+
+[project.scripts]
+smithers = "smithers.cli:main"
+
 [build-system]
-requires = ["uv_build>=0.8.23,<0.9.0"]
-build-backend = "uv_build"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/smithers"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+addopts = "-v --tb=short"
 
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
+include = ["src"]
+exclude = ["**/__pycache__", "build", "dist"]
 
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+src = ["src"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501", "UP047"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["smithers"]
+
+[tool.coverage.run]
+source = ["src/smithers"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

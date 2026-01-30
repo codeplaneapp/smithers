@@ -88,7 +88,7 @@ async def package_module(
         Summarize this module package:
         
         Code: {code.description}
-        Tests: {tests.test_count} tests covering {', '.join(tests.coverage_areas)}
+        Tests: {tests.test_count} tests covering {", ".join(tests.coverage_areas)}
         Docs: {len(docs.examples)} examples provided
         
         Is it ready to publish?
@@ -104,7 +104,7 @@ async def main():
     print("Execution Graph:")
     print(graph.mermaid())
     print()
-    
+
     # Show parallelization levels
     print("Execution levels (workflows in same level run in parallel):")
     for i, level in enumerate(graph.levels):

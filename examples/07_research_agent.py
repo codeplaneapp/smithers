@@ -12,7 +12,6 @@ from pydantic import BaseModel
 
 from smithers import build_graph, claude, run_graph, workflow
 
-
 # --- Output Models ---
 
 
@@ -72,7 +71,7 @@ async def search_academic(plan: ResearchPlan) -> SearchResult:
         Search for academic/research sources on: {plan.question}
         
         Focus on these sub-questions:
-        {chr(10).join(f'- {q}' for q in plan.sub_questions[:2])}
+        {chr(10).join(f"- {q}" for q in plan.sub_questions[:2])}
         
         Look for peer-reviewed papers, technical reports, and academic blogs.
         """,
@@ -90,7 +89,7 @@ async def search_industry(plan: ResearchPlan) -> SearchResult:
         Search for industry sources on: {plan.question}
         
         Focus on these sub-questions:
-        {chr(10).join(f'- {q}' for q in plan.sub_questions[2:])}
+        {chr(10).join(f"- {q}" for q in plan.sub_questions[2:])}
         
         Look for blog posts from companies, conference talks, and documentation.
         """,
@@ -125,20 +124,18 @@ async def analyze_findings(
     code: SearchResult,
 ) -> Analysis:
     """Analyze and synthesize all research findings."""
-    all_findings = academic.findings + industry.findings + code.findings
-
     return await claude(
         f"""
         Analyze these research findings:
         
         Academic findings ({academic.confidence:.0%} confidence):
-        {chr(10).join(f'- {f}' for f in academic.findings)}
+        {chr(10).join(f"- {f}" for f in academic.findings)}
         
         Industry findings ({industry.confidence:.0%} confidence):
-        {chr(10).join(f'- {f}' for f in industry.findings)}
+        {chr(10).join(f"- {f}" for f in industry.findings)}
         
         Code examples ({code.confidence:.0%} confidence):
-        {chr(10).join(f'- {f}' for f in code.findings)}
+        {chr(10).join(f"- {f}" for f in code.findings)}
         
         Identify themes, contradictions, and gaps.
         """,
@@ -156,22 +153,20 @@ async def generate_report(
 ) -> Report:
     """Generate the final research report."""
     all_sources = academic.sources + industry.sources + code.sources
-    avg_confidence = (
-        academic.confidence + industry.confidence + code.confidence
-    ) / 3
+    avg_confidence = (academic.confidence + industry.confidence + code.confidence) / 3
 
     return await claude(
         f"""
         Generate a research report on: {plan.question}
         
         Key themes identified:
-        {chr(10).join(f'- {t}' for t in analysis.key_themes)}
+        {chr(10).join(f"- {t}" for t in analysis.key_themes)}
         
         Strongest evidence:
-        {chr(10).join(f'- {e}' for e in analysis.strongest_evidence)}
+        {chr(10).join(f"- {e}" for e in analysis.strongest_evidence)}
         
         Gaps to acknowledge:
-        {chr(10).join(f'- {g}' for g in analysis.gaps)}
+        {chr(10).join(f"- {g}" for g in analysis.gaps)}
         
         Available sources: {len(all_sources)}
         Average confidence: {avg_confidence:.0%}

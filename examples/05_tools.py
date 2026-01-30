@@ -57,10 +57,10 @@ async def fix_issues(review: CodeReviewOutput) -> FixOutput:
         Fix these issues found during code review:
         
         Issues:
-        {chr(10).join(f'- {issue}' for issue in review.issues_found)}
+        {chr(10).join(f"- {issue}" for issue in review.issues_found)}
         
         Suggestions:
-        {chr(10).join(f'- {s}' for s in review.suggestions)}
+        {chr(10).join(f"- {s}" for s in review.suggestions)}
         
         Apply fixes and run tests to verify.
         """,
@@ -85,7 +85,7 @@ async def generate_report(
         
         Fixes applied:
         - Files modified: {len(fixes.files_modified)}
-        - Tests passed: {'Yes' if fixes.tests_passed else 'No'}
+        - Tests passed: {"Yes" if fixes.tests_passed else "No"}
         """,
         output=ReportOutput,
     )

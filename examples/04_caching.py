@@ -25,8 +25,7 @@ class SynthesisOutput(BaseModel):
 async def research_topic() -> ResearchOutput:
     """Conduct research on a topic."""
     return await claude(
-        "Research the current state of Python async/await best practices. "
-        "Provide key findings.",
+        "Research the current state of Python async/await best practices. Provide key findings.",
         output=ResearchOutput,
     )
 
@@ -38,7 +37,7 @@ async def synthesize(research: ResearchOutput) -> SynthesisOutput:
         f"""
         Based on these research findings:
         
-        {chr(10).join(f'- {f}' for f in research.findings)}
+        {chr(10).join(f"- {f}" for f in research.findings)}
         
         Confidence level: {research.confidence:.0%}
         
@@ -69,7 +68,7 @@ async def main():
 
     # Show cache stats
     stats = await cache.stats()
-    print(f"Cache stats:")
+    print("Cache stats:")
     print(f"  Entries: {stats.entries}")
     print(f"  Hits: {stats.hits}")
     print(f"  Misses: {stats.misses}")

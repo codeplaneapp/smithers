@@ -1,41 +1,70 @@
-# Dependencies
-node_modules/
-
-# Build output
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
 dist/
-*.tsbuildinfo
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Tauri
-apps/tauri-app/src-tauri/target/
+# Virtual environments
+.venv/
+venv/
+ENV/
 
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
+# uv
+.uv/
+uv.lock
 
-# OS files
-.DS_Store
-Thumbs.db
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Type checking
+.pyright/
+.mypy_cache/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+.spyderproject
+.spyproject
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Environment
 .env
 .env.local
 .env.*.local
 
-# Turbo
-.turbo/
+# Smithers cache
+smithers_cache.db
+*.db
 
-# Test coverage
-coverage/
+# Logs
+*.log
 
-# Temporary files
+# Temporary
 *.tmp
 *.temp
+.cache/

@@ -35,14 +35,14 @@ async def analyze_topic() -> AnalysisOutput:
 @workflow
 async def explain_topic(analysis: AnalysisOutput) -> ExplanationOutput:
     """Explain a topic based on prior analysis.
-    
+
     Note: `analysis` is automatically provided by Smithers from `analyze_topic`.
     """
     return await claude(
         f"""
         Based on this analysis of '{analysis.topic}':
         
-        Key points: {', '.join(analysis.key_points)}
+        Key points: {", ".join(analysis.key_points)}
         Complexity: {analysis.complexity}
         
         Create a beginner-friendly explanation with a relatable analogy.
@@ -65,7 +65,7 @@ async def main():
 
     print(f"Summary: {result.summary}")
     print(f"\nAnalogy: {result.analogy}")
-    print(f"\nNext steps:")
+    print("\nNext steps:")
     for step in result.next_steps:
         print(f"  - {step}")
 

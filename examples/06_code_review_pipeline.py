@@ -12,7 +12,6 @@ from pydantic import BaseModel
 
 from smithers import build_graph, claude, require_approval, run_graph, workflow
 
-
 # --- Output Models ---
 
 
@@ -97,9 +96,7 @@ async def aggregate_reviews(
 ) -> AggregatedReview:
     """Aggregate all reviews into a single report."""
     total_issues = (
-        len(security.vulnerabilities)
-        + len(performance.bottlenecks)
-        + len(style.violations)
+        len(security.vulnerabilities) + len(performance.bottlenecks) + len(style.violations)
     )
 
     critical = []
@@ -149,13 +146,13 @@ async def apply_fixes(
         Apply fixes for these issues:
         
         Security (priority):
-        {chr(10).join(f'- {v}' for v in security.vulnerabilities)}
+        {chr(10).join(f"- {v}" for v in security.vulnerabilities)}
         
         Performance:
-        {chr(10).join(f'- {b}' for b in performance.bottlenecks)}
+        {chr(10).join(f"- {b}" for b in performance.bottlenecks)}
         
         Style:
-        {chr(10).join(f'- {v}' for v in style.violations)}
+        {chr(10).join(f"- {v}" for v in style.violations)}
         
         Fix what you can automatically, list what remains.
         """,
@@ -186,7 +183,7 @@ async def main():
     print(f"  Issues fixed: {result.issues_fixed}")
     print(f"  Files changed: {len(result.files_changed)}")
     if result.remaining_issues:
-        print(f"  Remaining issues:")
+        print("  Remaining issues:")
         for issue in result.remaining_issues:
             print(f"    - {issue}")
 
