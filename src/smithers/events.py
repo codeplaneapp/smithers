@@ -403,6 +403,11 @@ class EventTypes:
     RETRY_SCHEDULED = "RetryScheduled"
     RETRY_ATTEMPT = "RetryAttempt"
 
+    # Ralph loop events
+    LOOP_ITERATION_STARTED = "LoopIterationStarted"
+    LOOP_ITERATION_FINISHED = "LoopIterationFinished"
+    LOOP_MAX_ITERATIONS_REACHED = "LoopMaxIterationsReached"
+
 
 # Factory functions for creating common events
 def run_started(run_id: str, target: str, node_count: int) -> Event:
@@ -595,5 +600,63 @@ def retry_scheduled(
             "attempt": attempt,
             "delay_seconds": delay_seconds,
             "error": error,
+        },
+    )
+
+
+def loop_iteration_started(
+    run_id: str,
+    node_id: str,
+    iteration: int,
+    input_hash: str | None = None,
+) -> Event:
+    """Create a LoopIterationStarted event."""
+    payload: dict[str, Any] = {"iteration": iteration}
+    if input_hash is not None:
+        payload["input_hash"] = input_hash
+    return Event(
+        type=EventTypes.LOOP_ITERATION_STARTED,
+        run_id=run_id,
+        node_id=node_id,
+        payload=payload,
+    )
+
+
+def loop_iteration_finished(
+    run_id: str,
+    node_id: str,
+    iteration: int,
+    output_hash: str | None = None,
+    duration_ms: float | None = None,
+    condition_met: bool = False,
+) -> Event:
+    """Create a LoopIterationFinished event."""
+    payload: dict[str, Any] = {"iteration": iteration, "condition_met": condition_met}
+    if output_hash is not None:
+        payload["output_hash"] = output_hash
+    if duration_ms is not None:
+        payload["duration_ms"] = duration_ms
+    return Event(
+        type=EventTypes.LOOP_ITERATION_FINISHED,
+        run_id=run_id,
+        node_id=node_id,
+        payload=payload,
+    )
+
+
+def loop_max_iterations_reached(
+    run_id: str,
+    node_id: str,
+    max_iterations: int,
+    final_iteration: int,
+) -> Event:
+    """Create a LoopMaxIterationsReached event."""
+    return Event(
+        type=EventTypes.LOOP_MAX_ITERATIONS_REACHED,
+        run_id=run_id,
+        node_id=node_id,
+        payload={
+            "max_iterations": max_iterations,
+            "final_iteration": final_iteration,
         },
     )

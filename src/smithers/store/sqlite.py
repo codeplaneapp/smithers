@@ -154,6 +154,25 @@ class ToolCall:
     error_json: str | None
 
 
+@dataclass
+class LoopIteration:
+    """A record of a Ralph loop iteration.
+
+    Implements Invariant I7: Ralph loop iterations are individually tracked
+    with their own events, timing, and optional caching.
+    """
+
+    run_id: str
+    loop_node_id: str
+    iteration: int
+    input_hash: str
+    output_hash: str | None
+    status: str
+    started_at: datetime | None
+    finished_at: datetime | None = None
+    duration_ms: float | None = None
+
+
 # SQL schema for all tables
 _SCHEMA = """
 -- cache entries: content-addressed results
@@ -253,6 +272,20 @@ CREATE TABLE IF NOT EXISTS node_outputs (
     PRIMARY KEY (run_id, node_id)
 );
 
+-- loop_iterations: tracking for Ralph loop iterations (Invariant I7)
+CREATE TABLE IF NOT EXISTS loop_iterations (
+    run_id TEXT NOT NULL,
+    loop_node_id TEXT NOT NULL,
+    iteration INTEGER NOT NULL,
+    input_hash TEXT NOT NULL,
+    output_hash TEXT,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    duration_ms REAL,
+    PRIMARY KEY (run_id, loop_node_id, iteration)
+);
+
 -- indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
@@ -261,6 +294,8 @@ CREATE INDEX IF NOT EXISTS idx_llm_calls_run_id ON llm_calls(run_id);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_run_id ON tool_calls(run_id);
 CREATE INDEX IF NOT EXISTS idx_cache_entries_workflow_id ON cache_entries(workflow_id);
 CREATE INDEX IF NOT EXISTS idx_node_outputs_run_id ON node_outputs(run_id);
+CREATE INDEX IF NOT EXISTS idx_loop_iterations_run_id ON loop_iterations(run_id);
+CREATE INDEX IF NOT EXISTS idx_loop_iterations_loop_node ON loop_iterations(run_id, loop_node_id);
 """
 
 
@@ -1297,6 +1332,243 @@ class SqliteStore:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "tool_counts": tool_counts,
+        }
+
+    # ==================== Loop Iteration Operations (Invariant I7) ====================
+
+    async def emit_loop_iteration_started(
+        self,
+        run_id: str,
+        loop_node_id: str,
+        iteration: int,
+        input_hash: str,
+    ) -> None:
+        """Record the start of a Ralph loop iteration.
+
+        Args:
+            run_id: The run ID
+            loop_node_id: The loop node ID
+            iteration: The iteration number (0-indexed)
+            input_hash: Hash of the input to this iteration
+        """
+        await self._ensure_initialized()
+        now = _timestamp_now()
+
+        async with self._lock, aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """
+                INSERT OR REPLACE INTO loop_iterations
+                    (run_id, loop_node_id, iteration, input_hash, status, started_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, loop_node_id, iteration, input_hash, "RUNNING", now),
+            )
+            await db.commit()
+
+        # Also emit an event for visibility
+        await self.emit_event(
+            run_id,
+            loop_node_id,
+            "LoopIterationStarted",
+            {"iteration": iteration, "input_hash": input_hash},
+        )
+
+    async def emit_loop_iteration_finished(
+        self,
+        run_id: str,
+        loop_node_id: str,
+        iteration: int,
+        output_hash: str,
+        *,
+        status: str = "SUCCESS",
+        error: str | None = None,
+    ) -> None:
+        """Record the completion of a Ralph loop iteration.
+
+        Args:
+            run_id: The run ID
+            loop_node_id: The loop node ID
+            iteration: The iteration number (0-indexed)
+            output_hash: Hash of the output from this iteration
+            status: Status of the iteration (SUCCESS or FAILED)
+            error: Error message if status is FAILED
+        """
+        await self._ensure_initialized()
+        now = _timestamp_now()
+
+        async with self._lock, aiosqlite.connect(self.path) as db:
+            # Get started_at to calculate duration
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT started_at FROM loop_iterations
+                WHERE run_id = ? AND loop_node_id = ? AND iteration = ?
+                """,
+                (run_id, loop_node_id, iteration),
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            duration_ms = None
+            if row and row["started_at"]:
+                started = _parse_timestamp(row["started_at"])
+                if started:
+                    from datetime import timezone
+
+                    finished = datetime.fromisoformat(now)
+                    if started.tzinfo is None:
+                        started = started.replace(tzinfo=timezone.utc)
+                    if finished.tzinfo is None:
+                        finished = finished.replace(tzinfo=timezone.utc)
+                    duration_ms = (finished - started).total_seconds() * 1000
+
+            await db.execute(
+                """
+                UPDATE loop_iterations
+                SET output_hash = ?, status = ?, finished_at = ?, duration_ms = ?
+                WHERE run_id = ? AND loop_node_id = ? AND iteration = ?
+                """,
+                (output_hash, status, now, duration_ms, run_id, loop_node_id, iteration),
+            )
+            await db.commit()
+
+        # Also emit an event for visibility
+        payload: dict[str, Any] = {
+            "iteration": iteration,
+            "output_hash": output_hash,
+            "status": status,
+        }
+        if duration_ms is not None:
+            payload["duration_ms"] = duration_ms
+        if error is not None:
+            payload["error"] = error
+
+        await self.emit_event(
+            run_id,
+            loop_node_id,
+            "LoopIterationFinished",
+            payload,
+        )
+
+    async def get_loop_iterations(
+        self,
+        run_id: str,
+        loop_node_id: str | None = None,
+    ) -> list[LoopIteration]:
+        """Get loop iterations for a run, optionally filtered by loop node.
+
+        Args:
+            run_id: The run ID
+            loop_node_id: Optional loop node ID to filter by
+
+        Returns:
+            List of LoopIteration records
+        """
+        await self._ensure_initialized()
+        query = "SELECT * FROM loop_iterations WHERE run_id = ?"
+        params: list[Any] = [run_id]
+
+        if loop_node_id is not None:
+            query += " AND loop_node_id = ?"
+            params.append(loop_node_id)
+
+        query += " ORDER BY loop_node_id, iteration"
+
+        async with self._lock, aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(query, params) as cursor:
+                rows = await cursor.fetchall()
+
+        return [
+            LoopIteration(
+                run_id=row["run_id"],
+                loop_node_id=row["loop_node_id"],
+                iteration=row["iteration"],
+                input_hash=row["input_hash"],
+                output_hash=row["output_hash"],
+                status=row["status"],
+                started_at=_parse_timestamp(row["started_at"]),
+                finished_at=_parse_timestamp(row["finished_at"]),
+                duration_ms=row["duration_ms"],
+            )
+            for row in rows
+        ]
+
+    async def get_loop_iteration(
+        self,
+        run_id: str,
+        loop_node_id: str,
+        iteration: int,
+    ) -> LoopIteration | None:
+        """Get a specific loop iteration.
+
+        Args:
+            run_id: The run ID
+            loop_node_id: The loop node ID
+            iteration: The iteration number
+
+        Returns:
+            LoopIteration if found, None otherwise
+        """
+        await self._ensure_initialized()
+
+        async with self._lock, aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT * FROM loop_iterations
+                WHERE run_id = ? AND loop_node_id = ? AND iteration = ?
+                """,
+                (run_id, loop_node_id, iteration),
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            if row is None:
+                return None
+
+            return LoopIteration(
+                run_id=row["run_id"],
+                loop_node_id=row["loop_node_id"],
+                iteration=row["iteration"],
+                input_hash=row["input_hash"],
+                output_hash=row["output_hash"],
+                status=row["status"],
+                started_at=_parse_timestamp(row["started_at"]),
+                finished_at=_parse_timestamp(row["finished_at"]),
+                duration_ms=row["duration_ms"],
+            )
+
+    async def get_loop_stats(self, run_id: str) -> dict[str, Any]:
+        """Get statistics about loop iterations for a run.
+
+        Returns:
+            A dict with:
+            - loop_count: Number of loop nodes
+            - total_iterations: Total iterations across all loops
+            - loops: Dict mapping loop_node_id to iteration counts and status
+        """
+        iterations = await self.get_loop_iterations(run_id)
+
+        loops: dict[str, dict[str, Any]] = {}
+        for it in iterations:
+            if it.loop_node_id not in loops:
+                loops[it.loop_node_id] = {
+                    "iteration_count": 0,
+                    "success_count": 0,
+                    "failed_count": 0,
+                    "total_duration_ms": 0.0,
+                }
+            loops[it.loop_node_id]["iteration_count"] += 1
+            if it.status == "SUCCESS":
+                loops[it.loop_node_id]["success_count"] += 1
+            elif it.status == "FAILED":
+                loops[it.loop_node_id]["failed_count"] += 1
+            if it.duration_ms is not None:
+                loops[it.loop_node_id]["total_duration_ms"] += it.duration_ms
+
+        return {
+            "loop_count": len(loops),
+            "total_iterations": len(iterations),
+            "loops": loops,
         }
 
 

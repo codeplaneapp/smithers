@@ -97,6 +97,13 @@ from smithers.verification import (
     verify_run_state,
     verify_workflow_output,
 )
+from smithers.ralph_loop import (
+    RalphLoopConfig,
+    RalphLoopWorkflow,
+    execute_ralph_loop,
+    is_ralph_loop,
+    ralph_loop,
+)
 from smithers.workflow import require_approval, require_approval_async, retry, skip, workflow
 
 __version__ = "0.1.0"
@@ -128,6 +135,8 @@ __all__ = [
     "RETRY_ONCE",
     "RETRY_THREE_TIMES",
     "RETRY_WITH_BACKOFF",
+    "RalphLoopConfig",
+    "RalphLoopWorkflow",
     "RateLimitConfig",
     "RateLimitError",
     "RateLimitExceededAction",
@@ -160,6 +169,7 @@ __all__ = [
     "configure",
     "configure_claude_rate_limits",
     "create_rate_limiter",
+    "execute_ralph_loop",
     "full_verification",
     "get_current_context",
     "get_daily_usage",
@@ -170,6 +180,8 @@ __all__ = [
     "get_run_tokens",
     "hash_json",
     "hash_string",
+    "is_ralph_loop",
+    "ralph_loop",
     "recalculate_run_costs",
     "register_model_pricing",
     "register_model_rate_limiter",
