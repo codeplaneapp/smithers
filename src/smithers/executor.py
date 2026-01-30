@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import TypeAdapter
 
 from smithers.cache import Cache, SqliteCache
-from smithers.errors import ApprovalRejected, WorkflowError
+from smithers.errors import ApprovalRejected, WorkflowError, WorkflowTimeoutError, GraphTimeoutError
 from smithers.events import Event, get_event_bus
 from smithers.hashing import code_hash, hash_json
 from smithers.hashing import input_hash as compute_input_hash
@@ -92,23 +92,38 @@ async def _execute_with_retry(
     node_id: str,
     store: SqliteStore,
     on_progress: Callable[[WorkflowEvent], Awaitable[None]] | None = None,
+    timeout_seconds: float | None = None,
 ) -> tuple[Any, float, int]:
     """
-    Execute a workflow function with retry logic.
+    Execute a workflow function with retry and timeout logic.
 
     Returns:
         Tuple of (output, total_duration_ms, attempt_count)
 
     Raises:
         The last exception if all retries are exhausted.
+        WorkflowTimeoutError if the workflow times out.
     """
+    from smithers.errors import WorkflowTimeoutError
+
     policy = wf.retry_policy
     last_exception: BaseException | None = None
     total_duration_ms = 0.0
     attempt = 0
+    execution_start = time.perf_counter()
 
     while attempt < policy.max_attempts:
         attempt += 1
+
+        # Check if we've exceeded the timeout before starting a new attempt
+        if timeout_seconds is not None:
+            elapsed = time.perf_counter() - execution_start
+            if elapsed >= timeout_seconds:
+                raise WorkflowTimeoutError(
+                    workflow_name=node_id,
+                    timeout_seconds=timeout_seconds,
+                    elapsed_seconds=elapsed,
+                )
 
         # Emit retry event if this is not the first attempt
         if attempt > 1:
@@ -140,10 +155,36 @@ async def _execute_with_retry(
         try:
             start = time.perf_counter()
 
+            # Calculate remaining timeout for this attempt
+            remaining_timeout: float | None = None
+            if timeout_seconds is not None:
+                elapsed_total = time.perf_counter() - execution_start
+                remaining_timeout = timeout_seconds - elapsed_total
+                if remaining_timeout <= 0:
+                    raise WorkflowTimeoutError(
+                        workflow_name=node_id,
+                        timeout_seconds=timeout_seconds,
+                        elapsed_seconds=elapsed_total,
+                    )
+
             # Set up RuntimeContext for LLM and tool call tracking
             rt_ctx = RuntimeContext(run_id=run_id, node_id=node_id, store=store)
             with runtime_context(rt_ctx):
-                output = await wf(**kwargs)
+                if remaining_timeout is not None:
+                    try:
+                        output = await asyncio.wait_for(
+                            wf(**kwargs),
+                            timeout=remaining_timeout,
+                        )
+                    except asyncio.TimeoutError:
+                        elapsed_total = time.perf_counter() - execution_start
+                        raise WorkflowTimeoutError(
+                            workflow_name=node_id,
+                            timeout_seconds=timeout_seconds,
+                            elapsed_seconds=elapsed_total,
+                        ) from None
+                else:
+                    output = await wf(**kwargs)
 
             duration_ms = (time.perf_counter() - start) * 1000.0
             total_duration_ms += duration_ms
@@ -157,6 +198,10 @@ async def _execute_with_retry(
 
         except ApprovalRejected:
             # Never retry approval rejections
+            raise
+
+        except WorkflowTimeoutError:
+            # Never retry timeouts - they are terminal
             raise
 
         except BaseException as exc:
@@ -358,6 +403,8 @@ async def run_graph_with_store(
     on_progress: Callable[[WorkflowEvent], Awaitable[None]] | None = None,
     run_id: str | None = None,
     headless: bool = False,
+    timeout: float | None = None,
+    node_timeout: float | None = None,
 ) -> Any:
     """
     Execute a workflow graph with full SqliteStore integration.
@@ -383,12 +430,16 @@ async def run_graph_with_store(
         on_progress: Progress callback
         run_id: Custom run ID (generated if None)
         headless: If True, pause execution when approval is required instead of prompting
+        timeout: Global timeout for entire graph execution in seconds
+        node_timeout: Default timeout for individual nodes in seconds (overridden by @timeout)
 
     Returns:
         The output of the root workflow (or ExecutionResult if return_all=True)
 
     Raises:
         PauseExecution: If headless=True and an approval is required
+        GraphTimeoutError: If the global timeout is exceeded
+        WorkflowTimeoutError: If a node timeout is exceeded
     """
     from smithers.config import get_config
 
@@ -426,6 +477,32 @@ async def run_graph_with_store(
 
     semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency else None
     start_time = time.perf_counter()
+
+    def _get_effective_timeout(wf: Workflow, name: str) -> float | None:
+        """Calculate the effective timeout for a node."""
+        # Priority: workflow-specific timeout > default node_timeout > global timeout remaining
+        wf_timeout: float | None = None
+        if wf.timeout_policy is not None:
+            wf_timeout = wf.timeout_policy.timeout_seconds
+
+        effective = wf_timeout or node_timeout
+
+        # If there's a global timeout, we need to constrain by remaining time
+        if timeout is not None:
+            elapsed = time.perf_counter() - start_time
+            remaining = timeout - elapsed
+            if remaining <= 0:
+                raise GraphTimeoutError(
+                    timeout_seconds=timeout,
+                    elapsed_seconds=elapsed,
+                    completed_nodes=[n for n, s in ctx.statuses.items() if s in ("success", "cached")],
+                    running_nodes=[n for n, s in ctx.statuses.items() if s not in ("success", "cached", "skipped", "failed")],
+                )
+            if effective is not None:
+                return min(effective, remaining)
+            return remaining
+
+        return effective
 
     async def run_node_in_main(name: str) -> None:
         """Node executor for run_graph_with_store."""
@@ -543,12 +620,18 @@ async def run_graph_with_store(
                 )
                 attempts = iterations  # For Ralph loops, "attempts" means iterations
             else:
+                # Calculate effective timeout for this node
+                effective_timeout = _get_effective_timeout(wf, name)
+
                 await _emit_event(
                     store,
                     run_id,
                     name,
                     "NodeStarted",
-                    {"max_attempts": wf.retry_policy.max_attempts},
+                    {
+                        "max_attempts": wf.retry_policy.max_attempts,
+                        "timeout_seconds": effective_timeout,
+                    },
                 )
 
                 # Execute with retry wrapper
@@ -559,6 +642,7 @@ async def run_graph_with_store(
                     node_id=name,
                     store=store,
                     on_progress=on_progress,
+                    timeout_seconds=effective_timeout,
                 )
 
             if isinstance(output, SkipResult):
@@ -655,6 +739,31 @@ async def run_graph_with_store(
             if on_rejection == "fail":
                 raise
 
+        except WorkflowTimeoutError as exc:
+            ctx.statuses[name] = "failed"
+            ctx.errors[name] = exc
+            await store.update_node_status(run_id, name, NodeStatus.FAILED, error=exc)
+            await _emit_event(
+                store,
+                run_id,
+                name,
+                "NodeTimedOut",
+                {
+                    "timeout_seconds": exc.timeout_seconds,
+                    "elapsed_seconds": exc.elapsed_seconds,
+                },
+            )
+            if on_progress:
+                await on_progress(
+                    WorkflowEvent(type="timeout", workflow_name=name, message=str(exc))
+                )
+            if fail_fast:
+                raise
+
+        except GraphTimeoutError:
+            # Re-raise graph timeout to be handled at the outer level
+            raise
+
         except BaseException as exc:
             ctx.statuses[name] = "failed"
             ctx.errors[name] = exc
@@ -687,6 +796,17 @@ async def run_graph_with_store(
             if not tasks:
                 continue
 
+            # Check global timeout before each level
+            if timeout is not None:
+                elapsed = time.perf_counter() - start_time
+                if elapsed >= timeout:
+                    raise GraphTimeoutError(
+                        timeout_seconds=timeout,
+                        elapsed_seconds=elapsed,
+                        completed_nodes=[n for n, s in ctx.statuses.items() if s in ("success", "cached")],
+                        running_nodes=[],
+                    )
+
             if fail_fast:
                 try:
                     await asyncio.gather(*tasks)
@@ -695,6 +815,10 @@ async def run_graph_with_store(
                 except WorkflowError:
                     raise
                 except PauseExecution:
+                    raise
+                except GraphTimeoutError:
+                    raise
+                except WorkflowTimeoutError:
                     raise
                 except BaseException:
                     if ctx.errors:
@@ -712,6 +836,22 @@ async def run_graph_with_store(
             exc.node_id,
             "RunPaused",
             {"node_id": exc.node_id, "message": exc.message},
+        )
+        raise
+    except GraphTimeoutError as exc:
+        # Update run status to FAILED due to timeout
+        await store.update_run_status(run_id, RunStatus.FAILED, finished=True)
+        await _emit_event(
+            store,
+            run_id,
+            None,
+            "RunTimedOut",
+            {
+                "timeout_seconds": exc.timeout_seconds,
+                "elapsed_seconds": exc.elapsed_seconds,
+                "completed_nodes": exc.completed_nodes,
+                "running_nodes": exc.running_nodes,
+            },
         )
         raise
     except BaseException:

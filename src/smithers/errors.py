@@ -66,3 +66,61 @@ class ToolError(SmithersError):
         super().__init__(message)
         self.tool_name = tool_name
         self.data = data
+
+
+class TimeoutError(SmithersError):
+    """Base class for timeout-related errors."""
+
+
+class WorkflowTimeoutError(TimeoutError):
+    """
+    Raised when a workflow exceeds its timeout limit.
+
+    Attributes:
+        workflow_name: Name of the workflow that timed out
+        timeout_seconds: The configured timeout in seconds
+        elapsed_seconds: Actual time elapsed before timeout
+    """
+
+    def __init__(
+        self,
+        workflow_name: str,
+        timeout_seconds: float,
+        elapsed_seconds: float,
+    ) -> None:
+        self.workflow_name = workflow_name
+        self.timeout_seconds = timeout_seconds
+        self.elapsed_seconds = elapsed_seconds
+        super().__init__(
+            f"Workflow '{workflow_name}' timed out after {elapsed_seconds:.2f}s "
+            f"(limit: {timeout_seconds:.2f}s)"
+        )
+
+
+class GraphTimeoutError(TimeoutError):
+    """
+    Raised when graph execution exceeds its global timeout.
+
+    Attributes:
+        timeout_seconds: The configured global timeout in seconds
+        elapsed_seconds: Actual time elapsed
+        completed_nodes: List of nodes that completed before timeout
+        running_nodes: List of nodes that were running when timeout occurred
+    """
+
+    def __init__(
+        self,
+        timeout_seconds: float,
+        elapsed_seconds: float,
+        completed_nodes: list[str] | None = None,
+        running_nodes: list[str] | None = None,
+    ) -> None:
+        self.timeout_seconds = timeout_seconds
+        self.elapsed_seconds = elapsed_seconds
+        self.completed_nodes = completed_nodes or []
+        self.running_nodes = running_nodes or []
+        super().__init__(
+            f"Graph execution timed out after {elapsed_seconds:.2f}s "
+            f"(limit: {timeout_seconds:.2f}s). "
+            f"Completed: {len(self.completed_nodes)}, Running: {len(self.running_nodes)}"
+        )

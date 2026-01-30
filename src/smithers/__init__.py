@@ -43,7 +43,26 @@ from smithers.ratelimit import (
 from smithers.cache import Cache, SqliteCache
 from smithers.claude import claude
 from smithers.config import configure
-from smithers.errors import ApprovalRejected, ClaudeError, RateLimitError, WorkflowError
+from smithers.errors import (
+    ApprovalRejected,
+    ClaudeError,
+    GraphTimeoutError,
+    RateLimitError,
+    WorkflowError,
+    WorkflowTimeoutError,
+)
+from smithers.timeout import (
+    LONG_TIMEOUT,
+    MEDIUM_TIMEOUT,
+    NO_TIMEOUT,
+    SHORT_TIMEOUT,
+    TimeoutAction,
+    TimeoutPolicy,
+    TimeoutState,
+    execute_with_timeout,
+    get_effective_timeout,
+    timeout,
+)
 from smithers.events import (
     Event,
     EventBus,
@@ -139,6 +158,9 @@ from smithers.websocket import (
 )
 from smithers.workflow import require_approval, require_approval_async, retry, skip, workflow
 
+# Re-export timeout from smithers.timeout for convenience
+# Already imported above, but including here for documentation
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -223,6 +245,19 @@ __all__ = [
     "VerificationIssue",
     "WorkflowError",
     "WorkflowGraph",
+    "WorkflowTimeoutError",
+    "GraphTimeoutError",
+    # Timeout exports
+    "LONG_TIMEOUT",
+    "MEDIUM_TIMEOUT",
+    "NO_TIMEOUT",
+    "SHORT_TIMEOUT",
+    "TimeoutAction",
+    "TimeoutPolicy",
+    "TimeoutState",
+    "execute_with_timeout",
+    "get_effective_timeout",
+    "timeout",
     "__version__",
     "build_graph",
     "cache_key",
