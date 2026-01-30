@@ -277,6 +277,38 @@ def main() -> int:
         help="Output format",
     )
 
+    # metrics command - Prometheus/OpenTelemetry metrics export
+    metrics_parser = subparsers.add_parser("metrics", help="Prometheus/OpenTelemetry metrics")
+    metrics_sub = metrics_parser.add_subparsers(dest="metrics_command")
+
+    # metrics serve
+    metrics_serve_parser = metrics_sub.add_parser("serve", help="Start metrics HTTP server for Prometheus scraping")
+    metrics_serve_parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Host to bind to (default: 0.0.0.0)",
+    )
+    metrics_serve_parser.add_argument(
+        "--port",
+        type=int,
+        default=9090,
+        help="Port to listen on (default: 9090)",
+    )
+    metrics_serve_parser.add_argument(
+        "--store",
+        default=None,
+        help="Path to SQLite store database for event integration",
+    )
+
+    # metrics export
+    metrics_export_parser = metrics_sub.add_parser("export", help="Export metrics")
+    metrics_export_parser.add_argument(
+        "--format",
+        choices=["prometheus", "opentelemetry"],
+        default="prometheus",
+        help="Output format (default: prometheus)",
+    )
+
     args = parser.parse_args()
 
     if args.version:
@@ -313,6 +345,8 @@ def main() -> int:
         return _show_stats(args)
     elif args.command == "ratelimit":
         return _ratelimit_command(args)
+    elif args.command == "metrics":
+        return _metrics_command(args)
 
     return 0
 
@@ -1239,6 +1273,62 @@ def _ratelimit_reset(args: argparse.Namespace) -> int:
 
     limiter.reset()
     print("Rate limiter state reset")
+
+    return 0
+
+
+def _metrics_command(args: argparse.Namespace) -> int:
+    """Handle metrics subcommands."""
+    if args.metrics_command == "serve":
+        return _metrics_serve(args)
+    elif args.metrics_command == "export":
+        return _metrics_export(args)
+    else:
+        print("Unknown metrics command. Use: serve or export", file=sys.stderr)
+        return 1
+
+
+def _metrics_serve(args: argparse.Namespace) -> int:
+    """Start a metrics server for Prometheus scraping."""
+    from smithers.metrics import MetricsCollector, get_metrics_collector
+
+    collector = get_metrics_collector()
+
+    # Attach to event bus if a store is provided
+    if args.store:
+        from smithers.events import get_event_bus
+        collector.attach_to_event_bus(get_event_bus())
+
+    print(f"Starting metrics server on http://{args.host}:{args.port}/metrics")
+    print("Press Ctrl+C to stop")
+
+    try:
+        server = collector.start_server(host=args.host, port=args.port, daemon=False)
+        # The server runs in the main thread when daemon=False is passed
+        # But start_server starts a daemon thread, so we need to wait
+        import time
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nStopping metrics server")
+        collector.stop_server()
+    return 0
+
+
+def _metrics_export(args: argparse.Namespace) -> int:
+    """Export metrics in the specified format."""
+    from smithers.metrics import get_metrics_collector
+
+    collector = get_metrics_collector()
+
+    if args.format == "prometheus":
+        print(collector.export_prometheus())
+    elif args.format == "opentelemetry":
+        import json
+        print(json.dumps(collector.export_opentelemetry(), indent=2))
+    else:
+        print(f"Unknown format: {args.format}", file=sys.stderr)
+        return 1
 
     return 0
 
