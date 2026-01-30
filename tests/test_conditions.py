@@ -37,7 +37,7 @@ from smithers import (
 from smithers.workflow import clear_registry
 
 
-class TestOutput(BaseModel):
+class CheckOutput(BaseModel):
     passed: bool
     coverage: float = 0.8
 
@@ -188,36 +188,36 @@ class TestPreBuiltConditions:
     def test_dep_succeeded(self):
         """dep_succeeded checks if dependency is not None."""
         cond = dep_succeeded("result")
-        assert cond(SimpleNamespace(result=TestOutput(passed=True))) is True
+        assert cond(SimpleNamespace(result=CheckOutput(passed=True))) is True
         assert cond(SimpleNamespace(result=None)) is False
         assert cond(SimpleNamespace()) is False
 
     def test_field_equals(self):
         """field_equals checks field value."""
         cond = field_equals("tests", "passed", True)
-        assert cond(SimpleNamespace(tests=TestOutput(passed=True))) is True
-        assert cond(SimpleNamespace(tests=TestOutput(passed=False))) is False
+        assert cond(SimpleNamespace(tests=CheckOutput(passed=True))) is True
+        assert cond(SimpleNamespace(tests=CheckOutput(passed=False))) is False
         assert cond(SimpleNamespace(tests=None)) is False
 
     def test_field_gt(self):
         """field_gt checks field > threshold."""
         cond = field_gt("tests", "coverage", 0.7)
-        assert cond(SimpleNamespace(tests=TestOutput(passed=True, coverage=0.8))) is True
-        assert cond(SimpleNamespace(tests=TestOutput(passed=True, coverage=0.5))) is False
-        assert cond(SimpleNamespace(tests=TestOutput(passed=True, coverage=0.7))) is False  # Not >
+        assert cond(SimpleNamespace(tests=CheckOutput(passed=True, coverage=0.8))) is True
+        assert cond(SimpleNamespace(tests=CheckOutput(passed=True, coverage=0.5))) is False
+        assert cond(SimpleNamespace(tests=CheckOutput(passed=True, coverage=0.7))) is False  # Not >
 
     def test_field_gte(self):
         """field_gte checks field >= threshold."""
         cond = field_gte("tests", "coverage", 0.8)
-        assert cond(SimpleNamespace(tests=TestOutput(passed=True, coverage=0.8))) is True
-        assert cond(SimpleNamespace(tests=TestOutput(passed=True, coverage=0.9))) is True
-        assert cond(SimpleNamespace(tests=TestOutput(passed=True, coverage=0.7))) is False
+        assert cond(SimpleNamespace(tests=CheckOutput(passed=True, coverage=0.8))) is True
+        assert cond(SimpleNamespace(tests=CheckOutput(passed=True, coverage=0.9))) is True
+        assert cond(SimpleNamespace(tests=CheckOutput(passed=True, coverage=0.7))) is False
 
     def test_field_lt(self):
         """field_lt checks field < threshold."""
         cond = field_lt("tests", "coverage", 0.8)
-        assert cond(SimpleNamespace(tests=TestOutput(passed=True, coverage=0.5))) is True
-        assert cond(SimpleNamespace(tests=TestOutput(passed=True, coverage=0.8))) is False
+        assert cond(SimpleNamespace(tests=CheckOutput(passed=True, coverage=0.5))) is True
+        assert cond(SimpleNamespace(tests=CheckOutput(passed=True, coverage=0.8))) is False
 
     def test_field_in(self):
         """field_in checks field in allowed values."""
@@ -315,7 +315,7 @@ class TestConditionWorkflowIntegration:
 
         @workflow
         @when(lambda deps: deps.tests.passed, skip_reason="Tests failed")
-        async def deploy(tests: TestOutput) -> DeployOutput:
+        async def deploy(tests: CheckOutput) -> DeployOutput:
             return DeployOutput(deployed=True)
 
         assert deploy.condition_policy is not None
@@ -326,12 +326,12 @@ class TestConditionWorkflowIntegration:
         """Workflow is skipped when condition not met."""
 
         @workflow
-        async def run_tests() -> TestOutput:
-            return TestOutput(passed=False, coverage=0.5)
+        async def run_tests() -> CheckOutput:
+            return CheckOutput(passed=False, coverage=0.5)
 
         @workflow
         @when(lambda deps: deps.tests.passed, skip_reason="Tests failed")
-        async def deploy(tests: TestOutput) -> DeployOutput:
+        async def deploy(tests: CheckOutput) -> DeployOutput:
             return DeployOutput(deployed=True)
 
         graph = build_graph(deploy)
@@ -347,12 +347,12 @@ class TestConditionWorkflowIntegration:
         """Workflow runs when condition is met."""
 
         @workflow
-        async def run_tests() -> TestOutput:
-            return TestOutput(passed=True, coverage=0.9)
+        async def run_tests() -> CheckOutput:
+            return CheckOutput(passed=True, coverage=0.9)
 
         @workflow
         @when(lambda deps: deps.tests.passed, skip_reason="Tests failed")
-        async def deploy(tests: TestOutput) -> DeployOutput:
+        async def deploy(tests: CheckOutput) -> DeployOutput:
             return DeployOutput(deployed=True)
 
         graph = build_graph(deploy)
@@ -367,8 +367,8 @@ class TestConditionWorkflowIntegration:
         """Condition can check multiple dependencies."""
 
         @workflow
-        async def run_tests() -> TestOutput:
-            return TestOutput(passed=True, coverage=0.9)
+        async def run_tests() -> CheckOutput:
+            return CheckOutput(passed=True, coverage=0.9)
 
         @workflow(register=False)
         async def get_config() -> ConfigOutput:
@@ -382,7 +382,7 @@ class TestConditionWorkflowIntegration:
             ),
             skip_reason="Tests must pass with >80% coverage",
         )
-        async def deploy(tests: TestOutput) -> DeployOutput:
+        async def deploy(tests: CheckOutput) -> DeployOutput:
             return DeployOutput(deployed=True)
 
         graph = build_graph(deploy)
@@ -396,12 +396,12 @@ class TestConditionWorkflowIntegration:
         """Workflow fails when condition not met with on_skip='fail'."""
 
         @workflow
-        async def run_tests() -> TestOutput:
-            return TestOutput(passed=False, coverage=0.5)
+        async def run_tests() -> CheckOutput:
+            return CheckOutput(passed=False, coverage=0.5)
 
         @workflow
         @when(lambda deps: deps.tests.passed, skip_reason="Tests failed", on_skip="fail")
-        async def deploy(tests: TestOutput) -> DeployOutput:
+        async def deploy(tests: CheckOutput) -> DeployOutput:
             return DeployOutput(deployed=True)
 
         graph = build_graph(deploy)
@@ -417,8 +417,8 @@ class TestConditionWorkflowIntegration:
         """Workflow returns default value when condition not met with on_skip='default'."""
 
         @workflow
-        async def run_tests() -> TestOutput:
-            return TestOutput(passed=False, coverage=0.5)
+        async def run_tests() -> CheckOutput:
+            return CheckOutput(passed=False, coverage=0.5)
 
         default_deploy = DeployOutput(deployed=False)
 
@@ -429,7 +429,7 @@ class TestConditionWorkflowIntegration:
             on_skip="default",
             default_value=default_deploy,
         )
-        async def deploy(tests: TestOutput) -> DeployOutput:
+        async def deploy(tests: CheckOutput) -> DeployOutput:
             return DeployOutput(deployed=True)
 
         graph = build_graph(deploy)
@@ -453,12 +453,12 @@ class TestComplexConditions:
         """Multiple workflows with conditions in a chain."""
 
         @workflow
-        async def run_tests() -> TestOutput:
-            return TestOutput(passed=True, coverage=0.9)
+        async def run_tests() -> CheckOutput:
+            return CheckOutput(passed=True, coverage=0.9)
 
         @workflow
         @when(field_equals("tests", "passed", True))
-        async def build(tests: TestOutput) -> ConfigOutput:
+        async def build(tests: CheckOutput) -> ConfigOutput:
             return ConfigOutput(env="production")
 
         @workflow
@@ -468,7 +468,7 @@ class TestComplexConditions:
                 field_in("config", "env", ["staging", "production"]),
             )
         )
-        async def deploy(tests: TestOutput, config: ConfigOutput) -> DeployOutput:
+        async def deploy(tests: CheckOutput, config: ConfigOutput) -> DeployOutput:
             return DeployOutput(deployed=True)
 
         graph = build_graph(deploy)
@@ -482,12 +482,12 @@ class TestComplexConditions:
         """Downstream nodes are skipped when upstream is skipped."""
 
         @workflow
-        async def run_tests() -> TestOutput:
-            return TestOutput(passed=False, coverage=0.3)
+        async def run_tests() -> CheckOutput:
+            return CheckOutput(passed=False, coverage=0.3)
 
         @workflow
         @when(lambda deps: deps.tests.passed, skip_reason="Tests failed")
-        async def build(tests: TestOutput) -> ConfigOutput:
+        async def build(tests: CheckOutput) -> ConfigOutput:
             return ConfigOutput(env="staging")
 
         @workflow
@@ -508,8 +508,8 @@ class TestComplexConditions:
         """Conditions can use all combinators."""
 
         @workflow
-        async def run_tests() -> TestOutput:
-            return TestOutput(passed=True, coverage=0.85)
+        async def run_tests() -> CheckOutput:
+            return CheckOutput(passed=True, coverage=0.85)
 
         @workflow
         @when(
@@ -522,7 +522,7 @@ class TestComplexConditions:
             ),
             skip_reason="Deploy conditions not met",
         )
-        async def deploy(tests: TestOutput) -> DeployOutput:
+        async def deploy(tests: CheckOutput) -> DeployOutput:
             return DeployOutput(deployed=True)
 
         graph = build_graph(deploy)
@@ -630,8 +630,8 @@ class TestDecoratorOrder:
 
         @workflow
         @when(lambda deps: True)
-        async def my_workflow() -> TestOutput:
-            return TestOutput(passed=True)
+        async def my_workflow() -> CheckOutput:
+            return CheckOutput(passed=True)
 
         assert my_workflow.condition_policy is not None
 
@@ -640,8 +640,8 @@ class TestDecoratorOrder:
 
         @workflow
         @skip_if(lambda deps: deps.skip, reason="Skipping")
-        async def maybe_run(skip: bool = False) -> TestOutput:  # noqa: FBT
-            return TestOutput(passed=True)
+        async def maybe_run(skip: bool = False) -> CheckOutput:  # noqa: FBT
+            return CheckOutput(passed=True)
 
         assert maybe_run.condition_policy is not None
         assert maybe_run.condition_policy.skip_reason == "Skipping"
