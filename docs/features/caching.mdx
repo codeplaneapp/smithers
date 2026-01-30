@@ -1,0 +1,216 @@
+---
+title: Caching
+description: Skip unchanged work with SQLite-based caching
+---
+
+Smithers can cache workflow results to skip unchanged work on subsequent runs.
+
+## Why Cache?
+
+- **Speed**: Skip expensive LLM calls when inputs haven't changed
+- **Cost**: Save API costs by not re-running workflows
+- **Reproducibility**: Get the same results for the same inputs
+
+## Basic Usage
+
+```python
+from smithers import SqliteCache, build_graph, run_graph
+
+cache = SqliteCache("./smithers_cache.db")
+
+# First run: executes all workflows
+result = await run_graph(graph, cache=cache)
+
+# Second run: skips workflows with unchanged inputs
+result = await run_graph(graph, cache=cache)  # ⚡ Instant
+```
+
+## How It Works
+
+For each workflow, Smithers computes a **cache key** by hashing:
+
+1. **Workflow name** and source code
+2. **Input values** (outputs from dependencies)
+3. **Configuration** (tools, system prompt, etc.)
+
+If the cache key matches a stored result, the workflow is skipped.
+
+```python
+# Pseudocode
+cache_key = hash(
+    workflow.name,
+    workflow.source_code,
+    input_values,
+    tools,
+    system_prompt,
+)
+
+if cache.has(cache_key):
+    return cache.get(cache_key)
+else:
+    result = await execute_workflow()
+    cache.set(cache_key, result)
+    return result
+```
+
+## SqliteCache
+
+The built-in cache uses SQLite for persistence:
+
+```python
+from smithers import SqliteCache
+
+# Create cache at specific path
+cache = SqliteCache("./cache/smithers.db")
+
+# Or use default location
+cache = SqliteCache.default()  # ~/.smithers/cache.db
+```
+
+### Schema
+
+```sql
+CREATE TABLE cache (
+    key TEXT PRIMARY KEY,
+    value BLOB,
+    created_at TIMESTAMP,
+    accessed_at TIMESTAMP,
+    workflow_name TEXT,
+    input_hash TEXT
+);
+```
+
+## Cache Operations
+
+### Check Stats
+
+```python
+stats = await cache.stats()
+print(f"Entries: {stats.entries}")
+print(f"Hits: {stats.hits}")
+print(f"Misses: {stats.misses}")
+print(f"Size: {stats.size_bytes / 1024:.1f} KB")
+```
+
+### Clear Cache
+
+```python
+# Clear everything
+await cache.clear()
+
+# Clear specific workflow
+await cache.clear(workflow="analyze")
+
+# Clear entries older than 7 days
+await cache.clear(older_than=timedelta(days=7))
+```
+
+### Inspect Entries
+
+```python
+# List all cached workflows
+entries = await cache.list()
+for entry in entries:
+    print(f"{entry.workflow_name}: {entry.created_at}")
+```
+
+## Cache Invalidation
+
+Cache is automatically invalidated when:
+
+- **Workflow code changes** — Source code is part of the hash
+- **Inputs change** — Different upstream outputs
+- **Configuration changes** — Different tools, system prompt, etc.
+
+### Manual Invalidation
+
+```python
+# Force re-execution of specific workflow
+result = await run_graph(graph, cache=cache, invalidate=["analyze"])
+
+# Force re-execution of all workflows
+result = await run_graph(graph, cache=cache, invalidate="*")
+```
+
+## Partial Caching
+
+Some workflows might hit cache while others execute:
+
+```python
+# Scenario: analyze is cached, but we changed implement
+
+# Level 0: analyze ← CACHED (skipped)
+# Level 1: implement ← EXECUTES (code changed)
+# Level 2: test ← EXECUTES (input changed)
+```
+
+## Cache Strategies
+
+### Development
+
+Aggressive caching for fast iteration:
+
+```python
+cache = SqliteCache("./dev_cache.db")
+result = await run_graph(graph, cache=cache)
+```
+
+### CI/CD
+
+Fresh execution, no caching:
+
+```python
+result = await run_graph(graph)  # No cache
+```
+
+### Production
+
+Persistent cache with TTL:
+
+```python
+cache = SqliteCache(
+    "./prod_cache.db",
+    ttl=timedelta(hours=24),  # Expire after 24 hours
+)
+```
+
+## Custom Cache Backends
+
+Implement the `Cache` protocol for custom backends:
+
+```python
+from smithers import Cache, CacheStats
+
+class RedisCache(Cache):
+    async def get(self, key: str) -> Any | None:
+        ...
+    
+    async def set(self, key: str, value: Any) -> None:
+        ...
+    
+    async def has(self, key: str) -> bool:
+        ...
+    
+    async def stats(self) -> CacheStats:
+        ...
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always cache in development">
+    Saves time and money during iteration.
+  </Accordion>
+  
+  <Accordion title="Clear cache when debugging">
+    Stale cache can mask bugs. When in doubt, clear.
+  </Accordion>
+  
+  <Accordion title="Use TTL in production">
+    Prevent stale data from being used indefinitely.
+  </Accordion>
+  
+  <Accordion title="Monitor cache hit rate">
+    Low hit rate might indicate unstable inputs.
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,194 @@
+---
+title: Cache
+description: API reference for SqliteCache and the Cache protocol
+---
+
+## `SqliteCache`
+
+SQLite-based cache for workflow results.
+
+```python
+from smithers import SqliteCache
+
+cache = SqliteCache("./smithers_cache.db")
+result = await run_graph(graph, cache=cache)
+```
+
+### Constructor
+
+```python
+def __init__(self, path: str | Path) -> None
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | `str \| Path` | Path to the SQLite database file |
+
+### Methods
+
+#### `get`
+
+Get a cached value by key.
+
+```python
+async def get(self, key: str) -> Any | None
+```
+
+#### `set`
+
+Set a cached value.
+
+```python
+async def set(self, key: str, value: Any) -> None
+```
+
+#### `has`
+
+Check if a key exists.
+
+```python
+async def has(self, key: str) -> bool
+```
+
+#### `stats`
+
+Get cache statistics.
+
+```python
+async def stats(self) -> CacheStats
+```
+
+#### `clear`
+
+Clear cached values.
+
+```python
+async def clear(self) -> None
+```
+
+### Example
+
+```python
+cache = SqliteCache("./cache.db")
+
+# First run - cache miss
+result = await run_graph(graph, cache=cache)
+
+# Second run - cache hit
+result = await run_graph(graph, cache=cache)
+
+# Check stats
+stats = await cache.stats()
+print(f"Hits: {stats.hits}, Misses: {stats.misses}")
+
+# Clear cache
+await cache.clear()
+```
+
+---
+
+## `Cache` Protocol
+
+Abstract base class for custom cache implementations.
+
+```python
+from smithers.cache import Cache
+
+class MyCache(Cache):
+    async def get(self, key: str) -> Any | None:
+        ...
+    
+    async def set(self, key: str, value: Any) -> None:
+        ...
+    
+    async def has(self, key: str) -> bool:
+        ...
+    
+    async def stats(self) -> CacheStats:
+        ...
+```
+
+### Required Methods
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `get` | `async def get(self, key: str) -> Any \| None` | Get cached value |
+| `set` | `async def set(self, key: str, value: Any) -> None` | Set cached value |
+| `has` | `async def has(self, key: str) -> bool` | Check if key exists |
+| `stats` | `async def stats(self) -> CacheStats` | Get statistics |
+
+---
+
+## `CacheStats`
+
+Statistics about cache usage.
+
+```python
+@dataclass
+class CacheStats:
+    entries: int
+    hits: int
+    misses: int
+    size_bytes: int
+```
+
+### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `entries` | `int` | Number of cached entries |
+| `hits` | `int` | Number of cache hits |
+| `misses` | `int` | Number of cache misses |
+| `size_bytes` | `int` | Total size of cache in bytes |
+
+### Example
+
+```python
+stats = await cache.stats()
+print(f"Entries: {stats.entries}")
+print(f"Hit rate: {stats.hits / (stats.hits + stats.misses):.1%}")
+print(f"Size: {stats.size_bytes / 1024:.1f} KB")
+```
+
+---
+
+## Custom Cache Example
+
+Implement a Redis-based cache:
+
+```python
+import redis.asyncio as redis
+from smithers.cache import Cache, CacheStats
+
+class RedisCache(Cache):
+    def __init__(self, url: str = "redis://localhost"):
+        self.client = redis.from_url(url)
+        self._hits = 0
+        self._misses = 0
+    
+    async def get(self, key: str) -> Any | None:
+        value = await self.client.get(f"smithers:{key}")
+        if value is None:
+            self._misses += 1
+            return None
+        self._hits += 1
+        return pickle.loads(value)
+    
+    async def set(self, key: str, value: Any) -> None:
+        await self.client.set(
+            f"smithers:{key}",
+            pickle.dumps(value),
+        )
+    
+    async def has(self, key: str) -> bool:
+        return await self.client.exists(f"smithers:{key}")
+    
+    async def stats(self) -> CacheStats:
+        keys = await self.client.keys("smithers:*")
+        return CacheStats(
+            entries=len(keys),
+            hits=self._hits,
+            misses=self._misses,
+            size_bytes=0,  # Redis doesn't easily expose this
+        )
+```

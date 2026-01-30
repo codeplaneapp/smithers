@@ -1,0 +1,217 @@
+---
+title: Tools
+description: Give Claude access to tools for interacting with the world
+---
+
+Tools allow Claude to read files, execute commands, and interact with external systems.
+
+## Using Tools
+
+Pass tool names to the `tools` parameter:
+
+```python
+result = await claude(
+    "Find all Python files with TODO comments and list them",
+    tools=["Read", "Grep", "Glob"],
+    output=TodoOutput,
+)
+```
+
+## Available Tools
+
+### File Operations
+
+| Tool | Description |
+|------|-------------|
+| `Read` | Read file contents |
+| `Edit` | Modify file contents |
+| `Glob` | Find files by pattern |
+| `Grep` | Search file contents |
+
+```python
+# Find and fix issues
+result = await claude(
+    "Find all files with 'FIXME' comments and fix them",
+    tools=["Glob", "Grep", "Read", "Edit"],
+    output=FixOutput,
+)
+```
+
+### Shell
+
+| Tool | Description |
+|------|-------------|
+| `Bash` | Execute shell commands |
+
+```python
+# Run tests
+result = await claude(
+    "Run the test suite and report failures",
+    tools=["Bash", "Read"],
+    output=TestOutput,
+)
+```
+
+### Web
+
+| Tool | Description |
+|------|-------------|
+| `web_search` | Search the web |
+| `read_web_page` | Fetch and read a URL |
+
+```python
+# Research a topic
+result = await claude(
+    "Research the latest Python 3.13 features",
+    tools=["web_search", "read_web_page"],
+    output=ResearchOutput,
+)
+```
+
+## Tool Execution Model
+
+When Claude uses tools:
+
+1. Claude decides to use a tool
+2. Smithers executes the tool
+3. The result is sent back to Claude
+4. Claude continues (may use more tools)
+5. Eventually Claude produces the final output
+
+This loop continues until `max_turns` is reached or Claude finishes.
+
+```python
+result = await claude(
+    "Implement a new feature",
+    tools=["Read", "Edit", "Bash"],
+    max_turns=20,  # Allow up to 20 tool uses
+    output=ImplementOutput,
+)
+```
+
+## Tool Results
+
+Tools return results that Claude can use:
+
+```python
+# Claude calls: Read(path="/src/main.py")
+# Tool returns: {"content": "def main(): ..."}
+# Claude sees the content and can reference it
+```
+
+## Restricting Tools
+
+Only provide tools that are needed:
+
+```python
+# Read-only analysis (safe)
+result = await claude(
+    "Analyze the codebase",
+    tools=["Read", "Grep"],  # No Edit, no Bash
+    output=AnalysisOutput,
+)
+
+# Full access (careful!)
+result = await claude(
+    "Refactor the authentication system",
+    tools=["Read", "Edit", "Bash", "Grep"],
+    output=RefactorOutput,
+)
+```
+
+## Custom Tools
+
+Define custom tools for domain-specific operations:
+
+```python
+from smithers import Tool
+
+@Tool
+async def query_database(sql: str) -> dict:
+    """Execute a SQL query and return results."""
+    # Your implementation
+    return await db.execute(sql)
+
+result = await claude(
+    "Find users who signed up last month",
+    tools=["query_database"],
+    output=QueryOutput,
+)
+```
+
+### Tool Schema
+
+Custom tools are defined with type hints and docstrings:
+
+```python
+@Tool
+async def send_email(
+    to: str,
+    subject: str,
+    body: str,
+) -> dict:
+    """
+    Send an email.
+    
+    Args:
+        to: Recipient email address
+        subject: Email subject line
+        body: Email body content
+    
+    Returns:
+        Success status and message ID
+    """
+    return await email_service.send(to, subject, body)
+```
+
+## Tool Safety
+
+<Warning>
+Tools like `Bash` and `Edit` can modify your system. Use with caution.
+</Warning>
+
+### Sandboxing
+
+Run tool execution in a sandbox:
+
+```python
+result = await claude(
+    "Run the tests",
+    tools=["Bash"],
+    sandbox=True,  # Run in isolated container
+    output=TestOutput,
+)
+```
+
+### Approval
+
+Require human approval for dangerous operations:
+
+```python
+result = await claude(
+    "Deploy to production",
+    tools=["Bash"],
+    require_approval=["Bash"],  # Approve each Bash command
+    output=DeployOutput,
+)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Principle of least privilege">
+    Only provide tools the task actually needs.
+  </Accordion>
+  
+  <Accordion title="Prefer read-only for analysis">
+    Use `Read` and `Grep` instead of `Bash cat`.
+  </Accordion>
+  
+  <Accordion title="Set reasonable max_turns">
+    Complex tasks need more turns, but cap it to prevent runaway costs.
+  </Accordion>
+  
+  <Accordion title="Monitor tool usage">
+    Log tool calls to understand what Claude is doing.
+  </Accordion>
+</AccordionGroup>

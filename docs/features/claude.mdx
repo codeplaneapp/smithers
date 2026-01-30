@@ -1,0 +1,221 @@
+---
+title: Claude Integration
+description: Using Claude for LLM-powered workflows
+---
+
+The `claude` function is the core LLM integration in Smithers. It calls Anthropic's Claude API with structured output support.
+
+## Basic Usage
+
+```python
+from smithers import claude
+from pydantic import BaseModel
+
+class SummaryOutput(BaseModel):
+    summary: str
+    key_points: list[str]
+
+result = await claude(
+    "Summarize the Python programming language",
+    output=SummaryOutput,
+)
+
+print(result.summary)
+print(result.key_points)
+```
+
+## Parameters
+
+```python
+await claude(
+    prompt: str,               # The prompt to send
+    *,
+    output: type[T],           # Pydantic model for structured output
+    tools: list[str] = None,   # Tools Claude can use
+    system: str = None,        # System prompt
+    max_turns: int = 10,       # Max tool-use iterations
+    model: str = "claude-sonnet-4-20250514",  # Model to use
+) -> T
+```
+
+### `prompt`
+
+The main instruction for Claude:
+
+```python
+await claude(
+    "Analyze this codebase and identify performance bottlenecks",
+    output=AnalysisOutput,
+)
+```
+
+### `output`
+
+A Pydantic model that defines the expected response structure:
+
+```python
+class ReviewOutput(BaseModel):
+    approved: bool
+    comments: list[str]
+    severity: Literal["low", "medium", "high"]
+
+result = await claude("Review this PR", output=ReviewOutput)
+# result is guaranteed to be a valid ReviewOutput
+```
+
+### `tools`
+
+List of tools Claude can use:
+
+```python
+result = await claude(
+    "Find and fix all TODO comments",
+    tools=["Read", "Edit", "Grep", "Bash"],
+    output=FixOutput,
+)
+```
+
+See [Tools](/features/tools) for available tools.
+
+### `system`
+
+Custom system prompt to set Claude's persona:
+
+```python
+result = await claude(
+    "Review this code",
+    system="You are a senior security engineer. Focus on vulnerabilities.",
+    output=SecurityReview,
+)
+```
+
+### `max_turns`
+
+Limit the number of tool-use iterations:
+
+```python
+result = await claude(
+    "Implement this feature",
+    tools=["Read", "Edit"],
+    max_turns=20,  # Allow more iterations for complex tasks
+    output=ImplementOutput,
+)
+```
+
+### `model`
+
+Choose the Claude model:
+
+```python
+# Faster, cheaper
+result = await claude(prompt, output=Output, model="claude-3-5-haiku-latest")
+
+# Smarter, more expensive
+result = await claude(prompt, output=Output, model="claude-sonnet-4-20250514")
+```
+
+## Structured Output
+
+Claude's response is automatically validated against your Pydantic model:
+
+```python
+class AnalysisOutput(BaseModel):
+    files: list[str]
+    total_lines: int
+    complexity: Literal["low", "medium", "high"]
+    issues: list[str] = []  # Optional with default
+
+result = await claude("Analyze src/", output=AnalysisOutput)
+
+# Type-safe access
+print(result.files)        # list[str]
+print(result.complexity)   # Literal["low", "medium", "high"]
+```
+
+### Complex Types
+
+Use Pydantic's full type system:
+
+```python
+from pydantic import BaseModel, Field
+from typing import Literal
+from datetime import datetime
+
+class FileChange(BaseModel):
+    path: str
+    change_type: Literal["added", "modified", "deleted"]
+    lines_changed: int = Field(ge=0)
+
+class CommitOutput(BaseModel):
+    message: str = Field(max_length=72)
+    files: list[FileChange]
+    breaking_change: bool = False
+
+result = await claude("Generate a commit", output=CommitOutput)
+```
+
+## Error Handling
+
+```python
+from smithers import ClaudeError, ValidationError
+
+try:
+    result = await claude("Do something", output=Output)
+except ValidationError as e:
+    # Claude's response didn't match the schema
+    print(f"Invalid response: {e}")
+except ClaudeError as e:
+    # API error (rate limit, network, etc.)
+    print(f"API error: {e}")
+```
+
+## Streaming
+
+For long-running tasks, use streaming:
+
+```python
+async for chunk in claude.stream(
+    "Write a detailed analysis",
+    output=AnalysisOutput,
+):
+    print(chunk.partial)  # Partial response so far
+    
+# Final result
+print(chunk.final)
+```
+
+## Cost Tracking
+
+Track token usage and costs:
+
+```python
+result = await claude(
+    "Analyze this",
+    output=Output,
+    track_usage=True,
+)
+
+print(result._usage.input_tokens)
+print(result._usage.output_tokens)
+print(result._usage.cost_usd)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Be specific in prompts">
+    Vague prompts lead to vague responses. Include concrete details.
+  </Accordion>
+  
+  <Accordion title="Design output schemas carefully">
+    The schema guides Claude's response. Make fields clear and constrained.
+  </Accordion>
+  
+  <Accordion title="Use appropriate models">
+    Use Haiku for simple tasks, Sonnet for complex reasoning.
+  </Accordion>
+  
+  <Accordion title="Handle validation errors">
+    Sometimes Claude produces invalid output. Always handle `ValidationError`.
+  </Accordion>
+</AccordionGroup>

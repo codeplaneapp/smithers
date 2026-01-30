@@ -1,0 +1,181 @@
+---
+title: Graph Functions
+description: API reference for build_graph and run_graph
+---
+
+## `build_graph`
+
+Build an execution graph from a target workflow.
+
+```python
+from smithers import build_graph
+
+graph = build_graph(deploy_workflow)
+```
+
+### Signature
+
+```python
+def build_graph(target: Workflow) -> WorkflowGraph
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `target` | `Workflow` | The target workflow to build the graph for |
+
+### Returns
+
+A `WorkflowGraph` containing all workflows and their dependencies.
+
+### Raises
+
+| Exception | Description |
+|-----------|-------------|
+| `ValueError` | Missing dependency or circular dependency detected |
+
+### Example
+
+```python
+@workflow
+async def step1() -> A:
+    ...
+
+@workflow
+async def step2(a: A) -> B:
+    ...
+
+graph = build_graph(step2)
+# Graph includes both step1 and step2
+```
+
+---
+
+## `run_graph`
+
+Execute a workflow graph.
+
+```python
+from smithers import run_graph
+
+result = await run_graph(graph)
+```
+
+### Signature
+
+```python
+async def run_graph(
+    graph: WorkflowGraph,
+    cache: Cache | None = None,
+    max_concurrency: int | None = None,
+) -> Any
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `graph` | `WorkflowGraph` | required | The graph to execute |
+| `cache` | `Cache \| None` | `None` | Cache for skipping unchanged workflows |
+| `max_concurrency` | `int \| None` | `None` | Max parallel workflows |
+
+### Returns
+
+The output of the root (target) workflow.
+
+### Example
+
+```python
+from smithers import SqliteCache
+
+cache = SqliteCache("./cache.db")
+result = await run_graph(graph, cache=cache, max_concurrency=4)
+```
+
+---
+
+## `WorkflowGraph`
+
+The graph data structure.
+
+```python
+@dataclass
+class WorkflowGraph:
+    root: str
+    nodes: dict[str, WorkflowNode]
+    edges: list[tuple[str, str]]
+    levels: list[list[str]]
+```
+
+### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `root` | `str` | Name of the target workflow |
+| `nodes` | `dict[str, WorkflowNode]` | All workflows in the graph |
+| `edges` | `list[tuple[str, str]]` | Dependency edges (from, to) |
+| `levels` | `list[list[str]]` | Parallelization groups |
+
+### Methods
+
+#### `mermaid`
+
+Generate a Mermaid diagram.
+
+```python
+print(graph.mermaid())
+# graph LR
+#     step1 --> step2
+#     step2 --> step3
+```
+
+---
+
+## `WorkflowNode`
+
+A node in the workflow graph.
+
+```python
+@dataclass
+class WorkflowNode:
+    name: str
+    output_type: type[BaseModel]
+    dependencies: list[str]
+    requires_approval: bool
+    approval_message: str | None
+```
+
+### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `name` | `str` | Workflow function name |
+| `output_type` | `type[BaseModel]` | What the workflow produces |
+| `dependencies` | `list[str]` | Names of upstream workflows |
+| `requires_approval` | `bool` | Whether approval is needed |
+| `approval_message` | `str \| None` | Approval prompt |
+
+---
+
+## `WorkflowResult`
+
+Result of a single workflow execution.
+
+```python
+@dataclass
+class WorkflowResult:
+    name: str
+    output: Any
+    cached: bool
+    duration_ms: float
+```
+
+### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `name` | `str` | Workflow name |
+| `output` | `Any` | The workflow's output |
+| `cached` | `bool` | Whether result was from cache |
+| `duration_ms` | `float` | Execution time in milliseconds |

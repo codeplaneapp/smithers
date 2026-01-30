@@ -1,0 +1,172 @@
+---
+title: Quickstart
+description: Build your first Smithers workflow in 5 minutes
+---
+
+## Installation
+
+```bash
+pip install smithers
+```
+
+Or with uv:
+
+```bash
+uv add smithers
+```
+
+## Your First Workflow
+
+Create a file called `hello.py`:
+
+```python
+from pydantic import BaseModel
+from smithers import workflow, claude, build_graph, run_graph
+
+# 1. Define your output schema
+class GreetingOutput(BaseModel):
+    greeting: str
+    emoji: str
+
+# 2. Create a workflow
+@workflow
+async def hello_world() -> GreetingOutput:
+    return await claude(
+        "Generate a friendly greeting for a developer",
+        output=GreetingOutput,
+    )
+
+# 3. Build and run
+async def main():
+    graph = build_graph(hello_world)
+    result = await run_graph(graph)
+    print(f"{result.emoji} {result.greeting}")
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
+```
+
+Run it:
+
+```bash
+export ANTHROPIC_API_KEY=your-key
+python hello.py
+```
+
+## Adding Dependencies
+
+Now let's chain two workflows together:
+
+```python
+class AnalysisOutput(BaseModel):
+    topic: str
+    key_points: list[str]
+
+class ExplanationOutput(BaseModel):
+    summary: str
+    analogy: str
+
+@workflow
+async def analyze() -> AnalysisOutput:
+    return await claude(
+        "Analyze the concept of dependency injection",
+        output=AnalysisOutput,
+    )
+
+@workflow
+async def explain(analysis: AnalysisOutput) -> ExplanationOutput:
+    # `analysis` is automatically provided by Smithers!
+    return await claude(
+        f"Explain {analysis.topic} using the key points: {analysis.key_points}",
+        output=ExplanationOutput,
+    )
+
+# Build from the final workflow - deps are resolved automatically
+graph = build_graph(explain)
+result = await run_graph(graph)
+```
+
+<Note>
+Notice how `explain` takes `analysis: AnalysisOutput` as a parameter. Smithers automatically finds the `analyze` workflow (which produces `AnalysisOutput`) and wires them together.
+</Note>
+
+## Parallel Execution
+
+When workflows don't depend on each other, they run in parallel:
+
+```python
+@workflow
+async def review_security(code: CodeOutput) -> SecurityReview:
+    return await claude("Review for security issues", output=SecurityReview)
+
+@workflow
+async def review_performance(code: CodeOutput) -> PerformanceReview:
+    return await claude("Review for performance issues", output=PerformanceReview)
+
+@workflow
+async def final_report(
+    security: SecurityReview,
+    performance: PerformanceReview,
+) -> Report:
+    return await claude("Generate final report", output=Report)
+```
+
+The execution graph:
+
+```mermaid
+graph LR
+    code[generate_code] --> security[review_security]
+    code --> performance[review_performance]
+    security --> report[final_report]
+    performance --> report
+```
+
+`review_security` and `review_performance` run **in parallel** because neither depends on the other.
+
+## Using Tools
+
+Give Claude access to tools for interacting with files:
+
+```python
+@workflow
+async def fix_bugs() -> FixOutput:
+    return await claude(
+        "Find and fix bugs in the codebase",
+        tools=["Read", "Edit", "Bash", "Grep"],
+        output=FixOutput,
+    )
+```
+
+## Caching
+
+Skip unchanged work with SQLite caching:
+
+```python
+from smithers import SqliteCache
+
+cache = SqliteCache("./smithers_cache.db")
+
+# First run: executes all workflows
+result = await run_graph(graph, cache=cache)
+
+# Second run: skips workflows with unchanged inputs
+result = await run_graph(graph, cache=cache)  # ⚡ Instant
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Workflows" icon="sitemap" href="/concepts/workflows">
+    Deep dive into workflow definitions
+  </Card>
+  <Card title="Dependencies" icon="link" href="/concepts/dependencies">
+    How type-based dependencies work
+  </Card>
+  <Card title="Claude Integration" icon="robot" href="/features/claude">
+    Advanced Claude usage with tools
+  </Card>
+  <Card title="Examples" icon="code" href="/examples/hello-world">
+    Complete example workflows
+  </Card>
+</CardGroup>

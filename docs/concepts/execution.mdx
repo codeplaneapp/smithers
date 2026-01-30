@@ -1,0 +1,186 @@
+---
+title: Execution
+description: How Smithers executes workflow graphs
+---
+
+The `run_graph` function executes a workflow graph, handling parallelism, caching, and error recovery.
+
+## Basic Execution
+
+```python
+from smithers import build_graph, run_graph
+
+graph = build_graph(final_workflow)
+result = await run_graph(graph)
+```
+
+## Execution Model
+
+Smithers executes workflows **level by level**:
+
+1. Run all Level 0 workflows in parallel
+2. Wait for all to complete
+3. Run all Level 1 workflows in parallel
+4. Repeat until done
+
+```python
+# Graph levels:
+# Level 0: [analyze]
+# Level 1: [lint, test]  ← These run in parallel
+# Level 2: [deploy]
+
+# Execution timeline:
+# t=0:  analyze starts
+# t=10: analyze completes
+# t=10: lint AND test start (parallel)
+# t=20: both complete
+# t=20: deploy starts
+# t=25: deploy completes
+```
+
+## Options
+
+```python
+result = await run_graph(
+    graph,
+    cache=SqliteCache("./cache.db"),  # Enable caching
+    max_concurrency=4,                 # Limit parallel workers
+)
+```
+
+### `cache`
+
+Provide a cache to skip unchanged workflows:
+
+```python
+from smithers import SqliteCache
+
+cache = SqliteCache("./smithers_cache.db")
+result = await run_graph(graph, cache=cache)
+```
+
+### `max_concurrency`
+
+Limit how many workflows run in parallel:
+
+```python
+# Even if Level 1 has 10 workflows, only 4 run at a time
+result = await run_graph(graph, max_concurrency=4)
+```
+
+Useful for:
+- Respecting API rate limits
+- Managing memory usage
+- Debugging parallel issues
+
+## Data Flow
+
+Outputs from upstream workflows are automatically passed to downstream:
+
+```python
+@workflow
+async def analyze() -> AnalysisOutput:
+    return await claude("Analyze", output=AnalysisOutput)
+
+@workflow
+async def implement(analysis: AnalysisOutput) -> ImplementOutput:
+    # `analysis` is provided by run_graph from the analyze output
+    return await claude(f"Fix {analysis.files}", output=ImplementOutput)
+```
+
+The executor:
+1. Runs `analyze`
+2. Stores the `AnalysisOutput` result
+3. Runs `implement`, injecting the stored output as `analysis`
+
+## Error Handling
+
+When a workflow fails:
+
+1. **The workflow raises an exception**
+2. **Parallel siblings continue** (by default)
+3. **Downstream workflows are skipped**
+4. **The error is surfaced to the caller**
+
+```python
+try:
+    result = await run_graph(graph)
+except WorkflowError as e:
+    print(f"Workflow {e.workflow_name} failed: {e}")
+    print(f"Completed workflows: {e.completed}")
+```
+
+### Fail-Fast Mode
+
+Stop all execution on first failure:
+
+```python
+result = await run_graph(graph, fail_fast=True)
+```
+
+## Progress Tracking
+
+Monitor execution progress with callbacks:
+
+```python
+async def on_progress(event: WorkflowEvent):
+    if event.type == "started":
+        print(f"Starting {event.workflow_name}")
+    elif event.type == "completed":
+        print(f"Completed {event.workflow_name} in {event.duration_ms}ms")
+    elif event.type == "cached":
+        print(f"Skipped {event.workflow_name} (cached)")
+
+result = await run_graph(graph, on_progress=on_progress)
+```
+
+## Dry Run
+
+Preview execution without actually running:
+
+```python
+plan = await run_graph(graph, dry_run=True)
+print(f"Would execute: {plan.workflows}")
+print(f"Estimated cost: ${plan.estimated_cost}")
+```
+
+## Execution Results
+
+`run_graph` returns the output of the root workflow, but you can access more:
+
+```python
+result = await run_graph(graph, return_all=True)
+
+# All workflow outputs
+print(result.outputs)
+# {
+#     'analyze': AnalysisOutput(...),
+#     'implement': ImplementOutput(...),
+#     'deploy': DeployOutput(...),
+# }
+
+# Execution stats
+print(result.stats)
+# ExecutionStats(
+#     total_duration_ms=15000,
+#     workflows_executed=3,
+#     workflows_cached=0,
+#     tokens_used=5000,
+# )
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always use caching in production">
+    Caching dramatically speeds up re-runs and saves API costs.
+  </Accordion>
+  
+  <Accordion title="Set appropriate concurrency">
+    Don't overwhelm APIs. Use `max_concurrency` to stay under rate limits.
+  </Accordion>
+  
+  <Accordion title="Handle errors gracefully">
+    Wrap `run_graph` in try/except and log failed workflows.
+  </Accordion>
+</AccordionGroup>

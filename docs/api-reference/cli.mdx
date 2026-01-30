@@ -1,0 +1,187 @@
+---
+title: CLI
+description: Command-line interface reference
+---
+
+Smithers provides a CLI for running and inspecting workflows.
+
+## Installation
+
+The CLI is installed automatically with the package:
+
+```bash
+pip install smithers
+smithers --version
+```
+
+---
+
+## `smithers run`
+
+Run a workflow file.
+
+```bash
+smithers run workflow.py
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--cache PATH` | Path to cache database |
+| `--dry-run` | Show plan without executing |
+| `--workflow NAME` | Run specific workflow (default: last defined) |
+
+### Examples
+
+```bash
+# Basic run
+smithers run examples/hello.py
+
+# With caching
+smithers run workflow.py --cache ./cache.db
+
+# Dry run
+smithers run workflow.py --dry-run
+
+# Run specific workflow
+smithers run workflow.py --workflow analyze
+```
+
+---
+
+## `smithers graph`
+
+Visualize the workflow graph.
+
+```bash
+smithers graph workflow.py
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-o, --output PATH` | Output file (default: stdout) |
+| `--format FORMAT` | Output format: `mermaid`, `dot`, `json` |
+| `--workflow NAME` | Graph for specific workflow |
+
+### Examples
+
+```bash
+# Print mermaid to stdout
+smithers graph workflow.py
+
+# Save to file
+smithers graph workflow.py -o graph.md
+
+# DOT format for Graphviz
+smithers graph workflow.py --format dot -o graph.dot
+
+# JSON for programmatic use
+smithers graph workflow.py --format json
+```
+
+---
+
+## `smithers cache`
+
+Manage the cache.
+
+### `smithers cache stats`
+
+Show cache statistics.
+
+```bash
+smithers cache stats --cache ./cache.db
+```
+
+Output:
+
+```
+Cache Statistics
+================
+Path: ./cache.db
+Entries: 42
+Hits: 156
+Misses: 23
+Size: 1.2 MB
+Hit rate: 87.2%
+```
+
+### `smithers cache clear`
+
+Clear the cache.
+
+```bash
+smithers cache clear --cache ./cache.db
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--workflow NAME` | Clear only specific workflow |
+| `--older-than DURATION` | Clear entries older than duration |
+
+```bash
+# Clear specific workflow
+smithers cache clear --cache ./cache.db --workflow analyze
+
+# Clear old entries
+smithers cache clear --cache ./cache.db --older-than 7d
+```
+
+---
+
+## `smithers init`
+
+Initialize a new Smithers project.
+
+```bash
+smithers init my-project
+cd my-project
+```
+
+Creates:
+
+```
+my-project/
+├── workflows/
+│   └── example.py
+├── pyproject.toml
+└── README.md
+```
+
+---
+
+## Global Options
+
+| Option | Description |
+|--------|-------------|
+| `--version` | Show version |
+| `--help` | Show help |
+| `--verbose, -v` | Verbose output |
+| `--quiet, -q` | Suppress output |
+
+---
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | Claude API key |
+| `SMITHERS_CACHE_DIR` | Default cache directory |
+| `SMITHERS_LOG_LEVEL` | Logging level (debug, info, warn, error) |
+
+---
+
+## Exit Codes
+
+| Code | Description |
+|------|-------------|
+| `0` | Success |
+| `1` | General error |
+| `2` | Workflow error |
+| `3` | Approval rejected |
+| `4` | Missing dependency |

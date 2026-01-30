@@ -1,0 +1,87 @@
+---
+title: Installation
+description: Install Smithers and configure your environment
+---
+
+## Requirements
+
+- Python 3.12 or higher
+- An Anthropic API key
+
+## Install with pip
+
+```bash
+pip install smithers
+```
+
+## Install with uv (Recommended)
+
+[uv](https://docs.astral.sh/uv/) is a fast Python package manager:
+
+```bash
+uv add smithers
+```
+
+## Install from source
+
+```bash
+git clone https://github.com/evmts/smithers.git
+cd smithers
+uv sync
+```
+
+## Configuration
+
+### API Key
+
+Set your Anthropic API key as an environment variable:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Or in a `.env` file:
+
+```env
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+### Optional: Cache Directory
+
+Configure where Smithers stores cached workflow results:
+
+```bash
+export SMITHERS_CACHE_DIR=./cache
+```
+
+## Verify Installation
+
+```python
+import smithers
+print(smithers.__version__)
+```
+
+Or use the CLI:
+
+```bash
+smithers --version
+```
+
+## Development Setup
+
+For contributing to Smithers:
+
+```bash
+git clone https://github.com/evmts/smithers.git
+cd smithers
+uv sync --all-extras
+
+# Run tests
+uv run pytest
+
+# Run linter
+uv run ruff check .
+
+# Run type checker
+uv run pyright
+```

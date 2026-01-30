@@ -1,0 +1,80 @@
+---
+title: Hello World
+description: The simplest Smithers workflow
+---
+
+The simplest possible Smithers workflow - a single agent that generates a greeting.
+
+## Code
+
+```python
+from pydantic import BaseModel
+from smithers import workflow, claude, build_graph, run_graph
+
+
+class GreetingOutput(BaseModel):
+    greeting: str
+    emoji: str
+
+
+@workflow
+async def hello_world() -> GreetingOutput:
+    """Generate a friendly greeting."""
+    return await claude(
+        "Generate a friendly greeting for a developer learning Smithers. "
+        "Include an appropriate emoji.",
+        output=GreetingOutput,
+    )
+
+
+async def main():
+    graph = build_graph(hello_world)
+    result = await run_graph(graph)
+
+    print(f"{result.emoji} {result.greeting}")
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
+```
+
+## Running
+
+```bash
+export ANTHROPIC_API_KEY=your-key
+python examples/01_hello_world.py
+```
+
+## Output
+
+```
+👋 Welcome to Smithers! You're about to build some amazing AI workflows.
+```
+
+## What's Happening
+
+1. **Define output schema** — `GreetingOutput` specifies what Claude should return
+2. **Create workflow** — `@workflow` registers the function
+3. **Build graph** — `build_graph` creates the execution plan (just one node here)
+4. **Execute** — `run_graph` runs Claude and returns validated output
+
+## Graph
+
+```mermaid
+graph LR
+    hello_world
+```
+
+Just one node - the simplest possible graph.
+
+## Key Concepts
+
+<CardGroup cols={2}>
+  <Card title="Pydantic Models">
+    Output schemas define what Claude returns. Smithers validates responses automatically.
+  </Card>
+  <Card title="@workflow Decorator">
+    Marks a function as a workflow and registers it for graph building.
+  </Card>
+</CardGroup>

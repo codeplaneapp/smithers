@@ -1,0 +1,133 @@
+---
+title: Workflows
+description: The building blocks of Smithers
+---
+
+A **workflow** is an async function that produces a typed output. Workflows are the building blocks of Smithers.
+
+## Defining a Workflow
+
+Use the `@workflow` decorator on an async function:
+
+```python
+from pydantic import BaseModel
+from smithers import workflow, claude
+
+class AnalysisOutput(BaseModel):
+    files: list[str]
+    summary: str
+
+@workflow
+async def analyze() -> AnalysisOutput:
+    return await claude(
+        "Analyze the codebase",
+        output=AnalysisOutput,
+    )
+```
+
+### Requirements
+
+1. **Must be async** — Use `async def`
+2. **Must have a return type** — A Pydantic `BaseModel`
+3. **Return type must be unique** — Only one workflow can produce each type
+
+## The `@workflow` Decorator
+
+When you decorate a function with `@workflow`, Smithers:
+
+1. **Registers it** in a global registry by output type
+2. **Extracts dependencies** from parameter type hints
+3. **Returns a `Workflow` object** that's still callable
+
+```python
+@workflow
+async def my_workflow() -> Output:
+    ...
+
+# `my_workflow` is now a Workflow object
+print(type(my_workflow))  # <class 'smithers.workflow.Workflow'>
+print(my_workflow.name)   # "my_workflow"
+print(my_workflow.output_type)  # Output
+
+# But you can still call it directly
+result = await my_workflow()
+```
+
+## Output Types
+
+Every workflow must return a Pydantic model:
+
+```python
+class ReviewOutput(BaseModel):
+    approved: bool
+    comments: list[str]
+    severity: Literal["low", "medium", "high"]
+
+@workflow
+async def review_code() -> ReviewOutput:
+    return await claude("Review this code", output=ReviewOutput)
+```
+
+The output type serves as:
+- **A contract** — Other workflows know exactly what they'll receive
+- **An identifier** — Smithers uses it to wire dependencies
+- **Validation** — Pydantic validates the LLM response
+
+## Workflow Registry
+
+Smithers maintains a global registry of workflows:
+
+```python
+from smithers.workflow import get_workflow_by_output, get_all_workflows
+
+# Find a workflow by its output type
+wf = get_workflow_by_output(AnalysisOutput)
+print(wf.name)  # "analyze"
+
+# Get all registered workflows
+all_wfs = get_all_workflows()
+print(list(all_wfs.keys()))  # [AnalysisOutput, ...]
+```
+
+<Warning>
+Each output type can only have one workflow. If you try to register two workflows with the same output type, Smithers raises an error.
+</Warning>
+
+## Direct Execution
+
+You can call workflows directly without `run_graph`:
+
+```python
+# Useful for testing or simple cases
+result = await analyze()
+print(result.summary)
+```
+
+However, this bypasses:
+- Automatic dependency resolution
+- Parallel execution
+- Caching
+
+For production use, prefer `build_graph` + `run_graph`.
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep workflows focused">
+    Each workflow should do one thing well. Split complex tasks into multiple workflows.
+  </Accordion>
+  
+  <Accordion title="Use descriptive output types">
+    Name your output types clearly: `CodeReviewOutput`, not `Output1`.
+  </Accordion>
+  
+  <Accordion title="Document with docstrings">
+    Add docstrings to workflows — they help with debugging and documentation.
+    ```python
+    @workflow
+    async def analyze() -> AnalysisOutput:
+        """Analyze the codebase for potential improvements."""
+        ...
+    ```
+  </Accordion>
+</AccordionGroup>

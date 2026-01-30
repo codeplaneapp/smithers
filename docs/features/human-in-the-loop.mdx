@@ -1,0 +1,227 @@
+---
+title: Human-in-the-Loop
+description: Require human approval before executing sensitive workflows
+---
+
+Some workflows shouldn't run automatically. Smithers supports human-in-the-loop approval for sensitive operations.
+
+## Basic Usage
+
+Use the `@require_approval` decorator:
+
+```python
+from smithers import workflow, require_approval, claude
+
+@workflow
+@require_approval("Deploy to production?")
+async def deploy(tests: TestOutput) -> DeployOutput:
+    return await claude(
+        "Deploy the application",
+        tools=["Bash"],
+        output=DeployOutput,
+    )
+```
+
+When this workflow is reached, execution pauses and asks for approval.
+
+## How It Works
+
+1. Graph execution proceeds normally
+2. When an approval-required workflow is reached, execution pauses
+3. User is prompted for approval
+4. If approved, workflow executes
+5. If rejected, workflow is skipped (or graph fails, depending on config)
+
+```python
+# Execution timeline
+# t=0:  analyze starts
+# t=10: analyze completes
+# t=10: implement starts
+# t=20: implement completes
+# t=20: deploy reached - PAUSED
+#       "Deploy to production? [y/N]" 
+# t=25: User approves
+# t=25: deploy starts
+# t=35: deploy completes
+```
+
+## Approval Modes
+
+### Interactive (CLI)
+
+Default mode - prompts in terminal:
+
+```bash
+$ python workflow.py
+
+Running workflow graph...
+✓ analyze completed (5.2s)
+✓ implement completed (12.1s)
+
+⏸ Approval required for 'deploy':
+  Deploy to production?
+  
+  Proceed? [y/N]: y
+
+✓ deploy completed (8.3s)
+```
+
+### Callback
+
+Provide a custom approval handler:
+
+```python
+async def my_approval_handler(workflow_name: str, message: str) -> bool:
+    # Custom logic - could be Slack, email, web UI, etc.
+    response = await slack.ask_approval(
+        channel="#deployments",
+        message=f"{workflow_name}: {message}",
+    )
+    return response.approved
+
+result = await run_graph(
+    graph,
+    approval_handler=my_approval_handler,
+)
+```
+
+### Auto-Approve
+
+For testing or non-interactive environments:
+
+```python
+result = await run_graph(
+    graph,
+    auto_approve=True,  # Approve all automatically
+)
+```
+
+Or selectively:
+
+```python
+result = await run_graph(
+    graph,
+    auto_approve=["deploy_staging"],  # Only auto-approve staging
+)
+```
+
+## Conditional Approval
+
+Require approval only under certain conditions:
+
+```python
+@workflow
+async def deploy(tests: TestOutput, impl: ImplementOutput) -> DeployOutput:
+    # Only require approval for production
+    if impl.target == "production":
+        await require_approval_async("Deploy to production?")
+    
+    return await claude("Deploy", output=DeployOutput)
+```
+
+## Approval Context
+
+Provide context to help the approver:
+
+```python
+@workflow
+@require_approval(
+    message="Deploy to production?",
+    context=lambda deps: f"""
+    Changes:
+    - {len(deps.impl.files_changed)} files modified
+    - Tests: {'passing' if deps.tests.passed else 'FAILING'}
+    - Risk: {deps.impl.risk_level}
+    """,
+)
+async def deploy(tests: TestOutput, impl: ImplementOutput) -> DeployOutput:
+    ...
+```
+
+## Timeout
+
+Set a timeout for approval:
+
+```python
+@workflow
+@require_approval(
+    message="Deploy?",
+    timeout=timedelta(minutes=30),  # Fail if not approved in 30min
+)
+async def deploy() -> DeployOutput:
+    ...
+```
+
+## Rejection Handling
+
+Handle rejected approvals:
+
+```python
+from smithers import ApprovalRejected
+
+try:
+    result = await run_graph(graph)
+except ApprovalRejected as e:
+    print(f"Workflow {e.workflow_name} was rejected")
+    print(f"Reason: {e.reason}")
+```
+
+Or allow continuation with skip:
+
+```python
+result = await run_graph(
+    graph,
+    on_rejection="skip",  # Skip rejected workflows instead of failing
+)
+```
+
+## Audit Trail
+
+All approvals are logged:
+
+```python
+result = await run_graph(graph, cache=cache)
+
+# Check approval history
+for approval in result.approvals:
+    print(f"{approval.workflow}: {approval.decision}")
+    print(f"  Approved by: {approval.user}")
+    print(f"  At: {approval.timestamp}")
+```
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Production Deployments">
+    Require approval before deploying to production.
+  </Card>
+  <Card title="Destructive Operations">
+    Confirm before deleting data or resources.
+  </Card>
+  <Card title="Cost Control">
+    Approve expensive API calls or operations.
+  </Card>
+  <Card title="Compliance">
+    Ensure human review for regulated workflows.
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use sparingly">
+    Too many approvals slow down workflows. Reserve for truly sensitive operations.
+  </Accordion>
+  
+  <Accordion title="Provide good context">
+    Help approvers make informed decisions with relevant information.
+  </Accordion>
+  
+  <Accordion title="Set reasonable timeouts">
+    Don't let workflows hang indefinitely waiting for approval.
+  </Accordion>
+  
+  <Accordion title="Log all decisions">
+    Maintain an audit trail for compliance and debugging.
+  </Accordion>
+</AccordionGroup>

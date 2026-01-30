@@ -1,0 +1,105 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "Smithers",
+  "logo": {
+    "dark": "/logo/dark.svg",
+    "light": "/logo/light.svg"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#0D9373",
+    "light": "#07C983",
+    "dark": "#0D9373",
+    "anchors": {
+      "from": "#0D9373",
+      "to": "#07C983"
+    }
+  },
+  "topbarLinks": [
+    {
+      "name": "GitHub",
+      "url": "https://github.com/evmts/smithers"
+    }
+  ],
+  "topbarCtaButton": {
+    "name": "Get Started",
+    "url": "/quickstart"
+  },
+  "tabs": [
+    {
+      "name": "Documentation",
+      "url": "/"
+    },
+    {
+      "name": "API Reference",
+      "url": "/api-reference"
+    },
+    {
+      "name": "Examples",
+      "url": "/examples"
+    }
+  ],
+  "anchors": [
+    {
+      "name": "GitHub",
+      "icon": "github",
+      "url": "https://github.com/evmts/smithers"
+    },
+    {
+      "name": "PyPI",
+      "icon": "python",
+      "url": "https://pypi.org/project/smithers"
+    }
+  ],
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": [
+        "introduction",
+        "quickstart",
+        "installation"
+      ]
+    },
+    {
+      "group": "Core Concepts",
+      "pages": [
+        "concepts/workflows",
+        "concepts/dependencies",
+        "concepts/graph",
+        "concepts/execution"
+      ]
+    },
+    {
+      "group": "Features",
+      "pages": [
+        "features/claude",
+        "features/tools",
+        "features/caching",
+        "features/human-in-the-loop"
+      ]
+    },
+    {
+      "group": "API Reference",
+      "pages": [
+        "api-reference/workflow",
+        "api-reference/claude",
+        "api-reference/graph",
+        "api-reference/cache",
+        "api-reference/cli"
+      ]
+    },
+    {
+      "group": "Examples",
+      "pages": [
+        "examples/hello-world",
+        "examples/dependencies",
+        "examples/parallel",
+        "examples/code-review",
+        "examples/research-agent"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/evmts/smithers"
+  }
+}

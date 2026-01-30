@@ -1,0 +1,76 @@
+---
+title: Introduction
+description: Build AI agent workflows the way you build software
+---
+
+# Smithers
+
+**Smithers** is a Python framework for composing LLM agents into type-safe, cacheable, parallel workflows.
+
+Think **Bazel**, but for AI agents.
+
+```python
+from pydantic import BaseModel
+from smithers import workflow, claude, build_graph, run_graph
+
+class AnalysisOutput(BaseModel):
+    files: list[str]
+    summary: str
+
+@workflow
+async def analyze() -> AnalysisOutput:
+    return await claude(
+        "Analyze the codebase",
+        tools=["Read", "Grep"],
+        output=AnalysisOutput,
+    )
+
+graph = build_graph(analyze)
+result = await run_graph(graph)
+```
+
+## Why Smithers?
+
+Most agent frameworks are either too simple (single agent, no composition) or too complex (state machines, manual wiring). Smithers takes a different approach:
+
+<CardGroup cols={2}>
+  <Card title="Dependencies as Type Hints" icon="link">
+    No manual wiring. Function parameters ARE the dependency graph.
+  </Card>
+  <Card title="Automatic Parallelism" icon="bolt">
+    Independent workflows run concurrently. Derived from deps.
+  </Card>
+  <Card title="Built-in Caching" icon="database">
+    Hash inputs, skip unchanged work. Like Bazel's remote cache.
+  </Card>
+  <Card title="Fully Typed" icon="shield-check">
+    Pydantic models define contracts. Catch errors at write-time.
+  </Card>
+</CardGroup>
+
+## Core Philosophy
+
+Smithers is built on three principles:
+
+1. **Workflows are functions** — Not classes, not state machines. Just async functions with type hints.
+
+2. **Data flows through types** — Pydantic models define what each workflow produces and consumes.
+
+3. **The graph is derived** — You don't wire workflows together. The dependency graph is inferred from type hints.
+
+## Inspired By
+
+- **Bazel** — Explicit dependencies, automatic parallelization, caching based on input hashing
+- **Pydantic** — Type-safe data validation and schemas  
+- **React** — Declarative, component-based thinking
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build your first workflow in 5 minutes
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/concepts/workflows">
+    Understand workflows, dependencies, and graphs
+  </Card>
+</CardGroup>

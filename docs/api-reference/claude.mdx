@@ -1,0 +1,167 @@
+---
+title: claude
+description: API reference for the claude function
+---
+
+## `claude`
+
+Call Claude with a prompt and get structured output.
+
+```python
+from smithers import claude
+
+result = await claude(
+    "Analyze this code",
+    tools=["Read", "Grep"],
+    output=AnalysisOutput,
+)
+```
+
+### Signature
+
+```python
+async def claude(
+    prompt: str,
+    *,
+    output: type[T],
+    tools: list[str] | None = None,
+    system: str | None = None,
+    max_turns: int = 10,
+    model: str = "claude-sonnet-4-20250514",
+) -> T
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt` | `str` | required | The prompt to send to Claude |
+| `output` | `type[T]` | required | Pydantic model for structured output |
+| `tools` | `list[str] \| None` | `None` | Tools Claude can use |
+| `system` | `str \| None` | `None` | Custom system prompt |
+| `max_turns` | `int` | `10` | Maximum tool-use iterations |
+| `model` | `str` | `"claude-sonnet-4-20250514"` | Claude model to use |
+
+### Returns
+
+An instance of the `output` model, validated by Pydantic.
+
+### Raises
+
+| Exception | Description |
+|-----------|-------------|
+| `ValidationError` | Claude's response didn't match the schema |
+| `ClaudeError` | API error (rate limit, network, etc.) |
+
+### Examples
+
+#### Basic
+
+```python
+class SummaryOutput(BaseModel):
+    summary: str
+    key_points: list[str]
+
+result = await claude(
+    "Summarize Python programming",
+    output=SummaryOutput,
+)
+```
+
+#### With Tools
+
+```python
+result = await claude(
+    "Find all TODO comments",
+    tools=["Read", "Grep", "Glob"],
+    output=TodoOutput,
+)
+```
+
+#### With System Prompt
+
+```python
+result = await claude(
+    "Review this code",
+    system="You are a security expert. Focus on vulnerabilities.",
+    output=SecurityReview,
+)
+```
+
+#### With Different Model
+
+```python
+# Faster, cheaper
+result = await claude(
+    "Quick summary",
+    output=Output,
+    model="claude-3-5-haiku-latest",
+)
+```
+
+---
+
+## Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `Read` | Read file contents |
+| `Edit` | Modify file contents |
+| `Glob` | Find files by pattern |
+| `Grep` | Search file contents |
+| `Bash` | Execute shell commands |
+| `web_search` | Search the web |
+| `read_web_page` | Fetch and read a URL |
+
+---
+
+## Available Models
+
+| Model | Description |
+|-------|-------------|
+| `claude-sonnet-4-20250514` | Latest Sonnet (default) |
+| `claude-3-5-haiku-latest` | Fast, cheap |
+| `claude-3-opus-latest` | Most capable |
+
+---
+
+## Error Types
+
+### `ClaudeError`
+
+Base exception for Claude API errors.
+
+```python
+from smithers import ClaudeError
+
+try:
+    result = await claude(...)
+except ClaudeError as e:
+    print(f"API error: {e}")
+```
+
+### `ValidationError`
+
+Raised when Claude's response doesn't match the output schema.
+
+```python
+from pydantic import ValidationError
+
+try:
+    result = await claude(...)
+except ValidationError as e:
+    print(f"Invalid response: {e}")
+```
+
+### `RateLimitError`
+
+Raised when hitting API rate limits.
+
+```python
+from smithers import RateLimitError
+
+try:
+    result = await claude(...)
+except RateLimitError as e:
+    print(f"Rate limited. Retry after: {e.retry_after}s")
+```

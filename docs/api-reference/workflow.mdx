@@ -1,0 +1,187 @@
+---
+title: workflow
+description: API reference for the @workflow decorator
+---
+
+## `@workflow`
+
+Decorator to register a function as a workflow.
+
+```python
+from smithers import workflow
+
+@workflow
+async def my_workflow() -> OutputModel:
+    ...
+```
+
+### Signature
+
+```python
+def workflow(fn: Callable[P, Coroutine[Any, Any, T]]) -> Workflow
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `fn` | `Callable` | Async function to decorate |
+
+### Returns
+
+A `Workflow` object that wraps the original function.
+
+### Requirements
+
+- Function must be `async`
+- Function must have a return type annotation
+- Return type must be a Pydantic `BaseModel`
+
+### Example
+
+```python
+from pydantic import BaseModel
+from smithers import workflow, claude
+
+class AnalysisOutput(BaseModel):
+    files: list[str]
+    summary: str
+
+@workflow
+async def analyze() -> AnalysisOutput:
+    return await claude(
+        "Analyze the codebase",
+        output=AnalysisOutput,
+    )
+```
+
+---
+
+## `Workflow`
+
+The object returned by the `@workflow` decorator.
+
+### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `name` | `str` | Function name |
+| `fn` | `Callable` | Original function |
+| `output_type` | `type[BaseModel]` | Return type |
+| `input_types` | `dict[str, type[BaseModel]]` | Parameter types (dependencies) |
+| `requires_approval` | `bool` | Whether approval is required |
+| `approval_message` | `str \| None` | Approval prompt message |
+
+### Methods
+
+#### `__call__`
+
+Execute the workflow directly:
+
+```python
+result = await my_workflow()
+```
+
+---
+
+## `@require_approval`
+
+Decorator to require human approval before executing a workflow.
+
+```python
+from smithers import workflow, require_approval
+
+@workflow
+@require_approval("Deploy to production?")
+async def deploy() -> DeployOutput:
+    ...
+```
+
+### Signature
+
+```python
+def require_approval(message: str) -> Callable
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `message` | `str` | Message to display when asking for approval |
+
+### Example
+
+```python
+@workflow
+@require_approval("This will delete all data. Proceed?")
+async def dangerous_operation() -> Result:
+    ...
+```
+
+---
+
+## `skip`
+
+Function to skip a workflow conditionally.
+
+```python
+from smithers import skip
+
+@workflow
+async def maybe_deploy(tests: TestOutput) -> DeployOutput | None:
+    if not tests.passed:
+        return skip("Tests failed")
+    return await claude("Deploy", output=DeployOutput)
+```
+
+### Signature
+
+```python
+def skip(reason: str) -> SkipResult
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `reason` | `str` | Reason for skipping |
+
+### Returns
+
+A `SkipResult` object that signals the workflow should be skipped.
+
+---
+
+## Registry Functions
+
+### `get_workflow_by_output`
+
+Find a workflow by its output type.
+
+```python
+from smithers.workflow import get_workflow_by_output
+
+wf = get_workflow_by_output(AnalysisOutput)
+print(wf.name)  # "analyze"
+```
+
+### `get_all_workflows`
+
+Get all registered workflows.
+
+```python
+from smithers.workflow import get_all_workflows
+
+all_wfs = get_all_workflows()
+# {AnalysisOutput: Workflow(...), ImplementOutput: Workflow(...)}
+```
+
+### `clear_registry`
+
+Clear the workflow registry. Mainly useful for testing.
+
+```python
+from smithers.workflow import clear_registry
+
+clear_registry()
+```
