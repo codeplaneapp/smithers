@@ -26,6 +26,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full design.
 - **Visualization** — Enhanced graph visualization with ASCII art, status colors, and real-time progress
 - **MetricsCollector** — Prometheus/OpenTelemetry metrics export for production monitoring
 - **WebSocketServer** — Real-time progress updates for web UIs via WebSocket
+- **TimeoutPolicy** — Per-workflow and global timeout handling to prevent runaway execution
 
 ## Commands
 
@@ -196,6 +197,38 @@ Client protocol (JSON over WebSocket):
 - Filter events: `{"action": "filter", "event_types": ["NodeStarted", "NodeFinished"]}`
 - Ping/heartbeat: `{"action": "ping"}`
 
+### Timeout Handling
+```python
+from smithers import workflow, timeout, run_graph_with_store
+from datetime import timedelta
+
+# Per-workflow timeout
+@workflow
+@timeout(seconds=30)
+async def quick_task() -> Output:
+    ...
+
+# Timeout with timedelta
+@workflow
+@timeout(timedelta(minutes=5))
+async def longer_task() -> Output:
+    ...
+
+# Skip on timeout instead of failing
+@workflow
+@timeout(60, on_timeout="skip")
+async def optional_task() -> Output:
+    ...
+
+# Global graph timeout
+result = await run_graph_with_store(graph, timeout=300)  # 5 minutes
+
+# Default timeout for all nodes
+result = await run_graph_with_store(graph, node_timeout=30)
+```
+
+Events: `NodeTimedOut`, `RunTimedOut`
+
 ## System Invariants
 
 - **I1**: WorkflowGraph must be a DAG (cycle detection at plan time). Ralph loops are single nodes that internally iterate.
@@ -205,6 +238,7 @@ Client protocol (JSON over WebSocket):
 - **I5**: Cache entries must be schema-valid and hash-consistent
 - **I6**: Approvals are persisted gates; execution can pause and resume
 - **I7**: Ralph loop iterations are individually tracked with their own events and timing
+- **I8**: Workflows timeout if exceeding configured limits; timeouts can fail, skip, or cancel the node
 
 ## Testing
 
