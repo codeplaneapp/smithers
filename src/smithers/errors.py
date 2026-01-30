@@ -68,11 +68,15 @@ class ToolError(SmithersError):
         self.data = data
 
 
-class TimeoutError(SmithersError):
-    """Base class for timeout-related errors."""
+class SmithersTimeoutError(SmithersError):
+    """Base class for timeout-related errors.
+
+    This is named SmithersTimeoutError to avoid shadowing the built-in
+    Python TimeoutError exception.
+    """
 
 
-class WorkflowTimeoutError(TimeoutError):
+class WorkflowTimeoutError(SmithersTimeoutError):
     """
     Raised when a workflow exceeds its timeout limit.
 
@@ -97,7 +101,7 @@ class WorkflowTimeoutError(TimeoutError):
         )
 
 
-class GraphTimeoutError(TimeoutError):
+class GraphTimeoutError(SmithersTimeoutError):
     """
     Raised when graph execution exceeds its global timeout.
 

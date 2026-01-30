@@ -48,6 +48,7 @@ from smithers.errors import (
     ClaudeError,
     GraphTimeoutError,
     RateLimitError,
+    SmithersTimeoutError,
     WorkflowError,
     WorkflowTimeoutError,
 )
@@ -283,6 +284,7 @@ __all__ = [
     "WorkflowGraph",
     "WorkflowTimeoutError",
     "GraphTimeoutError",
+    "SmithersTimeoutError",
     # Timeout exports
     "LONG_TIMEOUT",
     "MEDIUM_TIMEOUT",

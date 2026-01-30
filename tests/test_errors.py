@@ -10,7 +10,7 @@ from smithers.errors import (
     GraphTimeoutError,
     RateLimitError,
     SmithersError,
-    TimeoutError,
+    SmithersTimeoutError,
     ToolError,
     WorkflowError,
     WorkflowTimeoutError,
@@ -51,7 +51,7 @@ class TestSmithersError:
         assert issubclass(ClaudeError, SmithersError)
         assert issubclass(RateLimitError, SmithersError)
         assert issubclass(ToolError, SmithersError)
-        assert issubclass(TimeoutError, SmithersError)
+        assert issubclass(SmithersTimeoutError, SmithersError)
 
 
 # ============================================================================
@@ -331,27 +331,27 @@ class TestToolError:
 
 
 # ============================================================================
-# TimeoutError Tests
+# SmithersTimeoutError Tests
 # ============================================================================
 
 
-class TestTimeoutError:
-    """Tests for base TimeoutError class."""
+class TestSmithersTimeoutError:
+    """Tests for base SmithersTimeoutError class."""
 
     def test_basic_creation(self) -> None:
-        """Test creating TimeoutError."""
-        error = TimeoutError("Operation timed out")
+        """Test creating SmithersTimeoutError."""
+        error = SmithersTimeoutError("Operation timed out")
         assert str(error) == "Operation timed out"
 
     def test_is_smithers_error(self) -> None:
-        """Test that TimeoutError is a SmithersError."""
-        error = TimeoutError("timeout")
+        """Test that SmithersTimeoutError is a SmithersError."""
+        error = SmithersTimeoutError("timeout")
         assert isinstance(error, SmithersError)
 
     def test_subclass_hierarchy(self) -> None:
-        """Test that timeout subclasses inherit from TimeoutError."""
-        assert issubclass(WorkflowTimeoutError, TimeoutError)
-        assert issubclass(GraphTimeoutError, TimeoutError)
+        """Test that timeout subclasses inherit from SmithersTimeoutError."""
+        assert issubclass(WorkflowTimeoutError, SmithersTimeoutError)
+        assert issubclass(GraphTimeoutError, SmithersTimeoutError)
 
 
 # ============================================================================
@@ -390,7 +390,7 @@ class TestWorkflowTimeoutError:
     def test_inheritance(self) -> None:
         """Test inheritance chain."""
         error = WorkflowTimeoutError("wf", 1.0, 2.0)
-        assert isinstance(error, TimeoutError)
+        assert isinstance(error, SmithersTimeoutError)
         assert isinstance(error, SmithersError)
 
     def test_can_be_raised(self) -> None:
@@ -475,7 +475,7 @@ class TestGraphTimeoutError:
     def test_inheritance(self) -> None:
         """Test inheritance chain."""
         error = GraphTimeoutError(1.0, 2.0)
-        assert isinstance(error, TimeoutError)
+        assert isinstance(error, SmithersTimeoutError)
         assert isinstance(error, SmithersError)
 
     def test_can_be_raised(self) -> None:
@@ -521,7 +521,7 @@ class TestErrorChaining:
         errors: dict[str, BaseException] = {
             "workflow_a": ValueError("Invalid input"),
             "workflow_b": RuntimeError("Connection lost"),
-            "workflow_c": TimeoutError("Timed out"),
+            "workflow_c": SmithersTimeoutError("Timed out"),
         }
 
         error = WorkflowError(
@@ -534,7 +534,7 @@ class TestErrorChaining:
         assert len(error.errors) == 3
         assert isinstance(error.errors["workflow_a"], ValueError)
         assert isinstance(error.errors["workflow_b"], RuntimeError)
-        assert isinstance(error.errors["workflow_c"], TimeoutError)
+        assert isinstance(error.errors["workflow_c"], SmithersTimeoutError)
 
 
 # ============================================================================
@@ -583,7 +583,7 @@ class TestExceptionHandlingPatterns:
             ClaudeError("api"),
             RateLimitError(),
             ToolError("tool", "error"),
-            TimeoutError("timeout"),
+            SmithersTimeoutError("timeout"),
             WorkflowTimeoutError("wf", 1.0, 2.0),
             GraphTimeoutError(1.0, 2.0),
         ]
