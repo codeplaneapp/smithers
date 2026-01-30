@@ -125,6 +125,18 @@ from smithers.metrics import (
     reset_metrics_collector,
     set_metrics_collector,
 )
+from smithers.websocket import (
+    ClientConnection,
+    ConnectionStats,
+    WebSocketMessage,
+    WebSocketServer,
+    error_message,
+    get_websocket_server,
+    progress_message,
+    reset_websocket_server,
+    set_websocket_server,
+    status_message,
+)
 from smithers.workflow import require_approval, require_approval_async, retry, skip, workflow
 
 __version__ = "0.1.0"
@@ -149,6 +161,17 @@ __all__ = [
     "record_workflow_run",
     "reset_metrics_collector",
     "set_metrics_collector",
+    # WebSocket
+    "ClientConnection",
+    "ConnectionStats",
+    "WebSocketMessage",
+    "WebSocketServer",
+    "error_message",
+    "get_websocket_server",
+    "progress_message",
+    "reset_websocket_server",
+    "set_websocket_server",
+    "status_message",
     # Other exports
     "ApprovalRejected",
     "BudgetExceededAction",
