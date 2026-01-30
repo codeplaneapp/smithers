@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tempfile
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -18,7 +18,6 @@ from smithers.analytics import (
     UsageSummary,
     calculate_cost,
     clear_custom_pricing,
-    get_daily_usage,
     get_model_pricing,
     get_run_cost,
     get_run_tokens,

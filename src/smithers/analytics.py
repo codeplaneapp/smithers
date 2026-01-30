@@ -359,9 +359,7 @@ class TokenBudget:
             return True
         if self.max_total_tokens is not None and self.used_total_tokens > self.max_total_tokens:
             return True
-        if self.max_cost_usd is not None and self.used_cost_usd > self.max_cost_usd:
-            return True
-        return False
+        return self.max_cost_usd is not None and self.used_cost_usd > self.max_cost_usd
 
     def utilization(self) -> dict[str, float | None]:
         """Get budget utilization as percentages.
