@@ -32,6 +32,21 @@ def skip(reason: str) -> SkipResult:
     return SkipResult(reason=reason)
 
 
+def _empty_str_bool_dict() -> dict[str, bool]:
+    """Factory for empty dict[str, bool]."""
+    return {}
+
+
+def _empty_str_any_dict() -> dict[str, Any]:
+    """Factory for empty dict[str, Any]."""
+    return {}
+
+
+def _empty_workflow_deps_dict() -> dict[str, list[Workflow]]:
+    """Factory for empty workflow dependencies dict."""
+    return {}
+
+
 @dataclass
 class Workflow:
     """A registered workflow."""
@@ -40,15 +55,15 @@ class Workflow:
     fn: Callable[..., Coroutine[Any, Any, BaseModel]]
     output_type: type[BaseModel]
     input_types: dict[str, type[BaseModel]]
-    input_is_list: dict[str, bool] = field(default_factory=dict)
-    input_optional: dict[str, bool] = field(default_factory=dict)
+    input_is_list: dict[str, bool] = field(default_factory=_empty_str_bool_dict)
+    input_optional: dict[str, bool] = field(default_factory=_empty_str_bool_dict)
     requires_approval: bool = False
     approval_message: str | None = None
     approval_context: Callable[[Any], str] | None = None
     approval_timeout: timedelta | None = None
     output_optional: bool = False
-    bound_args: dict[str, Any] = field(default_factory=dict)
-    bound_deps: dict[str, list[Workflow]] = field(default_factory=dict)
+    bound_args: dict[str, Any] = field(default_factory=_empty_str_any_dict)
+    bound_deps: dict[str, list[Workflow]] = field(default_factory=_empty_workflow_deps_dict)
     retry_policy: RetryPolicy = field(default_factory=lambda: NO_RETRY)
     timeout_policy: Any = None  # TimeoutPolicy or None, avoiding circular import
     condition_policy: Any = None  # ConditionPolicy or None, avoiding circular import
@@ -60,18 +75,29 @@ class Workflow:
 
     def bind(self, **kwargs: Any) -> Workflow:
         """Bind concrete arguments or explicit dependencies to this workflow."""
-        bound_args = dict(self.bound_args)
-        bound_deps = {key: list(value) for key, value in self.bound_deps.items()}
+        bound_args: dict[str, Any] = dict(self.bound_args)
+        bound_deps: dict[str, list[Workflow]] = {
+            key: list(value) for key, value in self.bound_deps.items()
+        }
 
         for key, value in kwargs.items():
             if isinstance(value, Workflow):
                 bound_deps[key] = [value]
-            elif (
-                isinstance(value, Sequence)
-                and value
-                and all(isinstance(item, Workflow) for item in value)
-            ):
-                bound_deps[key] = list(value)
+            elif isinstance(value, Sequence) and value:
+                # Check if all items are Workflows
+                workflow_items: list[Workflow] = []
+                all_workflows = True
+                seq_value: Sequence[object] = value  # type: ignore[assignment]
+                for item in seq_value:
+                    if isinstance(item, Workflow):
+                        workflow_items.append(item)
+                    else:
+                        all_workflows = False
+                        break
+                if all_workflows:
+                    bound_deps[key] = workflow_items
+                else:
+                    bound_args[key] = value
             else:
                 bound_args[key] = value
 
@@ -421,15 +447,15 @@ def _make_bound_name(
     if not bound_args and not bound_deps:
         return base_name
 
-    def normalize(value: Any) -> Any:
+    def normalize(value: object) -> object:
         if isinstance(value, Workflow):
             return {"workflow": value.name}
         if isinstance(value, BaseModel):
             return value.model_dump(mode="json")
         if isinstance(value, dict):
-            return {str(k): normalize(v) for k, v in value.items()}
+            return {str(k): normalize(v) for k, v in value.items()}  # type: ignore[union-attr]
         if isinstance(value, (list, tuple, set)):
-            return [normalize(v) for v in value]
+            return [normalize(v) for v in value]  # type: ignore[union-attr]
         return value
 
     payload = {
