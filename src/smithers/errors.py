@@ -1,4 +1,75 @@
-"""Custom error types for Smithers."""
+"""Custom exception types for the Smithers workflow framework.
+
+This module defines the exception hierarchy for Smithers. All Smithers-specific
+exceptions inherit from SmithersError, making it easy to catch all framework
+errors in a single handler.
+
+Exception Hierarchy:
+    SmithersError (base)
+    ├── WorkflowError - Workflow execution failures
+    ├── ApprovalRejected - Human approval was denied
+    ├── ClaudeError - Claude API errors
+    │   └── RateLimitError - API rate limit exceeded
+    ├── ToolError - Tool execution failures
+    ├── GraphBuildError (also ValueError) - Graph construction errors
+    │   ├── CycleError - Circular dependencies detected
+    │   ├── MissingProducerError - No workflow produces required type
+    │   └── DuplicateProducerError - Multiple workflows produce same type
+    ├── RalphLoopError - Ralph loop errors
+    │   ├── RalphLoopConfigError - Loop misconfiguration
+    │   └── RalphLoopInputError - Invalid loop input
+    └── SmithersTimeoutError - Timeout errors
+        ├── WorkflowTimeoutError - Single workflow timeout
+        └── GraphTimeoutError - Full graph execution timeout
+
+Usage Examples:
+    Catching all Smithers errors::
+
+        from smithers import build_graph, run_graph
+        from smithers.errors import SmithersError
+
+        try:
+            graph = build_graph(my_workflow)
+            result = await run_graph(graph)
+        except SmithersError as e:
+            print(f"Smithers error: {e}")
+
+    Handling specific error types::
+
+        from smithers.errors import (
+            CycleError,
+            MissingProducerError,
+            WorkflowTimeoutError,
+        )
+
+        try:
+            graph = build_graph(my_workflow)
+        except CycleError as e:
+            print(f"Circular dependency in {e.workflow_name}")
+            print(f"Cycle path: {' -> '.join(e.cycle_path)}")
+        except MissingProducerError as e:
+            print(f"Missing dependency: {e.required_type.__name__}")
+            print(f"Available types: {e.registered_types}")
+
+    Catching graph build errors with ValueError compatibility::
+
+        # GraphBuildError inherits from both SmithersError and ValueError,
+        # so existing code that catches ValueError will still work
+        try:
+            graph = build_graph(my_workflow)
+        except ValueError as e:
+            print(f"Graph build failed: {e}")
+
+    Serializing errors for logging::
+
+        from smithers.errors import serialize_error, WorkflowError
+
+        try:
+            result = await run_graph(graph)
+        except WorkflowError as e:
+            error_dict = serialize_error(e)
+            logger.error("Workflow failed", extra=error_dict)
+"""
 
 from __future__ import annotations
 
