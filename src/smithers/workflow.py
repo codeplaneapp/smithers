@@ -1,4 +1,76 @@
-"""Workflow decorator and utilities."""
+"""Workflow decorator and registry for Smithers.
+
+This module provides the core @workflow decorator that transforms async functions
+into Workflow objects with dependency tracking, type validation, and registry support.
+
+Workflows are the fundamental building blocks of Smithers. A workflow is an async
+function that:
+- Returns a Pydantic model (for type-safe outputs)
+- Declares dependencies via type-annotated parameters
+- Is automatically registered by output type for dependency resolution
+
+Key components:
+- @workflow: Decorator to register an async function as a workflow
+- Workflow: Dataclass representing a registered workflow with metadata
+- SkipResult: Marker for conditionally skipping workflow execution
+- @require_approval: Decorator for human-in-the-loop approval gates
+- @retry: Decorator for configuring retry behavior
+
+Example:
+    from smithers import workflow, claude
+    from pydantic import BaseModel
+
+    class AnalysisOutput(BaseModel):
+        summary: str
+        files: list[str]
+
+    class ImplementOutput(BaseModel):
+        changed_files: list[str]
+
+    @workflow
+    async def analyze() -> AnalysisOutput:
+        return await claude("Analyze the codebase", output=AnalysisOutput)
+
+    # Dependencies are inferred from type hints
+    @workflow
+    async def implement(analysis: AnalysisOutput) -> ImplementOutput:
+        return await claude(
+            f"Implement fixes for: {analysis.files}",
+            output=ImplementOutput,
+        )
+
+Workflow Registration:
+    By default, workflows are registered in a global registry by their output type.
+    This allows automatic dependency resolution during graph building. Set
+    `register=False` for workflows that share output types (fan-in patterns).
+
+    @workflow(register=False)
+    async def producer1() -> SharedOutput:
+        ...
+
+    @workflow(register=False)
+    async def producer2() -> SharedOutput:
+        ...
+
+Retry Configuration:
+    Workflows can be configured to retry on failure:
+
+    @workflow(max_retries=3)
+    async def flaky_api_call() -> ApiOutput:
+        ...
+
+    @workflow(retry=RetryPolicy(max_attempts=5, backoff_seconds=2.0))
+    async def custom_retry() -> Output:
+        ...
+
+Approval Gates:
+    Use @require_approval for human-in-the-loop workflows:
+
+    @workflow
+    @require_approval("Deploy to production?")
+    async def deploy() -> DeployOutput:
+        ...
+"""
 
 from __future__ import annotations
 
