@@ -827,7 +827,11 @@ def _compute_levels_for_target(
     nodes: dict[str, WorkflowNode],
     target: str,
 ) -> list[list[str]]:
-    """Compute execution levels starting from leaves up to target."""
+    """Compute execution levels starting from leaves up to target.
+
+    Uses Kahn's algorithm with a precomputed dependents map for O(n + e)
+    complexity where n is the number of nodes and e is the number of edges.
+    """
     # Find all nodes reachable from target (backwards)
     reachable: set[str] = set()
 
@@ -844,10 +848,18 @@ def _compute_levels_for_target(
     # Filter to only reachable nodes
     filtered_nodes = {name: node for name, node in nodes.items() if name in reachable}
 
-    # Compute levels using standard algorithm
+    # Compute levels using Kahn's algorithm with precomputed dependents map
     in_degree: dict[str, int] = {name: 0 for name in filtered_nodes}
+
+    # Build a reverse dependency map: node -> list of nodes that depend on it
+    # This avoids O(n) lookup per node when updating in-degrees
+    dependents: dict[str, list[str]] = {name: [] for name in filtered_nodes}
+
     for node in filtered_nodes.values():
-        in_degree[node.name] = len([d for d in node.dependencies if d in filtered_nodes])
+        filtered_deps = [d for d in node.dependencies if d in filtered_nodes]
+        in_degree[node.name] = len(filtered_deps)
+        for dep in filtered_deps:
+            dependents[dep].append(node.name)
 
     levels: list[list[str]] = []
     remaining = set(filtered_nodes.keys())
@@ -864,9 +876,9 @@ def _compute_levels_for_target(
 
         for name in level:
             remaining.remove(name)
-            for node in filtered_nodes.values():
-                if name in node.dependencies:
-                    in_degree[node.name] -= 1
+            # Decrease in-degree of nodes that depend on this one (O(1) lookup)
+            for dependent in dependents[name]:
+                in_degree[dependent] -= 1
 
     return levels
 

@@ -12,6 +12,11 @@ from typing import Any
 from pydantic import BaseModel, TypeAdapter
 
 from smithers.cache import Cache, SqliteCache
+from smithers.conditions import (
+    ConditionNotMetError,
+    evaluate_condition,
+    get_condition_policy,
+)
 from smithers.config import get_config
 from smithers.errors import ApprovalRejected, WorkflowError
 from smithers.hashing import (
@@ -32,11 +37,6 @@ from smithers.types import (
     WorkflowResult,
 )
 from smithers.workflow import SkipResult, Workflow, get_workflow_by_output
-from smithers.conditions import (
-    ConditionNotMetError,
-    evaluate_condition,
-    get_condition_policy,
-)
 
 
 def build_graph(target: Workflow) -> WorkflowGraph:
@@ -103,10 +103,21 @@ def _compute_levels(nodes: dict[str, WorkflowNode]) -> list[list[str]]:
     Compute execution levels for parallel execution.
 
     Nodes in the same level can run in parallel.
+
+    Uses Kahn's algorithm with a precomputed dependents map for O(n + e)
+    complexity where n is the number of nodes and e is the number of edges.
     """
     in_degree: dict[str, int] = {name: 0 for name in nodes}
+
+    # Build a reverse dependency map: node -> list of nodes that depend on it
+    # This avoids O(n) lookup per node when updating in-degrees
+    dependents: dict[str, list[str]] = {name: [] for name in nodes}
+
     for node in nodes.values():
         in_degree[node.name] = len(node.dependencies)
+        for dep in node.dependencies:
+            if dep in dependents:
+                dependents[dep].append(node.name)
 
     levels: list[list[str]] = []
     remaining = set(nodes.keys())
@@ -123,10 +134,9 @@ def _compute_levels(nodes: dict[str, WorkflowNode]) -> list[list[str]]:
         # Remove this level and update in-degrees
         for name in level:
             remaining.remove(name)
-            # Decrease in-degree of nodes that depend on this one
-            for node in nodes.values():
-                if name in node.dependencies:
-                    in_degree[node.name] -= 1
+            # Decrease in-degree of nodes that depend on this one (O(1) lookup)
+            for dependent in dependents[name]:
+                in_degree[dependent] -= 1
 
     return levels
 
@@ -519,7 +529,10 @@ def _hash_inputs(wf: Workflow, outputs: dict[str, Any]) -> str:
         dep_wf = get_workflow_by_output(param_type)
         if dep_wf is None:
             continue
-        deps[param_name] = outputs[dep_wf.name]
+        if wf.input_is_list.get(param_name, False):
+            deps[param_name] = [outputs[dep_wf.name]]
+        else:
+            deps[param_name] = outputs[dep_wf.name]
 
     inputs["deps"] = deps
     return compute_input_hash(inputs)
@@ -630,5 +643,8 @@ def _dependency_namespace(wf: Workflow, outputs: dict[str, Any]) -> SimpleNamesp
         dep_wf = get_workflow_by_output(param_type)
         if dep_wf is None:
             continue
-        data[param_name] = outputs.get(dep_wf.name)
+        if wf.input_is_list.get(param_name, False):
+            data[param_name] = [outputs.get(dep_wf.name)]
+        else:
+            data[param_name] = outputs.get(dep_wf.name)
     return SimpleNamespace(**data)
