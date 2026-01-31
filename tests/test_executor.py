@@ -34,6 +34,49 @@ class SimpleOutput(BaseModel):
     result: str
 
 
+class StressTestOutput(BaseModel):
+    """Output for stress testing parallel execution."""
+
+    task_id: str
+    value: int
+
+
+class StressTestFinalOutput(BaseModel):
+    """Final output for stress test."""
+
+    total: int
+
+
+class ParallelTask1Output(BaseModel):
+    """Output for parallel task 1."""
+
+    v: int
+
+
+class ParallelTask2Output(BaseModel):
+    """Output for parallel task 2."""
+
+    v: int
+
+
+class ParallelTask3Output(BaseModel):
+    """Output for parallel task 3."""
+
+    v: int
+
+
+class ParallelTask4Output(BaseModel):
+    """Output for parallel task 4."""
+
+    v: int
+
+
+class ParallelTask5Output(BaseModel):
+    """Output for parallel task 5."""
+
+    v: int
+
+
 @pytest.fixture(autouse=True)
 def clean_registry():
     """Clear workflow registry before each test."""
@@ -386,3 +429,71 @@ class TestExecutorApprovals:
         approval = await store.get_approval(runs[0].run_id, "deploy")
         assert approval is not None
         assert approval.status == "APPROVED"
+
+    @pytest.mark.asyncio
+    async def test_parallel_execution_stress(self, store_path: Path) -> None:
+        """Stress test for parallel execution with many concurrent workflows.
+
+        This test creates a graph with many independent tasks that execute in parallel,
+        stressing the ExecutionContext shared state access patterns. Tests that
+        concurrent modifications to ctx.outputs, ctx.statuses, etc. don't cause issues.
+
+        The graph structure ensures all 5 tasks run in the same level, causing
+        concurrent access to ExecutionContext.outputs and ExecutionContext.statuses.
+        """
+        import asyncio
+
+        # Independent workflows (no dependencies = same level)
+        @workflow
+        async def task1() -> ParallelTask1Output:
+            await asyncio.sleep(0.001)
+            return ParallelTask1Output(v=1)
+
+        @workflow
+        async def task2() -> ParallelTask2Output:
+            await asyncio.sleep(0.001)
+            return ParallelTask2Output(v=2)
+
+        @workflow
+        async def task3() -> ParallelTask3Output:
+            await asyncio.sleep(0.001)
+            return ParallelTask3Output(v=3)
+
+        @workflow
+        async def task4() -> ParallelTask4Output:
+            await asyncio.sleep(0.001)
+            return ParallelTask4Output(v=4)
+
+        @workflow
+        async def task5() -> ParallelTask5Output:
+            await asyncio.sleep(0.001)
+            return ParallelTask5Output(v=5)
+
+        # Final workflow depends on all 5, so they must run in parallel
+        @workflow
+        async def combine(
+            t1: ParallelTask1Output,
+            t2: ParallelTask2Output,
+            t3: ParallelTask3Output,
+            t4: ParallelTask4Output,
+            t5: ParallelTask5Output,
+        ) -> StressTestFinalOutput:
+            return StressTestFinalOutput(total=t1.v + t2.v + t3.v + t4.v + t5.v)
+
+        graph = build_graph(combine)
+        store = SqliteStore(store_path)
+
+        # Verify graph structure: 5 tasks in level 0, 1 combine in level 1
+        assert len(graph.levels) == 2
+        assert len(graph.levels[0]) == 5  # All 5 tasks run in parallel
+
+        # Run multiple times to stress test concurrent dict access
+        for _ in range(20):
+            result = await run_graph_with_store(graph, store=store)
+            assert result.total == 15, f"Race condition detected: got {result.total}"
+
+            # Verify all nodes completed successfully
+            runs = await store.list_runs()
+            nodes = await store.get_run_nodes(runs[-1].run_id)
+            assert len(nodes) == 6
+            assert all(n.status == NodeStatus.SUCCESS for n in nodes)
