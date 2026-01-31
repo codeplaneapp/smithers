@@ -29,6 +29,11 @@ if TYPE_CHECKING:
 
 _CODE_HASH_CACHE: "weakref.WeakKeyDictionary[object, str]" = weakref.WeakKeyDictionary()
 
+# Cache runtime hashes by model name to avoid repeated computation.
+# The runtime hash only depends on the smithers version and model name,
+# both of which are typically a small, fixed set of values.
+_RUNTIME_HASH_CACHE: dict[str | None, str] = {}
+
 
 def canonical_json(value: Any) -> str:
     """
@@ -155,17 +160,26 @@ def runtime_hash(*, model: str | None = None) -> str:
     - Smithers version
     - LLM model name (if provided)
 
+    Results are cached by model name since the smithers version is constant
+    and model names are typically a small, fixed set of values.
+
     Args:
         model: Optional LLM model name
 
     Returns:
         Hex-encoded SHA-256 hash of runtime config
     """
+    cached = _RUNTIME_HASH_CACHE.get(model)
+    if cached is not None:
+        return cached
+
     config = {
         "smithers_version": _SMITHERS_VERSION,
         "model": model,
     }
-    return hash_json(config)
+    result = hash_json(config)
+    _RUNTIME_HASH_CACHE[model] = result
+    return result
 
 
 def cache_key(

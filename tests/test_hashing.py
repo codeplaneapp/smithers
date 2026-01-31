@@ -246,6 +246,28 @@ class TestRuntimeHash:
         hash2 = runtime_hash()
         assert hash1 == hash2
 
+    def test_runtime_hash_is_cached(self):
+        """Verify that runtime_hash results are cached for performance."""
+        from smithers.hashing import _RUNTIME_HASH_CACHE
+
+        # Use a unique model name to avoid interference from other tests
+        test_model = "test-model-for-cache-verification"
+
+        # Clear any existing cache entry for this model
+        _RUNTIME_HASH_CACHE.pop(test_model, None)
+
+        # First call should compute and cache
+        hash1 = runtime_hash(model=test_model)
+        assert test_model in _RUNTIME_HASH_CACHE
+        assert _RUNTIME_HASH_CACHE[test_model] == hash1
+
+        # Second call should return cached value
+        hash2 = runtime_hash(model=test_model)
+        assert hash1 == hash2
+
+        # Clean up
+        _RUNTIME_HASH_CACHE.pop(test_model, None)
+
 
 class TestCacheKey:
     """Tests for cache key computation."""
