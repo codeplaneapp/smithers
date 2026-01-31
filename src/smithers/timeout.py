@@ -121,7 +121,7 @@ LONG_TIMEOUT = TimeoutPolicy(timeout_seconds=600.0)
 
 
 # Import error types from smithers.errors for consistency
-from smithers.errors import GraphTimeoutError, WorkflowTimeoutError
+from smithers.errors import WorkflowTimeoutError
 
 
 def timeout(
@@ -175,7 +175,7 @@ def timeout(
     if isinstance(timeout_value, TimeoutPolicy):
         policy = timeout_value
     elif isinstance(timeout_value, timedelta):
-        action = TimeoutAction(on_timeout) if isinstance(on_timeout, str) else on_timeout
+        action = on_timeout if isinstance(on_timeout, TimeoutAction) else TimeoutAction(on_timeout)
         policy = TimeoutPolicy.from_timedelta(
             timeout_value,
             on_timeout=action,
@@ -183,7 +183,7 @@ def timeout(
             include_queue_time=include_queue_time,
         )
     elif isinstance(timeout_value, (int, float)):
-        action = TimeoutAction(on_timeout) if isinstance(on_timeout, str) else on_timeout
+        action = on_timeout if isinstance(on_timeout, TimeoutAction) else TimeoutAction(on_timeout)
         policy = TimeoutPolicy(
             timeout_seconds=float(timeout_value),
             on_timeout=action,
@@ -194,7 +194,7 @@ def timeout(
         total_seconds = (seconds or 0.0) + (minutes or 0.0) * 60.0
         if total_seconds <= 0:
             raise ValueError("Timeout must be positive")
-        action = TimeoutAction(on_timeout) if isinstance(on_timeout, str) else on_timeout
+        action = on_timeout if isinstance(on_timeout, TimeoutAction) else TimeoutAction(on_timeout)
         policy = TimeoutPolicy(
             timeout_seconds=total_seconds,
             on_timeout=action,
@@ -202,9 +202,7 @@ def timeout(
             include_queue_time=include_queue_time,
         )
     else:
-        raise ValueError(
-            "Must provide timeout_value, seconds, or minutes parameter"
-        )
+        raise ValueError("Must provide timeout_value, seconds, or minutes parameter")
 
     def decorator(fn: Callable[P, Coroutine[Any, Any, T]]) -> Callable[P, Coroutine[Any, Any, T]]:
         @wraps(fn)
@@ -253,7 +251,7 @@ async def execute_with_timeout(
     try:
         result = await asyncio.wait_for(coro, timeout=policy.timeout_seconds)
         return result
-    except asyncio.TimeoutError:
+    except TimeoutError:
         elapsed = time.perf_counter() - start_time
         error = WorkflowTimeoutError(
             workflow_name=workflow_name,
@@ -267,7 +265,7 @@ async def execute_with_timeout(
                     on_timeout_callback(error),
                     timeout=policy.grace_period_seconds,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass  # Grace period also expired
 
         if policy.on_timeout == TimeoutAction.FAIL:
@@ -290,9 +288,11 @@ class TimeoutState:
 
     global_timeout_seconds: float | None = None
     start_time: float = field(default_factory=lambda: __import__("time").perf_counter())
-    node_timeouts: dict[str, TimeoutPolicy] = field(default_factory=dict)
-    node_start_times: dict[str, float] = field(default_factory=dict)
-    timed_out_nodes: list[str] = field(default_factory=list)
+    node_timeouts: dict[str, TimeoutPolicy] = field(
+        default_factory=lambda: dict[str, TimeoutPolicy]()
+    )
+    node_start_times: dict[str, float] = field(default_factory=lambda: dict[str, float]())
+    timed_out_nodes: list[str] = field(default_factory=lambda: list[str]())
 
     def global_remaining(self) -> float | None:
         """Get remaining global timeout, or None if no global timeout."""
