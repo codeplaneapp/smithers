@@ -192,6 +192,62 @@ def verify_green() -> tuple[bool, list[str]]:
     return len(failures) == 0, failures
 
 
+def run_amp_review() -> bool:
+    """Run amp CLI to review the latest commit. Returns True if approved."""
+    log("Running amp review on latest commit...")
+
+    try:
+        # Get the latest commit info
+        result = subprocess.run(
+            ["git", "log", "-1", "--oneline"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        latest_commit = result.stdout.strip()
+        log(f"  Reviewing: {latest_commit}")
+
+        # Run amp to review the commit
+        result = subprocess.run(
+            [
+                "amp",
+                "-p",
+                f"""Review the latest git commit for quality and correctness.
+
+Run these checks:
+1. `git show HEAD` - review the actual changes
+2. `uv run pytest` - verify tests pass
+3. `uv run pyright` - verify types are correct
+4. `uv run ruff check .` - verify linting passes
+
+If ALL checks pass and the code looks good, respond with just: APPROVED
+
+If there are issues, describe them and suggest fixes. Do NOT make changes yourself.
+""",
+            ],
+            cwd=PROJECT_ROOT,
+            capture_output=False,
+            timeout=600,  # 10 minute timeout for review
+        )
+
+        if result.returncode == 0:
+            log("✅ Amp review completed")
+            return True
+        else:
+            log(f"⚠️ Amp review flagged issues (exit code {result.returncode})")
+            return False
+
+    except subprocess.TimeoutExpired:
+        log("⏰ Amp review timed out")
+        return False
+    except FileNotFoundError:
+        log("⚠️ 'amp' command not found - skipping review")
+        return True  # Don't block if amp isn't installed
+    except Exception as e:
+        log(f"⚠️ Amp review error: {e}")
+        return True  # Don't block on review errors
+
+
 def run_agent(focus: str, cycle: int, agent_cmd: str = "claude") -> bool:
     """Run an AI agent with the given focus. Returns True if successful."""
     focus_description = FOCUS_DESCRIPTIONS.get(focus, f"Work on {focus} tasks")
@@ -275,7 +331,25 @@ def main():
         action="store_true",
         help="Run only one cycle then exit",
     )
+    parser.add_argument(
+        "--review",
+        action="store_true",
+        help="Run amp CLI to review each commit after agent completes",
+    )
+    parser.add_argument(
+        "--review-only",
+        action="store_true",
+        help="Only run amp review on latest commit, then exit",
+    )
     args = parser.parse_args()
+
+    # Handle --review-only mode
+    if args.review_only:
+        log("=" * 60)
+        log("🔍 Running amp review on latest commit")
+        log("=" * 60)
+        success = run_amp_review()
+        sys.exit(0 if success else 1)
 
     # Determine which focuses to use
     # Structure: Backend (4) + Frontend (4) + Features (3) + Maintenance (3)
@@ -332,6 +406,12 @@ def main():
             if not is_green:
                 log(f"⚠️ Agent left codebase not green ({', '.join(failures)})")
                 consecutive_failures += 1
+            elif args.review:
+                # Run amp review if enabled and checks passed
+                log("Running amp review...")
+                review_ok = run_amp_review()
+                if not review_ok:
+                    log("⚠️ Amp review flagged issues - next agent should address")
         else:
             consecutive_failures += 1
 
