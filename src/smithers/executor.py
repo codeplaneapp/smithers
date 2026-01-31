@@ -92,6 +92,61 @@ def _is_ralph_loop(wf: Workflow) -> bool:
     return getattr(wf, "loop_config", None) is not None
 
 
+async def _mark_node_skipped(
+    name: str,
+    ctx: ExecutionContext,
+    store: SqliteStore,
+    skip_reason: str,
+    *,
+    output: Any = None,
+    duration_ms: float = 0.0,
+    event_payload: dict[str, Any] | None = None,
+    on_progress: Callable[[WorkflowEvent], Awaitable[None]] | None = None,
+    progress_message: str | None = None,
+) -> None:
+    """Mark a node as skipped with all necessary state updates.
+
+    This helper consolidates the repetitive pattern of marking nodes as skipped:
+    1. Update context outputs and statuses
+    2. Append a WorkflowResult
+    3. Update store node status
+    4. Emit a NodeSkipped event
+    5. Optionally call on_progress callback
+
+    Args:
+        name: The node name
+        ctx: The execution context
+        store: The SQLite store
+        skip_reason: Reason for skipping (stored in DB and events)
+        output: Output value to store (default None)
+        duration_ms: Execution duration if any (default 0.0)
+        event_payload: Additional event payload data (merged with reason)
+        on_progress: Optional progress callback
+        progress_message: Message for progress callback (defaults to skip_reason)
+    """
+    ctx.outputs[name] = output
+    ctx.statuses[name] = "skipped"
+    ctx.results.append(
+        WorkflowResult(name=name, output=output, cached=False, duration_ms=duration_ms)
+    )
+    await store.update_node_status(ctx.run_id, name, NodeStatus.SKIPPED, skip_reason=skip_reason)
+
+    payload = {"reason": skip_reason}
+    if event_payload:
+        payload.update(event_payload)
+    await _emit_event(store, ctx.run_id, name, "NodeSkipped", payload)
+
+    if on_progress:
+        await on_progress(
+            WorkflowEvent(
+                type="skipped",
+                workflow_name=name,
+                duration_ms=duration_ms if duration_ms > 0 else None,
+                message=progress_message or skip_reason,
+            )
+        )
+
+
 async def _emit_event(
     store: SqliteStore,
     run_id: str,
@@ -468,12 +523,7 @@ async def _execute_node(
     # Check dependencies
     for dep in node.dependencies:
         if ctx.statuses.get(dep) in {"failed", "skipped"}:
-            ctx.statuses[name] = "skipped"
-            ctx.outputs[name] = None
-            await store.update_node_status(
-                run_id, name, NodeStatus.SKIPPED, skip_reason="dependency failed"
-            )
-            await _emit_event(store, run_id, name, "NodeSkipped", {"reason": "dependency failed"})
+            await _mark_node_skipped(name, ctx, store, "dependency failed")
             return
 
     # Emit NodeReady event
@@ -498,60 +548,26 @@ async def _execute_node(
                     raise ConditionNotMetError(name, skip_reason)
                 elif on_skip_action == "default":
                     default_val = condition_policy.default_value
-                    ctx.outputs[name] = default_val
-                    ctx.statuses[name] = "skipped"
-                    ctx.results.append(
-                        WorkflowResult(name=name, output=default_val, cached=False, duration_ms=0.0)
-                    )
-                    await store.update_node_status(
-                        run_id,
+                    await _mark_node_skipped(
                         name,
-                        NodeStatus.SKIPPED,
-                        skip_reason=f"condition: {skip_reason}",
-                    )
-                    await _emit_event(
+                        ctx,
                         store,
-                        run_id,
-                        name,
-                        "NodeSkipped",
-                        {"reason": f"condition: {skip_reason}", "default_returned": True},
+                        f"condition: {skip_reason}",
+                        output=default_val,
+                        event_payload={"default_returned": True},
+                        on_progress=options.on_progress,
+                        progress_message=f"Condition not met: {skip_reason}",
                     )
-                    if options.on_progress:
-                        await options.on_progress(
-                            WorkflowEvent(
-                                type="skipped",
-                                workflow_name=name,
-                                message=f"Condition not met: {skip_reason}",
-                            )
-                        )
                     return
                 else:
-                    ctx.outputs[name] = None
-                    ctx.statuses[name] = "skipped"
-                    ctx.results.append(
-                        WorkflowResult(name=name, output=None, cached=False, duration_ms=0.0)
-                    )
-                    await store.update_node_status(
-                        run_id,
+                    await _mark_node_skipped(
                         name,
-                        NodeStatus.SKIPPED,
-                        skip_reason=f"condition: {skip_reason}",
-                    )
-                    await _emit_event(
+                        ctx,
                         store,
-                        run_id,
-                        name,
-                        "NodeSkipped",
-                        {"reason": f"condition: {skip_reason}"},
+                        f"condition: {skip_reason}",
+                        on_progress=options.on_progress,
+                        progress_message=f"Condition not met: {skip_reason}",
                     )
-                    if options.on_progress:
-                        await options.on_progress(
-                            WorkflowEvent(
-                                type="skipped",
-                                workflow_name=name,
-                                message=f"Condition not met: {skip_reason}",
-                            )
-                        )
                     return
 
         # Check cache (with optional invalidation)
@@ -594,19 +610,13 @@ async def _execute_node(
             headless=options.headless,
         )
         if not approved:
-            ctx.statuses[name] = "skipped"
-            ctx.outputs[name] = None
-            ctx.results.append(
-                WorkflowResult(name=name, output=None, cached=False, duration_ms=0.0)
+            await _mark_node_skipped(
+                name,
+                ctx,
+                store,
+                "Approval rejected",
+                on_progress=options.on_progress,
             )
-            if options.on_progress:
-                await options.on_progress(
-                    WorkflowEvent(
-                        type="skipped",
-                        workflow_name=name,
-                        message="Approval rejected",
-                    )
-                )
             return
 
         # Execute the workflow with retry support
@@ -671,24 +681,14 @@ async def _execute_node(
             )
 
         if isinstance(output, SkipResult):
-            ctx.outputs[name] = None
-            ctx.statuses[name] = "skipped"
-            ctx.results.append(
-                WorkflowResult(name=name, output=None, cached=False, duration_ms=duration_ms)
+            await _mark_node_skipped(
+                name,
+                ctx,
+                store,
+                output.reason,
+                duration_ms=duration_ms,
+                on_progress=options.on_progress,
             )
-            await store.update_node_status(
-                run_id, name, NodeStatus.SKIPPED, skip_reason=output.reason
-            )
-            await _emit_event(store, run_id, name, "NodeSkipped", {"reason": output.reason})
-            if options.on_progress:
-                await options.on_progress(
-                    WorkflowEvent(
-                        type="skipped",
-                        workflow_name=name,
-                        duration_ms=duration_ms,
-                        message=output.reason,
-                    )
-                )
             return
 
         validated = _validate_output(wf, output)
@@ -764,13 +764,8 @@ async def _execute_node(
             raise
 
     except ApprovalRejected as exc:
-        ctx.statuses[name] = "skipped"
-        ctx.outputs[name] = None
         ctx.errors[name] = exc
-        await store.update_node_status(
-            run_id, name, NodeStatus.SKIPPED, skip_reason="approval rejected"
-        )
-        await _emit_event(store, run_id, name, "NodeSkipped", {"reason": "approval rejected"})
+        await _mark_node_skipped(name, ctx, store, "approval rejected")
         if options.on_rejection == "fail":
             raise
 
