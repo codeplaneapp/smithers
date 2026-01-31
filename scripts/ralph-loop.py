@@ -240,12 +240,9 @@ If there are issues, describe them and suggest fixes. Do NOT make changes yourse
     except subprocess.TimeoutExpired:
         log("⏰ Amp review timed out")
         return False
-    except FileNotFoundError:
-        log("⚠️ 'amp' command not found - skipping review")
-        return True  # Don't block if amp isn't installed
     except Exception as e:
-        log(f"⚠️ Amp review error: {e}")
-        return True  # Don't block on review errors
+        log(f"❌ Amp review error: {e}")
+        return False
 
 
 def run_agent(focus: str, cycle: int, agent_cmd: str = "claude") -> bool:
