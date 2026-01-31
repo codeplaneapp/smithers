@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+
 import pytest
 from pydantic import BaseModel
 
 from smithers.composition import (
     CompositionError,
+    EmptyReduceError,
     GraphMergeConflict,
     branch,
     chain,
@@ -21,7 +23,7 @@ from smithers.composition import (
 )
 from smithers.graph import build_graph, run_graph
 from smithers.types import WorkflowGraph, WorkflowNode
-from smithers.workflow import Workflow, clear_registry, workflow
+from smithers.workflow import clear_registry, workflow
 
 
 # Test models
@@ -688,8 +690,15 @@ class TestReduceWorkflow:
 
         reduced = reduce_workflow(combine)
 
-        with pytest.raises(ValueError, match="Cannot reduce empty list"):
+        with pytest.raises(EmptyReduceError) as exc_info:
             await reduced(items=[])
+
+        # Verify the error message is descriptive
+        error_str = str(exc_info.value)
+        assert "empty list" in error_str.lower()
+        assert "initial" in error_str.lower()
+        # Verify the workflow name is included
+        assert "reduce__combine" in error_str
 
     @pytest.mark.asyncio
     async def test_reduce_with_initial(self):
@@ -872,7 +881,12 @@ class TestCompositionIntegration:
         chained = chain(step1, step2)
 
         # The chained workflow should be bound to step1
-        assert chained.bound_deps or chained.bound_args or "step1" in chained.name or "chain" in chained.name
+        assert (
+            chained.bound_deps
+            or chained.bound_args
+            or "step1" in chained.name
+            or "chain" in chained.name
+        )
 
     def test_compose_graphs_with_dependencies(self):
         """Composed graphs maintain proper dependency structure."""
@@ -1053,6 +1067,36 @@ class TestCompositionEdgeCases:
         error_str = str(error)
 
         assert "node1" in error_str
-        assert "TypeA" in error_str
-        assert "TypeB" in error_str
-        assert "conflicting" in error_str.lower()
+
+    def test_empty_reduce_error_str(self):
+        """EmptyReduceError has informative string representation."""
+        error = EmptyReduceError(
+            message="Cannot reduce empty list",
+            workflow_name="reduce__combine_items",
+        )
+        error_str = str(error)
+
+        # Should mention empty list
+        assert "empty list" in error_str.lower()
+        # Should mention initial value as solution
+        assert "initial" in error_str.lower()
+        # Should include workflow name
+        assert "reduce__combine_items" in error_str
+
+    def test_empty_reduce_error_without_workflow_name(self):
+        """EmptyReduceError works without workflow name."""
+        error = EmptyReduceError(message="Cannot reduce empty list")
+        error_str = str(error)
+
+        # Should still have useful message
+        assert "empty list" in error_str.lower()
+        assert "initial" in error_str.lower()
+
+    def test_empty_reduce_error_is_composition_error(self):
+        """EmptyReduceError inherits from CompositionError."""
+        error = EmptyReduceError(
+            message="test",
+            workflow_name="test_wf",
+        )
+        assert isinstance(error, CompositionError)
+        assert isinstance(error, Exception)

@@ -67,6 +67,47 @@ class GraphMergeConflict(Exception):
         )
 
 
+@dataclass
+class EmptyReduceError(CompositionError):
+    """Raised when attempting to reduce an empty list without an initial value.
+
+    This error occurs when `reduce_workflow` is called with an empty list
+    and no initial value was provided during composition.
+
+    Attributes:
+        workflow_name: Name of the reduce workflow that encountered the error.
+        message: Descriptive error message.
+
+    Example:
+        @workflow
+        async def combine(a: Summary, b: Summary) -> Summary:
+            ...
+
+        reduced = reduce_workflow(combine)  # No initial value
+
+        # This will raise EmptyReduceError:
+        await reduced(items=[])
+
+        # To avoid this error, provide an initial value:
+        reduced = reduce_workflow(combine, initial=Summary(content="", count=0))
+    """
+
+    workflow_name: str = ""
+
+    def __str__(self) -> str:
+        if self.workflow_name:
+            return (
+                f"Cannot reduce empty list without initial value in workflow '{self.workflow_name}'. "
+                f"Either provide a non-empty list or use reduce_workflow(..., initial=<value>) "
+                f"to specify a default starting value."
+            )
+        return (
+            "Cannot reduce empty list without initial value. "
+            "Either provide a non-empty list or use reduce_workflow(..., initial=<value>) "
+            "to specify a default starting value."
+        )
+
+
 def compose_graphs(
     *graphs: WorkflowGraph,
     target: str | None = None,
@@ -716,7 +757,10 @@ def reduce_workflow(
         if not items:
             if initial is not None:
                 return initial
-            raise ValueError("Cannot reduce empty list without initial value")
+            raise EmptyReduceError(
+                message="Cannot reduce empty list without initial value",
+                workflow_name=reduce_name,
+            )
 
         if len(items) == 1 and initial is None:
             return items[0]
@@ -749,6 +793,7 @@ def reduce_workflow(
 
 
 # Helper functions
+
 
 def _hash_workflow_names(names: list[str]) -> str:
     """Create a short hash from workflow names."""

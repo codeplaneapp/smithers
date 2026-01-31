@@ -21,145 +21,11 @@ from smithers.analytics import (
     recalculate_run_costs,
     register_model_pricing,
 )
-from smithers.ratelimit import (
-    CLAUDE_TIER_1_LIMITS,
-    CLAUDE_TIER_2_LIMITS,
-    CLAUDE_TIER_3_LIMITS,
-    CLAUDE_TIER_4_LIMITS,
-    RateLimitConfig,
-    RateLimitExceededAction,
-    RateLimitExceededError,
-    RateLimiter,
-    RateLimitStats,
-    RateLimitStrategy,
-    clear_model_rate_limiters,
-    configure_claude_rate_limits,
-    create_rate_limiter,
-    get_rate_limiter,
-    register_model_rate_limiter,
-    reset_all_rate_limiters,
-    set_rate_limiter,
-)
 from smithers.cache import Cache, SqliteCache
 from smithers.claude import claude
-from smithers.config import configure
-from smithers.errors import (
-    ApprovalRejected,
-    ClaudeError,
-    GraphTimeoutError,
-    RateLimitError,
-    SmithersTimeoutError,
-    WorkflowError,
-    WorkflowTimeoutError,
-)
-from smithers.timeout import (
-    LONG_TIMEOUT,
-    MEDIUM_TIMEOUT,
-    NO_TIMEOUT,
-    SHORT_TIMEOUT,
-    TimeoutAction,
-    TimeoutPolicy,
-    TimeoutState,
-    execute_with_timeout,
-    get_effective_timeout,
-    timeout,
-)
-from smithers.events import (
-    Event,
-    EventBus,
-    EventTypes,
-    Subscription,
-    get_event_bus,
-    reset_event_bus,
-    set_event_bus,
-)
-from smithers.executor import PauseExecution, resume_run, run_graph_with_store
-from smithers.graph import build_graph, run_graph
-from smithers.hashing import cache_key, canonical_json, hash_json, hash_string
-from smithers.runtime import (
-    RuntimeContext,
-    get_current_context,
-    runtime_context,
-)
-from smithers.store.sqlite import LoopIteration, SqliteStore
-from smithers.testing import (
-    FakeLLMProvider,
-    RecordingStore,
-    ReplayLLMProvider,
-    use_fake_llm,
-    use_recording,
-    use_recording_or_replay,
-    use_replay,
-)
-from smithers.tools import Tool
-from smithers.types import (
-    CacheStats,
-    ExecutionResult,
-    NO_RETRY,
-    RETRY_ONCE,
-    RETRY_THREE_TIMES,
-    RETRY_WITH_BACKOFF,
-    RetryPolicy,
-    WorkflowGraph,
-)
-from smithers.verification import (
-    CacheVerificationResult,
-    GraphVerificationResult,
-    IssueCode,
-    IssueSeverity,
-    OutputVerificationResult,
-    VerificationIssue,
-    full_verification,
-    verify_cache_entry,
-    verify_cache_integrity,
-    verify_graph,
-    verify_output,
-    verify_run_state,
-    verify_workflow_output,
-)
-from smithers.ralph_loop import (
-    RalphLoopConfig,
-    RalphLoopWorkflow,
-    execute_ralph_loop,
-    is_ralph_loop,
-    ralph_loop,
-)
-from smithers.visualization import (
-    GraphVisualization,
-    NodeState,
-    NodeStatus,
-    ProgressVisualizer,
-    create_progress_callback,
-    print_graph,
-    visualize_graph,
-)
-from smithers.metrics import (
-    CounterMetric,
-    GaugeMetric,
-    HistogramMetric,
-    MetricsCollector,
-    get_metrics_collector,
-    record_llm_call,
-    record_tool_call,
-    record_workflow_run,
-    reset_metrics_collector,
-    set_metrics_collector,
-)
-from smithers.websocket import (
-    ClientConnection,
-    ConnectionStats,
-    WebSocketMessage,
-    WebSocketServer,
-    error_message,
-    get_websocket_server,
-    progress_message,
-    reset_websocket_server,
-    set_websocket_server,
-    status_message,
-)
-from smithers.workflow import require_approval, require_approval_async, retry, skip, workflow
 from smithers.composition import (
     CompositionError,
+    EmptyReduceError,
     GraphMergeConflict,
     branch,
     chain,
@@ -194,6 +60,141 @@ from smithers.conditions import (
     skip_if,
     when,
 )
+from smithers.config import configure
+from smithers.errors import (
+    ApprovalRejected,
+    ClaudeError,
+    GraphTimeoutError,
+    RateLimitError,
+    SmithersTimeoutError,
+    WorkflowError,
+    WorkflowTimeoutError,
+)
+from smithers.events import (
+    Event,
+    EventBus,
+    EventTypes,
+    Subscription,
+    get_event_bus,
+    reset_event_bus,
+    set_event_bus,
+)
+from smithers.executor import PauseExecution, resume_run, run_graph_with_store
+from smithers.graph import build_graph, run_graph
+from smithers.hashing import cache_key, canonical_json, hash_json, hash_string
+from smithers.metrics import (
+    CounterMetric,
+    GaugeMetric,
+    HistogramMetric,
+    MetricsCollector,
+    get_metrics_collector,
+    record_llm_call,
+    record_tool_call,
+    record_workflow_run,
+    reset_metrics_collector,
+    set_metrics_collector,
+)
+from smithers.ralph_loop import (
+    RalphLoopConfig,
+    RalphLoopWorkflow,
+    execute_ralph_loop,
+    is_ralph_loop,
+    ralph_loop,
+)
+from smithers.ratelimit import (
+    CLAUDE_TIER_1_LIMITS,
+    CLAUDE_TIER_2_LIMITS,
+    CLAUDE_TIER_3_LIMITS,
+    CLAUDE_TIER_4_LIMITS,
+    RateLimitConfig,
+    RateLimiter,
+    RateLimitExceededAction,
+    RateLimitExceededError,
+    RateLimitStats,
+    RateLimitStrategy,
+    clear_model_rate_limiters,
+    configure_claude_rate_limits,
+    create_rate_limiter,
+    get_rate_limiter,
+    register_model_rate_limiter,
+    reset_all_rate_limiters,
+    set_rate_limiter,
+)
+from smithers.runtime import (
+    RuntimeContext,
+    get_current_context,
+    runtime_context,
+)
+from smithers.store.sqlite import LoopIteration, SqliteStore
+from smithers.testing import (
+    FakeLLMProvider,
+    RecordingStore,
+    ReplayLLMProvider,
+    use_fake_llm,
+    use_recording,
+    use_recording_or_replay,
+    use_replay,
+)
+from smithers.timeout import (
+    LONG_TIMEOUT,
+    MEDIUM_TIMEOUT,
+    NO_TIMEOUT,
+    SHORT_TIMEOUT,
+    TimeoutAction,
+    TimeoutPolicy,
+    TimeoutState,
+    execute_with_timeout,
+    get_effective_timeout,
+    timeout,
+)
+from smithers.tools import Tool
+from smithers.types import (
+    NO_RETRY,
+    RETRY_ONCE,
+    RETRY_THREE_TIMES,
+    RETRY_WITH_BACKOFF,
+    CacheStats,
+    ExecutionResult,
+    RetryPolicy,
+    WorkflowGraph,
+)
+from smithers.verification import (
+    CacheVerificationResult,
+    GraphVerificationResult,
+    IssueCode,
+    IssueSeverity,
+    OutputVerificationResult,
+    VerificationIssue,
+    full_verification,
+    verify_cache_entry,
+    verify_cache_integrity,
+    verify_graph,
+    verify_output,
+    verify_run_state,
+    verify_workflow_output,
+)
+from smithers.visualization import (
+    GraphVisualization,
+    NodeState,
+    NodeStatus,
+    ProgressVisualizer,
+    create_progress_callback,
+    print_graph,
+    visualize_graph,
+)
+from smithers.websocket import (
+    ClientConnection,
+    ConnectionStats,
+    WebSocketMessage,
+    WebSocketServer,
+    error_message,
+    get_websocket_server,
+    progress_message,
+    reset_websocket_server,
+    set_websocket_server,
+    status_message,
+)
+from smithers.workflow import require_approval, require_approval_async, retry, skip, workflow
 
 # Re-export timeout from smithers.timeout for convenience
 # Already imported above, but including here for documentation
@@ -370,6 +371,7 @@ __all__ = [
     "when",
     # Composition
     "CompositionError",
+    "EmptyReduceError",
     "GraphMergeConflict",
     "branch",
     "chain",
