@@ -168,6 +168,14 @@ class TestCodeHash:
 
         assert code_hash(version1) != code_hash(version2)
 
+    def test_code_hash_cached(self):
+        @workflow
+        async def cached() -> SampleOutput:
+            return SampleOutput(value="cached", count=1)
+
+        first = code_hash(cached)
+        assert code_hash(cached) == first
+
 
 class TestInputHash:
     """Tests for input hashing."""

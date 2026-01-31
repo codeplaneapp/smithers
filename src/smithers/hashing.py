@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import weakref
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -24,6 +25,9 @@ _SMITHERS_VERSION = "0.1.0"
 
 if TYPE_CHECKING:
     from smithers.workflow import Workflow
+
+
+_CODE_HASH_CACHE: "weakref.WeakKeyDictionary[object, str]" = weakref.WeakKeyDictionary()
 
 
 def canonical_json(value: Any) -> str:
@@ -115,12 +119,17 @@ def code_hash(wf: Workflow) -> str:
     Returns:
         Hex-encoded SHA-256 hash of source code
     """
+    cached = _CODE_HASH_CACHE.get(wf.fn)
+    if cached is not None:
+        return cached
     try:
         source = inspect.getsource(wf.fn)
     except (OSError, TypeError):
         # Source not available (e.g., dynamically generated)
         source = repr(wf.fn)
-    return hash_string(source)
+    digest = hash_string(source)
+    _CODE_HASH_CACHE[wf.fn] = digest
+    return digest
 
 
 def input_hash(inputs: dict[str, Any]) -> str:
