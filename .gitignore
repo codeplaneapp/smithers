@@ -63,11 +63,15 @@ smithers_cache.db
 
 # Logs
 *.log
+logs/
 
 # Temporary
 *.tmp
 *.temp
 .cache/
+
+# Profiling
+*.profraw
 
 # Zig build artifacts
 .zig-cache/
