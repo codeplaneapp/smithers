@@ -190,6 +190,8 @@ from smithers.types import (
     ExecutionResult,
     RetryPolicy,
     WorkflowGraph,
+    WorkflowNode,
+    WorkflowResult,
 )
 from smithers.verification import (
     CacheVerificationResult,
@@ -226,7 +228,15 @@ from smithers.websocket import (
     set_websocket_server,
     status_message,
 )
-from smithers.workflow import require_approval, require_approval_async, retry, skip, workflow
+from smithers.workflow import (
+    Workflow,
+    clear_registry,
+    require_approval,
+    require_approval_async,
+    retry,
+    skip,
+    workflow,
+)
 
 # Re-export timeout from smithers.timeout for convenience
 # Already imported above, but including here for documentation
@@ -332,8 +342,11 @@ __all__ = [
     "VerificationIssue",
     "WebSocketMessage",
     "WebSocketServer",
+    "Workflow",
     "WorkflowError",
     "WorkflowGraph",
+    "WorkflowNode",
+    "WorkflowResult",
     "WorkflowSnapshot",
     # Testing helpers
     "WorkflowTestCase",
@@ -357,6 +370,7 @@ __all__ = [
     "claude",
     "clear_custom_pricing",
     "clear_model_rate_limiters",
+    "clear_registry",
     "compose_graphs",
     "configure",
     "configure_claude_rate_limits",

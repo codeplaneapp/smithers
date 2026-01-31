@@ -13,6 +13,36 @@ from smithers.workflow import (
 )
 
 
+class TestPublicApiExports:
+    """Tests verifying public API exports from smithers module."""
+
+    def test_workflow_class_exported(self):
+        """Verify Workflow class is exported from smithers."""
+        from smithers import Workflow as PublicWorkflow
+
+        assert PublicWorkflow is Workflow
+
+    def test_clear_registry_exported(self):
+        """Verify clear_registry is exported from smithers."""
+        from smithers import clear_registry as public_clear_registry
+
+        assert public_clear_registry is clear_registry
+
+    def test_workflow_node_exported(self):
+        """Verify WorkflowNode is exported from smithers."""
+        from smithers import WorkflowNode
+        from smithers.types import WorkflowNode as TypesWorkflowNode
+
+        assert WorkflowNode is TypesWorkflowNode
+
+    def test_workflow_result_exported(self):
+        """Verify WorkflowResult is exported from smithers."""
+        from smithers import WorkflowResult
+        from smithers.types import WorkflowResult as TypesWorkflowResult
+
+        assert WorkflowResult is TypesWorkflowResult
+
+
 class OutputA(BaseModel):
     value: str
 
