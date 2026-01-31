@@ -69,6 +69,27 @@ class TestCanonicalJson:
         # Frozensets should be sorted for determinism, same as sets
         assert result == '{"items":["a","b","c"]}'
 
+    def test_set_with_mixed_types(self):
+        # Sets with mixed types (int and str) that can't be compared with '<'
+        # should still be serializable and deterministic
+        items = frozenset([3, "a", 1])  # type: ignore[arg-type]
+        result1 = canonical_json({"items": items})
+        result2 = canonical_json({"items": items})
+        # Should be deterministic
+        assert result1 == result2
+        # Should contain all elements (order is by type, then value)
+        assert "1" in result1
+        assert "3" in result1
+        assert '"a"' in result1
+
+    def test_set_with_mixed_types_deterministic(self):
+        # Same elements added in different order should produce same result
+        items1 = frozenset([3, "a", 1])  # type: ignore[arg-type]
+        items2 = frozenset(["a", 1, 3])  # type: ignore[arg-type]
+        result1 = canonical_json({"items": items1})
+        result2 = canonical_json({"items": items2})
+        assert result1 == result2
+
     def test_bytes_hex_encoded(self):
         result = canonical_json({"data": b"\x00\xff"})
         assert result == '{"data":"00ff"}'

@@ -211,6 +211,26 @@ def output_hash(output: Any) -> str:
     return hash_json(output)
 
 
+def _sort_key(v: Any) -> tuple[str, str]:
+    """
+    Generate a deterministic sort key for any JSON-serializable value.
+
+    Sorts by (type_name, json_repr) to handle mixed types deterministically.
+    This allows sorting collections containing different types (e.g., int and str)
+    that would otherwise raise TypeError when compared with '<'.
+
+    Args:
+        v: A normalized (JSON-serializable) value
+
+    Returns:
+        Tuple of (type_name, json_representation) for deterministic ordering
+    """
+    type_name = type(v).__name__
+    # Use JSON serialization for deterministic string representation
+    json_repr = json.dumps(v, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    return (type_name, json_repr)
+
+
 def _normalize_value(value: Any) -> Any:
     """
     Normalize a value for canonical JSON serialization.
@@ -233,8 +253,10 @@ def _normalize_value(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_normalize_value(v) for v in value]
     if isinstance(value, (set, frozenset)):
-        # Sets and frozensets are converted to sorted lists for determinism
-        return sorted(_normalize_value(v) for v in value)
+        # Sets and frozensets are converted to sorted lists for determinism.
+        # Use _sort_key to handle mixed types that can't be directly compared.
+        normalized = [_normalize_value(v) for v in value]
+        return sorted(normalized, key=_sort_key)
     if isinstance(value, bytes):
         # Bytes are hex-encoded
         return value.hex()
