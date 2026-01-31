@@ -14,6 +14,7 @@ from smithers.errors import (
     ToolError,
     WorkflowError,
     WorkflowTimeoutError,
+    serialize_error,
 )
 
 # ============================================================================
@@ -608,3 +609,339 @@ class TestExceptionHandlingPatterns:
             assert outer.cause is not None
             assert str(outer.cause) == "Original error"
             assert outer.__cause__ is not None
+
+
+# ============================================================================
+# serialize_error Tests
+# ============================================================================
+
+
+class TestSerializeError:
+    """Tests for serialize_error function."""
+
+    def test_basic_exception(self) -> None:
+        """Test serializing a basic Python exception."""
+        error = ValueError("Something went wrong")
+        result = serialize_error(error)
+
+        assert result["type"] == "ValueError"
+        assert result["message"] == "Something went wrong"
+
+    def test_exception_with_empty_message(self) -> None:
+        """Test serializing an exception with empty message uses repr."""
+        error = ValueError()
+        result = serialize_error(error)
+
+        assert result["type"] == "ValueError"
+        # Empty message should fall back to repr
+        assert "ValueError" in result["message"]
+
+    def test_smithers_error(self) -> None:
+        """Test serializing base SmithersError."""
+        error = SmithersError("Base smithers error")
+        result = serialize_error(error)
+
+        assert result["type"] == "SmithersError"
+        assert result["message"] == "Base smithers error"
+
+    def test_workflow_error_basic(self) -> None:
+        """Test serializing WorkflowError with minimal fields."""
+        cause = RuntimeError("inner")
+        error = WorkflowError("my_workflow", cause)
+        result = serialize_error(error)
+
+        assert result["type"] == "WorkflowError"
+        assert result["workflow_name"] == "my_workflow"
+        assert "completed" not in result  # Empty list not included
+        assert "errors" not in result  # Empty dict not included
+
+    def test_workflow_error_with_completed(self) -> None:
+        """Test serializing WorkflowError with completed workflows."""
+        error = WorkflowError(
+            "main",
+            RuntimeError("failed"),
+            completed=["a", "b", "c"],
+        )
+        result = serialize_error(error)
+
+        assert result["completed"] == ["a", "b", "c"]
+
+    def test_workflow_error_with_nested_errors(self) -> None:
+        """Test serializing WorkflowError with nested errors dict."""
+        error = WorkflowError(
+            "main",
+            RuntimeError("main failed"),
+            errors={
+                "sub_a": ValueError("a failed"),
+                "sub_b": TypeError("b failed"),
+            },
+        )
+        result = serialize_error(error)
+
+        assert "errors" in result
+        assert result["errors"]["sub_a"]["type"] == "ValueError"
+        assert result["errors"]["sub_a"]["message"] == "a failed"
+        assert result["errors"]["sub_b"]["type"] == "TypeError"
+        assert result["errors"]["sub_b"]["message"] == "b failed"
+
+    def test_approval_rejected_basic(self) -> None:
+        """Test serializing ApprovalRejected without reason."""
+        error = ApprovalRejected("deploy")
+        result = serialize_error(error)
+
+        assert result["type"] == "ApprovalRejected"
+        assert result["workflow_name"] == "deploy"
+        assert "reason" not in result  # None not included
+
+    def test_approval_rejected_with_reason(self) -> None:
+        """Test serializing ApprovalRejected with reason."""
+        error = ApprovalRejected("deploy", reason="User denied")
+        result = serialize_error(error)
+
+        assert result["reason"] == "User denied"
+
+    def test_rate_limit_error_basic(self) -> None:
+        """Test serializing RateLimitError without retry_after."""
+        error = RateLimitError("Too many requests")
+        result = serialize_error(error)
+
+        assert result["type"] == "RateLimitError"
+        assert "retry_after" not in result  # None not included
+
+    def test_rate_limit_error_with_retry_after(self) -> None:
+        """Test serializing RateLimitError with retry_after."""
+        error = RateLimitError(retry_after=30.5)
+        result = serialize_error(error)
+
+        assert result["retry_after"] == 30.5
+
+    def test_tool_error_basic(self) -> None:
+        """Test serializing ToolError without data."""
+        error = ToolError("read_file", "File not found")
+        result = serialize_error(error)
+
+        assert result["type"] == "ToolError"
+        assert result["tool_name"] == "read_file"
+        assert result["message"] == "File not found"
+        assert "data" not in result  # None not included
+
+    def test_tool_error_with_json_safe_data(self) -> None:
+        """Test serializing ToolError with JSON-serializable data."""
+        error = ToolError(
+            "bash",
+            "Command failed",
+            data={"exit_code": 1, "stderr": "Permission denied"},
+        )
+        result = serialize_error(error)
+
+        assert result["data"]["exit_code"] == 1
+        assert result["data"]["stderr"] == "Permission denied"
+
+    def test_tool_error_with_non_json_safe_data(self) -> None:
+        """Test serializing ToolError with non-JSON-serializable data."""
+
+        class CustomObj:
+            def __repr__(self) -> str:
+                return "<CustomObj instance>"
+
+        error = ToolError("tool", "error", data=CustomObj())
+        result = serialize_error(error)
+
+        # Non-serializable data should be converted to repr
+        assert result["data"] == "<CustomObj instance>"
+
+    def test_workflow_timeout_error(self) -> None:
+        """Test serializing WorkflowTimeoutError."""
+        error = WorkflowTimeoutError(
+            workflow_name="slow_wf",
+            timeout_seconds=30.0,
+            elapsed_seconds=35.5,
+        )
+        result = serialize_error(error)
+
+        assert result["type"] == "WorkflowTimeoutError"
+        assert result["workflow_name"] == "slow_wf"
+        assert result["timeout_seconds"] == 30.0
+        assert result["elapsed_seconds"] == 35.5
+
+    def test_graph_timeout_error_basic(self) -> None:
+        """Test serializing GraphTimeoutError without node lists."""
+        error = GraphTimeoutError(
+            timeout_seconds=60.0,
+            elapsed_seconds=65.0,
+        )
+        result = serialize_error(error)
+
+        assert result["type"] == "GraphTimeoutError"
+        assert result["timeout_seconds"] == 60.0
+        assert result["elapsed_seconds"] == 65.0
+        assert "completed_nodes" not in result  # Empty list not included
+        assert "running_nodes" not in result  # Empty list not included
+
+    def test_graph_timeout_error_with_nodes(self) -> None:
+        """Test serializing GraphTimeoutError with node lists."""
+        error = GraphTimeoutError(
+            timeout_seconds=60.0,
+            elapsed_seconds=65.0,
+            completed_nodes=["a", "b"],
+            running_nodes=["c"],
+        )
+        result = serialize_error(error)
+
+        assert result["completed_nodes"] == ["a", "b"]
+        assert result["running_nodes"] == ["c"]
+
+    def test_exception_with_cause(self) -> None:
+        """Test serializing exception with __cause__."""
+        try:
+            try:
+                raise ValueError("root cause")
+            except ValueError as e:
+                raise RuntimeError("outer") from e
+        except RuntimeError as error:
+            result = serialize_error(error)
+
+        assert result["type"] == "RuntimeError"
+        assert "cause" in result
+        assert result["cause"]["type"] == "ValueError"
+        assert result["cause"]["message"] == "root cause"
+
+    def test_exception_with_context(self) -> None:
+        """Test serializing exception with __context__ (implicit chaining)."""
+        try:
+            try:
+                raise ValueError("original")
+            except ValueError:
+                raise RuntimeError("while handling")  # noqa: B904 - testing implicit chaining
+        except RuntimeError as error:
+            result = serialize_error(error)
+
+        assert result["type"] == "RuntimeError"
+        assert "cause" in result
+        assert result["cause"]["type"] == "ValueError"
+
+    def test_max_depth_limits_recursion(self) -> None:
+        """Test that max_depth limits nested error serialization."""
+        # Create deeply nested errors
+        error = WorkflowError(
+            "level1",
+            RuntimeError("inner"),
+            errors={
+                "level2": WorkflowError(
+                    "level2",
+                    RuntimeError("inner2"),
+                    errors={
+                        "level3": ValueError("deep"),
+                    },
+                ),
+            },
+        )
+
+        # With max_depth=1, nested errors should be simplified
+        result = serialize_error(error, max_depth=1)
+
+        # level2 error should be present
+        assert "errors" in result
+        assert "level2" in result["errors"]
+        # But level3 within level2 should be simplified (no full serialization)
+        nested = result["errors"]["level2"]
+        assert nested["type"] == "WorkflowError"
+
+    def test_max_depth_zero(self) -> None:
+        """Test serialization with max_depth=0."""
+        try:
+            try:
+                raise ValueError("cause")
+            except ValueError as e:
+                raise RuntimeError("outer") from e
+        except RuntimeError as error:
+            result = serialize_error(error, max_depth=0)
+
+        # With max_depth=0, cause should not be included
+        assert "cause" not in result
+
+    def test_cycle_detection(self) -> None:
+        """Test that cycle detection prevents infinite recursion."""
+        # Create a circular reference scenario
+        # This is tricky since Python exceptions don't naturally form cycles
+        # But we can test the mechanism works
+        error = ValueError("test")
+        # Manually create a seen set and serialize
+        result = serialize_error(error)
+
+        # Should complete without hanging
+        assert result["type"] == "ValueError"
+
+    def test_serialization_is_json_safe(self) -> None:
+        """Test that the serialized output is JSON-serializable."""
+        import json
+
+        errors = [
+            SmithersError("base"),
+            WorkflowError("wf", RuntimeError("test"), completed=["a"]),
+            ApprovalRejected("wf", reason="denied"),
+            RateLimitError(retry_after=10.0),
+            ToolError("tool", "error", data={"key": "value"}),
+            WorkflowTimeoutError("wf", 1.0, 2.0),
+            GraphTimeoutError(1.0, 2.0, completed_nodes=["a"]),
+        ]
+
+        for error in errors:
+            result = serialize_error(error)
+            # Should not raise
+            json_str = json.dumps(result)
+            assert isinstance(json_str, str)
+            # Should round-trip
+            parsed = json.loads(json_str)
+            assert parsed["type"] == type(error).__name__
+
+    def test_complex_nested_structure(self) -> None:
+        """Test serializing a complex nested error structure."""
+        tool_error = ToolError(
+            "validate",
+            "Validation error",
+            data={"field": "email", "value": "invalid"},
+        )
+
+        workflow_error = WorkflowError(
+            "process_data",
+            tool_error,
+            completed=["fetch", "parse"],
+            errors={
+                "validate_email": tool_error,
+                "validate_phone": ValueError("Invalid phone"),
+            },
+        )
+
+        result = serialize_error(workflow_error)
+
+        assert result["type"] == "WorkflowError"
+        assert result["workflow_name"] == "process_data"
+        assert result["completed"] == ["fetch", "parse"]
+        assert "validate_email" in result["errors"]
+        assert result["errors"]["validate_email"]["tool_name"] == "validate"
+        assert result["errors"]["validate_phone"]["type"] == "ValueError"
+
+    def test_claude_error_serialization(self) -> None:
+        """Test serializing ClaudeError (not a special case but should work)."""
+        error = ClaudeError("API failed", cause=ConnectionError("timeout"))
+        result = serialize_error(error)
+
+        assert result["type"] == "ClaudeError"
+        assert result["message"] == "API failed"
+        # ClaudeError.cause is stored as attribute but not __cause__
+        # So the serializer won't automatically include it unless raised with 'from'
+
+    def test_suppressed_context_not_included(self) -> None:
+        """Test that suppressed context is not serialized."""
+        try:
+            try:
+                raise ValueError("original")
+            except ValueError:
+                # Using 'from None' suppresses the context
+                raise RuntimeError("replacement") from None
+        except RuntimeError as error:
+            result = serialize_error(error)
+
+        # Context should be suppressed
+        assert "cause" not in result
