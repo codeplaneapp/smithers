@@ -190,6 +190,33 @@ class TestCacheWithWorkflows:
             result2 = await run_graph(graph, cache=cache, invalidate=["analyze"])
             assert result2.value == "second"
 
+    async def test_workflow_invalidation_accepts_workflow_objects(self, tmp_path: Path):
+        @workflow
+        async def analyze() -> OutputModel:
+            return await claude("Analyze", output=OutputModel)
+
+        cache = SqliteCache(tmp_path / "test.db")
+
+        fake = FakeLLMProvider(
+            responses=[
+                {"value": "first"},
+                {"value": "second"},
+                {"value": "third"},
+            ]
+        )
+
+        with use_fake_llm(fake):
+            graph = build_graph(analyze)
+
+            result1 = await run_graph(graph, cache=cache)
+            assert result1.value == "first"
+
+            result2 = await run_graph(graph, cache=cache, invalidate=analyze)
+            assert result2.value == "second"
+
+            result3 = await run_graph(graph, cache=cache, invalidate=[analyze])
+            assert result3.value == "third"
+
     async def test_wildcard_invalidation(self, tmp_path: Path):
         @workflow
         async def analyze() -> OutputModel:

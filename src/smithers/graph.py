@@ -60,6 +60,14 @@ def build_graph(target: Workflow) -> WorkflowGraph:
         if wf.name in nodes:
             return
 
+        # Check for self-referential cycle before processing dependencies
+        # A workflow that depends on its own output type creates a cycle
+        if wf.name in workflows:
+            raise ValueError(
+                f"Workflow '{wf.name}' has a self-referential cycle: "
+                f"it depends on its own output type {wf.output_type.__name__}"
+            )
+
         workflows[wf.name] = wf
 
         dep_names: set[str] = set()
@@ -150,7 +158,7 @@ async def run_graph(
     fail_fast: bool = False,
     return_all: bool = False,
     dry_run: bool = False,
-    invalidate: Iterable[str] | str | None = None,
+    invalidate: Iterable[str | Workflow] | str | Workflow | None = None,
     approval_handler: Callable[[str, str], Awaitable[bool]] | None = None,
     auto_approve: bool | Iterable[str] = False,
     on_rejection: str = "fail",
@@ -166,6 +174,7 @@ async def run_graph(
         graph: The workflow graph to execute
         cache: Optional cache for skipping unchanged workflows
         max_concurrency: Maximum number of concurrent workflows (default: unlimited)
+        invalidate: Workflow names or Workflow objects to force re-execution
 
     Returns:
         The output of the root workflow

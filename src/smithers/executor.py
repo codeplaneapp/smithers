@@ -404,7 +404,7 @@ async def run_graph_with_store(
     fail_fast: bool = False,
     return_all: bool = False,
     dry_run: bool = False,
-    invalidate: Iterable[str] | str | None = None,
+    invalidate: Iterable[str | Workflow] | str | Workflow | None = None,
     approval_handler: Callable[[str, str], Awaitable[bool]] | None = None,
     auto_approve: bool | Iterable[str] = False,
     on_rejection: str = "fail",
@@ -431,7 +431,7 @@ async def run_graph_with_store(
         fail_fast: Stop execution on first failure
         return_all: Return full ExecutionResult instead of just root output
         dry_run: Return execution plan without running
-        invalidate: Workflow names to force re-execution
+        invalidate: Workflow names or Workflow objects to force re-execution
         approval_handler: Custom approval handler
         auto_approve: Auto-approve workflows
         on_rejection: Behavior on rejection ("fail" or "skip")

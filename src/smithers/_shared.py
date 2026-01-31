@@ -21,20 +21,35 @@ if TYPE_CHECKING:
     from smithers.types import WorkflowGraph, WorkflowNode
 
 
-def normalize_invalidate(invalidate: Iterable[str] | str | None) -> set[str]:
+def normalize_invalidate(
+    invalidate: Iterable[object] | str | Workflow | None,
+) -> set[str]:
     """Normalize invalidate argument to a set of workflow names.
 
     Args:
-        invalidate: Can be None, a single string, or an iterable of strings.
+        invalidate: Can be None, a single workflow name, a Workflow,
+            or an iterable of workflow names/Workflow objects.
 
     Returns:
         A set of workflow names to invalidate.
     """
     if invalidate is None:
         return set()
+    if isinstance(invalidate, Workflow):
+        return {invalidate.name}
     if isinstance(invalidate, str):
         return {invalidate}
-    return set(invalidate)
+    normalized: set[str] = set()
+    for item in invalidate:
+        if isinstance(item, Workflow):
+            normalized.add(item.name)
+        elif isinstance(item, str):
+            normalized.add(item)
+        else:
+            raise TypeError(
+                "invalidate must contain workflow names (str) or Workflow objects"
+            )
+    return normalized
 
 
 def resolve_workflow(graph: WorkflowGraph, node: WorkflowNode) -> Workflow:
