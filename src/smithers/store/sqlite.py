@@ -25,6 +25,8 @@ from uuid import uuid4
 
 import aiosqlite
 
+from smithers.errors import serialize_error
+
 if TYPE_CHECKING:
     from smithers.types import WorkflowGraph
 
@@ -664,7 +666,7 @@ class SqliteStore:
             params.append(skip_reason)
         if error is not None:
             updates.append("error_json = ?")
-            params.append(json.dumps({"type": type(error).__name__, "message": str(error)}))
+            params.append(json.dumps(serialize_error(error), default=str))
 
         params.extend([run_id, node_id])
 
@@ -1010,9 +1012,7 @@ class SqliteStore:
             )
             await db.commit()
 
-    async def get_llm_calls(
-        self, run_id: str, *, node_id: str | None = None
-    ) -> list[LLMCall]:
+    async def get_llm_calls(self, run_id: str, *, node_id: str | None = None) -> list[LLMCall]:
         """Get LLM calls for a run, optionally filtered by node.
 
         Args:
@@ -1118,7 +1118,7 @@ class SqliteStore:
 
         # Use error_json if provided, otherwise serialize error
         if error_json is None and error is not None:
-            error_json = json.dumps({"type": type(error).__name__, "message": str(error)})
+            error_json = json.dumps(serialize_error(error), default=str)
 
         async with self._lock, aiosqlite.connect(self.path) as db:
             await db.execute(
@@ -1269,9 +1269,7 @@ class SqliteStore:
         llm_calls = await self.get_llm_calls(run_id)
         tool_calls = await self.get_tool_calls(run_id)
 
-        total_tokens = sum(
-            (c.input_tokens or 0) + (c.output_tokens or 0) for c in llm_calls
-        )
+        total_tokens = sum((c.input_tokens or 0) + (c.output_tokens or 0) for c in llm_calls)
         total_cost = sum(c.cost_usd or 0 for c in llm_calls)
 
         node_statuses = {n.node_id: n.status.value for n in nodes}
@@ -1412,13 +1410,11 @@ class SqliteStore:
             if row and row["started_at"]:
                 started = _parse_timestamp(row["started_at"])
                 if started:
-                    from datetime import timezone
-
                     finished = datetime.fromisoformat(now)
                     if started.tzinfo is None:
-                        started = started.replace(tzinfo=timezone.utc)
+                        started = started.replace(tzinfo=UTC)
                     if finished.tzinfo is None:
-                        finished = finished.replace(tzinfo=timezone.utc)
+                        finished = finished.replace(tzinfo=UTC)
                     duration_ms = (finished - started).total_seconds() * 1000
 
             await db.execute(

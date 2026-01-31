@@ -3,8 +3,8 @@
 These tests verify the actual implementation in smithers/store/sqlite.py.
 """
 
+import json
 from pathlib import Path
-from typing import ClassVar
 
 import pytest
 from pydantic import BaseModel
@@ -124,7 +124,9 @@ class TestRunManagement:
         assert run is not None
         assert run.status == RunStatus.RUNNING
 
-    async def test_update_run_status_with_finished(self, tmp_path: Path, simple_graph: WorkflowGraph):
+    async def test_update_run_status_with_finished(
+        self, tmp_path: Path, simple_graph: WorkflowGraph
+    ):
         """Should set finished_at when finished=True."""
         store = SqliteStore(tmp_path / "test.db")
         await store.initialize()
@@ -205,7 +207,9 @@ class TestNodeManagement:
         assert node.status == NodeStatus.RUNNING
         assert node.started_at is not None
 
-    async def test_update_node_success_with_metadata(self, tmp_path: Path, simple_graph: WorkflowGraph):
+    async def test_update_node_success_with_metadata(
+        self, tmp_path: Path, simple_graph: WorkflowGraph
+    ):
         """Should update node with cache and output info."""
         store = SqliteStore(tmp_path / "test.db")
         await store.initialize()
@@ -244,6 +248,46 @@ class TestNodeManagement:
         assert node.status == NodeStatus.FAILED
         assert node.error_json is not None
         assert "Something went wrong" in node.error_json
+
+    async def test_update_node_error_includes_cause(self, tmp_path: Path, simple_graph: WorkflowGraph):
+        """Should serialize exception causes for better diagnostics."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        run_id = await store.create_run(simple_graph)
+        try:
+            try:
+                raise ValueError("inner failure")
+            except ValueError as exc:
+                raise RuntimeError("outer failure") from exc
+        except RuntimeError as exc:
+            error = exc
+
+        await store.update_node_status(run_id, "step1", NodeStatus.FAILED, error=error)
+
+        node = await store.get_node(run_id, "step1")
+        assert node is not None
+        payload = json.loads(node.error_json or "{}")
+        assert payload["type"] == "RuntimeError"
+        assert "outer failure" in payload["message"]
+        assert payload["cause"]["type"] == "ValueError"
+        assert "inner failure" in payload["cause"]["message"]
+
+    async def test_update_node_error_empty_message_fallback(
+        self, tmp_path: Path, simple_graph: WorkflowGraph
+    ):
+        """Should fall back to a repr when the error message is empty."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        run_id = await store.create_run(simple_graph)
+        await store.update_node_status(run_id, "step1", NodeStatus.FAILED, error=ValueError(""))
+
+        node = await store.get_node(run_id, "step1")
+        assert node is not None
+        payload = json.loads(node.error_json or "{}")
+        assert payload["type"] == "ValueError"
+        assert payload["message"]
 
 
 class TestEventLogging:
