@@ -144,7 +144,7 @@ def _get_type_adapter(output_type: type[BaseModel]) -> TypeAdapter[BaseModel]:
     return adapter
 
 
-def validate_output(wf: Workflow, output: Any) -> Any:
+def validate_output(wf: Workflow, output: Any) -> BaseModel | None:
     """Validate a workflow output against its declared type.
 
     Args:
@@ -152,7 +152,7 @@ def validate_output(wf: Workflow, output: Any) -> Any:
         output: The output value to validate.
 
     Returns:
-        The validated output (may be coerced to the correct type).
+        The validated output (may be coerced to the correct type), or None if optional.
     """
     if output is None and wf.output_optional:
         return None

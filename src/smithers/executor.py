@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from smithers._shared import (
     build_kwargs as _build_kwargs,
@@ -187,7 +187,7 @@ async def _execute_with_retry(
     store: SqliteStore,
     on_progress: Callable[[WorkflowEvent], Awaitable[None]] | None = None,
     timeout_seconds: float | None = None,
-) -> tuple[Any, float, int]:
+) -> tuple[BaseModel, float, int]:
     """
     Execute a workflow function with retry and timeout logic.
 
@@ -336,7 +336,7 @@ async def _execute_ralph_loop_node(
     node_id: str,
     store: SqliteStore,
     on_progress: Callable[[WorkflowEvent], Awaitable[None]] | None = None,
-) -> tuple[Any, float, int]:
+) -> tuple[BaseModel, float, int]:
     """
     Execute a Ralph loop workflow with full iteration tracking.
 
@@ -719,11 +719,11 @@ async def _execute_node(
             NodeStatus.SUCCESS,
             cache_key=cache_key,
             output_hash=hash_json(
-                validated.model_dump() if hasattr(validated, "model_dump") else validated
+                validated.model_dump() if validated is not None else None
             ),
         )
         # Store node output for potential resume
-        output_to_store = validated.model_dump() if hasattr(validated, "model_dump") else validated
+        output_to_store = validated.model_dump() if validated is not None else None
         await store.store_node_output(run_id, name, output_to_store)
 
         # Add loop info to NodeFinished event if this was a Ralph loop
@@ -835,7 +835,7 @@ async def run_graph_with_store(
     headless: bool = False,
     timeout: float | None = None,
     node_timeout: float | None = None,
-) -> Any:
+) -> BaseModel | None | ExecutionResult | DryRunPlan:
     """
     Execute a workflow graph with full SqliteStore integration.
 
@@ -1192,7 +1192,7 @@ async def resume_run(
     auto_approve: bool | Iterable[str] = False,
     on_rejection: str = "fail",
     on_progress: Callable[[WorkflowEvent], Awaitable[None]] | None = None,
-) -> Any:
+) -> BaseModel | None | ExecutionResult:
     """
     Resume a paused execution run.
 
