@@ -2,89 +2,101 @@
 """
 Ralph Loop - Autonomous Agent Relay System
 
-Runs a continuous loop of Codex agents, each with a different focus area.
-Agents self-discover work, complete one task with TDD, get reviewed, and commit.
+Runs a continuous loop of AI agents, each with a different focus area.
+Agents read RALPH.md, self-discover work, complete one task with TDD, and commit.
+
+Focuses rotate between implementation work (Smithers v2) and maintenance work.
 """
 
+import argparse
 import subprocess
 import sys
 import time
-import os
 from datetime import datetime
 from pathlib import Path
 
 # Project root
 PROJECT_ROOT = Path(__file__).parent.parent
 
-# 10 Focus areas that rotate
+# Focus areas that rotate - mix of implementation and maintenance
+# Implementation focuses (Smithers v2) come first, then maintenance
 FOCUSES = [
-    "TESTING",  # Add missing tests, improve coverage
-    "CODE_REVIEW",  # Review code for bugs and anti-patterns
-    "TYPE_SAFETY",  # Improve type hints, fix pyright errors
-    "ERROR_HANDLING",  # Better error messages, proper exceptions
-    "API_POLISH",  # Clean up public API, consistent naming
-    "PERFORMANCE",  # Profile and optimize slow paths
-    "REFACTORING",  # Simplify complex code, reduce duplication
-    "DOCUMENTATION",  # Fix docstrings, add missing docs
-    "BUG_HUNTING",  # Search for bugs and edge cases
-    "FEATURE_COMPLETION",  # Find and finish incomplete features
+    # === Implementation Focuses (Smithers v2) ===
+    "FOUNDATION",       # Wire core integration: adapters, persistence, reducers
+    "AGENTD",           # Agent daemon: session management, tool execution, streaming
+    "PROTOCOL",         # Event types, request/response, NDJSON serialization
+    "STORAGE",          # SQLite tables, event sourcing, session persistence
+    "SWIFT_UI",         # Chat UI, message rendering, streaming display
+    "TERMINAL",         # Terminal drawer, PTY management, sandbox integration
+    "GRAPH_VIEW",       # Graph canvas, layout, selection sync
+    "CHECKPOINTS",      # JJ integration, checkpoint create/restore
+    "SKILLS",           # Skills registry, palette, execution pipeline
+    # === Maintenance Focuses ===
+    "TESTING",          # Add missing tests, improve coverage, edge cases
+    "TYPE_SAFETY",      # Fix pyright errors, improve type hints
+    "ERROR_HANDLING",   # Better error messages, proper exceptions
+    "PERFORMANCE",      # Profile and optimize slow paths
+    "DOCUMENTATION",    # Fix docstrings, update examples
+    "BUG_HUNTING",      # Search for bugs, edge cases, race conditions
 ]
 
-# The prompt template for each agent
+# Focus descriptions for the prompt
+FOCUS_DESCRIPTIONS = {
+    "FOUNDATION": "Wire core integration: SessionManager → adapters, event persistence, graph reducers",
+    "AGENTD": "Agent daemon work: session management, tool execution pipeline, streaming events",
+    "PROTOCOL": "Protocol work: event types, request/response models, NDJSON serialization",
+    "STORAGE": "Storage work: SQLite tables (session_events), event sourcing, session persistence",
+    "SWIFT_UI": "Swift UI work: chat transcript, message rendering, streaming display, tool cards",
+    "TERMINAL": "Terminal work: terminal drawer, PTY management, tab UI, sandbox integration",
+    "GRAPH_VIEW": "Graph view work: canvas renderer, layout engine, pan/zoom, selection sync",
+    "CHECKPOINTS": "Checkpoint work: JJ wrapper service, checkpoint create/restore, stack operations",
+    "SKILLS": "Skills work: registry, ⌘K palette, execution pipeline, built-in skills",
+    "TESTING": "Add missing tests, improve coverage, ensure edge cases are handled",
+    "TYPE_SAFETY": "Fix pyright errors, improve type hints, add generics where helpful",
+    "ERROR_HANDLING": "Better error messages, proper exception types, handle edge cases",
+    "PERFORMANCE": "Profile slow paths, reduce allocations, optimize hot paths",
+    "DOCUMENTATION": "Fix inaccurate docstrings, add missing docs, update examples",
+    "BUG_HUNTING": "Search for bugs, edge cases, race conditions, security issues",
+}
+
+# The prompt template - references RALPH.md for full context
 PROMPT_TEMPLATE = """You are an autonomous agent working on the Smithers codebase.
 
-## Your Mission
+## CRITICAL: Read RALPH.md First
 
-1. **Read Documentation First** - Read CLAUDE.md, ARCHITECTURE.md, and README.md
-2. **Check Test Status** - Run `uv run pytest` to see current state
-3. **Fix Any Failures First** - If tests fail, fix them before anything else
-4. **Self-Discover Work** - Based on your focus area, identify the single most impactful task
-5. **Complete ONE Task** - Do one meaningful thing, tested and working
-6. **Commit** - Use emoji conventional commit format
+The file `RALPH.md` contains:
+- Complete codebase map with file locations and status
+- Implementation priority (Tier 0/1/2 tasks)
+- Current state assessment
+- Workflow instructions
+- Commit style guide
+
+**Read RALPH.md before doing anything else.**
 
 ## Your Focus: {focus}
 
-Focus descriptions:
-- TESTING: Add missing tests, improve coverage, ensure edge cases handled
-- CODE_REVIEW: Review code for bugs, anti-patterns, improvements
-- TYPE_SAFETY: Improve type hints, fix pyright errors, add generics
-- ERROR_HANDLING: Better error messages, proper exception types, edge cases
-- API_POLISH: Clean public API, consistent naming, improve usability
-- PERFORMANCE: Profile slow paths, reduce allocations, optimize
-- REFACTORING: Simplify complex functions, reduce duplication, readability
-- DOCUMENTATION: Fix docstrings, add missing docs, update examples
-- BUG_HUNTING: Search for bugs, edge cases, race conditions
-- FEATURE_COMPLETION: Find incomplete features and finish them
+{focus_description}
 
-## Development Rules
+## Always Green Rule
 
-### Test-Driven Development
-- A task is NOT complete without a passing test
-- Run tests before committing: `uv run pytest`
+Before ANY work, verify the codebase is green:
+```bash
+uv run pytest              # ALL tests must pass
+uv run pyright             # Type checking must pass
+uv run ruff check .        # Linting must pass
+```
 
-### Always Green
-- Test suite must pass at all times
-- Fix failing tests IMMEDIATELY if found
-- Never commit code that breaks tests
-
-### Commit Format
-Use emoji conventional commits:
-- ✨ feat(scope): add new feature
-- 🐛 fix(scope): fix a bug
-- ✅ test(scope): add tests
-- ♻️ refactor(scope): refactor code
-- 📝 docs(scope): documentation
-- 🔧 chore(scope): maintenance
+If ANY check fails, **fix it first** - that IS your task.
 
 ## Workflow
 
-1. Read docs: CLAUDE.md, ARCHITECTURE.md, README.md
-2. Run: `uv run pytest` - check current state
-3. If tests fail -> FIX THEM FIRST
-4. Identify ONE task matching your focus: {focus}
-5. Implement with TDD
-6. Run: `uv run pytest` to verify
-7. Run: `uv run pyright` for type checking  
+1. Read `RALPH.md` (complete instructions)
+2. Verify green: `uv run pytest && uv run pyright && uv run ruff check .`
+3. If failures → fix them (this IS your task)
+4. Read PRD: `prd/smithers-v2-task-guide.md` for task breakdown
+5. Identify ONE task matching your focus: {focus}
+6. Implement with TDD (test first)
+7. Verify green again
 8. Commit with emoji conventional commit
 9. Done - stop after ONE meaningful task
 
@@ -100,12 +112,13 @@ uv run ruff format .             # Format
 
 ## Important
 
-- Focus on Python code only (ignore Swift, Zig, etc.)
+- Read RALPH.md for the complete codebase map
+- Focus on Python unless Swift is specifically needed
 - Complete exactly ONE task, then stop
 - Quality over quantity
-- Leave the codebase better than you found it
+- Always stay green
 
-Now begin. Read the docs, check tests, find your task, complete it, commit it.
+Now begin. Read RALPH.md, verify green, find your task, complete it, commit it.
 """
 
 LOG_FILE = PROJECT_ROOT / "logs" / "ralph-loop.log"
@@ -123,23 +136,88 @@ def log(message: str) -> None:
         f.write(log_line + "\n")
 
 
-def run_codex_agent(focus: str, cycle: int) -> bool:
-    """Run a Codex agent with the given focus. Returns True if successful."""
-    prompt = PROMPT_TEMPLATE.format(focus=focus)
+def verify_green() -> tuple[bool, list[str]]:
+    """Verify all checks pass. Returns (success, list of failures)."""
+    failures = []
+
+    # Check 1: pytest
+    log("Checking pytest...")
+    result = subprocess.run(
+        ["uv", "run", "pytest", "-x", "-q", "--tb=no"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if result.returncode != 0:
+        failures.append("pytest")
+        log(f"  ❌ pytest failed")
+    else:
+        log(f"  ✅ pytest passed")
+
+    # Check 2: pyright
+    log("Checking pyright...")
+    result = subprocess.run(
+        ["uv", "run", "pyright", "--outputjson"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        failures.append("pyright")
+        log(f"  ❌ pyright failed")
+    else:
+        log(f"  ✅ pyright passed")
+
+    # Check 3: ruff
+    log("Checking ruff...")
+    result = subprocess.run(
+        ["uv", "run", "ruff", "check", "."],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        failures.append("ruff")
+        log(f"  ❌ ruff failed")
+    else:
+        log(f"  ✅ ruff passed")
+
+    return len(failures) == 0, failures
+
+
+def run_agent(focus: str, cycle: int, agent_cmd: str = "claude") -> bool:
+    """Run an AI agent with the given focus. Returns True if successful."""
+    focus_description = FOCUS_DESCRIPTIONS.get(focus, f"Work on {focus} tasks")
+    prompt = PROMPT_TEMPLATE.format(focus=focus, focus_description=focus_description)
 
     log(f"=== Cycle {cycle} | Focus: {focus} ===")
-    log(f"Starting Codex agent...")
+    log(f"Starting {agent_cmd} agent...")
 
     try:
-        # Run codex exec with the prompt (non-interactive mode)
-        # Use --dangerously-bypass-approvals-and-sandbox for full autonomous operation
-        result = subprocess.run(
-            [
+        if agent_cmd == "claude":
+            # Claude Code CLI
+            cmd = [
+                "claude",
+                "-p", prompt,
+                "--dangerously-skip-permissions",
+            ]
+        elif agent_cmd == "codex":
+            # Codex CLI
+            cmd = [
                 "codex",
                 "exec",
                 "--dangerously-bypass-approvals-and-sandbox",
                 prompt,
-            ],
+            ]
+        else:
+            log(f"❌ Unknown agent command: {agent_cmd}")
+            return False
+
+        result = subprocess.run(
+            cmd,
             cwd=PROJECT_ROOT,
             capture_output=False,  # Let output stream to terminal
             timeout=1800,  # 30 minute timeout per agent
@@ -156,70 +234,115 @@ def run_codex_agent(focus: str, cycle: int) -> bool:
         log(f"⏰ Agent timed out after 30 minutes (focus: {focus})")
         return False
     except FileNotFoundError:
-        log("❌ Error: 'codex' command not found. Is it installed?")
+        log(f"❌ Error: '{agent_cmd}' command not found. Is it installed?")
         return False
     except Exception as e:
         log(f"❌ Error running agent: {e}")
         return False
 
 
-def verify_tests_pass() -> bool:
-    """Quick check that tests are passing before starting."""
-    log("Verifying test suite...")
-    result = subprocess.run(
-        ["uv", "run", "pytest", "-x", "-q"],
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    if result.returncode == 0:
-        log("✅ Tests passing")
-        return True
-    else:
-        log(f"❌ Tests failing:\n{result.stdout}\n{result.stderr}")
-        return False
-
-
 def main():
     """Main ralph loop."""
+    parser = argparse.ArgumentParser(description="Ralph Loop - Autonomous Agent Relay")
+    parser.add_argument(
+        "--agent",
+        choices=["claude", "codex"],
+        default="claude",
+        help="Which AI agent CLI to use (default: claude)",
+    )
+    parser.add_argument(
+        "--start-focus",
+        choices=FOCUSES,
+        default=None,
+        help="Start with a specific focus (default: rotate from beginning)",
+    )
+    parser.add_argument(
+        "--implementation-only",
+        action="store_true",
+        help="Only run implementation focuses (skip maintenance)",
+    )
+    parser.add_argument(
+        "--maintenance-only",
+        action="store_true",
+        help="Only run maintenance focuses (skip implementation)",
+    )
+    parser.add_argument(
+        "--single",
+        action="store_true",
+        help="Run only one cycle then exit",
+    )
+    args = parser.parse_args()
+
+    # Determine which focuses to use
+    if args.implementation_only:
+        focuses = [f for f in FOCUSES if f in FOCUS_DESCRIPTIONS and "work" in FOCUS_DESCRIPTIONS[f].lower()]
+        # Implementation focuses (first 9)
+        focuses = FOCUSES[:9]
+    elif args.maintenance_only:
+        # Maintenance focuses (last 6)
+        focuses = FOCUSES[9:]
+    else:
+        focuses = FOCUSES
+
     log("=" * 60)
     log("🚀 Ralph Loop Starting")
     log(f"Project: {PROJECT_ROOT}")
-    log(f"Focuses: {', '.join(FOCUSES)}")
+    log(f"Agent: {args.agent}")
+    log(f"Focuses: {', '.join(focuses)}")
     log("=" * 60)
 
-    # Initial test verification
-    if not verify_tests_pass():
-        log("⚠️ Tests are failing - first agent will focus on fixing them")
+    # Initial green verification
+    is_green, failures = verify_green()
+    if not is_green:
+        log(f"⚠️ Codebase not green ({', '.join(failures)}) - first agent will fix")
 
     cycle = 0
     focus_index = 0
+
+    # Handle --start-focus
+    if args.start_focus:
+        if args.start_focus in focuses:
+            focus_index = focuses.index(args.start_focus)
+            log(f"Starting at focus: {args.start_focus}")
+        else:
+            log(f"⚠️ Focus {args.start_focus} not in active focuses, starting from beginning")
+
     consecutive_failures = 0
     max_consecutive_failures = 3
 
     while True:
         cycle += 1
-        focus = FOCUSES[focus_index]
+        focus = focuses[focus_index]
 
         log("")
         log(f"{'=' * 60}")
         log(f"Cycle {cycle} starting (focus: {focus})")
         log(f"{'=' * 60}")
 
-        success = run_codex_agent(focus, cycle)
+        success = run_agent(focus, cycle, args.agent)
 
         if success:
             consecutive_failures = 0
+            # Verify we're still green after agent work
+            is_green, failures = verify_green()
+            if not is_green:
+                log(f"⚠️ Agent left codebase not green ({', '.join(failures)})")
+                consecutive_failures += 1
         else:
             consecutive_failures += 1
-            if consecutive_failures >= max_consecutive_failures:
-                log(f"⚠️ {max_consecutive_failures} consecutive failures - pausing for 5 minutes")
-                time.sleep(300)
-                consecutive_failures = 0
+
+        if consecutive_failures >= max_consecutive_failures:
+            log(f"⚠️ {max_consecutive_failures} consecutive failures - pausing for 5 minutes")
+            time.sleep(300)
+            consecutive_failures = 0
+
+        # Single mode - exit after one cycle
+        if args.single:
+            log("Single mode - exiting after one cycle")
+            break
 
         # Rotate to next focus
-        focus_index = (focus_index + 1) % len(FOCUSES)
+        focus_index = (focus_index + 1) % len(focuses)
 
         # Sleep between runs
         sleep_seconds = 10
