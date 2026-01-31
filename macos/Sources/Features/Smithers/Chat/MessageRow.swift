@@ -20,8 +20,8 @@ struct MessageRow: View {
                         .foregroundColor(.secondary)
                 }
 
-                // Message text
-                Text(message.content)
+                // Message text with markdown rendering
+                Text(markdownContent)
                     .font(.system(size: 14))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -36,6 +36,34 @@ struct MessageRow: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(backgroundColor)
+    }
+
+    // MARK: - Computed Properties
+
+    /// Render markdown content using AttributedString
+    private var markdownContent: AttributedString {
+        do {
+            var attributedString = try AttributedString(
+                markdown: message.content,
+                options: AttributedString.MarkdownParsingOptions(
+                    interpretedSyntax: .inlineOnlyPreservingWhitespace
+                )
+            )
+
+            // Apply consistent styling to code blocks
+            for run in attributedString.runs {
+                if run.inlinePresentationIntent?.contains(.code) == true {
+                    let range = run.range
+                    attributedString[range].backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.1)
+                    attributedString[range].font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+                }
+            }
+
+            return attributedString
+        } catch {
+            // Fallback to plain text if markdown parsing fails
+            return AttributedString(message.content)
+        }
     }
 
     // MARK: - Subviews
@@ -107,6 +135,38 @@ struct MessageRow: View {
         3. Add logging for failed attempts
 
         Let me make these changes now.
+        """,
+        timestamp: Date()
+    ))
+    .frame(width: 600)
+}
+
+#Preview("Markdown Message") {
+    MessageRow(message: ChatMessage(
+        id: UUID(),
+        role: .assistant,
+        content: """
+        I'll help you fix the authentication bug. Here's what I found:
+
+        ## Analysis
+
+        The issue is in `auth.py:42` where the token validation is incomplete.
+
+        ### Problems
+        - Missing **expiration checks**
+        - No handling for `null` tokens
+        - Missing error logging
+
+        ### Code Example
+        ```python
+        def validate_token(token):
+            if not token or token.is_expired():
+                log.error("Invalid token")
+                return False
+            return True
+        ```
+
+        I'll make these changes now.
         """,
         timestamp: Date()
     ))
