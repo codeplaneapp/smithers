@@ -20,6 +20,7 @@ Most agent frameworks are either too simple (single agent, no composition) or to
 
 - **🎯 Deps as function params** — No manual wiring. Type hints ARE the dependency graph.
 - **⚡ Automatic parallelism** — Independent workflows run concurrently. Derived from deps.
+- **🔄 Ralph loops** — Declarative iteration without complex state machines. DAG-preserving loops.
 - **💾 Built-in caching** — Hash inputs, skip unchanged work. Like Bazel's remote cache.
 - **🔒 Fully typed** — Pydantic models define contracts between workflows. Catch errors at write-time.
 - **📊 Visualize before running** — See the execution graph. Approve the plan. Then execute.
@@ -158,6 +159,39 @@ result = await run_graph(graph, cache=cache)
 # Second run: skips workflows with unchanged inputs
 result = await run_graph(graph, cache=cache)  # ⚡ Instant
 ```
+
+### Ralph Loops
+
+Agentic workflows need iteration — "review until approved", "refine until done". Ralph loops provide declarative iteration while preserving the DAG model:
+
+```python
+from smithers import workflow, ralph_loop, claude
+
+class CodeOutput(BaseModel):
+    code: str
+    approved: bool = False
+
+@workflow
+async def review_and_revise(code: CodeOutput) -> CodeOutput:
+    """One iteration: review, maybe revise."""
+    review = await claude(f"Review: {code.code}", output=ReviewOutput)
+    if review.approved:
+        return CodeOutput(code=code.code, approved=True)
+    return await claude(f"Fix: {review.feedback}", output=CodeOutput)
+
+# Create a Ralph loop - runs until approved or max 5 iterations
+review_loop = ralph_loop(
+    review_and_revise,
+    until=lambda r: r.approved,
+    max_iterations=5,
+)
+
+# Use like any workflow
+graph = build_graph(review_loop)
+result = await run_graph(graph)
+```
+
+**Why "Ralph loops"?** Unlike LangGraph's complex state machines, Ralph loops are simple and declarative. The graph stays a DAG — the loop is a single node that iterates internally. Each iteration is tracked in SQLite for full visibility.
 
 ---
 
@@ -443,10 +477,12 @@ configure(
 |---------|----------|-----------|--------|-------------|
 | Deps from type hints | ✅ | ❌ | ❌ | ❌ |
 | Automatic parallelism | ✅ | ❌ | ❌ | ❌ |
+| Declarative loops | ✅ Ralph loops | ❌ State machines | ❌ | ❌ |
 | Built-in caching | ✅ | ❌ | ❌ | ❌ |
 | Pydantic-native | ✅ | ❌ | ❌ | ✅ |
 | Visualization | ✅ | ✅ | ❌ | ✅ |
 | Human-in-the-loop | ✅ | ✅ | ✅ | ✅ |
+| Graph model | DAG | Cyclic | N/A | DAG |
 
 ---
 

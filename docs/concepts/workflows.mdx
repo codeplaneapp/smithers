@@ -110,6 +110,38 @@ However, this bypasses:
 
 For production use, prefer `build_graph` + `run_graph`.
 
+## Ralph Loops
+
+For workflows that need to iterate (review until approved, refine until done), use `ralph_loop`:
+
+```python
+from smithers import workflow, ralph_loop, claude
+
+class CodeOutput(BaseModel):
+    code: str
+    approved: bool = False
+
+@workflow
+async def review_and_revise(code: CodeOutput) -> CodeOutput:
+    """One iteration: review, maybe revise."""
+    review = await claude(f"Review: {code.code}", output=ReviewOutput)
+    if review.approved:
+        return CodeOutput(code=code.code, approved=True)
+    return await claude(f"Fix: {review.feedback}", output=CodeOutput)
+
+# Create a loop that runs until approved (max 5 iterations)
+review_loop = ralph_loop(
+    review_and_revise,
+    until=lambda r: r.approved,
+    max_iterations=5,
+)
+
+# Use like any workflow
+graph = build_graph(review_loop)
+```
+
+Ralph loops preserve the DAG model — the loop is a single node that internally iterates. See [Ralph Loops](/concepts/ralph-loops) for details.
+
 ## Best Practices
 
 <AccordionGroup>
@@ -129,5 +161,9 @@ For production use, prefer `build_graph` + `run_graph`.
         """Analyze the codebase for potential improvements."""
         ...
     ```
+  </Accordion>
+  
+  <Accordion title="Use Ralph loops for iteration">
+    Don't hide loops inside workflows. Use `ralph_loop` for visibility and tracking.
   </Accordion>
 </AccordionGroup>

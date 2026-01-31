@@ -46,7 +46,17 @@ class WorkflowNode:
     dependencies: list[str]             # Names of workflows it depends on
     requires_approval: bool             # Human-in-the-loop?
     approval_message: str | None        # Message to show for approval
+
+@dataclass
+class RalphLoopNode(WorkflowNode):
+    inner_workflow_id: str              # The workflow being iterated
+    max_iterations: int                 # Safety limit
+    until_condition: str                # Condition description
 ```
+
+<Note>
+Ralph loops are nodes in the graph that internally iterate. From the DAG's perspective, they're atomic — but each iteration is tracked in SQLite.
+</Note>
 
 ### Edges
 
@@ -111,6 +121,17 @@ graph LR
     implement --> test
     lint --> deploy
     test --> deploy
+```
+
+### Ralph Loops in Diagrams
+
+Ralph loops are rendered with a self-referential edge:
+
+```mermaid
+graph LR
+    write_code --> review_loop
+    review_loop -->|"🔄 max 5"| review_loop
+    review_loop --> deploy
 ```
 
 ### In Notebooks

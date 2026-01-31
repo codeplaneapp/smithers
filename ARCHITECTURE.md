@@ -14,6 +14,7 @@ This design is optimized around three non-negotiables:
 
 - **Deterministic planning**: `build_graph(target)` produces a **WorkflowGraph Plan** that is stable and serializable.
 - **Correct dependency resolution**: dependencies are derived from type hints with explicit, debuggable rules.
+- **Declarative iteration**: Ralph loops provide iteration without abandoning the DAG model.
 - **Verifiable execution**:
   - Every workflow output is validated against its declared type.
   - Every cache hit is validated (schema + hash).
@@ -27,17 +28,19 @@ This design is optimized around three non-negotiables:
 - Distributed execution across machines.
 - Multi-writer remote DB with concurrency beyond SQLite best practices.
 - Automatic module scanning "magic" across arbitrary imports (unless explicitly opted in).
+- **Arbitrary graph cycles** — We intentionally avoid LangGraph-style state machines. Ralph loops are the controlled, declarative alternative.
 
 ### System Invariants (Verification Backbone)
 
 These are enforced by code and assertable in tests:
 
-- **I1**: A `WorkflowGraph` must be a DAG (cycle detection at plan time).
+- **I1**: A `WorkflowGraph` must be a DAG (cycle detection at plan time). Ralph loops are single nodes that internally iterate.
 - **I2**: Each node's declared `output_type` must be validated at runtime (Pydantic `TypeAdapter`).
 - **I3**: Every node run is content-addressed: `node_cache_key = H(workflow_identity + workflow_code_hash + input_hash + runtime_hash)`.
 - **I4**: Every node state transition is persisted to SQLite (append-only events + current-state tables).
 - **I5**: Cache entries must be schema-valid and hash-consistent or treated as corrupt/miss.
 - **I6**: Approval is an explicit persisted gate; execution can pause and resume from SQLite.
+- **I7**: Ralph loop iterations are individually tracked: each iteration has its own events, timing, and optional caching.
 
 ---
 
@@ -56,6 +59,7 @@ flowchart TB
     REG["WorkflowRegistry<br/>OutputType → Workflow"]
     PLAN["GraphBuilder<br/>+ GraphVerifier"]
     G["WorkflowGraph<br/>Serializable Plan"]
+    RALPH["RalphLoop<br/>Declarative Iteration"]
     EXE["ExecutionEngine<br/>Async Scheduler"]
     RT["RuntimeContext<br/>contextvars"]
     EVT["EventBus<br/>in-proc fanout"]
@@ -438,7 +442,171 @@ def build_graph(target_workflow: Workflow, registry: WorkflowRegistry) -> Workfl
 
 ---
 
-## 8. The `run_graph` Execution Engine
+## 8. Ralph Loops: Declarative Iteration
+
+### Why Ralph Loops?
+
+Agentic workflows often require iteration — "review until approved", "refine until quality threshold", "retry until success". Traditional DAGs don't support cycles, but arbitrary graph cycles (like LangGraph's state machines) introduce complexity that conflicts with Smithers' Bazel-inspired philosophy.
+
+**Ralph loops** provide a middle ground: declarative iteration that preserves the DAG model.
+
+### Core Concept
+
+A Ralph loop is a **single node** in the DAG that internally iterates. From the graph's perspective, it's atomic. Internally, it runs a workflow repeatedly until a condition is met.
+
+```python
+from smithers import workflow, ralph_loop, claude
+
+class CodeOutput(BaseModel):
+    code: str
+    approved: bool = False
+
+@workflow
+async def review_and_revise(code: CodeOutput) -> CodeOutput:
+    """Review code, revise if needed. Each call is one iteration."""
+    review = await claude(f"Review: {code.code}", output=ReviewOutput)
+    if review.approved:
+        return CodeOutput(code=code.code, approved=True)
+    revised = await claude(f"Fix: {review.feedback}", output=CodeOutput)
+    return revised
+
+# Create a Ralph loop
+review_loop = ralph_loop(
+    review_and_revise,
+    until=lambda result: result.approved,
+    max_iterations=5,
+)
+
+# Use in a graph like any other workflow
+graph = build_graph(review_loop)
+```
+
+### Key Properties
+
+1. **DAG-preserving**: The graph remains a DAG. The loop is one node.
+2. **Declarative**: No imperative control flow. Just "run this until condition".
+3. **Observable**: Each iteration emits events to SQLite (`LoopIterationStarted`, `LoopIterationFinished`).
+4. **Cacheable**: Individual iterations can be cached by iteration index + input hash.
+5. **Nestable**: Ralph loops can contain other Ralph loops.
+
+### Mermaid Visualization
+
+Ralph loops are rendered with a self-referential edge:
+
+```mermaid
+graph LR
+    write_code --> review_loop
+    review_loop -->|"🔄 max 5"| review_loop
+    review_loop --> deploy
+```
+
+### Data Structures
+
+```python
+@dataclass(frozen=True)
+class RalphLoopNode(GraphNode):
+    """A graph node that iterates internally."""
+    inner_workflow_id: WorkflowId
+    max_iterations: int
+    until_condition: str  # Serialized representation for visibility
+
+@dataclass
+class LoopIteration:
+    """Tracking for a single iteration within a Ralph loop."""
+    loop_node_id: NodeId
+    iteration: int
+    input_hash: str
+    output_hash: str | None
+    status: NodeStatus
+    started_at: datetime
+    finished_at: datetime | None
+```
+
+### Execution Model
+
+1. **Entry**: Loop node receives input from upstream dependencies.
+2. **Iterate**: Execute inner workflow with current state.
+3. **Check**: Evaluate `until` condition on output.
+4. **Continue or Exit**: If condition false and iterations < max, loop. Else, return output.
+5. **Events**: Each iteration emits `LoopIterationStarted`, `LoopIterationFinished` to SQLite.
+
+```python
+async def execute_ralph_loop(
+    loop: RalphLoopNode,
+    initial_input: BaseModel,
+    ctx: ExecutionContext,
+) -> BaseModel:
+    current = initial_input
+    
+    for i in range(loop.max_iterations):
+        await emit_event(ctx, "LoopIterationStarted", {"iteration": i})
+        
+        # Execute inner workflow
+        result = await execute_workflow(loop.inner_workflow, current, ctx)
+        
+        await emit_event(ctx, "LoopIterationFinished", {"iteration": i})
+        
+        # Check termination condition
+        if loop.until_condition(result):
+            return result
+        
+        current = result
+    
+    # Max iterations reached
+    return current
+```
+
+### SQLite Schema Addition
+
+```sql
+-- loop_iterations: tracking for Ralph loop iterations
+create table if not exists loop_iterations (
+  run_id text not null,
+  loop_node_id text not null,
+  iteration integer not null,
+  input_hash text not null,
+  output_hash text,
+  status text not null,
+  started_at text not null,
+  finished_at text,
+  primary key (run_id, loop_node_id, iteration)
+);
+```
+
+### Nested Ralph Loops
+
+Ralph loops can be nested naturally:
+
+```python
+@workflow
+async def inner_refinement(doc: DocOutput) -> DocOutput:
+    """Refine document until quality threshold."""
+    ...
+
+@workflow
+async def outer_review(doc: DocOutput) -> DocOutput:
+    """Review and refine, may call inner refinement."""
+    refined = await ralph_loop(inner_refinement, until=..., max_iterations=3)(doc)
+    review = await claude(f"Final review: {refined}", output=ReviewOutput)
+    ...
+
+# Outer loop contains inner loop
+full_pipeline = ralph_loop(outer_review, until=..., max_iterations=5)
+```
+
+### Comparison with LangGraph
+
+| Aspect | Ralph Loops | LangGraph |
+|--------|-------------|-----------|
+| Graph model | DAG (loops are atomic nodes) | Cyclic graph |
+| Complexity | Simple: one primitive | Complex: state machines |
+| State | External (SQLite/files) | In-memory state dict |
+| Visibility | Full iteration tracking | Custom state inspection |
+| Philosophy | Bazel-like declarative | Flowchart-like imperative |
+
+---
+
+## 9. The `run_graph` Execution Engine
 
 ### Execution Model
 
@@ -462,7 +630,7 @@ Default policy (fail-fast):
 
 ---
 
-## 9. The `claude()` Function
+## 10. The `claude()` Function
 
 ### Responsibilities
 
@@ -481,7 +649,7 @@ Default policy (fail-fast):
 
 ---
 
-## 10. Tools System
+## 11. Tools System
 
 ### Tool Registry
 
@@ -504,7 +672,7 @@ class Tool(Protocol):
 
 ---
 
-## 11. Caching System
+## 12. Caching System
 
 ### What is Hashed?
 
@@ -609,7 +777,7 @@ create table if not exists tool_calls (
 
 ---
 
-## 12. Human-in-the-Loop
+## 13. Human-in-the-Loop
 
 ### `@require_approval` Decorator
 
@@ -631,7 +799,7 @@ Attaches metadata to the function:
 
 ---
 
-## 13. Observability & Progress
+## 14. Observability & Progress
 
 ### Event-First Observability
 
@@ -639,6 +807,7 @@ Everything emits events persisted to SQLite immediately:
 
 - `RunStarted`, `RunFinished`, `RunFailed`, `RunPaused`
 - `NodeReady`, `NodeStarted`, `NodeFinished`, `NodeFailed`, `NodeSkipped`, `NodeCached`
+- `LoopIterationStarted`, `LoopIterationFinished`, `LoopMaxIterationsReached`
 - `CacheHit`, `CacheMiss`, `CacheCorrupt`
 - `ApprovalRequested`, `ApprovalDecided`
 - `LLMCallStarted`, `LLMCallFinished`
@@ -651,7 +820,7 @@ Everything emits events persisted to SQLite immediately:
 
 ---
 
-## 14. Testing
+## 15. Testing
 
 ### A. Unit Test Workflows Directly
 
@@ -689,7 +858,7 @@ async def test_analyze_with_fake_llm():
 
 ---
 
-## 15. Sequence Diagrams
+## 16. Sequence Diagrams
 
 ### Build Plan
 
@@ -763,14 +932,41 @@ sequenceDiagram
   end
 ```
 
+### Ralph Loop Execution
+
+```mermaid
+sequenceDiagram
+  participant E as ExecutionEngine
+  participant L as RalphLoop
+  participant W as InnerWorkflow
+  participant S as SqliteStore
+
+  E->>L: execute(initial_input)
+  loop until condition or max_iterations
+    L->>S: LoopIterationStarted {iteration: N}
+    L->>W: await workflow(current_input)
+    W-->>L: output
+    L->>S: LoopIterationFinished {iteration: N}
+    L->>L: check until(output)
+    alt condition met
+      L-->>E: return output
+    else continue
+      L->>L: current = output
+    end
+  end
+  L->>S: LoopMaxIterationsReached (if applicable)
+  L-->>E: return final output
+```
+
 ---
 
-## 16. Full System Diagram
+## 17. Full System Diagram
 
 ```mermaid
 flowchart LR
   subgraph PlanPhase["Plan Phase: build_graph()"]
     A["@workflow wrappers"] --> R["Registry<br/>OutputType→Workflow"]
+    RL["ralph_loop()"] --> R
     R --> P["GraphBuilder + Verifier<br/>cycles/missing/ambiguous"]
     P --> G["WorkflowGraph Plan<br/>nodes/edges/levels/plan_hash"]
   end
@@ -779,6 +975,7 @@ flowchart LR
     CE[("cache_entries")]
     RU[("runs")]
     RN[("run_nodes")]
+    LI[("loop_iterations")]
     EV[("events")]
     AP[("approvals")]
     LC[("llm_calls")]
@@ -790,6 +987,7 @@ flowchart LR
     E -->|cache_get/put| CE
     E -->|create_run/update status| RU
     E --> RN
+    E --> LI
     E --> EV
     E --> AP
     E --> LC

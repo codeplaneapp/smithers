@@ -64,6 +64,7 @@
       "group": "Core Concepts",
       "pages": [
         "concepts/workflows",
+        "concepts/ralph-loops",
         "concepts/dependencies",
         "concepts/graph",
         "concepts/execution"

@@ -138,6 +138,35 @@ async def fix_bugs() -> FixOutput:
     )
 ```
 
+## Iteration with Ralph Loops
+
+For workflows that need to iterate (review until approved, refine until done):
+
+```python
+from smithers import ralph_loop
+
+@workflow
+async def review_and_revise(code: CodeOutput) -> CodeOutput:
+    review = await claude(f"Review: {code.code}", output=ReviewOutput)
+    if review.approved:
+        return CodeOutput(code=code.code, approved=True)
+    return await claude(f"Fix: {review.feedback}", output=CodeOutput)
+
+# Loop until approved (max 5 tries)
+review_loop = ralph_loop(
+    review_and_revise,
+    until=lambda r: r.approved,
+    max_iterations=5,
+)
+
+graph = build_graph(review_loop)
+result = await run_graph(graph)
+```
+
+<Note>
+Ralph loops preserve the DAG model — the loop is a single node that internally iterates. Each iteration is tracked in SQLite for full visibility.
+</Note>
+
 ## Caching
 
 Skip unchanged work with SQLite caching:
@@ -160,13 +189,13 @@ result = await run_graph(graph, cache=cache)  # ⚡ Instant
   <Card title="Workflows" icon="sitemap" href="/concepts/workflows">
     Deep dive into workflow definitions
   </Card>
+  <Card title="Ralph Loops" icon="rotate" href="/concepts/ralph-loops">
+    Declarative iteration for agentic workflows
+  </Card>
   <Card title="Dependencies" icon="link" href="/concepts/dependencies">
     How type-based dependencies work
   </Card>
   <Card title="Claude Integration" icon="robot" href="/features/claude">
     Advanced Claude usage with tools
-  </Card>
-  <Card title="Examples" icon="code" href="/examples/hello-world">
-    Complete example workflows
   </Card>
 </CardGroup>
