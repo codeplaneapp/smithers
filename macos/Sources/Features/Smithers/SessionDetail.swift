@@ -4,6 +4,9 @@ import SwiftUI
 struct SessionDetail: View {
     let session: Session?
     @State private var messageInput: String = ""
+    @StateObject private var terminalManager = TerminalSessionManager()
+    @State private var isTerminalDrawerOpen = false
+    @EnvironmentObject var ghostty: Ghostty.App
 
     var body: some View {
         if let session = session {
@@ -18,6 +21,14 @@ struct SessionDetail: View {
 
                 // Input bar at bottom
                 inputBar
+
+                // Terminal drawer at the bottom
+                Divider()
+                TerminalDrawerView(
+                    manager: terminalManager,
+                    isOpen: $isTerminalDrawerOpen
+                )
+                .environmentObject(ghostty)
             }
         } else {
             emptyState
@@ -46,6 +57,12 @@ struct SessionDetail: View {
 
             // Action buttons
             HStack(spacing: 12) {
+                Button(action: openTerminal) {
+                    Image(systemName: "terminal")
+                }
+                .buttonStyle(.plain)
+                .help("Open Terminal")
+
                 Button(action: {}) {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -111,6 +128,21 @@ struct SessionDetail: View {
         // TODO: Send message to agent daemon
         print("Sending message: \(messageInput)")
         messageInput = ""
+    }
+
+    private func openTerminal() {
+        // Open the drawer
+        isTerminalDrawerOpen = true
+
+        // Open a new terminal tab or reuse existing
+        // TODO: Get the actual working directory from the session
+        let cwd = FileManager.default.homeDirectoryForCurrentUser
+        let tabId = terminalManager.reuseOrOpenTab(cwd: cwd, title: "Terminal")
+
+        // Create the surface if needed
+        if let tab = terminalManager.selectedTab, tab.surfaceView == nil {
+            terminalManager.createSurface(for: tabId, ghosttyApp: ghostty)
+        }
     }
 
     private var emptyState: some View {
