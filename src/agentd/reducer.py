@@ -329,6 +329,117 @@ def reduce_events(events: list[dict[str, Any]]) -> SessionGraph:
             if not found and tool_use_id:
                 graph._pending_tool_statuses[tool_use_id] = status
 
+        elif event_type == "checkpoint.created" or event_type == "CHECKPOINT_CREATED":
+            # Checkpoint created - add checkpoint node
+            node_id = next_node_id()
+            node = GraphNode(
+                id=node_id,
+                type=GraphNodeType.CHECKPOINT,
+                parent_id=graph._current_message_id,
+                timestamp=ts,
+                data={
+                    "checkpoint_id": data.get("checkpoint_id"),
+                    "label": data.get("label", ""),
+                    "jj_commit_id": data.get("jj_commit_id"),
+                    "bookmark_name": data.get("bookmark_name"),
+                },
+            )
+            graph.add_node(node)
+
+        elif event_type == "checkpoint.restored" or event_type == "CHECKPOINT_RESTORED":
+            # Checkpoint restored - add rebase point node
+            node_id = next_node_id()
+            node = GraphNode(
+                id=node_id,
+                type=GraphNodeType.PROMPT_REBASE,
+                parent_id=graph._current_message_id,
+                timestamp=ts,
+                data={
+                    "checkpoint_id": data.get("checkpoint_id"),
+                    "action": "restored",
+                },
+            )
+            graph.add_node(node)
+
+        elif event_type == "skill.start" or event_type == "SKILL_START":
+            # Skill execution started
+            node_id = next_node_id()
+            node = GraphNode(
+                id=node_id,
+                type=GraphNodeType.SKILL_RUN,
+                parent_id=graph._current_message_id,
+                timestamp=ts,
+                data={
+                    "skill_id": data.get("skill_id"),
+                    "name": data.get("name"),
+                    "args": data.get("args", ""),
+                    "status": "running",
+                },
+            )
+            graph.add_node(node)
+
+        elif event_type == "skill.result" or event_type == "SKILL_RESULT":
+            # Skill produced a result - find the skill node and update it
+            skill_id = data.get("skill_id")
+            for node in graph.nodes.values():
+                if (
+                    node.type == GraphNodeType.SKILL_RUN
+                    and node.data.get("skill_id") == skill_id
+                    and node.data.get("status") == "running"
+                ):
+                    node.data["result"] = data.get("result", "")
+                    break
+
+        elif event_type == "skill.end" or event_type == "SKILL_END":
+            # Skill completed - find the skill node and update it
+            skill_id = data.get("skill_id")
+            status = data.get("status", "success")
+            for node in graph.nodes.values():
+                if (
+                    node.type == GraphNodeType.SKILL_RUN
+                    and node.data.get("skill_id") == skill_id
+                ):
+                    node.data["status"] = status
+                    if status == "error":
+                        node.data["error"] = data.get("error", "")
+                    break
+
+        elif event_type == "subagent.start" or event_type == "SUBAGENT_START":
+            # Subagent execution started
+            node_id = next_node_id()
+            node = GraphNode(
+                id=node_id,
+                type=GraphNodeType.SUBAGENT_RUN,
+                parent_id=graph._current_message_id,
+                timestamp=ts,
+                data={
+                    "subagent_id": data.get("subagent_id"),
+                    "agent_type": data.get("agent_type"),
+                    "task": data.get("task", ""),
+                    "status": "running",
+                },
+            )
+            graph.add_node(node)
+
+        elif event_type == "subagent.end" or event_type == "SUBAGENT_END":
+            # Subagent completed - find the subagent node and update it
+            subagent_id = data.get("subagent_id")
+            status = data.get("status", "success")
+            for node in graph.nodes.values():
+                if (
+                    node.type == GraphNodeType.SUBAGENT_RUN
+                    and node.data.get("subagent_id") == subagent_id
+                ):
+                    node.data["status"] = status
+                    if status == "error":
+                        node.data["error"] = data.get("error", "")
+                    break
+
+        elif event_type == "run.cancelled" or event_type == "RUN_CANCELLED":
+            # Run was cancelled - finalize streaming and mark any running operations
+            graph._current_message_id = None
+            graph._current_message_text = ""
+
         elif event_type == "session.created" or event_type == "SESSION_CREATED":
             # Session created - no graph nodes needed
             pass
@@ -337,5 +448,10 @@ def reduce_events(events: list[dict[str, Any]]) -> SessionGraph:
             # Run finished - finalize streaming
             graph._current_message_id = None
             graph._current_message_text = ""
+
+        elif event_type == "error" or event_type == "ERROR":
+            # Error event - could create an error node or just log it
+            # For now, we'll ignore error events as they don't represent graph structure
+            pass
 
     return graph

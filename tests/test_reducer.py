@@ -875,3 +875,314 @@ class TestReducerEdgeCases:
         graph = reduce_events(events)
         message_nodes = [n for n in graph.nodes.values() if n.type == GraphNodeType.MESSAGE]
         assert len(message_nodes) == 1
+
+
+class TestReducerCheckpoints:
+    """Tests for checkpoint events in the reducer."""
+
+    def test_checkpoint_created_event(self):
+        """Test CHECKPOINT_CREATED creates a checkpoint node."""
+        events = [
+            {
+                "type": "RUN_STARTED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:00Z",
+            },
+            {
+                "type": "CHECKPOINT_CREATED",
+                "data": {
+                    "checkpoint_id": "cp-1",
+                    "label": "Before refactor",
+                    "jj_commit_id": "abc123",
+                    "bookmark_name": "smithers-cp-1",
+                },
+                "timestamp": "2024-01-01T00:00:01Z",
+            },
+            {
+                "type": "RUN_FINISHED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:02Z",
+            },
+        ]
+
+        graph = reduce_events(events)
+        checkpoint_nodes = [n for n in graph.nodes.values() if n.type == GraphNodeType.CHECKPOINT]
+        assert len(checkpoint_nodes) == 1
+
+        node = checkpoint_nodes[0]
+        assert node.data.get("checkpoint_id") == "cp-1"
+        assert node.data.get("label") == "Before refactor"
+        assert node.data.get("jj_commit_id") == "abc123"
+        assert node.data.get("bookmark_name") == "smithers-cp-1"
+
+    def test_checkpoint_restored_event(self):
+        """Test CHECKPOINT_RESTORED creates a rebase point node."""
+        events = [
+            {
+                "type": "RUN_STARTED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:00Z",
+            },
+            {
+                "type": "CHECKPOINT_RESTORED",
+                "data": {"checkpoint_id": "cp-1"},
+                "timestamp": "2024-01-01T00:00:01Z",
+            },
+            {
+                "type": "RUN_FINISHED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:02Z",
+            },
+        ]
+
+        graph = reduce_events(events)
+        rebase_nodes = [n for n in graph.nodes.values() if n.type == GraphNodeType.PROMPT_REBASE]
+        assert len(rebase_nodes) == 1
+
+        node = rebase_nodes[0]
+        assert node.data.get("checkpoint_id") == "cp-1"
+        assert node.data.get("action") == "restored"
+
+
+class TestReducerSkills:
+    """Tests for skill events in the reducer."""
+
+    def test_skill_execution(self):
+        """Test complete skill execution flow."""
+        events = [
+            {
+                "type": "RUN_STARTED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:00Z",
+            },
+            {
+                "type": "SKILL_START",
+                "data": {
+                    "skill_id": "summarize",
+                    "name": "Summarize Session",
+                    "args": "",
+                },
+                "timestamp": "2024-01-01T00:00:01Z",
+            },
+            {
+                "type": "SKILL_RESULT",
+                "data": {
+                    "skill_id": "summarize",
+                    "result": "Session Summary: 5 messages exchanged",
+                },
+                "timestamp": "2024-01-01T00:00:02Z",
+            },
+            {
+                "type": "SKILL_END",
+                "data": {"skill_id": "summarize", "status": "success"},
+                "timestamp": "2024-01-01T00:00:03Z",
+            },
+            {
+                "type": "RUN_FINISHED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:04Z",
+            },
+        ]
+
+        graph = reduce_events(events)
+        skill_nodes = [n for n in graph.nodes.values() if n.type == GraphNodeType.SKILL_RUN]
+        assert len(skill_nodes) == 1
+
+        node = skill_nodes[0]
+        assert node.data.get("skill_id") == "summarize"
+        assert node.data.get("name") == "Summarize Session"
+        assert node.data.get("status") == "success"
+        assert "Session Summary" in node.data.get("result", "")
+
+    def test_skill_with_error(self):
+        """Test skill that fails with an error."""
+        events = [
+            {
+                "type": "RUN_STARTED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:00Z",
+            },
+            {
+                "type": "SKILL_START",
+                "data": {
+                    "skill_id": "plan",
+                    "name": "Create Plan",
+                    "args": "Build a todo app",
+                },
+                "timestamp": "2024-01-01T00:00:01Z",
+            },
+            {
+                "type": "SKILL_END",
+                "data": {
+                    "skill_id": "plan",
+                    "status": "error",
+                    "error": "API rate limit exceeded",
+                },
+                "timestamp": "2024-01-01T00:00:02Z",
+            },
+            {
+                "type": "RUN_FINISHED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:03Z",
+            },
+        ]
+
+        graph = reduce_events(events)
+        skill_nodes = [n for n in graph.nodes.values() if n.type == GraphNodeType.SKILL_RUN]
+        assert len(skill_nodes) == 1
+
+        node = skill_nodes[0]
+        assert node.data.get("skill_id") == "plan"
+        assert node.data.get("status") == "error"
+        assert node.data.get("error") == "API rate limit exceeded"
+
+
+class TestReducerSubagents:
+    """Tests for subagent events in the reducer."""
+
+    def test_subagent_execution(self):
+        """Test complete subagent execution flow."""
+        events = [
+            {
+                "type": "RUN_STARTED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:00Z",
+            },
+            {
+                "type": "SUBAGENT_START",
+                "data": {
+                    "subagent_id": "sub-1",
+                    "agent_type": "explore",
+                    "task": "Find all Python files",
+                },
+                "timestamp": "2024-01-01T00:00:01Z",
+            },
+            {
+                "type": "SUBAGENT_END",
+                "data": {"subagent_id": "sub-1", "status": "success"},
+                "timestamp": "2024-01-01T00:00:02Z",
+            },
+            {
+                "type": "RUN_FINISHED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:03Z",
+            },
+        ]
+
+        graph = reduce_events(events)
+        subagent_nodes = [n for n in graph.nodes.values() if n.type == GraphNodeType.SUBAGENT_RUN]
+        assert len(subagent_nodes) == 1
+
+        node = subagent_nodes[0]
+        assert node.data.get("subagent_id") == "sub-1"
+        assert node.data.get("agent_type") == "explore"
+        assert node.data.get("task") == "Find all Python files"
+        assert node.data.get("status") == "success"
+
+    def test_subagent_with_error(self):
+        """Test subagent that fails with an error."""
+        events = [
+            {
+                "type": "RUN_STARTED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:00Z",
+            },
+            {
+                "type": "SUBAGENT_START",
+                "data": {
+                    "subagent_id": "sub-2",
+                    "agent_type": "bash",
+                    "task": "Run complex script",
+                },
+                "timestamp": "2024-01-01T00:00:01Z",
+            },
+            {
+                "type": "SUBAGENT_END",
+                "data": {
+                    "subagent_id": "sub-2",
+                    "status": "error",
+                    "error": "Command failed with exit code 1",
+                },
+                "timestamp": "2024-01-01T00:00:02Z",
+            },
+            {
+                "type": "RUN_FINISHED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:03Z",
+            },
+        ]
+
+        graph = reduce_events(events)
+        subagent_nodes = [n for n in graph.nodes.values() if n.type == GraphNodeType.SUBAGENT_RUN]
+        assert len(subagent_nodes) == 1
+
+        node = subagent_nodes[0]
+        assert node.data.get("subagent_id") == "sub-2"
+        assert node.data.get("status") == "error"
+        assert "exit code 1" in node.data.get("error", "")
+
+
+class TestReducerCancellation:
+    """Tests for run cancellation events."""
+
+    def test_run_cancelled_clears_streaming(self):
+        """Test that RUN_CANCELLED clears streaming state."""
+        events = [
+            {
+                "type": "RUN_STARTED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:00Z",
+            },
+            {
+                "type": "ASSISTANT_DELTA",
+                "data": {"text": "Starting to answer..."},
+                "timestamp": "2024-01-01T00:00:01Z",
+            },
+            {
+                "type": "RUN_CANCELLED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:02Z",
+            },
+        ]
+
+        graph = reduce_events(events)
+        # Should have created a message node from the delta
+        message_nodes = [n for n in graph.nodes.values() if n.type == GraphNodeType.MESSAGE]
+        assert len(message_nodes) == 1
+        # Streaming state should be cleared after cancellation
+        assert graph._current_message_id is None
+
+
+class TestReducerErrorEvents:
+    """Tests for error event handling."""
+
+    def test_error_events_ignored(self):
+        """Test that ERROR events don't crash the reducer."""
+        events = [
+            {
+                "type": "RUN_STARTED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:00Z",
+            },
+            {
+                "type": "ERROR",
+                "data": {"message": "Something went wrong"},
+                "timestamp": "2024-01-01T00:00:01Z",
+            },
+            {
+                "type": "ASSISTANT_FINAL",
+                "data": {"text": "Recovered"},
+                "timestamp": "2024-01-01T00:00:02Z",
+            },
+            {
+                "type": "RUN_FINISHED",
+                "data": {"run_id": "run-1"},
+                "timestamp": "2024-01-01T00:00:03Z",
+            },
+        ]
+
+        # Should process without crashing
+        graph = reduce_events(events)
+        message_nodes = [n for n in graph.nodes.values() if n.type == GraphNodeType.MESSAGE]
+        assert len(message_nodes) == 1
+        assert message_nodes[0].text == "Recovered"
