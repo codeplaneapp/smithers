@@ -1,4 +1,5 @@
 import SwiftUI
+import GhosttyKit
 
 /// Inspector tab types
 enum InspectorTab: String, CaseIterable, Identifiable {
@@ -27,6 +28,10 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 struct SessionInspectorView: View {
     @Binding var selectedTab: InspectorTab
     @Binding var selectedNodeId: UUID?
+    var terminalManager: TerminalSessionManager?
+    var workingDirectory: URL?
+    var onOpenDrawer: (() -> Void)?
+    @EnvironmentObject var ghostty: Ghostty.App
 
     var body: some View {
         VStack(spacing: 0) {
@@ -67,7 +72,13 @@ struct SessionInspectorView: View {
         case .browser:
             BrowserView()
         case .tools:
-            ToolsView(selectedNodeId: $selectedNodeId)
+            ToolsView(
+                selectedNodeId: $selectedNodeId,
+                terminalManager: terminalManager,
+                workingDirectory: workingDirectory,
+                onOpenDrawer: onOpenDrawer
+            )
+            .environmentObject(ghostty)
         case .runDetails:
             RunDetailsView(selectedNodeId: $selectedNodeId)
         }
@@ -178,6 +189,10 @@ struct BrowserView: View {
 /// Tools view showing tool invocations and details
 struct ToolsView: View {
     @Binding var selectedNodeId: UUID?
+    var terminalManager: TerminalSessionManager?
+    var workingDirectory: URL?
+    var onOpenDrawer: (() -> Void)?
+    @EnvironmentObject var ghostty: Ghostty.App
 
     var body: some View {
         ScrollView {
@@ -239,6 +254,21 @@ struct ToolsView: View {
                 }
 
                 Spacer()
+
+                // Open Terminal button
+                if shouldShowTerminalButton(for: node) {
+                    Button(action: {
+                        openTerminalHere()
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "terminal")
+                            Text("Terminal")
+                        }
+                        .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
 
                 // Copy all input button
                 if let input = node.data["input"]?.value as? [String: Any] {
@@ -547,6 +577,35 @@ struct ToolsView: View {
             .buttonStyle(.plain)
             .foregroundColor(.secondary)
             .help("Copy value")
+        }
+    }
+
+    // MARK: - Terminal Integration
+
+    private func shouldShowTerminalButton(for node: GraphNode) -> Bool {
+        // Show terminal button if we have terminal manager and working directory
+        guard terminalManager != nil, onOpenDrawer != nil, workingDirectory != nil else { return false }
+        // Show for tool invocations (especially Bash, but useful for all tools)
+        return node.type == .toolUse
+    }
+
+    private func openTerminalHere() {
+        guard let terminalManager = terminalManager,
+              let workingDirectory = workingDirectory,
+              let onOpenDrawer = onOpenDrawer else { return }
+
+        // Open the drawer
+        onOpenDrawer()
+
+        // Reuse or open a new terminal tab at the working directory
+        let tabId = terminalManager.reuseOrOpenTab(
+            cwd: workingDirectory,
+            title: "Terminal"
+        )
+
+        // Create the surface if needed
+        if let tab = terminalManager.selectedTab, tab.surfaceView == nil {
+            terminalManager.createSurface(for: tabId, ghosttyApp: ghostty)
         }
     }
 }

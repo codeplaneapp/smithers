@@ -1,10 +1,15 @@
 import SwiftUI
+import GhosttyKit
 
 /// A scrollable list of chat messages with auto-scroll behavior
 struct MessageList: View {
     let items: [ChatItem]
     var onRestoreCheckpoint: ((String) -> Void)?
     var onForkCheckpoint: ((String) -> Void)?
+    var terminalManager: TerminalSessionManager?
+    var workingDirectory: URL?
+    var onOpenDrawer: (() -> Void)?
+    @EnvironmentObject var ghostty: Ghostty.App
     @State private var isAtBottom = true
     @State private var scrollProxy: ScrollViewProxy?
     @State private var lastItemId: UUID?
@@ -70,9 +75,15 @@ struct MessageList: View {
         case .message(let message):
             MessageRow(message: message)
         case .tool(let tool):
-            ToolCard(tool: tool)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+            ToolCard(
+                tool: tool,
+                terminalManager: terminalManager,
+                workingDirectory: workingDirectory,
+                onOpenDrawer: onOpenDrawer
+            )
+            .environmentObject(ghostty)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         case .checkpoint(let checkpoint):
             CheckpointCard(
                 checkpoint: checkpoint,

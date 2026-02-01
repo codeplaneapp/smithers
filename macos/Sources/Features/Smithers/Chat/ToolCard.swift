@@ -1,8 +1,13 @@
 import SwiftUI
+import GhosttyKit
 
 /// A card showing tool invocation details in the chat
 struct ToolCard: View {
     let tool: ToolMessage
+    let terminalManager: TerminalSessionManager?
+    let workingDirectory: URL?
+    let onOpenDrawer: (() -> Void)?
+    @EnvironmentObject var ghostty: Ghostty.App
     @State private var isExpanded: Bool = false
 
     var body: some View {
@@ -59,6 +64,17 @@ struct ToolCard: View {
             }
 
             Spacer()
+
+            // Open Terminal button (for Bash tools or if working directory is available)
+            if shouldShowTerminalButton {
+                Button(action: openTerminalHere) {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Open Terminal Here")
+            }
 
             // Expand/collapse button
             Button(action: { isExpanded.toggle() }) {
@@ -235,88 +251,143 @@ struct ToolCard: View {
         }
         return Color.secondary.opacity(0.2)
     }
+
+    // MARK: - Terminal Integration
+
+    private var shouldShowTerminalButton: Bool {
+        // Show terminal button if we have terminal manager and working directory
+        guard terminalManager != nil, onOpenDrawer != nil else { return false }
+        return workingDirectory != nil
+    }
+
+    private func openTerminalHere() {
+        guard let terminalManager = terminalManager,
+              let workingDirectory = workingDirectory,
+              let onOpenDrawer = onOpenDrawer else { return }
+
+        // Open the drawer
+        onOpenDrawer()
+
+        // Reuse or open a new terminal tab at the working directory
+        let tabId = terminalManager.reuseOrOpenTab(
+            cwd: workingDirectory,
+            title: tool.name
+        )
+
+        // Create the surface if needed
+        if let tab = terminalManager.selectedTab, tab.surfaceView == nil {
+            terminalManager.createSurface(for: tabId, ghosttyApp: ghostty)
+        }
+    }
 }
 
 // MARK: - Previews
 
 #Preview("Read Tool - Success") {
-    ToolCard(tool: ToolMessage(
-        id: UUID(),
-        name: "Read",
-        input: "file_path: src/auth.py",
-        result: ToolResult(
-            success: true,
-            fullOutput: """
-            def authenticate(username, password):
-                # Validate credentials
-                if not username or not password:
-                    return False
+    ToolCard(
+        tool: ToolMessage(
+            id: UUID(),
+            name: "Read",
+            input: "file_path: src/auth.py",
+            result: ToolResult(
+                success: true,
+                fullOutput: """
+                def authenticate(username, password):
+                    # Validate credentials
+                    if not username or not password:
+                        return False
 
-                # Check database
-                user = db.get_user(username)
-                return user and user.check_password(password)
-            """
+                    # Check database
+                    user = db.get_user(username)
+                    return user and user.check_password(password)
+                """
+            ),
+            timestamp: Date()
         ),
-        timestamp: Date()
-    ))
+        terminalManager: nil,
+        workingDirectory: nil,
+        onOpenDrawer: nil
+    )
     .frame(width: 500)
     .padding()
 }
 
 #Preview("Bash Tool - Running") {
-    ToolCard(tool: ToolMessage(
-        id: UUID(),
-        name: "Bash",
-        input: "uv run pytest tests/test_auth.py",
-        result: nil,
-        timestamp: Date(),
-        isRunning: true
-    ))
+    ToolCard(
+        tool: ToolMessage(
+            id: UUID(),
+            name: "Bash",
+            input: "uv run pytest tests/test_auth.py",
+            result: nil,
+            timestamp: Date(),
+            isRunning: true
+        ),
+        terminalManager: nil,
+        workingDirectory: nil,
+        onOpenDrawer: nil
+    )
     .frame(width: 500)
     .padding()
 }
 
 #Preview("Edit Tool - Failed") {
-    ToolCard(tool: ToolMessage(
-        id: UUID(),
-        name: "Edit",
-        input: "file_path: src/auth.py\nold_string: ...\nnew_string: ...",
-        result: ToolResult(
-            success: false,
-            fullOutput: "Error: old_string not found in file"
+    ToolCard(
+        tool: ToolMessage(
+            id: UUID(),
+            name: "Edit",
+            input: "file_path: src/auth.py\nold_string: ...\nnew_string: ...",
+            result: ToolResult(
+                success: false,
+                fullOutput: "Error: old_string not found in file"
+            ),
+            timestamp: Date()
         ),
-        timestamp: Date()
-    ))
+        terminalManager: nil,
+        workingDirectory: nil,
+        onOpenDrawer: nil
+    )
     .frame(width: 500)
     .padding()
 }
 
 #Preview("Grep Tool - Long Output") {
-    ToolCard(tool: ToolMessage(
-        id: UUID(),
-        name: "Grep",
-        input: "pattern: TODO.*\npath: src/",
-        result: ToolResult(
-            success: true,
-            fullOutput: (1...50).map { "src/file\($0).py:42: TODO: Fix this" }.joined(separator: "\n")
+    ToolCard(
+        tool: ToolMessage(
+            id: UUID(),
+            name: "Grep",
+            input: "pattern: TODO.*\npath: src/",
+            result: ToolResult(
+                success: true,
+                fullOutput: (1...50).map { "src/file\($0).py:42: TODO: Fix this" }.joined(separator: "\n")
+            ),
+            timestamp: Date()
         ),
-        timestamp: Date()
-    ))
+        terminalManager: nil,
+        workingDirectory: nil,
+        onOpenDrawer: nil
+    )
     .frame(width: 500)
     .padding()
 }
 
 #Preview("Collapsed") {
-    ToolCard(tool: ToolMessage(
-        id: UUID(),
-        name: "WebSearch",
-        input: "query: Python async best practices",
-        result: ToolResult(
-            success: true,
-            fullOutput: "Found 10 results..."
+    ToolCard(
+        tool: ToolMessage(
+            id: UUID(),
+            name: "WebSearch",
+            input: "query: Python async best practices",
+            result: ToolResult(
+                success: true,
+                fullOutput: "Found 10 results..."
+            ),
+            timestamp: Date()
         ),
-        timestamp: Date()
-    ))
+        terminalManager: nil,
+        workingDirectory: nil,
+        onOpenDrawer: nil
+    )
     .frame(width: 500)
     .padding()
 }
+
+// Note: Terminal button integration can be tested in the full app

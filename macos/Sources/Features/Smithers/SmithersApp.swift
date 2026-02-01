@@ -5,8 +5,11 @@ import SwiftUI
 /// Full-window preview of the Smithers UI
 /// Open this file in Xcode and use the Canvas preview (Cmd+Option+Enter)
 #Preview("Smithers App") {
-    SmithersView()
-        .frame(width: 1000, height: 700)
+    SmithersView(
+        workspaceRoot: FileManager.default.temporaryDirectory.path,
+        agentBackend: "fake"
+    )
+    .frame(width: 1000, height: 700)
 }
 
 #Preview("Sidebar Only") {
@@ -18,11 +21,25 @@ import SwiftUI
 }
 
 #Preview("Detail - With Session") {
-    SessionDetail(session: Session.mockSessions.first)
-        .frame(width: 700, height: 500)
+    let manager = SessionManager(
+        workspaceRoot: FileManager.default.temporaryDirectory.path,
+        agentBackend: "fake"
+    )
+    return SessionDetail(
+        session: Session.mockSessions.first,
+        sessionManager: manager
+    )
+    .frame(width: 700, height: 500)
 }
 
 #Preview("Detail - Empty") {
-    SessionDetail(session: nil)
-        .frame(width: 700, height: 500)
+    let manager = SessionManager(
+        workspaceRoot: FileManager.default.temporaryDirectory.path,
+        agentBackend: "fake"
+    )
+    return SessionDetail(
+        session: nil,
+        sessionManager: manager
+    )
+    .frame(width: 700, height: 500)
 }

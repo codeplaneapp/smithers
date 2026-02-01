@@ -50,8 +50,14 @@ struct SessionDetail: View {
                 if inspectorVisible {
                     SessionInspectorView(
                         selectedTab: $selectedInspectorTab,
-                        selectedNodeId: $selectedNodeId
+                        selectedNodeId: $selectedNodeId,
+                        terminalManager: terminalManager,
+                        workingDirectory: URL(fileURLWithPath: sessionManager.workspace),
+                        onOpenDrawer: {
+                            isTerminalDrawerOpen = true
+                        }
                     )
+                    .environmentObject(ghostty)
                 }
             }
             .sheet(isPresented: $showSkillsPalette) {
@@ -181,8 +187,14 @@ struct SessionDetail: View {
                 },
                 onForkCheckpoint: { checkpointId in
                     forkCheckpoint(session: session, checkpointId: checkpointId)
+                },
+                terminalManager: terminalManager,
+                workingDirectory: URL(fileURLWithPath: sessionManager.workspace),
+                onOpenDrawer: {
+                    isTerminalDrawerOpen = true
                 }
             )
+            .environmentObject(ghostty)
         }
     }
 
