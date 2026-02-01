@@ -83,11 +83,13 @@ class SessionGraph: ObservableObject {
             switch node.type {
             case .message:
                 let role = (node.data["role"]?.value as? String) ?? "assistant"
+                let isStreaming = (node.data["is_streaming"]?.value as? Bool) ?? false
                 return ChatMessage(
                     id: node.id,
                     role: role == "user" ? .user : .assistant,
                     content: node.text ?? "",
-                    timestamp: node.timestamp
+                    timestamp: node.timestamp,
+                    isStreaming: isStreaming
                 )
             default:
                 return nil
@@ -107,4 +109,5 @@ struct ChatMessage: Identifiable {
     let role: Role
     let content: String
     let timestamp: Date
+    var isStreaming: Bool = false
 }

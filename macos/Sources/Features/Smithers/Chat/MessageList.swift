@@ -5,6 +5,7 @@ struct MessageList: View {
     let messages: [ChatMessage]
     @State private var isAtBottom = true
     @State private var scrollProxy: ScrollViewProxy?
+    @State private var lastMessageId: UUID?
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -20,6 +21,14 @@ struct MessageList: View {
                         Color.clear
                             .frame(height: 1)
                             .id("bottom")
+                            .onAppear {
+                                // User scrolled to bottom
+                                isAtBottom = true
+                            }
+                            .onDisappear {
+                                // User scrolled away from bottom
+                                isAtBottom = false
+                            }
                     }
                 }
                 .onAppear {
@@ -27,9 +36,19 @@ struct MessageList: View {
                     scrollToBottom(animated: false)
                 }
                 .onChange(of: messages.count) { _ in
+                    // Auto-scroll only if user is at bottom
                     if isAtBottom {
                         scrollToBottom(animated: true)
                     }
+                }
+                .onChange(of: messages.last?.content) { _ in
+                    // Handle streaming updates to last message
+                    if isAtBottom, messages.last?.isStreaming == true {
+                        scrollToBottom(animated: false)
+                    }
+                }
+                .onChange(of: messages.last?.id) { newId in
+                    lastMessageId = newId
                 }
             }
 
@@ -103,7 +122,8 @@ struct MessageList: View {
             id: UUID(),
             role: .assistant,
             content: "I found the issue. The token validation is missing expiration checks. Let me fix that now.",
-            timestamp: Date()
+            timestamp: Date(),
+            isStreaming: true
         ),
     ])
     .frame(width: 600, height: 400)
