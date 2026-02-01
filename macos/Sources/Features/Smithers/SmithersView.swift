@@ -48,8 +48,7 @@ struct SmithersView: View {
         }
         .onChange(of: selectedSearchResult) { result in
             if let result = result {
-                // TODO: Navigate to the result in the session
-                print("Selected result: \(result.title)")
+                navigateToSearchResult(result)
             }
         }
         .backport.onKeyPress("f") { modifiers in
@@ -63,6 +62,30 @@ struct SmithersView: View {
 
     private var selectedSession: Session? {
         sessionManager.sessions.first { $0.id == selectedSessionId }
+    }
+
+    private func navigateToSearchResult(_ result: SearchResult) {
+        // Parse the session ID from the result
+        guard let sessionId = UUID(uuidString: result.sessionId) else {
+            print("Invalid session ID in search result: \(result.sessionId)")
+            return
+        }
+
+        // Switch to the session
+        selectedSessionId = sessionId
+
+        // TODO: Navigate to the specific node (result.nodeId) once we have node selection sync
+        if let nodeId = result.nodeId {
+            print("Navigate to node: \(nodeId) in session: \(sessionId)")
+            // For now, just print. In the future, we'll need to:
+            // 1. Pass nodeId to SessionDetail (via @Binding or environment)
+            // 2. Scroll chat view to the node or select it in graph view
+        } else {
+            print("Navigated to session: \(sessionId)")
+        }
+
+        // Clear the selected result
+        selectedSearchResult = nil
     }
 }
 

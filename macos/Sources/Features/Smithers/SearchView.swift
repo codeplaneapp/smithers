@@ -8,6 +8,7 @@ struct SearchResult: Identifiable, Equatable {
     let preview: String
     let sessionId: String
     let timestamp: Date?
+    let nodeId: UUID?  // Session graph node ID (if available)
 
     enum ResultType: String {
         case event

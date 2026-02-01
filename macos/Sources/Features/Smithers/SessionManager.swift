@@ -224,7 +224,8 @@ class SessionManager: ObservableObject {
                             title: title,
                             preview: preview,
                             sessionId: sessionId.uuidString,
-                            timestamp: timestamp
+                            timestamp: timestamp,
+                            nodeId: nil  // Events don't have direct node mapping
                         )
                         results.append(result)
                     }
@@ -239,13 +240,22 @@ class SessionManager: ObservableObject {
 
                             let timestamp = ISO8601DateFormatter().date(from: createdAtStr)
 
+                            // Extract nodeId if available
+                            let nodeId: UUID?
+                            if let nodeIdStr = checkpointData["session_node_id"] as? String {
+                                nodeId = UUID(uuidString: nodeIdStr)
+                            } else {
+                                nodeId = nil
+                            }
+
                             let result = SearchResult(
                                 id: checkpointId,
                                 type: .checkpoint,
                                 title: "Checkpoint: \(message)",
                                 preview: message,
                                 sessionId: sessionIdStr,
-                                timestamp: timestamp
+                                timestamp: timestamp,
+                                nodeId: nodeId
                             )
                             results.append(result)
                         }
@@ -271,7 +281,8 @@ class SessionManager: ObservableObject {
                                 title: title,
                                 preview: preview,
                                 sessionId: sessionIdStr,
-                                timestamp: timestamp
+                                timestamp: timestamp,
+                                nodeId: nil  // Events don't have direct node mapping
                             )
                             results.append(result)
                         }
@@ -283,13 +294,22 @@ class SessionManager: ObservableObject {
 
                             let timestamp = ISO8601DateFormatter().date(from: createdAtStr)
 
+                            // Extract nodeId if available
+                            let nodeId: UUID?
+                            if let nodeIdStr = resultData["session_node_id"] as? String {
+                                nodeId = UUID(uuidString: nodeIdStr)
+                            } else {
+                                nodeId = nil
+                            }
+
                             let result = SearchResult(
                                 id: checkpointId,
                                 type: .checkpoint,
                                 title: "Checkpoint: \(message)",
                                 preview: message,
                                 sessionId: sessionIdStr,
-                                timestamp: timestamp
+                                timestamp: timestamp,
+                                nodeId: nodeId
                             )
                             results.append(result)
                         }
