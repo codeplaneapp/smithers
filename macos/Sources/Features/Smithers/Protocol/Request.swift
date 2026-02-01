@@ -30,4 +30,36 @@ struct AgentRequest: Encodable {
     static func cancelRun(runId: String) -> AgentRequest {
         AgentRequest(method: "run.cancel", params: ["run_id": runId])
     }
+
+    /// Run a skill
+    static func runSkill(sessionId: String, skillId: String, args: String? = nil) -> AgentRequest {
+        var params: [String: Any] = [
+            "session_id": sessionId,
+            "skill_id": skillId,
+        ]
+        if let args = args {
+            params["args"] = args
+        }
+        return AgentRequest(method: "skill.run", params: params)
+    }
+
+    /// Create a checkpoint
+    static func createCheckpoint(sessionId: String, message: String, sessionNodeId: String? = nil) -> AgentRequest {
+        var params: [String: Any] = [
+            "session_id": sessionId,
+            "message": message,
+        ]
+        if let sessionNodeId = sessionNodeId {
+            params["session_node_id"] = sessionNodeId
+        }
+        return AgentRequest(method: "checkpoint.create", params: params)
+    }
+
+    /// Restore a checkpoint
+    static func restoreCheckpoint(sessionId: String, checkpointId: String) -> AgentRequest {
+        AgentRequest(method: "checkpoint.restore", params: [
+            "session_id": sessionId,
+            "checkpoint_id": checkpointId,
+        ])
+    }
 }

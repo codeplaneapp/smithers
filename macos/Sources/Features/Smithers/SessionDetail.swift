@@ -16,6 +16,7 @@ struct SessionDetail: View {
     @State private var selectedNodeId: UUID?
     @State private var selectedInspectorTab: InspectorTab = .stack
     @State private var inspectorVisible: Bool = true
+    @State private var showSkillsPalette = false
     @EnvironmentObject var ghostty: Ghostty.App
 
     var body: some View {
@@ -51,6 +52,15 @@ struct SessionDetail: View {
                         selectedNodeId: $selectedNodeId
                     )
                 }
+            }
+            .sheet(isPresented: $showSkillsPalette) {
+                SkillsPalette(
+                    isPresented: $showSkillsPalette,
+                    sessionId: session.id.uuidString,
+                    onSelectSkill: { skill, args in
+                        runSkill(skill: skill, args: args)
+                    }
+                )
             }
         } else {
             emptyState
@@ -89,6 +99,12 @@ struct SessionDetail: View {
 
                 Spacer()
                     .frame(width: 20)
+
+                Button(action: { showSkillsPalette = true }) {
+                    Image(systemName: "command")
+                }
+                .buttonStyle(.plain)
+                .help("Skills (⌘K)")
 
                 Button(action: openTerminal) {
                     Image(systemName: "terminal")
@@ -227,6 +243,16 @@ struct SessionDetail: View {
         // 3. If it's a tool invocation, optionally open the terminal to the correct CWD
         // TODO: Check if node is a tool invocation and open terminal
         print("Node selected: \(nodeId)")
+    }
+
+    private func runSkill(skill: Skill, args: String?) {
+        guard let session = session else { return }
+        // TODO: Send skill.run request to agentd via AgentClient
+        // For now, just log it
+        print("Running skill: \(skill.name) (id: \(skill.id)) for session \(session.id)")
+        if let args = args {
+            print("  Args: \(args)")
+        }
     }
 
     private var emptyState: some View {
