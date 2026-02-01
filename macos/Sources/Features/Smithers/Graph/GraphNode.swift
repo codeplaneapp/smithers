@@ -77,6 +77,21 @@ class SessionGraph: ObservableObject {
         }
     }
 
+    /// Update an existing node in the graph
+    func updateNode(_ node: GraphNode) {
+        nodes[node.id] = node
+    }
+
+    /// Get a node by ID
+    func getNode(id: UUID) -> GraphNode? {
+        nodes[id]
+    }
+
+    /// Get the ID of the last node added (for building parent chains)
+    func lastNodeId() -> UUID? {
+        orderedNodes.last?.id
+    }
+
     /// Project to chat items (for Chat Mode)
     /// Returns both messages and tools in chronological order
     func projectToChat() -> [ChatItem] {

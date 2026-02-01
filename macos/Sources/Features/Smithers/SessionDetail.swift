@@ -9,6 +9,7 @@ enum SessionViewMode {
 /// The main content area showing the selected session's terminal
 struct SessionDetail: View {
     let session: Session?
+    let sessionManager: SessionManager
     @State private var messageInput: String = ""
     @StateObject private var terminalManager = TerminalSessionManager()
     @State private var isTerminalDrawerOpen = false
@@ -206,10 +207,14 @@ struct SessionDetail: View {
     // MARK: - Actions
 
     private func sendMessage() {
-        guard !messageInput.isEmpty else { return }
-        // TODO: Send message to agent daemon
-        print("Sending message: \(messageInput)")
-        messageInput = ""
+        guard !messageInput.isEmpty, let session = session else { return }
+
+        do {
+            try sessionManager.sendMessage(sessionId: session.id, message: messageInput)
+            messageInput = ""
+        } catch {
+            print("Failed to send message: \(error)")
+        }
     }
 
     private func openTerminal() {
@@ -247,11 +252,11 @@ struct SessionDetail: View {
 
     private func runSkill(skill: Skill, args: String?) {
         guard let session = session else { return }
-        // TODO: Send skill.run request to agentd via AgentClient
-        // For now, just log it
-        print("Running skill: \(skill.name) (id: \(skill.id)) for session \(session.id)")
-        if let args = args {
-            print("  Args: \(args)")
+
+        do {
+            try sessionManager.runSkill(sessionId: session.id, skillId: skill.id, args: args)
+        } catch {
+            print("Failed to run skill: \(error)")
         }
     }
 
@@ -276,11 +281,25 @@ struct SessionDetail: View {
 }
 
 #Preview("With Session") {
-    SessionDetail(session: Session.mockSessions.first)
-        .frame(width: 600, height: 500)
+    let manager = SessionManager(
+        workspaceRoot: FileManager.default.temporaryDirectory.path,
+        agentBackend: "fake"
+    )
+    return SessionDetail(
+        session: Session.mockSessions.first,
+        sessionManager: manager
+    )
+    .frame(width: 600, height: 500)
 }
 
 #Preview("Empty State") {
-    SessionDetail(session: nil)
-        .frame(width: 600, height: 500)
+    let manager = SessionManager(
+        workspaceRoot: FileManager.default.temporaryDirectory.path,
+        agentBackend: "fake"
+    )
+    return SessionDetail(
+        session: nil,
+        sessionManager: manager
+    )
+    .frame(width: 600, height: 500)
 }

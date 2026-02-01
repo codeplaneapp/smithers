@@ -2,22 +2,43 @@ import SwiftUI
 
 /// Root view for the Smithers app - combines sidebar and session detail
 struct SmithersView: View {
-    @State private var sessions: [Session] = Session.mockSessions
-    @State private var selectedSessionId: UUID? = Session.mockSessions.first?.id
+    @StateObject private var sessionManager: SessionManager
+    @State private var selectedSessionId: UUID?
     @State private var showSearch: Bool = false
     @State private var selectedSearchResult: SearchResult?
+
+    init(workspaceRoot: String, sandboxMode: String = "host", agentBackend: String = "fake") {
+        _sessionManager = StateObject(wrappedValue: SessionManager(
+            workspaceRoot: workspaceRoot,
+            sandboxMode: sandboxMode,
+            agentBackend: agentBackend
+        ))
+    }
 
     var body: some View {
         NavigationSplitView {
             SessionSidebar(
-                sessions: $sessions,
+                sessions: $sessionManager.sessions,
                 selectedSessionId: $selectedSessionId
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 300)
         } detail: {
-            SessionDetail(session: selectedSession)
+            SessionDetail(
+                session: selectedSession,
+                sessionManager: sessionManager
+            )
         }
         .frame(minWidth: 800, minHeight: 500)
+        .task {
+            do {
+                try await sessionManager.start()
+            } catch {
+                print("Failed to start session manager: \(error)")
+            }
+        }
+        .onDisappear {
+            sessionManager.stop()
+        }
         .sheet(isPresented: $showSearch) {
             SearchView(
                 isPresented: $showSearch,
@@ -44,11 +65,14 @@ struct SmithersView: View {
     }
 
     private var selectedSession: Session? {
-        sessions.first { $0.id == selectedSessionId }
+        sessionManager.sessions.first { $0.id == selectedSessionId }
     }
 }
 
 #Preview {
-    SmithersView()
-        .frame(width: 1000, height: 600)
+    SmithersView(
+        workspaceRoot: FileManager.default.temporaryDirectory.path,
+        agentBackend: "fake"
+    )
+    .frame(width: 1000, height: 600)
 }

@@ -300,7 +300,10 @@ class SessionStore:
         if self._initialized:
             return
 
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Only create parent directories for file-based databases
+        if str(self.path) != ":memory:":
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+
         async with self._connect() as db:
             # Enable foreign key constraints
             await db.execute("PRAGMA foreign_keys = ON")
