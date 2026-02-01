@@ -1072,7 +1072,7 @@ class SessionStore:
         """Search session events using full-text search.
 
         Args:
-            query: Search query (FTS5 syntax supported)
+            query: Search query (user input will be sanitized)
             session_id: Optional session ID to filter by
             limit: Maximum number of results to return
 
@@ -1081,6 +1081,9 @@ class SessionStore:
         """
         await self._ensure_initialized()
 
+        # Sanitize the query to prevent FTS5 injection and syntax errors
+        sanitized_query = _sanitize_fts5_query(query)
+
         # Build query with optional session filter
         sql = """
             SELECT se.*
@@ -1088,7 +1091,7 @@ class SessionStore:
             JOIN session_events se ON se.id = fts.rowid
             WHERE session_events_fts MATCH ?
         """
-        params: list[Any] = [query]
+        params: list[Any] = [sanitized_query]
 
         if session_id is not None:
             sql += " AND se.session_id = ?"
@@ -1123,7 +1126,7 @@ class SessionStore:
         """Search checkpoints using full-text search.
 
         Args:
-            query: Search query (FTS5 syntax supported)
+            query: Search query (user input will be sanitized)
             session_id: Optional session ID to filter by
             limit: Maximum number of results to return
 
@@ -1132,6 +1135,9 @@ class SessionStore:
         """
         await self._ensure_initialized()
 
+        # Sanitize the query to prevent FTS5 injection and syntax errors
+        sanitized_query = _sanitize_fts5_query(query)
+
         # Build query with optional session filter
         sql = """
             SELECT c.*
@@ -1139,7 +1145,7 @@ class SessionStore:
             JOIN checkpoints c ON c.checkpoint_id = fts.checkpoint_id
             WHERE checkpoints_fts MATCH ?
         """
-        params: list[Any] = [query]
+        params: list[Any] = [sanitized_query]
 
         if session_id is not None:
             sql += " AND c.session_id = ?"
@@ -1177,7 +1183,7 @@ class SessionStore:
         """Search todos using full-text search.
 
         Args:
-            query: Search query (FTS5 syntax supported)
+            query: Search query (user input will be sanitized)
             workspace_id: Optional workspace ID to filter by
             session_id: Optional session ID to filter by
             limit: Maximum number of results to return
@@ -1187,6 +1193,9 @@ class SessionStore:
         """
         await self._ensure_initialized()
 
+        # Sanitize the query to prevent FTS5 injection and syntax errors
+        sanitized_query = _sanitize_fts5_query(query)
+
         # Build query with optional filters
         sql = """
             SELECT t.*
@@ -1194,7 +1203,7 @@ class SessionStore:
             JOIN todos t ON t.id = fts.rowid
             WHERE todos_fts MATCH ?
         """
-        params: list[Any] = [query]
+        params: list[Any] = [sanitized_query]
 
         if workspace_id is not None:
             sql += " AND t.workspace_id = ?"
@@ -1278,3 +1287,52 @@ def _parse_timestamp(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _sanitize_fts5_query(query: str) -> str:
+    """Sanitize FTS5 query to prevent injection and syntax errors.
+
+    This function escapes special FTS5 operators and quotes to prevent:
+    1. FTS5 injection attacks
+    2. Syntax errors from malformed queries
+
+    FTS5 special characters and operators:
+    - Double quotes: Used for phrase queries
+    - Parentheses: Used for grouping
+    - AND, OR, NOT: Boolean operators
+    - NEAR: Proximity operator
+    - *: Prefix matching
+    - ^: Column filter
+
+    Strategy: Wrap each token in double quotes to treat them as literals,
+    and escape any internal quotes.
+
+    Args:
+        query: User-provided search query
+
+    Returns:
+        Sanitized query safe for FTS5 MATCH operator
+    """
+    if not query or not query.strip():
+        # Empty queries would cause errors, return a query that matches nothing
+        return '""'
+
+    # Remove leading/trailing whitespace
+    query = query.strip()
+
+    # Escape any existing double quotes by doubling them (FTS5 convention)
+    query = query.replace('"', '""')
+
+    # Split on whitespace to handle each token separately
+    tokens = query.split()
+
+    if not tokens:
+        return '""'
+
+    # Wrap each token in quotes to treat as literal strings
+    # This prevents FTS5 operators from being interpreted
+    sanitized_tokens = [f'"{token}"' for token in tokens]
+
+    # Join with OR to search for any of the terms
+    # This is safer than AND and more user-friendly
+    return " OR ".join(sanitized_tokens)

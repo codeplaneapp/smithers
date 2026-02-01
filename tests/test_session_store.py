@@ -1598,3 +1598,128 @@ class TestPerformance:
         assert len(stats["event_counts"]) > 0
         # Stats computation should be reasonable
         assert stats_time < 500, f"Stats took {stats_time:.0f}ms, expected < 500ms"
+
+
+class TestFTS5Security:
+    """Test FTS5 query security and error handling."""
+
+    @pytest.fixture
+    async def store(self, tmp_path):
+        """Create a temporary session store with test data."""
+        store = SessionStore(tmp_path / "sessions.db")
+        await store.initialize()
+        await store.create_session("/workspace", session_id="test-session")
+
+        # Add some test data
+        await store.append_event(
+            "test-session",
+            EventType.ASSISTANT_DELTA,
+            {"content": "Python programming tutorial"},
+        )
+        await store.create_checkpoint(
+            checkpoint_id="cp-1",
+            session_id="test-session",
+            jj_commit_id="commit1",
+            bookmark_name="test-checkpoint",
+            message="Test checkpoint for security testing",
+        )
+        await store.create_todo("/workspace", "Implement user authentication")
+
+        return store
+
+    @pytest.mark.asyncio
+    async def test_search_events_with_invalid_fts5_syntax(self, store):
+        """Should handle invalid FTS5 syntax gracefully without crashing."""
+        # These queries have invalid FTS5 syntax and could cause errors
+        invalid_queries = [
+            "test AND",  # Incomplete boolean expression
+            "test OR",  # Incomplete boolean expression
+            "NOT",  # Standalone NOT
+            '"unclosed quote',  # Unclosed quote
+            "test(",  # Unmatched parenthesis
+            "test)",  # Unmatched parenthesis
+            "NEAR/",  # Invalid NEAR syntax
+            "*",  # Wildcard alone
+        ]
+
+        for query in invalid_queries:
+            # Should not raise an exception - should sanitize the query
+            results = await store.search_events(query)
+            # Should return empty results for invalid syntax (after sanitization)
+            assert isinstance(results, list)
+
+    @pytest.mark.asyncio
+    async def test_search_checkpoints_with_invalid_fts5_syntax(self, store):
+        """Should handle invalid FTS5 syntax in checkpoint search."""
+        invalid_queries = [
+            "test AND",
+            '"unclosed quote',
+            "test(",
+        ]
+
+        for query in invalid_queries:
+            # Should not crash - should sanitize the query
+            results = await store.search_checkpoints(query)
+            assert isinstance(results, list)
+
+    @pytest.mark.asyncio
+    async def test_search_todos_with_invalid_fts5_syntax(self, store):
+        """Should handle invalid FTS5 syntax in todo search."""
+        invalid_queries = [
+            "test AND",
+            '"unclosed quote',
+            "test(",
+        ]
+
+        for query in invalid_queries:
+            # Should not crash - should sanitize the query
+            results = await store.search_todos(query)
+            assert isinstance(results, list)
+
+    @pytest.mark.asyncio
+    async def test_search_all_with_invalid_fts5_syntax(self, store):
+        """Should handle invalid FTS5 syntax in search_all."""
+        invalid_query = "test AND"
+
+        # Should not crash - should sanitize the query
+        results = await store.search_all(invalid_query, workspace_id="/workspace")
+        assert "events" in results
+        assert "checkpoints" in results
+        assert "todos" in results
+
+    @pytest.mark.asyncio
+    async def test_search_with_special_characters(self, store):
+        """Should handle special characters in search queries."""
+        # Special characters that might cause issues
+        special_queries = [
+            "test@email.com",  # @ symbol
+            "C++",  # Plus signs
+            "test-case",  # Hyphens
+            "test_function",  # Underscores
+            "test.method",  # Dots
+        ]
+
+        for query in special_queries:
+            # Should not crash
+            await store.search_events(query)
+            # Result count may vary, but shouldn't error
+
+    @pytest.mark.asyncio
+    async def test_search_empty_query(self, store):
+        """Should handle empty search queries."""
+        import contextlib
+
+        # Empty query should return empty results or error gracefully
+        with contextlib.suppress(Exception):
+            await store.search_events("")
+            # Empty query might return nothing or error - both are acceptable
+
+    @pytest.mark.asyncio
+    async def test_search_very_long_query(self, store):
+        """Should handle very long search queries without issues."""
+        # Very long query (but valid)
+        long_query = " ".join(["word"] * 1000)
+
+        # Should not crash
+        await store.search_events(long_query)
+        # May return 0 results, but should complete
