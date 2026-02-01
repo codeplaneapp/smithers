@@ -60,16 +60,73 @@ struct GraphView: View {
             var path = Path()
             path.move(to: edge.points[0])
 
-            for i in 1..<edge.points.count {
-                path.addLine(to: edge.points[i])
+            if edge.points.count == 4 {
+                // Bezier curve with 2 control points
+                path.addCurve(
+                    to: edge.points[3],
+                    control1: edge.points[1],
+                    control2: edge.points[2]
+                )
+            } else if edge.points.count == 3 {
+                // Quadratic Bezier curve with 1 control point
+                path.addQuadCurve(
+                    to: edge.points[2],
+                    control: edge.points[1]
+                )
+            } else {
+                // Fallback to straight lines
+                for i in 1..<edge.points.count {
+                    path.addLine(to: edge.points[i])
+                }
             }
 
             context.stroke(
                 path,
-                with: .color(.secondary.opacity(0.3)),
-                lineWidth: 2
+                with: .color(.secondary.opacity(0.4)),
+                lineWidth: 1.5
             )
+
+            // Draw arrow at the end
+            if let endPoint = edge.points.last,
+               edge.points.count >= 2 {
+                drawArrowhead(in: context, at: endPoint, from: edge.points[edge.points.count - 2])
+            }
         }
+    }
+
+    private func drawArrowhead(in context: GraphicsContext, at point: CGPoint, from previousPoint: CGPoint) {
+        // Calculate arrow direction
+        let dx = point.x - previousPoint.x
+        let dy = point.y - previousPoint.y
+        let angle = atan2(dy, dx)
+
+        // Arrow size
+        let arrowLength: CGFloat = 8
+        let arrowWidth: CGFloat = 6
+
+        // Calculate arrow points
+        let leftAngle = angle + .pi * 0.75
+        let rightAngle = angle - .pi * 0.75
+
+        let leftPoint = CGPoint(
+            x: point.x + arrowLength * cos(leftAngle),
+            y: point.y + arrowLength * sin(leftAngle)
+        )
+        let rightPoint = CGPoint(
+            x: point.x + arrowLength * cos(rightAngle),
+            y: point.y + arrowLength * sin(rightAngle)
+        )
+
+        var arrowPath = Path()
+        arrowPath.move(to: leftPoint)
+        arrowPath.addLine(to: point)
+        arrowPath.addLine(to: rightPoint)
+
+        context.stroke(
+            arrowPath,
+            with: .color(.secondary.opacity(0.4)),
+            lineWidth: 1.5
+        )
     }
 
     private func drawNodes(in context: GraphicsContext, layout: GraphLayoutResult) {

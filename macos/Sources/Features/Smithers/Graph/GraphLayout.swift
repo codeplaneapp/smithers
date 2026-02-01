@@ -135,7 +135,7 @@ class GraphLayoutEngine {
                 continue
             }
 
-            // Simple straight-line routing from bottom-center of parent to top-center of child
+            // Smooth Bezier curve routing from bottom-center of parent to top-center of child
             let fromPoint = CGPoint(
                 x: fromNode.center.x,
                 y: fromNode.position.y + fromNode.size.height
@@ -145,10 +145,24 @@ class GraphLayoutEngine {
                 y: toNode.position.y
             )
 
+            // Create control points for a smooth cubic Bezier curve
+            // The curve should flow downward from parent to child
+            let verticalDistance = toPoint.y - fromPoint.y
+            let controlPointOffset = max(verticalDistance * 0.4, 20.0)
+
+            let controlPoint1 = CGPoint(
+                x: fromPoint.x,
+                y: fromPoint.y + controlPointOffset
+            )
+            let controlPoint2 = CGPoint(
+                x: toPoint.x,
+                y: toPoint.y - controlPointOffset
+            )
+
             layoutEdges.append(LayoutEdge(
                 from: parentId,
                 to: node.id,
-                points: [fromPoint, toPoint]
+                points: [fromPoint, controlPoint1, controlPoint2, toPoint]
             ))
         }
 
