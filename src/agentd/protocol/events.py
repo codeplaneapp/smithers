@@ -57,6 +57,9 @@ class EventType(str, Enum):
     FORM_CREATE = "form.create"
     FORM_SUBMIT = "form.submit"
 
+    # Search
+    SEARCH_RESULTS = "search.results"
+
     # Generic error
     ERROR = "error"
 

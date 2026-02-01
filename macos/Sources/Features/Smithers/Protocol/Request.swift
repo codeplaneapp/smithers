@@ -62,4 +62,40 @@ struct AgentRequest: Encodable {
             "checkpoint_id": checkpointId,
         ])
     }
+
+    /// Search events
+    static func searchEvents(query: String, sessionId: String? = nil, limit: Int = 50) -> AgentRequest {
+        var params: [String: Any] = [
+            "query": query,
+            "limit": limit,
+        ]
+        if let sessionId = sessionId {
+            params["session_id"] = sessionId
+        }
+        return AgentRequest(method: "search.events", params: params)
+    }
+
+    /// Search checkpoints
+    static func searchCheckpoints(query: String, sessionId: String? = nil, limit: Int = 50) -> AgentRequest {
+        var params: [String: Any] = [
+            "query": query,
+            "limit": limit,
+        ]
+        if let sessionId = sessionId {
+            params["session_id"] = sessionId
+        }
+        return AgentRequest(method: "search.checkpoints", params: params)
+    }
+
+    /// Search all content (events and checkpoints)
+    static func searchAll(query: String, sessionId: String? = nil, limit: Int = 50) -> AgentRequest {
+        var params: [String: Any] = [
+            "query": query,
+            "limit": limit,
+        ]
+        if let sessionId = sessionId {
+            params["session_id"] = sessionId
+        }
+        return AgentRequest(method: "search.all", params: params)
+    }
 }

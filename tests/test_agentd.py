@@ -8,6 +8,7 @@ import pytest
 
 from agentd.daemon import AgentDaemon, DaemonConfig
 from agentd.protocol.events import EventType
+from agentd.protocol.requests import Request
 
 
 class TestAgentDaemon:
@@ -877,3 +878,155 @@ class TestSkillsSystem:
         assert "Implementation Plan" in skill_events[1]["data"]["result"]
         assert skill_events[2]["type"] == "skill.end"
         assert skill_events[2]["data"]["status"] == "success"
+
+
+class TestSearchRequests:
+    """Test search request handlers."""
+
+    @pytest.fixture
+    def config(self, tmp_path):
+        return DaemonConfig(
+            workspace_root=str(tmp_path),
+            sandbox_mode="host",
+            agent_backend="fake",
+        )
+
+    @pytest.fixture
+    async def daemon_with_data(self, tmp_path):
+        """Create a daemon with searchable data."""
+        import uuid
+
+        # Create config with unique workspace and db path for each test
+        config = DaemonConfig(
+            workspace_root=str(tmp_path / "workspace"),
+            sandbox_mode="host",
+            agent_backend="fake",
+            db_path=str(tmp_path / "test_sessions.db"),
+        )
+        input_stream = StringIO()
+        output_stream = StringIO()
+        daemon = AgentDaemon(config, input_stream, output_stream)
+        await daemon.store.initialize()
+
+        # Create a session with searchable events (unique ID per test)
+        session_id = str(uuid.uuid4())
+        await daemon.store.create_session(str(tmp_path / "workspace"), session_id=session_id)
+
+        # Add events with searchable content
+        await daemon.store.append_event(
+            session_id,
+            EventType.ASSISTANT_DELTA,
+            {"content": "Here is some Python code for fibonacci"},
+        )
+        await daemon.store.append_event(
+            session_id,
+            EventType.TOOL_OUTPUT_REF,
+            {"preview": "def calculate(): return 42"},
+        )
+
+        # Add a checkpoint
+        await daemon.store.create_checkpoint(
+            checkpoint_id="cp-test",
+            session_id=session_id,
+            session_node_id="node-1",
+            jj_commit_id="abc123",
+            bookmark_name="feature-auth",
+            message="Add authentication feature",
+        )
+
+        return daemon, output_stream, session_id
+
+    @pytest.mark.asyncio
+    async def test_search_events_request(self, daemon_with_data):
+        """Should handle search.events request."""
+        daemon, output_stream, session_id = daemon_with_data
+
+        request = Request(
+            id="req-1",
+            method="search.events",
+            params={"query": "Python", "session_id": session_id, "limit": 10},
+        )
+
+        await daemon.handle_request(request)
+
+        output_stream.seek(0)
+        lines = output_stream.read().strip().split("\n")
+        event = json.loads(lines[0])
+
+        assert event["type"] == "search.results"
+        assert event["data"]["request_id"] == "req-1"
+        assert "results" in event["data"]
+        assert len(event["data"]["results"]) > 0
+        # Should find the Python event
+        assert any("Python" in str(r["payload"]) for r in event["data"]["results"])
+
+    @pytest.mark.asyncio
+    async def test_search_checkpoints_request(self, daemon_with_data):
+        """Should handle search.checkpoints request."""
+        daemon, output_stream, session_id = daemon_with_data
+
+        request = Request(
+            id="req-2",
+            method="search.checkpoints",
+            params={"query": "authentication", "session_id": session_id},
+        )
+
+        await daemon.handle_request(request)
+
+        output_stream.seek(0)
+        lines = output_stream.read().strip().split("\n")
+        event = json.loads(lines[0])
+
+        assert event["type"] == "search.results"
+        assert event["data"]["request_id"] == "req-2"
+        assert "results" in event["data"]
+        assert len(event["data"]["results"]) > 0
+        # Should find the checkpoint
+        assert any(
+            "authentication" in r["message"].lower()
+            for r in event["data"]["results"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_search_all_request(self, daemon_with_data):
+        """Should handle search.all request."""
+        daemon, output_stream, session_id = daemon_with_data
+
+        request = Request(
+            id="req-3",
+            method="search.all",
+            params={"query": "auth OR Python", "session_id": session_id, "limit": 20},
+        )
+
+        await daemon.handle_request(request)
+
+        output_stream.seek(0)
+        lines = output_stream.read().strip().split("\n")
+        event = json.loads(lines[0])
+
+        assert event["type"] == "search.results"
+        assert event["data"]["request_id"] == "req-3"
+        assert "events" in event["data"]
+        assert "checkpoints" in event["data"]
+        assert "total" in event["data"]
+        assert event["data"]["total"] > 0
+
+    @pytest.mark.asyncio
+    async def test_search_no_results(self, daemon_with_data):
+        """Should return empty results when no matches."""
+        daemon, output_stream, session_id = daemon_with_data
+
+        request = Request(
+            id="req-4",
+            method="search.events",
+            params={"query": "nonexistent_xyz_term", "session_id": session_id},
+        )
+
+        await daemon.handle_request(request)
+
+        output_stream.seek(0)
+        lines = output_stream.read().strip().split("\n")
+        event = json.loads(lines[0])
+
+        assert event["type"] == "search.results"
+        assert len(event["data"]["results"]) == 0

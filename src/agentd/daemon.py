@@ -121,6 +121,99 @@ class AgentDaemon:
                     session_id, checkpoint_id, self.emit_event
                 )
 
+            case "search.events":
+                query = request.params["query"]
+                session_id = request.params.get("session_id")
+                limit = request.params.get("limit", 50)
+                results = await self.store.search_events(
+                    query, session_id=session_id, limit=limit
+                )
+                self.emit_event(
+                    Event(
+                        type=EventType.SEARCH_RESULTS,
+                        data={
+                            "request_id": request.id,
+                            "results": [
+                                {
+                                    "id": r.id,
+                                    "session_id": r.session_id,
+                                    "ts": r.ts.isoformat(),
+                                    "type": r.type,
+                                    "payload": r.payload,
+                                }
+                                for r in results
+                            ],
+                        },
+                    )
+                )
+
+            case "search.checkpoints":
+                query = request.params["query"]
+                session_id = request.params.get("session_id")
+                limit = request.params.get("limit", 50)
+                results = await self.store.search_checkpoints(
+                    query, session_id=session_id, limit=limit
+                )
+                self.emit_event(
+                    Event(
+                        type=EventType.SEARCH_RESULTS,
+                        data={
+                            "request_id": request.id,
+                            "results": [
+                                {
+                                    "checkpoint_id": r.checkpoint_id,
+                                    "session_id": r.session_id,
+                                    "session_node_id": r.session_node_id,
+                                    "jj_commit_id": r.jj_commit_id,
+                                    "bookmark_name": r.bookmark_name,
+                                    "message": r.message,
+                                    "created_at": r.created_at.isoformat(),
+                                }
+                                for r in results
+                            ],
+                        },
+                    )
+                )
+
+            case "search.all":
+                query = request.params["query"]
+                session_id = request.params.get("session_id")
+                limit = request.params.get("limit", 50)
+                results = await self.store.search_all(
+                    query, session_id=session_id, limit=limit
+                )
+                self.emit_event(
+                    Event(
+                        type=EventType.SEARCH_RESULTS,
+                        data={
+                            "request_id": request.id,
+                            "events": [
+                                {
+                                    "id": r.id,
+                                    "session_id": r.session_id,
+                                    "ts": r.ts.isoformat(),
+                                    "type": r.type,
+                                    "payload": r.payload,
+                                }
+                                for r in results["events"]
+                            ],
+                            "checkpoints": [
+                                {
+                                    "checkpoint_id": r.checkpoint_id,
+                                    "session_id": r.session_id,
+                                    "session_node_id": r.session_node_id,
+                                    "jj_commit_id": r.jj_commit_id,
+                                    "bookmark_name": r.bookmark_name,
+                                    "message": r.message,
+                                    "created_at": r.created_at.isoformat(),
+                                }
+                                for r in results["checkpoints"]
+                            ],
+                            "total": results["total"],
+                        },
+                    )
+                )
+
             case _:
                 self.emit_event(
                     Event(

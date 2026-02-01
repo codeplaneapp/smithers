@@ -4,6 +4,8 @@ import SwiftUI
 struct SmithersView: View {
     @State private var sessions: [Session] = Session.mockSessions
     @State private var selectedSessionId: UUID? = Session.mockSessions.first?.id
+    @State private var showSearch: Bool = false
+    @State private var selectedSearchResult: SearchResult?
 
     var body: some View {
         NavigationSplitView {
@@ -16,6 +18,26 @@ struct SmithersView: View {
             SessionDetail(session: selectedSession)
         }
         .frame(minWidth: 800, minHeight: 500)
+        .sheet(isPresented: $showSearch) {
+            SearchView(
+                isPresented: $showSearch,
+                selectedResult: $selectedSearchResult,
+                onSendRequest: { request in
+                    // TODO: Wire to AgentClient when available
+                    print("Search request: \(request.method)")
+                }
+            )
+        }
+        .onChange(of: selectedSearchResult) { _, result in
+            if let result = result {
+                // TODO: Navigate to the result in the session
+                print("Selected result: \(result.title)")
+            }
+        }
+        .onKeyPress(.init("f", modifiers: .command)) {
+            showSearch.toggle()
+            return .handled
+        }
     }
 
     private var selectedSession: Session? {

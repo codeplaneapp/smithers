@@ -46,6 +46,9 @@ enum AgentEventType: String, Codable {
     case formCreate = "form.create"
     case formSubmit = "form.submit"
 
+    // Search
+    case searchResults = "search.results"
+
     // Generic error
     case error = "error"
 }
