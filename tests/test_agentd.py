@@ -1119,6 +1119,263 @@ class TestAnthropicAdapter:
             assert tool_start.data["name"] == "bash"
             assert tool_start.data["input"] == {"command": "ls -la"}
 
+    @pytest.mark.asyncio
+    async def test_malformed_json_in_tool_input(self):
+        """Test that malformed JSON in tool input falls back to empty dict."""
+        from unittest.mock import MagicMock
+
+        from agentd.adapters.anthropic import AnthropicAgentAdapter
+        from agentd.protocol.events import EventType
+
+        # Skip if anthropic is not installed
+        pytest.importorskip("anthropic")
+
+        adapter = AnthropicAgentAdapter()
+
+        # Create mock events simulating content_block_start, malformed delta, and stop
+        class MockContentBlock:
+            type = "tool_use"
+            id = "tool-1"
+            name = "test_tool"
+
+        class MockStartEvent:
+            type = "content_block_start"
+            content_block = MockContentBlock()
+
+        class MockDeltaEvent:
+            type = "content_block_delta"
+
+            class Delta:
+                type = "input_json_delta"
+                partial_json = '{"key": invalid json'  # Malformed JSON
+
+            delta = Delta()
+
+        class MockStopEvent:
+            type = "content_block_stop"
+
+        class MockMessageStop:
+            type = "message_stop"
+
+        # Mock stream object
+        class MockStream:
+            def __init__(self):
+                self.current_message_snapshot = MagicMock()
+                self.current_message_snapshot.id = "msg-123"
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+            async def __aiter__(self):
+                yield MockStartEvent()
+                yield MockDeltaEvent()
+                yield MockStopEvent()
+                yield MockMessageStop()
+
+        # Patch the client
+        original_stream = adapter.client.messages.stream
+        adapter.client.messages.stream = lambda **kwargs: MockStream()
+
+        try:
+            events = []
+
+            def collect_event(event):
+                events.append(event)
+
+            async for _event in adapter.run(
+                messages=[{"role": "user", "content": "test"}],
+                tools=[],
+                emit=collect_event,
+            ):
+                pass
+
+            # Find TOOL_START event
+            tool_start_events = [e for e in events if e.type == EventType.TOOL_START]
+            assert len(tool_start_events) == 1
+
+            # Verify that malformed JSON defaulted to empty dict
+            tool_start = tool_start_events[0]
+            assert tool_start.data["tool_use_id"] == "tool-1"
+            assert tool_start.data["name"] == "test_tool"
+            assert tool_start.data["input"] == {}  # Should be empty due to malformed JSON
+        finally:
+            adapter.client.messages.stream = original_stream
+
+    @pytest.mark.asyncio
+    async def test_empty_tool_input_buffer(self):
+        """Test that empty tool input buffer results in empty dict."""
+        from unittest.mock import MagicMock
+
+        from agentd.adapters.anthropic import AnthropicAgentAdapter
+        from agentd.protocol.events import EventType
+
+        # Skip if anthropic is not installed
+        pytest.importorskip("anthropic")
+
+        adapter = AnthropicAgentAdapter()
+
+        # Simulate tool_use with no input deltas
+        class MockContentBlock:
+            type = "tool_use"
+            id = "tool-2"
+            name = "no_input_tool"
+
+        class MockStartEvent:
+            type = "content_block_start"
+            content_block = MockContentBlock()
+
+        class MockStopEvent:
+            type = "content_block_stop"
+
+        class MockMessageStop:
+            type = "message_stop"
+
+        # Mock stream object
+        class MockStream:
+            def __init__(self):
+                self.current_message_snapshot = MagicMock()
+                self.current_message_snapshot.id = "msg-456"
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+            async def __aiter__(self):
+                yield MockStartEvent()
+                # No delta events - go straight to stop
+                yield MockStopEvent()
+                yield MockMessageStop()
+
+        # Patch the client
+        original_stream = adapter.client.messages.stream
+        adapter.client.messages.stream = lambda **kwargs: MockStream()
+
+        try:
+            events = []
+
+            def collect_event(event):
+                events.append(event)
+
+            async for _event in adapter.run(
+                messages=[{"role": "user", "content": "test"}],
+                tools=[],
+                emit=collect_event,
+            ):
+                pass
+
+            # Find TOOL_START event
+            tool_start_events = [e for e in events if e.type == EventType.TOOL_START]
+            assert len(tool_start_events) == 1
+
+            # Verify empty input becomes empty dict
+            tool_start = tool_start_events[0]
+            assert tool_start.data["input"] == {}
+        finally:
+            adapter.client.messages.stream = original_stream
+
+    @pytest.mark.asyncio
+    async def test_cancel_clears_stream(self):
+        """Test that cancel() clears the current stream reference."""
+        from agentd.adapters.anthropic import AnthropicAgentAdapter
+
+        # Skip if anthropic is not installed
+        pytest.importorskip("anthropic")
+
+        adapter = AnthropicAgentAdapter()
+
+        # Set a mock stream
+        adapter._current_stream = "mock_stream"
+
+        # Cancel should clear it
+        await adapter.cancel()
+
+        assert adapter._current_stream is None
+
+    @pytest.mark.asyncio
+    async def test_text_accumulation(self):
+        """Test that text deltas are accumulated for ASSISTANT_FINAL."""
+        from unittest.mock import MagicMock
+
+        from agentd.adapters.anthropic import AnthropicAgentAdapter
+        from agentd.protocol.events import EventType
+
+        # Skip if anthropic is not installed
+        pytest.importorskip("anthropic")
+
+        adapter = AnthropicAgentAdapter()
+
+        # Simulate multiple text deltas
+        class MockTextDelta1:
+            type = "content_block_delta"
+
+            class Delta:
+                text = "Hello, "
+
+            delta = Delta()
+
+        class MockTextDelta2:
+            type = "content_block_delta"
+
+            class Delta:
+                text = "world!"
+
+            delta = Delta()
+
+        class MockMessageStop:
+            type = "message_stop"
+
+        # Mock stream object
+        class MockStream:
+            def __init__(self):
+                self.current_message_snapshot = MagicMock()
+                self.current_message_snapshot.id = "msg-789"
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+            async def __aiter__(self):
+                yield MockTextDelta1()
+                yield MockTextDelta2()
+                yield MockMessageStop()
+
+        # Patch the client
+        original_stream = adapter.client.messages.stream
+        adapter.client.messages.stream = lambda **kwargs: MockStream()
+
+        try:
+            events = []
+
+            def collect_event(event):
+                events.append(event)
+
+            async for _event in adapter.run(
+                messages=[{"role": "user", "content": "test"}],
+                tools=[],
+                emit=collect_event,
+            ):
+                pass
+
+            # Verify delta events
+            delta_events = [e for e in events if e.type == EventType.ASSISTANT_DELTA]
+            assert len(delta_events) == 2
+            assert delta_events[0].data["text"] == "Hello, "
+            assert delta_events[1].data["text"] == "world!"
+
+            # Verify final event has accumulated text
+            final_events = [e for e in events if e.type == EventType.ASSISTANT_FINAL]
+            assert len(final_events) == 1
+            assert final_events[0].data["text"] == "Hello, world!"
+        finally:
+            adapter.client.messages.stream = original_stream
+
 
 class TestRepoStateService:
     """Test JJ integration for checkpoints."""
