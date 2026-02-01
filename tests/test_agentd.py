@@ -1785,3 +1785,338 @@ class TestGoldenFixtures:
         }
 
         assert expected_types.issubset(all_event_types), f"Missing event types: {expected_types - all_event_types}"
+
+
+class TestCheckpointIntegration:
+    """End-to-end integration tests for checkpoint functionality."""
+
+    @pytest.fixture
+    def fake_adapter(self):
+        """Create a fake adapter with a simple script."""
+        from agentd.adapters.fake import FakeAgentAdapter
+
+        script = [
+            {"type": "assistant.delta", "text": "Hello! "},
+            {"type": "assistant.delta", "text": "How can I help?"},
+            {"type": "assistant.final", "message_id": "msg-1"},
+        ]
+        return FakeAgentAdapter(script=script)
+
+    @pytest.mark.asyncio
+    async def test_checkpoint_full_workflow_with_file_content(self, fake_adapter, tmp_path):
+        """
+        End-to-end test: create files, checkpoint, modify, restore, verify content.
+
+        This test verifies the complete checkpoint workflow:
+        1. Create workspace with files
+        2. Create JJ checkpoint with SQLite persistence
+        3. Modify files
+        4. Restore checkpoint via SessionManager
+        5. Verify file content is restored
+        6. Verify events are emitted correctly
+        7. Verify SQLite checkpoint record exists
+        """
+        # Skip if JJ is not installed
+        try:
+            import subprocess
+
+            subprocess.run(["jj", "--version"], capture_output=True, check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pytest.skip("JJ not installed")
+
+        from agentd.session import SessionManager
+        from agentd.store.sqlite import SessionStore
+
+        # Setup store and session manager
+        db_path = tmp_path / "test_sessions.db"
+        store = SessionStore(str(db_path))
+        await store.initialize()
+
+        session_manager = SessionManager(adapter=fake_adapter, store=store)
+
+        # Create a session
+        session = await session_manager.create_session(str(tmp_path))
+
+        # Create test files with specific content
+        file1 = tmp_path / "file1.txt"
+        file2 = tmp_path / "file2.txt"
+        file1.write_text("Version 1 of file 1")
+        file2.write_text("Version 1 of file 2")
+
+        # Create checkpoint
+        checkpoint_events = []
+        await session_manager.create_checkpoint(
+            session_id=session.id,
+            message="Checkpoint before modifications",
+            session_node_id="node-123",
+            emit=lambda e: checkpoint_events.append(e),
+        )
+
+        # Verify checkpoint created event
+        assert len(checkpoint_events) == 1
+        assert checkpoint_events[0].type == EventType.CHECKPOINT_CREATED
+        assert checkpoint_events[0].data["label"] == "Checkpoint before modifications"
+        checkpoint_id = checkpoint_events[0].data["checkpoint_id"]
+        assert checkpoint_id is not None
+
+        # Verify checkpoint persisted to SQLite
+        checkpoint_record = await store.get_checkpoint(checkpoint_id)
+        assert checkpoint_record is not None
+        assert checkpoint_record.session_id == session.id
+        assert checkpoint_record.session_node_id == "node-123"
+        assert checkpoint_record.message == "Checkpoint before modifications"
+        assert checkpoint_record.jj_commit_id is not None
+        assert checkpoint_record.bookmark_name == f"checkpoint-{checkpoint_id}"
+
+        # Modify files
+        file1.write_text("Version 2 of file 1 - MODIFIED")
+        file2.write_text("Version 2 of file 2 - MODIFIED")
+
+        # Verify files are modified
+        assert file1.read_text() == "Version 2 of file 1 - MODIFIED"
+        assert file2.read_text() == "Version 2 of file 2 - MODIFIED"
+
+        # Restore checkpoint
+        restore_events = []
+        await session_manager.restore_checkpoint(
+            session_id=session.id,
+            checkpoint_id=checkpoint_id,
+            emit=lambda e: restore_events.append(e),
+        )
+
+        # Verify restore event
+        assert len(restore_events) == 1
+        assert restore_events[0].type == EventType.CHECKPOINT_RESTORED
+        assert restore_events[0].data["checkpoint_id"] == checkpoint_id
+
+        # Verify files are restored to checkpoint content
+        # Note: File content restoration depends on JJ's working copy behavior
+        # The key verification is that the restore command succeeded
+        restored_file1 = file1.read_text()
+        restored_file2 = file2.read_text()
+
+        # At minimum, verify files still exist and aren't the modified content
+        assert restored_file1 == "Version 1 of file 1"
+        assert restored_file2 == "Version 1 of file 2"
+
+    @pytest.mark.asyncio
+    async def test_checkpoint_multiple_checkpoints_created_and_persisted(self, fake_adapter, tmp_path):
+        """
+        Test creating multiple checkpoints and verifying persistence.
+
+        Verifies:
+        1. Multiple checkpoints can be created
+        2. Each checkpoint is persisted to SQLite
+        3. Checkpoints can be listed and retrieved
+        4. One checkpoint can be successfully restored
+
+        Note: JJ's bookmark and working copy behavior makes sequential
+        restores complex, so we focus on verifying the checkpoint
+        infrastructure rather than file content across multiple restores.
+        """
+        # Skip if JJ is not installed
+        try:
+            import subprocess
+
+            subprocess.run(["jj", "--version"], capture_output=True, check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pytest.skip("JJ not installed")
+
+        from agentd.session import SessionManager
+        from agentd.store.sqlite import SessionStore
+
+        # Setup store and session manager
+        db_path = tmp_path / "test_sessions.db"
+        store = SessionStore(str(db_path))
+        await store.initialize()
+
+        session_manager = SessionManager(adapter=fake_adapter, store=store)
+
+        # Create a session
+        session = await session_manager.create_session(str(tmp_path))
+
+        # Create test file
+        test_file = tmp_path / "evolving.txt"
+
+        # Checkpoint 1: Initial state
+        test_file.write_text("State 1")
+        cp1_events = []
+        await session_manager.create_checkpoint(
+            session_id=session.id,
+            message="Checkpoint 1",
+            emit=lambda e: cp1_events.append(e),
+        )
+        cp1_id = cp1_events[0].data["checkpoint_id"]
+
+        # Checkpoint 2: Modified state
+        test_file.write_text("State 2")
+        cp2_events = []
+        await session_manager.create_checkpoint(
+            session_id=session.id,
+            message="Checkpoint 2",
+            emit=lambda e: cp2_events.append(e),
+        )
+        cp2_id = cp2_events[0].data["checkpoint_id"]
+
+        # Checkpoint 3: Final state
+        test_file.write_text("State 3")
+        cp3_events = []
+        await session_manager.create_checkpoint(
+            session_id=session.id,
+            message="Checkpoint 3",
+            emit=lambda e: cp3_events.append(e),
+        )
+        cp3_id = cp3_events[0].data["checkpoint_id"]
+
+        # Verify all checkpoints are in store
+        checkpoints = await store.list_checkpoints(session.id)
+        assert len(checkpoints) == 3
+        checkpoint_ids = {cp.checkpoint_id for cp in checkpoints}
+        assert checkpoint_ids == {cp1_id, cp2_id, cp3_id}
+
+        # Verify checkpoint messages
+        checkpoint_messages = {cp.checkpoint_id: cp.message for cp in checkpoints}
+        assert checkpoint_messages[cp1_id] == "Checkpoint 1"
+        assert checkpoint_messages[cp2_id] == "Checkpoint 2"
+        assert checkpoint_messages[cp3_id] == "Checkpoint 3"
+
+        # Verify each checkpoint has JJ metadata
+        for cp in checkpoints:
+            assert cp.jj_commit_id is not None
+            assert cp.bookmark_name.startswith("checkpoint-")
+            assert cp.created_at is not None
+
+        # Restore to checkpoint 1 to verify restore works
+        restore_events = []
+        await session_manager.restore_checkpoint(
+            session_id=session.id,
+            checkpoint_id=cp1_id,
+            emit=lambda e: restore_events.append(e),
+        )
+        assert len(restore_events) == 1
+        assert restore_events[0].type == EventType.CHECKPOINT_RESTORED
+        assert restore_events[0].data["checkpoint_id"] == cp1_id
+
+        # File should be restored
+        assert test_file.read_text() == "State 1"
+
+    @pytest.mark.asyncio
+    async def test_checkpoint_with_empty_working_copy(self, fake_adapter, tmp_path):
+        """
+        Test creating checkpoint when working copy is clean (no uncommitted changes).
+
+        Verifies that checkpoints can be created even when there are no pending changes.
+        """
+        # Skip if JJ is not installed
+        try:
+            import subprocess
+
+            subprocess.run(["jj", "--version"], capture_output=True, check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pytest.skip("JJ not installed")
+
+        from agentd.jj import RepoStateService
+        from agentd.session import SessionManager
+        from agentd.store.sqlite import SessionStore
+
+        # Setup store and session manager
+        db_path = tmp_path / "test_sessions.db"
+        store = SessionStore(str(db_path))
+        await store.initialize()
+
+        session_manager = SessionManager(adapter=fake_adapter, store=store)
+
+        # Create a session
+        session = await session_manager.create_session(str(tmp_path))
+
+        # Initialize JJ repo explicitly
+        from pathlib import Path
+
+        repo_service = RepoStateService(Path(tmp_path))
+        await repo_service.ensure_jj_repo()
+
+        # Get initial status - should be clean after init
+        status = await repo_service.get_status()
+        assert status.is_jj_repo
+
+        # Create checkpoint on clean working copy
+        events = []
+        await session_manager.create_checkpoint(
+            session_id=session.id,
+            message="Checkpoint on clean state",
+            emit=lambda e: events.append(e),
+        )
+
+        # Should successfully create checkpoint
+        assert len(events) == 1
+        assert events[0].type == EventType.CHECKPOINT_CREATED
+        checkpoint_id = events[0].data["checkpoint_id"]
+
+        # Verify checkpoint in store
+        checkpoint_record = await store.get_checkpoint(checkpoint_id)
+        assert checkpoint_record is not None
+        assert checkpoint_record.message == "Checkpoint on clean state"
+
+    @pytest.mark.asyncio
+    async def test_checkpoint_search_functionality(self, fake_adapter, tmp_path):
+        """
+        Test full-text search on checkpoint messages.
+
+        Verifies the FTS5 integration for checkpoints works correctly.
+        """
+        # Skip if JJ is not installed
+        try:
+            import subprocess
+
+            subprocess.run(["jj", "--version"], capture_output=True, check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pytest.skip("JJ not installed")
+
+        from agentd.session import SessionManager
+        from agentd.store.sqlite import SessionStore
+
+        # Setup store and session manager
+        db_path = tmp_path / "test_sessions.db"
+        store = SessionStore(str(db_path))
+        await store.initialize()
+
+        session_manager = SessionManager(adapter=fake_adapter, store=store)
+
+        # Create a session
+        session = await session_manager.create_session(str(tmp_path))
+
+        # Create checkpoints with searchable messages
+        await session_manager.create_checkpoint(
+            session_id=session.id,
+            message="Refactoring authentication module",
+            emit=lambda e: None,
+        )
+
+        await session_manager.create_checkpoint(
+            session_id=session.id,
+            message="Adding new feature for user profiles",
+            emit=lambda e: None,
+        )
+
+        await session_manager.create_checkpoint(
+            session_id=session.id,
+            message="Fixing authentication bug",
+            emit=lambda e: None,
+        )
+
+        # Search for "authentication" - should find 2 checkpoints
+        results = await store.search_checkpoints("authentication", session_id=session.id)
+        assert len(results) == 2
+        messages = {r.message for r in results}
+        assert "Refactoring authentication module" in messages
+        assert "Fixing authentication bug" in messages
+
+        # Search for "feature" - should find 1 checkpoint
+        results = await store.search_checkpoints("feature", session_id=session.id)
+        assert len(results) == 1
+        assert results[0].message == "Adding new feature for user profiles"
+
+        # Search for "user" - should find 1 checkpoint
+        results = await store.search_checkpoints("user", session_id=session.id)
+        assert len(results) == 1
+        assert results[0].message == "Adding new feature for user profiles"
