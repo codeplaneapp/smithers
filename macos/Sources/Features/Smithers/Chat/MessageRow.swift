@@ -36,9 +36,7 @@ struct MessageRow: View {
                 }
 
                 // Message text with markdown rendering
-                Text(markdownContent)
-                    .font(.system(size: 14))
-                    .textSelection(.enabled)
+                MarkdownView(content: message.content, isStreaming: message.isStreaming)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Timestamp
@@ -87,31 +85,6 @@ struct MessageRow: View {
         }
     }
 
-    /// Render markdown content using AttributedString
-    private var markdownContent: AttributedString {
-        do {
-            var attributedString = try AttributedString(
-                markdown: message.content,
-                options: AttributedString.MarkdownParsingOptions(
-                    interpretedSyntax: .inlineOnlyPreservingWhitespace
-                )
-            )
-
-            // Apply consistent styling to code blocks
-            for run in attributedString.runs {
-                if run.inlinePresentationIntent?.contains(.code) == true {
-                    let range = run.range
-                    attributedString[range].backgroundColor = NSColor.textBackgroundColor.withAlphaComponent(0.1)
-                    attributedString[range].font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-                }
-            }
-
-            return attributedString
-        } catch {
-            // Fallback to plain text if markdown parsing fails
-            return AttributedString(message.content)
-        }
-    }
 
     // MARK: - Subviews
 
