@@ -14,7 +14,7 @@ from typing import Any
 
 from agentd.adapters.base import AgentAdapter
 from agentd.protocol.events import Event, EventType
-from smithers.store.sqlite import SqliteStore
+from agentd.store.sqlite import SessionStore
 
 
 @dataclass
@@ -41,7 +41,7 @@ class SessionManager:
     def __init__(
         self,
         adapter: AgentAdapter,
-        store: SqliteStore | None = None,
+        store: SessionStore | None = None,
         config: Any = None,
     ):
         """Initialize the session manager with an agent adapter.
@@ -61,6 +61,14 @@ class SessionManager:
         """Create a new session."""
         session = Session.create(workspace_root)
         self.sessions[session.id] = session
+
+        # Persist session to store if available
+        if self.store:
+            await self.store.create_session(
+                session_id=session.id,
+                workspace_root=workspace_root,
+            )
+
         return session
 
     async def send_message(
@@ -97,7 +105,7 @@ class SessionManager:
             # Persist to store if available (schedule as background task)
             if self.store:
                 task = asyncio.create_task(
-                    self.store.append_session_event(
+                    self.store.append_event(
                         session_id=session_id,
                         event_type=event.type.value,
                         payload=event.data,
@@ -250,5 +258,163 @@ class SessionManager:
                     Event(
                         type=EventType.SKILL_END,
                         data={"skill_id": skill_id, "status": "error", "error": str(e)},
+                    )
+                )
+
+    async def create_checkpoint(
+        self,
+        session_id: str,
+        message: str,
+        session_node_id: str | None = None,
+        emit: Callable[[Event], None] | None = None,
+    ) -> None:
+        """Create a checkpoint in the session's workspace.
+
+        Args:
+            session_id: ID of the session to create checkpoint for
+            message: Human-readable description of the checkpoint
+            session_node_id: Optional graph node ID to associate with this checkpoint
+            emit: Optional callback for events
+        """
+        from pathlib import Path
+
+        from agentd.jj import JJNotFoundError, RepoStateService
+
+        session = self.sessions.get(session_id)
+        if not session:
+            if emit:
+                emit(
+                    Event(
+                        type=EventType.ERROR,
+                        data={"message": f"Session not found: {session_id}"},
+                    )
+                )
+            return
+
+        # Generate checkpoint ID
+        checkpoint_id = str(uuid.uuid4())
+
+        try:
+            # Initialize RepoStateService
+            repo_service = RepoStateService(Path(session.workspace_root))
+
+            # Create checkpoint
+            checkpoint = await repo_service.create_checkpoint(checkpoint_id, message)
+
+            # Persist to store if available
+            if self.store:
+                await self.store.create_checkpoint(
+                    checkpoint_id=checkpoint_id,
+                    session_id=session_id,
+                    session_node_id=session_node_id,
+                    jj_commit_id=checkpoint.jj_commit_id,
+                    bookmark_name=checkpoint.bookmark_name,
+                    message=message,
+                )
+
+            # Emit checkpoint created event
+            if emit:
+                emit(
+                    Event(
+                        type=EventType.CHECKPOINT_CREATED,
+                        data={
+                            "checkpoint_id": checkpoint_id,
+                            "label": message,
+                            "jj_commit_id": checkpoint.jj_commit_id,
+                            "bookmark_name": checkpoint.bookmark_name,
+                        },
+                    )
+                )
+
+        except JJNotFoundError as e:
+            if emit:
+                emit(
+                    Event(
+                        type=EventType.ERROR,
+                        data={"message": str(e)},
+                    )
+                )
+        except Exception as e:
+            if emit:
+                emit(
+                    Event(
+                        type=EventType.ERROR,
+                        data={"message": f"Failed to create checkpoint: {e}"},
+                    )
+                )
+
+    async def restore_checkpoint(
+        self,
+        session_id: str,
+        checkpoint_id: str,
+        emit: Callable[[Event], None] | None = None,
+    ) -> None:
+        """Restore a checkpoint in the session's workspace.
+
+        Args:
+            session_id: ID of the session to restore checkpoint for
+            checkpoint_id: The checkpoint ID to restore
+            emit: Optional callback for events
+        """
+        from pathlib import Path
+
+        from agentd.jj import JJNotFoundError, RepoStateService
+
+        session = self.sessions.get(session_id)
+        if not session:
+            if emit:
+                emit(
+                    Event(
+                        type=EventType.ERROR,
+                        data={"message": f"Session not found: {session_id}"},
+                    )
+                )
+            return
+
+        try:
+            # Verify checkpoint exists in store
+            if self.store:
+                checkpoint_record = await self.store.get_checkpoint(checkpoint_id)
+                if not checkpoint_record:
+                    if emit:
+                        emit(
+                            Event(
+                                type=EventType.ERROR,
+                                data={"message": f"Checkpoint not found: {checkpoint_id}"},
+                            )
+                        )
+                    return
+
+            # Initialize RepoStateService
+            repo_service = RepoStateService(Path(session.workspace_root))
+
+            # Restore checkpoint
+            await repo_service.restore_checkpoint(checkpoint_id)
+
+            # Emit checkpoint restored event
+            if emit:
+                emit(
+                    Event(
+                        type=EventType.CHECKPOINT_RESTORED,
+                        data={
+                            "checkpoint_id": checkpoint_id,
+                        },
+                    )
+                )
+
+        except JJNotFoundError as e:
+            if emit:
+                emit(
+                    Event(
+                        type=EventType.ERROR,
+                        data={"message": str(e)},
+                    )
+                )
+        except Exception as e:
+            if emit:
+                emit(
+                    Event(
+                        type=EventType.ERROR,
+                        data={"message": f"Failed to restore checkpoint: {e}"},
                     )
                 )

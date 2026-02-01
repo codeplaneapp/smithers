@@ -211,11 +211,11 @@ class TestSessionManager:
     async def test_event_persistence(self, fake_adapter, tmp_path):
         """Test that events are persisted to the store."""
         from agentd.session import SessionManager
-        from smithers.store.sqlite import SqliteStore
+        from agentd.store.sqlite import SessionStore
 
         # Create a store
         db_path = tmp_path / "test_sessions.db"
-        store = SqliteStore(str(db_path))
+        store = SessionStore(str(db_path))
         await store.initialize()
 
         # Create session manager with store
@@ -233,7 +233,7 @@ class TestSessionManager:
         await asyncio.sleep(0.1)
 
         # Verify events were persisted
-        events = await store.get_session_events(session.id)
+        events = await store.get_events(session.id)
         assert len(events) > 0
 
         # Should have RUN_STARTED, ASSISTANT_DELTA (x2), ASSISTANT_FINAL, RUN_FINISHED
@@ -242,6 +242,191 @@ class TestSessionManager:
         assert "assistant.delta" in event_types
         assert "assistant.final" in event_types
         assert "run.finished" in event_types
+
+    @pytest.mark.asyncio
+    async def test_create_checkpoint(self, fake_adapter, tmp_path):
+        """Test creating a checkpoint via SessionManager."""
+        from agentd.session import SessionManager
+        from agentd.store.sqlite import SessionStore
+
+        # Skip if JJ is not installed
+        try:
+            import subprocess
+
+            subprocess.run(["jj", "--version"], capture_output=True, check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pytest.skip("JJ not installed")
+
+        # Create a store
+        db_path = tmp_path / "test_sessions.db"
+        store = SessionStore(str(db_path))
+        await store.initialize()
+
+        # Create session manager with store
+        session_manager = SessionManager(adapter=fake_adapter, store=store)
+
+        # Create a session
+        session = await session_manager.create_session(str(tmp_path))
+
+        # Collect events
+        events = []
+
+        def collect_event(event):
+            events.append(event)
+
+        # Create checkpoint
+        await session_manager.create_checkpoint(
+            session_id=session.id,
+            message="Test checkpoint",
+            emit=collect_event,
+        )
+
+        # Verify checkpoint created event was emitted
+        checkpoint_events = [e for e in events if e.type == EventType.CHECKPOINT_CREATED]
+        assert len(checkpoint_events) == 1
+
+        checkpoint_event = checkpoint_events[0]
+        assert "checkpoint_id" in checkpoint_event.data
+        assert checkpoint_event.data["label"] == "Test checkpoint"
+        assert "jj_commit_id" in checkpoint_event.data
+        assert "bookmark_name" in checkpoint_event.data
+
+        # Verify checkpoint was persisted to store
+        checkpoint_id = checkpoint_event.data["checkpoint_id"]
+        checkpoint_record = await store.get_checkpoint(checkpoint_id)
+        assert checkpoint_record is not None
+        assert checkpoint_record.message == "Test checkpoint"
+        assert checkpoint_record.session_id == session.id
+
+    @pytest.mark.asyncio
+    async def test_create_checkpoint_session_not_found(self, session_manager):
+        """Test error when creating checkpoint for nonexistent session."""
+        events = []
+
+        await session_manager.create_checkpoint(
+            session_id="nonexistent",
+            message="Test checkpoint",
+            emit=lambda e: events.append(e),
+        )
+
+        # Should emit ERROR event
+        assert len(events) == 1
+        assert events[0].type == EventType.ERROR
+        assert "not found" in events[0].data["message"]
+
+    @pytest.mark.asyncio
+    async def test_restore_checkpoint(self, fake_adapter, tmp_path):
+        """Test restoring a checkpoint via SessionManager."""
+        from agentd.session import SessionManager
+        from agentd.store.sqlite import SessionStore
+
+        # Skip if JJ is not installed
+        try:
+            import subprocess
+
+            subprocess.run(["jj", "--version"], capture_output=True, check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pytest.skip("JJ not installed")
+
+        # Create a store
+        db_path = tmp_path / "test_sessions.db"
+        store = SessionStore(str(db_path))
+        await store.initialize()
+
+        # Create session manager with store
+        session_manager = SessionManager(adapter=fake_adapter, store=store)
+
+        # Create a session
+        session = await session_manager.create_session(str(tmp_path))
+
+        # Create a checkpoint first
+        create_events = []
+        await session_manager.create_checkpoint(
+            session_id=session.id,
+            message="Test checkpoint",
+            emit=lambda e: create_events.append(e),
+        )
+
+        checkpoint_id = None
+        for event in create_events:
+            if event.type == EventType.CHECKPOINT_CREATED:
+                checkpoint_id = event.data["checkpoint_id"]
+                break
+
+        assert checkpoint_id is not None
+
+        # Modify the workspace
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("modified content")
+
+        # Restore the checkpoint
+        restore_events = []
+        await session_manager.restore_checkpoint(
+            session_id=session.id,
+            checkpoint_id=checkpoint_id,
+            emit=lambda e: restore_events.append(e),
+        )
+
+        # Verify checkpoint restored event was emitted
+        restored_events = [
+            e for e in restore_events if e.type == EventType.CHECKPOINT_RESTORED
+        ]
+        assert len(restored_events) == 1
+        assert restored_events[0].data["checkpoint_id"] == checkpoint_id
+
+    @pytest.mark.asyncio
+    async def test_restore_checkpoint_session_not_found(self, session_manager):
+        """Test error when restoring checkpoint for nonexistent session."""
+        events = []
+
+        await session_manager.restore_checkpoint(
+            session_id="nonexistent",
+            checkpoint_id="cp-123",
+            emit=lambda e: events.append(e),
+        )
+
+        # Should emit ERROR event
+        assert len(events) == 1
+        assert events[0].type == EventType.ERROR
+        assert "not found" in events[0].data["message"]
+
+    @pytest.mark.asyncio
+    async def test_restore_nonexistent_checkpoint(self, fake_adapter, tmp_path):
+        """Test error when restoring nonexistent checkpoint."""
+        from agentd.session import SessionManager
+        from agentd.store.sqlite import SessionStore
+
+        # Skip if JJ is not installed
+        try:
+            import subprocess
+
+            subprocess.run(["jj", "--version"], capture_output=True, check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pytest.skip("JJ not installed")
+
+        # Create a store
+        db_path = tmp_path / "test_sessions.db"
+        store = SessionStore(str(db_path))
+        await store.initialize()
+
+        # Create session manager with store
+        session_manager = SessionManager(adapter=fake_adapter, store=store)
+
+        # Create a session
+        session = await session_manager.create_session(str(tmp_path))
+
+        # Try to restore nonexistent checkpoint
+        events = []
+        await session_manager.restore_checkpoint(
+            session_id=session.id,
+            checkpoint_id="nonexistent-cp",
+            emit=lambda e: events.append(e),
+        )
+
+        # Should emit ERROR event
+        assert len(events) == 1
+        assert events[0].type == EventType.ERROR
+        assert "not found" in events[0].data["message"]
 
 
 class TestRepoStateService:
@@ -617,6 +802,7 @@ class TestSkillsSystem:
             workspace_root=str(tmp_path),
             sandbox_mode="host",
             agent_backend="fake",
+            db_path=str(tmp_path / "test_sessions.db"),
         )
 
         input_stream = StringIO()
@@ -645,6 +831,9 @@ class TestSkillsSystem:
         ]
 
         daemon = AgentDaemon(config, input_stream, output_stream)
+
+        # Initialize the store
+        await daemon.store.initialize()
 
         # Process first request to create session
         input_stream.write(requests[0] + "\n")

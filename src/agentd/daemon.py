@@ -15,7 +15,7 @@ from agentd.adapters.fake import FakeAgentAdapter
 from agentd.protocol.events import Event, EventType
 from agentd.protocol.requests import Request, parse_request
 from agentd.session import SessionManager
-from smithers.store.sqlite import SqliteStore
+from agentd.store.sqlite import SessionStore
 
 
 @dataclass
@@ -51,7 +51,7 @@ class AgentDaemon:
         adapter = self._create_adapter()
 
         # Create SQLite store for event persistence
-        self.store = SqliteStore(config.db_path)
+        self.store = SessionStore(config.db_path)
 
         self.session_manager = SessionManager(adapter=adapter, store=self.store, config=config)
         self._running = False
@@ -104,6 +104,21 @@ class AgentDaemon:
                 args = request.params.get("args")
                 await self.session_manager.run_skill(
                     session_id, skill_id, args, self.emit_event
+                )
+
+            case "checkpoint.create":
+                session_id = request.params["session_id"]
+                message = request.params["message"]
+                session_node_id = request.params.get("session_node_id")
+                await self.session_manager.create_checkpoint(
+                    session_id, message, session_node_id, self.emit_event
+                )
+
+            case "checkpoint.restore":
+                session_id = request.params["session_id"]
+                checkpoint_id = request.params["checkpoint_id"]
+                await self.session_manager.restore_checkpoint(
+                    session_id, checkpoint_id, self.emit_event
                 )
 
             case _:
