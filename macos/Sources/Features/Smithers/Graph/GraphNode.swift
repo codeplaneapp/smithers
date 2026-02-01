@@ -158,6 +158,20 @@ class SessionGraph: ObservableObject {
                     isRunning: isRunning
                 )))
 
+            case .checkpoint:
+                let checkpointId = (node.data["checkpoint_id"]?.value as? String) ?? node.id.uuidString
+                let label = (node.data["label"]?.value as? String) ?? "Checkpoint"
+                let jjCommitId = node.data["jj_commit_id"]?.value as? String
+                let bookmarkName = node.data["bookmark_name"]?.value as? String
+                items.append(.checkpoint(CheckpointMessage(
+                    id: node.id,
+                    checkpointId: checkpointId,
+                    label: label,
+                    jjCommitId: jjCommitId,
+                    bookmarkName: bookmarkName,
+                    timestamp: node.timestamp
+                )))
+
             default:
                 // Skip other node types in chat view
                 break
@@ -168,10 +182,11 @@ class SessionGraph: ObservableObject {
     }
 }
 
-/// A chat item - either a message or a tool
+/// A chat item - either a message, tool, or checkpoint
 enum ChatItem: Identifiable {
     case message(ChatMessage)
     case tool(ToolMessage)
+    case checkpoint(CheckpointMessage)
 
     var id: UUID {
         switch self {
@@ -179,6 +194,8 @@ enum ChatItem: Identifiable {
             return msg.id
         case .tool(let tool):
             return tool.id
+        case .checkpoint(let checkpoint):
+            return checkpoint.id
         }
     }
 
@@ -188,6 +205,8 @@ enum ChatItem: Identifiable {
             return msg.timestamp
         case .tool(let tool):
             return tool.timestamp
+        case .checkpoint(let checkpoint):
+            return checkpoint.timestamp
         }
     }
 }
@@ -234,4 +253,14 @@ struct ToolResult {
             self.preview = fullOutput
         }
     }
+}
+
+/// Checkpoint message data
+struct CheckpointMessage: Identifiable {
+    let id: UUID
+    let checkpointId: String
+    let label: String
+    let jjCommitId: String?
+    let bookmarkName: String?
+    let timestamp: Date
 }

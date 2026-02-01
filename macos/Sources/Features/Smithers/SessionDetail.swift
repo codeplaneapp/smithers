@@ -167,7 +167,15 @@ struct SessionDetail: View {
             Color(nsColor: .textBackgroundColor)
 
             // Render chat messages from the session graph
-            MessageList(items: session.graph.projectToChat())
+            MessageList(
+                items: session.graph.projectToChat(),
+                onRestoreCheckpoint: { checkpointId in
+                    restoreCheckpoint(session: session, checkpointId: checkpointId)
+                },
+                onForkCheckpoint: { checkpointId in
+                    forkCheckpoint(session: session, checkpointId: checkpointId)
+                }
+            )
         }
     }
 
@@ -257,6 +265,19 @@ struct SessionDetail: View {
         } catch {
             print("Failed to run skill: \(error)")
         }
+    }
+
+    private func restoreCheckpoint(session: Session, checkpointId: String) {
+        do {
+            try sessionManager.restoreCheckpoint(sessionId: session.id, checkpointId: checkpointId)
+        } catch {
+            print("Failed to restore checkpoint: \(error)")
+        }
+    }
+
+    private func forkCheckpoint(session: Session, checkpointId: String) {
+        // TODO: Implement fork functionality - create new session from checkpoint
+        print("Fork from checkpoint: \(checkpointId)")
     }
 
     private var emptyState: some View {

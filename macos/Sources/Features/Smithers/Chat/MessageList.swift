@@ -3,6 +3,8 @@ import SwiftUI
 /// A scrollable list of chat messages with auto-scroll behavior
 struct MessageList: View {
     let items: [ChatItem]
+    var onRestoreCheckpoint: ((String) -> Void)?
+    var onForkCheckpoint: ((String) -> Void)?
     @State private var isAtBottom = true
     @State private var scrollProxy: ScrollViewProxy?
     @State private var lastItemId: UUID?
@@ -71,6 +73,14 @@ struct MessageList: View {
             ToolCard(tool: tool)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
+        case .checkpoint(let checkpoint):
+            CheckpointCard(
+                checkpoint: checkpoint,
+                onRestore: onRestoreCheckpoint,
+                onFork: onForkCheckpoint
+            )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
     }
 
@@ -105,6 +115,8 @@ struct MessageList: View {
             return msg.content
         case .tool(let tool):
             return tool.result?.preview
+        case .checkpoint(let checkpoint):
+            return checkpoint.label
         }
     }
 
@@ -115,6 +127,8 @@ struct MessageList: View {
             return msg.isStreaming
         case .tool(let tool):
             return tool.isRunning
+        case .checkpoint:
+            return false
         }
     }
 
