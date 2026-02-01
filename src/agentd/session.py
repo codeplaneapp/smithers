@@ -6,6 +6,7 @@ graph state, checkpoints, and tool execution context.
 """
 
 import asyncio
+import contextlib
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -56,6 +57,7 @@ class SessionManager:
         self.config = config
         self.sessions: dict[str, Session] = {}
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._running_tasks: dict[str, asyncio.Task[Any]] = {}
 
     async def create_session(self, workspace_root: str) -> Session:
         """Create a new session."""
@@ -126,14 +128,35 @@ class SessionManager:
         # Add user message to history
         session.message_history.append({"role": "user", "content": message})
 
-        # Run the agent through the adapter
-        await self._run_agent(session, surfaces or [], emit_with_persistence)
-
-        emit_with_persistence(
-            Event(
-                type=EventType.RUN_FINISHED, data={"run_id": run_id, "session_id": session_id}
+        try:
+            # Run the agent through the adapter - wrap in task for cancellation
+            agent_task = asyncio.create_task(
+                self._run_agent(session, surfaces or [], emit_with_persistence)
             )
-        )
+            # Track the running task so we can cancel it
+            self._running_tasks[run_id] = agent_task
+
+            # Wait for completion
+            await agent_task
+
+            emit_with_persistence(
+                Event(
+                    type=EventType.RUN_FINISHED, data={"run_id": run_id, "session_id": session_id}
+                )
+            )
+        except asyncio.CancelledError:
+            # Run was cancelled
+            emit_with_persistence(
+                Event(
+                    type=EventType.RUN_CANCELLED, data={"run_id": run_id, "session_id": session_id}
+                )
+            )
+            raise
+        finally:
+            # Clean up run tracking
+            self._running_tasks.pop(run_id, None)
+            if session.current_run_id == run_id:
+                session.current_run_id = None
 
     async def _run_agent(
         self,
@@ -160,7 +183,25 @@ class SessionManager:
             pass
 
     async def cancel_run(self, run_id: str) -> None:
-        """Cancel a running agent."""
+        """Cancel a running agent.
+
+        Args:
+            run_id: The run ID to cancel
+        """
+        # Find and cancel the running task
+        task = self._running_tasks.get(run_id)
+        if task and not task.done():
+            # Cancel the adapter (stops generating new events)
+            await self.adapter.cancel()
+
+            # Cancel the asyncio task
+            task.cancel()
+
+            # Wait for the task to finish canceling
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        # Clear current_run_id for the session
         for session in self.sessions.values():
             if session.current_run_id == run_id:
                 session.current_run_id = None

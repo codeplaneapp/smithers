@@ -1,6 +1,7 @@
 """Tests for the agentd daemon."""
 
 import asyncio
+import contextlib
 import json
 from io import StringIO
 
@@ -243,6 +244,73 @@ class TestSessionManager:
         assert "assistant.delta" in event_types
         assert "assistant.final" in event_types
         assert "run.finished" in event_types
+
+    @pytest.mark.asyncio
+    async def test_cancel_run_stops_execution(self, tmp_path):
+        """Test that cancel_run actually stops the running task."""
+        from agentd.adapters.fake import FakeAgentAdapter
+        from agentd.session import SessionManager
+
+        # Create a slow adapter that emits many events
+        slow_script = []
+        for i in range(50):
+            slow_script.append({"type": "assistant.delta", "text": f"Token {i} "})
+        slow_script.append({"type": "assistant.final", "message_id": "msg-1"})
+
+        adapter = FakeAgentAdapter(script=slow_script)
+        session_manager = SessionManager(adapter=adapter)
+
+        session = await session_manager.create_session(str(tmp_path))
+
+        # Collect events
+        events = []
+
+        def collect_event(event):
+            events.append(event)
+
+        # Start sending message in background
+        send_task = asyncio.create_task(
+            session_manager.send_message(
+                session_id=session.id, message="Start a long task", emit=collect_event
+            )
+        )
+
+        # Wait for a few events to be emitted (each takes 0.05s)
+        await asyncio.sleep(0.15)
+
+        # Get the current run_id before canceling
+        run_id = session.current_run_id
+        assert run_id is not None
+
+        # Count events before cancel
+        events_before_cancel = len(events)
+
+        # Cancel the run
+        await session_manager.cancel_run(run_id)
+
+        # Verify current_run_id was cleared
+        assert session.current_run_id is None
+
+        # Wait more time - if cancel_run worked, no more events should arrive
+        await asyncio.sleep(0.3)
+
+        # Count events after cancel
+        events_after_cancel = len(events)
+
+        # Wait for send_task to complete (should have been cancelled)
+        with contextlib.suppress(asyncio.CancelledError):
+            await send_task
+
+        # Verify cancellation worked: should get at most 1-2 more events after cancel
+        # (due to race conditions between cancel signal and event emission)
+        assert events_after_cancel <= events_before_cancel + 2, (
+            f"cancel_run should stop execution. "
+            f"Got {events_after_cancel - events_before_cancel} events after cancel"
+        )
+
+        # Verify RUN_CANCELLED event was emitted
+        event_types = [e.type for e in events]
+        assert EventType.RUN_CANCELLED in event_types, "Should emit RUN_CANCELLED event"
 
     @pytest.mark.asyncio
     async def test_create_checkpoint(self, fake_adapter, tmp_path):
