@@ -1022,6 +1022,347 @@ class TestFullTextSearch:
         # Results should be ordered by rank (FTS5 handles this automatically)
 
 
+class TestTodos:
+    """Test todo operations."""
+
+    @pytest.fixture
+    async def store(self, tmp_path):
+        """Create a temporary session store with a session."""
+        store = SessionStore(tmp_path / "sessions.db")
+        await store.initialize()
+        await store.create_session("/workspace", session_id="test-session")
+        return store
+
+    @pytest.mark.asyncio
+    async def test_create_todo(self, store):
+        """Should create a new todo."""
+        todo = await store.create_todo(
+            workspace_id="/workspace",
+            text="Implement feature X",
+        )
+
+        assert todo.id > 0
+        assert todo.workspace_id == "/workspace"
+        assert todo.text == "Implement feature X"
+        assert todo.completed is False
+        assert todo.session_id is None
+        assert todo.attached_node_id is None
+        assert todo.created_at is not None
+        assert todo.completed_at is None
+
+    @pytest.mark.asyncio
+    async def test_create_todo_with_session(self, store):
+        """Should create a todo attached to a session."""
+        todo = await store.create_todo(
+            workspace_id="/workspace",
+            text="Fix bug in session handling",
+            session_id="test-session",
+        )
+
+        assert todo.session_id == "test-session"
+
+    @pytest.mark.asyncio
+    async def test_create_todo_with_node(self, store):
+        """Should create a todo attached to a graph node."""
+        todo = await store.create_todo(
+            workspace_id="/workspace",
+            text="Review tool output",
+            attached_node_id="node-123",
+        )
+
+        assert todo.attached_node_id == "node-123"
+
+    @pytest.mark.asyncio
+    async def test_get_todo(self, store):
+        """Should retrieve a todo by ID."""
+        created = await store.create_todo(
+            workspace_id="/workspace",
+            text="Test todo",
+        )
+
+        retrieved = await store.get_todo(created.id)
+        assert retrieved is not None
+        assert retrieved.id == created.id
+        assert retrieved.text == "Test todo"
+
+    @pytest.mark.asyncio
+    async def test_get_nonexistent_todo(self, store):
+        """Getting a nonexistent todo should return None."""
+        todo = await store.get_todo(99999)
+        assert todo is None
+
+    @pytest.mark.asyncio
+    async def test_list_todos(self, store):
+        """Should list all todos for a workspace."""
+        await store.create_todo("/workspace", "Todo 1")
+        await store.create_todo("/workspace", "Todo 2")
+        await store.create_todo("/workspace", "Todo 3")
+
+        todos = await store.list_todos("/workspace")
+        assert len(todos) == 3
+        # Should be ordered by created_at DESC (newest first)
+        assert todos[0].text == "Todo 3"
+        assert todos[1].text == "Todo 2"
+        assert todos[2].text == "Todo 1"
+
+    @pytest.mark.asyncio
+    async def test_list_todos_by_session(self, store):
+        """Should filter todos by session ID."""
+        await store.create_todo("/workspace", "General todo")
+        await store.create_todo("/workspace", "Session todo", session_id="test-session")
+
+        todos = await store.list_todos("/workspace", session_id="test-session")
+        assert len(todos) == 1
+        assert todos[0].text == "Session todo"
+
+    @pytest.mark.asyncio
+    async def test_list_todos_by_completion(self, store):
+        """Should filter todos by completion status."""
+        await store.create_todo("/workspace", "Not done")
+        todo2 = await store.create_todo("/workspace", "Done")
+        await store.complete_todo(todo2.id)
+
+        # Get incomplete todos
+        incomplete = await store.list_todos("/workspace", completed=False)
+        assert len(incomplete) == 1
+        assert incomplete[0].text == "Not done"
+
+        # Get completed todos
+        completed_todos = await store.list_todos("/workspace", completed=True)
+        assert len(completed_todos) == 1
+        assert completed_todos[0].text == "Done"
+
+    @pytest.mark.asyncio
+    async def test_list_todos_limit(self, store):
+        """Should respect limit parameter."""
+        for i in range(10):
+            await store.create_todo("/workspace", f"Todo {i}")
+
+        todos = await store.list_todos("/workspace", limit=5)
+        assert len(todos) == 5
+
+    @pytest.mark.asyncio
+    async def test_update_todo_text(self, store):
+        """Should update todo text."""
+        todo = await store.create_todo("/workspace", "Original text")
+
+        updated = await store.update_todo_text(todo.id, "Updated text")
+        assert updated is True
+
+        retrieved = await store.get_todo(todo.id)
+        assert retrieved is not None
+        assert retrieved.text == "Updated text"
+
+    @pytest.mark.asyncio
+    async def test_update_nonexistent_todo(self, store):
+        """Updating a nonexistent todo should return False."""
+        updated = await store.update_todo_text(99999, "New text")
+        assert updated is False
+
+    @pytest.mark.asyncio
+    async def test_complete_todo(self, store):
+        """Should mark a todo as completed."""
+        todo = await store.create_todo("/workspace", "Task to complete")
+
+        completed = await store.complete_todo(todo.id)
+        assert completed is True
+
+        retrieved = await store.get_todo(todo.id)
+        assert retrieved is not None
+        assert retrieved.completed is True
+        assert retrieved.completed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_complete_nonexistent_todo(self, store):
+        """Completing a nonexistent todo should return False."""
+        completed = await store.complete_todo(99999)
+        assert completed is False
+
+    @pytest.mark.asyncio
+    async def test_uncomplete_todo(self, store):
+        """Should mark a completed todo as not completed."""
+        todo = await store.create_todo("/workspace", "Task to uncomplete")
+        await store.complete_todo(todo.id)
+
+        uncompleted = await store.uncomplete_todo(todo.id)
+        assert uncompleted is True
+
+        retrieved = await store.get_todo(todo.id)
+        assert retrieved is not None
+        assert retrieved.completed is False
+        assert retrieved.completed_at is None
+
+    @pytest.mark.asyncio
+    async def test_uncomplete_nonexistent_todo(self, store):
+        """Uncompleting a nonexistent todo should return False."""
+        uncompleted = await store.uncomplete_todo(99999)
+        assert uncompleted is False
+
+    @pytest.mark.asyncio
+    async def test_delete_todo(self, store):
+        """Should delete a todo."""
+        todo = await store.create_todo("/workspace", "Todo to delete")
+
+        deleted = await store.delete_todo(todo.id)
+        assert deleted is True
+
+        retrieved = await store.get_todo(todo.id)
+        assert retrieved is None
+
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent_todo(self, store):
+        """Deleting a nonexistent todo should return False."""
+        deleted = await store.delete_todo(99999)
+        assert deleted is False
+
+    @pytest.mark.asyncio
+    async def test_todos_cascade_delete_with_session(self, store):
+        """Todos should be deleted when associated session is deleted."""
+        await store.create_todo("/workspace", "Session todo", session_id="test-session")
+
+        # Verify todo exists
+        todos = await store.list_todos("/workspace", session_id="test-session")
+        assert len(todos) == 1
+
+        # Delete session
+        await store.delete_session("test-session")
+
+        # Todo should be gone (cascade delete)
+        todos = await store.list_todos("/workspace", session_id="test-session")
+        assert len(todos) == 0
+
+
+class TestTodoSearch:
+    """Test full-text search for todos."""
+
+    @pytest.fixture
+    async def store(self, tmp_path):
+        """Create a temporary session store with searchable todos."""
+        store = SessionStore(tmp_path / "sessions.db")
+        await store.initialize()
+
+        # Create todos with searchable content
+        await store.create_todo("/workspace", "Implement authentication with JWT tokens")
+        await store.create_todo("/workspace", "Fix bug in database connection pool")
+        await store.create_todo("/workspace", "Write tests for user registration")
+        await store.create_todo("/workspace", "Refactor authentication middleware")
+
+        return store
+
+    @pytest.mark.asyncio
+    async def test_search_todos_basic(self, store):
+        """Should search todos by text."""
+        results = await store.search_todos("authentication")
+        assert len(results) >= 2
+        assert any("authentication" in r.text.lower() for r in results)
+
+    @pytest.mark.asyncio
+    async def test_search_todos_case_insensitive(self, store):
+        """Search should be case insensitive."""
+        results_lower = await store.search_todos("authentication")
+        results_upper = await store.search_todos("AUTHENTICATION")
+        results_mixed = await store.search_todos("Authentication")
+
+        # All should return the same results
+        assert len(results_lower) == len(results_upper) == len(results_mixed)
+
+    @pytest.mark.asyncio
+    async def test_search_todos_with_workspace_filter(self, store):
+        """Should filter search results by workspace ID."""
+        # Create a todo in a different workspace
+        await store.create_todo("/other-workspace", "Authentication for other project")
+
+        # Search in specific workspace
+        results = await store.search_todos("authentication", workspace_id="/workspace")
+        assert len(results) > 0
+        assert all(r.workspace_id == "/workspace" for r in results)
+
+    @pytest.mark.asyncio
+    async def test_search_todos_with_session_filter(self, store):
+        """Should filter search results by session ID."""
+        await store.create_session("/workspace", session_id="session-1")
+        await store.create_todo("/workspace", "Todo for session 1", session_id="session-1")
+
+        results = await store.search_todos("session", session_id="session-1")
+        assert len(results) > 0
+        assert all(r.session_id == "session-1" for r in results)
+
+    @pytest.mark.asyncio
+    async def test_search_todos_limit(self, store):
+        """Should respect limit parameter."""
+        # Add many todos
+        for i in range(20):
+            await store.create_todo("/workspace", f"Task number {i} about testing")
+
+        results = await store.search_todos("testing", limit=5)
+        assert len(results) == 5
+
+    @pytest.mark.asyncio
+    async def test_search_todos_no_results(self, store):
+        """Should return empty list when no matches found."""
+        results = await store.search_todos("nonexistent_xyz")
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_search_todos_phrase_query(self, store):
+        """Should support phrase queries."""
+        results = await store.search_todos('"database connection"')
+        assert len(results) > 0
+
+    @pytest.mark.asyncio
+    async def test_search_all_includes_todos(self, store):
+        """Search all should include todos in results."""
+        results = await store.search_all("authentication", workspace_id="/workspace")
+
+        assert "todos" in results
+        assert len(results["todos"]) > 0
+        assert any("authentication" in t.text.lower() for t in results["todos"])
+
+    @pytest.mark.asyncio
+    async def test_fts_index_synchronized_on_todo_insert(self, store):
+        """FTS index should be updated when todos are inserted."""
+        # Add a new todo after store is created
+        await store.create_todo("/workspace", "New unique search term: xyzabc123")
+
+        # Should be immediately searchable
+        results = await store.search_todos("xyzabc123")
+        assert len(results) == 1
+        assert "xyzabc123" in results[0].text
+
+    @pytest.mark.asyncio
+    async def test_fts_index_synchronized_on_todo_update(self, store):
+        """FTS index should be updated when todos are updated."""
+        todo = await store.create_todo("/workspace", "Original text")
+
+        # Update the text
+        await store.update_todo_text(todo.id, "Updated text with unique term uniqueterm789")
+
+        # Should be searchable with new text
+        results = await store.search_todos("uniqueterm789")
+        assert len(results) == 1
+        assert "uniqueterm789" in results[0].text
+
+        # Old text should not be found
+        results = await store.search_todos("Original")
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_fts_index_synchronized_on_todo_delete(self, store):
+        """FTS index should be updated when todos are deleted."""
+        todo = await store.create_todo("/workspace", "Todo with unique search term deletetest123")
+
+        # Verify it's searchable
+        results = await store.search_todos("deletetest123")
+        assert len(results) == 1
+
+        # Delete the todo
+        await store.delete_todo(todo.id)
+
+        # Should not be found anymore
+        results = await store.search_todos("deletetest123")
+        assert len(results) == 0
+
+
 class TestPerformance:
     """Test performance requirements for session store operations."""
 

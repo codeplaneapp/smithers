@@ -60,6 +60,20 @@ class CheckpointRecord:
     created_at: datetime
 
 
+@dataclass
+class TodoRecord:
+    """A todo item record from the database."""
+
+    id: int
+    workspace_id: str
+    session_id: str | None
+    text: str
+    completed: bool
+    attached_node_id: str | None
+    created_at: datetime
+    completed_at: datetime | None
+
+
 # Current schema version
 SCHEMA_VERSION = 1
 
@@ -101,6 +115,19 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
+-- todos: task tracking per workspace/session
+CREATE TABLE IF NOT EXISTS todos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id TEXT NOT NULL,
+    session_id TEXT,
+    text TEXT NOT NULL,
+    completed INTEGER NOT NULL DEFAULT 0,
+    attached_node_id TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
 -- indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_session_events_session_id ON session_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_events_ts ON session_events(ts);
@@ -108,6 +135,9 @@ CREATE INDEX IF NOT EXISTS idx_session_events_type ON session_events(session_id,
 CREATE INDEX IF NOT EXISTS idx_sessions_last_active ON sessions(last_active_at);
 CREATE INDEX IF NOT EXISTS idx_checkpoints_session_id ON checkpoints(session_id);
 CREATE INDEX IF NOT EXISTS idx_checkpoints_created_at ON checkpoints(created_at);
+CREATE INDEX IF NOT EXISTS idx_todos_workspace_id ON todos(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_todos_session_id ON todos(session_id);
+CREATE INDEX IF NOT EXISTS idx_todos_completed ON todos(workspace_id, completed);
 
 -- Full-Text Search (FTS5) tables for search functionality
 -- Messages search: indexes message content for fast text search
@@ -127,6 +157,16 @@ CREATE VIRTUAL TABLE IF NOT EXISTS checkpoints_fts USING fts5(
     checkpoint_id UNINDEXED,
     content='checkpoints',
     content_rowid='rowid'
+);
+
+-- Todos search: indexes todo text
+CREATE VIRTUAL TABLE IF NOT EXISTS todos_fts USING fts5(
+    text,
+    workspace_id UNINDEXED,
+    session_id UNINDEXED,
+    todo_id UNINDEXED,
+    content='todos',
+    content_rowid='id'
 );
 
 -- Triggers to keep FTS indexes synchronized with base tables
@@ -198,6 +238,26 @@ CREATE TRIGGER IF NOT EXISTS checkpoints_fts_update AFTER UPDATE ON checkpoints 
     VALUES('delete', old.rowid, old.message, old.bookmark_name, old.session_id, old.checkpoint_id);
     INSERT INTO checkpoints_fts(rowid, message, bookmark_name, session_id, checkpoint_id)
     VALUES (new.rowid, new.message, new.bookmark_name, new.session_id, new.checkpoint_id);
+END;
+
+-- Insert trigger for todos
+CREATE TRIGGER IF NOT EXISTS todos_fts_insert AFTER INSERT ON todos BEGIN
+    INSERT INTO todos_fts(rowid, text, workspace_id, session_id, todo_id)
+    VALUES (new.id, new.text, new.workspace_id, new.session_id, new.id);
+END;
+
+-- Delete trigger for todos
+CREATE TRIGGER IF NOT EXISTS todos_fts_delete AFTER DELETE ON todos BEGIN
+    INSERT INTO todos_fts(todos_fts, rowid, text, workspace_id, session_id, todo_id)
+    VALUES('delete', old.id, old.text, old.workspace_id, old.session_id, old.id);
+END;
+
+-- Update trigger for todos
+CREATE TRIGGER IF NOT EXISTS todos_fts_update AFTER UPDATE ON todos BEGIN
+    INSERT INTO todos_fts(todos_fts, rowid, text, workspace_id, session_id, todo_id)
+    VALUES('delete', old.id, old.text, old.workspace_id, old.session_id, old.id);
+    INSERT INTO todos_fts(rowid, text, workspace_id, session_id, todo_id)
+    VALUES (new.id, new.text, new.workspace_id, new.session_id, new.id);
 END;
 """
 
@@ -791,6 +851,215 @@ class SessionStore:
             await db.commit()
             return deleted
 
+    # ==================== Todo Operations ====================
+
+    async def create_todo(
+        self,
+        workspace_id: str,
+        text: str,
+        *,
+        session_id: str | None = None,
+        attached_node_id: str | None = None,
+    ) -> TodoRecord:
+        """Create a new todo item.
+
+        Args:
+            workspace_id: The workspace this todo belongs to
+            text: The todo text
+            session_id: Optional session ID to associate with this todo
+            attached_node_id: Optional graph node ID to attach this todo to
+
+        Returns:
+            TodoRecord
+        """
+        await self._ensure_initialized()
+        now = _timestamp_now()
+
+        async with self._lock, self._connect() as db:
+            cursor = await db.execute(
+                """
+                INSERT INTO todos (workspace_id, session_id, text, completed, attached_node_id, created_at, completed_at)
+                VALUES (?, ?, ?, 0, ?, ?, NULL)
+                """,
+                (workspace_id, session_id, text, attached_node_id, now),
+            )
+            todo_id = cursor.lastrowid or 0
+            await db.commit()
+
+        return TodoRecord(
+            id=todo_id,
+            workspace_id=workspace_id,
+            session_id=session_id,
+            text=text,
+            completed=False,
+            attached_node_id=attached_node_id,
+            created_at=_parse_timestamp(now) or datetime.now(UTC),
+            completed_at=None,
+        )
+
+    async def get_todo(self, todo_id: int) -> TodoRecord | None:
+        """Get a todo by ID.
+
+        Args:
+            todo_id: The todo ID
+
+        Returns:
+            TodoRecord if found, None otherwise
+        """
+        await self._ensure_initialized()
+        async with self._lock, self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM todos WHERE id = ?",
+                (todo_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            if row is None:
+                return None
+
+            return TodoRecord(
+                id=row["id"],
+                workspace_id=row["workspace_id"],
+                session_id=row["session_id"],
+                text=row["text"],
+                completed=bool(row["completed"]),
+                attached_node_id=row["attached_node_id"],
+                created_at=_parse_timestamp(row["created_at"]) or datetime.now(UTC),
+                completed_at=_parse_timestamp(row["completed_at"]),
+            )
+
+    async def list_todos(
+        self,
+        workspace_id: str,
+        *,
+        session_id: str | None = None,
+        completed: bool | None = None,
+        limit: int = 100,
+    ) -> list[TodoRecord]:
+        """List todos for a workspace, optionally filtered.
+
+        Args:
+            workspace_id: The workspace ID
+            session_id: Optional session ID filter
+            completed: Optional completion status filter
+            limit: Maximum number of todos to return
+
+        Returns:
+            List of TodoRecord objects, ordered by creation time (newest first)
+        """
+        await self._ensure_initialized()
+        query = "SELECT * FROM todos WHERE workspace_id = ?"
+        params: list[Any] = [workspace_id]
+
+        if session_id is not None:
+            query += " AND session_id = ?"
+            params.append(session_id)
+        if completed is not None:
+            query += " AND completed = ?"
+            params.append(1 if completed else 0)
+
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        async with self._lock, self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(query, params) as cursor:
+                rows = await cursor.fetchall()
+
+        return [
+            TodoRecord(
+                id=row["id"],
+                workspace_id=row["workspace_id"],
+                session_id=row["session_id"],
+                text=row["text"],
+                completed=bool(row["completed"]),
+                attached_node_id=row["attached_node_id"],
+                created_at=_parse_timestamp(row["created_at"]) or datetime.now(UTC),
+                completed_at=_parse_timestamp(row["completed_at"]),
+            )
+            for row in rows
+        ]
+
+    async def update_todo_text(self, todo_id: int, text: str) -> bool:
+        """Update the text of a todo.
+
+        Args:
+            todo_id: The todo ID
+            text: New todo text
+
+        Returns:
+            True if the todo was updated, False if it didn't exist
+        """
+        await self._ensure_initialized()
+        async with self._lock, self._connect() as db:
+            cursor = await db.execute(
+                "UPDATE todos SET text = ? WHERE id = ?",
+                (text, todo_id),
+            )
+            updated = cursor.rowcount > 0
+            await db.commit()
+            return updated
+
+    async def complete_todo(self, todo_id: int) -> bool:
+        """Mark a todo as completed.
+
+        Args:
+            todo_id: The todo ID
+
+        Returns:
+            True if the todo was updated, False if it didn't exist
+        """
+        await self._ensure_initialized()
+        now = _timestamp_now()
+
+        async with self._lock, self._connect() as db:
+            cursor = await db.execute(
+                "UPDATE todos SET completed = 1, completed_at = ? WHERE id = ?",
+                (now, todo_id),
+            )
+            updated = cursor.rowcount > 0
+            await db.commit()
+            return updated
+
+    async def uncomplete_todo(self, todo_id: int) -> bool:
+        """Mark a todo as not completed.
+
+        Args:
+            todo_id: The todo ID
+
+        Returns:
+            True if the todo was updated, False if it didn't exist
+        """
+        await self._ensure_initialized()
+        async with self._lock, self._connect() as db:
+            cursor = await db.execute(
+                "UPDATE todos SET completed = 0, completed_at = NULL WHERE id = ?",
+                (todo_id,),
+            )
+            updated = cursor.rowcount > 0
+            await db.commit()
+            return updated
+
+    async def delete_todo(self, todo_id: int) -> bool:
+        """Delete a todo.
+
+        Args:
+            todo_id: The todo ID
+
+        Returns:
+            True if the todo was deleted, False if it didn't exist
+        """
+        await self._ensure_initialized()
+        async with self._lock, self._connect() as db:
+            cursor = await db.execute(
+                "DELETE FROM todos WHERE id = ?",
+                (todo_id,),
+            )
+            deleted = cursor.rowcount > 0
+            await db.commit()
+            return deleted
+
     # ==================== Search Operations (FTS5) ====================
 
     async def search_events(
@@ -897,35 +1166,102 @@ class SessionStore:
             for row in rows
         ]
 
+    async def search_todos(
+        self,
+        query: str,
+        *,
+        workspace_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 50,
+    ) -> list[TodoRecord]:
+        """Search todos using full-text search.
+
+        Args:
+            query: Search query (FTS5 syntax supported)
+            workspace_id: Optional workspace ID to filter by
+            session_id: Optional session ID to filter by
+            limit: Maximum number of results to return
+
+        Returns:
+            List of TodoRecord objects matching the query
+        """
+        await self._ensure_initialized()
+
+        # Build query with optional filters
+        sql = """
+            SELECT t.*
+            FROM todos_fts fts
+            JOIN todos t ON t.id = fts.rowid
+            WHERE todos_fts MATCH ?
+        """
+        params: list[Any] = [query]
+
+        if workspace_id is not None:
+            sql += " AND t.workspace_id = ?"
+            params.append(workspace_id)
+        if session_id is not None:
+            sql += " AND t.session_id = ?"
+            params.append(session_id)
+
+        sql += " ORDER BY rank LIMIT ?"
+        params.append(limit)
+
+        async with self._lock, self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+
+        return [
+            TodoRecord(
+                id=row["id"],
+                workspace_id=row["workspace_id"],
+                session_id=row["session_id"],
+                text=row["text"],
+                completed=bool(row["completed"]),
+                attached_node_id=row["attached_node_id"],
+                created_at=_parse_timestamp(row["created_at"]) or datetime.now(UTC),
+                completed_at=_parse_timestamp(row["completed_at"]),
+            )
+            for row in rows
+        ]
+
     async def search_all(
         self,
         query: str,
         *,
+        workspace_id: str | None = None,
         session_id: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
-        """Search across all indexed content (events and checkpoints).
+        """Search across all indexed content (events, checkpoints, and todos).
 
         Args:
             query: Search query (FTS5 syntax supported)
+            workspace_id: Optional workspace ID to filter todos by
             session_id: Optional session ID to filter by
             limit: Maximum number of results per category
 
         Returns:
-            Dict with 'events' and 'checkpoints' keys containing matching results
+            Dict with 'events', 'checkpoints', and 'todos' keys containing matching results
         """
         await self._ensure_initialized()
 
-        # Search both events and checkpoints concurrently
+        # Search across all categories concurrently
         events_task = self.search_events(query, session_id=session_id, limit=limit)
         checkpoints_task = self.search_checkpoints(query, session_id=session_id, limit=limit)
+        todos_task = self.search_todos(
+            query, workspace_id=workspace_id, session_id=session_id, limit=limit
+        )
 
-        events, checkpoints = await asyncio.gather(events_task, checkpoints_task)
+        events, checkpoints, todos = await asyncio.gather(
+            events_task, checkpoints_task, todos_task
+        )
 
         return {
             "events": events,
             "checkpoints": checkpoints,
-            "total": len(events) + len(checkpoints),
+            "todos": todos,
+            "total": len(events) + len(checkpoints) + len(todos),
         }
 
 
