@@ -10,7 +10,7 @@ including:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -176,7 +176,9 @@ def mock_output(output_type: type[T], **field_values: Any) -> T:
         elif field_info.default is not PydanticUndefined:
             values[field_name] = field_info.default
         elif field_info.default_factory is not None:
-            values[field_name] = field_info.default_factory()  # type: ignore[misc]
+            # Pydantic's default_factory is typed as returning Any, so we need cast
+            factory = cast(Callable[[], Any], field_info.default_factory)
+            values[field_name] = factory()
         else:
             # Generate a default based on type annotation
             annotation = field_info.annotation

@@ -81,12 +81,24 @@ from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 from functools import wraps
-from typing import Any, ParamSpec, TypeVar, get_args, get_origin, get_type_hints
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ParamSpec,
+    TypeVar,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from pydantic import BaseModel
 
 from smithers.errors import ApprovalRejected, DuplicateProducerError
 from smithers.types import NO_RETRY, RetryPolicy
+
+if TYPE_CHECKING:
+    pass
 
 P = ParamSpec("P")
 T = TypeVar("T", bound=BaseModel)
@@ -372,6 +384,7 @@ def require_approval(
             return await fn(*args, **kwargs)
 
         # Mark the function as requiring approval
+        # These attributes are read by the @workflow decorator via getattr
         wrapper._requires_approval = True  # type: ignore[attr-defined]
         wrapper._approval_message = message  # type: ignore[attr-defined]
         wrapper._approval_context = context  # type: ignore[attr-defined]
@@ -527,9 +540,13 @@ def _make_bound_name(
         if isinstance(value, BaseModel):
             return value.model_dump(mode="json")
         if isinstance(value, dict):
-            return {str(k): normalize(v) for k, v in value.items()}  # type: ignore[union-attr]
+            # Type narrowing: after isinstance check, value is dict
+            dict_value = cast(dict[Any, Any], value)
+            return {str(k): normalize(v) for k, v in dict_value.items()}
         if isinstance(value, (list, tuple, set)):
-            return [normalize(v) for v in value]  # type: ignore[union-attr]
+            # Type narrowing: after isinstance check, value is iterable
+            iter_value = cast(list[Any] | tuple[Any, ...] | set[Any], value)
+            return [normalize(v) for v in iter_value]
         return value
 
     payload = {

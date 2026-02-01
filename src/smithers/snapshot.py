@@ -30,7 +30,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 from smithers.hashing import canonical_json, code_hash, hash_string
 from smithers.types import WorkflowGraph, WorkflowNode
@@ -463,6 +463,10 @@ def create_snapshot(
     }
     content_hash = hash_string(canonical_json(content))
 
+    # Convert edges set to sorted tuple of tuples
+    # sorted() returns list[tuple[str, str]] which we explicitly cast for clarity
+    sorted_edges = cast(list[tuple[str, str]], sorted(graph.edges))
+
     return WorkflowSnapshot(
         name=name or graph.root,
         version=version,
@@ -470,7 +474,7 @@ def create_snapshot(
         description=description,
         root=graph.root,
         nodes=tuple(nodes),
-        edges=tuple((e[0], e[1]) for e in sorted(graph.edges)),  # type: ignore[misc]
+        edges=tuple((e[0], e[1]) for e in sorted_edges),
         levels=tuple(tuple(level) for level in graph.levels),
         content_hash=content_hash,
         metadata=metadata or {},
