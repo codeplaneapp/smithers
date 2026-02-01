@@ -47,12 +47,24 @@ class FakeAgentAdapter(AgentAdapter):
         """Execute the scripted response."""
         self._cancelled = False
 
+        # Track accumulated text for ASSISTANT_FINAL
+        accumulated_text = ""
+
         for item in self.script:
             if self._cancelled:
                 break
 
             event_type = EventType(item["type"])
             data = {k: v for k, v in item.items() if k != "type"}
+
+            # Track assistant deltas
+            if event_type == EventType.ASSISTANT_DELTA:
+                accumulated_text += data.get("text", "")
+
+            # Add accumulated text to ASSISTANT_FINAL
+            if event_type == EventType.ASSISTANT_FINAL:
+                data["text"] = accumulated_text
+
             event = Event(type=event_type, data=data)
 
             emit(event)

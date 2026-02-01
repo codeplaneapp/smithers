@@ -181,19 +181,52 @@ class TestSessionManager:
             session_id=session.id, message="Hello, agent!", emit=lambda e: None
         )
 
-        # Check history has user message
-        assert len(session.message_history) == 1
+        # Check history has user message and assistant response
+        assert len(session.message_history) == 2
         assert session.message_history[0]["role"] == "user"
         assert session.message_history[0]["content"] == "Hello, agent!"
+        assert session.message_history[1]["role"] == "assistant"
 
         # Send second message
         await session_manager.send_message(
             session_id=session.id, message="Can you help me?", emit=lambda e: None
         )
 
-        # History should now have both messages
+        # History should now have both exchanges (4 messages total)
+        assert len(session.message_history) == 4
+        assert session.message_history[2]["role"] == "user"
+        assert session.message_history[2]["content"] == "Can you help me?"
+        assert session.message_history[3]["role"] == "assistant"
+
+    @pytest.mark.asyncio
+    async def test_assistant_response_in_history(self, session_manager, tmp_path):
+        """Test that assistant responses are added to message history."""
+        session = await session_manager.create_session(str(tmp_path))
+
+        # Send a message
+        await session_manager.send_message(
+            session_id=session.id, message="Hello, agent!", emit=lambda e: None
+        )
+
+        # History should have user message and assistant response
         assert len(session.message_history) == 2
-        assert session.message_history[1]["content"] == "Can you help me?"
+        assert session.message_history[0]["role"] == "user"
+        assert session.message_history[0]["content"] == "Hello, agent!"
+        assert session.message_history[1]["role"] == "assistant"
+        # The fake adapter emits "Hello! How can I help?"
+        assert session.message_history[1]["content"] == "Hello! How can I help?"
+
+        # Send second message
+        await session_manager.send_message(
+            session_id=session.id, message="Can you help me?", emit=lambda e: None
+        )
+
+        # History should have both exchanges (4 messages total)
+        assert len(session.message_history) == 4
+        assert session.message_history[2]["role"] == "user"
+        assert session.message_history[2]["content"] == "Can you help me?"
+        assert session.message_history[3]["role"] == "assistant"
+        assert session.message_history[3]["content"] == "Hello! How can I help?"
 
     @pytest.mark.asyncio
     async def test_session_not_found(self, session_manager):

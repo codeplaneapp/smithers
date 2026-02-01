@@ -174,13 +174,28 @@ class SessionManager:
         # Build tool specs (empty for now, will be populated from surfaces)
         tools: list[dict[str, Any]] = []
 
+        # Track assistant response text
+        assistant_response = ""
+
+        # Wrapper to capture assistant deltas
+        def capture_and_emit(event: Event) -> None:
+            nonlocal assistant_response
+            if event.type == EventType.ASSISTANT_DELTA:
+                assistant_response += event.data.get("text", "")
+            if emit:
+                emit(event)
+
         # Run the adapter with current message history
         async for _ in self.adapter.run(
-            messages=session.message_history, tools=tools, emit=emit or (lambda e: None)
+            messages=session.message_history, tools=tools, emit=capture_and_emit
         ):
             # Events are already emitted by the adapter via the emit callback
             # We just consume the async iterator
             pass
+
+        # Add assistant response to message history
+        if assistant_response:
+            session.message_history.append({"role": "assistant", "content": assistant_response})
 
     async def cancel_run(self, run_id: str) -> None:
         """Cancel a running agent.

@@ -64,6 +64,7 @@ class AnthropicAgentAdapter(AgentAdapter):
             self._current_stream = stream
 
             current_tool_use = None
+            accumulated_text = ""  # Track full assistant response
 
             async for event in stream:
                 event_type = getattr(event, "type", None)
@@ -89,6 +90,7 @@ class AnthropicAgentAdapter(AgentAdapter):
                     case "content_block_delta":
                         if hasattr(event, "delta") and hasattr(event.delta, "text"):
                             text = getattr(event.delta, "text", "")
+                            accumulated_text += text  # Accumulate text
                             ev = Event(type=EventType.ASSISTANT_DELTA, data={"text": text})
                             emit(ev)
                             yield ev
@@ -106,7 +108,10 @@ class AnthropicAgentAdapter(AgentAdapter):
                     case "message_stop":
                         ev = Event(
                             type=EventType.ASSISTANT_FINAL,
-                            data={"message_id": stream.current_message_snapshot.id},
+                            data={
+                                "message_id": stream.current_message_snapshot.id,
+                                "text": accumulated_text,  # Include full text
+                            },
                         )
                         emit(ev)
                         yield ev
