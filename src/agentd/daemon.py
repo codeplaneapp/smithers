@@ -85,6 +85,26 @@ class AgentDaemon:
                     Event(type=EventType.SESSION_CREATED, data={"session_id": session.id})
                 )
 
+            case "session.list":
+                limit = request.params.get("limit", 100)
+                sessions = await self.store.list_sessions(limit=limit)
+                self.emit_event(
+                    Event(
+                        type=EventType.SESSION_LIST,
+                        data={
+                            "sessions": [
+                                {
+                                    "id": s.id,
+                                    "workspace_root": s.workspace_root,
+                                    "created_at": s.created_at.isoformat(),
+                                    "last_active_at": s.last_active_at.isoformat(),
+                                }
+                                for s in sessions
+                            ]
+                        },
+                    )
+                )
+
             case "session.send":
                 session_id = request.params["session_id"]
                 message = request.params["message"]
@@ -228,6 +248,9 @@ class AgentDaemon:
         # Initialize the SQLite store
         await self.store.initialize()
 
+        # Load existing sessions from the database
+        loaded_sessions = await self.session_manager.load_sessions()
+
         self.emit_event(
             Event(
                 type=EventType.DAEMON_READY,
@@ -237,6 +260,7 @@ class AgentDaemon:
                         "sandbox_mode": self.config.sandbox_mode,
                         "agent_backend": self.config.agent_backend,
                     },
+                    "loaded_sessions": loaded_sessions,
                 },
             )
         )

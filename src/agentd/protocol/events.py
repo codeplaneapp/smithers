@@ -19,6 +19,7 @@ class EventType(str, Enum):
 
     # Session events
     SESSION_CREATED = "session.created"
+    SESSION_LIST = "session.list"
     SESSION_CLOSED = "session.closed"
 
     # Run control

@@ -740,6 +740,157 @@ class TestSessionManager:
         assert events[0].type == EventType.ERROR
         assert "not found" in events[0].data["message"]
 
+    @pytest.mark.asyncio
+    async def test_load_sessions_from_store(self, fake_adapter, tmp_path):
+        """Test loading existing sessions from database on startup."""
+        from agentd.session import SessionManager
+        from agentd.store.sqlite import SessionStore
+
+        # Create a store and add some sessions
+        db_path = tmp_path / "test_sessions.db"
+        store = SessionStore(str(db_path))
+        await store.initialize()
+
+        # Create sessions directly in the store
+        await store.create_session(workspace_root=str(tmp_path / "session1"), session_id="sess-1")
+        await store.create_session(workspace_root=str(tmp_path / "session2"), session_id="sess-2")
+        await store.create_session(workspace_root=str(tmp_path / "session3"), session_id="sess-3")
+
+        # Create a new session manager and load sessions
+        session_manager = SessionManager(adapter=fake_adapter, store=store)
+        loaded_count = await session_manager.load_sessions()
+
+        # Should have loaded 3 sessions
+        assert loaded_count == 3
+        assert len(session_manager.sessions) == 3
+        assert "sess-1" in session_manager.sessions
+        assert "sess-2" in session_manager.sessions
+        assert "sess-3" in session_manager.sessions
+
+        # Verify session data is correct
+        session1 = session_manager.sessions["sess-1"]
+        assert session1.workspace_root == str(tmp_path / "session1")
+        assert session1.current_run_id is None  # No active runs on startup
+
+    @pytest.mark.asyncio
+    async def test_load_sessions_without_store(self, fake_adapter):
+        """Test that load_sessions handles missing store gracefully."""
+        from agentd.session import SessionManager
+
+        session_manager = SessionManager(adapter=fake_adapter, store=None)
+        loaded_count = await session_manager.load_sessions()
+
+        # Should return 0 when no store is available
+        assert loaded_count == 0
+        assert len(session_manager.sessions) == 0
+
+
+class TestAgentDaemonSessionList:
+    """Test session.list request handling."""
+
+    @pytest.mark.asyncio
+    async def test_session_list_request(self, tmp_path):
+        """Test that session.list request returns all sessions."""
+        from io import StringIO
+
+        from agentd.daemon import AgentDaemon, DaemonConfig
+        from agentd.protocol.requests import Request
+
+        # Create daemon with fake adapter
+        config = DaemonConfig(
+            workspace_root=str(tmp_path),
+            agent_backend="fake",
+            db_path=str(tmp_path / "test.db"),
+        )
+
+        input_stream = StringIO()
+        output_stream = StringIO()
+        daemon = AgentDaemon(config, input_stream, output_stream)
+
+        # Initialize store and create some sessions
+        await daemon.store.initialize()
+        await daemon.session_manager.create_session(str(tmp_path / "session1"))
+        await daemon.session_manager.create_session(str(tmp_path / "session2"))
+
+        # Handle session.list request
+        request = Request(id="req-1", method="session.list", params={})
+        await daemon.handle_request(request)
+
+        # Parse output
+        output = output_stream.getvalue()
+        lines = [line for line in output.strip().split("\n") if line]
+
+        # Should have emitted SESSION_LIST event
+        assert len(lines) >= 1
+        import json
+
+        last_event = json.loads(lines[-1])
+        assert last_event["type"] == "session.list"
+        assert "sessions" in last_event["data"]
+        assert len(last_event["data"]["sessions"]) == 2
+
+        # Verify session data structure
+        session_data = last_event["data"]["sessions"][0]
+        assert "id" in session_data
+        assert "workspace_root" in session_data
+        assert "created_at" in session_data
+        assert "last_active_at" in session_data
+
+    @pytest.mark.asyncio
+    async def test_daemon_loads_sessions_on_startup(self, tmp_path):
+        """Test that daemon loads existing sessions on startup."""
+        from io import StringIO
+
+        from agentd.daemon import AgentDaemon, DaemonConfig
+        from agentd.store.sqlite import SessionStore
+
+        db_path = tmp_path / "test.db"
+
+        # Create store and add sessions directly
+        store = SessionStore(str(db_path))
+        await store.initialize()
+        await store.create_session(workspace_root=str(tmp_path / "session1"), session_id="sess-1")
+        await store.create_session(workspace_root=str(tmp_path / "session2"), session_id="sess-2")
+
+        # Create daemon (should load sessions on run())
+        config = DaemonConfig(
+            workspace_root=str(tmp_path),
+            agent_backend="fake",
+            db_path=str(db_path),
+        )
+
+        input_stream = StringIO()
+        output_stream = StringIO()
+        daemon = AgentDaemon(config, input_stream, output_stream)
+
+        # Start daemon in background task
+        import asyncio
+
+        run_task = asyncio.create_task(daemon.run())
+
+        # Give it time to initialize
+        await asyncio.sleep(0.1)
+
+        # Stop daemon
+        daemon.stop()
+        await run_task
+
+        # Verify sessions were loaded
+        assert len(daemon.session_manager.sessions) == 2
+        assert "sess-1" in daemon.session_manager.sessions
+        assert "sess-2" in daemon.session_manager.sessions
+
+        # Verify DAEMON_READY event includes loaded_sessions count
+        output = output_stream.getvalue()
+        lines = [line for line in output.strip().split("\n") if line]
+        assert len(lines) >= 1
+
+        import json
+
+        ready_event = json.loads(lines[0])
+        assert ready_event["type"] == "daemon.ready"
+        assert ready_event["data"]["loaded_sessions"] == 2
+
 
 class TestRepoStateService:
     """Test JJ integration for checkpoints."""

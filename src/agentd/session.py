@@ -73,6 +73,34 @@ class SessionManager:
 
         return session
 
+    async def load_sessions(self) -> int:
+        """Load all sessions from the store into memory.
+
+        This should be called when the daemon starts to restore
+        existing sessions from the database.
+
+        Returns:
+            Number of sessions loaded
+        """
+        if not self.store:
+            return 0
+
+        # Load all session records from the store
+        session_records = await self.store.list_sessions(limit=1000)
+
+        # Reconstruct Session objects in memory
+        for record in session_records:
+            session = Session(
+                id=record.id,
+                workspace_root=record.workspace_root,
+                created_at=record.created_at,
+                current_run_id=None,  # No active runs on startup
+                message_history=[],  # Will be rebuilt from events if needed
+            )
+            self.sessions[session.id] = session
+
+        return len(session_records)
+
     async def send_message(
         self,
         session_id: str,
