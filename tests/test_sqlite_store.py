@@ -620,3 +620,305 @@ class TestInitialization:
         graph = build_graph(simple_workflow)
         run_id = await store.create_run(graph)
         assert run_id is not None
+
+
+class TestFullTextSearch:
+    """Tests for FTS5 full-text search functionality."""
+
+    async def test_index_and_search_messages(self, tmp_path: Path):
+        """Should index and search message content."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        # Index some messages
+        await store.index_message("session-1", 1, "Hello world, this is a test message")
+        await store.index_message("session-1", 2, "Another message about Python programming")
+        await store.index_message("session-2", 3, "Testing search functionality")
+
+        # Search for "test"
+        results = await store.search("test")
+        assert len(results) >= 2
+        assert all(r.result_type == "message" for r in results if "test" in r.snippet.lower())
+
+        # Search for "Python"
+        results = await store.search("Python")
+        assert len(results) >= 1
+        assert any("Python" in r.snippet for r in results)
+
+    async def test_search_with_session_filter(self, tmp_path: Path):
+        """Should filter search results by session ID."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        # Index messages in different sessions
+        await store.index_message("session-1", 1, "Test message in session 1")
+        await store.index_message("session-2", 2, "Test message in session 2")
+
+        # Search with session filter
+        results = await store.search("Test", session_id="session-1")
+        assert len(results) == 1
+        assert results[0].session_id == "session-1"
+
+    async def test_index_and_search_tools(self, tmp_path: Path):
+        """Should index and search tool call content."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        # Index tool calls
+        await store.index_tool_call("run-1", 1, "Read", "Read file: config.json")
+        await store.index_tool_call("run-1", 2, "Write", "Wrote to output.txt")
+        await store.index_tool_call("run-2", 3, "Bash", "Executed git status")
+
+        # Search for "file"
+        results = await store.search("file")
+        assert len(results) >= 1
+        assert any(r.result_type == "tool" for r in results)
+
+        # Search for "git"
+        results = await store.search("git")
+        assert len(results) >= 1
+        tool_results = [r for r in results if r.result_type == "tool"]
+        assert len(tool_results) >= 1
+
+    async def test_index_and_search_checkpoints(self, tmp_path: Path):
+        """Should index and search checkpoint labels and descriptions."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        # Index checkpoints
+        await store.index_checkpoint(
+            "session-1", "cp-1", "Before refactor", "Saving state before major refactoring"
+        )
+        await store.index_checkpoint("session-1", "cp-2", "After tests", "All tests passing")
+        await store.index_checkpoint("session-2", "cp-3", "Initial setup", "Project scaffolding complete")
+
+        # Search for "refactor"
+        results = await store.search("refactor")
+        assert len(results) >= 1
+        assert any(r.result_type == "checkpoint" for r in results)
+
+        # Search for "tests"
+        results = await store.search("tests")
+        assert len(results) >= 1
+        checkpoint_results = [r for r in results if r.result_type == "checkpoint"]
+        assert len(checkpoint_results) >= 1
+
+    async def test_index_and_search_todos(self, tmp_path: Path):
+        """Should index and search todo items."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        # Index todos
+        await store.index_todo("todo-1", "workspace-1", "session-1", "Fix the authentication bug")
+        await store.index_todo("todo-2", "workspace-1", "session-1", "Add unit tests for the API")
+        await store.index_todo("todo-3", "workspace-1", None, "Update documentation")
+
+        # Search for "bug"
+        results = await store.search("bug")
+        assert len(results) >= 1
+        assert any(r.result_type == "todo" for r in results)
+
+        # Search for "tests"
+        results = await store.search("tests")
+        assert len(results) >= 1
+        todo_results = [r for r in results if r.result_type == "todo"]
+        assert len(todo_results) >= 1
+
+    async def test_search_with_result_type_filter(self, tmp_path: Path):
+        """Should filter search results by result type."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        # Index various content types with similar text
+        await store.index_message("session-1", 1, "Testing the system")
+        await store.index_tool_call("run-1", 1, "Test", "Testing tool output")
+        await store.index_checkpoint("session-1", "cp-1", "Test checkpoint", "For testing")
+        await store.index_todo("todo-1", "workspace-1", None, "Test the new feature")
+
+        # Search only messages
+        results = await store.search("Testing", result_types=["message"])
+        assert all(r.result_type == "message" for r in results)
+
+        # Search only tools
+        results = await store.search("Testing", result_types=["tool"])
+        assert all(r.result_type == "tool" for r in results)
+
+        # Search only checkpoints
+        results = await store.search("Test", result_types=["checkpoint"])
+        assert all(r.result_type == "checkpoint" for r in results)
+
+        # Search only todos
+        results = await store.search("Test", result_types=["todo"])
+        assert all(r.result_type == "todo" for r in results)
+
+    async def test_search_results_have_snippets(self, tmp_path: Path):
+        """Should include text snippets with search results."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        await store.index_message(
+            "session-1",
+            1,
+            "This is a long message with lots of content to search through and find matches",
+        )
+
+        results = await store.search("search")
+        assert len(results) >= 1
+        assert results[0].snippet != ""
+        assert "search" in results[0].snippet.lower()
+
+    async def test_search_results_ordered_by_rank(self, tmp_path: Path):
+        """Should order search results by relevance rank."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        # Index messages with varying relevance
+        await store.index_message("session-1", 1, "Python Python Python")  # High relevance
+        await store.index_message("session-1", 2, "Python programming")  # Medium relevance
+        await store.index_message("session-1", 3, "Some text with Python")  # Lower relevance
+
+        results = await store.search("Python")
+        assert len(results) >= 3
+
+        # Results should be ordered by rank (lower rank = more relevant)
+        ranks = [r.rank for r in results]
+        assert ranks == sorted(ranks)
+
+    async def test_search_limit(self, tmp_path: Path):
+        """Should respect the limit parameter."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        # Index many messages
+        for i in range(20):
+            await store.index_message("session-1", i, f"Test message number {i}")
+
+        # Search with limit
+        results = await store.search("Test", limit=5)
+        assert len(results) <= 5
+
+    async def test_search_with_phrase_query(self, tmp_path: Path):
+        """Should support phrase queries."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        await store.index_message("session-1", 1, "Hello world from Python")
+        await store.index_message("session-1", 2, "Python says hello to the world")
+
+        # Phrase query - should match exact phrase
+        results = await store.search('"Hello world"')
+        assert len(results) >= 1
+
+    async def test_clear_search_index_all(self, tmp_path: Path):
+        """Should clear entire search index."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        # Index content
+        await store.index_message("session-1", 1, "Test message")
+        await store.index_tool_call("run-1", 1, "Test", "Test tool")
+        await store.index_checkpoint("session-1", "cp-1", "Test", "checkpoint")
+        await store.index_todo("todo-1", "workspace-1", None, "Test todo")
+
+        # Verify content exists
+        results = await store.search("Test")
+        assert len(results) >= 4
+
+        # Clear all
+        await store.clear_search_index()
+
+        # Verify content is gone
+        results = await store.search("Test")
+        assert len(results) == 0
+
+    async def test_clear_search_index_by_type(self, tmp_path: Path):
+        """Should clear search index for specific result type."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        # Index content
+        await store.index_message("session-1", 1, "Test message")
+        await store.index_tool_call("run-1", 1, "Test", "Test tool")
+
+        # Clear only messages
+        await store.clear_search_index(result_type="message")
+
+        # Verify messages are gone but tools remain
+        results = await store.search("Test", result_types=["message"])
+        assert len(results) == 0
+
+        results = await store.search("Test", result_types=["tool"])
+        assert len(results) >= 1
+
+    async def test_clear_search_index_by_session(self, tmp_path: Path):
+        """Should clear search index for specific session."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        # Index content in different sessions
+        await store.index_message("session-1", 1, "Test message 1")
+        await store.index_message("session-2", 2, "Test message 2")
+
+        # Clear only session-1
+        await store.clear_search_index(session_id="session-1")
+
+        # Verify session-1 is gone but session-2 remains
+        results = await store.search("Test", session_id="session-1")
+        assert len(results) == 0
+
+        results = await store.search("Test", session_id="session-2")
+        assert len(results) >= 1
+
+    async def test_search_empty_query(self, tmp_path: Path):
+        """Should handle empty query gracefully."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        await store.index_message("session-1", 1, "Test message")
+
+        # Empty query should return empty results
+        results = await store.search("")
+        assert len(results) == 0
+
+    async def test_search_no_matches(self, tmp_path: Path):
+        """Should return empty list when no matches found."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        await store.index_message("session-1", 1, "Hello world")
+
+        # Search for something that doesn't exist
+        results = await store.search("nonexistent")
+        assert len(results) == 0
+
+    async def test_search_case_insensitive(self, tmp_path: Path):
+        """Should perform case-insensitive search."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        await store.index_message("session-1", 1, "Python Programming Language")
+
+        # Search with different cases
+        results_lower = await store.search("python")
+        results_upper = await store.search("PYTHON")
+        results_mixed = await store.search("PyThOn")
+
+        # All should return results
+        assert len(results_lower) >= 1
+        assert len(results_upper) >= 1
+        assert len(results_mixed) >= 1
+
+    async def test_search_with_special_characters(self, tmp_path: Path):
+        """Should handle special characters in search queries."""
+        store = SqliteStore(tmp_path / "test.db")
+        await store.initialize()
+
+        await store.index_message("session-1", 1, "Use the @decorator syntax")
+        await store.index_message("session-1", 2, "Variable $PATH is set")
+
+        # Search for content with special characters
+        results = await store.search("decorator")
+        assert len(results) >= 1
+
+        results = await store.search("PATH")
+        assert len(results) >= 1

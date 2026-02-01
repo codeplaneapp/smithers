@@ -190,6 +190,18 @@ class SessionEvent:
     payload_json: str
 
 
+@dataclass
+class SearchResult:
+    """A full-text search result."""
+
+    result_type: str  # "message", "tool", "checkpoint", "todo"
+    match_id: str  # ID of the matching item
+    session_id: str | None  # Session ID if applicable
+    run_id: str | None  # Run ID if applicable
+    snippet: str  # Text snippet with match context
+    rank: float  # Search relevance score
+
+
 # SQL schema for all tables
 _SCHEMA = """
 -- cache entries: content-addressed results
@@ -324,6 +336,42 @@ CREATE INDEX IF NOT EXISTS idx_loop_iterations_run_id ON loop_iterations(run_id)
 CREATE INDEX IF NOT EXISTS idx_session_events_session_id ON session_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_events_ts ON session_events(ts);
 CREATE INDEX IF NOT EXISTS idx_loop_iterations_loop_node ON loop_iterations(run_id, loop_node_id);
+
+-- FTS5 full-text search tables for searchable content
+-- Messages: Search through assistant/user message content
+CREATE VIRTUAL TABLE IF NOT EXISTS fts_messages USING fts5(
+    session_id UNINDEXED,
+    event_id UNINDEXED,
+    content,
+    tokenize = 'porter unicode61'
+);
+
+-- Tool calls: Search through tool names, inputs, and outputs
+CREATE VIRTUAL TABLE IF NOT EXISTS fts_tools USING fts5(
+    run_id UNINDEXED,
+    tool_call_id UNINDEXED,
+    tool_name UNINDEXED,
+    preview,
+    tokenize = 'porter unicode61'
+);
+
+-- Checkpoint labels: Search through checkpoint descriptions
+CREATE VIRTUAL TABLE IF NOT EXISTS fts_checkpoints USING fts5(
+    session_id UNINDEXED,
+    checkpoint_id UNINDEXED,
+    label,
+    description,
+    tokenize = 'porter unicode61'
+);
+
+-- Todos: Search through todo text
+CREATE VIRTUAL TABLE IF NOT EXISTS fts_todos USING fts5(
+    todo_id UNINDEXED,
+    workspace_id UNINDEXED,
+    session_id UNINDEXED,
+    text,
+    tokenize = 'porter unicode61'
+);
 """
 
 
@@ -1697,6 +1745,302 @@ class SqliteStore:
             "total_iterations": len(iterations),
             "loops": loops,
         }
+
+    # ==================== Full-Text Search Operations ====================
+
+    async def index_message(
+        self,
+        session_id: str,
+        event_id: int,
+        content: str,
+    ) -> None:
+        """Index a message for full-text search.
+
+        Args:
+            session_id: The session ID
+            event_id: The event ID
+            content: The message content to index
+        """
+        await self._ensure_initialized()
+        async with self._lock, aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """
+                INSERT INTO fts_messages (session_id, event_id, content)
+                VALUES (?, ?, ?)
+                """,
+                (session_id, event_id, content),
+            )
+            await db.commit()
+
+    async def index_tool_call(
+        self,
+        run_id: str,
+        tool_call_id: int,
+        tool_name: str,
+        preview: str,
+    ) -> None:
+        """Index a tool call for full-text search.
+
+        Args:
+            run_id: The run ID
+            tool_call_id: The tool call ID
+            tool_name: The tool name
+            preview: Preview text (e.g., first N lines of output)
+        """
+        await self._ensure_initialized()
+        async with self._lock, aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """
+                INSERT INTO fts_tools (run_id, tool_call_id, tool_name, preview)
+                VALUES (?, ?, ?, ?)
+                """,
+                (run_id, tool_call_id, tool_name, preview),
+            )
+            await db.commit()
+
+    async def index_checkpoint(
+        self,
+        session_id: str,
+        checkpoint_id: str,
+        label: str,
+        description: str = "",
+    ) -> None:
+        """Index a checkpoint for full-text search.
+
+        Args:
+            session_id: The session ID
+            checkpoint_id: The checkpoint ID
+            label: The checkpoint label
+            description: Optional checkpoint description
+        """
+        await self._ensure_initialized()
+        async with self._lock, aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """
+                INSERT INTO fts_checkpoints (session_id, checkpoint_id, label, description)
+                VALUES (?, ?, ?, ?)
+                """,
+                (session_id, checkpoint_id, label, description),
+            )
+            await db.commit()
+
+    async def index_todo(
+        self,
+        todo_id: str,
+        workspace_id: str,
+        session_id: str | None,
+        text: str,
+    ) -> None:
+        """Index a todo for full-text search.
+
+        Args:
+            todo_id: The todo ID
+            workspace_id: The workspace ID
+            session_id: Optional session ID if todo is attached to a session
+            text: The todo text
+        """
+        await self._ensure_initialized()
+        async with self._lock, aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """
+                INSERT INTO fts_todos (todo_id, workspace_id, session_id, text)
+                VALUES (?, ?, ?, ?)
+                """,
+                (todo_id, workspace_id, session_id, text),
+            )
+            await db.commit()
+
+    async def search(
+        self,
+        query: str,
+        *,
+        result_types: list[str] | None = None,
+        session_id: str | None = None,
+        limit: int = 50,
+    ) -> list[SearchResult]:
+        """Perform a full-text search across indexed content.
+
+        Args:
+            query: The search query (supports FTS5 query syntax)
+            result_types: Optional list of result types to search
+                         (message, tool, checkpoint, todo). If None, searches all.
+            session_id: Optional session ID to filter results
+            limit: Maximum number of results to return
+
+        Returns:
+            List of SearchResult objects, ordered by relevance
+        """
+        await self._ensure_initialized()
+
+        # Handle empty query
+        if not query or not query.strip():
+            return []
+
+        results: list[SearchResult] = []
+
+        # Determine which tables to search
+        search_tables = result_types or ["message", "tool", "checkpoint", "todo"]
+
+        async with self._lock, aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+
+            # Search messages
+            if "message" in search_tables:
+                msg_query = """
+                    SELECT 'message' as result_type, session_id, event_id as match_id,
+                           snippet(fts_messages, -1, '<b>', '</b>', '...', 32) as snippet,
+                           rank
+                    FROM fts_messages
+                    WHERE fts_messages MATCH ?
+                """
+                params: list[Any] = [query]
+                if session_id is not None:
+                    msg_query += " AND session_id = ?"
+                    params.append(session_id)
+                msg_query += " ORDER BY rank LIMIT ?"
+                params.append(limit)
+
+                async with db.execute(msg_query, params) as cursor:
+                    async for row in cursor:
+                        results.append(
+                            SearchResult(
+                                result_type=row["result_type"],
+                                match_id=str(row["match_id"]),
+                                session_id=row["session_id"],
+                                run_id=None,
+                                snippet=row["snippet"],
+                                rank=row["rank"],
+                            )
+                        )
+
+            # Search tool calls
+            if "tool" in search_tables:
+                tool_query = """
+                    SELECT 'tool' as result_type, run_id, tool_call_id as match_id,
+                           snippet(fts_tools, -1, '<b>', '</b>', '...', 32) as snippet,
+                           rank
+                    FROM fts_tools
+                    WHERE fts_tools MATCH ?
+                    ORDER BY rank LIMIT ?
+                """
+                async with db.execute(tool_query, (query, limit)) as cursor:
+                    async for row in cursor:
+                        results.append(
+                            SearchResult(
+                                result_type=row["result_type"],
+                                match_id=str(row["match_id"]),
+                                session_id=None,
+                                run_id=row["run_id"],
+                                snippet=row["snippet"],
+                                rank=row["rank"],
+                            )
+                        )
+
+            # Search checkpoints
+            if "checkpoint" in search_tables:
+                cp_query = """
+                    SELECT 'checkpoint' as result_type, session_id, checkpoint_id as match_id,
+                           snippet(fts_checkpoints, -1, '<b>', '</b>', '...', 32) as snippet,
+                           rank
+                    FROM fts_checkpoints
+                    WHERE fts_checkpoints MATCH ?
+                """
+                params = [query]
+                if session_id is not None:
+                    cp_query += " AND session_id = ?"
+                    params.append(session_id)
+                cp_query += " ORDER BY rank LIMIT ?"
+                params.append(limit)
+
+                async with db.execute(cp_query, params) as cursor:
+                    async for row in cursor:
+                        results.append(
+                            SearchResult(
+                                result_type=row["result_type"],
+                                match_id=row["match_id"],
+                                session_id=row["session_id"],
+                                run_id=None,
+                                snippet=row["snippet"],
+                                rank=row["rank"],
+                            )
+                        )
+
+            # Search todos
+            if "todo" in search_tables:
+                todo_query = """
+                    SELECT 'todo' as result_type, workspace_id, session_id,
+                           todo_id as match_id,
+                           snippet(fts_todos, -1, '<b>', '</b>', '...', 32) as snippet,
+                           rank
+                    FROM fts_todos
+                    WHERE fts_todos MATCH ?
+                """
+                params = [query]
+                if session_id is not None:
+                    todo_query += " AND session_id = ?"
+                    params.append(session_id)
+                todo_query += " ORDER BY rank LIMIT ?"
+                params.append(limit)
+
+                async with db.execute(todo_query, params) as cursor:
+                    async for row in cursor:
+                        results.append(
+                            SearchResult(
+                                result_type=row["result_type"],
+                                match_id=row["match_id"],
+                                session_id=row["session_id"],
+                                run_id=None,
+                                snippet=row["snippet"],
+                                rank=row["rank"],
+                            )
+                        )
+
+        # Sort all results by rank (lower is better for FTS5)
+        results.sort(key=lambda r: r.rank)
+        return results[:limit]
+
+    async def clear_search_index(
+        self,
+        *,
+        result_type: str | None = None,
+        session_id: str | None = None,
+    ) -> None:
+        """Clear the search index, optionally filtered by type or session.
+
+        Args:
+            result_type: Optional result type to clear (message, tool, checkpoint, todo)
+            session_id: Optional session ID to filter by
+        """
+        await self._ensure_initialized()
+        async with self._lock, aiosqlite.connect(self.path) as db:
+            if result_type is None or result_type == "message":
+                query = "DELETE FROM fts_messages"
+                params: list[Any] = []
+                if session_id is not None:
+                    query += " WHERE session_id = ?"
+                    params.append(session_id)
+                await db.execute(query, params)
+
+            if result_type is None or result_type == "tool":
+                await db.execute("DELETE FROM fts_tools")
+
+            if result_type is None or result_type == "checkpoint":
+                query = "DELETE FROM fts_checkpoints"
+                params = []
+                if session_id is not None:
+                    query += " WHERE session_id = ?"
+                    params.append(session_id)
+                await db.execute(query, params)
+
+            if result_type is None or result_type == "todo":
+                query = "DELETE FROM fts_todos"
+                params = []
+                if session_id is not None:
+                    query += " WHERE session_id = ?"
+                    params.append(session_id)
+                await db.execute(query, params)
+
+            await db.commit()
 
 
 def _timestamp_now() -> str:
