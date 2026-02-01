@@ -163,6 +163,13 @@ struct TerminalDrawerView: View {
             if let surfaceView = tab.surfaceView {
                 GeometryReader { geo in
                     Ghostty.SurfaceRepresentable(view: surfaceView, size: geo.size)
+                        .onChange(of: surfaceView.pwd) { newPwd in
+                            // Update the working directory in the manager when it changes
+                            if let pwdString = newPwd, !pwdString.isEmpty {
+                                let url = URL(fileURLWithPath: pwdString)
+                                manager.updateTabWorkingDirectory(tab.id, workingDirectory: url)
+                            }
+                        }
                 }
             } else {
                 placeholderView(message: "Terminal initializing...")
