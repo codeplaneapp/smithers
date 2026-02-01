@@ -65,6 +65,7 @@ class AnthropicAgentAdapter(AgentAdapter):
 
             current_tool_use = None
             accumulated_text = ""  # Track full assistant response
+            tool_input_buffer = ""  # Track accumulated tool input JSON
 
             async for event in stream:
                 event_type = getattr(event, "type", None)
@@ -76,34 +77,61 @@ class AnthropicAgentAdapter(AgentAdapter):
                             and event.content_block.type == "tool_use"
                         ):
                             current_tool_use = event.content_block
-                            ev = Event(
-                                type=EventType.TOOL_START,
-                                data={
-                                    "tool_use_id": current_tool_use.id,
-                                    "name": current_tool_use.name,
-                                    "input": {},
-                                },
-                            )
-                            emit(ev)
-                            yield ev
+                            tool_input_buffer = ""  # Reset buffer for new tool
 
                     case "content_block_delta":
+                        # Handle text deltas
                         if hasattr(event, "delta") and hasattr(event.delta, "text"):
                             text = getattr(event.delta, "text", "")
                             accumulated_text += text  # Accumulate text
                             ev = Event(type=EventType.ASSISTANT_DELTA, data={"text": text})
                             emit(ev)
                             yield ev
+                        # Handle tool input JSON deltas
+                        elif (
+                            current_tool_use
+                            and hasattr(event, "delta")
+                            and hasattr(event.delta, "type")
+                            and event.delta.type == "input_json_delta"
+                        ):
+                            partial_json = getattr(event.delta, "partial_json", "")
+                            tool_input_buffer += partial_json
 
                     case "content_block_stop":
                         if current_tool_use:
-                            ev = Event(
+                            # Parse the accumulated JSON input
+                            import json
+
+                            tool_input = {}
+                            if tool_input_buffer:
+                                try:
+                                    tool_input = json.loads(tool_input_buffer)
+                                except json.JSONDecodeError:
+                                    # Fall back to empty input if parsing fails
+                                    tool_input = {}
+
+                            # Emit TOOL_START with complete input
+                            ev_start = Event(
+                                type=EventType.TOOL_START,
+                                data={
+                                    "tool_use_id": current_tool_use.id,
+                                    "name": current_tool_use.name,
+                                    "input": tool_input,
+                                },
+                            )
+                            emit(ev_start)
+                            yield ev_start
+
+                            # Emit TOOL_END
+                            ev_end = Event(
                                 type=EventType.TOOL_END,
                                 data={"tool_use_id": current_tool_use.id, "status": "success"},
                             )
-                            emit(ev)
-                            yield ev
+                            emit(ev_end)
+                            yield ev_end
+
                             current_tool_use = None
+                            tool_input_buffer = ""
 
                     case "message_stop":
                         ev = Event(

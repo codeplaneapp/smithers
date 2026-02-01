@@ -976,6 +976,52 @@ class TestAgentDaemonSessionList:
         assert ready_event["data"]["loaded_sessions"] == 2
 
 
+class TestAnthropicAdapter:
+    """Test AnthropicAgentAdapter tool use handling."""
+
+    @pytest.mark.asyncio
+    async def test_tool_input_accumulation(self):
+        """Test that tool inputs are accumulated from input_json_delta events."""
+        from agentd.adapters.fake import FakeAgentAdapter
+        from agentd.protocol.events import EventType
+        from agentd.session import SessionManager
+
+        # Script simulating Anthropic streaming with tool use
+        script = [
+            {"type": "tool.start", "tool_use_id": "t1", "name": "bash", "input": {"command": "ls -la"}},
+            {"type": "tool.end", "tool_use_id": "t1", "status": "success"},
+            {"type": "assistant.final", "message_id": "msg-1", "text": ""},
+        ]
+        adapter = FakeAgentAdapter(script=script)
+        session_manager = SessionManager(adapter=adapter)
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp_path:
+            session = await session_manager.create_session(tmp_path)
+
+            # Collect events
+            events = []
+
+            def collect_event(event):
+                events.append(event)
+
+            # Send a message
+            await session_manager.send_message(
+                session_id=session.id, message="List files", emit=collect_event
+            )
+
+            # Find TOOL_START event
+            tool_start_events = [e for e in events if e.type == EventType.TOOL_START]
+            assert len(tool_start_events) == 1
+
+            # Verify tool start has complete input
+            tool_start = tool_start_events[0]
+            assert tool_start.data["tool_use_id"] == "t1"
+            assert tool_start.data["name"] == "bash"
+            assert tool_start.data["input"] == {"command": "ls -la"}
+
+
 class TestRepoStateService:
     """Test JJ integration for checkpoints."""
 
