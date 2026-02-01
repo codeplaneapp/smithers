@@ -43,10 +43,7 @@ struct SmithersView: View {
             SearchView(
                 isPresented: $showSearch,
                 selectedResult: $selectedSearchResult,
-                onSendRequest: { request in
-                    // TODO: Wire to AgentClient when available
-                    print("Search request: \(request.method)")
-                }
+                sessionManager: sessionManager
             )
         }
         .onChange(of: selectedSearchResult) { result in

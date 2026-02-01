@@ -18,12 +18,17 @@ struct SearchResult: Identifiable, Equatable {
 /// Global search view with results navigation
 struct SearchView: View {
     @State private var searchQuery: String = ""
-    @State private var results: [SearchResult] = []
-    @State private var isSearching: Bool = false
     @Binding var isPresented: Bool
     @Binding var selectedResult: SearchResult?
+    @ObservedObject var sessionManager: SessionManager
 
-    var onSendRequest: ((AgentRequest) -> Void)?
+    private var results: [SearchResult] {
+        sessionManager.searchResults
+    }
+
+    private var isSearching: Bool {
+        sessionManager.isSearching
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,7 +44,7 @@ struct SearchView: View {
                 if !searchQuery.isEmpty {
                     Button(action: {
                         searchQuery = ""
-                        results = []
+                        sessionManager.searchResults = []
                     }) {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundColor(.secondary)
@@ -108,26 +113,24 @@ struct SearchView: View {
             if !newValue.isEmpty {
                 performSearch()
             } else {
-                results = []
+                sessionManager.searchResults = []
             }
         }
     }
 
     private func performSearch() {
-        guard !searchQuery.isEmpty else { return }
+        guard !searchQuery.isEmpty else {
+            sessionManager.searchResults = []
+            return
+        }
 
-        isSearching = true
+        sessionManager.isSearching = true
 
-        // Send search request
-        let request = AgentRequest.searchAll(query: searchQuery)
-        onSendRequest?(request)
-
-        // Mock results for now - will be replaced when we handle search.results events
-        // In a real implementation, we'd listen for search.results events from the daemon
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            // TODO: Replace with actual event handling
-            results = []
-            isSearching = false
+        do {
+            try sessionManager.searchAll(query: searchQuery)
+        } catch {
+            print("Search failed: \(error)")
+            sessionManager.isSearching = false
         }
     }
 }
@@ -191,6 +194,10 @@ struct SearchResultRow: View {
 #Preview {
     SearchView(
         isPresented: .constant(true),
-        selectedResult: .constant(nil)
+        selectedResult: .constant(nil),
+        sessionManager: SessionManager(
+            workspaceRoot: FileManager.default.temporaryDirectory.path,
+            agentBackend: "fake"
+        )
     )
 }

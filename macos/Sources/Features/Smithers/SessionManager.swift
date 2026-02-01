@@ -6,6 +6,8 @@ import Combine
 class SessionManager: ObservableObject {
     @Published var sessions: [Session] = []
     @Published var error: String?
+    @Published var searchResults: [SearchResult] = []
+    @Published var isSearching: Bool = false
 
     private var agentClient: AgentClient?
     private var cancellables = Set<AnyCancellable>()
@@ -131,6 +133,45 @@ class SessionManager: ObservableObject {
         ))
     }
 
+    /// Search events
+    func searchEvents(query: String, sessionId: UUID? = nil, limit: Int = 50) throws {
+        guard let client = agentClient else {
+            throw SessionManagerError.notConnected
+        }
+
+        try client.send(AgentRequest.searchEvents(
+            query: query,
+            sessionId: sessionId?.uuidString,
+            limit: limit
+        ))
+    }
+
+    /// Search checkpoints
+    func searchCheckpoints(query: String, sessionId: UUID? = nil, limit: Int = 50) throws {
+        guard let client = agentClient else {
+            throw SessionManagerError.notConnected
+        }
+
+        try client.send(AgentRequest.searchCheckpoints(
+            query: query,
+            sessionId: sessionId?.uuidString,
+            limit: limit
+        ))
+    }
+
+    /// Search all content (events and checkpoints)
+    func searchAll(query: String, sessionId: UUID? = nil, limit: Int = 50) throws {
+        guard let client = agentClient else {
+            throw SessionManagerError.notConnected
+        }
+
+        try client.send(AgentRequest.searchAll(
+            query: query,
+            sessionId: sessionId?.uuidString,
+            limit: limit
+        ))
+    }
+
     // MARK: - Event Handling
 
     private func handleEvent(_ event: AgentEvent) {
@@ -153,9 +194,106 @@ class SessionManager: ObservableObject {
             }
 
         case .searchResults:
-            // Handle session list response from search results
-            // TODO: Implement proper session list handling
-            break
+            // Handle search results from search queries
+            isSearching = false
+
+            var results: [SearchResult] = []
+
+            // Check if this is a search.all response (has events and checkpoints)
+            if let events = event.data["events"]?.value as? [[String: Any]] {
+                // Handle search.all response
+                for eventData in events {
+                    if let id = eventData["id"] as? String,
+                       let sessionIdStr = eventData["session_id"] as? String,
+                       let sessionId = UUID(uuidString: sessionIdStr),
+                       let tsStr = eventData["ts"] as? String,
+                       let type = eventData["type"] as? String,
+                       let payload = eventData["payload"] as? [String: Any] {
+
+                        let timestamp = ISO8601DateFormatter().date(from: tsStr)
+                        let title = self.extractEventTitle(type: type, payload: payload)
+                        let preview = self.extractEventPreview(payload: payload)
+
+                        let result = SearchResult(
+                            id: id,
+                            type: .event,
+                            title: title,
+                            preview: preview,
+                            sessionId: sessionId.uuidString,
+                            timestamp: timestamp
+                        )
+                        results.append(result)
+                    }
+                }
+
+                if let checkpoints = event.data["checkpoints"]?.value as? [[String: Any]] {
+                    for checkpointData in checkpoints {
+                        if let checkpointId = checkpointData["checkpoint_id"] as? String,
+                           let sessionIdStr = checkpointData["session_id"] as? String,
+                           let message = checkpointData["message"] as? String,
+                           let createdAtStr = checkpointData["created_at"] as? String {
+
+                            let timestamp = ISO8601DateFormatter().date(from: createdAtStr)
+
+                            let result = SearchResult(
+                                id: checkpointId,
+                                type: .checkpoint,
+                                title: "Checkpoint: \(message)",
+                                preview: message,
+                                sessionId: sessionIdStr,
+                                timestamp: timestamp
+                            )
+                            results.append(result)
+                        }
+                    }
+                }
+            } else if let resultsArray = event.data["results"]?.value as? [[String: Any]] {
+                // Handle search.events or search.checkpoints response
+                for resultData in resultsArray {
+                    // Check if this is an event result
+                    if let id = resultData["id"] as? String {
+                        if let sessionIdStr = resultData["session_id"] as? String,
+                           let tsStr = resultData["ts"] as? String,
+                           let type = resultData["type"] as? String,
+                           let payload = resultData["payload"] as? [String: Any] {
+
+                            let timestamp = ISO8601DateFormatter().date(from: tsStr)
+                            let title = self.extractEventTitle(type: type, payload: payload)
+                            let preview = self.extractEventPreview(payload: payload)
+
+                            let result = SearchResult(
+                                id: id,
+                                type: .event,
+                                title: title,
+                                preview: preview,
+                                sessionId: sessionIdStr,
+                                timestamp: timestamp
+                            )
+                            results.append(result)
+                        }
+                    } else if let checkpointId = resultData["checkpoint_id"] as? String {
+                        // This is a checkpoint result
+                        if let sessionIdStr = resultData["session_id"] as? String,
+                           let message = resultData["message"] as? String,
+                           let createdAtStr = resultData["created_at"] as? String {
+
+                            let timestamp = ISO8601DateFormatter().date(from: createdAtStr)
+
+                            let result = SearchResult(
+                                id: checkpointId,
+                                type: .checkpoint,
+                                title: "Checkpoint: \(message)",
+                                preview: message,
+                                sessionId: sessionIdStr,
+                                timestamp: timestamp
+                            )
+                            results.append(result)
+                        }
+                    }
+                }
+            }
+
+            searchResults = results
 
         case .runFinished, .runCancelled:
             // Mark session as inactive
@@ -346,6 +484,46 @@ class SessionManager: ObservableObject {
 
     private func currentActiveSessionIndex() -> Int? {
         sessions.firstIndex(where: { $0.isActive })
+    }
+
+    private func extractEventTitle(type: String, payload: [String: Any]) -> String {
+        switch type {
+        case "user.message":
+            return "User message"
+        case "assistant.delta", "assistant.final":
+            return "Assistant response"
+        case "tool.start", "tool.end":
+            if let toolName = payload["tool_name"] as? String {
+                return "Tool: \(toolName)"
+            }
+            return "Tool"
+        case "checkpoint.created":
+            if let label = payload["label"] as? String {
+                return "Checkpoint: \(label)"
+            }
+            return "Checkpoint"
+        case "skill.start", "skill.result", "skill.end":
+            if let skillId = payload["skill_id"] as? String {
+                return "Skill: \(skillId)"
+            }
+            return "Skill"
+        default:
+            return type
+        }
+    }
+
+    private func extractEventPreview(payload: [String: Any]) -> String {
+        // Try different common payload keys for preview text
+        if let text = payload["text"] as? String {
+            return String(text.prefix(200))
+        } else if let content = payload["content"] as? String {
+            return String(content.prefix(200))
+        } else if let message = payload["message"] as? String {
+            return String(message.prefix(200))
+        } else if let output = payload["output"] as? String {
+            return String(output.prefix(200))
+        }
+        return ""
     }
 
     private var streamingMessageId: UUID?
