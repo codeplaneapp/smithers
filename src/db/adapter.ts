@@ -9,6 +9,7 @@ import {
   smithersCache,
   smithersToolCalls,
   smithersEvents,
+  smithersRalph,
 } from "./internal-schema";
 
 export class SmithersDb {
@@ -134,6 +135,45 @@ export class SmithersDb {
 
   async insertEvent(row: any) {
     await this.db.insert(smithersEvents).values(row);
+  }
+
+  async getLastEventSeq(runId: string) {
+    const rows = await this.db
+      .select()
+      .from(smithersEvents)
+      .where(eq(smithersEvents.runId, runId))
+      .orderBy(desc(smithersEvents.seq))
+      .limit(1);
+    return rows[0]?.seq as number | undefined;
+  }
+
+  async listEvents(runId: string, afterSeq: number, limit = 200) {
+    return this.db
+      .select()
+      .from(smithersEvents)
+      .where(and(eq(smithersEvents.runId, runId), sql`${smithersEvents.seq} > ${afterSeq}`))
+      .orderBy(smithersEvents.seq)
+      .limit(limit);
+  }
+
+  async insertOrUpdateRalph(row: any) {
+    await this.db.insert(smithersRalph).values(row).onConflictDoUpdate({
+      target: [smithersRalph.runId, smithersRalph.ralphId],
+      set: row,
+    });
+  }
+
+  async listRalph(runId: string) {
+    return this.db.select().from(smithersRalph).where(eq(smithersRalph.runId, runId));
+  }
+
+  async getRalph(runId: string, ralphId: string) {
+    const rows = await this.db
+      .select()
+      .from(smithersRalph)
+      .where(and(eq(smithersRalph.runId, runId), eq(smithersRalph.ralphId, ralphId)))
+      .limit(1);
+    return rows[0];
   }
 
   async insertCache(row: any) {

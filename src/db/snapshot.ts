@@ -23,6 +23,7 @@ export async function loadOutputs(db: any, schema: Record<string, any>, runId: s
     if (!runIdCol) continue;
     const rows = await db.select().from(table as any).where(eq(runIdCol, runId));
     out[getTableName(table as any)] = rows;
+    out[key] = rows;
   }
   return out;
 }

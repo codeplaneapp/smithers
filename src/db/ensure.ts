@@ -107,5 +107,14 @@ export function ensureSmithersTables(db: BunSQLiteDatabase<any>): void {
       payload_json TEXT NOT NULL,
       PRIMARY KEY (run_id, seq)
     );
+
+    CREATE TABLE IF NOT EXISTS _smithers_ralph (
+      run_id TEXT NOT NULL,
+      ralph_id TEXT NOT NULL,
+      iteration INTEGER NOT NULL DEFAULT 0,
+      done INTEGER NOT NULL DEFAULT 0,
+      updated_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (run_id, ralph_id)
+    );
   `);
 }
