@@ -19,11 +19,14 @@ function createElement(type: string, props: Record<string, any>): HostElement {
   return { kind: "element", tag: type, props: stringProps, rawProps: props ?? {}, children: [] };
 }
 
+let currentUpdatePriority = 1;
+
 const hostConfig: any = {
   supportsMutation: true,
   supportsPersistence: false,
   supportsHydration: false,
   isPrimaryRenderer: true,
+  supportsMicrotasks: true,
 
   getRootHostContext() {
     return {};
@@ -71,11 +74,17 @@ const hostConfig: any = {
   },
   prepareUpdate(instance: HostElement, _type: string, oldProps: any, newProps: any) {
     if (oldProps === newProps) return null;
+    if (process.env.SMITHERS_DEBUG && instance.tag === "smithers:ralph") {
+      console.error("[smithers] prepareUpdate ralph", { oldProps, newProps });
+    }
     return newProps;
   },
-  commitUpdate(instance: HostElement, updatePayload: any) {
-    if (!updatePayload) return;
-    const next = createElement(instance.tag, updatePayload);
+  commitUpdate(instance: HostElement, _type: string, _oldProps: any, newProps: any) {
+    if (!newProps || typeof newProps !== "object") return;
+    if (process.env.SMITHERS_DEBUG && instance.tag === "smithers:ralph") {
+      console.error("[smithers] commitUpdate ralph", { newProps });
+    }
+    const next = createElement(instance.tag, newProps);
     instance.props = next.props;
     instance.rawProps = next.rawProps;
   },
@@ -98,8 +107,40 @@ const hostConfig: any = {
   getCurrentEventPriority() {
     return 1;
   },
+  shouldAttemptEagerTransition() {
+    return false;
+  },
+  maySuspendCommit() {
+    return false;
+  },
+  preloadInstance() {},
+  startSuspendingCommit() {},
+  suspendInstance() {},
+  waitForCommitToBeReady() {
+    return null;
+  },
+  resetFormInstance() {},
+  detachDeletedInstance() {},
+  bindToConsole(type: "error" | "warn" | "info" | "log", args: any[]) {
+    return () => {
+      const fn = (console as any)[type] ?? console.log;
+      fn(...args);
+    };
+  },
+  getCurrentUpdatePriority() {
+    return currentUpdatePriority;
+  },
+  setCurrentUpdatePriority(priority: number) {
+    currentUpdatePriority = priority;
+  },
+  resolveUpdatePriority() {
+    return currentUpdatePriority;
+  },
   scheduleTimeout(fn: (...args: any[]) => void, delay?: number) {
     return setTimeout(fn, delay ?? 0);
+  },
+  scheduleMicrotask(fn: (...args: any[]) => void) {
+    queueMicrotask(fn);
   },
   cancelTimeout(id: any) {
     clearTimeout(id);
@@ -115,22 +156,23 @@ export class SmithersRenderer {
 
   constructor() {
     this.container = { root: null };
-    this.root = reconciler.createContainer(
+    this.root = (reconciler as any).createContainer(
       this.container,
       0,
       null,
       false,
       null,
       "",
-      () => {},
+      (reconciler as any).defaultOnUncaughtError,
+      (reconciler as any).defaultOnCaughtError,
+      (reconciler as any).defaultOnRecoverableError,
       null,
     );
   }
 
   async render(element: React.ReactElement, opts?: ExtractOptions) {
-    await new Promise<void>((resolve) => {
-      reconciler.updateContainer(element, this.root, null, () => resolve());
-    });
+    (reconciler as any).updateContainerSync(element, this.root, null, () => {});
+    (reconciler as any).flushSyncWork();
     return extractFromHost(this.container.root, opts);
   }
 
