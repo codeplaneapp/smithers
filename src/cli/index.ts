@@ -54,7 +54,13 @@ async function main() {
     const input = args.input ? JSON.parse(args.input) : {};
     const runId = args["run-id"]; 
     const resume = cmd === "resume" || Boolean(args.resume);
-    const result = await runWorkflow(workflow, { input, runId, resume, maxConcurrency: args["max-concurrency"] ? Number(args["max-concurrency"]) : undefined });
+    const result = await runWorkflow(workflow, {
+      input,
+      runId,
+      resume,
+      workflowPath,
+      maxConcurrency: args["max-concurrency"] ? Number(args["max-concurrency"]) : undefined,
+    });
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.status === "finished" ? 0 : result.status === "waiting-approval" ? 3 : result.status === "cancelled" ? 2 : 1);
   }
