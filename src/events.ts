@@ -18,13 +18,7 @@ export class EventBus extends EventEmitter {
   async emitEvent(event: SmithersEvent) {
     this.emit("event", event);
     if (this.db) {
-      await this.db.insertEvent?.({
-        runId: event.runId,
-        seq: this.seq++,
-        timestampMs: event.timestampMs,
-        type: event.type,
-        payloadJson: JSON.stringify(event),
-      });
+      await this.persistDb(event);
     }
   }
 
@@ -41,6 +35,15 @@ export class EventBus extends EventEmitter {
   private async persistDb(event: SmithersEvent) {
     if (!this.db) return;
     const payloadJson = JSON.stringify(event);
+    if (typeof this.db.insertEventWithNextSeq === "function") {
+      await this.db.insertEventWithNextSeq({
+        runId: event.runId,
+        timestampMs: event.timestampMs,
+        type: event.type,
+        payloadJson,
+      });
+      return;
+    }
     await this.db.insertEvent({
       runId: event.runId,
       seq: this.seq++,
