@@ -142,6 +142,7 @@ export function startServer(opts: { port?: number; db?: BunSQLiteDatabase<any> }
         });
         let closed = false;
         let lastSeq = Number(url.searchParams.get("afterSeq") ?? -1);
+        if (!Number.isFinite(lastSeq)) lastSeq = -1;
         const poll = async () => {
           if (closed) return;
           const events = await adapter.listEvents(runId, lastSeq, 200);
