@@ -28,6 +28,19 @@ export class SmithersDb {
     return rows[0];
   }
 
+  async listRuns(limit = 50, status?: string) {
+    const where = status ? eq(smithersRuns.status, status) : undefined;
+    const query = this.db
+      .select()
+      .from(smithersRuns)
+      .orderBy(desc(smithersRuns.createdAtMs))
+      .limit(limit);
+    if (where) {
+      return query.where(where);
+    }
+    return query;
+  }
+
   async insertNode(row: any) {
     await this.db.insert(smithersNodes).values(row).onConflictDoUpdate({
       target: [smithersNodes.runId, smithersNodes.nodeId, smithersNodes.iteration],
