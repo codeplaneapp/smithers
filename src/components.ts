@@ -12,7 +12,12 @@ export function Workflow(props: WorkflowProps) {
 }
 
 export function Task<Row>(props: TaskProps<Row>) {
-  return React.createElement("smithers:task", props, props.children as any);
+  if (props.agent) {
+    return React.createElement("smithers:task", props, props.children as any);
+  }
+  const { children, ...rest } = props as any;
+  const nextProps = { ...rest, __payload: children } as any;
+  return React.createElement("smithers:task", nextProps, null);
 }
 
 export function Sequence(props: SequenceProps) {
@@ -33,5 +38,8 @@ export function Branch(props: BranchProps) {
 
 export function Ralph(props: RalphProps) {
   if (props.skipIf) return null;
+  if (process.env.SMITHERS_DEBUG) {
+    console.error("[smithers] Ralph render", props.id ?? "(auto)", props.until);
+  }
   return React.createElement("smithers:ralph", props, props.children);
 }
