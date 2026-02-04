@@ -6,6 +6,7 @@ import { read, grep, bash } from "../src/tools/index";
 import { runWithToolContext } from "../src/tools/context";
 import { ensureSmithersTables } from "../src/db/ensure";
 import { SmithersDb } from "../src/db/adapter";
+import { smithersToolCalls } from "../src/db/internal-schema";
 import { createTestDb } from "./helpers";
 import { ddl, schema } from "./schema";
 
@@ -87,6 +88,38 @@ describe("tools sandbox", () => {
         withToolContext(root, () => execTool(read, { path: "big.txt" }), { maxOutputBytes: 64 }),
       ).rejects.toThrow("File too large");
     } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("tool errorJson includes message", async () => {
+    const root = makeTempDir("smithers-root-");
+    const { db, cleanup } = createTestDb(schema, ddl);
+    ensureSmithersTables(db as any);
+    const adapter = new SmithersDb(db as any);
+    try {
+      await expect(
+        runWithToolContext(
+          {
+            db: adapter,
+            runId: "run",
+            nodeId: "node",
+            iteration: 0,
+            attempt: 1,
+            rootDir: root,
+            allowNetwork: false,
+            maxOutputBytes: 128,
+            timeoutMs: 50,
+            seq: 0,
+          },
+          () => execTool(read, { path: "../outside.txt" }),
+        ),
+      ).rejects.toThrow();
+      const rows = await (db as any).select().from(smithersToolCalls);
+      expect(rows.length).toBe(1);
+      expect(rows[0].errorJson).toContain("Path escapes sandbox root");
+    } finally {
+      cleanup();
       rmSync(root, { recursive: true, force: true });
     }
   });
