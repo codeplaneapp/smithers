@@ -7,11 +7,12 @@ import type { SmithersWorkflow } from "../types";
 import { SmithersDb } from "../db/adapter";
 import { ensureSmithersTables } from "../db/ensure";
 import { approveNode, denyNode } from "../engine/approvals";
+import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 
 type RunRecord = {
   workflow: SmithersWorkflow<any>;
   abort: AbortController;
-  events: Set<ServerResponse>;
+  workflowPath: string;
 };
 
 const runs = new Map<string, RunRecord>();
@@ -37,12 +38,24 @@ function sendJson(res: ServerResponse, status: number, payload: any) {
   res.end(JSON.stringify(payload));
 }
 
-export function startServer(opts: { port?: number } = {}) {
+export function startServer(opts: { port?: number; db?: BunSQLiteDatabase<any> } = {}) {
   const port = opts.port ?? 7331;
+  const serverDb = opts.db ?? null;
+  if (serverDb) {
+    ensureSmithersTables(serverDb);
+  }
+  const serverAdapter = serverDb ? new SmithersDb(serverDb) : null;
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
       const method = req.method ?? "GET";
+
+      function adapterForRun(runId: string): SmithersDb | null {
+        if (serverAdapter) return serverAdapter;
+        const record = runs.get(runId);
+        if (!record) return null;
+        return new SmithersDb(record.workflow.db as any);
+      }
 
       if (method === "POST" && url.pathname === "/v1/runs") {
         const body = await readBody(req);
@@ -50,7 +63,7 @@ export function startServer(opts: { port?: number } = {}) {
         ensureSmithersTables(workflow.db as any);
         const abort = new AbortController();
         const runId = body.runId ?? newRunId();
-        const record: RunRecord = { workflow, abort, events: new Set() };
+        const record: RunRecord = { workflow, abort, workflowPath: body.workflowPath };
         runs.set(runId, record);
 
         runWorkflow(workflow, {
@@ -59,19 +72,11 @@ export function startServer(opts: { port?: number } = {}) {
           resume: body.resume ?? false,
           maxConcurrency: body.config?.maxConcurrency,
           signal: abort.signal,
-          onProgress: (e) => {
-            for (const client of record.events) {
-              client.write(`event: smithers\n`);
-              client.write(`data: ${JSON.stringify(e)}\n\n`);
-            }
-          },
+          workflowPath: body.workflowPath,
         }).then((result) => {
           const id = result.runId;
           const rec = runs.get(id);
           if (rec) {
-            for (const client of rec.events) {
-              client.end();
-            }
             runs.delete(id);
           }
         });
@@ -87,7 +92,7 @@ export function startServer(opts: { port?: number } = {}) {
         const workflow = await loadWorkflow(body.workflowPath);
         ensureSmithersTables(workflow.db as any);
         const abort = new AbortController();
-        const record: RunRecord = { workflow, abort, events: new Set() };
+        const record: RunRecord = { workflow, abort, workflowPath: body.workflowPath };
         runs.set(runId, record);
 
         runWorkflow(workflow, {
@@ -96,18 +101,10 @@ export function startServer(opts: { port?: number } = {}) {
           resume: true,
           maxConcurrency: body.config?.maxConcurrency,
           signal: abort.signal,
-          onProgress: (e) => {
-            for (const client of record.events) {
-              client.write(`event: smithers\n`);
-              client.write(`data: ${JSON.stringify(e)}\n\n`);
-            }
-          },
+          workflowPath: body.workflowPath,
         }).then(() => {
           const rec = runs.get(runId);
           if (rec) {
-            for (const client of rec.events) {
-              client.end();
-            }
             runs.delete(runId);
           }
         });
@@ -130,32 +127,55 @@ export function startServer(opts: { port?: number } = {}) {
       const runEventsMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/events$/);
       if (method === "GET" && runEventsMatch) {
         const runId = runEventsMatch[1]!;
-        const record = runs.get(runId);
+        const adapter = adapterForRun(runId);
+        if (!adapter) {
+          return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
+        }
+        const run = await adapter.getRun(runId);
+        if (!run) {
+          return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
+        }
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
         });
-        if (record) {
-          record.events.add(res);
-          req.on("close", () => record.events.delete(res));
-        } else {
-          res.write(`event: smithers\n`);
-          res.write(`data: ${JSON.stringify({ type: "RunFinished", runId })}\n\n`);
-          res.end();
-        }
+        let closed = false;
+        let lastSeq = Number(url.searchParams.get("afterSeq") ?? -1);
+        const poll = async () => {
+          if (closed) return;
+          const events = await adapter.listEvents(runId, lastSeq, 200);
+          for (const ev of events) {
+            lastSeq = ev.seq;
+            res.write(`event: smithers\n`);
+            res.write(`data: ${ev.payloadJson}\n\n`);
+          }
+          const runRow = await adapter.getRun(runId);
+          if (runRow && ["finished", "failed", "cancelled"].includes(runRow.status) && events.length === 0) {
+            closed = true;
+            res.end();
+          }
+        };
+        const timer = setInterval(poll, 500);
+        req.on("close", () => {
+          closed = true;
+          clearInterval(timer);
+        });
+        await poll();
         return;
       }
 
       const runMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)$/);
       if (method === "GET" && runMatch) {
         const runId = runMatch[1]!;
-        const record = runs.get(runId);
-        if (!record) {
+        const adapter = adapterForRun(runId);
+        if (!adapter) {
           return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
         }
-        const adapter = new SmithersDb(record.workflow.db as any);
         const run = await adapter.getRun(runId);
+        if (!run) {
+          return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
+        }
         const summary = await adapter.countNodesByState(runId);
         return sendJson(res, 200, {
           runId,
@@ -173,11 +193,14 @@ export function startServer(opts: { port?: number } = {}) {
       const framesMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/frames$/);
       if (method === "GET" && framesMatch) {
         const runId = framesMatch[1]!;
-        const record = runs.get(runId);
-        if (!record) {
+        const adapter = adapterForRun(runId);
+        if (!adapter) {
           return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
         }
-        const adapter = new SmithersDb(record.workflow.db as any);
+        const run = await adapter.getRun(runId);
+        if (!run) {
+          return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
+        }
         const limit = Number(url.searchParams.get("limit") ?? 50);
         const after = url.searchParams.get("afterFrameNo");
         const frames = await adapter.listFrames(runId, limit, after ? Number(after) : undefined);
@@ -189,9 +212,8 @@ export function startServer(opts: { port?: number } = {}) {
         const runId = approveMatch[1]!;
         const nodeId = approveMatch[2]!;
         const body = await readBody(req);
-        const record = runs.get(runId);
-        if (!record) return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
-        const adapter = new SmithersDb(record.workflow.db as any);
+        const adapter = adapterForRun(runId);
+        if (!adapter) return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
         await approveNode(adapter, runId, nodeId, body.iteration ?? 0, body.note, body.decidedBy);
         return sendJson(res, 200, { runId });
       }
@@ -201,11 +223,20 @@ export function startServer(opts: { port?: number } = {}) {
         const runId = denyMatch[1]!;
         const nodeId = denyMatch[2]!;
         const body = await readBody(req);
-        const record = runs.get(runId);
-        if (!record) return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
-        const adapter = new SmithersDb(record.workflow.db as any);
+        const adapter = adapterForRun(runId);
+        if (!adapter) return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
         await denyNode(adapter, runId, nodeId, body.iteration ?? 0, body.note, body.decidedBy);
         return sendJson(res, 200, { runId });
+      }
+
+      if (method === "GET" && url.pathname === "/v1/runs") {
+        if (!serverAdapter) {
+          return sendJson(res, 400, { error: { code: "DB_NOT_CONFIGURED", message: "Server DB not configured" } });
+        }
+        const limit = Number(url.searchParams.get("limit") ?? 50);
+        const status = url.searchParams.get("status") ?? undefined;
+        const runs = await serverAdapter.listRuns(limit, status);
+        return sendJson(res, 200, runs);
       }
 
       sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Route not found" } });
