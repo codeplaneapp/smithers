@@ -4,10 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Smithers</title>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/@mariozechner/pi-web-ui@0.30.2/dist/app.css"
-    />
+    <link rel="stylesheet" href="./app.css" />
     <link rel="stylesheet" href="./main.css" />
     <style>
       html,
@@ -17,11 +14,40 @@
       }
       body {
         margin: 0;
-        background: #0c0d10;
+        background: #faf6ee;
+        color: #1b1a17;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #0f1113;
+          color: #f0e8d8;
+        }
       }
     </style>
   </head>
   <body>
-    <script type="module" src="./main.js"></script>
+    <div id="debug" style="color: inherit; padding: 20px; font-family: ui-monospace, monospace;">Loading...</div>
+    <script>
+      window.onerror = function(msg, url, line, col, error) {
+        document.getElementById('debug').innerHTML = '<pre>Error: ' + msg + '\nLine: ' + line + ', Col: ' + col + '\nURL: ' + url + '\nStack: ' + (error?.stack || 'N/A') + '</pre>';
+        return false;
+      };
+    </script>
+    <script type="module">
+      import("./main.js")
+        .then(() => {
+          document.getElementById('debug').textContent = 'JS loaded, waiting for bootstrap...';
+          setTimeout(() => {
+            if (document.querySelector('.app')) {
+              document.getElementById('debug').style.display = 'none';
+            } else {
+              document.getElementById('debug').textContent = 'App not rendered after 3s';
+            }
+          }, 3000);
+        })
+        .catch(err => {
+          document.getElementById('debug').innerHTML = '<pre>Import error: ' + err.message + '\nStack: ' + (err.stack || 'N/A') + '</pre>';
+        });
+    </script>
   </body>
 </html>
