@@ -4,16 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "postinstall": "bun scripts/patch-vendors.ts",
-    "build:webview": "bun build src/webview/main.ts --outdir views/main --target=browser && cp src/webview/main.css views/main/main.css",
-    "dev:webview": "bun build src/webview/main.ts --outdir views/main --target=browser --watch",
-    "start": "bun src/bun/main.ts",
-    "patch:vendors": "bun scripts/patch-vendors.ts"
+    "build": "bunx electrobun",
+    "start": "bun run build && open build/dev-macos-arm64/Smithers-dev.app",
+    "dev": "bunx electrobun dev"
   },
   "dependencies": {
     "@mariozechner/pi-ai": "^0.30.2",
-    "@mariozechner/pi-web-ui": "^0.30.2",
-    "@mariozechner/mini-lit": "^0.2.0",
     "diff": "^5.2.0",
     "electrobun": "^0.8.0",
     "lit": "^3.3.1",
