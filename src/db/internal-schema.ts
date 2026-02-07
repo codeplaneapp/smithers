@@ -48,6 +48,7 @@ export const smithersAttempts = sqliteTable(
     jjPointer: text("jj_pointer"),
     cached: integer("cached", { mode: "boolean" }).default(false),
     metaJson: text("meta_json"),
+    responseText: text("response_text"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration, t.attempt] }),

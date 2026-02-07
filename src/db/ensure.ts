@@ -117,4 +117,7 @@ export function ensureSmithersTables(db: BunSQLiteDatabase<any>): void {
       PRIMARY KEY (run_id, ralph_id)
     );
   `);
+
+  // Migrations for columns added after initial schema
+  try { client.exec(`ALTER TABLE _smithers_attempts ADD COLUMN response_text TEXT`); } catch {}
 }
