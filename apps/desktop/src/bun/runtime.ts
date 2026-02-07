@@ -200,6 +200,7 @@ export function createAppRuntime(options: { dbPath?: string; workspaceRoot?: str
     getRunOutputs: ({ runId }) => smithersService.getRunOutputs(runId),
     getRunAttempts: ({ runId }) => smithersService.getRunAttempts(runId),
     getRunToolCalls: ({ runId }) => smithersService.getRunToolCalls(runId),
+    queryRunDb: ({ runId, sql }) => smithersService.queryRunDb(runId, sql),
     approveNode: ({ runId, nodeId, iteration, note }) => {
       void smithersService.approveNode(runId, nodeId, iteration ?? 0, note);
       return { ok: true };

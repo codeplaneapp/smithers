@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type {
   ApprovalDTO,
+  DbQueryResultDTO,
   FrameSnapshotDTO,
   RunAttemptsDTO,
   RunDetailDTO,
@@ -289,6 +290,18 @@ export class SmithersService {
     return { runId, toolCalls: rows };
   }
 
+  async queryRunDb(runId: string, sql: string): Promise<DbQueryResultDTO> {
+    const handle = await this.getOrLoadRunHandle(runId);
+    if (!handle) throw new Error(`Run not found: ${runId}`);
+    const client: any = (handle.db as any).$client;
+    if (!client) throw new Error("No database client");
+    const stmt = client.query(sql);
+    const rows = stmt.all() as Record<string, unknown>[];
+    const columns = rows.length > 0 ? Object.keys(rows[0]) : (stmt.columnNames ?? []) as string[];
+    const values = rows.map((r: Record<string, unknown>) => columns.map((c: string) => r[c]));
+    return { columns, rows: values, rowCount: values.length };
+  }
+
   private async executeRun(handle: RunHandle, opts: { input: any; resume: boolean }) {
     try {
       const result = await runWorkflowEngine(handle.workflow, {
@@ -539,6 +552,18 @@ function buildGraph(xml: XmlNode | null, nodes: WorkflowNodeDTO[]): FrameSnapsho
   const graph = { nodes: [] as FrameSnapshotDTO["graph"]["nodes"], edges: [] as FrameSnapshotDTO["graph"]["edges"] };
   if (!xml) return graph;
 
+  // Build full iteration map: nodeId → iteration → state
+  const iterationMap = new Map<string, Map<number, string>>();
+  for (const node of nodes) {
+    let iterMap = iterationMap.get(node.nodeId);
+    if (!iterMap) {
+      iterMap = new Map();
+      iterationMap.set(node.nodeId, iterMap);
+    }
+    iterMap.set(node.iteration, node.state);
+  }
+
+  // Also keep latest-iteration lookup for non-Ralph tasks
   const nodeStates = new Map<string, { state: string; iteration: number }>();
   for (const node of nodes) {
     const current = nodeStates.get(node.nodeId);
@@ -549,7 +574,7 @@ function buildGraph(xml: XmlNode | null, nodes: WorkflowNodeDTO[]): FrameSnapsho
 
   let idx = 0;
 
-  function walk(node: XmlNode, parentId?: string, path: number[] = []) {
+  function walk(node: XmlNode, parentId?: string, path: number[] = [], inRalph = false, ralphId?: string) {
     if (node.kind === "text") return;
     const tag = node.tag;
     let kind: FrameSnapshotDTO["graph"]["nodes"][number]["kind"] = "Unknown";
@@ -560,19 +585,82 @@ function buildGraph(xml: XmlNode | null, nodes: WorkflowNodeDTO[]): FrameSnapsho
     if (tag === "smithers:branch") kind = "Branch";
     if (tag === "smithers:ralph") kind = "Ralph";
 
+    // For Ralph nodes, extract props
+    const isRalph = kind === "Ralph";
+    const ralphMaxIter = isRalph ? parseInt(node.props.maxIterations || "0", 10) || undefined : undefined;
+    const currentRalphId = isRalph ? (node.props.id || `ralph-${path.join(".") || idx}`) : ralphId;
+
     const id =
       kind === "Task" && node.props.id
         ? node.props.id
         : `${kind.toLowerCase()}-${path.join(".") || idx++}`;
 
+    // For tasks inside a Ralph: expand per-iteration nodes
+    if (kind === "Task" && inRalph) {
+      const baseId = node.props.id || id;
+      const iterMap = iterationMap.get(baseId);
+      const maxIter = iterMap ? Math.max(...iterMap.keys()) : -1;
+
+      if (maxIter >= 0) {
+        for (let i = 0; i <= maxIter; i++) {
+          const iterId = `${baseId}::iter${i}`;
+          const state = iterMap!.get(i);
+          if (!graph.nodes.find((n) => n.id === iterId)) {
+            graph.nodes.push({
+              id: iterId,
+              label: `${baseId} #${i}`,
+              kind: "Task",
+              state,
+              iteration: i,
+              ralphId: currentRalphId,
+            });
+          }
+          if (parentId) {
+            graph.edges.push({ from: parentId, to: iterId });
+          }
+        }
+      } else {
+        // No iterations recorded yet — show a single pending node
+        if (!graph.nodes.find((n) => n.id === baseId)) {
+          graph.nodes.push({
+            id: baseId,
+            label: baseId,
+            kind: "Task",
+            state: undefined,
+            ralphId: currentRalphId,
+          });
+        }
+        if (parentId) {
+          graph.edges.push({ from: parentId, to: baseId });
+        }
+      }
+      return;
+    }
+
     if (!graph.nodes.find((n) => n.id === id)) {
       const state = kind === "Task" ? nodeStates.get(id)?.state : undefined;
-      graph.nodes.push({
-        id,
-        label: kind === "Task" ? id : kind,
-        kind,
-        state,
-      });
+
+      if (isRalph) {
+        // For Ralph container: derive state from child task iterations
+        const childMaxIter = deriveRalphCurrentIteration(node, iterationMap);
+        graph.nodes.push({
+          id,
+          label: ralphMaxIter
+            ? `Ralph (${childMaxIter + 1}/${ralphMaxIter})`
+            : `Ralph${childMaxIter >= 0 ? ` (${childMaxIter + 1})` : ""}`,
+          kind,
+          state: deriveRalphState(node, iterationMap),
+          maxIterations: ralphMaxIter,
+          ralphId: currentRalphId,
+        });
+      } else {
+        graph.nodes.push({
+          id,
+          label: kind === "Task" ? id : kind,
+          kind,
+          state,
+        });
+      }
     }
 
     if (parentId) {
@@ -582,10 +670,62 @@ function buildGraph(xml: XmlNode | null, nodes: WorkflowNodeDTO[]): FrameSnapsho
     let elementIndex = 0;
     for (const child of node.children) {
       const nextPath = child.kind === "element" ? [...path, elementIndex++] : path;
-      walk(child, id, nextPath);
+      walk(child, id, nextPath, inRalph || isRalph, isRalph ? currentRalphId : ralphId);
     }
   }
 
   walk(xml, undefined, []);
   return graph;
+}
+
+/** Find the highest iteration among all direct Task children of a Ralph node */
+function deriveRalphCurrentIteration(
+  ralphNode: XmlNode & { kind: "element" },
+  iterationMap: Map<string, Map<number, string>>,
+): number {
+  let maxIter = -1;
+  for (const child of ralphNode.children) {
+    if (child.kind !== "element" || child.tag !== "smithers:task") continue;
+    const id = child.props.id;
+    if (!id) continue;
+    const iterMap = iterationMap.get(id);
+    if (iterMap) {
+      for (const k of iterMap.keys()) {
+        if (k > maxIter) maxIter = k;
+      }
+    }
+  }
+  return maxIter;
+}
+
+/** Derive Ralph container state from its child tasks' iteration states */
+function deriveRalphState(
+  ralphNode: XmlNode & { kind: "element" },
+  iterationMap: Map<string, Map<number, string>>,
+): string | undefined {
+  let hasInProgress = false;
+  let hasFinished = false;
+  let hasFailed = false;
+  let hasPending = false;
+
+  for (const child of ralphNode.children) {
+    if (child.kind !== "element" || child.tag !== "smithers:task") continue;
+    const id = child.props.id;
+    if (!id) continue;
+    const iterMap = iterationMap.get(id);
+    if (!iterMap) continue;
+    // Check the latest iteration's state
+    const maxKey = Math.max(...iterMap.keys());
+    const state = iterMap.get(maxKey);
+    if (state === "in-progress") hasInProgress = true;
+    else if (state === "finished") hasFinished = true;
+    else if (state === "failed") hasFailed = true;
+    else if (state === "pending") hasPending = true;
+  }
+
+  if (hasFailed) return "failed";
+  if (hasInProgress) return "in-progress";
+  if (hasPending) return "pending";
+  if (hasFinished) return "finished";
+  return undefined;
 }

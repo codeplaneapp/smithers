@@ -15,6 +15,7 @@ import type {
   RunOutputsDTO,
   RunAttemptsDTO,
   RunToolCallsDTO,
+  DbQueryResultDTO,
   SettingsDTO,
   SecretKey,
   SecretStatusDTO,
@@ -78,6 +79,7 @@ export type AppRPCType = {
       getRunOutputs: { params: { runId: string }; response: RunOutputsDTO };
       getRunAttempts: { params: { runId: string }; response: RunAttemptsDTO };
       getRunToolCalls: { params: { runId: string }; response: RunToolCallsDTO };
+      queryRunDb: { params: { runId: string; sql: string }; response: DbQueryResultDTO };
       approveNode: {
         params: { runId: string; nodeId: string; iteration?: number; note?: string };
         response: { ok: true };
