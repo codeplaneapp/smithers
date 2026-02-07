@@ -14,7 +14,7 @@ import type {
 } from "@smithers/shared";
 
 export type AppView = "chat" | "runs" | "workflows" | "settings";
-export type InspectorTab = "graph" | "timeline" | "logs" | "outputs" | "attempts";
+export type InspectorTab = "graph" | "timeline" | "logs" | "outputs" | "attempts" | "db";
 
 export type ToastItem = {
   id: string;

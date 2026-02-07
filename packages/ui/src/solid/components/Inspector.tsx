@@ -1,4 +1,4 @@
-import { type Component, Show, For, Match, Switch, createMemo, createSignal } from "solid-js";
+import { type Component, Show, For, Match, Switch, createMemo, createSignal, onMount } from "solid-js";
 import { appState, setAppState, pushToast } from "../stores/app-store";
 import { getRpc, refreshRuns, focusRun } from "../index";
 import { formatTime, formatDuration } from "../lib/format";
@@ -11,6 +11,7 @@ const TABS: Array<{ key: InspectorTab; label: string }> = [
   { key: "logs", label: "Logs" },
   { key: "outputs", label: "Outputs" },
   { key: "attempts", label: "Attempts" },
+  { key: "db", label: "DB" },
 ];
 
 export const Inspector: Component = () => {
@@ -188,6 +189,9 @@ export const Inspector: Component = () => {
                   <Match when={appState.activeTab === "attempts"}>
                     <AttemptsTab runId={appState.selectedRunId!} />
                   </Match>
+                  <Match when={appState.activeTab === "db"}>
+                    <DbTab runId={appState.selectedRunId!} />
+                  </Match>
                 </Switch>
               </div>
             </div>
@@ -224,16 +228,77 @@ function GraphTab(props: { runId: string }) {
     return node ?? null;
   });
 
-  const nodeOutput = createMemo(() => {
+  /** Parse iteration suffix from per-iteration node IDs like "review::iter0" */
+  const parsedNodeId = createMemo(() => {
     const id = selectedNode();
-    if (!id) return undefined;
+    if (!id) return null;
+    const match = id.match(/^(.+)::iter(\d+)$/);
+    if (match) return { baseId: match[1], iteration: parseInt(match[2], 10) };
+    return { baseId: id, iteration: undefined };
+  });
+
+  const nodeOutput = createMemo(() => {
+    const parsed = parsedNodeId();
+    if (!parsed) return undefined;
     const outputData = appState.outputs[props.runId];
     if (!outputData) return undefined;
     for (const table of outputData.tables) {
-      const row = table.rows.find((r: any) => r.nodeId === id || r.node_id === id);
+      const row = table.rows.find((r: any) => {
+        const rowNodeId = r.nodeId ?? r.node_id;
+        if (rowNodeId !== parsed.baseId) return false;
+        // If we have a specific iteration, match it
+        if (parsed.iteration !== undefined && r.iteration !== undefined) {
+          return r.iteration === parsed.iteration;
+        }
+        return true;
+      });
       if (row) return row;
     }
     return undefined;
+  });
+
+  const nodeStreamText = createMemo(() => {
+    const parsed = parsedNodeId();
+    if (!parsed) return "";
+    const events = appState.runEvents[props.runId] ?? [];
+    const chunks: string[] = [];
+    for (const e of events) {
+      if ((e as any).type === "NodeOutput" && (e as any).nodeId === parsed.baseId) {
+        // If we have a specific iteration, only include events for that iteration
+        if (parsed.iteration !== undefined && (e as any).iteration !== undefined) {
+          if ((e as any).iteration !== parsed.iteration) continue;
+        }
+        chunks.push((e as any).text);
+      }
+    }
+    return chunks.join("");
+  });
+
+  const nodeResponseText = createMemo(() => {
+    const parsed = parsedNodeId();
+    if (!parsed) return null;
+    const attemptsData = appState.attempts[props.runId];
+    if (!attemptsData) return null;
+    const nodeAttempts = attemptsData.attempts.filter((a: any) => {
+      if (a.nodeId !== parsed.baseId) return false;
+      if (parsed.iteration !== undefined && a.iteration !== undefined) {
+        return a.iteration === parsed.iteration;
+      }
+      return true;
+    });
+    if (nodeAttempts.length === 0) return null;
+    return (nodeAttempts[0] as any).responseText ?? null;
+  });
+
+  const agentOutputText = createMemo(() => {
+    const stream = nodeStreamText();
+    if (stream) return stream;
+    return nodeResponseText() ?? "";
+  });
+
+  const isNodeInProgress = createMemo(() => {
+    const nd = nodeDetail();
+    return nd?.state === "in-progress";
   });
 
   const zoom = () => appState.graphZoom;
@@ -304,7 +369,16 @@ function GraphTab(props: { runId: string }) {
                     const depth = () => node.kind === "Workflow" ? 0 : node.kind === "Task" ? 2 : 1;
                     const x = () => depth() * 180 + 40;
                     const y = () => idx() * 90 + 40;
+                    const isRalphNode = () => node.kind === "Ralph";
                     const color = () => {
+                      if (isRalphNode()) {
+                        switch (node.state) {
+                          case "in-progress": return { bg: "#1A0D30", stroke: "#9B6DFF" };
+                          case "finished": return { bg: "#0A1F1A", stroke: "#3DDC97" };
+                          case "failed": return { bg: "#1E0A12", stroke: "#FF3B5C" };
+                          default: return { bg: "#14101E", stroke: "#5A4B8A" };
+                        }
+                      }
                       switch (node.state) {
                         case "in-progress": return { bg: "#0D1530", stroke: "#4C7DFF" };
                         case "finished": return { bg: "#0A1F1A", stroke: "#3DDC97" };
@@ -319,7 +393,11 @@ function GraphTab(props: { runId: string }) {
                         class="cursor-pointer"
                         onClick={() => setSelectedNode(node.id)}
                       >
-                        <rect x={x()} y={y()} rx="10" ry="10" width="140" height="48" fill={color().bg} stroke={color().stroke} />
+                        <rect
+                          x={x()} y={y()} rx="10" ry="10" width="140" height="48"
+                          fill={color().bg} stroke={color().stroke}
+                          stroke-dasharray={isRalphNode() ? "6 3" : undefined}
+                        />
                         <text x={x() + 12} y={y() + 28} fill="#e9eaf0" font-size="12">{node.label}</text>
                       </g>
                     );
@@ -335,6 +413,12 @@ function GraphTab(props: { runId: string }) {
         {(nd) => (
           <div class="node-drawer mt-3 border-t border-border pt-3">
             <div class="node-drawer__title text-sm font-semibold mb-2">{nd().label}</div>
+            <Show when={nd().iteration !== undefined}>
+              <div class="node-drawer__section mb-2">
+                <div class="node-drawer__label text-[10px] text-muted uppercase tracking-wide mb-1">Iteration</div>
+                <div class="text-xs">{nd().iteration}</div>
+              </div>
+            </Show>
             <div class="node-drawer__section mb-2">
               <div class="node-drawer__label text-[10px] text-muted uppercase tracking-wide mb-1">State</div>
               <div class="text-xs">{nd().state}</div>
@@ -343,6 +427,17 @@ function GraphTab(props: { runId: string }) {
               <div class="node-drawer__section mb-2">
                 <div class="node-drawer__label text-[10px] text-muted uppercase tracking-wide mb-1">Output</div>
                 <pre class="text-xs font-mono text-muted overflow-auto">{JSON.stringify(nodeOutput(), null, 2)}</pre>
+              </div>
+            </Show>
+            <Show when={agentOutputText()}>
+              <div class="node-drawer__section mb-2">
+                <div class="node-drawer__label text-[10px] text-muted uppercase tracking-wide mb-1 flex items-center gap-1.5">
+                  Agent Response
+                  <Show when={isNodeInProgress()}>
+                    <span class="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                  </Show>
+                </div>
+                <pre class="text-xs font-mono text-foreground overflow-auto whitespace-pre-wrap max-h-[400px] bg-background border border-border rounded p-2">{agentOutputText()}</pre>
               </div>
             </Show>
             <div class="node-drawer__actions flex gap-1 mt-2">
@@ -356,6 +451,18 @@ function GraphTab(props: { runId: string }) {
               >
                 Copy Output
               </button>
+              <Show when={agentOutputText()}>
+                <button
+                  class="px-2 py-0.5 text-[10px] border border-border rounded bg-panel-2 text-muted cursor-pointer hover:text-foreground"
+                  data-copy="response"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(agentOutputText());
+                    pushToast("info", "Response copied");
+                  }}
+                >
+                  Copy Response
+                </button>
+              </Show>
             </div>
           </div>
         )}
@@ -541,5 +648,145 @@ function AttemptsTab(props: { runId: string }) {
         </For>
       )}
     </Show>
+  );
+}
+
+function DbTab(props: { runId: string }) {
+  const [tables, setTables] = createSignal<string[]>([]);
+  const [columns, setColumns] = createSignal<string[]>([]);
+  const [rows, setRows] = createSignal<unknown[][]>([]);
+  const [selectedTable, setSelectedTable] = createSignal<string | null>(null);
+  const [sql, setSql] = createSignal("");
+  const [error, setError] = createSignal<string | null>(null);
+  const [loading, setLoading] = createSignal(false);
+
+  const runQuery = async (query: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await getRpc().request.queryRunDb({ runId: props.runId, sql: query });
+      setColumns(result.columns);
+      setRows(result.rows);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+      setColumns([]);
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  onMount(async () => {
+    try {
+      const result = await getRpc().request.queryRunDb({
+        runId: props.runId,
+        sql: "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
+      });
+      setTables(result.rows.map((r) => String(r[0])));
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
+  });
+
+  const handleTableClick = (name: string) => {
+    setSelectedTable(name);
+    void runQuery(`SELECT * FROM "${name}" LIMIT 100`);
+  };
+
+  const handleRunSql = () => {
+    const q = sql().trim();
+    if (q) void runQuery(q);
+  };
+
+  return (
+    <div class="flex flex-col gap-3">
+      <div>
+        <div class="text-[10px] text-muted uppercase tracking-wide mb-1">Tables</div>
+        <div class="flex flex-wrap gap-1">
+          <For each={tables()} fallback={<span class="text-muted text-xs">No tables found.</span>}>
+            {(name) => (
+              <button
+                class={cn(
+                  "px-2 py-0.5 text-[11px] border border-border rounded cursor-pointer",
+                  selectedTable() === name ? "bg-accent/20 text-accent" : "bg-panel-2 text-muted hover:text-foreground"
+                )}
+                onClick={() => handleTableClick(name)}
+              >
+                {name}
+              </button>
+            )}
+          </For>
+        </div>
+      </div>
+
+      <div>
+        <div class="text-[10px] text-muted uppercase tracking-wide mb-1">SQL Query</div>
+        <div class="flex gap-1">
+          <textarea
+            class="flex-1 bg-background border border-border text-foreground text-xs rounded px-2 py-1 font-mono resize-y min-h-[60px] focus:border-accent focus:outline-none"
+            placeholder="SELECT * FROM ..."
+            value={sql()}
+            onInput={(e) => setSql(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                handleRunSql();
+              }
+            }}
+          />
+          <button
+            class="px-3 py-1 text-[11px] uppercase tracking-wide border border-border rounded bg-panel-2 text-muted cursor-pointer hover:text-foreground self-end"
+            onClick={handleRunSql}
+            disabled={loading()}
+          >
+            Run
+          </button>
+        </div>
+      </div>
+
+      <Show when={error()}>
+        <div class="text-[11px] text-danger bg-danger/10 border border-danger/30 rounded px-2 py-1">
+          {error()}
+        </div>
+      </Show>
+
+      <Show when={loading()}>
+        <div class="text-muted text-xs">Loading...</div>
+      </Show>
+
+      <Show when={columns().length > 0}>
+        <div class="overflow-auto border border-border rounded">
+          <div class="text-[10px] text-muted px-2 py-1 border-b border-border">
+            {rows().length} row{rows().length !== 1 ? "s" : ""}
+          </div>
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="border-b border-border bg-panel-2">
+                <For each={columns()}>
+                  {(col) => (
+                    <th class="text-left px-2 py-1 text-[10px] text-muted uppercase tracking-wide font-medium whitespace-nowrap">{col}</th>
+                  )}
+                </For>
+              </tr>
+            </thead>
+            <tbody>
+              <For each={rows()}>
+                {(row) => (
+                  <tr class="border-b border-border last:border-0 hover:bg-panel-2/50">
+                    <For each={row}>
+                      {(cell) => (
+                        <td class="px-2 py-1 font-mono text-foreground whitespace-nowrap max-w-[300px] overflow-hidden text-ellipsis">
+                          {cell === null ? <span class="text-muted italic">null</span> : String(cell)}
+                        </td>
+                      )}
+                    </For>
+                  </tr>
+                )}
+              </For>
+            </tbody>
+          </table>
+        </div>
+      </Show>
+    </div>
   );
 }
