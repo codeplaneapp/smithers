@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
-import { resolve, relative, basename } from "node:path";
-import { readdir } from "node:fs/promises";
+import { resolve, relative, basename, dirname, join } from "node:path";
+import { readdir, access } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type {
@@ -310,6 +310,12 @@ export class SmithersService {
   }
 
   private handleProgress(handle: RunHandle, event: SmithersEvent) {
+    // NodeOutput events are high-frequency streaming chunks — skip DB persistence,
+    // just forward to UI directly
+    if (event.type === "NodeOutput") {
+      this.emitWorkflowEvent({ ...(event as SmithersEventDTO), seq: -1 });
+      return;
+    }
     this.applyEvent(handle.runId, event as SmithersEventDTO);
 
     if (event.type === "ApprovalRequested") {
@@ -507,10 +513,26 @@ export class SmithersService {
     return handle;
   }
 
+  private loadedPreloads = new Set<string>();
+
   private async loadWorkflow(workflowPath: string): Promise<WorkflowModule> {
     const cached = this.workflowCache.get(workflowPath);
     if (cached) return cached;
     const abs = resolve(workflowPath);
+    const dir = dirname(abs);
+
+    // Load workflow preload (e.g. MDX plugin) if not already loaded
+    if (!this.loadedPreloads.has(dir)) {
+      this.loadedPreloads.add(dir);
+      const preload = join(dir, "preload.ts");
+      try {
+        await access(preload);
+        await import(pathToFileURL(preload).toString());
+      } catch {
+        // No preload — that's fine
+      }
+    }
+
     const mod = (await import(pathToFileURL(abs).toString())) as WorkflowModule;
     if (!mod.default) {
       throw new Error("Workflow must export default");

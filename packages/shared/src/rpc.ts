@@ -148,6 +148,7 @@ export type SmithersEventDTO =
   | { type: "ApprovalRequested"; runId: string; nodeId: string; iteration: number; timestampMs: number }
   | { type: "ApprovalGranted"; runId: string; nodeId: string; iteration: number; timestampMs: number }
   | { type: "ApprovalDenied"; runId: string; nodeId: string; iteration: number; timestampMs: number }
+  | { type: "NodeOutput"; runId: string; nodeId: string; iteration: number; attempt: number; text: string; stream: "stdout" | "stderr"; timestampMs: number }
   | { type: "RevertStarted"; runId: string; nodeId: string; jjPointer: string | null; timestampMs: number }
   | { type: "RevertFinished"; runId: string; nodeId: string; jjPointer: string | null; success: boolean; timestampMs: number };
 
@@ -305,6 +306,8 @@ export type RpcProcedures = {
   getSecretStatus: { params: {}; response: SecretStatusDTO };
   setSecret: { params: { key: SecretKey; value: string }; response: { ok: true } };
   clearSecret: { params: { key: SecretKey }; response: { ok: true } };
+
+  browseDirectory: { params: { startingFolder?: string }; response: { path: string | null } };
 };
 
 export type RpcMessages = {

@@ -118,6 +118,8 @@ type RunCommandOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
   maxOutputBytes?: number;
+  onStdout?: (chunk: string) => void;
+  onStderr?: (chunk: string) => void;
 };
 
 type RunCommandResult = {
@@ -216,7 +218,7 @@ function extractTextFromJsonValue(value: any): string | undefined {
   if (typeof value.content === "string") return value.content;
   if (Array.isArray(value.content)) {
     const parts = value.content
-      .map((part) => {
+      .map((part: any) => {
         if (!part) return "";
         if (typeof part === "string") return part;
         if (typeof part.text === "string") return part.text;
@@ -386,11 +388,11 @@ function buildStreamResult(result: GenerateTextResult<any, any>): StreamTextResu
     providerMetadata: Promise.resolve(result.providerMetadata),
     textStream: textStream as any,
     fullStream: fullStream as any,
-  } as StreamTextResult<any, any>;
+  } as unknown as StreamTextResult<any, any>;
 }
 
 async function runCommand(command: string, args: string[], options: RunCommandOptions): Promise<RunCommandResult> {
-  const { cwd, env, input, timeoutMs, signal, maxOutputBytes } = options;
+  const { cwd, env, input, timeoutMs, signal, maxOutputBytes, onStdout, onStderr } = options;
   return await new Promise((resolve, reject) => {
     let stdout = "";
     let stderr = "";
@@ -404,8 +406,13 @@ async function runCommand(command: string, args: string[], options: RunCommandOp
     const onData = (chunk: Buffer, target: "stdout" | "stderr") => {
       const text = chunk.toString("utf8");
       const next = truncateToBytes(target === "stdout" ? stdout + text : stderr + text, maxOutputBytes);
-      if (target === "stdout") stdout = next;
-      else stderr = next;
+      if (target === "stdout") {
+        stdout = next;
+        onStdout?.(text);
+      } else {
+        stderr = next;
+        onStderr?.(text);
+      }
     };
 
     child.stdout?.on("data", (chunk) => onData(chunk, "stdout"));
@@ -462,7 +469,7 @@ async function runCommand(command: string, args: string[], options: RunCommandOp
 abstract class BaseCliAgent implements Agent<any, any, any> {
   readonly version = "agent-v1" as const;
   readonly tools: Record<string, never> = {};
-  readonly id?: string;
+  readonly id: string;
   protected readonly model?: string;
   protected readonly systemPrompt?: string;
   protected readonly cwd?: string;
@@ -473,7 +480,7 @@ abstract class BaseCliAgent implements Agent<any, any, any> {
   protected readonly extraArgs?: string[];
 
   constructor(opts: BaseCliAgentOptions) {
-    this.id = opts.id;
+    this.id = opts.id ?? randomUUID();
     this.model = opts.model;
     this.systemPrompt = opts.systemPrompt ?? opts.instructions;
     this.cwd = opts.cwd;
@@ -484,7 +491,7 @@ abstract class BaseCliAgent implements Agent<any, any, any> {
     this.extraArgs = opts.extraArgs;
   }
 
-  async generate(options: any): PromiseLike<GenerateTextResult<any, any>> {
+  async generate(options: any): Promise<GenerateTextResult<any, any>> {
     const { prompt, systemFromMessages } = extractPrompt(options);
     const callTimeout = resolveTimeoutMs(options?.timeout, this.timeoutMs);
     const cwd = this.cwd ?? getToolContext()?.rootDir ?? process.cwd();
@@ -504,6 +511,8 @@ abstract class BaseCliAgent implements Agent<any, any, any> {
       timeoutMs: callTimeout,
       signal: options?.abortSignal,
       maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
+      onStdout: options?.onStdout,
+      onStderr: options?.onStderr,
     });
 
     const stdout = commandSpec.outputFile
@@ -529,7 +538,7 @@ abstract class BaseCliAgent implements Agent<any, any, any> {
     return buildGenerateResult(extractedText, output, this.model ?? commandSpec.command);
   }
 
-  async stream(options: any): PromiseLike<StreamTextResult<any, any>> {
+  async stream(options: any): Promise<StreamTextResult<any, any>> {
     const result = await this.generate(options);
     return buildStreamResult(result);
   }
@@ -703,8 +712,9 @@ export class CodexAgent extends BaseCliAgent {
     pushFlag(args, "--local-provider", this.opts.localProvider);
     pushFlag(args, "--sandbox", this.opts.sandbox);
     pushFlag(args, "--profile", this.opts.profile);
-    if (this.opts.fullAuto) args.push("--full-auto");
-    if (yoloEnabled || this.opts.dangerouslyBypassApprovalsAndSandbox) {
+    if (this.opts.fullAuto) {
+      args.push("--full-auto");
+    } else if (yoloEnabled || this.opts.dangerouslyBypassApprovalsAndSandbox) {
       args.push("--dangerously-bypass-approvals-and-sandbox");
     }
     pushFlag(args, "--cd", this.opts.cd);

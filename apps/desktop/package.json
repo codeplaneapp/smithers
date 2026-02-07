@@ -4,9 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bunx electrobun",
+    "build:webview": "npx vite build",
+    "build": "bun run build:webview && bunx electrobun",
     "start": "bun run build && open build/dev-macos-arm64/Smithers-dev.app",
     "dev": "bunx electrobun dev"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "vite-plugin-solid": "^2.11.0"
   },
   "dependencies": {
     "@mariozechner/pi-ai": "^0.30.2",

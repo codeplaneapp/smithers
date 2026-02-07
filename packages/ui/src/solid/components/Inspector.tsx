@@ -42,12 +42,16 @@ export const Inspector: Component = () => {
   };
 
   return (
-    <div class="relative flex">
+    <div class="relative flex-shrink-0" style={{
+      width: appState.inspectorOpen
+        ? appState.inspectorExpanded ? "calc(100% - 56px)" : "380px"
+        : "0px",
+    }}>
     <aside
       id="sidebar"
       class={cn(
-        "border-l border-border bg-panel overflow-hidden flex flex-col transition-all duration-300",
-        appState.inspectorOpen ? "w-[380px]" : "w-0 border-l-0 sidebar--closed"
+        "border-l border-border bg-panel overflow-hidden flex flex-col h-full w-full transition-all duration-300",
+        !appState.inspectorOpen && "border-l-0 sidebar--closed"
       )}
       aria-label="Inspector"
       aria-hidden={!appState.inspectorOpen}
@@ -362,14 +366,18 @@ function GraphTab(props: { runId: string }) {
 
 function TimelineTab(props: { runId: string }) {
   const events = createMemo(() => appState.runEvents[props.runId] ?? []);
+  const nonOutputEvents = createMemo(() => events().filter((e: any) => e.type !== "NodeOutput"));
 
   return (
     <div class="flex flex-col gap-1">
-      <For each={events()} fallback={<div class="text-muted text-xs uppercase">No events.</div>}>
+      <For each={nonOutputEvents()} fallback={<div class="text-muted text-xs uppercase">No events.</div>}>
         {(event) => (
           <div class="timeline-row flex gap-3 text-xs py-1">
             <span class="text-muted font-mono flex-shrink-0">{formatTime(event.timestampMs)}</span>
             <span class="text-foreground">{event.type}</span>
+            <Show when={(event as any).nodeId}>
+              <span class="text-muted font-mono">{(event as any).nodeId}</span>
+            </Show>
           </div>
         )}
       </For>
@@ -379,8 +387,19 @@ function TimelineTab(props: { runId: string }) {
 
 function LogsTab(props: { runId: string }) {
   const [search, setSearch] = createSignal("");
+  const [showOutput, setShowOutput] = createSignal(true);
   const [activeFilters, setActiveFilters] = createSignal<Set<string>>(new Set(["run", "node", "approval", "revert"]));
   const events = createMemo(() => appState.runEvents[props.runId] ?? []);
+
+  const outputText = createMemo(() => {
+    const chunks: string[] = [];
+    for (const e of events()) {
+      if ((e as any).type === "NodeOutput") {
+        chunks.push((e as any).text);
+      }
+    }
+    return chunks.join("");
+  });
 
   const filteredEvents = createMemo(() => {
     let evts = events();
@@ -391,6 +410,7 @@ function LogsTab(props: { runId: string }) {
     const filters = activeFilters();
     evts = evts.filter((e) => {
       const type = (e.type ?? "").toLowerCase();
+      if (type === "nodeoutput") return false; // shown separately
       if (type.startsWith("run") && !filters.has("run")) return false;
       if (type.startsWith("node") && !filters.has("node")) return false;
       if (type.startsWith("approval") && !filters.has("approval")) return false;
@@ -430,6 +450,15 @@ function LogsTab(props: { runId: string }) {
           value={search()}
           onInput={(e) => setSearch(e.currentTarget.value)}
         />
+        <button
+          class={cn(
+            "logs-filter px-2 py-0.5 text-[10px] border border-border rounded cursor-pointer",
+            showOutput() ? "bg-accent/20 text-accent" : "bg-panel-2 text-muted"
+          )}
+          onClick={() => setShowOutput((v) => !v)}
+        >
+          Output
+        </button>
         {["Run", "Node", "Approval", "Revert"].map((f) => (
           <button
             class={cn(
@@ -452,14 +481,20 @@ function LogsTab(props: { runId: string }) {
           id="logs-copy"
           class="px-2 py-0.5 text-[10px] border border-border rounded bg-panel-2 text-muted cursor-pointer hover:text-foreground"
           onClick={() => {
-            const data = filteredEvents().map((e) => JSON.stringify(e)).join("\n");
+            const data = showOutput() ? outputText() : filteredEvents().map((e) => JSON.stringify(e)).join("\n");
             navigator.clipboard?.writeText(data);
-            pushToast("info", "Logs copied");
+            pushToast("info", "Copied");
           }}
         >
           Copy
         </button>
       </div>
+      <Show when={showOutput() && outputText()}>
+        <div class="mb-3 border border-border rounded bg-background p-2">
+          <div class="text-[10px] text-muted uppercase tracking-wide mb-1">Agent Output</div>
+          <pre class="text-xs font-mono text-foreground overflow-auto whitespace-pre-wrap max-h-[400px]">{outputText()}</pre>
+        </div>
+      </Show>
       <pre class="logs text-xs font-mono text-muted overflow-auto whitespace-pre-wrap">
         {filteredEvents().map((e) => JSON.stringify(e)).join("\n")}
       </pre>

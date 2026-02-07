@@ -215,6 +215,7 @@ export function createAppRuntime(options: { dbPath?: string; workspaceRoot?: str
       void smithersService.resumeRun(runId);
       return { ok: true };
     },
+    browseDirectory: () => ({ path: null }),
   };
 
   return {
@@ -280,12 +281,23 @@ function resolveInitialWorkspaceRoot(savedRoot: string | null): string {
 
 function looksLikeWorkspace(dir: string): boolean {
   try {
+    // Has a .smithers/ directory (explicit Smithers project)
+    if (existsSync(join(dir, ".smithers"))) return true;
+
+    // Has a workflows/ subdirectory (convention for workflow projects)
+    if (existsSync(join(dir, "workflows"))) return true;
+
+    // Original check: package.json named "smithers" with src/examples/apps
     const pkgPath = join(dir, "package.json");
-    if (!existsSync(pkgPath)) return false;
-    const raw = readFileSync(pkgPath, "utf8");
-    const parsed = JSON.parse(raw) as { name?: string };
-    if (parsed?.name !== "smithers") return false;
-    return existsSync(join(dir, "src")) || existsSync(join(dir, "examples")) || existsSync(join(dir, "apps"));
+    if (existsSync(pkgPath)) {
+      const raw = readFileSync(pkgPath, "utf8");
+      const parsed = JSON.parse(raw) as { name?: string };
+      if (parsed?.name === "smithers") {
+        return existsSync(join(dir, "src")) || existsSync(join(dir, "examples")) || existsSync(join(dir, "apps"));
+      }
+    }
+
+    return false;
   } catch {
     return false;
   }

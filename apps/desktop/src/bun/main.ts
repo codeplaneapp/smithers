@@ -1,4 +1,4 @@
-import { BrowserWindow, BrowserView } from "electrobun/bun";
+import { BrowserWindow, BrowserView, Utils } from "electrobun/bun";
 import type { AppRPCType } from "../shared/rpc.js";
 import { createAppRuntime } from "@smithers/core";
 
@@ -15,7 +15,23 @@ const runtime = createAppRuntime({
 });
 
 const rpc = BrowserView.defineRPC<AppRPCType>({
-  handlers: runtime.handlers,
+  handlers: {
+    ...runtime.handlers,
+    requests: {
+      ...runtime.handlers.requests,
+      browseDirectory: async ({ startingFolder }) => {
+        const paths = await Utils.openFileDialog({
+          startingFolder: startingFolder ?? "~/",
+          canChooseFiles: false,
+          canChooseDirectory: true,
+          allowsMultipleSelection: false,
+        });
+        // openFileDialog returns [""] when cancelled, filter that out
+        const selected = paths.find((p) => p.length > 0);
+        return { path: selected ?? null };
+      },
+    },
+  },
 });
 
 runtime.setSend({

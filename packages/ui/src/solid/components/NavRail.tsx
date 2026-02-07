@@ -15,7 +15,7 @@ export const NavRail: Component = () => {
   );
 
   return (
-    <nav class="flex flex-col bg-[#07080A] border-r border-border w-14 overflow-hidden py-2 z-10">
+    <nav class="flex flex-col bg-[#07080A] border-r border-border w-14 flex-shrink-0 overflow-hidden py-2 z-10">
       <div class="flex items-center gap-2 px-3 pb-3 border-b border-border mb-2">
         <span class="text-lg text-accent flex-shrink-0 w-8 text-center">◆</span>
         <span class="text-xs font-semibold uppercase tracking-widest text-muted whitespace-nowrap overflow-hidden">

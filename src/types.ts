@@ -225,6 +225,16 @@ export type SmithersEvent =
       timestampMs: number;
     }
   | {
+      type: "NodeOutput";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+      text: string;
+      stream: "stdout" | "stderr";
+      timestampMs: number;
+    }
+  | {
       type: "RevertStarted";
       runId: string;
       nodeId: string;

@@ -89,6 +89,9 @@ export type AppRPCType = {
       cancelRun: { params: { runId: string }; response: { ok: true } };
       resumeRun: { params: { runId: string }; response: { ok: true } };
 
+      // filesystem
+      browseDirectory: { params: { startingFolder?: string }; response: { path: string | null } };
+
       // settings
       getSettings: { params: {}; response: SettingsDTO };
       setSettings: { params: { patch: DeepPartial<SettingsDTO> }; response: SettingsDTO };

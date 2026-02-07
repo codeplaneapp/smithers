@@ -5,6 +5,7 @@ import { getRpc, refreshRuns } from "../index";
 interface WorkspaceDialogProps {
   open: boolean;
   onClose: () => void;
+  browseDirectory?: () => Promise<string | null>;
 }
 
 export const WorkspaceDialog: Component<WorkspaceDialogProps> = (props) => {
@@ -13,6 +14,12 @@ export const WorkspaceDialog: Component<WorkspaceDialogProps> = (props) => {
   createEffect(() => {
     if (props.open) setPath("");
   });
+
+  const handleBrowse = async () => {
+    if (!props.browseDirectory) return;
+    const selected = await props.browseDirectory();
+    if (selected) setPath(selected);
+  };
 
   const handleOpen = async () => {
     const p = path().trim();
@@ -39,14 +46,24 @@ export const WorkspaceDialog: Component<WorkspaceDialogProps> = (props) => {
           onClick={(e) => e.stopPropagation()}
         >
           <h2 class="text-xs font-semibold uppercase tracking-wide">Open Workspace</h2>
-          <input
-            id="workspace-path"
-            class="w-full bg-background border border-border text-foreground text-xs rounded-lg px-2 py-1.5 focus:border-accent focus:outline-none"
-            placeholder="Enter workspace path…"
-            value={path()}
-            onInput={(e) => setPath(e.currentTarget.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") handleOpen(); }}
-          />
+          <div class="flex gap-1.5">
+            <input
+              id="workspace-path"
+              class="flex-1 bg-background border border-border text-foreground text-xs rounded-lg px-2 py-1.5 focus:border-accent focus:outline-none"
+              placeholder="Enter workspace path…"
+              value={path()}
+              onInput={(e) => setPath(e.currentTarget.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleOpen(); }}
+            />
+            <Show when={props.browseDirectory}>
+              <button
+                class="px-3 py-1.5 rounded border border-border bg-transparent text-muted text-[11px] uppercase tracking-wide cursor-pointer hover:text-foreground whitespace-nowrap"
+                onClick={handleBrowse}
+              >
+                Browse…
+              </button>
+            </Show>
+          </div>
           <div class="flex justify-end gap-1.5">
             <button
               id="workspace-cancel"

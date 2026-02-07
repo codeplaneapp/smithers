@@ -27,7 +27,7 @@ const App: Component = () => {
       if (e.shiftKey) {
         document.body.classList.toggle("artifacts-hidden");
       } else {
-        setAppState("inspectorOpen", (v) => !v);
+        setAppState({ inspectorOpen: !appState.inspectorOpen, inspectorExpanded: false });
       }
       e.preventDefault();
     }
@@ -37,8 +37,10 @@ const App: Component = () => {
     }
     if (e.key === "Escape") {
       if (workspaceDialogOpen()) setWorkspaceDialogOpen(false);
-      if (runDialogOpen()) setRunDialogOpen(false);
-      if (settingsDialogOpen()) setSettingsDialogOpen(false);
+      else if (runDialogOpen()) setRunDialogOpen(false);
+      else if (settingsDialogOpen()) setSettingsDialogOpen(false);
+      else if (appState.inspectorExpanded) setAppState("inspectorExpanded", false);
+      else if (appState.inspectorOpen) setAppState("inspectorOpen", false);
     }
   };
 
@@ -92,7 +94,15 @@ const App: Component = () => {
         <Inspector />
       </div>
 
-      <WorkspaceDialog open={workspaceDialogOpen()} onClose={() => setWorkspaceDialogOpen(false)} />
+      <WorkspaceDialog
+        open={workspaceDialogOpen()}
+        onClose={() => setWorkspaceDialogOpen(false)}
+        browseDirectory={async () => {
+          const { getRpc } = await import("./index");
+          const result = await getRpc().request.browseDirectory({});
+          return result.path;
+        }}
+      />
       <RunDialog open={runDialogOpen()} onClose={() => setRunDialogOpen(false)} preselect={runDialogPreselect()} />
       <SettingsDialog
         modal={true}

@@ -498,10 +498,24 @@ async function executeTask(
           async () => {
             // Generate with the provided prompt
             // The agent should output JSON as specified in the prompt
-            return desc.agent!.generate({
+            const emitOutput = (text: string, stream: "stdout" | "stderr") => {
+                eventBus.emit("event", {
+                  type: "NodeOutput",
+                  runId,
+                  nodeId: desc.nodeId,
+                  iteration: desc.iteration,
+                  attempt: attemptNo,
+                  text,
+                  stream,
+                  timestampMs: nowMs(),
+                });
+              };
+            return (desc.agent as any).generate({
               options: undefined as any,
               prompt: desc.prompt ?? "",
               timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
+              onStdout: (text: string) => emitOutput(text, "stdout"),
+              onStderr: (text: string) => emitOutput(text, "stderr"),
             });
           },
         );
