@@ -177,13 +177,10 @@ final class SmithersUITests: XCTestCase {
         let readmeExpectation = XCTNSPredicateExpectation(predicate: readmePredicate, object: textView)
         XCTAssertEqual(XCTWaiter.wait(for: [readmeExpectation], timeout: 5), .completed)
 
-        // Expand src folder by clicking its disclosure triangle
+        // Expand src folder by clicking it
         let srcFolder = list.staticTexts["FileTreeItem_src"]
         XCTAssertTrue(srcFolder.waitForExistence(timeout: 3))
-        // Find the disclosure triangle in the same row as src
-        let disclosureTriangle = list.disclosureTriangles.firstMatch
-        XCTAssertTrue(disclosureTriangle.waitForExistence(timeout: 3))
-        disclosureTriangle.click()
+        srcFolder.click()
 
         let mainSwift = list.staticTexts["FileTreeItem_main.swift"]
         XCTAssertTrue(mainSwift.waitForExistence(timeout: 3))

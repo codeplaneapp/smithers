@@ -21,8 +21,10 @@ class WorkspaceState: ObservableObject {
     }
 
     func selectFile(_ url: URL) {
-        guard !FileItem.loadChildren(of: url.deletingLastPathComponent())
-            .contains(where: { $0.id == url && $0.isFolder }) else { return }
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+            return
+        }
         selectedFileURL = url
         editorText = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     }

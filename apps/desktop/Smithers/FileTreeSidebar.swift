@@ -18,15 +18,8 @@ struct FileTreeSidebar: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(selection: $workspace.selectedFileURL) {
-                    OutlineGroup(workspace.fileTree, children: \.children) { item in
-                        Label {
-                            Text(item.name)
-                        } icon: {
-                            Image(systemName: item.isFolder ? "folder.fill" : "doc.text")
-                                .foregroundStyle(item.isFolder ? .blue : .secondary)
-                        }
-                        .tag(item.id)
-                        .accessibilityIdentifier("FileTreeItem_\(item.name)")
+                    ForEach(workspace.fileTree) { item in
+                        FileTreeRow(item: item, workspace: workspace)
                     }
                 }
                 .listStyle(.sidebar)
@@ -37,6 +30,56 @@ struct FileTreeSidebar: View {
                     }
                 }
             }
+        }
+    }
+}
+
+struct FileTreeRow: View {
+    let item: FileItem
+    @ObservedObject var workspace: WorkspaceState
+    @State private var isExpanded = false
+
+    var body: some View {
+        if item.isFolder {
+            folderRow
+        } else {
+            fileLabel
+                .tag(item.id)
+                .accessibilityIdentifier("FileTreeItem_\(item.name)")
+        }
+    }
+
+    @ViewBuilder
+    private var folderRow: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .rotationEffect(isExpanded ? .degrees(90) : .zero)
+                .animation(.easeInOut(duration: 0.15), value: isExpanded)
+                .frame(width: 10)
+            Image(systemName: "folder.fill")
+                .foregroundStyle(.blue)
+            Text(item.name)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { isExpanded.toggle() }
+        .accessibilityIdentifier("FileTreeItem_\(item.name)")
+
+        if isExpanded, let children = item.children {
+            ForEach(children) { child in
+                FileTreeRow(item: child, workspace: workspace)
+                    .padding(.leading, 16)
+            }
+        }
+    }
+
+    private var fileLabel: some View {
+        Label {
+            Text(item.name)
+        } icon: {
+            Image(systemName: "doc.text")
+                .foregroundStyle(.secondary)
         }
     }
 }
