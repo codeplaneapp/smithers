@@ -222,10 +222,18 @@ export const bash = tool({
       cwd = opts?.cwd ? resolveSandboxPath(root, opts.cwd) : root;
       await assertPathWithinRoot(root, cwd);
       if (!allowNetwork) {
-        const forbidden = ["curl", "wget", "http://", "https://", "git", "npm", "bun", "pip"]; // coarse guard
         const hay = [cmd, ...(args ?? [])].join(" ");
-        if (forbidden.some((f) => hay.includes(f))) {
+        // Block obvious network commands
+        const networkCommands = ["curl", "wget", "http://", "https://", "npm", "bun", "pip"];
+        if (networkCommands.some((f) => hay.includes(f))) {
           throw new Error("Network access is disabled for bash tool");
+        }
+        // Block git remote operations but allow local ones
+        if (hay.includes("git")) {
+          const gitRemoteOps = ["push", "pull", "fetch", "clone", "remote"];
+          if (gitRemoteOps.some((op) => hay.includes(op))) {
+            throw new Error("Git remote operations are disabled for bash tool");
+          }
         }
       }
     } catch (err) {

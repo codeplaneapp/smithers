@@ -155,6 +155,7 @@ Run options:
       allowNetwork: Boolean(args["allow-network"]),
       maxOutputBytes,
       toolTimeoutMs,
+      rootDir: args["root-dir"] ?? undefined,
     });
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.status === "finished" ? 0 : result.status === "waiting-approval" ? 3 : result.status === "cancelled" ? 2 : 1);
