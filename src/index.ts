@@ -5,6 +5,7 @@ import { runWorkflow as runWorkflowEngine, renderFrame as renderFrameEngine } fr
 
 export * from "./types";
 export * from "./components";
+export * from "./agents/cli";
 
 export function smithers<Schema extends Record<string, unknown>>(
   db: BunSQLiteDatabase<Schema>,
