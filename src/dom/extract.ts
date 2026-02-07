@@ -128,6 +128,7 @@ export function extractFromHost(root: HostNode | null, opts?: ExtractOptions): E
         ralphId,
         outputTable,
         outputTableName,
+        outputSchema: raw.outputSchema, // Pass through custom output schema
         needsApproval,
         skipIf,
         retries,

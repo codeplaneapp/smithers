@@ -24,6 +24,7 @@ export type TaskDescriptor = {
 
   outputTable: Table;
   outputTableName: string;
+  outputSchema?: import("zod").ZodObject<any>; // Optional Zod schema for agent output
 
   parallelGroupId?: string;
   parallelMaxConcurrency?: number;
@@ -254,6 +255,7 @@ export type TaskProps<Row> = {
   key?: string;
   id: string;
   output: Table;
+  outputSchema?: import("zod").ZodObject<any>; // Optional Zod schema for agent output
   agent?: AgentLike;
   skipIf?: boolean;
   needsApproval?: boolean;
