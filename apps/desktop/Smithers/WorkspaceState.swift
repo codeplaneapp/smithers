@@ -71,6 +71,7 @@ class WorkspaceState: ObservableObject {
     @Published var chatMessages: [ChatMessage] = [
         ChatMessage(role: .assistant, kind: .text("Chat ready. Ask me anything."))
     ]
+    @Published var theme: AppTheme = .default
     @Published var activeDiffPreview: DiffPreview?
     @Published var activeSessionDiff: SessionDiffSnapshot?
     @Published private(set) var sessionDiffSnapshot: SessionDiffSnapshot?
@@ -322,6 +323,13 @@ class WorkspaceState: ObservableObject {
         }
         if nvimCurrentFilePath == normalizedURL.path {
             nvimCurrentFilePath = nil
+        }
+    }
+
+    func applyNvimHighlights(_ highlights: [String: NvimHighlightColors]) {
+        let nextTheme = AppTheme.fromNvimHighlights(highlights)
+        if nextTheme != theme {
+            theme = nextTheme
         }
     }
 
