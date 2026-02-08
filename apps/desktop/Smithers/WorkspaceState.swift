@@ -49,6 +49,7 @@ class WorkspaceState: ObservableObject {
     @Published var selectedFileURL: URL?
     @Published var terminalViews: [URL: GhosttyTerminalView] = [:]
     @Published private(set) var nvimTerminalView: GhosttyTerminalView?
+    @Published private(set) var nvimCurrentFilePath: String?
     @Published var editorText: String = """
     func hello() {
         print("Hello, Smithers!")
@@ -250,6 +251,7 @@ class WorkspaceState: ObservableObject {
 
     func handleNvimBufferEnter(url: URL, select: Bool) {
         let normalizedURL = url.standardizedFileURL
+        NvimController.log("[WorkspaceState] handleNvimBufferEnter: %@ select: %@", normalizedURL.path, select ? "true" : "false")
         if !openFiles.contains(normalizedURL) {
             openFiles.append(normalizedURL)
         }
@@ -258,6 +260,8 @@ class WorkspaceState: ObservableObject {
                 suppressSelectionSync = true
                 selectedFileURL = normalizedURL
             }
+            NvimController.log("[WorkspaceState] setting nvimCurrentFilePath = %@", normalizedURL.path)
+            nvimCurrentFilePath = normalizedURL.path
             currentLanguage = nil
             setEditorText("")
         }
@@ -272,6 +276,9 @@ class WorkspaceState: ObservableObject {
             selectedFileURL = nil
             currentLanguage = nil
             setEditorText("")
+        }
+        if nvimCurrentFilePath == normalizedURL.path {
+            nvimCurrentFilePath = nil
         }
     }
 
@@ -305,6 +312,7 @@ class WorkspaceState: ObservableObject {
 
     private func openFileInNvim(_ url: URL, line: Int?, column: Int?) {
         let normalizedURL = url.standardizedFileURL
+        NvimController.log("[WorkspaceState] openFileInNvim: %@", normalizedURL.path)
         if !openFiles.contains(normalizedURL) {
             openFiles.append(normalizedURL)
         }
@@ -314,9 +322,13 @@ class WorkspaceState: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             do {
+                NvimController.log("[WorkspaceState] openFileInNvim: awaiting ensureNvimStarted")
                 let controller = try await self.ensureNvimStarted()
+                NvimController.log("[WorkspaceState] openFileInNvim: nvim started, calling openFile")
                 try await controller.openFile(normalizedURL, line: line, column: column)
+                NvimController.log("[WorkspaceState] openFileInNvim: openFile completed")
             } catch {
+                NvimController.log("[WorkspaceState] openFileInNvim error: %@", error.localizedDescription)
                 self.appendErrorMessage("Neovim error: \(error.localizedDescription)")
                 if error is NvimRPCError || error is NvimController.ControllerError {
                     self.isNvimModeEnabled = false
@@ -410,6 +422,7 @@ class WorkspaceState: ObservableObject {
         nvimController?.stop()
         nvimController = nil
         nvimTerminalView = nil
+        nvimCurrentFilePath = nil
     }
 
     private func handleNvimTerminalClosed() {

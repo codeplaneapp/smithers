@@ -191,6 +191,15 @@ struct ContentView: View {
                     .transition(.opacity)
                     .zIndex(1)
             }
+
+            if workspace.isNvimModeEnabled {
+                Text(workspace.nvimCurrentFilePath ?? "(none)")
+                    .frame(width: 0, height: 0)
+                    .clipped()
+                    .accessibilityIdentifier("NvimCurrentFilePath")
+                    .accessibilityLabel(workspace.nvimCurrentFilePath ?? "(none)")
+                    .accessibilityHidden(false)
+            }
         }
         .animation(.easeInOut(duration: 0.15), value: workspace.isCommandPalettePresented)
     }
