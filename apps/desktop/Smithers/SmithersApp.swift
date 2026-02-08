@@ -9,6 +9,9 @@ struct SmithersApp: App {
             ContentView(workspace: workspace)
                 .preferredColorScheme(.dark)
                 .frame(minWidth: 700, minHeight: 400)
+                .environment(\.openURL, OpenURLAction { url in
+                    workspace.handleOpenURL(url) ? .handled : .systemAction
+                })
                 .onAppear {
                     handleLaunchArguments()
                     setInitialWindowSize()
