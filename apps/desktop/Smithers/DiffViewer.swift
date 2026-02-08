@@ -9,7 +9,7 @@ struct DiffViewer: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedFileId: String?
-    @State private var wrapLines: Bool = false
+    @State private var wrapLines: Bool = true
     @State private var compactMode: Bool = true
     @State private var hunkIndex: Int = 0
     @State private var scrollTarget: String?
@@ -233,27 +233,35 @@ private struct DiffContentView: View {
     @Binding var scrollTarget: String?
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView([.vertical, .horizontal]) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(document.files) { file in
-                        DiffFileSection(file: file, wrapLines: wrapLines, compactMode: compactMode)
+        GeometryReader { geometry in
+            let availableWidth = max(0, geometry.size.width)
+            ScrollViewReader { proxy in
+                ScrollView(wrapLines ? .vertical : [.vertical, .horizontal]) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(document.files) { file in
+                            DiffFileSection(
+                                file: file,
+                                wrapLines: wrapLines,
+                                compactMode: compactMode,
+                                availableWidth: wrapLines ? availableWidth : nil
+                            )
                             .id(file.id)
+                        }
+                    }
+                    .padding(.bottom, 24)
+                }
+                .background(DiffTheme.canvasBackground)
+                .onChange(of: selectedFileId) { _, newValue in
+                    guard let newValue else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(newValue, anchor: .top)
                     }
                 }
-                .padding(.bottom, 24)
-            }
-            .background(DiffTheme.canvasBackground)
-            .onChange(of: selectedFileId) { _, newValue in
-                guard let newValue else { return }
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    proxy.scrollTo(newValue, anchor: .top)
-                }
-            }
-            .onChange(of: scrollTarget) { _, newValue in
-                guard let newValue else { return }
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    proxy.scrollTo(newValue, anchor: .top)
+                .onChange(of: scrollTarget) { _, newValue in
+                    guard let newValue else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(newValue, anchor: .top)
+                    }
                 }
             }
         }
@@ -264,6 +272,7 @@ private struct DiffFileSection: View {
     let file: DiffFile
     let wrapLines: Bool
     let compactMode: Bool
+    let availableWidth: CGFloat?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -273,7 +282,8 @@ private struct DiffFileSection: View {
                     hunk: hunk,
                     wrapLines: wrapLines,
                     compactMode: compactMode,
-                    anchorId: "\(file.id)::hunk::\(index)"
+                    anchorId: "\(file.id)::hunk::\(index)",
+                    availableWidth: availableWidth
                 )
             }
             Divider()
@@ -304,6 +314,7 @@ private struct DiffHunkView: View {
     let wrapLines: Bool
     let compactMode: Bool
     let anchorId: String
+    let availableWidth: CGFloat?
     @State private var showAll: Bool = false
 
     var body: some View {
@@ -314,6 +325,7 @@ private struct DiffHunkView: View {
                 DiffRowView(
                     row: row,
                     wrapLines: wrapLines,
+                    availableWidth: availableWidth,
                     onReveal: {
                         showAll = true
                     }
@@ -348,6 +360,7 @@ private struct DiffHunkHeader: View {
 private struct DiffRowView: View {
     let row: DiffRow
     let wrapLines: Bool
+    let availableWidth: CGFloat?
     let onReveal: (() -> Void)?
 
     var body: some View {
@@ -355,23 +368,29 @@ private struct DiffRowView: View {
             DiffMetaRowView(row: row, onReveal: onReveal)
         } else {
             let inline = DiffHighlighter.highlight(row: row)
+            let dividerWidth: CGFloat = 1
+            let columnWidth = availableWidth.map { max(0, ($0 - dividerWidth) / 2) }
             HStack(spacing: 0) {
                 DiffSideView(
                     side: row.left,
                     kind: row.kind,
                     wrapLines: wrapLines,
                     isLeft: true,
-                    attributedText: inline?.left
+                    attributedText: inline?.left,
+                    maxWidth: columnWidth
                 )
                 Divider()
+                    .frame(width: dividerWidth)
                 DiffSideView(
                     side: row.right,
                     kind: row.kind,
                     wrapLines: wrapLines,
                     isLeft: false,
-                    attributedText: inline?.right
+                    attributedText: inline?.right,
+                    maxWidth: columnWidth
                 )
             }
+            .frame(maxWidth: availableWidth ?? .infinity, alignment: .leading)
             .background(DiffTheme.rowBackground(for: row.kind))
         }
     }
@@ -383,6 +402,7 @@ private struct DiffSideView: View {
     let wrapLines: Bool
     let isLeft: Bool
     let attributedText: AttributedString?
+    let maxWidth: CGFloat?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -403,7 +423,8 @@ private struct DiffSideView: View {
         }
         .padding(.vertical, 2)
         .padding(.horizontal, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(width: maxWidth, alignment: .leading)
+        .frame(maxWidth: maxWidth ?? .infinity, alignment: .leading)
         .background(DiffTheme.sideBackground(for: kind, isLeft: isLeft))
     }
 
