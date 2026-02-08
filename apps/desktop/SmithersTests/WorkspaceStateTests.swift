@@ -144,4 +144,44 @@ final class WorkspaceStateTests: XCTestCase {
         XCTAssertEqual(ws.openFiles[1], fileA)
         XCTAssertEqual(ws.selectedFileURL, fileA)
     }
+
+    func testTabNavigationSelectsExpectedTabs() throws {
+        let tmpDir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let fileA = tmpDir.appendingPathComponent("a.txt")
+        let fileB = tmpDir.appendingPathComponent("b.txt")
+        try "a".write(to: fileA, atomically: true, encoding: .utf8)
+        try "b".write(to: fileB, atomically: true, encoding: .utf8)
+
+        let ws = WorkspaceState()
+        ws.openDirectory(tmpDir)
+        ws.selectFile(fileA)
+        ws.selectFile(fileB)
+
+        ws.selectPreviousTab()
+        XCTAssertEqual(ws.selectedFileURL, fileA)
+
+        ws.selectNextTab()
+        XCTAssertEqual(ws.selectedFileURL, fileB)
+
+        ws.selectTab(index: 0)
+        XCTAssertTrue(ws.isChatURL(ws.selectedFileURL!))
+    }
+
+    func testHandleOpenURLOpensFile() throws {
+        let tmpDir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("log.txt")
+        try "log".write(to: file, atomically: true, encoding: .utf8)
+
+        let ws = WorkspaceState()
+        ws.openDirectory(tmpDir)
+
+        let link = ws.makeOpenFileURL(path: "log.txt", line: 3, column: 2)
+        XCTAssertNotNil(link)
+        XCTAssertTrue(ws.handleOpenURL(link!))
+        XCTAssertEqual(ws.selectedFileURL, file)
+    }
 }
