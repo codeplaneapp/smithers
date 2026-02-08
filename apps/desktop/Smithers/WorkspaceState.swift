@@ -330,29 +330,44 @@ class WorkspaceState: ObservableObject {
     }
 
     private func closeDecisionForTab(_ url: URL) async -> CloseDecision {
-        if closeGuardsBypassed || !isNvimModeEnabled || !isRegularFileURL(url) {
+        if closeGuardsBypassed || !isRegularFileURL(url) {
             return .allow(force: false)
         }
-        guard let buffers = await fetchModifiedNvimBuffers() else {
-            let confirmed = confirmUnableToCheck(context: .tab(url))
+        if isNvimModeEnabled {
+            guard let buffers = await fetchModifiedNvimBuffers() else {
+                let confirmed = confirmUnableToCheck(context: .tab(url))
+                return confirmed ? .allow(force: true) : .deny
+            }
+            let normalized = url.standardizedFileURL
+            let matching = buffers.filter { $0.url?.standardizedFileURL == normalized }
+            guard !matching.isEmpty else { return .allow(force: false) }
+            let names = uniqueBufferNames(from: matching)
+            let confirmed = confirmDiscardChanges(context: .tab(url), names: names)
             return confirmed ? .allow(force: true) : .deny
         }
-        let normalized = url.standardizedFileURL
-        let matching = buffers.filter { $0.url?.standardizedFileURL == normalized }
-        guard !matching.isEmpty else { return .allow(force: false) }
-        let confirmed = confirmDiscardChanges(context: .tab(url), buffers: matching)
-        return confirmed ? .allow(force: true) : .deny
+
+        if isNativeFileModified(url) {
+            let confirmed = confirmDiscardChanges(context: .tab(url), names: [displayPath(for: url)])
+            return confirmed ? .allow(force: false) : .deny
+        }
+        return .allow(force: false)
     }
 
     private func confirmCloseIfNeeded(context: CloseContext) async -> Bool {
-        if closeGuardsBypassed || !isNvimModeEnabled {
+        if closeGuardsBypassed {
             return true
         }
-        guard let buffers = await fetchModifiedNvimBuffers() else {
-            return confirmUnableToCheck(context: context)
+        var names: [String] = []
+        if isNvimModeEnabled {
+            guard let buffers = await fetchModifiedNvimBuffers() else {
+                return confirmUnableToCheck(context: context)
+            }
+            names.append(contentsOf: uniqueBufferNames(from: buffers))
         }
-        guard !buffers.isEmpty else { return true }
-        return confirmDiscardChanges(context: context, buffers: buffers)
+        names.append(contentsOf: modifiedNativeFileNames())
+        names = uniqueNames(names)
+        guard !names.isEmpty else { return true }
+        return confirmDiscardChanges(context: context, names: names)
     }
 
     private func fetchModifiedNvimBuffers() async -> [NvimModifiedBuffer]? {
@@ -367,8 +382,7 @@ class WorkspaceState: ObservableObject {
         }
     }
 
-    private func confirmDiscardChanges(context: CloseContext, buffers: [NvimModifiedBuffer]) -> Bool {
-        let names = uniqueBufferNames(from: buffers)
+    private func confirmDiscardChanges(context: CloseContext, names: [String]) -> Bool {
         let count = names.count
         let listText = formatBufferList(names)
         let alert = NSAlert()
@@ -418,6 +432,27 @@ class WorkspaceState: ObservableObject {
             return actionText
         }
         return "Unsaved files:\n\(listText)\n\n\(actionText)"
+    }
+
+    private func modifiedNativeFileNames() -> [String] {
+        var names: [String] = []
+        for url in openFiles where isRegularFileURL(url) {
+            if isNativeFileModified(url) {
+                names.append(displayPath(for: url))
+            }
+        }
+        return names
+    }
+
+    private func uniqueNames(_ names: [String]) -> [String] {
+        var seen = Set<String>()
+        var output: [String] = []
+        for name in names {
+            if seen.contains(name) { continue }
+            seen.insert(name)
+            output.append(name)
+        }
+        return output
     }
 
     private func formatBufferList(_ names: [String], limit: Int = 6) -> String {
