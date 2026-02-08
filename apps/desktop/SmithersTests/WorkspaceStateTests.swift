@@ -1,6 +1,7 @@
 import XCTest
 @testable import Smithers
 
+@MainActor
 final class WorkspaceStateTests: XCTestCase {
 
     private func makeTempDir() throws -> URL {
