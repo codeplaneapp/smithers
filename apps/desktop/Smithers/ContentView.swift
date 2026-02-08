@@ -400,7 +400,6 @@ struct TabBarItem: View {
 
     var body: some View {
         let helpText = isModified ? "\(subtitle)\nUnsaved changes" : subtitle
-        let dotColor = isSelected ? theme.tabSelectedForegroundColor : theme.accentColor
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 12))
@@ -411,6 +410,7 @@ struct TabBarItem: View {
                 .truncationMode(.middle)
                 .foregroundStyle(isSelected ? theme.tabSelectedForegroundColor : theme.tabForegroundColor)
             if isModified {
+                let dotColor = isSelected ? theme.tabSelectedForegroundColor : theme.accentColor
                 Circle()
                     .fill(dotColor)
                     .frame(width: 6, height: 6)
