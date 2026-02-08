@@ -7,6 +7,7 @@ class WorkspaceState: ObservableObject {
     @Published var fileTree: [FileItem] = []
     @Published var openFiles: [URL] = []
     @Published var selectedFileURL: URL?
+    @Published var currentLanguage: SupportedLanguage?
     @Published var editorText: String = """
     func hello() {
         print("Hello, Smithers!")
@@ -31,6 +32,7 @@ class WorkspaceState: ObservableObject {
         openFiles = []
         selectedFileURL = nil
         setEditorText("")
+        currentLanguage = nil
         fileLoadTask?.cancel()
         openFileContents = [:]
     }
@@ -44,6 +46,7 @@ class WorkspaceState: ObservableObject {
             openFiles.append(url)
         }
         selectedFileURL = url
+        currentLanguage = SupportedLanguage.fromFileName(url.lastPathComponent)
         fileLoadTask?.cancel()
         if let cached = openFileContents[url] {
             setEditorText(cached)
@@ -74,6 +77,7 @@ class WorkspaceState: ObservableObject {
         fileLoadTask?.cancel()
         if openFiles.isEmpty {
             selectedFileURL = nil
+            currentLanguage = nil
             setEditorText("")
             return
         }
