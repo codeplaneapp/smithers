@@ -10,6 +10,26 @@ final class WorkspaceStateTests: XCTestCase {
         return tmpDir
     }
 
+    private func waitUntil(_ condition: @escaping () -> Bool, timeout: TimeInterval = 2.0) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return condition()
+    }
+
+    private func isRipgrepAvailable() -> Bool {
+        guard let pathEnv = ProcessInfo.processInfo.environment["PATH"] else { return false }
+        for part in pathEnv.split(separator: ":") {
+            let candidate = URL(fileURLWithPath: String(part)).appendingPathComponent("rg").path
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return true
+            }
+        }
+        return false
+    }
+
     // MARK: - Phase 4: expandFolder
 
     func testOpenDirectoryProducesShallowTree() throws {
@@ -218,5 +238,56 @@ final class WorkspaceStateTests: XCTestCase {
         XCTAssertEqual(ws.openFiles.count, 3)
         XCTAssertTrue(ws.openFiles.contains(fileA))
         XCTAssertTrue(ws.openFiles.contains(fileB))
+    }
+
+    func testNonUTF8FileIsReadOnly() async throws {
+        let tmpDir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("binary.dat")
+        let originalData = Data([0xff, 0xfe, 0xfd, 0x00])
+        try originalData.write(to: file)
+
+        let ws = WorkspaceState()
+        ws.openDirectory(tmpDir)
+        ws.selectFile(file)
+
+        XCTAssertTrue(await waitUntil({ !ws.isEditorLoading }))
+        XCTAssertEqual(ws.editorText, WorkspaceState.nonUTF8Placeholder)
+        XCTAssertFalse(ws.isFileModified(file))
+
+        ws.editorText = "mutate"
+        XCTAssertTrue(await waitUntil({ ws.editorText == WorkspaceState.nonUTF8Placeholder }))
+        XCTAssertFalse(ws.isFileModified(file))
+
+        ws.saveCurrentFile()
+        let afterSave = try Data(contentsOf: file)
+        XCTAssertEqual(afterSave, originalData)
+    }
+
+    func testSearchInFilesUsesLatestQuery() async throws {
+        if !isRipgrepAvailable() {
+            throw XCTSkip("rg not available")
+        }
+
+        let tmpDir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let alpha = tmpDir.appendingPathComponent("alpha.txt")
+        let beta = tmpDir.appendingPathComponent("beta.txt")
+        try "alpha".write(to: alpha, atomically: true, encoding: .utf8)
+        try "beta".write(to: beta, atomically: true, encoding: .utf8)
+
+        let ws = WorkspaceState()
+        ws.openDirectory(tmpDir)
+        ws.searchQuery = "alpha"
+        ws.searchQuery = "beta"
+
+        XCTAssertTrue(await waitUntil({ !ws.isSearchInProgress }))
+        XCTAssertNil(ws.searchErrorMessage)
+
+        let resultFiles = Set(ws.searchResults.map { $0.url.lastPathComponent })
+        XCTAssertTrue(resultFiles.contains("beta.txt"))
+        XCTAssertFalse(resultFiles.contains("alpha.txt"))
     }
 }
