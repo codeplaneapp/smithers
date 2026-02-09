@@ -381,6 +381,30 @@ struct CodeEditor: NSViewRepresentable {
             )
         }
 
+        private func configureScrollbarActions(scrollView: NSScrollView, scrollbar: ScrollbarOverlayView) {
+            scrollbar.onScrollToOffset = { [weak scrollView, weak scrollbar] offset in
+                guard let scrollView else { return }
+                let metrics = scrollbar?.metrics
+                let maxOffset = max((metrics?.contentLength ?? 0) - (metrics?.viewportLength ?? 0), 0)
+                let clamped = min(max(offset, 0), maxOffset)
+                var origin = scrollView.contentView.bounds.origin
+                origin.y = clamped
+                scrollView.contentView.setBoundsOrigin(origin)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+
+            scrollbar.onPageScroll = { [weak scrollView, weak scrollbar] direction in
+                guard let scrollView else { return }
+                let metrics = scrollbar?.metrics
+                let viewport = metrics?.viewportLength ?? scrollView.contentView.bounds.height
+                let maxOffset = max((metrics?.contentLength ?? 0) - (metrics?.viewportLength ?? 0), 0)
+                var origin = scrollView.contentView.bounds.origin
+                origin.y = min(max(origin.y + viewport * CGFloat(direction), 0), maxOffset)
+                scrollView.contentView.setBoundsOrigin(origin)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+        }
+
         @objc private func handleMagnification(_ recognizer: NSMagnificationGestureRecognizer) {
             guard textView != nil else { return }
             switch recognizer.state {
@@ -849,6 +873,7 @@ struct ContentView: View {
                     fileURL: workspace.selectedFileURL,
                     theme: workspace.theme,
                     font: workspace.editorFont,
+                    scrollbarMode: workspace.scrollbarVisibilityMode,
                     minFontSize: WorkspaceState.minEditorFontSize,
                     maxFontSize: WorkspaceState.maxEditorFontSize,
                     saveViewState: { url, scrollOrigin, selection in
