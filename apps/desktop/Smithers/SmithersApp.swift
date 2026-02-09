@@ -5,12 +5,14 @@ struct SmithersApp: App {
     @StateObject private var workspace: WorkspaceState
     @NSApplicationDelegateAdaptor(SmithersAppDelegate.self) private var appDelegate
     @StateObject private var tmuxKeyHandler: TmuxKeyHandler
+    @StateObject private var updateController = UpdateController()
     @State private var windowCloseDelegate = WindowCloseDelegate()
 
     init() {
         let workspace = WorkspaceState()
         _workspace = StateObject(wrappedValue: workspace)
         _tmuxKeyHandler = StateObject(wrappedValue: TmuxKeyHandler(workspace: workspace))
+        appDelegate.workspace = workspace
     }
 
     var body: some Scene {
@@ -35,6 +37,11 @@ struct SmithersApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates...") {
+                    updateController.checkForUpdates()
+                }
+            }
             CommandGroup(replacing: .saveItem) {
                 Button("Save") {
                     workspace.saveCurrentFile()
@@ -107,11 +114,12 @@ struct SmithersApp: App {
             let height = screenFrame.height * 0.85
             let x = screenFrame.origin.x + (screenFrame.width - width) / 2
             let y = screenFrame.origin.y + (screenFrame.height - height) / 2
-            if let savedFrame = WindowCloseDelegate.loadWindowFrame() {
-                window.setFrame(adjustedFrame(savedFrame), display: true)
+            if let savedFrame = WindowFrameStore.loadFrame(for: workspace.rootDirectory) {
+                window.setFrame(WindowFrameStore.adjustedFrame(savedFrame), display: true)
             } else {
                 window.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
             }
+            WindowFrameStore.saveFrame(window.frame, for: workspace.rootDirectory)
             workspace.showWindowAfterLaunch()
         }
     }
@@ -126,65 +134,33 @@ struct SmithersApp: App {
             window.title = "Smithers"
             window.delegate = windowCloseDelegate
             workspace.refreshWindowTitle()
+            workspace.applyWindowAppearance()
         }
-    }
-
-    private func adjustedFrame(_ frame: NSRect) -> NSRect {
-        for screen in NSScreen.screens {
-            if screen.visibleFrame.intersects(frame) {
-                return clampFrame(frame, to: screen.visibleFrame)
-            }
-        }
-        guard let screen = NSScreen.main else { return frame }
-        let visible = screen.visibleFrame
-        let width = min(frame.width, visible.width)
-        let height = min(frame.height, visible.height)
-        let x = visible.origin.x + (visible.width - width) / 2
-        let y = visible.origin.y + (visible.height - height) / 2
-        return NSRect(x: x, y: y, width: width, height: height)
-    }
-
-    private func clampFrame(_ frame: NSRect, to bounds: NSRect) -> NSRect {
-        var clamped = frame
-        if clamped.width > bounds.width {
-            clamped.size.width = bounds.width
-        }
-        if clamped.height > bounds.height {
-            clamped.size.height = bounds.height
-        }
-        if clamped.minX < bounds.minX {
-            clamped.origin.x = bounds.minX
-        }
-        if clamped.maxX > bounds.maxX {
-            clamped.origin.x = bounds.maxX - clamped.width
-        }
-        if clamped.minY < bounds.minY {
-            clamped.origin.y = bounds.minY
-        }
-        if clamped.maxY > bounds.maxY {
-            clamped.origin.y = bounds.maxY - clamped.height
-        }
-        return clamped
     }
 
     private func handleLaunchArguments() {
         let args = ProcessInfo.processInfo.arguments
-        var handledDirectory = false
-        var handledFile = false
-        if let idx = args.firstIndex(of: "-openDirectory"),
-           idx + 1 < args.count {
-            let path = args[idx + 1]
-            let url = URL(fileURLWithPath: path)
-            workspace.openDirectory(url)
-            handledDirectory = true
+        var openItems: [URL] = []
+        var index = 0
+        while index < args.count {
+            let arg = args[index]
+            if arg == "-openDirectory", index + 1 < args.count {
+                openItems.append(URL(fileURLWithPath: args[index + 1]))
+                index += 2
+                continue
+            }
+            if arg == "-openFile", index + 1 < args.count {
+                openItems.append(URL(fileURLWithPath: args[index + 1]))
+                index += 2
+                continue
+            }
+            index += 1
         }
-        if let idx = args.firstIndex(of: "-openFile"),
-           idx + 1 < args.count {
-            let path = args[idx + 1]
-            workspace.selectFile(URL(fileURLWithPath: path))
-            handledFile = true
+        if !openItems.isEmpty {
+            workspace.handleExternalOpen(urls: openItems)
+            return
         }
-        if !handledDirectory && !handledFile {
+        if !appDelegate.hasPendingOpenRequests {
             workspace.restoreLastWorkspaceIfNeeded()
         }
     }
