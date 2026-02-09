@@ -69,6 +69,12 @@ struct SmithersApp: App {
                 }
                 .keyboardShortcut("/", modifiers: [.command])
             }
+            CommandGroup(after: .toolbar) {
+                Button("Toggle Sidebar") {
+                    workspace.toggleSidebarVisibility()
+                }
+                .keyboardShortcut("B", modifiers: [.command])
+            }
             CommandGroup(replacing: .printItem) {
                 Button("Go to File...") {
                     workspace.showCommandPalette()
@@ -117,8 +123,9 @@ struct SmithersApp: App {
             window.titlebarAppearsTransparent = true
             window.isMovableByWindowBackground = true
             window.styleMask.insert(.fullSizeContentView)
-            window.title = ""
+            window.title = "Smithers"
             window.delegate = windowCloseDelegate
+            workspace.refreshWindowTitle()
         }
     }
 
