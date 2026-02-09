@@ -1123,6 +1123,13 @@ class WorkspaceState: ObservableObject {
         return f
     }()
 
+    private static let nvimReportDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter
+    }()
+
     static func debugLog(_ msg: String) {
         let ts = debugDateFormatter.string(from: Date())
         let line = "[\(ts)] \(msg)\n"
