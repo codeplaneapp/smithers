@@ -341,10 +341,20 @@ class AgentOrchestrator: ObservableObject {
             process.standardError = stderr
 
             try process.run()
+            let stdoutTask = Task<Data, Never> {
+                stdout.fileHandleForReading.readDataToEndOfFile()
+            }
+            let stderrTask = Task<Data, Never> {
+                stderr.fileHandleForReading.readDataToEndOfFile()
+            }
+
             process.waitUntilExit()
 
+            let _ = await stdoutTask.value
+            let stderrData = await stderrTask.value
+
             if process.terminationStatus != 0 {
-                let errorOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                let errorOutput = String(data: stderrData, encoding: .utf8) ?? ""
                 throw JJError.commandFailed("Setup command failed: \(command)\n\(errorOutput)")
             }
         }.value
@@ -368,10 +378,17 @@ class AgentOrchestrator: ObservableObject {
 
             do {
                 try process.run()
+                let stdoutTask = Task<Data, Never> {
+                    stdout.fileHandleForReading.readDataToEndOfFile()
+                }
+                let stderrTask = Task<Data, Never> {
+                    stderr.fileHandleForReading.readDataToEndOfFile()
+                }
+
                 process.waitUntilExit()
 
-                let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
-                let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
+                let stdoutData = await stdoutTask.value
+                let stderrData = await stderrTask.value
                 let output = (String(data: stdoutData, encoding: .utf8) ?? "") +
                              (String(data: stderrData, encoding: .utf8) ?? "")
                 let duration = Date().timeIntervalSince(start)

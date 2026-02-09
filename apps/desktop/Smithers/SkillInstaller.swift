@@ -238,9 +238,9 @@ final class SkillInstaller {
         process.standardError = pipe
         process.standardOutput = pipe
         try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         if process.terminationStatus != 0 {
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let message = String(data: data, encoding: .utf8) ?? "Unknown error"
             throw SkillInstallError.gitFailed(message)
         }

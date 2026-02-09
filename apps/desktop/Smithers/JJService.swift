@@ -322,10 +322,17 @@ class JJService: ObservableObject {
 
             try process.run()
 
-            let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
-            let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
+            let stdoutTask = Task<Data, Never> {
+                stdout.fileHandleForReading.readDataToEndOfFile()
+            }
+            let stderrTask = Task<Data, Never> {
+                stderr.fileHandleForReading.readDataToEndOfFile()
+            }
 
             process.waitUntilExit()
+
+            let stdoutData = await stdoutTask.value
+            let stderrData = await stderrTask.value
 
             let output = String(data: stdoutData, encoding: .utf8) ?? ""
             let errorOutput = String(data: stderrData, encoding: .utf8) ?? ""
