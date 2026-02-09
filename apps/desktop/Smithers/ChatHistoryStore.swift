@@ -3,25 +3,48 @@ import CryptoKit
 import CoreGraphics
 
 enum ChatHistoryStore {
-    private static let currentVersion = 2
+    private static let currentVersion = 3
 
     @MainActor
     static func loadHistory(for rootDirectory: URL) -> [ChatMessage]? {
-        guard let url = historyURL(for: rootDirectory) else { return nil }
+        guard let url = resolvedHistoryURL(for: rootDirectory) else { return nil }
         guard let data = try? Data(contentsOf: url) else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let payload = try? decoder.decode(ChatHistoryPayload.self, from: data) else { return nil }
-        let messages = payload.messages.map { $0.asChatMessage() }
+        let imagesDir = imagesDirectory(for: rootDirectory)
+        let messages = payload.messages.map { $0.asChatMessage(imagesDirectory: imagesDir) }
         return messages
     }
 
     static func saveHistory(_ messages: [ChatMessage], for rootDirectory: URL) {
         guard let url = historyURL(for: rootDirectory) else { return }
+        let imagesDir = imagesDirectory(for: rootDirectory)
+        if let imagesDir {
+            try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
+        }
+        var usedFiles = Set<String>()
+        var payloadMessages: [ChatHistoryMessage] = []
+        payloadMessages.reserveCapacity(messages.count)
+        for message in messages {
+            payloadMessages.append(ChatHistoryMessage(message, imagesDirectory: imagesDir, usedFiles: &usedFiles))
+        }
+
+        if let imagesDir {
+            let fm = FileManager.default
+            if let existing = try? fm.contentsOfDirectory(at: imagesDir, includingPropertiesForKeys: nil) {
+                for fileURL in existing {
+                    if !usedFiles.contains(fileURL.lastPathComponent) {
+                        try? fm.removeItem(at: fileURL)
+                    }
+                }
+            }
+        }
+
         let payload = ChatHistoryPayload(
             version: currentVersion,
             rootPath: rootDirectory.standardizedFileURL.path,
-            messages: messages.map(ChatHistoryMessage.init)
+            messages: payloadMessages
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -30,9 +53,28 @@ enum ChatHistoryStore {
         let folder = url.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try? data.write(to: url, options: [.atomic])
+        if let legacy = legacyHistoryURL(for: rootDirectory), legacy.path != url.path {
+            try? FileManager.default.removeItem(at: legacy)
+        }
+    }
+
+    private static func historyDirectory(for rootDirectory: URL) -> URL? {
+        guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let hash = hashedPath(rootDirectory.standardizedFileURL.path)
+        return base
+            .appendingPathComponent("Smithers", isDirectory: true)
+            .appendingPathComponent("ChatHistory", isDirectory: true)
+            .appendingPathComponent(hash, isDirectory: true)
     }
 
     private static func historyURL(for rootDirectory: URL) -> URL? {
+        guard let directory = historyDirectory(for: rootDirectory) else { return nil }
+        return directory.appendingPathComponent("history.json")
+    }
+
+    private static func legacyHistoryURL(for rootDirectory: URL) -> URL? {
         guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
@@ -41,6 +83,18 @@ enum ChatHistoryStore {
             .appendingPathComponent("ChatHistory", isDirectory: true)
         let hash = hashedPath(rootDirectory.standardizedFileURL.path)
         return directory.appendingPathComponent("history-\(hash).json")
+    }
+
+    private static func resolvedHistoryURL(for rootDirectory: URL) -> URL? {
+        if let url = historyURL(for: rootDirectory), FileManager.default.fileExists(atPath: url.path) {
+            return url
+        }
+        return legacyHistoryURL(for: rootDirectory)
+    }
+
+    private static func imagesDirectory(for rootDirectory: URL) -> URL? {
+        guard let directory = historyDirectory(for: rootDirectory) else { return nil }
+        return directory.appendingPathComponent("images", isDirectory: true)
     }
 
     private static func hashedPath(_ path: String) -> String {
@@ -83,16 +137,22 @@ private struct ChatHistoryMessage: Codable {
         self.timestamp = timestamp
     }
 
-    init(_ message: ChatMessage) {
+    init(_ message: ChatMessage, imagesDirectory: URL?, usedFiles: inout Set<String>) {
         role = ChatHistoryRole(message.role)
         kind = ChatHistoryKind(message.kind)
-        images = message.images.map(ChatHistoryImage.init)
+        images = message.images.map { image in
+            let stored = ChatHistoryImage(image, imagesDirectory: imagesDirectory)
+            if let fileName = stored.fileName {
+                usedFiles.insert(fileName)
+            }
+            return stored
+        }
         turnId = message.turnId
         timestamp = message.timestamp
     }
 
-    func asChatMessage() -> ChatMessage {
-        let restoredImages = images.compactMap { $0.asChatImage() }
+    func asChatMessage(imagesDirectory: URL?) -> ChatMessage {
+        let restoredImages = images.compactMap { $0.asChatImage(imagesDirectory: imagesDirectory) }
         return ChatMessage(
             role: role.asChatRole(),
             kind: kind.asChatKind(),
@@ -134,29 +194,60 @@ private struct ChatHistoryMessage: Codable {
 
 private struct ChatHistoryImage: Codable {
     let id: String
-    let data: String
+    let fileName: String?
+    let data: String?
     let originalWidth: Double
     let originalHeight: Double
 
-    init(id: String, data: String, originalWidth: Double, originalHeight: Double) {
+    init(id: String, fileName: String?, data: String?, originalWidth: Double, originalHeight: Double) {
         self.id = id
+        self.fileName = fileName
         self.data = data
         self.originalWidth = originalWidth
         self.originalHeight = originalHeight
     }
 
-    init(_ image: ChatImage) {
+    init(_ image: ChatImage, imagesDirectory: URL?) {
         id = image.id.uuidString
-        data = image.data.base64EncodedString()
+        let fileName = "\(id).png"
+        if let imagesDirectory {
+            let fileURL = imagesDirectory.appendingPathComponent(fileName)
+            if FileManager.default.fileExists(atPath: fileURL.path) || ((try? image.data.write(to: fileURL, options: [.atomic])) != nil) {
+                self.fileName = fileName
+                self.data = nil
+            } else {
+                self.fileName = nil
+                self.data = image.data.base64EncodedString()
+            }
+        } else {
+            self.fileName = nil
+            self.data = image.data.base64EncodedString()
+        }
         originalWidth = Double(image.originalSize.width)
         originalHeight = Double(image.originalSize.height)
     }
 
-    func asChatImage() -> ChatImage? {
-        guard let decoded = Data(base64Encoded: data) else { return nil }
+    func asChatImage(imagesDirectory: URL?) -> ChatImage? {
         let size = CGSize(width: originalWidth, height: originalHeight)
         let uuid = UUID(uuidString: id)
-        return ChatImage.fromData(decoded, originalSize: size, id: uuid)
+        if let fileName, let imagesDirectory {
+            let fileURL = imagesDirectory.appendingPathComponent(fileName)
+            if let decoded = try? Data(contentsOf: fileURL) {
+                return ChatImage.fromData(decoded, originalSize: size, id: uuid)
+            }
+        }
+        if let data, let decoded = Data(base64Encoded: data) {
+            return ChatImage.fromData(decoded, originalSize: size, id: uuid)
+        }
+        return nil
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case fileName
+        case data
+        case originalWidth
+        case originalHeight
     }
 }
 
