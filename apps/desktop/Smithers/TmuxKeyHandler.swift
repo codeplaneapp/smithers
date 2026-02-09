@@ -2,10 +2,10 @@ import AppKit
 import Foundation
 import Dispatch
 
-final class TmuxKeyHandler {
+final class TmuxKeyHandler: ObservableObject {
     private weak var workspace: WorkspaceState?
     private var monitor: Any?
-    private var prefixActive = false
+    @Published private(set) var prefixActive = false
     private var prefixResetItem: DispatchWorkItem?
     private let prefixTimeout: TimeInterval = 1.0
 
