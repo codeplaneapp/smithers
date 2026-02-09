@@ -12,6 +12,7 @@ export type AgentServiceOptions = {
   emit: (event: AgentStreamEventDTO) => void;
   secretStore?: SecretStore;
   toolRegistry?: CustomToolRegistry;
+  onWorkspaceDirty?: () => void;
   smithers?: {
     runWorkflow: (params: { workflowPath: string; input: any; attachToSessionId?: string }) => Promise<string>;
   };
@@ -26,6 +27,7 @@ export class AgentService {
   private smithers?: AgentServiceOptions["smithers"];
   private secretStore?: SecretStore;
   private toolRegistry?: CustomToolRegistry;
+  private onWorkspaceDirty?: () => void;
   private listWorkflowsFn?: AgentServiceOptions["listWorkflows"];
   private listRunsFn?: AgentServiceOptions["listRuns"];
   private runs = new Map<string, AbortController>();
@@ -39,6 +41,7 @@ export class AgentService {
     this.toolRegistry = opts.toolRegistry;
     this.listWorkflowsFn = opts.listWorkflows;
     this.listRunsFn = opts.listRuns;
+    this.onWorkspaceDirty = opts.onWorkspaceDirty;
   }
 
   listChatSessions() {
@@ -142,6 +145,7 @@ export class AgentService {
     const { sessionId, runId, generator } = opts;
     const toolMessageIds = new Map<string, string | null>();
     const toolStarts = new Map<string, { args: any; startedAtMs: number }>();
+    const toolMutations = new Set(["write", "edit", "bash"]);
 
     console.log("[AgentService] consumeEvents started for runId:", runId);
     try {
@@ -149,7 +153,7 @@ export class AgentService {
         console.log("[AgentService] Emitting event:", event.type, "for runId:", runId);
         this.emit({ runId, event });
         if (event.type === "message_end") {
-          const messageId = this.db.insertMessage({
+          const inserted = this.db.insertMessage({
             sessionId,
             role: event.message.role,
             content: event.message as any,
@@ -158,7 +162,7 @@ export class AgentService {
           if (event.message.role === "assistant") {
             for (const content of event.message.content) {
               if (content.type === "toolCall") {
-                toolMessageIds.set(content.id, messageId);
+                toolMessageIds.set(content.id, inserted.messageId);
               }
             }
           }
@@ -181,6 +185,9 @@ export class AgentService {
             finishedAtMs: Date.now(),
           });
           toolStarts.delete(event.toolCallId);
+          if (toolMutations.has(event.toolName.toLowerCase())) {
+            this.onWorkspaceDirty?.();
+          }
         }
       }
     } catch (err) {
