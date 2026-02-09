@@ -242,7 +242,9 @@ export class ForkService {
       throw new Error("Fork not found.");
     }
     const sourceRoot = fork.sandboxRoot ?? this.workspace.getRoot();
-    const targetRoot = await this.resolveTargetRoot(params.targetSessionId ?? fork.sourceSessionId);
+    const targetRoot = params.targetSessionId
+      ? await this.resolveTargetRoot(params.targetSessionId)
+      : fork.sourceRoot ?? this.primaryRoot ?? this.workspace.getRoot();
     if (!sourceRoot || !targetRoot) return [];
     return await diffDirs(sourceRoot, targetRoot, DEFAULT_IGNORE);
   }
@@ -276,7 +278,9 @@ export class ForkService {
       throw new Error("Fork not found.");
     }
     const sourceRoot = fork.sandboxRoot ?? this.workspace.getRoot();
-    const targetRoot = await this.resolveTargetRoot(params.targetSessionId ?? fork.sourceSessionId);
+    const targetRoot = params.targetSessionId
+      ? await this.resolveTargetRoot(params.targetSessionId)
+      : fork.sourceRoot ?? this.primaryRoot ?? this.workspace.getRoot();
     if (!sourceRoot || !targetRoot) {
       return { ok: true, appliedFiles: [] };
     }
