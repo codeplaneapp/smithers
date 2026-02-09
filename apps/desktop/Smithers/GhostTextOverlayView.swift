@@ -27,6 +27,10 @@ final class GhostTextOverlayView: NSView {
         didSet { needsDisplay = true }
     }
 
+    private let textStorage = NSTextStorage()
+    private let layoutManager = NSLayoutManager()
+    private let textContainer = NSTextContainer(size: .zero)
+
     override var isOpaque: Bool { false }
 
     override var isFlipped: Bool {
@@ -38,6 +42,9 @@ final class GhostTextOverlayView: NSView {
         wantsLayer = true
         alphaValue = 0
         isHidden = true
+        textContainer.lineFragmentPadding = 0
+        layoutManager.addTextContainer(textContainer)
+        textStorage.addLayoutManager(layoutManager)
     }
 
     required init?(coder: NSCoder) {
@@ -92,15 +99,11 @@ final class GhostTextOverlayView: NSView {
             .ligature: ligaturesEnabled ? 1 : 0,
         ]
 
-        let storage = NSTextStorage(string: ghostText, attributes: attrs)
-        let layoutManager = NSLayoutManager()
-        let container = NSTextContainer(size: NSSize(width: availableWidth, height: bounds.height))
-        container.lineFragmentPadding = 0
-        layoutManager.addTextContainer(container)
-        storage.addLayoutManager(layoutManager)
-        layoutManager.ensureLayout(for: container)
+        textContainer.size = NSSize(width: availableWidth, height: bounds.height)
+        textStorage.setAttributedString(NSAttributedString(string: ghostText, attributes: attrs))
+        layoutManager.ensureLayout(for: textContainer)
 
-        let glyphRange = layoutManager.glyphRange(for: container)
+        let glyphRange = layoutManager.glyphRange(for: textContainer)
         let origin = CGPoint(x: lineStartX, y: caretRect.minY)
         layoutManager.drawGlyphs(forGlyphRange: glyphRange, at: origin)
     }
