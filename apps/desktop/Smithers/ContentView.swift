@@ -514,10 +514,29 @@ struct ContentView: View {
     @State private var editorScrollMetrics = EditorScrollMetrics()
 
     var body: some View {
+        let selectionKey = workspace.selectedFileURL?.absoluteString ?? "empty"
+        let statusBarHeight: CGFloat = 22
+        let isChatActive = workspace.selectedFileURL.map(workspace.isChatURL) ?? false
+        let toastBottomPadding = statusBarHeight + (isChatActive ? 64 : 16)
+        let toastTransition = AnyTransition.asymmetric(
+            insertion: .move(edge: .bottom)
+                .combined(with: .opacity)
+                .animation(.easeOut(duration: 0.25)),
+            removal: .move(edge: .bottom)
+                .combined(with: .opacity)
+                .animation(.easeIn(duration: 0.15))
+        )
+
         ZStack {
-            NavigationSplitView {
+            NavigationSplitView(columnVisibility: $workspace.sidebarVisibility) {
                 FileTreeSidebar(workspace: workspace)
                     .navigationSplitViewColumnWidth(min: 180, ideal: 240, max: 400)
+                    .overlay(SidebarResizeHandle(theme: workspace.theme), alignment: .trailing)
+                    .overlay(FocusRing(isActive: focusedPane == .sidebar, theme: workspace.theme))
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        focusedPane = .sidebar
+                    }
             } detail: {
                 VStack(spacing: 0) {
                     if !workspace.openFiles.isEmpty {
@@ -525,67 +544,89 @@ struct ContentView: View {
                         Divider()
                             .background(workspace.theme.dividerColor)
                     }
-                    if let selectedURL = workspace.selectedFileURL {
-                        if workspace.isChatURL(selectedURL) {
-                            ChatView(workspace: workspace)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else if workspace.isTerminalURL(selectedURL) {
-                            if let view = workspace.terminalViews[selectedURL] {
-                                TerminalTabView(view: view)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            } else {
-                                emptyEditor
-                            }
-                        } else if workspace.isDiffURL(selectedURL) {
-                            if let tab = workspace.diffTab(for: selectedURL) {
-                                DiffViewer(title: tab.title, summary: tab.summary, diff: tab.diff, theme: workspace.theme)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            } else {
-                                emptyEditor
-                            }
-                        } else {
-                            if workspace.isNvimModeEnabled {
-                                if let nvimView = workspace.nvimTerminalView {
-                                    TerminalTabView(view: nvimView)
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    if let selectedURL = workspace.selectedFileURL,
+                       workspace.isRegularFileURL(selectedURL) {
+                        BreadcrumbBar(path: workspace.displayPath(for: selectedURL), theme: workspace.theme)
+                        Divider()
+                            .background(workspace.theme.dividerColor)
+                    }
+
+                    Group {
+                        if let selectedURL = workspace.selectedFileURL {
+                            if workspace.isChatURL(selectedURL) {
+                                pane(
+                                    ChatView(workspace: workspace, onFocusChange: { focused in
+                                        if focused { focusedPane = .chat }
+                                    }),
+                                    pane: .chat
+                                )
+                            } else if workspace.isTerminalURL(selectedURL) {
+                                if let view = workspace.terminalViews[selectedURL] {
+                                    pane(TerminalTabView(view: view), pane: .terminal)
                                 } else {
-                                    nvimPlaceholder
+                                    pane(emptyEditor, pane: .editor)
+                                }
+                            } else if workspace.isDiffURL(selectedURL) {
+                                if let tab = workspace.diffTab(for: selectedURL) {
+                                    pane(
+                                        DiffViewer(
+                                            title: tab.title,
+                                            summary: tab.summary,
+                                            diff: tab.diff,
+                                            theme: workspace.theme
+                                        ),
+                                        pane: .diff
+                                    )
+                                } else {
+                                    pane(emptyEditor, pane: .editor)
                                 }
                             } else {
-                                CodeEditor(
-                                    text: $workspace.editorText,
-                                    selectionRequest: $workspace.pendingSelection,
-                                    language: workspace.currentLanguage,
-                                    fileURL: workspace.selectedFileURL,
-                                    theme: workspace.theme,
-                                    font: workspace.editorFont
-                                )
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                if workspace.isNvimModeEnabled {
+                                    if let nvimView = workspace.nvimTerminalView {
+                                        pane(TerminalTabView(view: nvimView), pane: .terminal)
+                                    } else {
+                                        pane(nvimPlaceholder, pane: .editor)
+                                    }
+                                } else {
+                                    pane(editorView, pane: .editor)
+                                }
                             }
+                        } else {
+                            pane(emptyEditor, pane: .editor)
                         }
-                } else {
-                    emptyEditor
+                    }
+                    .id(selectionKey)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.1), value: selectionKey)
+
+                    StatusBar(workspace: workspace, height: statusBarHeight)
                 }
             }
-            }
             .navigationTitle("")
+
+            if workspace.isSearchPresented {
+                SearchPanelOverlay(workspace: workspace)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(1)
+            }
 
             if workspace.isCommandPalettePresented {
                 CommandPaletteView(workspace: workspace)
                     .transition(.scale(scale: 0.97, anchor: .top).combined(with: .opacity))
-                    .zIndex(1)
+                    .zIndex(2)
             }
 
             if let toast = workspace.toastMessage {
                 VStack {
                     Spacer()
                     ToastView(message: toast, theme: workspace.theme)
-                        .padding(.bottom, 24)
+                        .padding(.bottom, toastBottomPadding)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(toastTransition)
                 .allowsHitTesting(false)
-                .zIndex(2)
+                .zIndex(3)
             }
 
             if workspace.isProgressBarVisible {
@@ -602,7 +643,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .transition(.opacity)
                 .allowsHitTesting(false)
-                .zIndex(3)
+                .zIndex(4)
             }
 
             // Hidden accessibility element for test observability of nvim active file.
@@ -616,7 +657,6 @@ struct ContentView: View {
             }
         }
         .animation(.spring(duration: 0.25, bounce: 0.15), value: workspace.isCommandPalettePresented)
-        .animation(.easeInOut(duration: 0.2), value: workspace.toastMessage)
         .animation(.easeInOut(duration: 0.2), value: workspace.isProgressBarVisible)
         .background(workspace.theme.backgroundColor)
     }
@@ -624,7 +664,7 @@ struct ContentView: View {
     private var emptyEditor: some View {
         VStack(spacing: 10) {
             Image(systemName: "doc.text")
-                .font(.system(size: 40))
+                .font(.system(size: Typography.iconL))
                 .foregroundStyle(.tertiary)
             Text("Select a file to edit")
                 .font(.title3)
@@ -659,7 +699,7 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             Spacer()
             Text(keys)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(.system(size: Typography.s, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: 260)
@@ -699,7 +739,7 @@ private struct ToastView: View {
 
     var body: some View {
         Text(message)
-            .font(.system(size: 12, weight: .semibold))
+            .font(.system(size: Typography.base, weight: .semibold))
             .foregroundStyle(theme.foregroundColor)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -785,7 +825,7 @@ struct TabBar: View {
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: Typography.base, weight: .medium))
                     .foregroundStyle(theme.mutedForegroundColor)
             }
             .buttonStyle(.borderless)
@@ -842,10 +882,10 @@ struct TabBarItem: View {
         let showDot = isModified && !isHovered
         HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 12))
+                .font(.system(size: Typography.base))
                 .foregroundStyle(fileColor?.opacity(0.8) ?? theme.mutedForegroundColor)
             Text(title)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: Typography.base, weight: .medium))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .foregroundStyle(isSelected ? theme.tabSelectedForegroundColor : theme.tabForegroundColor)
@@ -860,7 +900,7 @@ struct TabBarItem: View {
                 }
                 Button(action: onClose) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: Typography.xs, weight: .bold))
                         .foregroundStyle(theme.mutedForegroundColor)
                         .padding(4)
                 }
