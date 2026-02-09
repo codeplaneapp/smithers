@@ -1,5 +1,6 @@
 import Foundation
 import Network
+// SmithersShared sources are compiled as part of the Smithers target (see project.yml)
 
 @MainActor
 final class SmithersIPCServer {
@@ -80,9 +81,9 @@ final class SmithersIPCServer {
 
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
-        let endpoint = NWEndpoint.unix(path: SmithersIPC.socketPath)
+        parameters.requiredLocalEndpoint = .unix(path: SmithersIPC.socketPath)
         do {
-            listener = try NWListener(using: parameters, on: endpoint)
+            listener = try NWListener(using: parameters)
         } catch {
             WorkspaceState.debugLog("[IPC] Failed to start listener: \(error)")
             listener = nil
