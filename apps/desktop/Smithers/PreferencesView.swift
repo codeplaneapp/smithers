@@ -16,7 +16,11 @@ struct PreferencesView: View {
                 HStack {
                     Text("Size")
                     Spacer()
-                    Stepper(value: $workspace.editorFontSize, in: 9...32, step: 1) {
+                    Stepper(
+                        value: $workspace.editorFontSize,
+                        in: WorkspaceState.minEditorFontSize...WorkspaceState.maxEditorFontSize,
+                        step: 1
+                    ) {
                         Text("\(Int(workspace.editorFontSize)) pt")
                             .font(.system(size: 12, weight: .semibold))
                     }
