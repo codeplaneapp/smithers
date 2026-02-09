@@ -185,4 +185,38 @@ final class WorkspaceStateTests: XCTestCase {
         XCTAssertTrue(ws.handleOpenURL(link!))
         XCTAssertEqual(ws.selectedFileURL, file)
     }
+
+    func testHandleExternalOpenSetsWorkspaceRoot() throws {
+        let tmpDir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("main.swift")
+        try "print(\"hello\")".write(to: file, atomically: true, encoding: .utf8)
+
+        let ws = WorkspaceState()
+        ws.handleExternalOpen(urls: [file])
+
+        XCTAssertEqual(ws.rootDirectory?.standardizedFileURL, tmpDir.standardizedFileURL)
+        XCTAssertEqual(ws.selectedFileURL, file)
+        XCTAssertTrue(ws.openFiles.contains(file))
+    }
+
+    func testHandleExternalOpenMultipleFilesOpensInOneWindow() throws {
+        let tmpDir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let fileA = tmpDir.appendingPathComponent("a.py")
+        let fileB = tmpDir.appendingPathComponent("b.py")
+        try "a".write(to: fileA, atomically: true, encoding: .utf8)
+        try "b".write(to: fileB, atomically: true, encoding: .utf8)
+
+        let ws = WorkspaceState()
+        ws.handleExternalOpen(urls: [fileA, fileB])
+
+        XCTAssertEqual(ws.rootDirectory?.standardizedFileURL, tmpDir.standardizedFileURL)
+        XCTAssertEqual(ws.selectedFileURL, fileB)
+        XCTAssertEqual(ws.openFiles.count, 3)
+        XCTAssertTrue(ws.openFiles.contains(fileA))
+        XCTAssertTrue(ws.openFiles.contains(fileB))
+    }
 }
