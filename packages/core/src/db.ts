@@ -84,6 +84,51 @@ export class AppDb {
     `);
 
     this.db.run(`
+      CREATE TABLE IF NOT EXISTS workspace_snapshots (
+        snapshot_id TEXT PRIMARY KEY,
+        session_id TEXT,
+        message_seq INTEGER,
+        fork_point TEXT,
+        workspace_root TEXT,
+        snapshot_type TEXT,
+        ref TEXT,
+        created_at_ms INTEGER NOT NULL,
+        metadata_json TEXT
+      );
+    `);
+
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS workspace_snapshots_session_seq
+      ON workspace_snapshots(session_id, message_seq);
+    `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS workspace_forks (
+        fork_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        source_session_id TEXT NOT NULL,
+        message_seq INTEGER NOT NULL,
+        fork_point TEXT NOT NULL,
+        code_mode TEXT NOT NULL,
+        snapshot_id TEXT,
+        sandbox_root TEXT,
+        source_root TEXT,
+        created_at_ms INTEGER NOT NULL
+      );
+    `);
+
+    try {
+      this.db.run("ALTER TABLE workspace_forks ADD COLUMN source_root TEXT");
+    } catch {
+      // ignore if column already exists
+    }
+
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS workspace_forks_source
+      ON workspace_forks(source_session_id);
+    `);
+
+    this.db.run(`
       CREATE TABLE IF NOT EXISTS workflow_runs (
         run_id TEXT PRIMARY KEY,
         workspace_root TEXT,
@@ -186,8 +231,12 @@ export class AppDb {
                s.title AS title,
                s.created_at_ms AS createdAtMs,
                s.updated_at_ms AS updatedAtMs,
-               (SELECT COUNT(*) FROM chat_messages m WHERE m.session_id = s.session_id) AS messageCount
+               (SELECT COUNT(*) FROM chat_messages m WHERE m.session_id = s.session_id) AS messageCount,
+               f.fork_id AS forkId,
+               f.source_session_id AS forkSourceSessionId,
+               f.code_mode AS forkCodeMode
         FROM chat_sessions s
+        LEFT JOIN workspace_forks f ON f.session_id = s.session_id
         ORDER BY s.updated_at_ms DESC
       `,
       )
@@ -211,7 +260,24 @@ export class AppDb {
       .all(sessionId) as { content_json: string }[];
 
     const messages = rows.map((row) => JSON.parse(row.content_json) as AppMessageDTO);
-    return { ...session, messages };
+
+    const fork = this.db
+      .query(
+        `SELECT fork_id AS forkId,
+                session_id AS sessionId,
+                source_session_id AS sourceSessionId,
+                message_seq AS messageSeq,
+                fork_point AS forkPoint,
+                code_mode AS codeMode,
+                snapshot_id AS snapshotId,
+                sandbox_root AS sandboxRoot,
+                source_root AS sourceRoot,
+                created_at_ms AS createdAtMs
+         FROM workspace_forks WHERE session_id = ? LIMIT 1`,
+      )
+      .get(sessionId) as ChatSessionDTO["fork"] | null;
+
+    return { ...session, messages, fork: fork ?? null };
   }
 
   listSessionMessages(sessionId: string, limit = 50): AppMessageDTO[] {
@@ -237,7 +303,7 @@ export class AppDb {
     role: string;
     content: AppMessageDTO;
     runId?: string | null;
-  }): string {
+  }): { messageId: string; seq: number } {
     const messageId = randomUUID();
     const createdAtMs = Date.now();
     const seqRow = this.db
@@ -263,7 +329,7 @@ export class AppDb {
       createdAtMs,
       params.sessionId,
     ]);
-    return messageId;
+    return { messageId, seq };
   }
 
   insertToolCall(params: {
@@ -296,6 +362,222 @@ export class AppDb {
         params.finishedAtMs,
       ],
     );
+  }
+
+  forkSession(params: {
+    sourceSessionId: string;
+    messageSeq: number;
+    forkPoint: "before" | "after";
+    title?: string;
+  }): string {
+    const sessionId = this.createSession(params.title);
+    const includeSeq = params.forkPoint === "after";
+    const maxSeq = includeSeq ? params.messageSeq : params.messageSeq - 1;
+    if (maxSeq >= 0) {
+      const rows = this.db
+        .query(
+          `SELECT role, content_json, run_id
+           FROM chat_messages
+           WHERE session_id = ? AND seq <= ?
+           ORDER BY seq ASC`,
+        )
+        .all(params.sourceSessionId, maxSeq) as { role: string; content_json: string; run_id: string | null }[];
+      for (const row of rows) {
+        this.insertMessage({
+          sessionId,
+          role: row.role,
+          content: JSON.parse(row.content_json) as AppMessageDTO,
+          runId: row.run_id ?? null,
+        });
+      }
+    }
+    return sessionId;
+  }
+
+  insertWorkspaceSnapshot(params: {
+    snapshotId: string;
+    sessionId?: string | null;
+    messageSeq?: number | null;
+    forkPoint?: string | null;
+    workspaceRoot?: string | null;
+    snapshotType: string;
+    ref: string;
+    createdAtMs: number;
+    metadataJson?: string | null;
+  }) {
+    this.db.run(
+      `INSERT INTO workspace_snapshots
+       (snapshot_id, session_id, message_seq, fork_point, workspace_root, snapshot_type, ref, created_at_ms, metadata_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        params.snapshotId,
+        params.sessionId ?? null,
+        params.messageSeq ?? null,
+        params.forkPoint ?? null,
+        params.workspaceRoot ?? null,
+        params.snapshotType,
+        params.ref,
+        params.createdAtMs,
+        params.metadataJson ?? null,
+      ],
+    );
+  }
+
+  getSnapshotForMessage(params: {
+    sessionId: string;
+    messageSeq: number;
+    forkPoint?: string;
+  }) {
+    const rows = this.db
+      .query(
+        `SELECT snapshot_id AS snapshotId,
+                session_id AS sessionId,
+                message_seq AS messageSeq,
+                fork_point AS forkPoint,
+                workspace_root AS workspaceRoot,
+                snapshot_type AS snapshotType,
+                ref,
+                created_at_ms AS createdAtMs,
+                metadata_json AS metadataJson
+         FROM workspace_snapshots
+         WHERE session_id = ? AND message_seq = ?
+         ${params.forkPoint ? "AND fork_point = ?" : ""}
+         ORDER BY created_at_ms DESC
+         LIMIT 1`,
+      )
+      .all(
+        params.sessionId,
+        params.messageSeq,
+        ...(params.forkPoint ? [params.forkPoint] : []),
+      ) as any[];
+    return rows[0] ?? null;
+  }
+
+  getNearestSnapshot(params: { sessionId: string; messageSeq: number }) {
+    const row = this.db
+      .query(
+        `SELECT snapshot_id AS snapshotId,
+                session_id AS sessionId,
+                message_seq AS messageSeq,
+                fork_point AS forkPoint,
+                workspace_root AS workspaceRoot,
+                snapshot_type AS snapshotType,
+                ref,
+                created_at_ms AS createdAtMs,
+                metadata_json AS metadataJson
+         FROM workspace_snapshots
+         WHERE session_id = ? AND message_seq <= ?
+         ORDER BY message_seq DESC, created_at_ms DESC
+         LIMIT 1`,
+      )
+      .get(params.sessionId, params.messageSeq) as any;
+    return row ?? null;
+  }
+
+  insertWorkspaceFork(params: {
+    forkId: string;
+    sessionId: string;
+    sourceSessionId: string;
+    messageSeq: number;
+    forkPoint: string;
+    codeMode: string;
+    snapshotId?: string | null;
+    sandboxRoot?: string | null;
+    sourceRoot?: string | null;
+    createdAtMs: number;
+  }) {
+    this.db.run(
+      `INSERT INTO workspace_forks
+       (fork_id, session_id, source_session_id, message_seq, fork_point, code_mode, snapshot_id, sandbox_root, source_root, created_at_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        params.forkId,
+        params.sessionId,
+        params.sourceSessionId,
+        params.messageSeq,
+        params.forkPoint,
+        params.codeMode,
+        params.snapshotId ?? null,
+        params.sandboxRoot ?? null,
+        params.sourceRoot ?? null,
+        params.createdAtMs,
+      ],
+    );
+  }
+
+  getForkForSession(sessionId: string) {
+    return this.db
+      .query(
+        `SELECT fork_id AS forkId,
+                session_id AS sessionId,
+                source_session_id AS sourceSessionId,
+                message_seq AS messageSeq,
+                fork_point AS forkPoint,
+                code_mode AS codeMode,
+                snapshot_id AS snapshotId,
+                sandbox_root AS sandboxRoot,
+                source_root AS sourceRoot,
+                created_at_ms AS createdAtMs
+         FROM workspace_forks
+         WHERE session_id = ?
+         LIMIT 1`,
+      )
+      .get(sessionId) as any;
+  }
+
+  listForksForSession(sourceSessionId: string) {
+    return this.db
+      .query(
+        `SELECT fork_id AS forkId,
+                session_id AS sessionId,
+                source_session_id AS sourceSessionId,
+                message_seq AS messageSeq,
+                fork_point AS forkPoint,
+                code_mode AS codeMode,
+                snapshot_id AS snapshotId,
+                sandbox_root AS sandboxRoot,
+                source_root AS sourceRoot,
+                created_at_ms AS createdAtMs
+         FROM workspace_forks
+         WHERE source_session_id = ?
+         ORDER BY created_at_ms DESC`,
+      )
+      .all(sourceSessionId) as any[];
+  }
+
+  getForkById(forkId: string) {
+    return this.db
+      .query(
+        `SELECT fork_id AS forkId,
+                session_id AS sessionId,
+                source_session_id AS sourceSessionId,
+                message_seq AS messageSeq,
+                fork_point AS forkPoint,
+                code_mode AS codeMode,
+                snapshot_id AS snapshotId,
+                sandbox_root AS sandboxRoot,
+                source_root AS sourceRoot,
+                created_at_ms AS createdAtMs
+         FROM workspace_forks WHERE fork_id = ? LIMIT 1`,
+      )
+      .get(forkId) as any;
+  }
+
+  getSnapshotById(snapshotId: string) {
+    return this.db
+      .query(
+        `SELECT snapshot_id AS snapshotId,
+                session_id AS sessionId,
+                message_seq AS messageSeq,
+                fork_point AS forkPoint,
+                workspace_root AS workspaceRoot,
+                snapshot_type AS snapshotType,
+                ref,
+                created_at_ms AS createdAtMs,
+                metadata_json AS metadataJson
+         FROM workspace_snapshots WHERE snapshot_id = ? LIMIT 1`,
+      )
+      .get(snapshotId) as any;
   }
 
   upsertWorkflowRun(run: RunSummaryDTO & { inputJson?: string; workspaceRoot?: string | null; workflowDbPath?: string | null }) {
@@ -644,6 +926,10 @@ const DEFAULT_SETTINGS: SettingsDTO = {
     workflowPanel: { isOpen: true, width: 380 },
     artifactsPanelOpen: true,
     lastWorkspaceRoot: null,
+    forks: {
+      defaultIncludeCode: false,
+      defaultCodeMode: "shared",
+    },
   },
   agent: {
     provider: "openai",
