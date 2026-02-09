@@ -1,6 +1,7 @@
 [submodule "ghostty"]
 	path = ghostty
 	url = https://github.com/ghostty-org/ghostty.git
+	ignore = dirty
 [submodule "codex"]
 	path = codex
 	url = https://github.com/openai/codex.git
