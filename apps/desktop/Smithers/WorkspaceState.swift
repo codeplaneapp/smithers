@@ -125,6 +125,7 @@ class WorkspaceState: ObservableObject {
         case tab(URL)
         case window
         case application
+        case workspace
     }
 
     private enum CloseDecision {
@@ -210,7 +211,11 @@ class WorkspaceState: ObservableObject {
             scheduleChatHistoryPersist()
         }
     }
-    @Published var theme: AppTheme = .default
+    @Published var theme: AppTheme = .default {
+        didSet {
+            applyWindowAppearance()
+        }
+    }
     @Published var activeDiffPreview: DiffPreview?
     @Published var activeSessionDiff: SessionDiffSnapshot?
     @Published private(set) var sessionDiffSnapshot: SessionDiffSnapshot?
@@ -275,6 +280,7 @@ class WorkspaceState: ObservableObject {
                 return
             }
             UserDefaults.standard.set(editorFontName, forKey: Self.editorFontNameKey)
+            scheduleNvimSettingsSync()
         }
     }
     @Published var editorFontSize: Double = {
@@ -288,6 +294,7 @@ class WorkspaceState: ObservableObject {
                 return
             }
             UserDefaults.standard.set(editorFontSize, forKey: Self.editorFontSizeKey)
+            scheduleNvimSettingsSync()
         }
     }
     @Published var preferredNvimPath: String = {
@@ -295,6 +302,7 @@ class WorkspaceState: ObservableObject {
     }() {
         didSet {
             UserDefaults.standard.set(preferredNvimPath, forKey: Self.nvimPathKey)
+            scheduleNvimSettingsSync()
         }
     }
     @Published var optionAsMeta: OptionAsMeta = {
@@ -307,6 +315,7 @@ class WorkspaceState: ObservableObject {
         didSet {
             UserDefaults.standard.set(optionAsMeta.rawValue, forKey: Self.optionAsMetaKey)
             updateTerminalOptionAsMeta()
+            scheduleNvimSettingsSync()
         }
     }
     @Published var scrollbarVisibilityMode: ScrollbarVisibilityMode = {
@@ -318,8 +327,109 @@ class WorkspaceState: ObservableObject {
     }() {
         didSet {
             UserDefaults.standard.set(scrollbarVisibilityMode.rawValue, forKey: Self.scrollbarVisibilityModeKey)
+            scheduleNvimSettingsSync()
         }
     }
+    @Published var updateChannel: UpdateChannel = UpdateChannel.loadFromDefaults() {
+        didSet {
+            UserDefaults.standard.set(updateChannel.rawValue, forKey: UpdateChannel.userDefaultsKey)
+        }
+    }
+    @Published var showLineNumbers: Bool = {
+        if UserDefaults.standard.object(forKey: WorkspaceState.showLineNumbersKey) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: WorkspaceState.showLineNumbersKey)
+    }() {
+        didSet {
+            UserDefaults.standard.set(showLineNumbers, forKey: Self.showLineNumbersKey)
+            scheduleNvimSettingsSync()
+        }
+    }
+    @Published var highlightCurrentLine: Bool = {
+        if UserDefaults.standard.object(forKey: WorkspaceState.highlightCurrentLineKey) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: WorkspaceState.highlightCurrentLineKey)
+    }() {
+        didSet {
+            UserDefaults.standard.set(highlightCurrentLine, forKey: Self.highlightCurrentLineKey)
+            scheduleNvimSettingsSync()
+        }
+    }
+    @Published var showIndentGuides: Bool = {
+        if UserDefaults.standard.object(forKey: WorkspaceState.showIndentGuidesKey) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: WorkspaceState.showIndentGuidesKey)
+    }() {
+        didSet {
+            UserDefaults.standard.set(showIndentGuides, forKey: Self.showIndentGuidesKey)
+            scheduleNvimSettingsSync()
+        }
+    }
+    @Published var showMinimap: Bool = {
+        if UserDefaults.standard.object(forKey: WorkspaceState.showMinimapKey) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: WorkspaceState.showMinimapKey)
+    }() {
+        didSet {
+            UserDefaults.standard.set(showMinimap, forKey: Self.showMinimapKey)
+            scheduleNvimSettingsSync()
+        }
+    }
+    @Published var isWindowTransparencyEnabled: Bool = UserDefaults.standard.bool(
+        forKey: WorkspaceState.windowTransparencyEnabledKey
+    ) {
+        didSet {
+            UserDefaults.standard.set(isWindowTransparencyEnabled, forKey: Self.windowTransparencyEnabledKey)
+            applyWindowAppearance()
+        }
+    }
+    @Published var windowOpacity: Double = {
+        let value = UserDefaults.standard.double(forKey: WorkspaceState.windowOpacityKey)
+        let initial = value > 0 ? value : 1.0
+        return clampWindowOpacity(initial)
+    }() {
+        didSet {
+            let clamped = Self.clampWindowOpacity(windowOpacity)
+            if clamped != windowOpacity {
+                windowOpacity = clamped
+                return
+            }
+            UserDefaults.standard.set(clamped, forKey: Self.windowOpacityKey)
+            applyWindowAppearance()
+        }
+    }
+#if DEBUG
+    @Published var isPerformanceOverlayEnabled: Bool = UserDefaults.standard.bool(
+        forKey: WorkspaceState.performanceOverlayEnabledKey
+    ) {
+        didSet {
+            UserDefaults.standard.set(isPerformanceOverlayEnabled, forKey: Self.performanceOverlayEnabledKey)
+            PerformanceMonitor.shared.setOverlayEnabled(isPerformanceOverlayEnabled)
+            showToast(isPerformanceOverlayEnabled ? "Performance Overlay On" : "Performance Overlay Off")
+        }
+    }
+    @Published var isPerformanceLoggingEnabled: Bool = UserDefaults.standard.bool(
+        forKey: WorkspaceState.performanceLoggingEnabledKey
+    ) {
+        didSet {
+            UserDefaults.standard.set(isPerformanceLoggingEnabled, forKey: Self.performanceLoggingEnabledKey)
+            PerformanceMonitor.shared.setLoggingEnabled(isPerformanceLoggingEnabled)
+            if isPerformanceLoggingEnabled {
+                if let logURL = PerformanceMonitor.shared.logFileURL {
+                    showToast("Logging perf metrics: \(logURL.lastPathComponent)")
+                } else {
+                    showToast("Performance logging on")
+                }
+            } else {
+                showToast("Performance logging off")
+            }
+        }
+    }
+#endif
     @Published var fileSearchQuery: String = "" {
         didSet {
             scheduleSearch()
@@ -394,6 +504,8 @@ class WorkspaceState: ObservableObject {
     private var autoSaveToken: Int = 0
     private var chatHistoryPersistTask: Task<Void, Never>?
     private var nvimSaveTask: Task<Void, Never>?
+    private var nvimSettingsSyncTask: Task<Void, Never>?
+    private var nvimSettingsSyncToken: Int = 0
     private var sessionPersistTask: Task<Void, Never>?
     private var turnDiffs: [String: String] = [:]
     private var turnDiffOrder: [String] = []
@@ -418,6 +530,7 @@ class WorkspaceState: ObservableObject {
     private static let autoSaveIntervalKey = "smithers.autoSaveInterval"
     private static let defaultAutoSaveInterval: TimeInterval = 5
     static let progressBarHeightRange: ClosedRange<CGFloat> = 1...8
+    static let windowOpacityRange: ClosedRange<Double> = 0.7...1.0
     private static let progressBarAutoHideDelay: TimeInterval = 0.45
     private static let progressBarHeightKey = "smithers.progressBarHeight"
     private static let progressBarFillColorKey = "smithers.progressBarFillColor"
@@ -427,6 +540,16 @@ class WorkspaceState: ObservableObject {
     private static let nvimPathKey = "smithers.nvimPath"
     private static let optionAsMetaKey = "smithers.optionAsMeta"
     private static let scrollbarVisibilityModeKey = "smithers.scrollbarVisibilityMode"
+    private static let showLineNumbersKey = "smithers.showLineNumbers"
+    private static let highlightCurrentLineKey = "smithers.highlightCurrentLine"
+    private static let showIndentGuidesKey = "smithers.showIndentGuides"
+    private static let showMinimapKey = "smithers.showMinimap"
+    private static let windowTransparencyEnabledKey = "smithers.windowTransparencyEnabled"
+    private static let windowOpacityKey = "smithers.windowOpacity"
+#if DEBUG
+    private static let performanceOverlayEnabledKey = "smithers.performanceOverlayEnabled"
+    private static let performanceLoggingEnabledKey = "smithers.performanceLoggingEnabled"
+#endif
     private static let defaultEditorFontSize: Double = 13
     private static let defaultEditorFontName: String = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular).fontName
     static let minEditorFontSize: Double = 9
@@ -456,6 +579,10 @@ class WorkspaceState: ObservableObject {
         recentFileURLs = Self.loadRecentURLs(key: Self.recentFilesKey)
         recentFolderURLs = Self.loadRecentURLs(key: Self.recentFoldersKey)
         refreshRecentEntries()
+#if DEBUG
+        PerformanceMonitor.shared.setOverlayEnabled(isPerformanceOverlayEnabled)
+        PerformanceMonitor.shared.setLoggingEnabled(isPerformanceLoggingEnabled)
+#endif
     }
 
     var editorFont: NSFont {
@@ -505,6 +632,40 @@ class WorkspaceState: ObservableObject {
             view.optionAsMeta = optionAsMeta
         }
         nvimTerminalView?.optionAsMeta = optionAsMeta
+    }
+
+    private func scheduleNvimSettingsSync() {
+        guard isNvimModeEnabled, let controller = nvimController else { return }
+        nvimSettingsSyncToken += 1
+        let token = nvimSettingsSyncToken
+        nvimSettingsSyncTask?.cancel()
+        nvimSettingsSyncTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard let self, token == self.nvimSettingsSyncToken else { return }
+            guard self.isNvimModeEnabled else { return }
+            guard self.nvimController === controller else { return }
+            await self.syncNvimSettings(controller: controller)
+        }
+    }
+
+    private func syncNvimSettings(controller: NvimController) async {
+        let payload = nvimSettingsPayload()
+        guard !payload.isEmpty else { return }
+        await controller.setGlobalVariables(payload)
+    }
+
+    private func nvimSettingsPayload() -> [String: MsgPackValue] {
+        [
+            "smithers_font_name": .string(editorFontName),
+            "smithers_font_size": .double(editorFontSize),
+            "smithers_option_as_meta": .string(optionAsMeta.rawValue),
+            "smithers_scrollbar_mode": .string(scrollbarVisibilityMode.rawValue),
+            "smithers_show_line_numbers": .bool(showLineNumbers),
+            "smithers_highlight_current_line": .bool(highlightCurrentLine),
+            "smithers_show_indent_guides": .bool(showIndentGuides),
+            "smithers_show_minimap": .bool(showMinimap),
+            "smithers_nvim_path": .string(preferredNvimPath.isEmpty ? "" : expandedNvimPath),
+        ]
     }
 
     private func resolveNvimPath() throws -> String {
@@ -559,6 +720,10 @@ class WorkspaceState: ObservableObject {
 
     private static func clampEditorFontSize(_ size: Double) -> Double {
         min(max(size, minEditorFontSize), maxEditorFontSize)
+    }
+
+    private static func clampWindowOpacity(_ value: Double) -> Double {
+        min(max(value, windowOpacityRange.lowerBound), windowOpacityRange.upperBound)
     }
 
     func persistChatHistory() {
@@ -730,10 +895,14 @@ class WorkspaceState: ObservableObject {
     }
 
     func openDirectory(_ url: URL, restoreSession: Bool = false) {
+        persistWindowFrameForCurrentWorkspace()
         persistSessionStateIfNeeded()
         persistChatHistoryNow()
         let shouldRestartNvim = isNvimModeEnabled
         stopNvim()
+        if shouldRestartNvim {
+            maybeHideWindowForNvimStart()
+        }
         stopCodexService()
         closeAllTerminals()
         saveLastWorkspace(url)
@@ -787,6 +956,7 @@ class WorkspaceState: ObservableObject {
         startCodexService(cwd: url.path, resumeThreadId: storedThreadId)
         suppressSessionPersistence = false
         persistSessionStateIfNeeded()
+        applyWindowFrameForCurrentWorkspace()
         if shouldRestartNvim {
             Task { [weak self] in
                 guard let self else { return }
@@ -796,6 +966,162 @@ class WorkspaceState: ObservableObject {
                     self.handleNvimStartFailure(error)
                 }
             }
+        }
+    }
+
+    func handleExternalOpen(urls: [URL]) {
+        Task { @MainActor [weak self] in
+            await self?.handleExternalOpen(urls: urls, focus: nil)
+        }
+    }
+
+    func handleExternalOpen(url: URL, line: Int?, column: Int?) {
+        Task { @MainActor [weak self] in
+            await self?.handleExternalOpen(urls: [url], focus: ExternalOpenFocus(url: url, line: line, column: column))
+        }
+    }
+
+    private struct ExternalOpenFocus {
+        let url: URL
+        let line: Int?
+        let column: Int?
+    }
+
+    private func handleExternalOpen(urls: [URL], focus: ExternalOpenFocus?) async {
+        guard !urls.isEmpty else { return }
+        var fileURLs: [URL] = []
+        var directoryURLs: [URL] = []
+        var seenFiles: Set<URL> = []
+        var seenDirs: Set<URL> = []
+
+        for url in urls {
+            let normalized = url.standardizedFileURL
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: normalized.path, isDirectory: &isDir) else { continue }
+            if isDir.boolValue {
+                if seenDirs.insert(normalized).inserted {
+                    directoryURLs.append(normalized)
+                }
+            } else {
+                if seenFiles.insert(normalized).inserted {
+                    fileURLs.append(normalized)
+                }
+            }
+        }
+
+        var resolvedFocus = focus
+        if let focusURL = focus?.url.standardizedFileURL {
+            resolvedFocus = ExternalOpenFocus(url: focusURL, line: focus?.line, column: focus?.column)
+            if !seenFiles.contains(focusURL) {
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: focusURL.path, isDirectory: &isDir),
+                   !isDir.boolValue,
+                   seenFiles.insert(focusURL).inserted {
+                    fileURLs.append(focusURL)
+                }
+            }
+        }
+
+        guard !fileURLs.isEmpty || !directoryURLs.isEmpty else { return }
+
+        if let root = preferredWorkspaceRoot(fileURLs: fileURLs, directoryURLs: directoryURLs),
+           root != rootDirectory {
+            if rootDirectory != nil {
+                let shouldSwitch = await confirmCloseForWorkspaceSwitch()
+                guard shouldSwitch else { return }
+            }
+            openDirectory(root, restoreSession: true)
+        }
+
+        if fileURLs.isEmpty {
+            if let dir = directoryURLs.first, rootDirectory == nil {
+                openDirectory(dir, restoreSession: true)
+            }
+            return
+        }
+
+        if let resolvedFocus {
+            fileURLs.removeAll { $0 == resolvedFocus.url }
+        }
+
+        for url in fileURLs {
+            selectFile(url)
+        }
+
+        if let resolvedFocus {
+            if let line = resolvedFocus.line {
+                openFileAtLocation(resolvedFocus.url, line: line, column: resolvedFocus.column ?? 1)
+            } else {
+                selectFile(resolvedFocus.url)
+            }
+        }
+    }
+
+    private func preferredWorkspaceRoot(fileURLs: [URL], directoryURLs: [URL]) -> URL? {
+        let normalizedFiles = fileURLs.map { $0.standardizedFileURL }
+        let normalizedDirectories = directoryURLs.map { $0.standardizedFileURL }
+
+        if let root = rootDirectory?.standardizedFileURL,
+           itemsAreWithinRoot(root, fileURLs: normalizedFiles, directoryURLs: normalizedDirectories) {
+            return root
+        }
+
+        if normalizedDirectories.count == 1 {
+            let dir = normalizedDirectories[0]
+            if itemsAreWithinRoot(dir, fileURLs: normalizedFiles, directoryURLs: []) {
+                return dir
+            }
+        }
+
+        var candidates: [URL] = normalizedDirectories
+        candidates.append(contentsOf: normalizedFiles.map { $0.deletingLastPathComponent() })
+        guard !candidates.isEmpty else { return nil }
+        return commonAncestorDirectory(for: candidates)
+    }
+
+    private func itemsAreWithinRoot(_ root: URL, fileURLs: [URL], directoryURLs: [URL]) -> Bool {
+        for url in fileURLs where !isURL(url, within: root) {
+            return false
+        }
+        for url in directoryURLs where !isURL(url, within: root) {
+            return false
+        }
+        return true
+    }
+
+    private func isURL(_ url: URL, within root: URL) -> Bool {
+        let rootPath = root.standardizedFileURL.path
+        let path = url.standardizedFileURL.path
+        let prefix = rootPath.hasSuffix("/") ? rootPath : "\(rootPath)/"
+        return path == rootPath || path.hasPrefix(prefix)
+    }
+
+    private func commonAncestorDirectory(for urls: [URL]) -> URL? {
+        guard var commonComponents = urls.first?.standardizedFileURL.pathComponents else { return nil }
+        for url in urls.dropFirst() {
+            let components = url.standardizedFileURL.pathComponents
+            while !components.starts(with: commonComponents) {
+                commonComponents.removeLast()
+                if commonComponents.isEmpty {
+                    return nil
+                }
+            }
+        }
+        return URL(fileURLWithPath: NSString.path(withComponents: commonComponents))
+    }
+
+    func requestOpenDirectory(_ url: URL, restoreSession: Bool = false) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let rootDirectory,
+               rootDirectory.standardizedFileURL == url.standardizedFileURL {
+                return
+            }
+            if rootDirectory != nil {
+                let shouldClose = await confirmCloseForWorkspaceSwitch()
+                guard shouldClose else { return }
+            }
+            openDirectory(url, restoreSession: restoreSession)
         }
     }
 
@@ -938,6 +1264,10 @@ class WorkspaceState: ObservableObject {
         await confirmCloseIfNeeded(context: .application)
     }
 
+    func confirmCloseForWorkspaceSwitch() async -> Bool {
+        await confirmCloseIfNeeded(context: .workspace)
+    }
+
     func setCloseGuardsBypassed(_ value: Bool) {
         closeGuardsBypassed = value
     }
@@ -1031,6 +1361,11 @@ class WorkspaceState: ObservableObject {
             alert.messageText = "You have unsaved changes in \(count) \(fileWord)."
             alert.informativeText = buildCloseInfo(listText: listText, actionText: "Quitting will discard these changes.")
             alert.addButton(withTitle: "Quit")
+        case .workspace:
+            let fileWord = count == 1 ? "file" : "files"
+            alert.messageText = "You have unsaved changes in \(count) \(fileWord)."
+            alert.informativeText = buildCloseInfo(listText: listText, actionText: "Opening another folder will discard these changes.")
+            alert.addButton(withTitle: "Open Folder")
         }
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
@@ -1050,6 +1385,9 @@ class WorkspaceState: ObservableObject {
         case .application:
             alert.informativeText = "Quit anyway?"
             alert.addButton(withTitle: "Quit")
+        case .workspace:
+            alert.informativeText = "Open the folder anyway?"
+            alert.addButton(withTitle: "Open Folder")
         }
         alert.addButton(withTitle: "Cancel")
         return alert.runModal() == .alertFirstButtonReturn
@@ -1854,6 +2192,7 @@ class WorkspaceState: ObservableObject {
         if force {
             clearNvimFailure()
         }
+        maybeHideWindowForNvimStart()
 
         let logURL = makeNvimLogFileURL()
         nvimLogFileURL = logURL
@@ -1899,6 +2238,8 @@ class WorkspaceState: ObservableObject {
     private func stopNvim() {
         nvimStartTask?.cancel()
         nvimStartTask = nil
+        nvimSettingsSyncTask?.cancel()
+        nvimSettingsSyncTask = nil
         nvimTerminalView?.onClose = nil
         nvimController?.stop()
         nvimController = nil
@@ -1923,6 +2264,7 @@ class WorkspaceState: ObservableObject {
 
     func handleNvimReady() {
         showWindowAfterNvimReady()
+        scheduleNvimSettingsSync()
     }
 
     func makeOpenFileURL(path: String, line: Int?, column: Int?) -> URL? {
@@ -1948,17 +2290,7 @@ class WorkspaceState: ObservableObject {
         guard let resolved = resolveFileURL(path: pathValue) else { return false }
         let line = components.queryItems?.first(where: { $0.name == "line" })?.value.flatMap(Int.init)
         let column = components.queryItems?.first(where: { $0.name == "column" })?.value.flatMap(Int.init)
-        if isNvimModeEnabled {
-            if selectedFileURL != resolved {
-                suppressSelectionSync = true
-            }
-            openFileInNvim(resolved, line: line, column: column)
-        } else {
-            selectFile(resolved)
-            if let line {
-                pendingSelection = EditorSelection(url: resolved, line: line, column: column ?? 1, length: 0)
-            }
-        }
+        handleExternalOpen(url: resolved, line: line, column: column)
         return true
     }
 
@@ -2260,7 +2592,7 @@ class WorkspaceState: ObservableObject {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            openDirectory(url)
+            requestOpenDirectory(url)
         }
     }
 
@@ -2556,6 +2888,35 @@ class WorkspaceState: ObservableObject {
         return url.lastPathComponent
     }
 
+    private func persistWindowFrameForCurrentWorkspace() {
+        guard let window = activeWindow() else { return }
+        WindowFrameStore.saveFrame(window.frame, for: rootDirectory)
+    }
+
+    func applyWindowFrameForCurrentWorkspace() {
+        guard let window = activeWindow() else { return }
+        guard let savedFrame = WindowFrameStore.loadFrame(for: rootDirectory) else { return }
+        window.setFrame(WindowFrameStore.adjustedFrame(savedFrame), display: true)
+    }
+
+    func applyWindowAppearance() {
+        guard let window = activeWindow() else { return }
+        if isWindowTransparencyEnabled {
+            let clamped = Self.clampWindowOpacity(windowOpacity)
+            if window.alphaValue != clamped {
+                window.alphaValue = clamped
+            }
+            window.isOpaque = false
+            window.backgroundColor = .clear
+        } else {
+            if window.alphaValue != 1.0 {
+                window.alphaValue = 1.0
+            }
+            window.isOpaque = true
+            window.backgroundColor = theme.background
+        }
+    }
+
     private func updateWindowTitle() {
         guard let window = activeWindow() else { return }
         let context = buildWindowTitleContext()
@@ -2565,6 +2926,7 @@ class WorkspaceState: ObservableObject {
         }
         if window.representedURL != context.representedURL {
             window.representedURL = context.representedURL
+            window.representedFilename = context.representedURL?.path ?? ""
         }
         if window.isDocumentEdited != context.isEdited {
             window.isDocumentEdited = context.isEdited
