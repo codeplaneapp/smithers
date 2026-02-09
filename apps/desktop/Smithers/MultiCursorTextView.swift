@@ -380,10 +380,12 @@ final class MultiCursorTextView: STTextView {
     }
 
     private func wordRangeForPrimarySelection() -> NSRange? {
-        guard let primarySelection = textLayoutManager.textSelections.last,
-              let wordSelection = textLayoutManager.textSelectionNavigation.textSelection(for: .word, enclosing: primarySelection),
-              let textRange = wordSelection.textRanges.first
-        else { return nil }
+        guard let primarySelection = textLayoutManager.textSelections.last else { return nil }
+        let wordSelection = textLayoutManager.textSelectionNavigation.textSelection(
+            for: .word,
+            enclosing: primarySelection
+        )
+        guard let textRange = wordSelection.textRanges.first else { return nil }
         return NSRange(textRange, in: textContentManager)
     }
 
@@ -517,7 +519,10 @@ final class MultiCursorTextView: STTextView {
         }
 
         groupedUndoIfNeeded {
-            for (textRange, payload) in replacements.sorted(by: { $0.0.location > $1.0.location }) {
+            let sorted = replacements.sorted { lhs, rhs in
+                textLayoutManager.compare(lhs.0.location, to: rhs.0.location) == .orderedDescending
+            }
+            for (textRange, payload) in sorted {
                 replaceCharacters(in: textRange, with: payload)
             }
         }
