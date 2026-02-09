@@ -353,8 +353,8 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
     }
 
     private func optionSideFlags(from flags: NSEvent.ModifierFlags) -> (left: Bool, right: Bool) {
-        let left = flags.contains(.leftOption)
-        let right = flags.contains(.rightOption)
+        let left = flags.contains(.leftOptionCompat)
+        let right = flags.contains(.rightOptionCompat)
         return (left: left, right: right)
     }
 
@@ -666,6 +666,12 @@ final class GhosttyTerminalView: NSView, ObservableObject, NSTextInputClient {
             return .arrow
         }
     }
+}
+
+private extension NSEvent.ModifierFlags {
+    // Raw values match the left/right option modifier bits on macOS.
+    static let leftOptionCompat = NSEvent.ModifierFlags(rawValue: 0x080020)
+    static let rightOptionCompat = NSEvent.ModifierFlags(rawValue: 0x080040)
 }
 
 private extension Optional where Wrapped == String {
