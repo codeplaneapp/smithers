@@ -251,7 +251,8 @@ final class SkillInstaller {
             return source
         }
         if source.contains("/") {
-            return "https://github.com/\(source).git"
+            let normalized = source.hasSuffix(".git") ? source : "\(source).git"
+            return "https://github.com/\(normalized)"
         }
         return source
     }
