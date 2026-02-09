@@ -52,7 +52,6 @@ final class EditorCursorView: NSView {
         layer?.anchorPoint = CGPoint(x: 0.5, y: 0.5)
         layer?.cornerRadius = 0
         layer?.masksToBounds = true
-        isOpaque = false
         updateColors()
         updateBlinking()
     }
