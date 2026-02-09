@@ -104,13 +104,10 @@ final class TreeSitterHighlighter {
         static let diagnostic = NSColor.systemRed
     }
 
-    private static let baseFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-    private static let keywordFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .medium)
-    private static let titleFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .bold)
-    private static let baseAttributes: [NSAttributedString.Key: Any] = [
-        .foregroundColor: Palette.baseForeground,
-        .font: baseFont,
-    ]
+    private let baseFont: NSFont
+    private let keywordFont: NSFont
+    private let titleFont: NSFont
+    private let baseAttributes: [NSAttributedString.Key: Any]
 
     private let parser = Parser()
     private let lang: SupportedLanguage
@@ -122,8 +119,15 @@ final class TreeSitterHighlighter {
     private static let maxHighlightCharacters = 200_000
     private static let maxInlineHighlightCharacters = 80_000
 
-    init(language: SupportedLanguage) {
+    init(language: SupportedLanguage, font: NSFont) {
         self.lang = language
+        self.baseFont = font
+        self.keywordFont = Self.fontWithWeight(font, weight: .medium)
+        self.titleFont = Self.fontWithWeight(font, weight: .bold)
+        self.baseAttributes = [
+            .foregroundColor: Palette.baseForeground,
+            .font: font,
+        ]
         try? parser.setLanguage(language.language)
 
         let config: LanguageConfiguration?
@@ -205,8 +209,8 @@ final class TreeSitterHighlighter {
         guard let storage = (textView.textContentManager as? NSTextContentStorage)?.textStorage else { return }
 
         storage.beginEditing()
-        storage.addAttributes(Self.baseAttributes, range: fullRange)
-        textView.typingAttributes = Self.baseAttributes
+        storage.addAttributes(baseAttributes, range: fullRange)
+        textView.typingAttributes = baseAttributes
 
         for highlight in highlights {
             let nsRange = highlight.range
@@ -217,7 +221,7 @@ final class TreeSitterHighlighter {
             if let color = Self.colorForCapture(highlight.name) {
                 storage.addAttribute(.foregroundColor, value: color, range: nsRange)
             }
-            if let font = Self.fontForCapture(highlight.name) {
+            if let font = fontForCapture(highlight.name) {
                 storage.addAttribute(.font, value: font, range: nsRange)
             }
         }
@@ -352,14 +356,24 @@ final class TreeSitterHighlighter {
         }
     }
 
-    private static func fontForCapture(_ name: String) -> NSFont? {
+    private func fontForCapture(_ name: String) -> NSFont? {
         let base = name.components(separatedBy: ".").first ?? name
         if base == "keyword" {
-            return Self.keywordFont
+            return keywordFont
         }
         if name.contains("title") || name.contains("strong") {
-            return Self.titleFont
+            return titleFont
         }
         return nil
+    }
+
+    private static func fontWithWeight(_ base: NSFont, weight: NSFont.Weight) -> NSFont {
+        let traits: [NSFontDescriptor.TraitKey: Any] = [
+            .weight: weight.rawValue,
+        ]
+        let descriptor = base.fontDescriptor.addingAttributes([
+            .traits: traits,
+        ])
+        return NSFont(descriptor: descriptor, size: base.pointSize) ?? base
     }
 }
