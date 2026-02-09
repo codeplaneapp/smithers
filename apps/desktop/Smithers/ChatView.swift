@@ -410,112 +410,12 @@ struct ChatView: View {
     var body: some View {
         let theme = workspace.theme
         VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(workspace.chatMessages) { message in
-                            ChatBubble(
-                                message: message,
-                                workspace: workspace,
-                                onSelectImage: { selectedImage = $0 }
-                            )
-                                .id(message.id)
-                                .transition(.asymmetric(
-                                    insertion: .move(edge: message.role == .user ? .trailing : .leading)
-                                        .combined(with: .opacity),
-                                    removal: .opacity
-                                ))
-                        }
-                        if workspace.isTurnInProgress {
-                            ThinkingRow()
-                        }
-                    }
-                    .animation(.spring(duration: 0.3, bounce: 0.1), value: workspace.chatMessages.count)
-                    .padding(16)
-                }
-                .background(theme.backgroundColor)
-                .onChange(of: workspace.chatMessages) { _, messages in
-                    guard let last = messages.last else { return }
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
-                }
-            }
+            chatMessagesSection(theme: theme)
 
             Divider()
                 .background(theme.dividerColor)
 
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 6) {
-                    TextField("Message...", text: $workspace.chatDraft, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .lineLimit(1...4)
-                        .focused($inputFocused)
-                        .onSubmit {
-                            workspace.sendChatMessage()
-                        }
-                        .onPasteCommand { _ in
-                            workspace.handleChatImagePaste()
-                        }
-
-                    if !workspace.chatDraftImages.isEmpty {
-                        ChatImageStrip(
-                            images: workspace.chatDraftImages,
-                            maxHeight: 72,
-                            theme: theme,
-                            showsBorder: true,
-                            onSelect: { selectedImage = $0 }
-                        )
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(theme.inputFieldBackgroundColor)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(isDropTargeted ? theme.accentColor : Color.clear, lineWidth: 1)
-                )
-                .onDrop(
-                    of: [UTType.image.identifier, UTType.fileURL.identifier],
-                    isTargeted: $isDropTargeted
-                ) { providers in
-                    workspace.handleChatImageDrop(providers: providers)
-                }
-
-                if workspace.isTurnInProgress {
-                    Button("Interrupt") {
-                        workspace.interruptTurn()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-
-                if workspace.sessionDiffSnapshot != nil {
-                    Button("Session Diff") {
-                        workspace.presentSessionDiff()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-
-                Button("New Chat") {
-                    workspace.startNewChat()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(workspace.isTurnInProgress)
-
-                Button("Send") {
-                    workspace.sendChatMessage()
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-            }
-            .padding(12)
-            .background(theme.secondaryBackgroundColor)
+            chatInputSection(theme: theme)
         }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -556,6 +456,125 @@ struct ChatView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func chatMessagesSection(theme: AppTheme) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    ForEach(workspace.chatMessages) { message in
+                        ChatBubble(
+                            message: message,
+                            workspace: workspace,
+                            onSelectImage: { selectedImage = $0 }
+                        )
+                            .id(message.id)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: message.role == .user ? .trailing : .leading)
+                                    .combined(with: .opacity),
+                                removal: .opacity
+                            ))
+                    }
+                    if workspace.isTurnInProgress {
+                        ThinkingRow()
+                    }
+                }
+                .animation(.spring(duration: 0.3, bounce: 0.1), value: workspace.chatMessages.count)
+                .padding(16)
+            }
+            .background(theme.backgroundColor)
+            .onChange(of: workspace.chatMessages) { _, messages in
+                guard let last = messages.last else { return }
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func chatInputSection(theme: AppTheme) -> some View {
+        HStack(spacing: 8) {
+            chatInputField(theme: theme)
+            chatActionButtons
+        }
+        .padding(12)
+        .background(theme.secondaryBackgroundColor)
+    }
+
+    @ViewBuilder
+    private func chatInputField(theme: AppTheme) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Message...", text: $workspace.chatDraft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .lineLimit(1...4)
+                .focused($inputFocused)
+                .onSubmit {
+                    workspace.sendChatMessage()
+                }
+                .onPasteCommand(of: [UTType.image]) { _ in
+                    workspace.handleChatImagePaste()
+                }
+
+            if !workspace.chatDraftImages.isEmpty {
+                ChatImageStrip(
+                    images: workspace.chatDraftImages,
+                    maxHeight: 72,
+                    theme: theme,
+                    showsBorder: true,
+                    onSelect: { selectedImage = $0 }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(theme.inputFieldBackgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isDropTargeted ? theme.accentColor : Color.clear, lineWidth: 1)
+        )
+        .onDrop(
+            of: [UTType.image.identifier, UTType.fileURL.identifier],
+            isTargeted: $isDropTargeted
+        ) { providers in
+            workspace.handleChatImageDrop(providers: providers)
+        }
+    }
+
+    @ViewBuilder
+    private var chatActionButtons: some View {
+        if workspace.isTurnInProgress {
+            Button("Interrupt") {
+                workspace.interruptTurn()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+
+        if workspace.sessionDiffSnapshot != nil {
+            Button("Session Diff") {
+                workspace.presentSessionDiff()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+
+        Button("New Chat") {
+            workspace.startNewChat()
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .disabled(workspace.isTurnInProgress)
+
+        Button("Send") {
+            workspace.sendChatMessage()
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
     }
 }
 
