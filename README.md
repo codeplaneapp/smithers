@@ -69,7 +69,7 @@ const fixSchema = z.object({
 
 ```ts
 import { createSmithers, Task, Sequence } from "smithers-orchestrator";
-import { agent } from "ai";
+import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 
 const { Workflow, useCtx, smithers } = createSmithers({
@@ -83,14 +83,14 @@ const { Workflow, useCtx, smithers } = createSmithers({
 ### 3. Define your agents
 
 ```ts
-const analyzer = agent({
+const analyzer = new Agent({
   model: anthropic("claude-sonnet-4-20250514"),
-  system: "You are a code analyst. Return structured JSON.",
+  instructions: "You are a code analyst. Return structured JSON.",
 });
 
-const fixer = agent({
+const fixer = new Agent({
   model: anthropic("claude-sonnet-4-20250514"),
-  system: "You are a senior engineer who writes minimal, correct fixes.",
+  instructions: "You are a senior engineer who writes minimal, correct fixes.",
 });
 ```
 
@@ -280,10 +280,10 @@ function MyComponent() {
 ```tsx
 import { read, edit, bash, grep, write } from "smithers-orchestrator/tools";
 
-const codeAgent = agent({
+const codeAgent = new Agent({
   model: anthropic("claude-sonnet-4-20250514"),
   tools: { read, edit, bash, grep, write },
-  system: "You are a senior software engineer.",
+  instructions: "You are a senior software engineer.",
 });
 ```
 
