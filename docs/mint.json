@@ -1,6 +1,7 @@
 {
   "name": "Smithers",
-  "theme": "mint",
+  "theme": "quill",
+  "favicon": "/favicon.svg",
   "colors": {
     "primary": "#1F6FEB"
   },
