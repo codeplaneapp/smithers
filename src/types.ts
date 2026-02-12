@@ -58,7 +58,6 @@ export type AgentLike = {
   stream?: (...args: any[]) => any;
 };
 
-
 export type GraphSnapshot = {
   runId: string;
   frameNo: number;
