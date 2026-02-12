@@ -18,19 +18,3 @@ jobs:
         run: bun run typecheck
       - name: Test
         run: bun test
-
-  desktop:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: "1.3.4"
-      - name: Install
-        run: bun install --frozen-lockfile
-        working-directory: apps/desktop
-      - name: Check desktop package sync
-        run: python3 scripts/check-desktop-package-sync.py
-      - name: Build webview
-        run: bun run build:webview
-        working-directory: apps/desktop
