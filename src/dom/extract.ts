@@ -156,7 +156,7 @@ export function extractFromHost(
         "merge-queue",
         node.rawProps,
         ctx.path,
-        parallelStack,
+        nextParallelStack,
       );
     }
     // Entering a Worktree node: push onto the worktree stack
