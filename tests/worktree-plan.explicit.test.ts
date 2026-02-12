@@ -4,7 +4,7 @@ import { buildPlanTree } from "../src/engine/scheduler";
 import { el } from "./helpers";
 
 describe("scheduler: explicit worktree + merge-queue plan shape", () => {
-  test("worktree is group; merge-queue is parallel(default=1)", () => {
+  test("worktree is group; merge-queue is parallel (concurrency enforced via descriptors)", () => {
     const xml: XmlElement = el("smithers:workflow", {}, [
       el("smithers:worktree", { id: "wt", path: "/tmp/wt" }, [
         el("smithers:task", { id: "a" }, []),
@@ -27,7 +27,6 @@ describe("scheduler: explicit worktree + merge-queue plan shape", () => {
 
     const par = seq.children[1];
     expect(par.kind).toBe("parallel");
-    expect(par.maxConcurrency).toBe(1);
     expect(par.children.map((c: any) => c.nodeId)).toEqual(["m1", "m2"]);
   });
 });

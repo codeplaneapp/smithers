@@ -390,43 +390,34 @@ async function computeTaskStates(
   return stateMap;
 }
 
-function applyConcurrencyLimits(
+/**
+ * Apply only the global maxConcurrency cap.
+ *
+ * Per-group caps (Parallel/MergeQueue) are enforced upstream by the scheduler
+ * when selecting runnable tasks. Keeping group logic in a single place avoids
+ * double-enforcement and admission drift.
+ */
+export function applyConcurrencyLimits(
   runnable: TaskDescriptor[],
   stateMap: TaskStateMap,
   maxConcurrency: number,
   allTasks: TaskDescriptor[],
 ): TaskDescriptor[] {
   const selected: TaskDescriptor[] = [];
-  const inProgressByGroup = new Map<string, number>();
   let inProgressTotal = 0;
 
   for (const desc of allTasks) {
     const state = stateMap.get(buildStateKey(desc.nodeId, desc.iteration));
     if (state === "in-progress") {
       inProgressTotal += 1;
-      if (desc.parallelGroupId) {
-        inProgressByGroup.set(
-          desc.parallelGroupId,
-          (inProgressByGroup.get(desc.parallelGroupId) ?? 0) + 1,
-        );
-      }
     }
   }
 
   const capacity = Math.max(0, maxConcurrency - inProgressTotal);
-
   for (const desc of runnable) {
     if (selected.length >= capacity) break;
-    if (desc.parallelGroupId && desc.parallelMaxConcurrency) {
-      const used = inProgressByGroup.get(desc.parallelGroupId) ?? 0;
-      if (used >= desc.parallelMaxConcurrency) {
-        continue;
-      }
-      inProgressByGroup.set(desc.parallelGroupId, used + 1);
-    }
     selected.push(desc);
   }
-
   return selected;
 }
 

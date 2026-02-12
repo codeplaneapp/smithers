@@ -31,8 +31,10 @@ export type TaskDescriptor = {
 
   /**
    * When task is nested under a <Parallel> or <MergeQueue> group,
-   * this captures the stable group id and the group-level max concurrency
-   * limit that the scheduler should respect across all tasks in the group.
+   * this captures the stable group id and the group-level max concurrency.
+   * The scheduler enforces this cap when selecting runnable tasks so that
+   * at most `parallelMaxConcurrency` tasks sharing the same group run
+   * concurrently across the workflow.
    */
   parallelGroupId?: string;
   parallelMaxConcurrency?: number;

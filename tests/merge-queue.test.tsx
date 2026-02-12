@@ -17,6 +17,25 @@ function buildDb() {
 }
 
 describe("<MergeQueue>", () => {
+  test("explicit id propagates to child task descriptors", async () => {
+    const renderer = new SmithersRenderer();
+    const res = await renderer.render(
+      <Workflow name="mq-id">
+        <MergeQueue id="my-queue">
+          <Task id="a" output={outputC}>
+            {{ value: 1 }}
+          </Task>
+          <Task id="b" output={outputC}>
+            {{ value: 2 }}
+          </Task>
+        </MergeQueue>
+      </Workflow>,
+    );
+    expect(res.tasks.length).toBe(2);
+    expect(res.tasks[0]!.parallelGroupId).toBe("my-queue");
+    expect(res.tasks[1]!.parallelGroupId).toBe("my-queue");
+  });
+
   test("extract sets parallel group with default concurrency 1", async () => {
     const renderer = new SmithersRenderer();
     const res = await renderer.render(

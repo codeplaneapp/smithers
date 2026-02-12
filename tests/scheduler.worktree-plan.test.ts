@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { XmlElement } from "../src/types";
-import { buildPlanTree, scheduleTasks } from "../src/engine/scheduler";
+import { buildPlanTree, scheduleTasks, buildStateKey as key } from "../src/engine/scheduler";
 import { el } from "./helpers";
 
 // Shared minimal descriptor factory for scheduleTasks
@@ -85,7 +85,6 @@ describe("scheduler: buildPlanTree — <Worktree>", () => {
     expect(plan && plan.kind).toBe("sequence");
     const par = (plan as any).children[0];
     expect(par.kind).toBe("parallel");
-    expect(par.maxConcurrency).toBe(2);
 
     const desc = new Map<string, any>([
       ["wa", mk("wa")],
@@ -128,5 +127,67 @@ describe("scheduler: buildPlanTree — <Worktree>", () => {
     const leaf = inner.children[0];
     expect(leaf.kind).toBe("task");
     expect(leaf.nodeId).toBe("t");
+  });
+});
+
+describe("scheduler: per-group concurrency caps in scheduleTasks()", () => {
+  function mkWithCap(id: string, gid?: string, cap?: number) {
+    return {
+      nodeId: id,
+      ordinal: 0,
+      iteration: 0,
+      outputTable: null,
+      outputTableName: "t",
+      needsApproval: false,
+      skipIf: false,
+      retries: 0,
+      timeoutMs: null,
+      continueOnFail: false,
+      parallelGroupId: gid,
+      parallelMaxConcurrency: cap,
+    } as any;
+  }
+
+  // state-key helper imported at top
+
+  test("cap=2 with one in-progress allows one additional", () => {
+    const xml = el("smithers:workflow", {}, [
+      el("smithers:merge-queue", { id: "g" }, [
+        el("smithers:task", { id: "a" }, []),
+        el("smithers:task", { id: "b" }, []),
+        el("smithers:task", { id: "c" }, []),
+      ]),
+    ]) as any;
+    const { plan } = buildPlanTree(xml);
+    const desc = new Map<string, any>([
+      ["a", mkWithCap("a", "g", 2)],
+      ["b", mkWithCap("b", "g", 2)],
+      ["c", mkWithCap("c", "g", 2)],
+    ]);
+    const states = new Map<string, any>([[key("a"), "in-progress"]]);
+    const ralph = new Map<string, any>();
+    const s = scheduleTasks(plan!, states as any, desc as any, ralph as any);
+    // Only one of b/c should be runnable due to remaining group capacity = 1
+    expect(s.runnable.length).toBe(1);
+    expect(s.runnable[0]!.nodeId).toBe("b");
+  });
+
+  test("cap=1 admits at most one pending from the group", () => {
+    const xml = el("smithers:workflow", {}, [
+      el("smithers:merge-queue", { id: "q" }, [
+        el("smithers:task", { id: "m1" }, []),
+        el("smithers:task", { id: "m2" }, []),
+      ]),
+    ]) as any;
+    const { plan } = buildPlanTree(xml);
+    const desc = new Map<string, any>([
+      ["m1", mkWithCap("m1", "q", 1)],
+      ["m2", mkWithCap("m2", "q", 1)],
+    ]);
+    const states = new Map<string, any>();
+    const ralph = new Map<string, any>();
+    const s = scheduleTasks(plan!, states as any, desc as any, ralph as any);
+    expect(s.runnable.length).toBe(1);
+    expect(s.runnable[0]!.nodeId).toBe("m1");
   });
 });

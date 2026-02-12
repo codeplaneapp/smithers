@@ -4,8 +4,6 @@ import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import type { XmlElement } from "../src/types";
-
-
 export function createTestDb<Schema>(schema: Schema, ddl: string) {
   const dir = mkdtempSync(join(tmpdir(), "smithers-"));
   const path = join(dir, "db.sqlite");
@@ -31,5 +29,4 @@ export function el(
   children: any[] = [],
 ): XmlElement {
   return { kind: "element", tag, props, children } as XmlElement;
-
 }

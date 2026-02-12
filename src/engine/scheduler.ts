@@ -6,7 +6,7 @@ import { DEFAULT_MERGE_QUEUE_CONCURRENCY } from "../constants";
 export type PlanNode =
   | { kind: "task"; nodeId: string }
   | { kind: "sequence"; children: PlanNode[] }
-  | { kind: "parallel"; children: PlanNode[]; maxConcurrency?: number }
+  | { kind: "parallel"; children: PlanNode[] }
   | {
       kind: "ralph";
       id: string;
@@ -94,19 +94,13 @@ export function buildPlanTree(xml: XmlNode | null): {
       return { kind: "sequence", children };
     }
     if (tag === "smithers:parallel") {
-      const max = parseNum(node.props.maxConcurrency, NaN);
-      return {
-        kind: "parallel",
-        children,
-        maxConcurrency: Number.isFinite(max) ? max : undefined,
-      };
+      // Structural grouping only; concurrency enforced via descriptor group ids.
+      return { kind: "parallel", children };
     }
     if (tag === "smithers:merge-queue") {
-      const maxRaw = parseNum(node.props.maxConcurrency, NaN);
-      const max = Number.isFinite(maxRaw)
-        ? maxRaw
-        : DEFAULT_MERGE_QUEUE_CONCURRENCY;
-      return { kind: "parallel", children, maxConcurrency: max };
+      // Treat as a parallel structural group; per-group concurrency defaults
+      // to 1 and is enforced via extracted task descriptors.
+      return { kind: "parallel", children };
     }
     // Worktree has no special scheduling semantics in the plan tree.
     // Recognize explicitly to preserve subtree boundaries and ordering.
@@ -159,6 +153,24 @@ export function scheduleTasks(
   let waitingApprovalExists = false;
   const readyRalphs: RalphMeta[] = [];
 
+  // Track current usage per parallel/merge-queue group based on in-progress tasks.
+  // This allows the scheduler to admit at most `parallelMaxConcurrency` new
+  // tasks per group when selecting runnables in this cycle.
+  const groupUsage = new Map<string, number>();
+  for (const [stateKey, state] of states) {
+    if (state !== "in-progress") continue;
+    // Keys are built via `${nodeId}::${iteration}`; recover nodeId cheaply.
+    const sep = stateKey.lastIndexOf("::");
+    const nodeId = sep >= 0 ? stateKey.slice(0, sep) : stateKey;
+    const desc = descriptors.get(nodeId);
+    if (!desc) continue;
+    const gid = desc.parallelGroupId;
+    const cap = desc.parallelMaxConcurrency;
+    if (gid && cap != null) {
+      groupUsage.set(gid, (groupUsage.get(gid) ?? 0) + 1);
+    }
+  }
+
   function walk(node: PlanNode): { terminal: boolean } {
     switch (node.kind) {
       case "task": {
@@ -169,6 +181,16 @@ export function scheduleTasks(
         if (state === "pending" || state === "cancelled") pendingExists = true;
         const terminal = isTerminal(state, desc);
         if (!terminal && (state === "pending" || state === "cancelled")) {
+          const gid = desc.parallelGroupId;
+          const cap = desc.parallelMaxConcurrency;
+          if (gid && cap != null) {
+            const used = groupUsage.get(gid) ?? 0;
+            if (used >= cap) {
+              // Group is at capacity — skip admitting this task now.
+              return { terminal };
+            }
+            groupUsage.set(gid, used + 1);
+          }
           runnable.push(desc);
         }
         return { terminal };
@@ -225,7 +247,6 @@ export function scheduleTasks(
   if (plan) {
     walk(plan);
   }
-
 
   return { runnable, pendingExists, waitingApprovalExists, readyRalphs };
 }
