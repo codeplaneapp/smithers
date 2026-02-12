@@ -81,7 +81,12 @@ export function Sequence(props: SequenceProps) {
 
 export function Parallel(props: ParallelProps) {
   if (props.skipIf) return null;
-  return React.createElement("smithers:parallel", props, props.children);
+  // Align prop sanitization with other structural components
+  const next: { maxConcurrency?: number; id?: string } = {
+    maxConcurrency: props.maxConcurrency,
+    id: (props as any).id,
+  };
+  return React.createElement("smithers:parallel", next, props.children);
 }
 
 export function MergeQueue(props: MergeQueueProps) {
@@ -105,10 +110,10 @@ export function Ralph(props: RalphProps) {
 }
 
 export function Worktree(props: WorktreeProps) {
-  if (!props.path || !String(props.path).trim()) {
+  if (typeof props.path !== "string" || props.path.trim() === "") {
     throw new Error(WORKTREE_EMPTY_PATH_ERROR);
   }
   if (props.skipIf) return null;
-  const next: any = Object.fromEntries([["id", props.id], ["path", props.path]] as any);
+  const next: { id?: string; path: string } = { id: props.id, path: props.path };
   return React.createElement("smithers:worktree", next, props.children);
 }
