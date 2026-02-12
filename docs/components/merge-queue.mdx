@@ -1,9 +1,22 @@
-# <MergeQueue>
+---
+title: <MergeQueue>
+description: Queue tasks so at most maxConcurrency run; defaults to 1.
+---
 
-Queue tasks so that at most `maxConcurrency` run concurrently across the group.
+## Import
 
-- Default: omitting `maxConcurrency` creates a single-lane FIFO-style queue (`maxConcurrency = 1`).
-- Behavior: implemented via the same parallel-concurrency mechanism as `<Parallel>`, with the queue acting as a scoped concurrency group.
+```tsx
+import { MergeQueue } from "smithers-orchestrator";
+```
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | auto-generated | Optional stable id for the queue group. |
+| `maxConcurrency` | `number` | `1` | Maximum number of child tasks within the queue that may run simultaneously. |
+| `skipIf` | `boolean` | `false` | Skip the entire queue subtree when true. |
+| `children` | `ReactNode` | — | Child tasks/control-flow nodes. |
 
 ## Examples
 
@@ -15,7 +28,6 @@ Queue tasks so that at most `maxConcurrency` run concurrently across the group.
   <Task id="test" output={outputC}>{{ value: 3 }}</Task>
 </MergeQueue>
 ```
-Only one of the above runs at a time.
 
 ### Custom concurrency
 ```tsx
@@ -25,7 +37,6 @@ Only one of the above runs at a time.
   ))}
 </MergeQueue>
 ```
-At most two tasks from the group run concurrently.
 
 ### Nesting with Parallel
 ```tsx
@@ -35,7 +46,20 @@ At most two tasks from the group run concurrently.
       <Task key={i} id={`q${i}`} output={outputC}>{{ value: i }}</Task>
     ))}
   </MergeQueue>
+  <Task id="other" output={outputC}>{{ value: 99 }}</Task>
 </Parallel>
 ```
+
 - The inner `<MergeQueue>` constrains its children to 1-at-a-time.
 - The outer `<Parallel>` may still run other, unrelated siblings (outside the queue) concurrently up to its limit.
+
+## Rendering
+
+Internally, `<MergeQueue>` renders as a `<smithers:merge-queue>` host element (or `null` when skipped). Each child task inside the queue receives `parallelGroupId` and `parallelMaxConcurrency` in its task descriptor. The scheduler enforces that no more than `parallelMaxConcurrency` tasks sharing the same `parallelGroupId` run at once.
+
+## Notes
+
+- Defaults to a single-lane queue (`maxConcurrency = 1`).
+- Designed as a convenient merge-queue primitive for sequentializing task application (e.g., applying patches one-at-a-time).
+- Nesting with `<Parallel>` is supported; the innermost group determines the effective cap for its descendants.
+- Tasks outside the queue are unaffected by the queue’s limit.
