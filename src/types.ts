@@ -29,6 +29,11 @@ export type TaskDescriptor = {
   outputTableName: string;
   outputSchema?: import("zod").ZodObject<any>; // Optional Zod schema for agent output
 
+  /**
+   * When task is nested under a <Parallel> or <MergeQueue> group,
+   * this captures the stable group id and the group-level max concurrency
+   * limit that the scheduler should respect across all tasks in the group.
+   */
   parallelGroupId?: string;
   parallelMaxConcurrency?: number;
 
@@ -49,9 +54,9 @@ export type TaskDescriptor = {
 /**
  * Minimal agent surface Smithers relies on at runtime.
  *
- * Tests use lightweight mocks that don't implement the full 
- * interface (e.g. missing  and ). Keep this structural
- * type narrow to avoid over-constraining users and tests.
+ * Tests use lightweight mocks that only implement `generate()` and may omit
+ * optional fields like `id` or `tools`. Keep this structural type narrow to
+ * avoid over‑constraining users and tests.
  */
 export type AgentLike = {
   id?: string;
