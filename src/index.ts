@@ -35,16 +35,16 @@ export {
 export { zodSchemaToJsonExample } from "./zod-to-example";
 export * from "./vcs/jj";
 
-type CreateSmithersApi = {
+type CreateSmithersApi<Schema = any> = {
   Workflow: (props: WorkflowProps) => React.ReactElement;
   Task: <Row>(props: TaskProps<Row>) => React.ReactElement;
-  useCtx: () => any;
+  useCtx: () => SmithersCtx<Schema>;
   smithers: (
-    build: (ctx: any) => React.ReactElement,
+    build: (ctx: SmithersCtx<Schema>) => React.ReactElement,
     opts?: SmithersWorkflowOptions,
-  ) => SmithersWorkflow<any>;
+  ) => SmithersWorkflow<Schema>;
   db: BunSQLiteDatabase<any>;
-  tables: Record<string, any>;
+  tables: { [K in keyof Schema]: any };
 };
 
 /**
@@ -69,17 +69,27 @@ export function smithers<Schema extends Record<string, unknown>>(
  *   research: researchOutputSchema,
  * });
  *
- * export default smithers(() => (
+ * export default smithers((ctx) => (
  *   <Workflow name="my-workflow">
  *     <Task id="discover" output="discover" agent={myAgent}>...</Task>
  *   </Workflow>
  * ));
  * ```
  */
+// Overload: Drizzle db-based API (backward compat)
+export function createSmithers<Schema extends Record<string, unknown>>(
+  db: BunSQLiteDatabase<Schema>,
+): CreateSmithersApi<Schema>;
+// Overload: Zod schema-driven API
+export function createSmithers<Schemas extends Record<string, z.ZodObject<any>>>(
+  schemas: Schemas,
+  opts?: { dbPath?: string; journalMode?: string },
+): CreateSmithersApi<Schemas>;
+// Implementation
 export function createSmithers(
   schemasOrDb: any,
   opts?: { dbPath?: string; journalMode?: string },
-): CreateSmithersApi {
+): CreateSmithersApi<any> {
   // Detect which overload: if it has $client or _.fullSchema, it's a Drizzle db
   const isDrizzleDb =
     schemasOrDb?.$client != null ||
@@ -87,13 +97,13 @@ export function createSmithers(
     typeof schemasOrDb?.select === "function";
 
   if (isDrizzleDb) {
-    return createSmithersFromDb(schemasOrDb) as unknown as CreateSmithersApi;
+    return createSmithersFromDb(schemasOrDb) as unknown as CreateSmithersApi<any>;
   }
 
   return createSmithersFromSchemas(
     schemasOrDb as Record<string, z.ZodObject<any>>,
     opts,
-  ) as CreateSmithersApi;
+  ) as CreateSmithersApi<any>;
 }
 
 /**

@@ -321,6 +321,6 @@ describe("docs examples (engine)", () => {
     });
 
     const latest = ctx.latest(outputA, "review");
-    expect(latest.value).toBe(3);
+    expect(latest!.value).toBe(3);
   });
 });

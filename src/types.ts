@@ -1,5 +1,6 @@
 import type { Table } from "drizzle-orm";
 import type React from "react";
+import type { z } from "zod";
 
 export type XmlNode = XmlElement | XmlText;
 
@@ -133,19 +134,41 @@ export interface SmithersCtx<Schema> {
   runId: string;
   iteration: number;
   iterations?: Record<string, number>;
-  input: Schema extends { input: infer T } ? T : never;
+  input: Schema extends { input: infer T } ? T : Record<string, unknown>;
   outputs: OutputAccessor<Schema>;
-  output<T extends keyof Schema>(
-    table: Schema[T],
-    key: OutputKey,
-  ): InferRow<Schema[T]>;
-  outputMaybe<T extends keyof Schema>(
-    table: Schema[T],
-    key: OutputKey,
-  ): InferRow<Schema[T]> | undefined;
 
-  /** Get the latest output row for a nodeId (highest iteration, not just current). */
-  latest(table: any, nodeId: string): any;
+  /** String-key overload (schema-driven API): infers return type from Zod schema. */
+  output<K extends keyof Schema & string>(
+    table: K,
+    key: OutputKey,
+  ): InferOutputEntry<Schema[K]>;
+  /** Drizzle table overload (db-based API): infers return type from Drizzle $inferSelect. */
+  output<TTable extends { $inferSelect: any }>(
+    table: TTable,
+    key: OutputKey,
+  ): InferRow<TTable>;
+
+  /** String-key overload (schema-driven API): infers return type from Zod schema. */
+  outputMaybe<K extends keyof Schema & string>(
+    table: K,
+    key: OutputKey,
+  ): InferOutputEntry<Schema[K]> | undefined;
+  /** Drizzle table overload (db-based API): infers return type from Drizzle $inferSelect. */
+  outputMaybe<TTable extends { $inferSelect: any }>(
+    table: TTable,
+    key: OutputKey,
+  ): InferRow<TTable> | undefined;
+
+  /** String-key overload: get the latest output row for a nodeId (highest iteration). */
+  latest<K extends keyof Schema & string>(
+    table: K,
+    nodeId: string,
+  ): InferOutputEntry<Schema[K]> | undefined;
+  /** Drizzle table overload: get the latest output row for a nodeId (highest iteration). */
+  latest<TTable extends { $inferSelect: any }>(
+    table: TTable,
+    nodeId: string,
+  ): InferRow<TTable> | undefined;
 
   /** Get latest output row, then safely parse/validate an array field using a Zod schema. Drops invalid items. */
   latestArray(value: unknown, schema: import("zod").ZodType): any[];
@@ -154,12 +177,26 @@ export interface SmithersCtx<Schema> {
   iterationCount(table: any, nodeId: string): number;
 }
 
-export type OutputAccessor<Schema> = ((table: any) => any[]) &
-  Record<string, any[]>;
+export type OutputAccessor<Schema> = {
+  <K extends keyof Schema & string>(table: K): Array<InferOutputEntry<Schema[K]>>;
+  <TTable extends { $inferSelect: any }>(table: TTable): Array<InferRow<TTable>>;
+} & {
+  [K in keyof Schema & string]: Array<InferOutputEntry<Schema[K]>>;
+};
 
 export type InferRow<TTable> = TTable extends { $inferSelect: infer R }
   ? R
   : never;
+
+/**
+ * Infer the output type from either a Zod schema or a Drizzle table.
+ * Used by the string-key overloads on SmithersCtx.
+ */
+export type InferOutputEntry<T> = T extends z.ZodTypeAny
+  ? z.infer<T>
+  : T extends { $inferSelect: any }
+    ? InferRow<T>
+    : never;
 
 export type SmithersEvent =
   | { type: "RunStarted"; runId: string; timestampMs: number }

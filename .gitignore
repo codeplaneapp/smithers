@@ -56,3 +56,6 @@ ghostty/
 
 # Worktree script SQLite artifacts
 scripts/worktree-feature/*.db*
+smithers.db
+smithers.db-shm
+smithers.db-wal

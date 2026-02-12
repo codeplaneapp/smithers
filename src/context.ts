@@ -69,11 +69,8 @@ export function buildContext<Schema>(opts: {
     iterations,
     input: normalizedInput,
     outputs: outputsFn,
-    output<T extends keyof Schema>(
-      table: Schema[T],
-      key: OutputKey,
-    ): InferRow<Schema[T]> {
-      const row = resolveRow<InferRow<Schema[T]>>(table as any, key);
+    output(table: any, key: OutputKey): any {
+      const row = resolveRow(table, key);
       if (!row) {
         throw new Error(
           `Missing output for nodeId=${key.nodeId} iteration=${key.iteration ?? 0}`,
@@ -81,11 +78,8 @@ export function buildContext<Schema>(opts: {
       }
       return row;
     },
-    outputMaybe<T extends keyof Schema>(
-      table: Schema[T],
-      key: OutputKey,
-    ): InferRow<Schema[T]> | undefined {
-      return resolveRow<InferRow<Schema[T]>>(table as any, key);
+    outputMaybe(table: any, key: OutputKey): any {
+      return resolveRow(table, key);
     },
     latest(table: any, nodeId: string): any {
       const name = typeof table === "string" ? table : getTableName(table);
