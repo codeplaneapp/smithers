@@ -13,4 +13,4 @@ export const { Workflow, Task, useCtx, smithers, tables } = createSmithers({
   review: ReviewOutput,
   reviewFix: ReviewFixOutput,
   report: ReportOutput,
-}, { dbPath: "./worktree-feature.db" });
+}, { dbPath: `${process.env.HOME}/.cache/smithers/worktree-feature.db`, journalMode: "DELETE" });
