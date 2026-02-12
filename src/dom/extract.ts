@@ -1,6 +1,7 @@
 import type { XmlNode, XmlElement, TaskDescriptor } from "../types";
 import { getTableName } from "drizzle-orm";
 import { resolveStableId } from "../utils/tree-ids";
+import { isAbsolute, resolve as resolvePath } from "node:path";
 
 export type HostNode = HostElement | HostText;
 
@@ -26,6 +27,8 @@ export type ExtractResult = {
 export type ExtractOptions = {
   ralphIterations?: Map<string, number> | Record<string, number>;
   defaultIteration?: number;
+  /** Base directory for resolving relative Worktree paths */
+  baseRootDir?: string;
 };
 
 function toXmlNode(node: HostNode): XmlNode {
@@ -41,9 +44,13 @@ function toXmlNode(node: HostNode): XmlNode {
   return element;
 }
 
-function getRalphIteration(opts: ExtractOptions | undefined, id: string): number {
+function getRalphIteration(
+  opts: ExtractOptions | undefined,
+  id: string,
+): number {
   const map = opts?.ralphIterations;
-  const fallback = typeof opts?.defaultIteration === "number" ? opts.defaultIteration : 0;
+  const fallback =
+    typeof opts?.defaultIteration === "number" ? opts.defaultIteration : 0;
   if (!map) return fallback;
   if (map instanceof Map) {
     return map.get(id) ?? fallback;
@@ -52,7 +59,10 @@ function getRalphIteration(opts: ExtractOptions | undefined, id: string): number
   return typeof value === "number" ? value : fallback;
 }
 
-export function extractFromHost(root: HostNode | null, opts?: ExtractOptions): ExtractResult {
+export function extractFromHost(
+  root: HostNode | null,
+  opts?: ExtractOptions,
+): ExtractResult {
   if (!root) {
     return { xml: null, tasks: [], mountedTaskIds: [] };
   }
@@ -61,6 +71,7 @@ export function extractFromHost(root: HostNode | null, opts?: ExtractOptions): E
   const mountedTaskIds: string[] = [];
   const seen = new Set<string>();
   const seenRalph = new Set<string>();
+  const seenWorktree = new Set<string>();
   let ordinal = 0;
 
   function walk(
@@ -70,7 +81,11 @@ export function extractFromHost(root: HostNode | null, opts?: ExtractOptions): E
       iteration: number;
       ralphId?: string;
       parallelStack: { id: string; max?: number }[];
-      worktree?: { id: string; path: string; baseRev?: string } | null;
+      /**
+       * Stack of active <Worktree> contexts (outermost -> innermost).
+       * The top of the stack controls the effective root override for tasks.
+       */
+      worktreeStack: { id: string; path: string; baseRev?: string }[];
     },
   ) {
     if (node.kind === "text") return;
@@ -78,7 +93,7 @@ export function extractFromHost(root: HostNode | null, opts?: ExtractOptions): E
     let iteration = ctx.iteration;
     const parallelStack = ctx.parallelStack;
     let ralphId = ctx.ralphId;
-    let worktree = ctx.worktree ?? null;
+    const worktreeStack = ctx.worktreeStack;
 
     if (node.tag === "smithers:ralph") {
       if (ralphId) {
@@ -95,27 +110,36 @@ export function extractFromHost(root: HostNode | null, opts?: ExtractOptions): E
 
     let nextParallelStack = parallelStack;
     if (node.tag === "smithers:parallel") {
-      const max = typeof node.rawProps?.maxConcurrency === "number" ? node.rawProps.maxConcurrency : undefined;
+      const max =
+        typeof node.rawProps?.maxConcurrency === "number"
+          ? node.rawProps.maxConcurrency
+          : undefined;
       const id = resolveStableId(node.rawProps?.id, "parallel", ctx.path);
       nextParallelStack = [...parallelStack, { id, max }];
     }
-
-    // Treat merge-queue like a parallel group for concurrency purposes
-    if (node.tag === "smithers:merge-queue") {
-      const max = typeof node.rawProps?.maxWorktrees === "number" ? node.rawProps.maxWorktrees : undefined;
-      const id = resolveStableId(node.rawProps?.id, "merge-queue", ctx.path);
-      nextParallelStack = [...parallelStack, { id, max }];
-    }
-
-    // Entering a Worktree node updates inherited worktree context
-    let nextWorktree = worktree;
+    // Entering a Worktree node: push onto the worktree stack
+    let nextWorktreeStack = worktreeStack;
     if (node.tag === "smithers:worktree") {
       const id = resolveStableId(node.rawProps?.id, "worktree", ctx.path);
-      const path = String(node.rawProps?.path ?? "");
-      const baseRev = typeof node.rawProps?.baseRev === "string" ? node.rawProps.baseRev : undefined;
-      nextWorktree = { id, path, baseRev };
+      if (seenWorktree.has(id)) {
+        throw new Error(`Duplicate Worktree id detected: ${id}`);
+      }
+      seenWorktree.add(id);
+      let pathVal = String(node.rawProps?.path ?? "").trim();
+      if (!pathVal) {
+        throw new Error("<Worktree> requires a non-empty path");
+      }
+      const base =
+        opts?.baseRootDir &&
+        typeof opts.baseRootDir === "string" &&
+        opts.baseRootDir.length > 0
+          ? opts.baseRootDir
+          : process.cwd();
+      const normPath = isAbsolute(pathVal)
+        ? resolvePath(pathVal)
+        : resolvePath(base, pathVal);
+      nextWorktreeStack = [...worktreeStack, { id, path: normPath }];
     }
-
     if (node.tag === "smithers:task") {
       const raw = node.rawProps || {};
       const nodeId = raw.id;
@@ -146,27 +170,28 @@ export function extractFromHost(root: HostNode | null, opts?: ExtractOptions): E
       const needsApproval = Boolean(raw.needsApproval);
       const skipIf = Boolean(raw.skipIf);
       const retries = typeof raw.retries === "number" ? raw.retries : 0;
-      const timeoutMs = typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
+      const timeoutMs =
+        typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
       const continueOnFail = Boolean(raw.continueOnFail);
 
       const agent = raw.agent;
       const kind = raw.__smithersKind;
       const isAgent = kind === "agent" || Boolean(agent);
       const prompt = isAgent ? String(raw.children ?? "") : undefined;
-      const staticPayload = isAgent ? undefined : (raw.__smithersPayload ?? raw.__payload ?? raw.children);
+      const staticPayload = isAgent
+        ? undefined
+        : (raw.__smithersPayload ?? raw.__payload ?? raw.children);
 
       const parallelGroup = nextParallelStack[nextParallelStack.length - 1];
 
+      const topWorktree = nextWorktreeStack[nextWorktreeStack.length - 1];
       const descriptor: TaskDescriptor = {
         nodeId,
         ordinal: ordinal++,
         iteration,
         ralphId,
-        worktreeId: nextWorktree?.id,
-        worktreePath: nextWorktree?.path,
-        rootDirOverride: typeof raw.rootDirOverride === "string" && raw.rootDirOverride.length > 0
-          ? raw.rootDirOverride
-          : (nextWorktree?.path || undefined),
+        worktreeId: topWorktree?.id,
+        worktreePath: topWorktree?.path,
         outputTable,
         outputTableName,
         outputSchema: raw.outputSchema, // Pass through custom output schema
@@ -183,18 +208,30 @@ export function extractFromHost(root: HostNode | null, opts?: ExtractOptions): E
         parallelGroupId: parallelGroup?.id,
         parallelMaxConcurrency: parallelGroup?.max,
       };
+
+      // Provide a root directory override for task execution when inside a Worktree.
+      if (topWorktree?.path) {
+        (descriptor as any).rootDirOverride = topWorktree.path;
+      }
       tasks.push(descriptor);
       mountedTaskIds.push(`${nodeId}::${iteration}`);
     }
 
     let elementIndex = 0;
     for (const child of node.children) {
-      const nextPath = child.kind === "element" ? [...ctx.path, elementIndex++] : ctx.path;
-      walk(child, { path: nextPath, iteration, ralphId, parallelStack: nextParallelStack, worktree: nextWorktree });
+      const nextPath =
+        child.kind === "element" ? [...ctx.path, elementIndex++] : ctx.path;
+      walk(child, {
+        path: nextPath,
+        iteration,
+        ralphId,
+        parallelStack: nextParallelStack,
+        worktreeStack: nextWorktreeStack,
+      });
     }
   }
 
-  walk(root, { path: [], iteration: 0, parallelStack: [], worktree: null });
+  walk(root, { path: [], iteration: 0, parallelStack: [], worktreeStack: [] });
 
   return { xml: toXmlNode(root), tasks, mountedTaskIds };
 }

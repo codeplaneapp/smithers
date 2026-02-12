@@ -69,14 +69,22 @@ export function buildContext<Schema>(opts: {
     iterations,
     input: normalizedInput,
     outputs: outputsFn,
-    output<T extends keyof Schema>(table: Schema[T], key: OutputKey): InferRow<Schema[T]> {
+    output<T extends keyof Schema>(
+      table: Schema[T],
+      key: OutputKey,
+    ): InferRow<Schema[T]> {
       const row = resolveRow<InferRow<Schema[T]>>(table as any, key);
       if (!row) {
-        throw new Error(`Missing output for nodeId=${key.nodeId} iteration=${key.iteration ?? 0}`);
+        throw new Error(
+          `Missing output for nodeId=${key.nodeId} iteration=${key.iteration ?? 0}`,
+        );
       }
       return row;
     },
-    outputMaybe<T extends keyof Schema>(table: Schema[T], key: OutputKey): InferRow<Schema[T]> | undefined {
+    outputMaybe<T extends keyof Schema>(
+      table: Schema[T],
+      key: OutputKey,
+    ): InferRow<Schema[T]> | undefined {
       return resolveRow<InferRow<Schema[T]>>(table as any, key);
     },
     latest(table: any, nodeId: string): any {
@@ -86,7 +94,9 @@ export function buildContext<Schema>(opts: {
       let bestIteration = -Infinity;
       for (const row of tableRows) {
         if (!row || row.nodeId !== nodeId) continue;
-        const iter = Number.isFinite(Number(row.iteration)) ? Number(row.iteration) : 0;
+        const iter = Number.isFinite(Number(row.iteration))
+          ? Number(row.iteration)
+          : 0;
         if (!best || iter >= bestIteration) {
           best = row;
           bestIteration = iter;
@@ -124,7 +134,9 @@ export function buildContext<Schema>(opts: {
       const seen = new Set<number>();
       for (const row of tableRows) {
         if (!row || row.nodeId !== nodeId) continue;
-        const iter = Number.isFinite(Number(row.iteration)) ? Number(row.iteration) : 0;
+        const iter = Number.isFinite(Number(row.iteration))
+          ? Number(row.iteration)
+          : 0;
         seen.add(iter);
       }
       return seen.size;
@@ -138,7 +150,9 @@ export function createSmithersContext<Schema>() {
   function useCtx(): SmithersCtx<Schema> {
     const ctx = React.useContext(SmithersContext);
     if (!ctx) {
-      throw new Error("useCtx() must be called inside a <Workflow> created by createSmithers()");
+      throw new Error(
+        "useCtx() must be called inside a <Workflow> created by createSmithers()",
+      );
     }
     return ctx;
   }

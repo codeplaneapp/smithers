@@ -3,7 +3,9 @@ import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 export function ensureSmithersTables(db: BunSQLiteDatabase<any>): void {
   const client: any = (db as any).$client;
   if (!client || typeof client.exec !== "function") {
-    throw new Error("Smithers requires a Bun SQLite database client with exec().");
+    throw new Error(
+      "Smithers requires a Bun SQLite database client with exec().",
+    );
   }
 
   client.exec(`
@@ -119,5 +121,7 @@ export function ensureSmithersTables(db: BunSQLiteDatabase<any>): void {
   `);
 
   // Migrations for columns added after initial schema
-  try { client.exec(`ALTER TABLE _smithers_attempts ADD COLUMN response_text TEXT`); } catch {}
+  try {
+    client.exec(`ALTER TABLE _smithers_attempts ADD COLUMN response_text TEXT`);
+  } catch {}
 }

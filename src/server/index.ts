@@ -27,7 +27,12 @@ class HttpError extends Error {
   code: string;
   details?: Record<string, unknown>;
 
-  constructor(status: number, code: string, message: string, details?: Record<string, unknown>) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    details?: Record<string, unknown>,
+  ) {
     super(message);
     this.status = status;
     this.code = code;
@@ -39,7 +44,11 @@ function parsePositiveInt(value: string | null, fallback: number): number {
   if (value === null) return fallback;
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) {
-    throw new HttpError(400, "INVALID_REQUEST", `Expected a positive integer, got "${value}"`);
+    throw new HttpError(
+      400,
+      "INVALID_REQUEST",
+      `Expected a positive integer, got "${value}"`,
+    );
   }
   return Math.floor(num);
 }
@@ -48,7 +57,11 @@ function parseOptionalInt(value: string | null, fallback: number): number {
   if (value === null) return fallback;
   const num = Number(value);
   if (!Number.isFinite(num)) {
-    throw new HttpError(400, "INVALID_REQUEST", `Expected a number, got "${value}"`);
+    throw new HttpError(
+      400,
+      "INVALID_REQUEST",
+      `Expected a number, got "${value}"`,
+    );
   }
   return Math.floor(num);
 }
@@ -58,16 +71,28 @@ async function readBody(req: IncomingMessage, maxBytes: number): Promise<any> {
   let total = 0;
   const lengthHeader = req.headers["content-length"];
   if (lengthHeader) {
-    const len = Array.isArray(lengthHeader) ? Number(lengthHeader[0]) : Number(lengthHeader);
+    const len = Array.isArray(lengthHeader)
+      ? Number(lengthHeader[0])
+      : Number(lengthHeader);
     if (Number.isFinite(len) && len > maxBytes) {
-      throw new HttpError(413, "PAYLOAD_TOO_LARGE", `Request body exceeds ${maxBytes} bytes`, { maxBytes });
+      throw new HttpError(
+        413,
+        "PAYLOAD_TOO_LARGE",
+        `Request body exceeds ${maxBytes} bytes`,
+        { maxBytes },
+      );
     }
   }
   for await (const chunk of req) {
     const buf = Buffer.from(chunk);
     total += buf.length;
     if (total > maxBytes) {
-      throw new HttpError(413, "PAYLOAD_TOO_LARGE", `Request body exceeds ${maxBytes} bytes`, { maxBytes });
+      throw new HttpError(
+        413,
+        "PAYLOAD_TOO_LARGE",
+        `Request body exceeds ${maxBytes} bytes`,
+        { maxBytes },
+      );
     }
     chunks.push(buf);
   }
@@ -76,7 +101,11 @@ async function readBody(req: IncomingMessage, maxBytes: number): Promise<any> {
   try {
     return JSON.parse(body);
   } catch (err: any) {
-    throw new HttpError(400, "INVALID_JSON", err?.message ?? "Request body must be valid JSON");
+    throw new HttpError(
+      400,
+      "INVALID_JSON",
+      err?.message ?? "Request body must be valid JSON",
+    );
   }
 }
 
@@ -96,11 +125,18 @@ function sendJson(res: ServerResponse, status: number, payload: any) {
 
 function assertAuth(req: IncomingMessage, authToken?: string) {
   if (!authToken) return;
-  const header = req.headers["authorization"] ?? req.headers["Authorization"] ?? req.headers["x-smithers-key"];
+  const header =
+    req.headers["authorization"] ??
+    req.headers["Authorization"] ??
+    req.headers["x-smithers-key"];
   const value = Array.isArray(header) ? header[0] : header;
   const token = value?.startsWith("Bearer ") ? value.slice(7) : value;
   if (!token || token !== authToken) {
-    throw new HttpError(401, "UNAUTHORIZED", "Missing or invalid authorization token");
+    throw new HttpError(
+      401,
+      "UNAUTHORIZED",
+      "Missing or invalid authorization token",
+    );
   }
 }
 
@@ -111,7 +147,11 @@ function resolveWorkflowPath(workflowPath: string, rootDir?: string): string {
     const root = resolve(rootDir);
     const rootPrefix = root.endsWith(sep) ? root : root + sep;
     if (resolved !== root && !resolved.startsWith(rootPrefix)) {
-      throw new HttpError(400, "WORKFLOW_PATH_OUTSIDE_ROOT", "Workflow path must be within server root directory");
+      throw new HttpError(
+        400,
+        "WORKFLOW_PATH_OUTSIDE_ROOT",
+        "Workflow path must be within server root directory",
+      );
     }
   }
   return resolved;
@@ -126,7 +166,10 @@ function getDbIdentity(db: any): string | undefined {
   return undefined;
 }
 
-function isSameDb(serverDb: BunSQLiteDatabase<any> | null, workflowDb: BunSQLiteDatabase<any>): boolean {
+function isSameDb(
+  serverDb: BunSQLiteDatabase<any> | null,
+  workflowDb: BunSQLiteDatabase<any>,
+): boolean {
   if (!serverDb) return false;
   if (serverDb === workflowDb) return true;
   const serverId = getDbIdentity(serverDb);
@@ -134,7 +177,13 @@ function isSameDb(serverDb: BunSQLiteDatabase<any> | null, workflowDb: BunSQLite
   return Boolean(serverId && workflowId && serverId === workflowId);
 }
 
-function buildMirrorOnProgress(adapter: SmithersDb | null, runId: string, workflowName: string, workflowPath: string, configJson: string) {
+function buildMirrorOnProgress(
+  adapter: SmithersDb | null,
+  runId: string,
+  workflowName: string,
+  workflowPath: string,
+  configJson: string,
+) {
   if (!adapter) return undefined;
   let runInserted = false;
   const ensureRun = async () => {
@@ -164,13 +213,19 @@ function buildMirrorOnProgress(adapter: SmithersDb | null, runId: string, workfl
       });
       switch (event.type) {
         case "RunStarted":
-          await adapter.updateRun(runId, { status: "running", startedAtMs: event.timestampMs });
+          await adapter.updateRun(runId, {
+            status: "running",
+            startedAtMs: event.timestampMs,
+          });
           break;
         case "RunStatusChanged":
           await adapter.updateRun(runId, { status: event.status });
           break;
         case "RunFinished":
-          await adapter.updateRun(runId, { status: "finished", finishedAtMs: event.timestampMs });
+          await adapter.updateRun(runId, {
+            status: "finished",
+            finishedAtMs: event.timestampMs,
+          });
           break;
         case "RunFailed":
           await adapter.updateRun(runId, {
@@ -180,7 +235,10 @@ function buildMirrorOnProgress(adapter: SmithersDb | null, runId: string, workfl
           });
           break;
         case "RunCancelled":
-          await adapter.updateRun(runId, { status: "cancelled", finishedAtMs: event.timestampMs });
+          await adapter.updateRun(runId, {
+            status: "cancelled",
+            finishedAtMs: event.timestampMs,
+          });
           break;
         case "NodePending":
           await adapter.insertNode({
@@ -329,15 +387,32 @@ export function startServer(opts: ServerOptions = {}) {
       if (method === "POST" && url.pathname === "/v1/runs") {
         const body = await readBody(req, maxBodyBytes);
         if (!body?.workflowPath || typeof body.workflowPath !== "string") {
-          throw new HttpError(400, "INVALID_REQUEST", "workflowPath must be a string");
+          throw new HttpError(
+            400,
+            "INVALID_REQUEST",
+            "workflowPath must be a string",
+          );
         }
-        if (body.input !== undefined && (body.input === null || typeof body.input !== "object" || Array.isArray(body.input))) {
-          throw new HttpError(400, "INVALID_REQUEST", "input must be a JSON object");
+        if (
+          body.input !== undefined &&
+          (body.input === null ||
+            typeof body.input !== "object" ||
+            Array.isArray(body.input))
+        ) {
+          throw new HttpError(
+            400,
+            "INVALID_REQUEST",
+            "input must be a JSON object",
+          );
         }
         if (body.config?.maxConcurrency !== undefined) {
           const mc = Number(body.config.maxConcurrency);
           if (!Number.isFinite(mc) || mc <= 0) {
-            throw new HttpError(400, "INVALID_REQUEST", "config.maxConcurrency must be a positive number");
+            throw new HttpError(
+              400,
+              "INVALID_REQUEST",
+              "config.maxConcurrency must be a positive number",
+            );
           }
         }
         const workflowPath = resolveWorkflowPath(body.workflowPath, rootDir);
@@ -346,20 +421,32 @@ export function startServer(opts: ServerOptions = {}) {
         const sameDb = isSameDb(serverDb, workflow.db as any);
         const abort = new AbortController();
         if (body.resume && !body.runId) {
-          throw new HttpError(400, "RUN_ID_REQUIRED", "runId is required when resume is true");
+          throw new HttpError(
+            400,
+            "RUN_ID_REQUIRED",
+            "runId is required when resume is true",
+          );
         }
         const runId = body.runId ?? newRunId();
         const adapter = new SmithersDb(workflow.db as any);
         const existing = await adapter.getRun(runId);
         const inMemory = runs.get(runId);
         if (inMemory && !body.resume) {
-          throw new HttpError(409, "RUN_IN_PROGRESS", "Run is already in progress");
+          throw new HttpError(
+            409,
+            "RUN_IN_PROGRESS",
+            "Run is already in progress",
+          );
         }
         if (body.resume && inMemory && existing?.status === "running") {
           return sendJson(res, 200, { runId, status: "running" });
         }
         if (existing && !body.resume) {
-          throw new HttpError(409, "RUN_ALREADY_EXISTS", "Run id already exists");
+          throw new HttpError(
+            409,
+            "RUN_ALREADY_EXISTS",
+            "Run id already exists",
+          );
         }
         if (body.resume && !existing) {
           throw new HttpError(404, "RUN_NOT_FOUND", "Run id does not exist");
@@ -372,7 +459,11 @@ export function startServer(opts: ServerOptions = {}) {
           runId,
           workflowName,
           workflowPath,
-          JSON.stringify({ maxConcurrency: body.config?.maxConcurrency ?? null, rootDir: effectiveRoot, allowNetwork }),
+          JSON.stringify({
+            maxConcurrency: body.config?.maxConcurrency ?? null,
+            rootDir: effectiveRoot,
+            allowNetwork,
+          }),
         );
         const record: RunRecord = { workflow, abort, workflowPath };
         runs.set(runId, record);
@@ -387,22 +478,24 @@ export function startServer(opts: ServerOptions = {}) {
           rootDir: effectiveRoot,
           allowNetwork,
           onProgress: mirrorOnProgress,
-        }).then((result) => {
-          const id = result.runId;
-          if (serverDb) {
-            const rec = runs.get(id);
-            if (rec) {
-              runs.delete(id);
+        })
+          .then((result) => {
+            const id = result.runId;
+            if (serverDb) {
+              const rec = runs.get(id);
+              if (rec) {
+                runs.delete(id);
+              }
             }
-          }
-        }).catch((err) => {
-          if (process.env.SMITHERS_DEBUG) {
-            console.error("[smithers] server run error", err);
-          }
-          if (serverDb) {
-            runs.delete(runId);
-          }
-        });
+          })
+          .catch((err) => {
+            if (process.env.SMITHERS_DEBUG) {
+              console.error("[smithers] server run error", err);
+            }
+            if (serverDb) {
+              runs.delete(runId);
+            }
+          });
 
         sendJson(res, 200, { runId });
         return;
@@ -413,15 +506,32 @@ export function startServer(opts: ServerOptions = {}) {
         const runId = resumeMatch[1]!;
         const body = await readBody(req, maxBodyBytes);
         if (!body?.workflowPath || typeof body.workflowPath !== "string") {
-          throw new HttpError(400, "INVALID_REQUEST", "workflowPath must be a string");
+          throw new HttpError(
+            400,
+            "INVALID_REQUEST",
+            "workflowPath must be a string",
+          );
         }
-        if (body.input !== undefined && (body.input === null || typeof body.input !== "object" || Array.isArray(body.input))) {
-          throw new HttpError(400, "INVALID_REQUEST", "input must be a JSON object");
+        if (
+          body.input !== undefined &&
+          (body.input === null ||
+            typeof body.input !== "object" ||
+            Array.isArray(body.input))
+        ) {
+          throw new HttpError(
+            400,
+            "INVALID_REQUEST",
+            "input must be a JSON object",
+          );
         }
         if (body.config?.maxConcurrency !== undefined) {
           const mc = Number(body.config.maxConcurrency);
           if (!Number.isFinite(mc) || mc <= 0) {
-            throw new HttpError(400, "INVALID_REQUEST", "config.maxConcurrency must be a positive number");
+            throw new HttpError(
+              400,
+              "INVALID_REQUEST",
+              "config.maxConcurrency must be a positive number",
+            );
           }
         }
         const workflowPath = resolveWorkflowPath(body.workflowPath, rootDir);
@@ -447,7 +557,11 @@ export function startServer(opts: ServerOptions = {}) {
           runId,
           workflowName,
           workflowPath,
-          JSON.stringify({ maxConcurrency: body.config?.maxConcurrency ?? null, rootDir: effectiveRoot, allowNetwork }),
+          JSON.stringify({
+            maxConcurrency: body.config?.maxConcurrency ?? null,
+            rootDir: effectiveRoot,
+            allowNetwork,
+          }),
         );
 
         runWorkflow(workflow, {
@@ -460,21 +574,23 @@ export function startServer(opts: ServerOptions = {}) {
           rootDir: effectiveRoot,
           allowNetwork,
           onProgress: mirrorOnProgress,
-        }).then(() => {
-          if (serverDb) {
-            const rec = runs.get(runId);
-            if (rec) {
+        })
+          .then(() => {
+            if (serverDb) {
+              const rec = runs.get(runId);
+              if (rec) {
+                runs.delete(runId);
+              }
+            }
+          })
+          .catch((err) => {
+            if (process.env.SMITHERS_DEBUG) {
+              console.error("[smithers] server resume error", err);
+            }
+            if (serverDb) {
               runs.delete(runId);
             }
-          }
-        }).catch((err) => {
-          if (process.env.SMITHERS_DEBUG) {
-            console.error("[smithers] server resume error", err);
-          }
-          if (serverDb) {
-            runs.delete(runId);
-          }
-        });
+          });
 
         sendJson(res, 200, { runId });
         return;
@@ -485,22 +601,30 @@ export function startServer(opts: ServerOptions = {}) {
         const runId = cancelMatch[1]!;
         const record = runs.get(runId);
         if (!record) {
-          return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
+          return sendJson(res, 404, {
+            error: { code: "NOT_FOUND", message: "Run not found" },
+          });
         }
         record.abort.abort();
         return sendJson(res, 200, { runId });
       }
 
-      const runEventsMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/events$/);
+      const runEventsMatch = url.pathname.match(
+        /^\/v1\/runs\/([^/]+)\/events$/,
+      );
       if (method === "GET" && runEventsMatch) {
         const runId = runEventsMatch[1]!;
         const adapter = adapterForRun(runId);
         if (!adapter) {
-          return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
+          return sendJson(res, 404, {
+            error: { code: "NOT_FOUND", message: "Run not found" },
+          });
         }
         const run = await adapter.getRun(runId);
         if (!run) {
-          return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
+          return sendJson(res, 404, {
+            error: { code: "NOT_FOUND", message: "Run not found" },
+          });
         }
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
@@ -523,12 +647,19 @@ export function startServer(opts: ServerOptions = {}) {
             res.write(`data: ${ev.payloadJson}\n\n`);
           }
           const now = Date.now();
-          if (now - lastHeartbeat >= DEFAULT_SSE_HEARTBEAT_MS && !res.writableEnded) {
+          if (
+            now - lastHeartbeat >= DEFAULT_SSE_HEARTBEAT_MS &&
+            !res.writableEnded
+          ) {
             res.write(`: keep-alive\n\n`);
             lastHeartbeat = now;
           }
           const runRow = await adapter.getRun(runId);
-          if (runRow && ["finished", "failed", "cancelled"].includes(runRow.status) && events.length === 0) {
+          if (
+            runRow &&
+            ["finished", "failed", "cancelled"].includes(runRow.status) &&
+            events.length === 0
+          ) {
             closed = true;
             res.end();
           }
@@ -557,11 +688,15 @@ export function startServer(opts: ServerOptions = {}) {
         const runId = runMatch[1]!;
         const adapter = adapterForRun(runId);
         if (!adapter) {
-          return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
+          return sendJson(res, 404, {
+            error: { code: "NOT_FOUND", message: "Run not found" },
+          });
         }
         const run = await adapter.getRun(runId);
         if (!run) {
-          return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
+          return sendJson(res, 404, {
+            error: { code: "NOT_FOUND", message: "Run not found" },
+          });
         }
         const summary = await adapter.countNodesByState(runId);
         return sendJson(res, 200, {
@@ -582,44 +717,83 @@ export function startServer(opts: ServerOptions = {}) {
         const runId = framesMatch[1]!;
         const adapter = adapterForRun(runId);
         if (!adapter) {
-          return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
+          return sendJson(res, 404, {
+            error: { code: "NOT_FOUND", message: "Run not found" },
+          });
         }
         const run = await adapter.getRun(runId);
         if (!run) {
-          return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
+          return sendJson(res, 404, {
+            error: { code: "NOT_FOUND", message: "Run not found" },
+          });
         }
         const limit = parsePositiveInt(url.searchParams.get("limit"), 50);
         const after = url.searchParams.get("afterFrameNo");
         const afterFrameNo = after ? parseOptionalInt(after, -1) : undefined;
-        const frames = await adapter.listFrames(runId, limit, afterFrameNo !== undefined && afterFrameNo >= 0 ? afterFrameNo : undefined);
+        const frames = await adapter.listFrames(
+          runId,
+          limit,
+          afterFrameNo !== undefined && afterFrameNo >= 0
+            ? afterFrameNo
+            : undefined,
+        );
         return sendJson(res, 200, frames);
       }
 
-      const approveMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/nodes\/([^/]+)\/approve$/);
+      const approveMatch = url.pathname.match(
+        /^\/v1\/runs\/([^/]+)\/nodes\/([^/]+)\/approve$/,
+      );
       if (method === "POST" && approveMatch) {
         const runId = approveMatch[1]!;
         const nodeId = approveMatch[2]!;
         const body = await readBody(req, maxBodyBytes);
         const adapter = adapterForRun(runId);
-        if (!adapter) return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
-        await approveNode(adapter, runId, nodeId, body.iteration ?? 0, body.note, body.decidedBy);
+        if (!adapter)
+          return sendJson(res, 404, {
+            error: { code: "NOT_FOUND", message: "Run not found" },
+          });
+        await approveNode(
+          adapter,
+          runId,
+          nodeId,
+          body.iteration ?? 0,
+          body.note,
+          body.decidedBy,
+        );
         return sendJson(res, 200, { runId });
       }
 
-      const denyMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/nodes\/([^/]+)\/deny$/);
+      const denyMatch = url.pathname.match(
+        /^\/v1\/runs\/([^/]+)\/nodes\/([^/]+)\/deny$/,
+      );
       if (method === "POST" && denyMatch) {
         const runId = denyMatch[1]!;
         const nodeId = denyMatch[2]!;
         const body = await readBody(req, maxBodyBytes);
         const adapter = adapterForRun(runId);
-        if (!adapter) return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Run not found" } });
-        await denyNode(adapter, runId, nodeId, body.iteration ?? 0, body.note, body.decidedBy);
+        if (!adapter)
+          return sendJson(res, 404, {
+            error: { code: "NOT_FOUND", message: "Run not found" },
+          });
+        await denyNode(
+          adapter,
+          runId,
+          nodeId,
+          body.iteration ?? 0,
+          body.note,
+          body.decidedBy,
+        );
         return sendJson(res, 200, { runId });
       }
 
       if (method === "GET" && url.pathname === "/v1/runs") {
         if (!serverAdapter) {
-          return sendJson(res, 400, { error: { code: "DB_NOT_CONFIGURED", message: "Server DB not configured" } });
+          return sendJson(res, 400, {
+            error: {
+              code: "DB_NOT_CONFIGURED",
+              message: "Server DB not configured",
+            },
+          });
         }
         const limit = parsePositiveInt(url.searchParams.get("limit"), 50);
         const status = url.searchParams.get("status") ?? undefined;
@@ -627,13 +801,22 @@ export function startServer(opts: ServerOptions = {}) {
         return sendJson(res, 200, runs);
       }
 
-      sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Route not found" } });
+      sendJson(res, 404, {
+        error: { code: "NOT_FOUND", message: "Route not found" },
+      });
     } catch (err: any) {
       if (err instanceof HttpError) {
-        sendJson(res, err.status, { error: { code: err.code, message: err.message, details: err.details } });
+        sendJson(res, err.status, {
+          error: { code: err.code, message: err.message, details: err.details },
+        });
         return;
       }
-      sendJson(res, 500, { error: { code: "SERVER_ERROR", message: err?.message ?? "Unknown error" } });
+      sendJson(res, 500, {
+        error: {
+          code: "SERVER_ERROR",
+          message: err?.message ?? "Unknown error",
+        },
+      });
     }
   });
 

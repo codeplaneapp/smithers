@@ -22,7 +22,10 @@ export type RunJjResult = {
  * Run a `jj` command and capture output.
  * Minimal helper used by vcs features and safe to call when jj is missing.
  */
-export async function runJj(args: string[], opts: RunJjOptions = {}): Promise<RunJjResult> {
+export async function runJj(
+  args: string[],
+  opts: RunJjOptions = {},
+): Promise<RunJjResult> {
   return await new Promise<RunJjResult>((resolve) => {
     try {
       const child = spawn("jj", args, {
@@ -35,7 +38,11 @@ export async function runJj(args: string[], opts: RunJjOptions = {}): Promise<Ru
       child.stderr?.on("data", (chunk) => (stderr += chunk.toString("utf8")));
       child.on("error", (err) => {
         // When jj isn't installed or cannot spawn, normalize to code 127
-        resolve({ code: 127, stdout: "", stderr: err.message || "spawn error" });
+        resolve({
+          code: 127,
+          stdout: "",
+          stderr: err.message || "spawn error",
+        });
       });
       child.on("close", (code, signal) => {
         const withSignal = signal ? `terminated by signal ${signal}` : stderr;
@@ -57,7 +64,10 @@ function jjError(res: RunJjResult): string {
  * Accepts optional `cwd` to run inside a target repository.
  */
 export async function getJjPointer(cwd?: string): Promise<string | null> {
-  const res = await runJj(["log", "-r", "@", "--no-graph", "--template", "change_id"], { cwd });
+  const res = await runJj(
+    ["log", "-r", "@", "--no-graph", "--template", "change_id"],
+    { cwd },
+  );
   if (res.code === 0) {
     const out = res.stdout.trim();
     return out ? out : null;
@@ -74,7 +84,10 @@ export type JjRevertResult = {
  * Restore the working copy to a previously recorded jujutsu `change_id`.
  * Kept for backwards compatibility with existing tests.
  */
-export async function revertToJjPointer(pointer: string, cwd?: string): Promise<JjRevertResult> {
+export async function revertToJjPointer(
+  pointer: string,
+  cwd?: string,
+): Promise<JjRevertResult> {
   const res = await runJj(["restore", "--from", pointer], { cwd });
   if (res.code === 0) return { success: true };
   return { success: false, error: jjError(res) };
@@ -116,7 +129,8 @@ export async function workspaceAdd(
   attempts.push(["workspace", "add", path, "--name", name, ...revTail]);
 
   // Alt 1: put -r before path/name
-  if (opts.atRev) attempts.push(["workspace", "add", "-r", opts.atRev, path, "--name", name]);
+  if (opts.atRev)
+    attempts.push(["workspace", "add", "-r", opts.atRev, path, "--name", name]);
 
   // Alt 2: legacy style (name, path)
   attempts.push(["workspace", "add", name, path, ...revTail]);
@@ -144,16 +158,24 @@ export type WorkspaceInfo = {
  */
 export async function workspaceList(cwd?: string): Promise<WorkspaceInfo[]> {
   // Prefer structured output to avoid version-specific human formats
-  const res = await runJj(["workspace", "list", "-T", 'name ++ "\\n"'], { cwd });
+  const res = await runJj(["workspace", "list", "-T", 'name ++ "\\n"'], {
+    cwd,
+  });
   if (res.code !== 0) return [];
-  const lines = res.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = res.stdout
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
   return lines.map((name) => ({ name, path: null, selected: false }));
 }
 
 /**
  * Close the given workspace by name.
  */
-export async function workspaceClose(name: string, opts: { cwd?: string } = {}): Promise<WorkspaceResult> {
+export async function workspaceClose(
+  name: string,
+  opts: { cwd?: string } = {},
+): Promise<WorkspaceResult> {
   // `jj workspace close` does not exist; correct subcommand is `forget`.
   const res = await runJj(["workspace", "forget", name], { cwd: opts.cwd });
   if (res.code === 0) return { success: true };

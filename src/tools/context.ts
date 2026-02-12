@@ -16,7 +16,10 @@ export type ToolContext = {
 
 const storage = new AsyncLocalStorage<ToolContext>();
 
-export function runWithToolContext<T>(ctx: ToolContext, fn: () => Promise<T>): Promise<T> {
+export function runWithToolContext<T>(
+  ctx: ToolContext,
+  fn: () => Promise<T>,
+): Promise<T> {
   return storage.run(ctx, fn);
 }
 

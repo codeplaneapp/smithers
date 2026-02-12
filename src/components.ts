@@ -10,7 +10,6 @@ import type {
   BranchProps,
   RalphProps,
   WorktreeProps,
-  MergeQueueProps,
 } from "./types";
 export function Workflow(props: WorkflowProps) {
   return React.createElement("smithers:workflow", props, props.children);
@@ -64,7 +63,12 @@ export function Task<Row>(props: TaskProps<Row>) {
       prompt,
     );
   }
-  const nextProps = { ...rest, __smithersKind: "static", __smithersPayload: children, __payload: children } as any;
+  const nextProps = {
+    ...rest,
+    __smithersKind: "static",
+    __smithersPayload: children,
+    __payload: children,
+  } as any;
   return React.createElement("smithers:task", nextProps, null);
 }
 
@@ -80,7 +84,7 @@ export function Parallel(props: ParallelProps) {
 
 export function Branch(props: BranchProps) {
   if (props.skipIf) return null;
-  const chosen = props.if ? props.then : props.else ?? null;
+  const chosen = props.if ? props.then : (props.else ?? null);
   return React.createElement("smithers:branch", props, chosen);
 }
 
@@ -90,11 +94,9 @@ export function Ralph(props: RalphProps) {
 }
 
 export function Worktree(props: WorktreeProps) {
+  if (!props.path || !String(props.path).trim()) {
+    throw new Error("<Worktree> requires a non-empty path prop");
+  }
   if (props.skipIf) return null;
   return React.createElement("smithers:worktree", props, props.children);
-}
-
-export function MergeQueue(props: MergeQueueProps) {
-  if (props.skipIf) return null;
-  return React.createElement("smithers:merge-queue", props, props.children);
 }

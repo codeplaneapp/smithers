@@ -32,13 +32,26 @@ export function buildKeyWhere(table: Table, key: OutputKey) {
   return and(...clauses);
 }
 
-export async function selectOutputRow<T>(db: any, table: Table, key: OutputKey): Promise<T | undefined> {
+export async function selectOutputRow<T>(
+  db: any,
+  table: Table,
+  key: OutputKey,
+): Promise<T | undefined> {
   const where = buildKeyWhere(table, key);
-  const rows = await db.select().from(table as any).where(where).limit(1);
+  const rows = await db
+    .select()
+    .from(table as any)
+    .where(where)
+    .limit(1);
   return rows[0] as T | undefined;
 }
 
-export async function upsertOutputRow(db: any, table: Table, key: OutputKey, payload: Record<string, unknown>) {
+export async function upsertOutputRow(
+  db: any,
+  table: Table,
+  key: OutputKey,
+  payload: Record<string, unknown>,
+) {
   const cols = getKeyColumns(table);
   const values: Record<string, unknown> = { ...payload };
   values.runId = key.runId;
@@ -60,7 +73,10 @@ export async function upsertOutputRow(db: any, table: Table, key: OutputKey, pay
     });
 }
 
-export function validateOutput(table: Table, payload: unknown): {
+export function validateOutput(
+  table: Table,
+  payload: unknown,
+): {
   ok: boolean;
   data?: any;
   error?: z.ZodError;
@@ -73,7 +89,10 @@ export function validateOutput(table: Table, payload: unknown): {
   return { ok: false, error: result.error };
 }
 
-export function validateExistingOutput(table: Table, payload: unknown): {
+export function validateExistingOutput(
+  table: Table,
+  payload: unknown,
+): {
   ok: boolean;
   data?: any;
   error?: z.ZodError;
@@ -118,14 +137,19 @@ function describeZodType(schema: z.ZodType): string {
   if ((schema as any)._zod?.def) {
     const def = (schema as any)._zod.def;
     const typeName = def.type;
-    if (typeName === "optional" || typeName === "default" || typeName === "nullable") {
+    if (
+      typeName === "optional" ||
+      typeName === "default" ||
+      typeName === "nullable"
+    ) {
       const inner = def.innerType ? describeZodType(def.innerType) : "unknown";
       if (typeName === "optional") return `${inner} (optional)`;
       if (typeName === "nullable") return `${inner} | null`;
       return inner;
     }
     if (typeName === "string") return "string";
-    if (typeName === "number" || typeName === "int" || typeName === "float") return "number";
+    if (typeName === "number" || typeName === "int" || typeName === "float")
+      return "number";
     if (typeName === "boolean") return "boolean";
     if (typeName === "array") {
       const itemType = def.element ? describeZodType(def.element) : "unknown";
@@ -135,7 +159,9 @@ function describeZodType(schema: z.ZodType): string {
     if (typeName === "enum") return `enum(${(def.values ?? []).join(" | ")})`;
     if (typeName === "literal") return `literal(${JSON.stringify(def.value)})`;
     if (typeName === "union") {
-      const options = (def.options ?? []).map((o: z.ZodType) => describeZodType(o));
+      const options = (def.options ?? []).map((o: z.ZodType) =>
+        describeZodType(o),
+      );
       return options.join(" | ");
     }
   }
@@ -147,7 +173,9 @@ function describeZodType(schema: z.ZodType): string {
   if (desc === "ZodArray") return "array";
   if (desc === "ZodOptional") {
     const inner = (schema as any)._def?.innerType;
-    return inner ? `${describeZodType(inner)} (optional)` : "unknown (optional)";
+    return inner
+      ? `${describeZodType(inner)} (optional)`
+      : "unknown (optional)";
   }
   if (desc === "ZodDefault") {
     const inner = (schema as any)._def?.innerType;

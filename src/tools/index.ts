@@ -10,7 +10,14 @@ import { errorToJson } from "../utils/errors";
 import { resolveSandboxPath, assertPathWithinRoot } from "./utils";
 import { getToolContext, nextToolSeq } from "./context";
 
-async function logToolCall(toolName: string, input: unknown, output: unknown, status: "success" | "error", error?: unknown, startedAtMs?: number) {
+async function logToolCall(
+  toolName: string,
+  input: unknown,
+  output: unknown,
+  status: "success" | "error",
+  error?: unknown,
+  startedAtMs?: number,
+) {
   const ctx = getToolContext();
   if (!ctx) return;
   const seq = nextToolSeq(ctx);
@@ -46,7 +53,11 @@ function safeJson(value: unknown, maxBytes: number): string {
   const json = JSON.stringify(value ?? null);
   if (Buffer.byteLength(json, "utf8") <= maxBytes) return json;
   const preview = truncateToBytes(json, maxBytes);
-  return JSON.stringify({ truncated: true, bytes: Buffer.byteLength(json, "utf8"), preview });
+  return JSON.stringify({
+    truncated: true,
+    bytes: Buffer.byteLength(json, "utf8"),
+    preview,
+  });
 }
 
 export const read: any = tool({
@@ -66,7 +77,14 @@ export const read: any = tool({
       }
       const content = await fs.readFile(resolved, "utf8");
       const output = truncateToBytes(content, max);
-      await logToolCall("read", { path }, { content: output }, "success", undefined, started);
+      await logToolCall(
+        "read",
+        { path },
+        { content: output },
+        "success",
+        undefined,
+        started,
+      );
       return output;
     } catch (err) {
       await logToolCall("read", { path }, null, "error", err, started);
@@ -93,7 +111,14 @@ export const write = tool({
       }
       await fs.mkdir(dirname(resolved), { recursive: true });
       await fs.writeFile(resolved, content, "utf8");
-      await logToolCall("write", logInput, { ok: true }, "success", undefined, started);
+      await logToolCall(
+        "write",
+        logInput,
+        { ok: true },
+        "success",
+        undefined,
+        started,
+      );
       return "ok";
     } catch (err) {
       await logToolCall("write", logInput, null, "error", err, started);
@@ -128,7 +153,14 @@ export const edit = tool({
         throw new Error("Failed to apply patch");
       }
       await fs.writeFile(resolved, updated, "utf8");
-      await logToolCall("edit", logInput, { ok: true }, "success", undefined, started);
+      await logToolCall(
+        "edit",
+        logInput,
+        { ok: true },
+        "success",
+        undefined,
+        started,
+      );
       return "ok";
     } catch (err) {
       await logToolCall("edit", logInput, null, "error", err, started);
@@ -139,7 +171,9 @@ export const edit = tool({
 
 export const grep = tool({
   description: "Search for a pattern in files",
-  inputSchema: zodSchema(z.object({ pattern: z.string(), path: z.string().optional() })),
+  inputSchema: zodSchema(
+    z.object({ pattern: z.string(), path: z.string().optional() }),
+  ),
   execute: async ({ pattern, path }: { pattern: string; path?: string }) => {
     const ctx = getToolContext();
     const root = ctx?.rootDir ?? process.cwd();
@@ -194,10 +228,24 @@ export const grep = tool({
       if (exitCode === 2) {
         throw new Error(stderrText || "rg failed");
       }
-      await logToolCall("grep", { pattern, path }, logOutput, "success", undefined, started);
+      await logToolCall(
+        "grep",
+        { pattern, path },
+        logOutput,
+        "success",
+        undefined,
+        started,
+      );
       return stdoutText;
     } catch (err) {
-      await logToolCall("grep", { pattern, path }, logOutput, "error", err, started);
+      await logToolCall(
+        "grep",
+        { pattern, path },
+        logOutput,
+        "error",
+        err,
+        started,
+      );
       throw err;
     }
   },
@@ -212,7 +260,15 @@ export const bash = tool({
       opts: z.object({ cwd: z.string().optional() }).optional(),
     }),
   ),
-  execute: async ({ cmd, args, opts }: { cmd: string; args?: string[]; opts?: { cwd?: string } }) => {
+  execute: async ({
+    cmd,
+    args,
+    opts,
+  }: {
+    cmd: string;
+    args?: string[];
+    opts?: { cwd?: string };
+  }) => {
     const ctx = getToolContext();
     const root = ctx?.rootDir ?? process.cwd();
     const allowNetwork = ctx?.allowNetwork ?? false;
@@ -224,7 +280,15 @@ export const bash = tool({
       if (!allowNetwork) {
         const hay = [cmd, ...(args ?? [])].join(" ");
         // Block obvious network commands
-        const networkCommands = ["curl", "wget", "http://", "https://", "npm", "bun", "pip"];
+        const networkCommands = [
+          "curl",
+          "wget",
+          "http://",
+          "https://",
+          "npm",
+          "bun",
+          "pip",
+        ];
         if (networkCommands.some((f) => hay.includes(f))) {
           throw new Error("Network access is disabled for bash tool");
         }
@@ -245,7 +309,11 @@ export const bash = tool({
     const maxOutputBytes = ctx?.maxOutputBytes ?? 200_000;
 
     return await new Promise<string>((resolve, reject) => {
-      const child = spawn(cmd, args ?? [], { cwd, env: process.env, detached: true });
+      const child = spawn(cmd, args ?? [], {
+        cwd,
+        env: process.env,
+        detached: true,
+      });
       let stdout = Buffer.alloc(0);
       let stderr = Buffer.alloc(0);
       let timedOut = false;
@@ -283,20 +351,48 @@ export const bash = tool({
       });
       child.on("close", async (code, signal) => {
         clearTimeout(timer);
-        const output = truncateToBytes(`${stdout.toString("utf8")}${stderr.toString("utf8")}`, maxOutputBytes);
+        const output = truncateToBytes(
+          `${stdout.toString("utf8")}${stderr.toString("utf8")}`,
+          maxOutputBytes,
+        );
         if (timedOut) {
           const err = new Error(`Command timed out after ${timeoutMs}ms`);
-          await logToolCall("bash", { cmd, args }, { output }, "error", err, started);
+          await logToolCall(
+            "bash",
+            { cmd, args },
+            { output },
+            "error",
+            err,
+            started,
+          );
           reject(err);
           return;
         }
         if (code !== 0) {
-          const err = new Error(signal ? `Command failed with signal ${signal}` : `Command failed with exit code ${code}`);
-          await logToolCall("bash", { cmd, args }, { output }, "error", err, started);
+          const err = new Error(
+            signal
+              ? `Command failed with signal ${signal}`
+              : `Command failed with exit code ${code}`,
+          );
+          await logToolCall(
+            "bash",
+            { cmd, args },
+            { output },
+            "error",
+            err,
+            started,
+          );
           reject(err);
           return;
         }
-        await logToolCall("bash", { cmd, args }, { output }, "success", undefined, started);
+        await logToolCall(
+          "bash",
+          { cmd, args },
+          { output },
+          "success",
+          undefined,
+          started,
+        );
         resolve(output);
       });
     });

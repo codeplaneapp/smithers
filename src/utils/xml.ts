@@ -1,7 +1,9 @@
 import type { XmlNode, XmlElement } from "../types";
 
 function sortProps(props: Record<string, string>): Record<string, string> {
-  const entries = Object.entries(props).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const entries = Object.entries(props).sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
   return Object.fromEntries(entries);
 }
 

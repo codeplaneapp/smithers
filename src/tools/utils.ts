@@ -15,7 +15,10 @@ export function resolveSandboxPath(rootDir: string, inputPath: string): string {
   return resolved;
 }
 
-export async function assertPathWithinRoot(rootDir: string, resolvedPath: string) {
+export async function assertPathWithinRoot(
+  rootDir: string,
+  resolvedPath: string,
+) {
   const root = await realpath(resolve(rootDir));
   let current = resolvedPath;
   while (true) {

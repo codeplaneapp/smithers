@@ -1,10 +1,23 @@
-import type { SmithersWorkflow, RunOptions, RunResult, SmithersEvent, TaskDescriptor } from "../types";
+import type {
+  SmithersWorkflow,
+  RunOptions,
+  RunResult,
+  SmithersEvent,
+  TaskDescriptor,
+} from "../types";
 import { SmithersRenderer } from "../dom/renderer";
 import { buildContext } from "../context";
 import { loadInput, loadOutputs } from "../db/snapshot";
 import { ensureSmithersTables } from "../db/ensure";
 import { SmithersDb } from "../db/adapter";
-import { selectOutputRow, upsertOutputRow, validateOutput, validateExistingOutput, getAgentOutputSchema, describeSchemaShape } from "../db/output";
+import {
+  selectOutputRow,
+  upsertOutputRow,
+  validateOutput,
+  validateExistingOutput,
+  getAgentOutputSchema,
+  describeSchemaShape,
+} from "../db/output";
 import { validateInput } from "../db/input";
 import { schemaSignature } from "../db/schema-signature";
 import { canonicalizeXml } from "../utils/xml";
@@ -12,7 +25,14 @@ import { sha256Hex } from "../utils/hash";
 import { nowMs } from "../utils/time";
 import { newRunId } from "../utils/ids";
 import { errorToJson, SmithersError } from "../utils/errors";
-import { buildPlanTree, scheduleTasks, buildStateKey, type TaskState, type TaskStateMap, type RalphStateMap } from "./scheduler";
+import {
+  buildPlanTree,
+  scheduleTasks,
+  buildStateKey,
+  type TaskState,
+  type TaskStateMap,
+  type RalphStateMap,
+} from "./scheduler";
 import { runWithToolContext } from "../tools/context";
 import { EventBus } from "../events";
 import { getJjPointer } from "../vcs/jj";
@@ -38,7 +58,9 @@ function acquireCaffeinate(): { release: () => void } {
     child.unref();
     return {
       release: () => {
-        try { child.kill(); } catch {}
+        try {
+          child.kill();
+        } catch {}
       },
     };
   } catch {
@@ -52,24 +74,36 @@ function coercePositiveInt(value: unknown, fallback: number): number {
   return Math.floor(num);
 }
 
-function buildInputRow(inputTable: any, runId: string, input: Record<string, unknown>) {
+function buildInputRow(
+  inputTable: any,
+  runId: string,
+  input: Record<string, unknown>,
+) {
   const cols = getTableColumns(inputTable as any) as Record<string, any>;
   const keys = Object.keys(cols);
   const hasPayload = keys.includes("payload");
-  const payloadOnly = hasPayload && keys.every((key) => key === "runId" || key === "payload");
+  const payloadOnly =
+    hasPayload && keys.every((key) => key === "runId" || key === "payload");
   if (payloadOnly) {
     return { runId, payload: input };
   }
   return { runId, ...input };
 }
 
-function resolveRootDir(opts: RunOptions, workflowPath?: string | null): string {
+function resolveRootDir(
+  opts: RunOptions,
+  workflowPath?: string | null,
+): string {
   if (opts.rootDir) return resolve(opts.rootDir);
   if (workflowPath) return resolve(dirname(workflowPath));
   return resolve(process.cwd());
 }
 
-function resolveLogDir(rootDir: string, runId: string, logDir?: string | null): string | undefined {
+function resolveLogDir(
+  rootDir: string,
+  runId: string,
+  logDir?: string | null,
+): string | undefined {
   if (logDir === null) return undefined;
   if (typeof logDir === "string") {
     return resolve(rootDir, logDir);
@@ -125,7 +159,9 @@ function getWorkflowNameFromXml(xml: any): string {
   return xml.props?.name ?? "workflow";
 }
 
-function buildDescriptorMap(tasks: TaskDescriptor[]): Map<string, TaskDescriptor> {
+function buildDescriptorMap(
+  tasks: TaskDescriptor[],
+): Map<string, TaskDescriptor> {
   const map = new Map<string, TaskDescriptor>();
   for (const task of tasks) map.set(task.nodeId, task);
   return map;
@@ -134,7 +170,10 @@ function buildDescriptorMap(tasks: TaskDescriptor[]): Map<string, TaskDescriptor
 function buildRalphStateMap(rows: any[]): RalphStateMap {
   const map: RalphStateMap = new Map();
   for (const row of rows) {
-    map.set(row.ralphId, { iteration: row.iteration ?? 0, done: Boolean(row.done) });
+    map.set(row.ralphId, {
+      iteration: row.iteration ?? 0,
+      done: Boolean(row.done),
+    });
   }
   return map;
 }
@@ -155,7 +194,10 @@ function ralphIterationsObject(state: RalphStateMap): Record<string, number> {
   return obj;
 }
 
-function buildRalphDoneMap(ralphs: { id: string; until: boolean }[], state: RalphStateMap): Map<string, boolean> {
+function buildRalphDoneMap(
+  ralphs: { id: string; until: boolean }[],
+  state: RalphStateMap,
+): Map<string, boolean> {
   const done = new Map<string, boolean>();
   for (const ralph of ralphs) {
     const st = state.get(ralph.id);
@@ -193,7 +235,11 @@ async function computeTaskStates(
     }
 
     if (desc.needsApproval) {
-      const approval = await adapter.getApproval(runId, desc.nodeId, desc.iteration);
+      const approval = await adapter.getApproval(
+        runId,
+        desc.nodeId,
+        desc.iteration,
+      );
       if (approval?.status === "denied") {
         const state: TaskState = desc.continueOnFail ? "skipped" : "failed";
         stateMap.set(key, state);
@@ -251,7 +297,11 @@ async function computeTaskStates(
       }
     }
 
-    const attempts = await adapter.listAttempts(runId, desc.nodeId, desc.iteration);
+    const attempts = await adapter.listAttempts(
+      runId,
+      desc.nodeId,
+      desc.iteration,
+    );
     const inProgress = attempts.find((a: any) => a.state === "in-progress");
     if (inProgress) {
       stateMap.set(key, "in-progress");
@@ -355,7 +405,10 @@ function applyConcurrencyLimits(
     if (state === "in-progress") {
       inProgressTotal += 1;
       if (desc.parallelGroupId) {
-        inProgressByGroup.set(desc.parallelGroupId, (inProgressByGroup.get(desc.parallelGroupId) ?? 0) + 1);
+        inProgressByGroup.set(
+          desc.parallelGroupId,
+          (inProgressByGroup.get(desc.parallelGroupId) ?? 0) + 1,
+        );
       }
     }
   }
@@ -377,13 +430,23 @@ function applyConcurrencyLimits(
   return selected;
 }
 
-async function cancelInProgress(adapter: SmithersDb, runId: string, eventBus: EventBus) {
+async function cancelInProgress(
+  adapter: SmithersDb,
+  runId: string,
+  eventBus: EventBus,
+) {
   const inProgress = await adapter.listInProgressAttempts(runId);
   for (const attempt of inProgress) {
-    await adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-      state: "cancelled",
-      finishedAtMs: nowMs(),
-    });
+    await adapter.updateAttempt(
+      runId,
+      attempt.nodeId,
+      attempt.iteration,
+      attempt.attempt,
+      {
+        state: "cancelled",
+        finishedAtMs: nowMs(),
+      },
+    );
     await adapter.insertNode({
       runId,
       nodeId: attempt.nodeId,
@@ -411,10 +474,16 @@ async function cancelStaleAttempts(adapter: SmithersDb, runId: string) {
   const now = nowMs();
   for (const attempt of inProgress) {
     if (attempt.startedAtMs && now - attempt.startedAtMs > STALE_ATTEMPT_MS) {
-      await adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-        state: "cancelled",
-        finishedAtMs: now,
-      });
+      await adapter.updateAttempt(
+        runId,
+        attempt.nodeId,
+        attempt.iteration,
+        attempt.attempt,
+        {
+          state: "cancelled",
+          finishedAtMs: now,
+        },
+      );
       await adapter.insertNode({
         runId,
         nodeId: attempt.nodeId,
@@ -435,11 +504,20 @@ async function executeTask(
   runId: string,
   desc: TaskDescriptor,
   eventBus: EventBus,
-  toolConfig: { rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number },
+  toolConfig: {
+    rootDir: string;
+    allowNetwork: boolean;
+    maxOutputBytes: number;
+    toolTimeoutMs: number;
+  },
   workflowName: string,
   cacheEnabled: boolean,
 ) {
-  const attempts = await adapter.listAttempts(runId, desc.nodeId, desc.iteration);
+  const attempts = await adapter.listAttempts(
+    runId,
+    desc.nodeId,
+    desc.iteration,
+  );
   const attemptNo = (attempts[0]?.attempt ?? 0) + 1;
 
   await adapter.insertAttempt({
@@ -492,7 +570,9 @@ async function executeTask(
     if (cacheEnabled) {
       const schemaSig = schemaSignature(desc.outputTable as any);
       const agentSig = desc.agent?.id ?? "agent";
-      const toolsSig = desc.agent?.tools ? Object.keys(desc.agent.tools).sort().join(",") : "";
+      const toolsSig = desc.agent?.tools
+        ? Object.keys(desc.agent.tools).sort().join(",")
+        : "";
       const cacheBase = {
         workflowName,
         nodeId: desc.nodeId,
@@ -516,7 +596,7 @@ async function executeTask(
     }
 
     if (!payload) {
-      const taskRoot = desc.rootDirOverride ?? toolConfig.rootDir;
+      let taskRoot = toolConfig.rootDir;
       if (desc.agent) {
         const result = await runWithToolContext(
           {
@@ -535,17 +615,17 @@ async function executeTask(
             // Generate with the provided prompt
             // The agent should output JSON as specified in the prompt
             const emitOutput = (text: string, stream: "stdout" | "stderr") => {
-                eventBus.emit("event", {
-                  type: "NodeOutput",
-                  runId,
-                  nodeId: desc.nodeId,
-                  iteration: desc.iteration,
-                  attempt: attemptNo,
-                  text,
-                  stream,
-                  timestampMs: nowMs(),
-                });
-              };
+              eventBus.emit("event", {
+                type: "NodeOutput",
+                runId,
+                nodeId: desc.nodeId,
+                iteration: desc.iteration,
+                attempt: attemptNo,
+                text,
+                stream,
+                timestampMs: nowMs(),
+              });
+            };
             return (desc.agent as any).generate({
               options: undefined as any,
               prompt: desc.prompt ?? "",
@@ -561,19 +641,25 @@ async function executeTask(
 
         // Try structured output first (wrapping in try/catch since getters may throw)
         try {
-          if ((result as any)._output !== undefined && (result as any)._output !== null) {
+          if (
+            (result as any)._output !== undefined &&
+            (result as any)._output !== null
+          ) {
             output = (result as any)._output;
-          } else if ((result as any).output !== undefined && (result as any).output !== null) {
+          } else if (
+            (result as any).output !== undefined &&
+            (result as any).output !== null
+          ) {
             output = (result as any).output;
           }
         } catch {
           // Structured output access threw
         }
-        
+
         // Fall back to parsing text/steps for JSON
         if (output === undefined) {
           const text = (result as any).text ?? "";
-          
+
           // Try to parse the whole text as JSON first
           try {
             const trimmed = text.trim();
@@ -583,7 +669,7 @@ async function executeTask(
           } catch {
             // Not valid JSON, try extraction
           }
-          
+
           // Helper to extract balanced JSON from text
           function extractBalancedJson(str: string): string | null {
             const start = str.indexOf("{");
@@ -622,7 +708,9 @@ async function executeTask(
             // Check text first - look for code fence with balanced JSON
             const codeFenceStart = text.search(/```(?:json)?\s*\{/);
             if (codeFenceStart !== -1) {
-              const afterFence = text.slice(codeFenceStart).replace(/```(?:json)?\s*/, "");
+              const afterFence = text
+                .slice(codeFenceStart)
+                .replace(/```(?:json)?\s*/, "");
               const jsonStr = extractBalancedJson(afterFence);
               if (jsonStr) {
                 try {
@@ -632,7 +720,7 @@ async function executeTask(
                 }
               }
             }
-            
+
             // Check all steps for code fences with balanced JSON
             if (output === undefined) {
               const steps = (result as any).steps ?? [];
@@ -640,7 +728,9 @@ async function executeTask(
                 const stepText = steps[i]?.text ?? "";
                 const fenceStart = stepText.search(/```(?:json)?\s*\{/);
                 if (fenceStart !== -1) {
-                  const afterFence = stepText.slice(fenceStart).replace(/```(?:json)?\s*/, "");
+                  const afterFence = stepText
+                    .slice(fenceStart)
+                    .replace(/```(?:json)?\s*/, "");
                   const jsonStr = extractBalancedJson(afterFence);
                   if (jsonStr) {
                     try {
@@ -654,7 +744,7 @@ async function executeTask(
               }
             }
           }
-          
+
           // Extract JSON object using balanced brace matching
           if (output === undefined) {
             const steps = (result as any).steps ?? [];
@@ -690,7 +780,7 @@ async function executeTask(
               }
             }
           }
-          
+
           // If no JSON found, send a follow-up prompt asking for just the JSON with schema info
           if (output === undefined && desc.agent) {
             const schemaDesc = describeSchemaShape(desc.outputTable as any);
@@ -730,11 +820,18 @@ async function executeTask(
           if (output === undefined) {
             // Debug: log what we have
             const debugSteps = (result as any).steps ?? [];
-            const stepTexts = debugSteps.map((s: any, i: number) => `Step ${i}: ${(s?.text ?? "").slice(0, 200)}`);
+            const stepTexts = debugSteps.map(
+              (s: any, i: number) =>
+                `Step ${i}: ${(s?.text ?? "").slice(0, 200)}`,
+            );
             const finishReason = (result as any).finishReason ?? "unknown";
-            console.log(`[JSON Debug] finishReason=${finishReason}, text.length=${text.length}, steps.count=${debugSteps.length}`);
+            console.log(
+              `[JSON Debug] finishReason=${finishReason}, text.length=${text.length}, steps.count=${debugSteps.length}`,
+            );
             console.log(`[JSON Debug] text preview: ${text.slice(0, 300)}`);
-            console.log(`[JSON Debug] last step text: ${debugSteps[debugSteps.length - 1]?.text?.slice(0, 500) ?? "none"}`);
+            console.log(
+              `[JSON Debug] last step text: ${debugSteps[debugSteps.length - 1]?.text?.slice(0, 500) ?? "none"}`,
+            );
             throw new Error("No valid JSON output found in agent response");
           }
         }
@@ -745,8 +842,13 @@ async function executeTask(
             payload = JSON.parse(output);
           } catch (e) {
             const fs = await import("node:fs");
-            fs.appendFileSync("/tmp/smithers_debug.log", `[JSON Debug] output is string, length=${output.length}, preview: ${output.slice(0, 500)}\n`);
-            throw new Error(`Failed to parse agent output as JSON. Output starts with: "${output.slice(0, 100)}"`);
+            fs.appendFileSync(
+              "/tmp/smithers_debug.log",
+              `[JSON Debug] output is string, length=${output.length}, preview: ${output.slice(0, 500)}\n`,
+            );
+            throw new Error(
+              `Failed to parse agent output as JSON. Output starts with: "${output.slice(0, 100)}"`,
+            );
           }
         } else {
           payload = output;
@@ -762,11 +864,19 @@ async function executeTask(
         if ("nodeId" in payload && (payload as any).nodeId !== desc.nodeId) {
           throw new Error("Payload nodeId does not match task id");
         }
-        if ("iteration" in payload && (payload as any).iteration !== desc.iteration) {
+        if (
+          "iteration" in payload &&
+          (payload as any).iteration !== desc.iteration
+        ) {
           throw new Error("Payload iteration does not match task iteration");
         }
       }
-      const payloadWithKeys = { ...(payload ?? {}), runId, nodeId: desc.nodeId, iteration: desc.iteration };
+      const payloadWithKeys = {
+        ...(payload ?? {}),
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+      };
       let validation = validateOutput(desc.outputTable as any, payloadWithKeys);
 
       // Schema-validation retry: if the agent returned parseable JSON but it
@@ -777,9 +887,12 @@ async function executeTask(
       while (!validation.ok && desc.agent && schemaRetry < MAX_SCHEMA_RETRIES) {
         schemaRetry++;
         const schemaDesc = describeSchemaShape(desc.outputTable as any);
-        const zodIssues = validation.error?.issues
-          ?.map((iss: any) => `  - ${(iss.path ?? []).join(".")}: ${iss.message}`)
-          .join("\n") ?? "Unknown validation error";
+        const zodIssues =
+          validation.error?.issues
+            ?.map(
+              (iss: any) => `  - ${(iss.path ?? []).join(".")}: ${iss.message}`,
+            )
+            .join("\n") ?? "Unknown validation error";
         const schemaRetryPrompt = [
           `Your previous output did not match the required schema. Validation errors:`,
           zodIssues,
@@ -808,15 +921,24 @@ async function executeTask(
         }
         if (retryOutput === undefined) {
           // Try code-fence extraction
-          const fenceMatch = retryText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+          const fenceMatch = retryText.match(
+            /```(?:json)?\s*(\{[\s\S]*?\})\s*```/,
+          );
           if (fenceMatch) {
-            try { retryOutput = JSON.parse(fenceMatch[1]!); } catch {}
+            try {
+              retryOutput = JSON.parse(fenceMatch[1]!);
+            } catch {}
           }
         }
 
         if (retryOutput && typeof retryOutput === "object") {
           payload = retryOutput;
-          const retryPayload = { ...retryOutput, runId, nodeId: desc.nodeId, iteration: desc.iteration };
+          const retryPayload = {
+            ...retryOutput,
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+          };
           validation = validateOutput(desc.outputTable as any, retryPayload);
           if (validation.ok) {
             payload = validation.data;
@@ -830,7 +952,12 @@ async function executeTask(
       payload = validation.data;
     }
 
-    await upsertOutputRow(db, desc.outputTable as any, { runId, nodeId: desc.nodeId, iteration: desc.iteration }, payload);
+    await upsertOutputRow(
+      db,
+      desc.outputTable as any,
+      { runId, nodeId: desc.nodeId, iteration: desc.iteration },
+      payload,
+    );
     if (cacheEnabled && cacheKey && !cached) {
       await adapter.insertCache({
         cacheKey,
@@ -840,7 +967,9 @@ async function executeTask(
         outputTable: desc.outputTableName,
         schemaSig: schemaSignature(desc.outputTable as any),
         agentSig: desc.agent?.id ?? "agent",
-        toolsSig: desc.agent?.tools ? Object.keys(desc.agent.tools).sort().join(",") : null,
+        toolsSig: desc.agent?.tools
+          ? Object.keys(desc.agent.tools).sort().join(",")
+          : null,
         jjPointer: null,
         payloadJson: JSON.stringify(payload),
       });
@@ -901,8 +1030,14 @@ async function executeTask(
       timestampMs: nowMs(),
     });
 
-    const attempts = await adapter.listAttempts(runId, desc.nodeId, desc.iteration);
-    if (attempts.filter((a: any) => a.state === "failed").length <= desc.retries) {
+    const attempts = await adapter.listAttempts(
+      runId,
+      desc.nodeId,
+      desc.iteration,
+    );
+    if (
+      attempts.filter((a: any) => a.state === "failed").length <= desc.retries
+    ) {
       await eventBus.emitEventWithPersist({
         type: "NodeRetrying",
         runId,
@@ -915,9 +1050,20 @@ async function executeTask(
   }
 }
 
-export async function renderFrame<Schema>(workflow: SmithersWorkflow<Schema>, ctx: any): Promise<{ runId: string; frameNo: number; xml: any; tasks: TaskDescriptor[] }> {
+export async function renderFrame<Schema>(
+  workflow: SmithersWorkflow<Schema>,
+  ctx: any,
+): Promise<{
+  runId: string;
+  frameNo: number;
+  xml: any;
+  tasks: TaskDescriptor[];
+}> {
   const renderer = new SmithersRenderer();
-  const result = await renderer.render(workflow.build(ctx), { ralphIterations: ctx?.iterations, defaultIteration: ctx?.iteration });
+  const result = await renderer.render(workflow.build(ctx), {
+    ralphIterations: ctx?.iterations,
+    defaultIteration: ctx?.iteration,
+  });
 
   // Resolve string-keyed output tasks using the schema registry
   if (workflow.schemaRegistry) {
@@ -937,7 +1083,10 @@ export async function renderFrame<Schema>(workflow: SmithersWorkflow<Schema>, ct
   return { runId: ctx.runId, frameNo: 0, xml: result.xml, tasks: result.tasks };
 }
 
-export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, opts: RunOptions): Promise<RunResult> {
+export async function runWorkflow<Schema>(
+  workflow: SmithersWorkflow<Schema>,
+  opts: RunOptions,
+): Promise<RunResult> {
   const db = workflow.db as any;
   ensureSmithersTables(db);
   const adapter = new SmithersDb(db);
@@ -945,19 +1094,37 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
   const schema = resolveSchema(db);
   const inputTable = schema.input;
   if (!inputTable) {
-    throw new SmithersError("MISSING_INPUT_TABLE", "Schema must include input table");
+    throw new SmithersError(
+      "MISSING_INPUT_TABLE",
+      "Schema must include input table",
+    );
   }
 
-  const resolvedWorkflowPath = opts.workflowPath ? resolve(opts.workflowPath) : null;
+  const resolvedWorkflowPath = opts.workflowPath
+    ? resolve(opts.workflowPath)
+    : null;
   const rootDir = resolveRootDir(opts, resolvedWorkflowPath);
   const logDir = resolveLogDir(rootDir, runId, opts.logDir);
-  const maxConcurrency = coercePositiveInt(opts.maxConcurrency, DEFAULT_MAX_CONCURRENCY);
-  const maxOutputBytes = coercePositiveInt(opts.maxOutputBytes, DEFAULT_MAX_OUTPUT_BYTES);
-  const toolTimeoutMs = coercePositiveInt(opts.toolTimeoutMs, DEFAULT_TOOL_TIMEOUT_MS);
+  const maxConcurrency = coercePositiveInt(
+    opts.maxConcurrency,
+    DEFAULT_MAX_CONCURRENCY,
+  );
+  const maxOutputBytes = coercePositiveInt(
+    opts.maxOutputBytes,
+    DEFAULT_MAX_OUTPUT_BYTES,
+  );
+  const toolTimeoutMs = coercePositiveInt(
+    opts.toolTimeoutMs,
+    DEFAULT_TOOL_TIMEOUT_MS,
+  );
   const allowNetwork = Boolean(opts.allowNetwork);
 
   const lastSeq = await adapter.getLastEventSeq(runId);
-  const eventBus = new EventBus({ db: adapter, logDir, startSeq: (lastSeq ?? -1) + 1 });
+  const eventBus = new EventBus({
+    db: adapter,
+    logDir,
+    startSeq: (lastSeq ?? -1) + 1,
+  });
   if (opts.onProgress) {
     eventBus.on("event", (e: SmithersEvent) => opts.onProgress?.(e));
   }
@@ -968,14 +1135,21 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
     if (!opts.resume) {
       assertInputObject(opts.input);
       if ("runId" in opts.input && (opts.input as any).runId !== runId) {
-        throw new SmithersError("INVALID_INPUT", "Input runId does not match provided runId");
+        throw new SmithersError(
+          "INVALID_INPUT",
+          "Input runId does not match provided runId",
+        );
       }
       const inputRow = buildInputRow(inputTable as any, runId, opts.input);
       const validation = validateInput(inputTable as any, inputRow);
       if (!validation.ok) {
-        throw new SmithersError("INVALID_INPUT", "Input does not match schema", {
-          issues: validation.error?.issues,
-        });
+        throw new SmithersError(
+          "INVALID_INPUT",
+          "Input does not match schema",
+          {
+            issues: validation.error?.issues,
+          },
+        );
       }
       const insertQuery = db.insert(inputTable).values(inputRow);
       if (typeof insertQuery.onConflictDoNothing === "function") {
@@ -986,7 +1160,10 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
     } else {
       const existingInput = await loadInput(db, inputTable, runId);
       if (!existingInput) {
-        throw new SmithersError("MISSING_INPUT", "Cannot resume without an existing input row");
+        throw new SmithersError(
+          "MISSING_INPUT",
+          "Cannot resume without an existing input row",
+        );
       }
     }
 
@@ -1012,11 +1189,19 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
       await adapter.updateRun(runId, {
         status: "running",
         startedAtMs: existingRun.startedAtMs ?? nowMs(),
-        workflowPath: resolvedWorkflowPath ?? opts.workflowPath ?? existingRun.workflowPath ?? null,
+        workflowPath:
+          resolvedWorkflowPath ??
+          opts.workflowPath ??
+          existingRun.workflowPath ??
+          null,
       });
     }
 
-    await eventBus.emitEventWithPersist({ type: "RunStarted", runId, timestampMs: nowMs() });
+    await eventBus.emitEventWithPersist({
+      type: "RunStarted",
+      runId,
+      timestampMs: nowMs(),
+    });
 
     await cancelStaleAttempts(adapter, runId);
 
@@ -1025,10 +1210,16 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
       const staleInProgress = await adapter.listInProgressAttempts(runId);
       const now = nowMs();
       for (const attempt of staleInProgress) {
-        await adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-          state: "cancelled",
-          finishedAtMs: now,
-        });
+        await adapter.updateAttempt(
+          runId,
+          attempt.nodeId,
+          attempt.iteration,
+          attempt.attempt,
+          {
+            state: "cancelled",
+            finishedAtMs: now,
+          },
+        );
         await adapter.insertNode({
           runId,
           nodeId: attempt.nodeId,
@@ -1047,15 +1238,27 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
     let defaultIteration = 0;
     if (opts.resume) {
       const nodes = await adapter.listNodes(runId);
-      const maxIteration = nodes.reduce((max, node) => Math.max(max, node.iteration ?? 0), 0);
+      const maxIteration = nodes.reduce(
+        (max, node) => Math.max(max, node.iteration ?? 0),
+        0,
+      );
       defaultIteration = maxIteration;
     }
-    const ralphState: RalphStateMap = buildRalphStateMap(await adapter.listRalph(runId));
+    const ralphState: RalphStateMap = buildRalphStateMap(
+      await adapter.listRalph(runId),
+    );
 
     while (true) {
       if (opts.signal?.aborted) {
-        await adapter.updateRun(runId, { status: "cancelled", finishedAtMs: nowMs() });
-        await eventBus.emitEventWithPersist({ type: "RunCancelled", runId, timestampMs: nowMs() });
+        await adapter.updateRun(runId, {
+          status: "cancelled",
+          finishedAtMs: nowMs(),
+        });
+        await eventBus.emitEventWithPersist({
+          type: "RunCancelled",
+          runId,
+          timestampMs: nowMs(),
+        });
         return { runId, status: "cancelled" };
       }
 
@@ -1071,10 +1274,14 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
         outputs,
       });
 
-      const { xml, tasks, mountedTaskIds } = await renderer.render(workflow.build(ctx), {
-        ralphIterations,
-        defaultIteration,
-      });
+      const { xml, tasks, mountedTaskIds } = await renderer.render(
+        workflow.build(ctx),
+        {
+          ralphIterations,
+          defaultIteration,
+          baseRootDir: rootDir,
+        },
+      );
       const xmlJson = canonicalizeXml(xml);
       const xmlHash = sha256Hex(xmlJson);
 
@@ -1101,7 +1308,11 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
       const workflowName = getWorkflowNameFromXml(xml);
       const cacheEnabled =
         workflow.opts.cache ??
-        Boolean(xml && xml.kind === "element" && (xml.props.cache === "true" || xml.props.cache === "1"));
+        Boolean(
+          xml &&
+          xml.kind === "element" &&
+          (xml.props.cache === "true" || xml.props.cache === "1"),
+        );
       await adapter.updateRun(runId, { workflowName });
 
       frameNo += 1;
@@ -1112,14 +1323,30 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
         xmlJson,
         xmlHash,
         mountedTaskIdsJson: JSON.stringify(mountedTaskIds),
-        taskIndexJson: JSON.stringify(tasks.map((t) => ({ nodeId: t.nodeId, ordinal: t.ordinal, iteration: t.iteration }))),
+        taskIndexJson: JSON.stringify(
+          tasks.map((t) => ({
+            nodeId: t.nodeId,
+            ordinal: t.ordinal,
+            iteration: t.iteration,
+          })),
+        ),
         note: null,
       });
-      await eventBus.emitEventWithPersist({ type: "FrameCommitted", runId, frameNo, xmlHash, timestampMs: nowMs() });
+      await eventBus.emitEventWithPersist({
+        type: "FrameCommitted",
+        runId,
+        frameNo,
+        xmlHash,
+        timestampMs: nowMs(),
+      });
 
       const inProgress = await adapter.listInProgressAttempts(runId);
       const mountedSet = new Set(mountedTaskIds);
-      if (inProgress.some((a: any) => !mountedSet.has(`${a.nodeId}::${a.iteration ?? 0}`))) {
+      if (
+        inProgress.some(
+          (a: any) => !mountedSet.has(`${a.nodeId}::${a.iteration ?? 0}`),
+        )
+      ) {
         await cancelInProgress(adapter, runId, eventBus);
         continue;
       }
@@ -1146,11 +1373,23 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
       const singleRalphId = ralphs.length === 1 ? ralphs[0]!.id : null;
 
       const ralphDoneMap = buildRalphDoneMap(ralphs, ralphState);
-      const stateMap = await computeTaskStates(adapter, db, runId, tasks, eventBus, ralphDoneMap);
+      const stateMap = await computeTaskStates(
+        adapter,
+        db,
+        runId,
+        tasks,
+        eventBus,
+        ralphDoneMap,
+      );
       const descriptorMap = buildDescriptorMap(tasks);
       const schedule = scheduleTasks(plan, stateMap, descriptorMap, ralphState);
 
-      const runnable = applyConcurrencyLimits(schedule.runnable, stateMap, maxConcurrency, tasks);
+      const runnable = applyConcurrencyLimits(
+        schedule.runnable,
+        stateMap,
+        maxConcurrency,
+        tasks,
+      );
 
       if (runnable.length === 0) {
         if (schedule.waitingApprovalExists) {
@@ -1170,14 +1409,25 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
         });
 
         if (blockingFailed) {
-          await adapter.updateRun(runId, { status: "failed", finishedAtMs: nowMs() });
-          await eventBus.emitEventWithPersist({ type: "RunFailed", runId, error: "Task failed", timestampMs: nowMs() });
+          await adapter.updateRun(runId, {
+            status: "failed",
+            finishedAtMs: nowMs(),
+          });
+          await eventBus.emitEventWithPersist({
+            type: "RunFailed",
+            runId,
+            error: "Task failed",
+            timestampMs: nowMs(),
+          });
           return { runId, status: "failed", error: "Task failed" };
         }
 
         if (schedule.readyRalphs.length > 0) {
           for (const ralph of schedule.readyRalphs) {
-            const state = ralphState.get(ralph.id) ?? { iteration: defaultIteration, done: false };
+            const state = ralphState.get(ralph.id) ?? {
+              iteration: defaultIteration,
+              done: false,
+            };
             if (state.done || ralph.until) continue;
             if (state.iteration + 1 < ralph.maxIterations) {
               state.iteration += 1;
@@ -1195,9 +1445,25 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
               continue;
             }
             if (ralph.onMaxReached === "fail") {
-              await adapter.updateRun(runId, { status: "failed", finishedAtMs: nowMs(), errorJson: JSON.stringify({ code: "RALPH_MAX_REACHED", ralphId: ralph.id }) });
-              await eventBus.emitEventWithPersist({ type: "RunFailed", runId, error: { code: "RALPH_MAX_REACHED", ralphId: ralph.id }, timestampMs: nowMs() });
-              return { runId, status: "failed", error: { code: "RALPH_MAX_REACHED", ralphId: ralph.id } };
+              await adapter.updateRun(runId, {
+                status: "failed",
+                finishedAtMs: nowMs(),
+                errorJson: JSON.stringify({
+                  code: "RALPH_MAX_REACHED",
+                  ralphId: ralph.id,
+                }),
+              });
+              await eventBus.emitEventWithPersist({
+                type: "RunFailed",
+                runId,
+                error: { code: "RALPH_MAX_REACHED", ralphId: ralph.id },
+                timestampMs: nowMs(),
+              });
+              return {
+                runId,
+                status: "failed",
+                error: { code: "RALPH_MAX_REACHED", ralphId: ralph.id },
+              };
             }
             ralphState.set(ralph.id, { ...state, done: true });
             await adapter.insertOrUpdateRalph({
@@ -1211,16 +1477,29 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
           continue;
         }
 
-        await adapter.updateRun(runId, { status: "finished", finishedAtMs: nowMs() });
-        await eventBus.emitEventWithPersist({ type: "RunFinished", runId, timestampMs: nowMs() });
+        await adapter.updateRun(runId, {
+          status: "finished",
+          finishedAtMs: nowMs(),
+        });
+        await eventBus.emitEventWithPersist({
+          type: "RunFinished",
+          runId,
+          timestampMs: nowMs(),
+        });
 
         const outputTable = schema.output;
         let output: unknown = undefined;
         if (outputTable) {
-          const cols = getTableColumns(outputTable as any) as Record<string, any>;
+          const cols = getTableColumns(outputTable as any) as Record<
+            string,
+            any
+          >;
           const runIdCol = cols.runId;
           if (runIdCol) {
-            const rows = await db.select().from(outputTable).where(eq(runIdCol, runId));
+            const rows = await db
+              .select()
+              .from(outputTable)
+              .where(eq(runIdCol, runId));
             output = rows;
           } else {
             output = await db.select().from(outputTable);
@@ -1237,18 +1516,36 @@ export async function runWorkflow<Schema>(workflow: SmithersWorkflow<Schema>, op
       };
 
       await Promise.all(
-      runnable.map((task) =>
-        executeTask(adapter, db, runId, task, eventBus, toolConfig, workflowName, cacheEnabled),
-      ),
-    );
+        runnable.map((task) =>
+          executeTask(
+            adapter,
+            db,
+            runId,
+            task,
+            eventBus,
+            toolConfig,
+            workflowName,
+            cacheEnabled,
+          ),
+        ),
+      );
     }
   } catch (err) {
     if (process.env.SMITHERS_DEBUG) {
       console.error("[smithers] runWorkflow error", err);
     }
     const errorInfo = errorToJson(err);
-    await adapter.updateRun(runId, { status: "failed", finishedAtMs: nowMs(), errorJson: JSON.stringify(errorInfo) });
-    await eventBus.emitEventWithPersist({ type: "RunFailed", runId, error: errorInfo, timestampMs: nowMs() });
+    await adapter.updateRun(runId, {
+      status: "failed",
+      finishedAtMs: nowMs(),
+      errorJson: JSON.stringify(errorInfo),
+    });
+    await eventBus.emitEventWithPersist({
+      type: "RunFailed",
+      runId,
+      error: errorInfo,
+      timestampMs: nowMs(),
+    });
     return { runId, status: "failed", error: errorInfo };
   } finally {
     wakeLock.release();

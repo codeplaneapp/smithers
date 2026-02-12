@@ -2,7 +2,10 @@ import type { Table } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export function validateInput(table: Table, payload: unknown): {
+export function validateInput(
+  table: Table,
+  payload: unknown,
+): {
   ok: boolean;
   data?: any;
   error?: z.ZodError;

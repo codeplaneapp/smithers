@@ -1,7 +1,14 @@
 import { nowMs } from "../utils/time";
 import { SmithersDb } from "../db/adapter";
 
-export async function approveNode(adapter: SmithersDb, runId: string, nodeId: string, iteration: number, note?: string, decidedBy?: string) {
+export async function approveNode(
+  adapter: SmithersDb,
+  runId: string,
+  nodeId: string,
+  iteration: number,
+  note?: string,
+  decidedBy?: string,
+) {
   const ts = nowMs();
   await adapter.insertOrUpdateApproval({
     runId,
@@ -37,7 +44,14 @@ export async function approveNode(adapter: SmithersDb, runId: string, nodeId: st
   });
 }
 
-export async function denyNode(adapter: SmithersDb, runId: string, nodeId: string, iteration: number, note?: string, decidedBy?: string) {
+export async function denyNode(
+  adapter: SmithersDb,
+  runId: string,
+  nodeId: string,
+  iteration: number,
+  note?: string,
+  decidedBy?: string,
+) {
   const ts = nowMs();
   await adapter.insertOrUpdateApproval({
     runId,

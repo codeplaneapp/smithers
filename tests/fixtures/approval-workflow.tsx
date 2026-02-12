@@ -1,7 +1,12 @@
 /** @jsxImportSource smithers */
 import { smithers, Workflow, Task, Sequence } from "../../src/index";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  primaryKey,
+} from "drizzle-orm/sqlite-core";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,7 +44,10 @@ const outputB = sqliteTable(
 );
 
 const schema = { input, outputA, outputB };
-const tmpPath = join(mkdtempSync(join(tmpdir(), "smithers-approval-")), "db.sqlite");
+const tmpPath = join(
+  mkdtempSync(join(tmpdir(), "smithers-approval-")),
+  "db.sqlite",
+);
 const sqlite = new Database(tmpPath);
 sqlite.exec(`
   CREATE TABLE IF NOT EXISTS input (run_id TEXT PRIMARY KEY, description TEXT);

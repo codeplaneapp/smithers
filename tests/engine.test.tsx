@@ -1,6 +1,14 @@
 /** @jsxImportSource smithers */
 import { describe, expect, test } from "bun:test";
-import { Parallel, Ralph, Sequence, Task, Workflow, runWorkflow, smithers } from "../src/index.ts";
+import {
+  Parallel,
+  Ralph,
+  Sequence,
+  Task,
+  Workflow,
+  runWorkflow,
+  smithers,
+} from "../src/index.ts";
 import { approveNode } from "../src/engine/approvals";
 import { SmithersDb } from "../src/db/adapter";
 import { createTestDb, sleep } from "./helpers";
@@ -27,7 +35,9 @@ describe("Ralph iteration", () => {
     expect(result.status).toBe("finished");
 
     const rows = await (db as any).select().from(outputA);
-    const iterations = rows.map((row: any) => row.iteration).sort((a: number, b: number) => a - b);
+    const iterations = rows
+      .map((row: any) => row.iteration)
+      .sort((a: number, b: number) => a - b);
     expect(iterations).toEqual([0, 1]);
     cleanup();
   });
@@ -56,8 +66,12 @@ describe("Ralph iteration", () => {
 
     const rowsA = await (db as any).select().from(outputA);
     const rowsB = await (db as any).select().from(outputB);
-    const iterationsA = rowsA.map((row: any) => row.iteration).sort((a: number, b: number) => a - b);
-    const iterationsB = rowsB.map((row: any) => row.iteration).sort((a: number, b: number) => a - b);
+    const iterationsA = rowsA
+      .map((row: any) => row.iteration)
+      .sort((a: number, b: number) => a - b);
+    const iterationsB = rowsB
+      .map((row: any) => row.iteration)
+      .sort((a: number, b: number) => a - b);
     expect(iterationsA).toEqual([0, 1]);
     expect(iterationsB).toEqual([0]);
     cleanup();
@@ -114,7 +128,10 @@ describe("Parallel concurrency", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {}, maxConcurrency: 4 });
+    const result = await runWorkflow(workflow, {
+      input: {},
+      maxConcurrency: 4,
+    });
     expect(result.status).toBe("finished");
     expect(max).toBeLessThanOrEqual(2);
     cleanup();
@@ -143,7 +160,11 @@ describe("Approvals", () => {
     const adapter = new SmithersDb(db as any);
     await approveNode(adapter, first.runId, "gate", 0, "ok", "test");
 
-    const resumed = await runWorkflow(workflow, { input: {}, runId: first.runId, resume: true });
+    const resumed = await runWorkflow(workflow, {
+      input: {},
+      runId: first.runId,
+      resume: true,
+    });
     expect(resumed.status).toBe("finished");
 
     const rowsB = await (db as any).select().from(outputB);

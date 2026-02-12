@@ -1,5 +1,6 @@
 import type { Table } from "drizzle-orm";
 import type React from "react";
+import type { Agent } from "ai";
 
 export type XmlNode = XmlElement | XmlText;
 
@@ -24,8 +25,6 @@ export type TaskDescriptor = {
   /** Set when task is inside <Worktree>. */
   worktreeId?: string;
   worktreePath?: string;
-  /** Optional per-task root override (absolute path). */
-  rootDirOverride?: string;
 
   outputTable: Table | null;
   outputTableName: string;
@@ -48,17 +47,8 @@ export type TaskDescriptor = {
   meta?: Record<string, unknown>;
 };
 
-/**
- * Lightweight structural agent type decoupled from any specific library.
- * Includes legacy fields (version, stream) for backwards compatibility.
- */
-export type AgentLike = {
-  id?: string;
-  version?: string;
-  tools?: Record<string, any>;
-  generate: (...args: any[]) => Promise<any>;
-  stream?: (...args: any[]) => Promise<any>;
-};
+export type AgentLike = Agent<any, any, any>;
+
 export type GraphSnapshot = {
   runId: string;
   frameNo: number;
@@ -138,17 +128,31 @@ export interface SmithersCtx<Schema> {
   iterationCount(table: any, nodeId: string): number;
 }
 
-export type OutputAccessor<Schema> = ((table: any) => any[]) & Record<string, any[]>;
+export type OutputAccessor<Schema> = ((table: any) => any[]) &
+  Record<string, any[]>;
 
-export type InferRow<TTable> = TTable extends { $inferSelect: infer R } ? R : never;
+export type InferRow<TTable> = TTable extends { $inferSelect: infer R }
+  ? R
+  : never;
 
 export type SmithersEvent =
   | { type: "RunStarted"; runId: string; timestampMs: number }
-  | { type: "RunStatusChanged"; runId: string; status: RunStatus; timestampMs: number }
+  | {
+      type: "RunStatusChanged";
+      runId: string;
+      status: RunStatus;
+      timestampMs: number;
+    }
   | { type: "RunFinished"; runId: string; timestampMs: number }
   | { type: "RunFailed"; runId: string; error: unknown; timestampMs: number }
   | { type: "RunCancelled"; runId: string; timestampMs: number }
-  | { type: "FrameCommitted"; runId: string; frameNo: number; xmlHash: string; timestampMs: number }
+  | {
+      type: "FrameCommitted";
+      runId: string;
+      frameNo: number;
+      xmlHash: string;
+      timestampMs: number;
+    }
   | {
       type: "NodePending";
       runId: string;
@@ -338,22 +342,10 @@ export type RalphProps = {
  * Execute a subtree of tasks in a separate worktree rooted at `path`.
  *
  * - `id` provides stable identification for state tracking and scheduling.
- * - `baseRev` optionally selects the JJ (Jujutsu) revision to base the worktree from.
  */
 export type WorktreeProps = {
   id?: string;
   path: string;
-  baseRev?: string;
-  skipIf?: boolean;
-  children?: React.ReactNode;
-};
-
-/**
- * Group of concurrent worktrees participating in a merge queue.
- */
-export type MergeQueueProps = {
-  id?: string;
-  maxWorktrees?: number;
   skipIf?: boolean;
   children?: React.ReactNode;
 };

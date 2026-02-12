@@ -22,9 +22,17 @@ export async function revertToAttempt(
 ): Promise<RevertResult> {
   const { runId, nodeId, iteration, attempt, onProgress } = opts;
 
-  const attemptRow = await adapter.getAttempt(runId, nodeId, iteration, attempt);
+  const attemptRow = await adapter.getAttempt(
+    runId,
+    nodeId,
+    iteration,
+    attempt,
+  );
   if (!attemptRow) {
-    return { success: false, error: `Attempt not found: ${runId}/${nodeId}/${iteration}/${attempt}` };
+    return {
+      success: false,
+      error: `Attempt not found: ${runId}/${nodeId}/${iteration}/${attempt}`,
+    };
   }
 
   const jjPointer = attemptRow.jjPointer;

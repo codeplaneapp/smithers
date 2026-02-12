@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Agent, GenerateTextResult, StreamTextResult, ModelMessage } from "ai";
+import type {
+  Agent,
+  GenerateTextResult,
+  StreamTextResult,
+  ModelMessage,
+} from "ai";
 import { getToolContext } from "../tools/context";
 
 type TimeoutInput = number | { totalMs?: number } | undefined;
@@ -51,7 +56,13 @@ type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
   noChrome?: boolean;
   noSessionPersistence?: boolean;
   outputFormat?: "text" | "json" | "stream-json";
-  permissionMode?: "acceptEdits" | "bypassPermissions" | "default" | "delegate" | "dontAsk" | "plan";
+  permissionMode?:
+    | "acceptEdits"
+    | "bypassPermissions"
+    | "default"
+    | "delegate"
+    | "dontAsk"
+    | "plan";
   pluginDir?: string[];
   replayUserMessages?: boolean;
   resume?: string;
@@ -64,7 +75,9 @@ type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
   verbose?: boolean;
 };
 
-type CodexConfigOverrides = Record<string, string | number | boolean | object | null> | string[];
+type CodexConfigOverrides =
+  | Record<string, string | number | boolean | object | null>
+  | string[];
 
 type CodexAgentOptions = BaseCliAgentOptions & {
   config?: CodexConfigOverrides;
@@ -128,9 +141,17 @@ type RunCommandResult = {
   exitCode: number | null;
 };
 
-function resolveTimeoutMs(timeout: TimeoutInput, fallback?: number): number | undefined {
+function resolveTimeoutMs(
+  timeout: TimeoutInput,
+  fallback?: number,
+): number | undefined {
   if (typeof timeout === "number") return timeout;
-  if (timeout && typeof timeout === "object" && typeof timeout.totalMs === "number") return timeout.totalMs;
+  if (
+    timeout &&
+    typeof timeout === "object" &&
+    typeof timeout.totalMs === "number"
+  )
+    return timeout.totalMs;
   return fallback;
 }
 
@@ -194,7 +215,9 @@ function messagesToPrompt(messages: ModelMessage[]): PromptParts {
   }
   return {
     prompt: promptParts.join("\n\n"),
-    systemFromMessages: systemParts.length ? systemParts.join("\n\n") : undefined,
+    systemFromMessages: systemParts.length
+      ? systemParts.join("\n\n")
+      : undefined,
   };
 }
 
@@ -282,7 +305,11 @@ function emptyUsage() {
   };
 }
 
-function buildGenerateResult(text: string, output: unknown, modelId: string): GenerateTextResult<any, any> {
+function buildGenerateResult(
+  text: string,
+  output: unknown,
+  modelId: string,
+): GenerateTextResult<any, any> {
   const usage = emptyUsage();
   return {
     content: [{ type: "text", text }],
@@ -316,7 +343,9 @@ function buildGenerateResult(text: string, output: unknown, modelId: string): Ge
   } as GenerateTextResult<any, any>;
 }
 
-function asyncIterableToStream<T>(iterable: AsyncIterable<T>): ReadableStream<T> & AsyncIterable<T> {
+function asyncIterableToStream<T>(
+  iterable: AsyncIterable<T>,
+): ReadableStream<T> & AsyncIterable<T> {
   const stream = new ReadableStream<T>({
     async start(controller) {
       try {
@@ -330,11 +359,14 @@ function asyncIterableToStream<T>(iterable: AsyncIterable<T>): ReadableStream<T>
       controller.close();
     },
   });
-  (stream as any)[Symbol.asyncIterator] = iterable[Symbol.asyncIterator].bind(iterable);
+  (stream as any)[Symbol.asyncIterator] =
+    iterable[Symbol.asyncIterator].bind(iterable);
   return stream as any;
 }
 
-function buildStreamResult(result: GenerateTextResult<any, any>): StreamTextResult<any, any> {
+function buildStreamResult(
+  result: GenerateTextResult<any, any>,
+): StreamTextResult<any, any> {
   const text = result.text ?? "";
   const content = result.content ?? [];
   const steps = result.steps ?? [];
@@ -391,8 +423,21 @@ function buildStreamResult(result: GenerateTextResult<any, any>): StreamTextResu
   } as unknown as StreamTextResult<any, any>;
 }
 
-async function runCommand(command: string, args: string[], options: RunCommandOptions): Promise<RunCommandResult> {
-  const { cwd, env, input, timeoutMs, signal, maxOutputBytes, onStdout, onStderr } = options;
+async function runCommand(
+  command: string,
+  args: string[],
+  options: RunCommandOptions,
+): Promise<RunCommandResult> {
+  const {
+    cwd,
+    env,
+    input,
+    timeoutMs,
+    signal,
+    maxOutputBytes,
+    onStdout,
+    onStderr,
+  } = options;
   return await new Promise((resolve, reject) => {
     let stdout = "";
     let stderr = "";
@@ -405,7 +450,10 @@ async function runCommand(command: string, args: string[], options: RunCommandOp
 
     const onData = (chunk: Buffer, target: "stdout" | "stderr") => {
       const text = chunk.toString("utf8");
-      const next = truncateToBytes(target === "stdout" ? stdout + text : stderr + text, maxOutputBytes);
+      const next = truncateToBytes(
+        target === "stdout" ? stdout + text : stderr + text,
+        maxOutputBytes,
+      );
       if (target === "stdout") {
         stdout = next;
         onStdout?.(text);
@@ -439,14 +487,19 @@ async function runCommand(command: string, args: string[], options: RunCommandOp
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     if (timeoutMs && Number.isFinite(timeoutMs)) {
-      timer = setTimeout(() => kill(`CLI timed out after ${timeoutMs}ms`), timeoutMs);
+      timer = setTimeout(
+        () => kill(`CLI timed out after ${timeoutMs}ms`),
+        timeoutMs,
+      );
     }
 
     if (signal) {
       if (signal.aborted) {
         kill("CLI aborted");
       } else {
-        signal.addEventListener("abort", () => kill("CLI aborted"), { once: true });
+        signal.addEventListener("abort", () => kill("CLI aborted"), {
+          once: true,
+        });
       }
     }
 
@@ -495,8 +548,14 @@ abstract class BaseCliAgent implements Agent<any, any, any> {
     const { prompt, systemFromMessages } = extractPrompt(options);
     const callTimeout = resolveTimeoutMs(options?.timeout, this.timeoutMs);
     const cwd = this.cwd ?? getToolContext()?.rootDir ?? process.cwd();
-    const env = { ...process.env, ...(this.env ?? {}) } as Record<string, string>;
-    const combinedSystem = combineNonEmpty([this.systemPrompt, systemFromMessages]);
+    const env = { ...process.env, ...(this.env ?? {}) } as Record<
+      string,
+      string
+    >;
+    const combinedSystem = combineNonEmpty([
+      this.systemPrompt,
+      systemFromMessages,
+    ]);
     const commandSpec = await this.buildCommand({
       prompt,
       systemPrompt: combinedSystem,
@@ -516,7 +575,9 @@ abstract class BaseCliAgent implements Agent<any, any, any> {
     });
 
     const stdout = commandSpec.outputFile
-      ? await fs.readFile(commandSpec.outputFile, "utf8").catch(() => result.stdout)
+      ? await fs
+          .readFile(commandSpec.outputFile, "utf8")
+          .catch(() => result.stdout)
       : result.stdout;
 
     if (commandSpec.cleanup) {
@@ -538,7 +599,10 @@ abstract class BaseCliAgent implements Agent<any, any, any> {
 
     if (result.exitCode && result.exitCode !== 0) {
       const filteredStderr = filterBenignStderr(result.stderr);
-      const errorText = filteredStderr || result.stdout.trim() || `CLI exited with code ${result.exitCode}`;
+      const errorText =
+        filteredStderr ||
+        result.stdout.trim() ||
+        `CLI exited with code ${result.exitCode}`;
       throw new Error(errorText);
     }
 
@@ -546,10 +610,14 @@ abstract class BaseCliAgent implements Agent<any, any, any> {
     const outputFormat = commandSpec.outputFormat;
     const extractedText =
       outputFormat === "json" || outputFormat === "stream-json"
-        ? extractTextFromJsonPayload(rawText) ?? rawText
+        ? (extractTextFromJsonPayload(rawText) ?? rawText)
         : rawText;
     const output = tryParseJson(extractedText);
-    return buildGenerateResult(extractedText, output, this.model ?? commandSpec.command);
+    return buildGenerateResult(
+      extractedText,
+      output,
+      this.model ?? commandSpec.command,
+    );
   }
 
   async stream(options: any): Promise<StreamTextResult<any, any>> {
@@ -572,7 +640,11 @@ abstract class BaseCliAgent implements Agent<any, any, any> {
   }>;
 }
 
-function pushFlag(args: string[], flag: string, value?: string | number | boolean) {
+function pushFlag(
+  args: string[],
+  flag: string,
+  value?: string | number | boolean,
+) {
   if (value === undefined) return;
   if (value === true) {
     args.push(flag);
@@ -595,7 +667,8 @@ function normalizeCodexConfig(config?: CodexConfigOverrides): string[] {
   return entries.map(([key, value]) => {
     if (value === null) return `${key}=null`;
     if (typeof value === "string") return `${key}=${value}`;
-    if (typeof value === "number" || typeof value === "boolean") return `${key}=${value}`;
+    if (typeof value === "number" || typeof value === "boolean")
+      return `${key}=${value}`;
     return `${key}=${JSON.stringify(value)}`;
   });
 }
@@ -629,7 +702,10 @@ export class ClaudeCodeAgent extends BaseCliAgent {
     pushList(args, "--add-dir", this.opts.addDir);
     pushFlag(args, "--agent", this.opts.agent);
     if (this.opts.agents) {
-      const agentsJson = typeof this.opts.agents === "string" ? this.opts.agents : JSON.stringify(this.opts.agents);
+      const agentsJson =
+        typeof this.opts.agents === "string"
+          ? this.opts.agents
+          : JSON.stringify(this.opts.agents);
       pushFlag(args, "--agents", agentsJson);
     }
 
@@ -642,8 +718,10 @@ export class ClaudeCodeAgent extends BaseCliAgent {
       }
     }
 
-    if (this.opts.allowDangerouslySkipPermissions) args.push("--allow-dangerously-skip-permissions");
-    if (this.opts.dangerouslySkipPermissions) args.push("--dangerously-skip-permissions");
+    if (this.opts.allowDangerouslySkipPermissions)
+      args.push("--allow-dangerously-skip-permissions");
+    if (this.opts.dangerouslySkipPermissions)
+      args.push("--dangerously-skip-permissions");
     pushList(args, "--allowed-tools", this.opts.allowedTools);
     pushFlag(args, "--append-system-prompt", this.opts.appendSystemPrompt);
     pushList(args, "--betas", this.opts.betas);
@@ -663,7 +741,8 @@ export class ClaudeCodeAgent extends BaseCliAgent {
     if (this.opts.forkSession) args.push("--fork-session");
     pushFlag(args, "--from-pr", this.opts.fromPr);
     if (this.opts.ide) args.push("--ide");
-    if (this.opts.includePartialMessages) args.push("--include-partial-messages");
+    if (this.opts.includePartialMessages)
+      args.push("--include-partial-messages");
     pushFlag(args, "--input-format", this.opts.inputFormat);
     pushFlag(args, "--json-schema", this.opts.jsonSchema);
     pushFlag(args, "--max-budget-usd", this.opts.maxBudgetUsd);
@@ -753,7 +832,10 @@ export class CodexAgent extends BaseCliAgent {
       try {
         const { zodToJsonSchema } = await import("zod-to-json-schema");
         const jsonSchema = zodToJsonSchema(params.options.outputSchema);
-        const schemaFile = join(tmpdir(), `smithers-schema-${randomUUID()}.json`);
+        const schemaFile = join(
+          tmpdir(),
+          `smithers-schema-${randomUUID()}.json`,
+        );
         await fs.writeFile(schemaFile, JSON.stringify(jsonSchema), "utf8");
         pushFlag(args, "--output-schema", schemaFile);
         schemaCleanupFile = schemaFile;
@@ -763,12 +845,15 @@ export class CodexAgent extends BaseCliAgent {
     }
 
     const outputFile =
-      this.opts.outputLastMessage ?? join(tmpdir(), `smithers-codex-${randomUUID()}.txt`);
+      this.opts.outputLastMessage ??
+      join(tmpdir(), `smithers-codex-${randomUUID()}.txt`);
     pushFlag(args, "--output-last-message", outputFile);
 
     if (this.extraArgs?.length) args.push(...this.extraArgs);
 
-    const systemPrefix = params.systemPrompt ? `${params.systemPrompt}\n\n` : "";
+    const systemPrefix = params.systemPrompt
+      ? `${params.systemPrompt}\n\n`
+      : "";
     const fullPrompt = `${systemPrefix}${params.prompt ?? ""}`;
 
     args.push("-");
@@ -783,7 +868,9 @@ export class CodexAgent extends BaseCliAgent {
           await fs.rm(outputFile, { force: true }).catch(() => undefined);
         }
         if (schemaCleanupFile) {
-          await fs.rm(schemaCleanupFile, { force: true }).catch(() => undefined);
+          await fs
+            .rm(schemaCleanupFile, { force: true })
+            .catch(() => undefined);
         }
       },
     };
@@ -817,7 +904,11 @@ export class GeminiAgent extends BaseCliAgent {
       args.push("--yolo");
     }
     if (this.opts.experimentalAcp) args.push("--experimental-acp");
-    pushList(args, "--allowed-mcp-server-names", this.opts.allowedMcpServerNames);
+    pushList(
+      args,
+      "--allowed-mcp-server-names",
+      this.opts.allowedMcpServerNames,
+    );
     pushList(args, "--allowed-tools", this.opts.allowedTools);
     pushList(args, "--extensions", this.opts.extensions);
     if (this.opts.listExtensions) args.push("--list-extensions");
@@ -829,7 +920,9 @@ export class GeminiAgent extends BaseCliAgent {
     pushFlag(args, "--output-format", outputFormat);
     if (this.extraArgs?.length) args.push(...this.extraArgs);
 
-    const systemPrefix = params.systemPrompt ? `${params.systemPrompt}\n\n` : "";
+    const systemPrefix = params.systemPrompt
+      ? `${params.systemPrompt}\n\n`
+      : "";
     const fullPrompt = `${systemPrefix}${params.prompt ?? ""}`;
     args.push("--prompt", fullPrompt);
 

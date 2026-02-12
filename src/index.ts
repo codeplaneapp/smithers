@@ -1,9 +1,19 @@
-import type { SmithersWorkflow, SmithersWorkflowOptions, RunOptions, RunResult, GraphSnapshot, SchemaRegistryEntry } from "./types";
+import type {
+  SmithersWorkflow,
+  SmithersWorkflowOptions,
+  RunOptions,
+  RunResult,
+  GraphSnapshot,
+  SchemaRegistryEntry,
+} from "./types";
 import type { SmithersCtx, WorkflowProps } from "./types";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import React from "react";
-import { runWorkflow as runWorkflowEngine, renderFrame as renderFrameEngine } from "./engine";
+import {
+  runWorkflow as runWorkflowEngine,
+  renderFrame as renderFrameEngine,
+} from "./engine";
 import { createSmithersContext } from "./context";
 import { Workflow as BaseWorkflow, Task as BaseTask } from "./components";
 import type { TaskProps } from "./types";
@@ -16,14 +26,22 @@ export * from "./components";
 export * from "./agents/cli";
 export { mdxPlugin } from "./mdx-plugin";
 export { markdownComponents, renderMdx } from "./mdx-components";
-export { zodToTable, zodToCreateTableSQL, camelToSnake, unwrapZodType } from "./zod-to-table";
+export {
+  zodToTable,
+  zodToCreateTableSQL,
+  camelToSnake,
+  unwrapZodType,
+} from "./zod-to-table";
 export { zodSchemaToJsonExample } from "./zod-to-example";
 
 type CreateSmithersApi = {
   Workflow: (props: WorkflowProps) => React.ReactElement;
   Task: <Row>(props: TaskProps<Row>) => React.ReactElement;
   useCtx: () => any;
-  smithers: (build: (ctx: any) => React.ReactElement, opts?: SmithersWorkflowOptions) => SmithersWorkflow<any>;
+  smithers: (
+    build: (ctx: any) => React.ReactElement,
+    opts?: SmithersWorkflowOptions,
+  ) => SmithersWorkflow<any>;
   db: BunSQLiteDatabase<any>;
   tables: Record<string, any>;
 };
@@ -71,7 +89,10 @@ export function createSmithers(
     return createSmithersFromDb(schemasOrDb) as unknown as CreateSmithersApi;
   }
 
-  return createSmithersFromSchemas(schemasOrDb as Record<string, z.ZodObject<any>>, opts) as CreateSmithersApi;
+  return createSmithersFromSchemas(
+    schemasOrDb as Record<string, z.ZodObject<any>>,
+    opts,
+  ) as CreateSmithersApi;
 }
 
 /**
@@ -87,7 +108,7 @@ function createSmithersFromDb<Schema extends Record<string, unknown>>(
     return React.createElement(
       SmithersContext.Provider,
       { value: ctxRef.current },
-      React.createElement(BaseWorkflow, props, props.children)
+      React.createElement(BaseWorkflow, props, props.children),
     );
   }
 
@@ -109,7 +130,14 @@ function createSmithersFromDb<Schema extends Record<string, unknown>>(
     } as SmithersWorkflow<Schema>;
   }
 
-  return { Workflow, Task, useCtx, smithers: boundSmithers as any, db: db as any, tables: {} };
+  return {
+    Workflow,
+    Task,
+    useCtx,
+    smithers: boundSmithers as any,
+    db: db as any,
+    tables: {},
+  };
 }
 
 /**
@@ -119,10 +147,7 @@ function createSmithersFromDb<Schema extends Record<string, unknown>>(
  */
 function createSmithersFromSchemas<
   Schemas extends Record<string, z.ZodObject<any>>,
->(
-  schemas: Schemas,
-  opts?: { dbPath?: string; journalMode?: string },
-) {
+>(schemas: Schemas, opts?: { dbPath?: string; journalMode?: string }) {
   // Dynamic import to avoid hard dependency issues at module level
   const { Database } = require("bun:sqlite");
   const { drizzle } = require("drizzle-orm/bun-sqlite");
@@ -146,9 +171,13 @@ function createSmithersFromSchemas<
   sqlite.exec("PRAGMA foreign_keys = ON");
 
   // 3. Auto-create tables using CREATE TABLE IF NOT EXISTS
-  sqlite.exec(`CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`);
+  sqlite.exec(
+    `CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`,
+  );
   try {
-    const cols = sqlite.query(`PRAGMA table_info("input")`).all() as Array<{ name?: string }>;
+    const cols = sqlite.query(`PRAGMA table_info("input")`).all() as Array<{
+      name?: string;
+    }>;
     const hasPayload = cols.some((col) => col?.name === "payload");
     if (!hasPayload) {
       sqlite.exec(`ALTER TABLE "input" ADD COLUMN payload TEXT`);
@@ -193,7 +222,7 @@ function createSmithersFromSchemas<
     return React.createElement(
       SmithersContext.Provider,
       { value: ctxRef.current },
-      React.createElement(BaseWorkflow, props, props.children)
+      React.createElement(BaseWorkflow, props, props.children),
     );
   }
 
@@ -215,7 +244,10 @@ function createSmithersFromSchemas<
       if (tableName) {
         const zodSchema = tableNameToZodSchema.get(tableName);
         if (zodSchema) {
-          return React.createElement(BaseTask, { ...props, outputSchema: zodSchema } as any);
+          return React.createElement(BaseTask, {
+            ...props,
+            outputSchema: zodSchema,
+          } as any);
         }
       }
     }
@@ -259,5 +291,10 @@ export async function renderFrame<Schema>(
   ctx: any,
 ): Promise<GraphSnapshot> {
   const snap = await renderFrameEngine(workflow, ctx);
-  return { runId: snap.runId, frameNo: snap.frameNo, xml: snap.xml, tasks: snap.tasks };
+  return {
+    runId: snap.runId,
+    frameNo: snap.frameNo,
+    xml: snap.xml,
+    tasks: snap.tasks,
+  };
 }

@@ -9,11 +9,19 @@ export async function loadInput(db: any, inputTable: any, runId: string) {
   if (!runIdCol) {
     throw new Error("schema.input must include runId column");
   }
-  const rows = await db.select().from(inputTable).where(eq(runIdCol, runId)).limit(1);
+  const rows = await db
+    .select()
+    .from(inputTable)
+    .where(eq(runIdCol, runId))
+    .limit(1);
   return rows[0];
 }
 
-export async function loadOutputs(db: any, schema: Record<string, any>, runId: string): Promise<OutputSnapshot> {
+export async function loadOutputs(
+  db: any,
+  schema: Record<string, any>,
+  runId: string,
+): Promise<OutputSnapshot> {
   const out: OutputSnapshot = {};
   for (const [key, table] of Object.entries(schema)) {
     if (!table || typeof table !== "object") continue;
@@ -34,7 +42,10 @@ export async function loadOutputs(db: any, schema: Record<string, any>, runId: s
       // Skip entries that are not valid Drizzle tables
       continue;
     }
-    const rows = await db.select().from(table as any).where(eq(runIdCol, runId));
+    const rows = await db
+      .select()
+      .from(table as any)
+      .where(eq(runIdCol, runId));
     out[tableName] = rows;
     out[key] = rows;
   }

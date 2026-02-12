@@ -1,6 +1,13 @@
 /** @jsxImportSource smithers */
 import { describe, expect, test } from "bun:test";
-import { Branch, Parallel, Ralph, Sequence, Task, Workflow } from "../src/components";
+import {
+  Branch,
+  Parallel,
+  Ralph,
+  Sequence,
+  Task,
+  Workflow,
+} from "../src/components";
 import { SmithersRenderer } from "../src/dom/renderer";
 import { createSmithers, runWorkflow, smithers } from "../src/index";
 import { createTestDb } from "./helpers";
@@ -47,7 +54,9 @@ describe("docs examples (renderer)", () => {
     expect(nodeIds).toContain("then-task");
     expect(nodeIds).not.toContain("else-task");
 
-    const parallelTasks = result.tasks.filter((task) => task.nodeId.startsWith("p"));
+    const parallelTasks = result.tasks.filter((task) =>
+      task.nodeId.startsWith("p"),
+    );
     expect(parallelTasks.length).toBe(2);
     const groupIds = new Set(parallelTasks.map((task) => task.parallelGroupId));
     expect(groupIds.size).toBe(1);
@@ -107,7 +116,11 @@ describe("docs examples (engine)", () => {
   test("schema-driven input payload is exposed via ctx.input", async () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-input-"));
     const dbPath = join(dir, "smithers.db");
-    const { Workflow, Task, smithers: build } = createSmithers(
+    const {
+      Workflow,
+      Task,
+      smithers: build,
+    } = createSmithers(
       {
         output: z.object({ echo: z.string() }),
       },
@@ -123,7 +136,10 @@ describe("docs examples (engine)", () => {
     ));
 
     try {
-      const result = await runWorkflow(workflow, { input: { message: "hello" }, runId: "input-test" });
+      const result = await runWorkflow(workflow, {
+        input: { message: "hello" },
+        runId: "input-test",
+      });
       expect(result.status).toBe("finished");
       const rows = result.output as Array<{ echo: string }>;
       expect(rows?.[0]?.echo).toBe("hello");
@@ -161,7 +177,10 @@ describe("docs examples (engine)", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, { input: {}, runId: "retry-run" });
+      const result = await runWorkflow(workflow, {
+        input: {},
+        runId: "retry-run",
+      });
       expect(result.status).toBe("finished");
       expect(calls).toBe(2);
 
@@ -187,7 +206,12 @@ describe("docs examples (engine)", () => {
       const workflow = smithers(db, () => (
         <Workflow name="continue">
           <Sequence>
-            <Task id="fail" output={outputA} agent={failingAgent} continueOnFail>
+            <Task
+              id="fail"
+              output={outputA}
+              agent={failingAgent}
+              continueOnFail
+            >
               Fail
             </Task>
             <Task id="ok" output={outputB}>
@@ -197,7 +221,10 @@ describe("docs examples (engine)", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, { input: {}, runId: "continue-run" });
+      const result = await runWorkflow(workflow, {
+        input: {},
+        runId: "continue-run",
+      });
       expect(result.status).toBe("finished");
 
       const outputs = await loadOutputs(db as any, testSchema, result.runId);
@@ -228,7 +255,10 @@ describe("docs examples (engine)", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, { input: {}, runId: "timeout-run" });
+      const result = await runWorkflow(workflow, {
+        input: {},
+        runId: "timeout-run",
+      });
       expect(result.status).toBe("finished");
       expect(seenTimeout).toBe(1234);
     } finally {
@@ -260,7 +290,11 @@ describe("docs examples (engine)", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, { input: {}, runId: "tools-run", rootDir: dir });
+      const result = await runWorkflow(workflow, {
+        input: {},
+        runId: "tools-run",
+        rootDir: dir,
+      });
       expect(result.status).toBe("finished");
 
       const outputs = await loadOutputs(db as any, testSchema, result.runId);

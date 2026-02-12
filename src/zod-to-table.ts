@@ -1,4 +1,9 @@
-import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  primaryKey,
+} from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 /**
@@ -10,7 +15,11 @@ export function unwrapZodType(t: any): any {
   // Zod v4 style
   if (t._zod?.def) {
     const typeName = t._zod.def.type;
-    if (typeName === "nullable" || typeName === "optional" || typeName === "default") {
+    if (
+      typeName === "nullable" ||
+      typeName === "optional" ||
+      typeName === "default"
+    ) {
       const inner = t._zod.def.innerType;
       return inner ? unwrapZodType(inner) : t;
     }
@@ -84,7 +93,11 @@ export function zodToTable(tableName: string, schema: z.ZodObject<any>): any {
     const baseType = unwrapZodType(zodType);
     const baseTypeName = getZodBaseTypeName(baseType);
 
-    if (baseTypeName === "number" || baseTypeName === "int" || baseTypeName === "float") {
+    if (
+      baseTypeName === "number" ||
+      baseTypeName === "int" ||
+      baseTypeName === "float"
+    ) {
       columns[key] = integer(colName);
     } else if (baseTypeName === "boolean") {
       columns[key] = integer(colName, { mode: "boolean" });
@@ -109,7 +122,10 @@ export function zodToTable(tableName: string, schema: z.ZodObject<any>): any {
  * Generates a CREATE TABLE IF NOT EXISTS SQL statement from a Zod schema.
  * Used for runtime table creation without Drizzle migrations.
  */
-export function zodToCreateTableSQL(tableName: string, schema: z.ZodObject<any>): string {
+export function zodToCreateTableSQL(
+  tableName: string,
+  schema: z.ZodObject<any>,
+): string {
   const colDefs: string[] = [
     `run_id TEXT NOT NULL`,
     `node_id TEXT NOT NULL`,

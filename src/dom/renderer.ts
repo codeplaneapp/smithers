@@ -1,6 +1,12 @@
 import Reconciler from "react-reconciler";
 import type React from "react";
-import { extractFromHost, type HostNode, type HostElement, type HostText, type ExtractOptions } from "./extract";
+import {
+  extractFromHost,
+  type HostNode,
+  type HostElement,
+  type HostText,
+  type ExtractOptions,
+} from "./extract";
 
 export type HostContainer = {
   root: HostNode | null;
@@ -12,11 +18,21 @@ function createElement(type: string, props: Record<string, any>): HostElement {
   for (const [key, value] of Object.entries(rest)) {
     if (value === undefined || typeof value === "function") continue;
     if (key.startsWith("__")) continue;
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
       stringProps[key] = String(value);
     }
   }
-  return { kind: "element", tag: type, props: stringProps, rawProps: props ?? {}, children: [] };
+  return {
+    kind: "element",
+    tag: type,
+    props: stringProps,
+    rawProps: props ?? {},
+    children: [],
+  };
 }
 
 let currentUpdatePriority = 1;
@@ -65,14 +81,23 @@ const hostConfig: any = {
     if (idx >= 0) parent.children.splice(idx, 0, child);
     else parent.children.push(child);
   },
-  insertInContainerBefore(container: HostContainer, child: HostNode, beforeChild: HostNode) {
+  insertInContainerBefore(
+    container: HostContainer,
+    child: HostNode,
+    beforeChild: HostNode,
+  ) {
     if (container.root === beforeChild) {
       container.root = child;
     } else {
       container.root = child;
     }
   },
-  prepareUpdate(instance: HostElement, _type: string, oldProps: any, newProps: any) {
+  prepareUpdate(
+    instance: HostElement,
+    _type: string,
+    oldProps: any,
+    newProps: any,
+  ) {
     if (oldProps === newProps) return null;
     return newProps;
   },

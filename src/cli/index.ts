@@ -27,7 +27,11 @@ function parseJsonOrExit(raw: string, label: string) {
   }
 }
 
-function parseIntegerOrExit(value: unknown, label: string, min: number): number {
+function parseIntegerOrExit(
+  value: unknown,
+  label: string,
+  min: number,
+): number {
   const num = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(num) || num < min) {
     console.error(`Invalid ${label}: expected integer >= ${min}`);
@@ -54,7 +58,8 @@ function parseArgs(argv: string[]) {
     const arg = argv[i]!;
     if (arg.startsWith("--")) {
       const key = arg.slice(2);
-      const value = argv[i + 1] && !argv[i + 1]!.startsWith("--") ? argv[++i] : true;
+      const value =
+        argv[i + 1] && !argv[i + 1]!.startsWith("--") ? argv[++i] : true;
       args[key] = value;
     } else {
       args._.push(arg);
@@ -69,12 +74,24 @@ async function main() {
   const cmd = argv[0];
   const args = parseArgs(argv.slice(1));
 
-  if (args.version || args.v || cmd === "version" || cmd === "--version" || cmd === "-v") {
+  if (
+    args.version ||
+    args.v ||
+    cmd === "version" ||
+    cmd === "--version" ||
+    cmd === "-v"
+  ) {
     console.log(readPackageVersion());
     process.exit(0);
   }
 
-  if (args.help || args.h || cmd === "help" || cmd === "--help" || cmd === "-h") {
+  if (
+    args.help ||
+    args.h ||
+    cmd === "help" ||
+    cmd === "--help" ||
+    cmd === "-h"
+  ) {
     console.log(`Usage: smithers <command> [options]
 
 Commands:
@@ -127,11 +144,17 @@ Run options:
     if (!resume) {
       const staleRuns = await adapter.listRuns(10, "running");
       if (staleRuns.length > 0) {
-        process.stderr.write(`⚠ Found ${staleRuns.length} run(s) still marked as 'running':\n`);
+        process.stderr.write(
+          `⚠ Found ${staleRuns.length} run(s) still marked as 'running':\n`,
+        );
         for (const r of staleRuns as any[]) {
-          process.stderr.write(`  ${r.runId} (started ${new Date(r.startedAtMs ?? r.createdAtMs).toISOString()})\n`);
+          process.stderr.write(
+            `  ${r.runId} (started ${new Date(r.startedAtMs ?? r.createdAtMs).toISOString()})\n`,
+          );
         }
-        process.stderr.write(`  Use 'smithers cancel' to mark them as cancelled, or 'smithers resume' to continue.\n`);
+        process.stderr.write(
+          `  Use 'smithers cancel' to mark them as cancelled, or 'smithers resume' to continue.\n`,
+        );
       }
     }
     if (runId) {
@@ -145,17 +168,22 @@ Run options:
         process.exit(4);
       }
     }
-    const rootDir = args.root ? resolve(process.cwd(), String(args.root)) : dirname(resolvedWorkflowPath);
+    const rootDir = args.root
+      ? resolve(process.cwd(), String(args.root))
+      : dirname(resolvedWorkflowPath);
     const logDir = args["no-log"] ? null : args["log-dir"];
-    const maxConcurrency = args["max-concurrency"] !== undefined
-      ? parseIntegerOrExit(args["max-concurrency"], "max-concurrency", 1)
-      : undefined;
-    const maxOutputBytes = args["max-output-bytes"] !== undefined
-      ? parseIntegerOrExit(args["max-output-bytes"], "max-output-bytes", 1)
-      : undefined;
-    const toolTimeoutMs = args["tool-timeout-ms"] !== undefined
-      ? parseIntegerOrExit(args["tool-timeout-ms"], "tool-timeout-ms", 1)
-      : undefined;
+    const maxConcurrency =
+      args["max-concurrency"] !== undefined
+        ? parseIntegerOrExit(args["max-concurrency"], "max-concurrency", 1)
+        : undefined;
+    const maxOutputBytes =
+      args["max-output-bytes"] !== undefined
+        ? parseIntegerOrExit(args["max-output-bytes"], "max-output-bytes", 1)
+        : undefined;
+    const toolTimeoutMs =
+      args["tool-timeout-ms"] !== undefined
+        ? parseIntegerOrExit(args["tool-timeout-ms"], "tool-timeout-ms", 1)
+        : undefined;
     const startTime = Date.now();
     const formatElapsed = () => {
       const elapsed = Date.now() - startTime;
@@ -169,22 +197,32 @@ Run options:
       const ts = formatElapsed();
       switch (event.type) {
         case "NodeStarted":
-          process.stderr.write(`[${ts}] → ${event.nodeId} (attempt ${event.attempt ?? 1}, iteration ${event.iteration ?? 0})\n`);
+          process.stderr.write(
+            `[${ts}] → ${event.nodeId} (attempt ${event.attempt ?? 1}, iteration ${event.iteration ?? 0})\n`,
+          );
           break;
         case "NodeFinished":
-          process.stderr.write(`[${ts}] ✓ ${event.nodeId} (attempt ${event.attempt ?? 1})\n`);
+          process.stderr.write(
+            `[${ts}] ✓ ${event.nodeId} (attempt ${event.attempt ?? 1})\n`,
+          );
           break;
         case "NodeFailed":
-          process.stderr.write(`[${ts}] ✗ ${event.nodeId} (attempt ${event.attempt ?? 1}): ${typeof event.error === "string" ? event.error : event.error?.message ?? "failed"}\n`);
+          process.stderr.write(
+            `[${ts}] ✗ ${event.nodeId} (attempt ${event.attempt ?? 1}): ${typeof event.error === "string" ? event.error : (event.error?.message ?? "failed")}\n`,
+          );
           break;
         case "NodeRetrying":
-          process.stderr.write(`[${ts}] ↻ ${event.nodeId} retrying (attempt ${event.attempt ?? 1})\n`);
+          process.stderr.write(
+            `[${ts}] ↻ ${event.nodeId} retrying (attempt ${event.attempt ?? 1})\n`,
+          );
           break;
         case "RunFinished":
           process.stderr.write(`[${ts}] ✓ Run finished\n`);
           break;
         case "RunFailed":
-          process.stderr.write(`[${ts}] ✗ Run failed: ${typeof event.error === "string" ? event.error : event.error?.message ?? "unknown"}\n`);
+          process.stderr.write(
+            `[${ts}] ✗ Run failed: ${typeof event.error === "string" ? event.error : (event.error?.message ?? "unknown")}\n`,
+          );
           break;
         case "FrameCommitted":
           // Don't print frame commits - too noisy
@@ -205,7 +243,15 @@ Run options:
       onProgress,
     });
     console.log(JSON.stringify(result, null, 2));
-    process.exit(result.status === "finished" ? 0 : result.status === "waiting-approval" ? 3 : result.status === "cancelled" ? 2 : 1);
+    process.exit(
+      result.status === "finished"
+        ? 0
+        : result.status === "waiting-approval"
+          ? 3
+          : result.status === "cancelled"
+            ? 2
+            : 1,
+    );
   }
 
   if (cmd === "approve" || cmd === "deny") {
@@ -223,13 +269,28 @@ Run options:
     const workflow = await loadWorkflow(workflowPath);
     ensureSmithersTables(workflow.db as any);
     const adapter = new SmithersDb(workflow.db as any);
-    const iteration = args.iteration !== undefined
-      ? parseIntegerOrExit(args.iteration, "iteration", 0)
-      : 0;
+    const iteration =
+      args.iteration !== undefined
+        ? parseIntegerOrExit(args.iteration, "iteration", 0)
+        : 0;
     if (cmd === "approve") {
-      await approveNode(adapter, runId, nodeId, iteration, args.note, args["decided-by"]);
+      await approveNode(
+        adapter,
+        runId,
+        nodeId,
+        iteration,
+        args.note,
+        args["decided-by"],
+      );
     } else {
-      await denyNode(adapter, runId, nodeId, iteration, args.note, args["decided-by"]);
+      await denyNode(
+        adapter,
+        runId,
+        nodeId,
+        iteration,
+        args.note,
+        args["decided-by"],
+      );
     }
     console.log(JSON.stringify({ runId, nodeId, status: cmd }, null, 2));
     process.exit(0);
@@ -260,7 +321,8 @@ Run options:
     const workflow = await loadWorkflow(workflowPath);
     ensureSmithersTables(workflow.db as any);
     const adapter = new SmithersDb(workflow.db as any);
-    const tail = args.tail !== undefined ? parseIntegerOrExit(args.tail, "tail", 1) : 20;
+    const tail =
+      args.tail !== undefined ? parseIntegerOrExit(args.tail, "tail", 1) : 20;
     const frames = await adapter.listFrames(runId, tail);
     if (args.compact) {
       const compact = frames.map((frame: any) => {
@@ -298,7 +360,10 @@ Run options:
     const workflow = await loadWorkflow(workflowPath);
     ensureSmithersTables(workflow.db as any);
     const adapter = new SmithersDb(workflow.db as any);
-    const limit = args.limit !== undefined ? parseIntegerOrExit(args.limit, "limit", 1) : 50;
+    const limit =
+      args.limit !== undefined
+        ? parseIntegerOrExit(args.limit, "limit", 1)
+        : 50;
     const status = args.status as string | undefined;
     const runs = await adapter.listRuns(limit, status);
     console.log(JSON.stringify(runs, null, 2));
@@ -336,8 +401,14 @@ Run options:
     }
     const runId = args["run-id"];
     const nodeId = args["node-id"];
-    const attempt = args.attempt !== undefined ? parseIntegerOrExit(args.attempt, "attempt", 1) : 1;
-    const iteration = args.iteration !== undefined ? parseIntegerOrExit(args.iteration, "iteration", 0) : 0;
+    const attempt =
+      args.attempt !== undefined
+        ? parseIntegerOrExit(args.attempt, "attempt", 1)
+        : 1;
+    const iteration =
+      args.iteration !== undefined
+        ? parseIntegerOrExit(args.iteration, "iteration", 0)
+        : 0;
     if (!runId || !nodeId) {
       console.error("Missing --run-id or --node-id");
       process.exit(4);
@@ -379,14 +450,26 @@ Run options:
     const inProgress = await adapter.listInProgressAttempts(runId);
     const now = Date.now();
     for (const attempt of inProgress) {
-      await adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-        state: "cancelled",
-        finishedAtMs: now,
-      });
+      await adapter.updateAttempt(
+        runId,
+        attempt.nodeId,
+        attempt.iteration,
+        attempt.attempt,
+        {
+          state: "cancelled",
+          finishedAtMs: now,
+        },
+      );
     }
     // Mark run as cancelled
     await adapter.updateRun(runId, { status: "cancelled", finishedAtMs: now });
-    console.log(JSON.stringify({ runId, status: "cancelled", cancelledAttempts: inProgress.length }, null, 2));
+    console.log(
+      JSON.stringify(
+        { runId, status: "cancelled", cancelledAttempts: inProgress.length },
+        null,
+        2,
+      ),
+    );
     process.exit(2);
   }
 

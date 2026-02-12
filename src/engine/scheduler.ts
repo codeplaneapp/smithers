@@ -5,12 +5,24 @@ export type PlanNode =
   | { kind: "task"; nodeId: string }
   | { kind: "sequence"; children: PlanNode[] }
   | { kind: "parallel"; children: PlanNode[]; maxConcurrency?: number }
-  | { kind: "ralph"; id: string; children: PlanNode[]; until: boolean; maxIterations: number; onMaxReached: "fail" | "return-last" }
-  | { kind: "worktree"; id: string; path: string; baseRev?: string; children: PlanNode[] }
-  | { kind: "merge-queue"; maxWorktrees?: number; children: PlanNode[] }
+  | {
+      kind: "ralph";
+      id: string;
+      children: PlanNode[];
+      until: boolean;
+      maxIterations: number;
+      onMaxReached: "fail" | "return-last";
+    }
   | { kind: "group"; children: PlanNode[] };
 
-export type TaskState = "pending" | "waiting-approval" | "in-progress" | "finished" | "failed" | "cancelled" | "skipped";
+export type TaskState =
+  | "pending"
+  | "waiting-approval"
+  | "in-progress"
+  | "finished"
+  | "failed"
+  | "cancelled"
+  | "skipped";
 
 export type TaskStateMap = Map<string, TaskState>;
 
@@ -49,12 +61,18 @@ function parseNum(value: string | undefined, fallback: number): number {
   return Number.isFinite(num) ? num : fallback;
 }
 
-export function buildPlanTree(xml: XmlNode | null): { plan: PlanNode | null; ralphs: RalphMeta[] } {
+export function buildPlanTree(xml: XmlNode | null): {
+  plan: PlanNode | null;
+  ralphs: RalphMeta[];
+} {
   if (!xml) return { plan: null, ralphs: [] };
   const ralphs: RalphMeta[] = [];
   const seenRalph = new Set<string>();
 
-  function walk(node: XmlNode, ctx: { path: number[]; inRalph: boolean }): PlanNode | null {
+  function walk(
+    node: XmlNode,
+    ctx: { path: number[]; inRalph: boolean },
+  ): PlanNode | null {
     if (node.kind === "text") return null;
     const tag = node.tag;
 
@@ -65,7 +83,8 @@ export function buildPlanTree(xml: XmlNode | null): { plan: PlanNode | null; ral
     const children: PlanNode[] = [];
     let elementIndex = 0;
     for (const child of node.children) {
-      const nextPath = child.kind === "element" ? [...ctx.path, elementIndex++] : ctx.path;
+      const nextPath =
+        child.kind === "element" ? [...ctx.path, elementIndex++] : ctx.path;
       const nextInRalph = ctx.inRalph || tag === "smithers:ralph";
       const built = walk(child, { path: nextPath, inRalph: nextInRalph });
       if (built) children.push(built);
@@ -84,11 +103,11 @@ export function buildPlanTree(xml: XmlNode | null): { plan: PlanNode | null; ral
     }
     if (tag === "smithers:parallel") {
       const max = parseNum(node.props.maxConcurrency, NaN);
-      return { kind: "parallel", children, maxConcurrency: Number.isFinite(max) ? max : undefined };
-    }
-    if (tag === "smithers:merge-queue") {
-      const max = parseNum(node.props.maxWorktrees, NaN);
-      return { kind: "merge-queue", children, maxWorktrees: Number.isFinite(max) ? max : undefined };
+      return {
+        kind: "parallel",
+        children,
+        maxConcurrency: Number.isFinite(max) ? max : undefined,
+      };
     }
     if (tag === "smithers:ralph") {
       const id = resolveStableId(node.props.id, "ralph", ctx.path);
@@ -98,16 +117,18 @@ export function buildPlanTree(xml: XmlNode | null): { plan: PlanNode | null; ral
       seenRalph.add(id);
       const until = parseBool(node.props.until);
       const maxIterations = parseNum(node.props.maxIterations, 5);
-      const onMaxReached = (node.props.onMaxReached as "fail" | "return-last") ?? "return-last";
+      const onMaxReached =
+        (node.props.onMaxReached as "fail" | "return-last") ?? "return-last";
       const meta: RalphMeta = { id, until, maxIterations, onMaxReached };
       ralphs.push(meta);
-      return { kind: "ralph", id, children, until, maxIterations, onMaxReached };
-    }
-    if (tag === "smithers:worktree") {
-      const id = resolveStableId(node.props.id, "worktree", ctx.path);
-      const path = String(node.props.path ?? "");
-      const baseRev = node.props.baseRev;
-      return { kind: "worktree", id, path, baseRev, children };
+      return {
+        kind: "ralph",
+        id,
+        children,
+        until,
+        maxIterations,
+        onMaxReached,
+      };
     }
     return { kind: "group", children };
   }
@@ -174,13 +195,16 @@ export function scheduleTasks(
           if (!res.terminal) terminal = false;
         }
         if (terminal) {
-          readyRalphs.push({ id: node.id, until: node.until, maxIterations: node.maxIterations, onMaxReached: node.onMaxReached });
+          readyRalphs.push({
+            id: node.id,
+            until: node.until,
+            maxIterations: node.maxIterations,
+            onMaxReached: node.onMaxReached,
+          });
         }
         return { terminal: false };
       }
-      case "group":
-      case "worktree":
-      case "merge-queue": {
+      case "group": {
         let terminal = true;
         for (const child of node.children) {
           const res = walk(child);
