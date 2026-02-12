@@ -1,4 +1,3 @@
-// Decouple from external ai Agent type to keep tests flexible
 import type { Table } from "drizzle-orm";
 import type React from "react";
 
@@ -22,7 +21,7 @@ export type TaskDescriptor = {
   iteration: number;
   ralphId?: string;
 
-  /** Worktree/MergeQueue context (set when task is inside <Worktree>). */
+  /** Set when task is inside <Worktree>. */
   worktreeId?: string;
   worktreePath?: string;
   /** Optional per-task root override (absolute path). */
@@ -49,15 +48,17 @@ export type TaskDescriptor = {
   meta?: Record<string, unknown>;
 };
 
+/**
+ * Lightweight structural agent type decoupled from any specific library.
+ * Includes legacy fields (version, stream) for backwards compatibility.
+ */
 export type AgentLike = {
   id?: string;
+  version?: string;
   tools?: Record<string, any>;
   generate: (...args: any[]) => Promise<any>;
-  // Optional fields tolerated by the engine (present in some Agent impls)
-  version?: string | number;
-  stream?: (...args: any[]) => any;
+  stream?: (...args: any[]) => Promise<any>;
 };
-
 export type GraphSnapshot = {
   runId: string;
   frameNo: number;
@@ -351,6 +352,7 @@ export type WorktreeProps = {
  * Group of concurrent worktrees participating in a merge queue.
  */
 export type MergeQueueProps = {
+  id?: string;
   maxWorktrees?: number;
   skipIf?: boolean;
   children?: React.ReactNode;
