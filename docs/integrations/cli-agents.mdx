@@ -1,16 +1,24 @@
 ---
 title: CLI Agents
-description: Run external AI CLI tools (Claude Code, Codex, Gemini CLI) as drop-in Smithers agents that implement the AI SDK agent interface.
+description: Run external AI CLI tools (Claude Code, Codex, Gemini CLI, PI) as drop-in Smithers agents that implement the AI SDK agent interface.
 ---
 
-Smithers ships three CLI-backed agent classes that wrap external AI command-line tools. Each agent implements the AI SDK `Agent` interface, so they work as drop-in replacements anywhere you would use an AI SDK agent -- including in `<Task>` components.
+Smithers ships CLI-backed agent classes that wrap external AI command-line tools. Each agent implements the AI SDK `Agent` interface, so they work as drop-in replacements anywhere you would use an AI SDK agent -- including in `<Task>` components.
 
 The agents spawn the corresponding CLI process, pass the prompt via arguments or stdin, capture the output, and return it in the standard `GenerateTextResult` format.
 
 ## Import
 
 ```ts
-import { ClaudeCodeAgent, CodexAgent, GeminiAgent } from "smithers-orchestrator/agents/cli";
+import {
+  ClaudeCodeAgent,
+  CodexAgent,
+  GeminiAgent,
+  PiAgent,
+  type PiAgentOptions,
+  type PiExtensionUiRequest,
+  type PiExtensionUiResponse,
+} from "smithers-orchestrator/agents/cli";
 ```
 
 ## Prerequisites
@@ -22,15 +30,17 @@ Each agent requires its corresponding CLI tool installed and available in the sy
 | `ClaudeCodeAgent` | `claude` | [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) |
 | `CodexAgent` | `codex` | [OpenAI Codex CLI](https://github.com/openai/codex) |
 | `GeminiAgent` | `gemini` | [Gemini CLI](https://github.com/google-gemini/gemini-cli) |
+| `PiAgent` | `pi` | [PI Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) |
 
 ## Quick Start
 
 ```ts
-import { ClaudeCodeAgent, CodexAgent, GeminiAgent } from "smithers-orchestrator/agents/cli";
+import { ClaudeCodeAgent, CodexAgent, GeminiAgent, PiAgent } from "smithers-orchestrator/agents/cli";
 
 const claude = new ClaudeCodeAgent({ model: "claude-sonnet-4-20250514" });
 const codex = new CodexAgent({ model: "gpt-4.1" });
 const gemini = new GeminiAgent({ model: "gemini-2.5-pro" });
+const pi = new PiAgent({ provider: "openai", model: "gpt-5.2-codex" });
 ```
 
 Use them in workflows like any other agent:
@@ -45,7 +55,7 @@ Use them in workflows like any other agent:
 
 ## Base Options
 
-All three agent classes share a common set of base options:
+All CLI agent classes share a common set of base options:
 
 ```ts
 type BaseCliAgentOptions = {
@@ -250,6 +260,84 @@ type GeminiAgentOptions = BaseCliAgentOptions & {
 **Yolo mode behavior:** When `yolo` is `true` and `approvalMode` is not set, the agent passes `--yolo`.
 
 **Input handling:** The prompt (with system prompt prepended) is passed via `--prompt`.
+
+---
+
+## PiAgent
+
+Wraps the `pi` CLI.
+
+```ts
+const pi = new PiAgent({
+  provider: "openai",
+  model: "gpt-5.2-codex",
+  mode: "text",
+  noSession: true,
+});
+```
+
+### PI-Specific Options
+
+```ts
+type PiAgentOptions = BaseCliAgentOptions & {
+  provider?: string;
+  model?: string;
+  apiKey?: string;
+  systemPrompt?: string;
+  appendSystemPrompt?: string;
+  mode?: "text" | "json" | "rpc";
+  print?: boolean;
+  continue?: boolean;
+  resume?: boolean;
+  session?: string;
+  sessionDir?: string;
+  noSession?: boolean;
+  models?: string | string[];
+  listModels?: boolean | string;
+  tools?: string[];
+  noTools?: boolean;
+  extension?: string[];
+  noExtensions?: boolean;
+  skill?: string[];
+  noSkills?: boolean;
+  promptTemplate?: string[];
+  noPromptTemplates?: boolean;
+  theme?: string[];
+  noThemes?: boolean;
+  thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  export?: string;
+  files?: string[];
+  verbose?: boolean;
+  onExtensionUiRequest?: (request: PiExtensionUiRequest) =>
+    | Promise<PiExtensionUiResponse | null>
+    | PiExtensionUiResponse
+    | null;
+};
+```
+
+**Key options:**
+
+| Option | Description |
+|---|---|
+| `provider` | PI provider name passed to `--provider` |
+| `model` | PI model passed to `--model` |
+| `apiKey` | Passed to `--api-key` (visible in process listings; prefer PI env/config when possible) |
+| `mode` | PI mode: `text`, `json`, or `rpc` |
+| `print` | Force print mode (`--print`) in text mode only |
+| `continue` / `resume` / `session` | Session continuation controls (`--continue`, `--resume`, `--session`) |
+| `sessionDir` | Custom session directory (`--session-dir`) |
+| `models` / `listModels` | Scoped model patterns and model listing (`--models`, `--list-models`) |
+| `extension` | Load extension path(s) |
+| `skill` | Load skill path(s) |
+| `promptTemplate` | Load prompt template path(s) |
+| `theme` | Load theme path(s) |
+| `tools` / `noTools` | Enable specific tools or disable built-ins |
+| `export` | Export session HTML (`--export`) |
+| `files` | File args passed as `@path` (text/json modes only) |
+| `onExtensionUiRequest` | RPC-only handler for extension UI requests |
+| `noSession` | Disable session persistence (defaults to `true` unless session flags are set) |
+
+**Input handling:** In `text`/`json` modes, the prompt is passed as a positional PI message argument and `files` are emitted as `@path` arguments. In `rpc` mode, the prompt is sent as a JSON `prompt` command over stdin (file args are not supported). Text mode defaults to `--print` and omits `--mode`, while `json`/`rpc` modes set `--mode` and do not pass `--print`.
 
 ---
 

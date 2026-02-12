@@ -1,0 +1,87 @@
+---
+title: PI Integration
+description: Use PI as a Smithers workflow CLI backend and understand how PI extensibility composes with Smithers declarative orchestration.
+---
+
+This guide explains how PI and Smithers fit together for workflow execution in this repo. Chat-provider UI integration is out of scope here.
+
+## Why Combine PI and Smithers
+
+- Smithers gives deterministic orchestration: workflow graph, approvals, retries, and durable run data.
+- PI gives adaptive agent capabilities: providers/models, extensions, skills, prompt templates, and package ecosystem.
+
+Use both together when you want deterministic execution with flexible agent behavior.
+
+## Integration Modes
+
+### 1) PI as Workflow Agent (`PiAgent`)
+
+Use `PiAgent` in workflow tasks like any other CLI-backed agent:
+
+```tsx
+import { PiAgent } from "smithers-orchestrator/agents/cli";
+
+const pi = new PiAgent({
+  provider: "openai",
+  model: "gpt-5.2-codex",
+  mode: "text",
+});
+
+<Task id="implementation" output="implementation" agent={pi}>
+  {`Implement feature X and explain tradeoffs.`}
+</Task>
+```
+
+`PiAgent` supports common PI CLI flags including provider/model, tools, extension paths, skill paths, prompt templates, themes, and session flags. Text mode uses `--print` by default (no explicit `--mode` flag), while JSON/RPC modes set `--mode` and do not enable `--print`. PI’s extensibility surface is broader than the other CLI agents (extensions + skills + prompt templates + themes), so expose those explicitly when you need adaptive behavior.
+
+### 2) PI Server Client (`pi-plugin`)
+
+Use `pi-plugin` when you need to drive Smithers server APIs from a PI extension or another Node process:
+
+```ts
+import { runWorkflow, approve, streamEvents } from "smithers-orchestrator/pi-plugin";
+```
+
+The client is a thin HTTP wrapper for Smithers server endpoints and remains unchanged by PI agent support.
+
+### 3) PI Extensibility + Smithers Orchestration (Hybrid)
+
+Recommended split:
+
+- Keep orchestration in Smithers (`<Sequence>`, `<Parallel>`, `<Branch>`, `<Ralph>`).
+- Run adaptive logic in PI tasks (extensions/skills/provider overrides).
+
+Pattern examples:
+
+1. PI skill-driven coding task in a Smithers `<Task>`.
+2. PI extension command that starts or resumes Smithers workflows via server API or pi-plugin.
+3. Smithers workflow output persisted to SQLite and consumed by later PI-assisted tasks.
+
+## End-to-End Setup
+
+1. Install PI CLI and ensure it is on `PATH`.
+2. Configure PI credentials/provider environment as required by your PI setup (prefer env/config over CLI args for API keys).
+3. For workflows, instantiate `PiAgent` with explicit options.
+4. For server-driven workflows, use `pi-plugin` to call Smithers server APIs.
+
+Quick sanity checks:
+
+```bash
+pi --version
+bun run test
+```
+
+## Design Guidance
+
+Use `PiAgent` task nodes when:
+
+- You need PI capabilities inside deterministic workflows.
+- You want PI calls as explicit, auditable workflow steps.
+
+Use Smithers-native tasks/tools when:
+
+- You need strict reproducibility and narrow tool contracts.
+
+## Limitations and Expectations
+
+See `integrations/pi-support-matrix` for exact supported vs planned behavior. Chat-provider integration lives in host applications, not this repo.

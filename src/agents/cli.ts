@@ -519,6 +519,201 @@ async function runCommand(
   });
 }
 
+\\ async function runRpcCommand(command: string, args: string[], options: RunRpcCommandOptions): Promise<{
+   text: string;
+   output: unknown;
+   stderr: string;
+   exitCode: number | null;
+ }> {
+   const { cwd, env, prompt, timeoutMs, signal, maxOutputBytes, onStderr, onExtensionUiRequest } = options;
+   return await new Promise((resolve, reject) => {
+     let stderr = "";
+     let settled = false;
+     let exitCode: number | null = null;
+     let textDeltas = "";
+     let finalMessage: unknown | null = null;
+     let promptResponseError: string | null = null;
+ 
+     const child = spawn(command, args, {
+       cwd,
+       env,
+       stdio: ["pipe", "pipe", "pipe"],
+     });
+ 
+     const rl = createInterface({ input: child.stdout });
+ 
+     const handleError = (err: Error) => {
+       if (settled) return;
+       settled = true;
+       try {
+         rl.close();
+       } catch {
+         // ignore
+       }
+       reject(err);
+     };
+ 
+     const finalize = (text: string, output: unknown) => {
+       if (settled) return;
+       settled = true;
+       try {
+         rl.close();
+       } catch {
+         // ignore
+       }
+       resolve({ text, output, stderr, exitCode: child.exitCode });
+     };
+ 
+     const terminateChild = () => {
+       try {
+         child.kill("SIGTERM");
+       } catch {
+         // ignore
+       }
+       const killTimer = setTimeout(() => {
+         try {
+           child.kill("SIGKILL");
+         } catch {
+           // ignore
+         }
+       }, 250);
+       child.once("close", () => clearTimeout(killTimer));
+     };
+ 
+     const kill = (reason: string) => {
+       terminateChild();
+       handleError(new Error(reason));
+     };
+ 
+     let timer: ReturnType<typeof setTimeout> | undefined;
+     if (timeoutMs && Number.isFinite(timeoutMs)) {
+       timer = setTimeout(() => kill(`CLI timed out after ${timeoutMs}ms`), timeoutMs);
+     }
+ 
+     if (signal) {
+       if (signal.aborted) {
+         kill("CLI aborted");
+       } else {
+         signal.addEventListener("abort", () => kill("CLI aborted"), { once: true });
+       }
+     }
+ 
+     const maybeWriteExtensionResponse = async (request: PiExtensionUiRequest) => {
+       const needsResponse = ["select", "confirm", "input", "editor"].includes(request.method);
+       if (!needsResponse && !onExtensionUiRequest) return;
+ 
+       let response = onExtensionUiRequest ? await onExtensionUiRequest(request) : null;
+       if (!response && needsResponse) {
+         response = { type: "extension_ui_response", id: request.id, cancelled: true };
+       }
+       if (!response) return;
+       const normalized = { ...response, id: request.id, type: "extension_ui_response" } as PiExtensionUiResponse;
+      if (!child.stdin) {
+        handleError(new Error("Failed to send extension UI response: child stdin is not available"));
+        terminateChild();
+        return;
+      }
+      child.stdin.write(`${JSON.stringify(normalized)}\n`);
+     };
+ 
+     const handleLine = async (line: string) => {
+       let parsed: unknown;
+       try {
+         parsed = JSON.parse(line);
+       } catch {
+         return;
+       }
+       if (!parsed || typeof parsed !== "object") return;
+       const event = parsed as Record<string, unknown>;
+       const type = event.type;
+       if (type === "response" && event.command === "prompt" && event.success === false) {
+         const errorMessage = typeof event.error === "string" ? event.error : "PI RPC prompt failed";
+         promptResponseError = errorMessage;
+         kill(errorMessage);
+         return;
+       }
+       if (type === "message_update") {
+         const assistantEvent = (event as any).assistantMessageEvent as { type?: string; delta?: string } | undefined;
+         if (assistantEvent?.type === "text_delta" && typeof assistantEvent.delta === "string") {
+           textDeltas += assistantEvent.delta;
+         }
+       }
+       if (type === "message_end") {
+         const message = (event as any).message as { role?: string; stopReason?: string; errorMessage?: string } | undefined;
+         if (message?.role === "assistant") {
+           finalMessage = (event as any).message;
+           if (message.stopReason === "error" || message.stopReason === "aborted") {
+             promptResponseError = message.errorMessage || `Request ${message.stopReason}`;
+           }
+         }
+       }
+       if (type === "turn_end") {
+         const message = (event as any).message as { role?: string; stopReason?: string; errorMessage?: string } | undefined;
+         if (message?.role === "assistant") {
+           finalMessage = (event as any).message ?? finalMessage;
+           if (message.stopReason === "error" || message.stopReason === "aborted") {
+             promptResponseError = message.errorMessage || `Request ${message.stopReason}`;
+           }
+           const extracted = finalMessage ? extractTextFromJsonValue(finalMessage) : undefined;
+           const text = extracted ?? textDeltas;
+           if (timer) clearTimeout(timer);
+           if (promptResponseError) {
+             handleError(new Error(promptResponseError));
+             return;
+           }
+           finalize(text, finalMessage ?? text);
+           child.stdin?.end();
+           terminateChild();
+         }
+       }
+       if (type === "extension_ui_request") {
+         await maybeWriteExtensionResponse(event as PiExtensionUiRequest);
+       }
+     };
+ 
+     let lineQueue = Promise.resolve();
+     rl.on("line", (line) => {
+       lineQueue = lineQueue.then(() => handleLine(line)).catch((err) => {
+         handleError(err instanceof Error ? err : new Error(String(err)));
+       });
+     });
+ 
+     child.stderr?.on("data", (chunk) => {
+       const text = chunk.toString("utf8");
+       stderr = truncateToBytes(stderr + text, maxOutputBytes);
+       onStderr?.(text);
+     });
+ 
+     child.on("error", (err) => {
+       if (timer) clearTimeout(timer);
+       handleError(err);
+     });
+ 
+     child.on("close", (code) => {
+       exitCode = code ?? null;
+       if (timer) clearTimeout(timer);
+       if (settled) return;
+       if (promptResponseError) {
+         handleError(new Error(promptResponseError));
+         return;
+       }
+       if (code && code !== 0) {
+         handleError(new Error(stderr.trim() || `CLI exited with code ${code}`));
+         return;
+       }
+       const text = finalMessage ? extractTextFromJsonValue(finalMessage) ?? textDeltas : textDeltas;
+       finalize(text ?? "", finalMessage ?? text ?? "");
+     });
+ 
+     const promptPayload = { id: randomUUID(), type: "prompt", message: prompt };
+    if (!child.stdin) {
+      handleError(new Error("Child process stdin is not available; cannot send prompt payload."));
+      return;
+    }
+    child.stdin.write(`${JSON.stringify(promptPayload)}\n`);
+   });
+ }
+ 
 abstract class BaseCliAgent implements Agent<any, any, any> {
   readonly version = "agent-v1" as const;
   readonly tools: Record<string, never> = {};
