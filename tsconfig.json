@@ -22,7 +22,8 @@
       "smithers/jsx-runtime": ["./src/jsx-runtime.ts"],
       "smithers/jsx-dev-runtime": ["./src/jsx-runtime.ts"],
       "smithers/tools": ["./src/tools/index.ts"]
-    }
+    },
+    "typeRoots": ["./src/types", "./node_modules/@types"]
   },
   "include": ["src/**/*", "examples/**/*", "tests/**/*"]
 }

@@ -19,6 +19,15 @@ export { markdownComponents, renderMdx } from "./mdx-components";
 export { zodToTable, zodToCreateTableSQL, camelToSnake, unwrapZodType } from "./zod-to-table";
 export { zodSchemaToJsonExample } from "./zod-to-example";
 
+type CreateSmithersApi = {
+  Workflow: (props: WorkflowProps) => React.ReactElement;
+  Task: <Row>(props: TaskProps<Row>) => React.ReactElement;
+  useCtx: () => any;
+  smithers: (build: (ctx: any) => React.ReactElement, opts?: SmithersWorkflowOptions) => SmithersWorkflow<any>;
+  db: BunSQLiteDatabase<any>;
+  tables: Record<string, any>;
+};
+
 /**
  * Original API — user provides a pre-configured Drizzle db instance.
  * Kept for backward compatibility.
@@ -48,35 +57,10 @@ export function smithers<Schema extends Record<string, unknown>>(
  * ));
  * ```
  */
-export function createSmithers<
-  Schemas extends Record<string, z.ZodObject<any>>,
->(
-  schemas: Schemas,
-  opts?: { dbPath?: string },
-): {
-  Workflow: (props: WorkflowProps) => React.ReactElement;
-  useCtx: () => SmithersCtx<any>;
-  smithers: (build: (ctx: SmithersCtx<any>) => React.ReactElement, opts?: SmithersWorkflowOptions) => SmithersWorkflow<any>;
-  db: BunSQLiteDatabase<any>;
-  tables: { [K in keyof Schemas]: any };
-};
-
-/**
- * Original db-based API — user provides a pre-configured Drizzle db instance.
- * Kept for backward compatibility.
- */
-export function createSmithers<Schema extends Record<string, unknown>>(
-  db: BunSQLiteDatabase<Schema>,
-): {
-  Workflow: (props: WorkflowProps) => React.ReactElement;
-  useCtx: () => SmithersCtx<Schema>;
-  smithers: (build: () => React.ReactElement, opts?: SmithersWorkflowOptions) => SmithersWorkflow<Schema>;
-};
-
 export function createSmithers(
   schemasOrDb: any,
   opts?: { dbPath?: string },
-) {
+): CreateSmithersApi {
   // Detect which overload: if it has $client or _.fullSchema, it's a Drizzle db
   const isDrizzleDb =
     schemasOrDb?.$client != null ||
@@ -84,10 +68,10 @@ export function createSmithers(
     typeof schemasOrDb?.select === "function";
 
   if (isDrizzleDb) {
-    return createSmithersFromDb(schemasOrDb);
+    return createSmithersFromDb(schemasOrDb) as unknown as CreateSmithersApi;
   }
 
-  return createSmithersFromSchemas(schemasOrDb as Record<string, z.ZodObject<any>>, opts);
+  return createSmithersFromSchemas(schemasOrDb as Record<string, z.ZodObject<any>>, opts) as CreateSmithersApi;
 }
 
 /**
@@ -95,7 +79,7 @@ export function createSmithers(
  */
 function createSmithersFromDb<Schema extends Record<string, unknown>>(
   db: BunSQLiteDatabase<Schema>,
-) {
+): Omit<CreateSmithersApi, "tables"> & { tables: Record<string, any> } {
   const { SmithersContext, useCtx } = createSmithersContext<Schema>();
   const ctxRef = { current: null as SmithersCtx<Schema> | null };
 
@@ -105,6 +89,10 @@ function createSmithersFromDb<Schema extends Record<string, unknown>>(
       { value: ctxRef.current },
       React.createElement(BaseWorkflow, props, props.children)
     );
+  }
+
+  function Task<Row>(props: TaskProps<Row>) {
+    return React.createElement(BaseTask, props as any);
   }
 
   function boundSmithers(
@@ -121,7 +109,7 @@ function createSmithersFromDb<Schema extends Record<string, unknown>>(
     } as SmithersWorkflow<Schema>;
   }
 
-  return { Workflow, useCtx, smithers: boundSmithers };
+  return { Workflow, Task, useCtx, smithers: boundSmithers as any, db: db as any, tables: {} };
 }
 
 /**
