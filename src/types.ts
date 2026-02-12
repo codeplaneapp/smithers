@@ -1,6 +1,5 @@
 import type { Table } from "drizzle-orm";
 import type React from "react";
-import type { Agent } from "ai";
 
 export type XmlNode = XmlElement | XmlText;
 
@@ -47,7 +46,27 @@ export type TaskDescriptor = {
   meta?: Record<string, unknown>;
 };
 
-export type AgentLike = Agent<any, any, any>;
+/**
+ * Minimal agent surface Smithers relies on at runtime.
+ *
+ * Tests use lightweight mocks that don't implement the full 
+ * interface (e.g. missing  and ). Keep this structural
+ * type narrow to avoid over-constraining users and tests.
+ */
+export type AgentLike = {
+  id?: string;
+  tools?: Record<string, any>;
+  generate: (args: {
+    options?: any;
+    prompt: string;
+    timeout?: { totalMs: number } | undefined;
+    onStdout?: (text: string) => void;
+    onStderr?: (text: string) => void;
+    outputSchema?: import("zod").ZodObject<any>;
+  }) => Promise<any>;
+  // Allow additional fields provided by specific agent implementations
+  [key: string]: any;
+};
 
 export type GraphSnapshot = {
   runId: string;

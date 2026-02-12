@@ -68,7 +68,7 @@ describe("<Worktree>", () => {
   test("empty path throws early in component", () => {
     // Invoke component directly to validate props before rendering machinery
     // @ts-expect-error testing invalid prop
-    expect(() => Worktree({ path: "   ", children: null })).toThrow(
+    expect(() => Worktree({ path: "   ", children: null, bogus: 1 })).toThrow(
       "<Worktree> requires a non-empty path prop",
     );
   });
