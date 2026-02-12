@@ -6,6 +6,8 @@ export type PlanNode =
   | { kind: "sequence"; children: PlanNode[] }
   | { kind: "parallel"; children: PlanNode[]; maxConcurrency?: number }
   | { kind: "ralph"; id: string; children: PlanNode[]; until: boolean; maxIterations: number; onMaxReached: "fail" | "return-last" }
+  | { kind: "worktree"; id: string; path: string; baseRev?: string; children: PlanNode[] }
+  | { kind: "merge-queue"; maxWorktrees?: number; children: PlanNode[] }
   | { kind: "group"; children: PlanNode[] };
 
 export type TaskState = "pending" | "waiting-approval" | "in-progress" | "finished" | "failed" | "cancelled" | "skipped";
@@ -84,6 +86,10 @@ export function buildPlanTree(xml: XmlNode | null): { plan: PlanNode | null; ral
       const max = parseNum(node.props.maxConcurrency, NaN);
       return { kind: "parallel", children, maxConcurrency: Number.isFinite(max) ? max : undefined };
     }
+    if (tag === "smithers:merge-queue") {
+      const max = parseNum(node.props.maxWorktrees, NaN);
+      return { kind: "merge-queue", children, maxWorktrees: Number.isFinite(max) ? max : undefined };
+    }
     if (tag === "smithers:ralph") {
       const id = resolveStableId(node.props.id, "ralph", ctx.path);
       if (seenRalph.has(id)) {
@@ -96,6 +102,12 @@ export function buildPlanTree(xml: XmlNode | null): { plan: PlanNode | null; ral
       const meta: RalphMeta = { id, until, maxIterations, onMaxReached };
       ralphs.push(meta);
       return { kind: "ralph", id, children, until, maxIterations, onMaxReached };
+    }
+    if (tag === "smithers:worktree") {
+      const id = resolveStableId(node.props.id, "worktree", ctx.path);
+      const path = String(node.props.path ?? "");
+      const baseRev = node.props.baseRev;
+      return { kind: "worktree", id, path, baseRev, children };
     }
     return { kind: "group", children };
   }
@@ -166,7 +178,9 @@ export function scheduleTasks(
         }
         return { terminal: false };
       }
-      case "group": {
+      case "group":
+      case "worktree":
+      case "merge-queue": {
         let terminal = true;
         for (const child of node.children) {
           const res = walk(child);
