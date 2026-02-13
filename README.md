@@ -78,8 +78,10 @@ If the process crashes, Smithers resumes from the last completed node.
 Requires Bun ≥ 1.3.
 
 ```bash
-bun add smithers-orchestrator ai @ai-sdk/anthropic zod
+bun add smithers-orchestrator ai @ai-sdk/anthropic zod@^4
 ```
+
+> **Note:** Smithers requires Zod v4. Zod v3 is not compatible.
 
 ---
 

@@ -61,17 +61,18 @@
     "drizzle-zod": "^0.8.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-reconciler": "^0.31.0",
-    "zod": "^4.3.6"
+    "react-reconciler": "^0.31.0"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/diff": "^5.2.0",
     "@types/react": "^19.2.10",
     "@types/react-reconciler": "^0.28.9",
-    "@playwright/test": "^1.52.0"
+    "@playwright/test": "^1.52.0",
+    "zod": "^4.3.6"
   }
 }
