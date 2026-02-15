@@ -610,8 +610,22 @@ async function executeTask(
             seq: 0,
           },
           async () => {
-            // Generate with the provided prompt
-            // The agent should output JSON as specified in the prompt
+            // Auto-append structured output instructions when an output table is defined.
+            // This prevents agents from needing manual "REQUIRED OUTPUT" blocks in every prompt
+            // and avoids costly retry round-trips when the agent forgets to output JSON.
+            let effectivePrompt = desc.prompt ?? "";
+            if (desc.outputTable) {
+              const schemaDesc = describeSchemaShape(desc.outputTable as any);
+              effectivePrompt += [
+                "",
+                "",
+                "**REQUIRED OUTPUT** — You MUST end your response with a JSON object in a code fence matching this schema:",
+                "```json",
+                schemaDesc,
+                "```",
+                "Output the JSON at the END of your response. The workflow will fail without it.",
+              ].join("\n");
+            }
             const emitOutput = (text: string, stream: "stdout" | "stderr") => {
               eventBus.emit("event", {
                 type: "NodeOutput",
@@ -626,7 +640,7 @@ async function executeTask(
             };
             return (desc.agent as any).generate({
               options: undefined as any,
-              prompt: desc.prompt ?? "",
+              prompt: effectivePrompt,
               timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
               onStdout: (text: string) => emitOutput(text, "stdout"),
               onStderr: (text: string) => emitOutput(text, "stderr"),
