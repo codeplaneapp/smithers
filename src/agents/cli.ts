@@ -1088,19 +1088,15 @@ export class CodexAgent extends BaseCliAgent {
     // Auto-wire output schema from task context if not explicitly set
     let schemaCleanupFile: string | null = null;
     if (!this.opts.outputSchema && params.options?.outputSchema) {
-      try {
-        const { zodToJsonSchema } = await import("zod-to-json-schema");
-        const jsonSchema = zodToJsonSchema(params.options.outputSchema);
-        const schemaFile = join(
-          tmpdir(),
-          `smithers-schema-${randomUUID()}.json`,
-        );
-        await fs.writeFile(schemaFile, JSON.stringify(jsonSchema), "utf8");
-        pushFlag(args, "--output-schema", schemaFile);
-        schemaCleanupFile = schemaFile;
-      } catch {
-        // zod-to-json-schema not available or conversion failed, skip auto-wiring
-      }
+      const { z } = await import("zod");
+      const jsonSchema = z.toJSONSchema(params.options.outputSchema);
+      const schemaFile = join(
+        tmpdir(),
+        `smithers-schema-${randomUUID()}.json`,
+      );
+      await fs.writeFile(schemaFile, JSON.stringify(jsonSchema), "utf8");
+      pushFlag(args, "--output-schema", schemaFile);
+      schemaCleanupFile = schemaFile;
     }
 
     const outputFile =
