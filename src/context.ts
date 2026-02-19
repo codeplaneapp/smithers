@@ -41,8 +41,21 @@ export function buildContext<Schema>(opts: {
     outputsFn[name] = rows;
   }
 
-  function resolveRow<T>(table: string, key: OutputKey): T | undefined {
-    const rows = outputs[table] ?? [];
+  function resolveTableName(table: any): string {
+    if (typeof table === "string") return table;
+    // Drizzle table object — extract the SQL table name
+    try {
+      const { getTableName } = require("drizzle-orm");
+      return getTableName(table);
+    } catch {}
+    // Fallback: check common Drizzle internal properties
+    if (table?._ && typeof table._.name === "string") return table._.name;
+    return String(table);
+  }
+
+  function resolveRow<T>(table: any, key: OutputKey): T | undefined {
+    const tableName = resolveTableName(table);
+    const rows = outputs[tableName] ?? [];
     return rows.find((row) => {
       if (row.nodeId !== key.nodeId) return false;
       return (row.iteration ?? 0) === (key.iteration ?? iteration);

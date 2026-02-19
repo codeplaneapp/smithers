@@ -65,7 +65,7 @@ export function Task<Row>(props: TaskProps<Row>) {
   if (agent) {
     // Auto-inject `schema` prop into React element children when output is a ZodObject
     let childElement = children;
-    const outputIsZod = props.output && typeof props.output !== "string";
+    const outputIsZod = props.output && typeof props.output === "object" && "shape" in (props.output as any) && (props.output as any).shape;
     if (React.isValidElement(children) && outputIsZod) {
       childElement = React.cloneElement(children as React.ReactElement<any>, {
         schema: zodSchemaToJsonExample(props.output as any),

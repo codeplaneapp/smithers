@@ -89,11 +89,22 @@ async function ensureGitWorktree(
   }
 
   if (vcs.type === "git") {
+    // Fetch latest and create worktree from origin/main (or HEAD as fallback)
+    // so concurrent worktrees always start from the latest pushed state.
+    await new Promise<void>((res) => {
+      const child = nodeSpawn("git", ["fetch", "origin"], {
+        cwd: vcs.root,
+        stdio: ["ignore", "ignore", "ignore"],
+      });
+      child.on("close", () => res());
+      child.on("error", () => res());
+    });
+
     const result = await new Promise<{ code: number; stderr: string }>(
       (res) => {
         const child = nodeSpawn(
           "git",
-          ["worktree", "add", worktreePath, "HEAD"],
+          ["worktree", "add", worktreePath, "origin/main"],
           { cwd: vcs.root, stdio: ["ignore", "pipe", "pipe"] },
         );
         let stderr = "";
@@ -244,8 +255,31 @@ function resolveTaskOutputs(tasks: TaskDescriptor[], workflow: SmithersWorkflow<
     // Already resolved (has a table)
     if (task.outputTable) continue;
 
-    if (task.outputSchema && workflow.zodToKeyName) {
-      const keyName = workflow.zodToKeyName.get(task.outputSchema);
+    const raw = task.outputSchema;
+    if (!raw) continue;
+
+    // Case 1: raw is a Drizzle table (has SQL column metadata)
+    let tableName: string | undefined;
+    try {
+      tableName = getTableName(raw as any);
+    } catch {
+      // Not a Drizzle table
+    }
+    if (tableName && workflow.schemaRegistry) {
+      // Drizzle table passed directly — use it as the output table
+      task.outputTable = raw;
+      task.outputTableName = tableName;
+      // Resolve the original Zod schema for stricter validation
+      const entry = workflow.schemaRegistry.get(tableName);
+      if (entry?.zodSchema) {
+        task.outputSchema = entry.zodSchema;
+      }
+      continue;
+    }
+
+    // Case 2: raw is a ZodObject — resolve via zodToKeyName
+    if (workflow.zodToKeyName) {
+      const keyName = workflow.zodToKeyName.get(raw);
       if (keyName && workflow.schemaRegistry) {
         const entry = workflow.schemaRegistry.get(keyName);
         if (entry) {
