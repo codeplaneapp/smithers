@@ -39,8 +39,88 @@ import { getJjPointer } from "../vcs/jj";
 import { eq, getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { dirname, resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { spawn as nodeSpawn } from "node:child_process";
 import { platform } from "node:os";
+
+/**
+ * Track which worktree paths have already been created this run so we don't
+ * re-create them for every task sharing the same worktree.
+ */
+const createdWorktrees = new Set<string>();
+
+/**
+ * Walk up from `startDir` to find the nearest directory containing `.git` or `.jj`.
+ * Returns the VCS type and root path, or null if neither is found.
+ */
+function findVcsRoot(startDir: string): { type: "git" | "jj"; root: string } | null {
+  let dir = resolve(startDir);
+  const { root: fsRoot } = require("node:path").parse(dir);
+  while (true) {
+    if (existsSync(resolve(dir, ".git"))) return { type: "git", root: dir };
+    if (existsSync(resolve(dir, ".jj"))) return { type: "jj", root: dir };
+    const parent = dirname(dir);
+    if (parent === dir || dir === fsRoot) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * Ensure a git worktree exists at `worktreePath`, creating it from `rootDir`
+ * if necessary. Safe to call multiple times for the same path.
+ */
+async function ensureGitWorktree(
+  rootDir: string,
+  worktreePath: string,
+): Promise<void> {
+  if (createdWorktrees.has(worktreePath)) return;
+  if (existsSync(worktreePath)) {
+    createdWorktrees.add(worktreePath);
+    return;
+  }
+
+  // Walk up from rootDir to find the actual VCS root
+  const vcs = findVcsRoot(rootDir);
+  if (!vcs) {
+    throw new Error(
+      `Cannot create worktree: no git or jj repository found from ${rootDir}`,
+    );
+  }
+
+  if (vcs.type === "git") {
+    const result = await new Promise<{ code: number; stderr: string }>(
+      (res) => {
+        const child = nodeSpawn(
+          "git",
+          ["worktree", "add", worktreePath, "HEAD"],
+          { cwd: vcs.root, stdio: ["ignore", "pipe", "pipe"] },
+        );
+        let stderr = "";
+        child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+        child.on("error", (err) =>
+          res({ code: 127, stderr: err.message }),
+        );
+        child.on("close", (code) => res({ code: code ?? 1, stderr }));
+      },
+    );
+    if (result.code !== 0) {
+      throw new Error(
+        `Failed to create git worktree at ${worktreePath}: ${result.stderr}`,
+      );
+    }
+  } else {
+    const { workspaceAdd } = await import("../vcs/jj");
+    const name = worktreePath.split("/").pop() ?? "worktree";
+    const wsResult = await workspaceAdd(name, worktreePath, { cwd: vcs.root });
+    if (!wsResult.success) {
+      throw new Error(
+        `Failed to create jj workspace at ${worktreePath}: ${wsResult.error}`,
+      );
+    }
+  }
+
+  createdWorktrees.add(worktreePath);
+}
 
 const DEFAULT_MAX_CONCURRENCY = 4;
 const STALE_ATTEMPT_MS = 15 * 60 * 1000;
@@ -589,6 +669,11 @@ async function executeTask(
   let responseText: string | null = null;
   // Resolve effective root once so both caching and execution share it.
   const taskRoot = desc.worktreePath ?? toolConfig.rootDir;
+
+  // Ensure the worktree directory exists on disk before running the task.
+  if (desc.worktreePath) {
+    await ensureGitWorktree(toolConfig.rootDir, desc.worktreePath);
+  }
 
   try {
     if (cacheEnabled) {
