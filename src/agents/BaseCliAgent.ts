@@ -1,8 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type {
   Agent,
@@ -14,7 +12,7 @@ import { getToolContext } from "../tools/context";
 
 type TimeoutInput = number | { totalMs?: number } | undefined;
 
-type BaseCliAgentOptions = {
+export type BaseCliAgentOptions = {
   id?: string;
   model?: string;
   systemPrompt?: string;
@@ -27,99 +25,8 @@ type BaseCliAgentOptions = {
   extraArgs?: string[];
 };
 
-type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
-  addDir?: string[];
-  agent?: string;
-  agents?: Record<string, { description?: string; prompt?: string }> | string;
-  allowDangerouslySkipPermissions?: boolean;
-  allowedTools?: string[];
-  appendSystemPrompt?: string;
-  betas?: string[];
-  chrome?: boolean;
-  continue?: boolean;
-  dangerouslySkipPermissions?: boolean;
-  debug?: boolean | string;
-  debugFile?: string;
-  disableSlashCommands?: boolean;
-  disallowedTools?: string[];
-  fallbackModel?: string;
-  file?: string[];
-  forkSession?: boolean;
-  fromPr?: string;
-  ide?: boolean;
-  includePartialMessages?: boolean;
-  inputFormat?: "text" | "stream-json";
-  jsonSchema?: string;
-  maxBudgetUsd?: number;
-  mcpConfig?: string[];
-  mcpDebug?: boolean;
-  model?: string;
-  noChrome?: boolean;
-  noSessionPersistence?: boolean;
-  outputFormat?: "text" | "json" | "stream-json";
-  permissionMode?:
-    | "acceptEdits"
-    | "bypassPermissions"
-    | "default"
-    | "delegate"
-    | "dontAsk"
-    | "plan";
-  pluginDir?: string[];
-  replayUserMessages?: boolean;
-  resume?: string;
-  sessionId?: string;
-  settingSources?: string;
-  settings?: string;
-  strictMcpConfig?: boolean;
-  systemPrompt?: string;
-  tools?: string[] | "default" | "";
-  verbose?: boolean;
-};
-
-type CodexConfigOverrides =
-  | Record<string, string | number | boolean | object | null>
-  | string[];
-
-type CodexAgentOptions = BaseCliAgentOptions & {
-  config?: CodexConfigOverrides;
-  enable?: string[];
-  disable?: string[];
-  image?: string[];
-  model?: string;
-  oss?: boolean;
-  localProvider?: string;
-  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
-  profile?: string;
-  fullAuto?: boolean;
-  dangerouslyBypassApprovalsAndSandbox?: boolean;
-  cd?: string;
-  skipGitRepoCheck?: boolean;
-  addDir?: string[];
-  outputSchema?: string;
-  color?: "always" | "never" | "auto";
-  json?: boolean;
-  outputLastMessage?: string;
-};
-
-type GeminiAgentOptions = BaseCliAgentOptions & {
-  debug?: boolean;
-  model?: string;
-  sandbox?: boolean;
-  yolo?: boolean;
-  approvalMode?: "default" | "auto_edit" | "yolo" | "plan";
-  experimentalAcp?: boolean;
-  allowedMcpServerNames?: string[];
-  allowedTools?: string[];
-  extensions?: string[];
-  listExtensions?: boolean;
-  resume?: string;
-  listSessions?: boolean;
-  deleteSession?: string;
-  includeDirectories?: string[];
-  screenReader?: boolean;
-  outputFormat?: "text" | "json" | "stream-json";
-};
-
+// PiExtensionUiRequest is defined here because RunRpcCommandOptions references it.
+// It is re-exported from PiAgent.ts for the public API barrel.
 export type PiExtensionUiRequest = {
   type: "extension_ui_request";
   id: string;
@@ -137,41 +44,6 @@ export type PiExtensionUiResponse = {
   [key: string]: unknown;
 };
 
-export type PiAgentOptions = BaseCliAgentOptions & {
-  provider?: string;
-  model?: string;
-  apiKey?: string;
-  systemPrompt?: string;
-  appendSystemPrompt?: string;
-  mode?: "text" | "json" | "rpc";
-  print?: boolean;
-  continue?: boolean;
-  resume?: boolean;
-  session?: string;
-  sessionDir?: string;
-  noSession?: boolean;
-  models?: string | string[];
-  listModels?: boolean | string;
-  tools?: string[];
-  noTools?: boolean;
-  extension?: string[];
-  noExtensions?: boolean;
-  skill?: string[];
-  noSkills?: boolean;
-  promptTemplate?: string[];
-  noPromptTemplates?: boolean;
-  theme?: string[];
-  noThemes?: boolean;
-  thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-  export?: string;
-  files?: string[];
-  verbose?: boolean;
-  onExtensionUiRequest?: (request: PiExtensionUiRequest) =>
-    | Promise<PiExtensionUiResponse | null>
-    | PiExtensionUiResponse
-    | null;
-};
-
 type RunRpcCommandOptions = {
   cwd: string;
   env: Record<string, string>;
@@ -180,7 +52,10 @@ type RunRpcCommandOptions = {
   signal?: AbortSignal;
   maxOutputBytes?: number;
   onStderr?: (chunk: string) => void;
-  onExtensionUiRequest?: PiAgentOptions["onExtensionUiRequest"];
+  onExtensionUiRequest?: (request: PiExtensionUiRequest) =>
+    | Promise<PiExtensionUiResponse | null>
+    | PiExtensionUiResponse
+    | null;
 };
 
 type PromptParts = {
@@ -205,7 +80,7 @@ type RunCommandResult = {
   exitCode: number | null;
 };
 
-function resolveTimeoutMs(
+export function resolveTimeoutMs(
   timeout: TimeoutInput,
   fallback?: number,
 ): number | undefined {
@@ -219,7 +94,7 @@ function resolveTimeoutMs(
   return fallback;
 }
 
-function combineNonEmpty(parts: Array<string | undefined>): string | undefined {
+export function combineNonEmpty(parts: Array<string | undefined>): string | undefined {
   const filtered = parts.map((part) => (part ?? "").trim()).filter(Boolean);
   return filtered.length ? filtered.join("\n\n") : undefined;
 }
@@ -242,7 +117,7 @@ function contentToText(content: any): string {
   return String(content);
 }
 
-function extractPrompt(options: any): PromptParts {
+export function extractPrompt(options: any): PromptParts {
   if (!options) return { prompt: "" };
   if ("prompt" in options) {
     const promptInput = options.prompt;
@@ -285,7 +160,7 @@ function messagesToPrompt(messages: ModelMessage[]): PromptParts {
   };
 }
 
-function tryParseJson(text: string): unknown | undefined {
+export function tryParseJson(text: string): unknown | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
@@ -298,7 +173,7 @@ function tryParseJson(text: string): unknown | undefined {
   return undefined;
 }
 
-function extractTextFromJsonValue(value: any): string | undefined {
+export function extractTextFromJsonValue(value: any): string | undefined {
   if (typeof value === "string") return value;
   if (!value || typeof value !== "object") return undefined;
   if (typeof value.text === "string") return value.text;
@@ -345,10 +220,9 @@ function extractTextFromJsonPayload(raw: string): string | undefined {
   return chunks.length ? chunks.join("") : undefined;
 }
 
-function extractTextFromPiNdjson(raw: string): string | undefined {
+export function extractTextFromPiNdjson(raw: string): string | undefined {
   const trimmed = raw.trim();
   if (!trimmed) return undefined;
-
   const lines = trimmed.split(/\r?\n/).filter(Boolean);
   let turnEndMessage: any = null;
   let agentEndMessage: any = null;
@@ -384,7 +258,7 @@ function extractTextFromPiNdjson(raw: string): string | undefined {
   return extractTextFromJsonPayload(raw);
 }
 
-function truncateToBytes(text: string, maxBytes?: number): string {
+export function truncateToBytes(text: string, maxBytes?: number): string {
   if (!maxBytes || maxBytes <= 0) return text;
   const buf = Buffer.from(text, "utf8");
   if (buf.length <= maxBytes) return text;
@@ -408,7 +282,7 @@ function emptyUsage() {
   };
 }
 
-function buildGenerateResult(
+export function buildGenerateResult(
   text: string,
   output: unknown,
   modelId: string,
@@ -467,7 +341,7 @@ function asyncIterableToStream<T>(
   return stream as any;
 }
 
-function buildStreamResult(
+export function buildStreamResult(
   result: GenerateTextResult<any, any>,
 ): StreamTextResult<any, any> {
   const text = result.text ?? "";
@@ -526,7 +400,7 @@ function buildStreamResult(
   } as unknown as StreamTextResult<any, any>;
 }
 
-async function runCommand(
+export async function runCommand(
   command: string,
   args: string[],
   options: RunCommandOptions,
@@ -622,7 +496,7 @@ async function runCommand(
   });
 }
 
-async function runRpcCommand(command: string, args: string[], options: RunRpcCommandOptions): Promise<{
+export async function runRpcCommand(command: string, args: string[], options: RunRpcCommandOptions): Promise<{
    text: string;
    output: unknown;
    stderr: string;
@@ -816,8 +690,8 @@ async function runRpcCommand(command: string, args: string[], options: RunRpcCom
     child.stdin.write(`${JSON.stringify(promptPayload)}\n`);
    });
  }
- 
-abstract class BaseCliAgent implements Agent<any, any, any> {
+
+export abstract class BaseCliAgent implements Agent<any, any, any> {
   readonly version = "agent-v1" as const;
   readonly tools: Record<string, never> = {};
   readonly id: string;
@@ -938,7 +812,7 @@ abstract class BaseCliAgent implements Agent<any, any, any> {
   }>;
 }
 
-function pushFlag(
+export function pushFlag(
   args: string[],
   flag: string,
   value?: string | number | boolean,
@@ -953,12 +827,16 @@ function pushFlag(
   }
 }
 
-function pushList(args: string[], flag: string, values?: string[]) {
+export function pushList(args: string[], flag: string, values?: string[]) {
   if (!values || values.length === 0) return;
   args.push(flag, ...values.map(String));
 }
 
-function normalizeCodexConfig(config?: CodexConfigOverrides): string[] {
+export type CodexConfigOverrides =
+  | Record<string, string | number | boolean | object | null>
+  | string[];
+
+export function normalizeCodexConfig(config?: CodexConfigOverrides): string[] {
   if (!config) return [];
   if (Array.isArray(config)) return config.map(String);
   const entries = Object.entries(config);
@@ -971,426 +849,3 @@ function normalizeCodexConfig(config?: CodexConfigOverrides): string[] {
   });
 }
 
-export class ClaudeCodeAgent extends BaseCliAgent {
-  private readonly opts: ClaudeCodeAgentOptions;
-
-  constructor(opts: ClaudeCodeAgentOptions = {}) {
-    // Unset ANTHROPIC_API_KEY so Claude Code uses the subscription instead of API billing.
-    // If you want API billing, use ToolLoopAgent from "ai" with anthropic() provider instead.
-    if (process.env.ANTHROPIC_API_KEY) {
-      console.warn(
-        "[smithers] ClaudeCodeAgent: unsetting ANTHROPIC_API_KEY so Claude Code uses your subscription. " +
-        "To use API billing instead, use ToolLoopAgent from 'ai' with anthropic() provider.",
-      );
-      opts = { ...opts, env: { ...opts.env, ANTHROPIC_API_KEY: "" } };
-    }
-    super(opts);
-    this.opts = opts;
-  }
-
-  protected async buildCommand(params: {
-    prompt: string;
-    systemPrompt?: string;
-    cwd: string;
-    options: any;
-  }) {
-    const args: string[] = ["--print"];
-    const outputFormat = this.opts.outputFormat ?? "text";
-
-    pushList(args, "--add-dir", this.opts.addDir);
-    pushFlag(args, "--agent", this.opts.agent);
-    if (this.opts.agents) {
-      const agentsJson =
-        typeof this.opts.agents === "string"
-          ? this.opts.agents
-          : JSON.stringify(this.opts.agents);
-      pushFlag(args, "--agents", agentsJson);
-    }
-
-    const yoloEnabled = this.opts.yolo ?? this.yolo;
-    if (yoloEnabled) {
-      args.push("--allow-dangerously-skip-permissions");
-      args.push("--dangerously-skip-permissions");
-      if (!this.opts.permissionMode) {
-        args.push("--permission-mode", "bypassPermissions");
-      }
-    }
-
-    if (this.opts.allowDangerouslySkipPermissions)
-      args.push("--allow-dangerously-skip-permissions");
-    if (this.opts.dangerouslySkipPermissions)
-      args.push("--dangerously-skip-permissions");
-    pushList(args, "--allowed-tools", this.opts.allowedTools);
-    pushFlag(args, "--append-system-prompt", this.opts.appendSystemPrompt);
-    pushList(args, "--betas", this.opts.betas);
-    if (this.opts.chrome) args.push("--chrome");
-    if (this.opts.noChrome) args.push("--no-chrome");
-    if (this.opts.continue) args.push("--continue");
-    if (this.opts.debug === true) {
-      args.push("--debug");
-    } else if (typeof this.opts.debug === "string") {
-      pushFlag(args, "--debug", this.opts.debug);
-    }
-    pushFlag(args, "--debug-file", this.opts.debugFile);
-    if (this.opts.disableSlashCommands) args.push("--disable-slash-commands");
-    pushList(args, "--disallowed-tools", this.opts.disallowedTools);
-    pushFlag(args, "--fallback-model", this.opts.fallbackModel);
-    pushList(args, "--file", this.opts.file);
-    if (this.opts.forkSession) args.push("--fork-session");
-    pushFlag(args, "--from-pr", this.opts.fromPr);
-    if (this.opts.ide) args.push("--ide");
-    if (this.opts.includePartialMessages)
-      args.push("--include-partial-messages");
-    pushFlag(args, "--input-format", this.opts.inputFormat);
-    pushFlag(args, "--json-schema", this.opts.jsonSchema);
-    pushFlag(args, "--max-budget-usd", this.opts.maxBudgetUsd);
-    pushList(args, "--mcp-config", this.opts.mcpConfig);
-    if (this.opts.mcpDebug) args.push("--mcp-debug");
-    pushFlag(args, "--model", this.opts.model ?? this.model);
-    if (this.opts.noSessionPersistence) args.push("--no-session-persistence");
-    pushFlag(args, "--output-format", outputFormat);
-    pushFlag(args, "--permission-mode", this.opts.permissionMode);
-    pushList(args, "--plugin-dir", this.opts.pluginDir);
-    if (this.opts.replayUserMessages) args.push("--replay-user-messages");
-    pushFlag(args, "--resume", this.opts.resume);
-    pushFlag(args, "--session-id", this.opts.sessionId);
-    pushFlag(args, "--setting-sources", this.opts.settingSources);
-    pushFlag(args, "--settings", this.opts.settings);
-    if (this.opts.strictMcpConfig) args.push("--strict-mcp-config");
-    if (params.systemPrompt) {
-      pushFlag(args, "--system-prompt", params.systemPrompt);
-    }
-    if (this.opts.tools !== undefined) {
-      if (this.opts.tools === "") {
-        pushFlag(args, "--tools", "");
-      } else if (this.opts.tools === "default") {
-        pushFlag(args, "--tools", "default");
-      } else {
-        pushList(args, "--tools", this.opts.tools as string[]);
-      }
-    }
-    if (this.opts.verbose) args.push("--verbose");
-    if (this.extraArgs?.length) args.push(...this.extraArgs);
-
-    if (params.prompt) args.push(params.prompt);
-
-    return {
-      command: "claude",
-      args,
-      outputFormat,
-    };
-  }
-}
-
-export class CodexAgent extends BaseCliAgent {
-  private readonly opts: CodexAgentOptions;
-
-  constructor(opts: CodexAgentOptions = {}) {
-    super(opts);
-    this.opts = opts;
-  }
-
-  protected async buildCommand(params: {
-    prompt: string;
-    systemPrompt?: string;
-    cwd: string;
-    options: any;
-  }) {
-    const args: string[] = ["exec"];
-    const yoloEnabled = this.opts.yolo ?? this.yolo;
-
-    const configOverrides = normalizeCodexConfig(this.opts.config);
-    for (const entry of configOverrides) {
-      args.push("-c", entry);
-    }
-
-    pushList(args, "--enable", this.opts.enable);
-    pushList(args, "--disable", this.opts.disable);
-    pushList(args, "--image", this.opts.image);
-    pushFlag(args, "--model", this.opts.model ?? this.model);
-    if (this.opts.oss) args.push("--oss");
-    pushFlag(args, "--local-provider", this.opts.localProvider);
-    pushFlag(args, "--sandbox", this.opts.sandbox);
-    pushFlag(args, "--profile", this.opts.profile);
-    if (this.opts.fullAuto) {
-      args.push("--full-auto");
-    } else if (yoloEnabled || this.opts.dangerouslyBypassApprovalsAndSandbox) {
-      args.push("--dangerously-bypass-approvals-and-sandbox");
-    }
-    pushFlag(args, "--cd", this.opts.cd);
-    if (this.opts.skipGitRepoCheck) args.push("--skip-git-repo-check");
-    pushList(args, "--add-dir", this.opts.addDir);
-    pushFlag(args, "--output-schema", this.opts.outputSchema);
-    pushFlag(args, "--color", this.opts.color);
-    if (this.opts.json) args.push("--json");
-
-    // Auto-wire output schema from task context if not explicitly set
-    let schemaCleanupFile: string | null = null;
-    if (!this.opts.outputSchema && params.options?.outputSchema) {
-      const { z } = await import("zod");
-      const jsonSchema = z.toJSONSchema(params.options.outputSchema);
-      const schemaFile = join(
-        tmpdir(),
-        `smithers-schema-${randomUUID()}.json`,
-      );
-      await fs.writeFile(schemaFile, JSON.stringify(jsonSchema), "utf8");
-      pushFlag(args, "--output-schema", schemaFile);
-      schemaCleanupFile = schemaFile;
-    }
-
-    const outputFile =
-      this.opts.outputLastMessage ??
-      join(tmpdir(), `smithers-codex-${randomUUID()}.txt`);
-    pushFlag(args, "--output-last-message", outputFile);
-
-    if (this.extraArgs?.length) args.push(...this.extraArgs);
-
-    const systemPrefix = params.systemPrompt
-      ? `${params.systemPrompt}\n\n`
-      : "";
-    const fullPrompt = `${systemPrefix}${params.prompt ?? ""}`;
-
-    args.push("-");
-
-    return {
-      command: "codex",
-      args,
-      stdin: fullPrompt,
-      outputFile,
-      cleanup: async () => {
-        if (!this.opts.outputLastMessage) {
-          await fs.rm(outputFile, { force: true }).catch(() => undefined);
-        }
-        if (schemaCleanupFile) {
-          await fs
-            .rm(schemaCleanupFile, { force: true })
-            .catch(() => undefined);
-        }
-      },
-    };
-  }
-}
-
-export class GeminiAgent extends BaseCliAgent {
-  private readonly opts: GeminiAgentOptions;
-
-  constructor(opts: GeminiAgentOptions = {}) {
-    super(opts);
-    this.opts = opts;
-  }
-
-  protected async buildCommand(params: {
-    prompt: string;
-    systemPrompt?: string;
-    cwd: string;
-    options: any;
-  }) {
-    const args: string[] = [];
-    const yoloEnabled = this.opts.yolo ?? this.yolo;
-    const outputFormat = this.opts.outputFormat ?? "text";
-
-    if (this.opts.debug) args.push("--debug");
-    pushFlag(args, "--model", this.opts.model ?? this.model);
-    if (this.opts.sandbox) args.push("--sandbox");
-    if (this.opts.approvalMode) {
-      pushFlag(args, "--approval-mode", this.opts.approvalMode);
-    } else if (yoloEnabled) {
-      args.push("--yolo");
-    }
-    if (this.opts.experimentalAcp) args.push("--experimental-acp");
-    pushList(
-      args,
-      "--allowed-mcp-server-names",
-      this.opts.allowedMcpServerNames,
-    );
-    pushList(args, "--allowed-tools", this.opts.allowedTools);
-    pushList(args, "--extensions", this.opts.extensions);
-    if (this.opts.listExtensions) args.push("--list-extensions");
-    pushFlag(args, "--resume", this.opts.resume);
-    if (this.opts.listSessions) args.push("--list-sessions");
-    pushFlag(args, "--delete-session", this.opts.deleteSession);
-    pushList(args, "--include-directories", this.opts.includeDirectories);
-    if (this.opts.screenReader) args.push("--screen-reader");
-    pushFlag(args, "--output-format", outputFormat);
-    if (this.extraArgs?.length) args.push(...this.extraArgs);
-
-    const systemPrefix = params.systemPrompt
-      ? `${params.systemPrompt}\n\n`
-      : "";
-    const fullPrompt = `${systemPrefix}${params.prompt ?? ""}`;
-    args.push("--prompt", fullPrompt);
-
-    return {
-      command: "gemini",
-      args,
-      outputFormat,
-    };
-  }
-}
-
-export class PiAgent extends BaseCliAgent {
-  private readonly opts: PiAgentOptions;
-
-  constructor(opts: PiAgentOptions = {}) {
-    super(opts);
-    this.opts = opts;
-  }
-
-  async generate(options: any): Promise<GenerateTextResult<any, any>> {
-    const { prompt, systemFromMessages } = extractPrompt(options);
-    const callTimeout = resolveTimeoutMs(options?.timeout, this.timeoutMs);
-    const cwd = this.cwd ?? getToolContext()?.rootDir ?? process.cwd();
-    const env = { ...process.env, ...(this.env ?? {}) } as Record<string, string>;
-    const combinedSystem = combineNonEmpty([this.systemPrompt, systemFromMessages]);
-
-    const mode = this.opts.mode ?? "text";
-
-    if (mode === "rpc" && this.opts.files?.length) {
-      throw new Error("RPC mode does not support file arguments");
-    }
-
-    const args: string[] = [];
-
-    // Mode handling: text uses --print (no --mode), json/rpc use --mode
-    if (mode === "text") {
-      if (this.opts.print !== false) args.push("--print");
-    } else {
-      args.push("--mode", mode);
-    }
-
-    pushFlag(args, "--provider", this.opts.provider);
-    pushFlag(args, "--model", this.opts.model ?? this.model);
-    pushFlag(args, "--api-key", this.opts.apiKey);
-    pushFlag(args, "--system-prompt", this.opts.systemPrompt);
-
-    // Combine appendSystemPrompt with systemFromMessages
-    const appendParts = combineNonEmpty([this.opts.appendSystemPrompt, systemFromMessages]);
-    pushFlag(args, "--append-system-prompt", appendParts);
-
-    if (this.opts.continue) args.push("--continue");
-    if (this.opts.resume) args.push("--resume");
-    pushFlag(args, "--session", this.opts.session);
-    pushFlag(args, "--session-dir", this.opts.sessionDir);
-
-    // noSession defaults to true unless session flags are set
-    const hasSessionFlags = !!(this.opts.session || this.opts.sessionDir || this.opts.continue || this.opts.resume);
-    if (this.opts.noSession ?? (!hasSessionFlags)) {
-      args.push("--no-session");
-    }
-
-    if (this.opts.models) {
-      const modelsStr = Array.isArray(this.opts.models) ? this.opts.models.join(",") : this.opts.models;
-      args.push("--models", modelsStr);
-    }
-    if (this.opts.listModels !== undefined && this.opts.listModels !== false) {
-      if (typeof this.opts.listModels === "string") {
-        args.push("--list-models", this.opts.listModels);
-      } else {
-        args.push("--list-models");
-      }
-    }
-    pushFlag(args, "--export", this.opts.export);
-
-    if (this.opts.tools?.length) {
-      args.push("--tools", this.opts.tools.join(","));
-    }
-    if (this.opts.noTools) args.push("--no-tools");
-
-    if (this.opts.extension) {
-      for (const ext of this.opts.extension) {
-        args.push("--extension", ext);
-      }
-    }
-    if (this.opts.noExtensions) args.push("--no-extensions");
-
-    if (this.opts.skill) {
-      for (const s of this.opts.skill) {
-        args.push("--skill", s);
-      }
-    }
-    if (this.opts.noSkills) args.push("--no-skills");
-
-    if (this.opts.promptTemplate) {
-      for (const pt of this.opts.promptTemplate) {
-        args.push("--prompt-template", pt);
-      }
-    }
-    if (this.opts.noPromptTemplates) args.push("--no-prompt-templates");
-
-    if (this.opts.theme) {
-      for (const t of this.opts.theme) {
-        args.push("--theme", t);
-      }
-    }
-    if (this.opts.noThemes) args.push("--no-themes");
-
-    pushFlag(args, "--thinking", this.opts.thinking);
-    if (this.opts.verbose) args.push("--verbose");
-    if (this.extraArgs?.length) args.push(...this.extraArgs);
-
-    if (mode !== "rpc") {
-      // File args as @path
-      if (this.opts.files) {
-        for (const f of this.opts.files) {
-          args.push(`@${f}`);
-        }
-      }
-      // Prompt as last positional arg
-      if (prompt) args.push(prompt);
-
-      const result = await runCommand("pi", args, {
-        cwd,
-        env,
-        timeoutMs: callTimeout,
-        signal: options?.abortSignal,
-        maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
-        onStdout: options?.onStdout,
-        onStderr: options?.onStderr,
-      });
-
-      if (result.exitCode && result.exitCode !== 0) {
-        throw new Error(result.stderr.trim() || result.stdout.trim() || `CLI exited with code ${result.exitCode}`);
-      }
-
-      const rawText = result.stdout.trim();
-      // In json mode, pi outputs NDJSON stream. Extract text from turn_end message
-      // rather than returning the first JSON object (session metadata).
-      const extractedText = mode === "json"
-        ? (extractTextFromPiNdjson(rawText) ?? rawText)
-        : rawText;
-      const output = tryParseJson(extractedText);
-      return buildGenerateResult(extractedText, output, this.opts.model ?? "pi");
-    }
-
-    // RPC mode
-    const rpcResult = await runRpcCommand("pi", args, {
-      cwd,
-      env,
-      prompt,
-      timeoutMs: callTimeout,
-      signal: options?.abortSignal,
-      maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
-      onStderr: options?.onStderr,
-      onExtensionUiRequest: this.opts.onExtensionUiRequest,
-    });
-
-    return buildGenerateResult(rpcResult.text, rpcResult.output, this.opts.model ?? "pi");
-  }
-
-  protected async buildCommand(_params: {
-    prompt: string;
-    systemPrompt?: string;
-    cwd: string;
-    options: any;
-  }): Promise<{
-    command: string;
-    args: string[];
-    stdin?: string;
-    outputFormat?: string;
-    outputFile?: string;
-    cleanup?: () => Promise<void>;
-  }> {
-    // PiAgent overrides generate() directly, so buildCommand is not used
-    throw new Error("PiAgent does not use buildCommand");
-  }
-}
