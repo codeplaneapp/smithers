@@ -734,62 +734,63 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
       cwd,
       options,
     });
+    try {
+      const result = await runCommand(commandSpec.command, commandSpec.args, {
+        cwd,
+        env,
+        input: commandSpec.stdin,
+        timeoutMs: callTimeout,
+        signal: options?.abortSignal,
+        maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
+        onStdout: options?.onStdout,
+        onStderr: options?.onStderr,
+      });
 
-    const result = await runCommand(commandSpec.command, commandSpec.args, {
-      cwd,
-      env,
-      input: commandSpec.stdin,
-      timeoutMs: callTimeout,
-      signal: options?.abortSignal,
-      maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
-      onStdout: options?.onStdout,
-      onStderr: options?.onStderr,
-    });
+      const stdout = commandSpec.outputFile
+        ? await fs
+            .readFile(commandSpec.outputFile, "utf8")
+            .catch(() => result.stdout)
+        : result.stdout;
 
-    const stdout = commandSpec.outputFile
-      ? await fs
-          .readFile(commandSpec.outputFile, "utf8")
-          .catch(() => result.stdout)
-      : result.stdout;
-
-    if (commandSpec.cleanup) {
-      await commandSpec.cleanup();
-    }
-
-    function filterBenignStderr(stderr: string): string {
-      const benignPatterns = [
-        /^.*state db missing rollout path.*$/gm,
-        /^.*codex_core::rollout::list.*$/gm,
-      ];
-      let filtered = stderr;
-      for (const pattern of benignPatterns) {
-        filtered = filtered.replace(pattern, "");
+      function filterBenignStderr(stderr: string): string {
+        const benignPatterns = [
+          /^.*state db missing rollout path.*$/gm,
+          /^.*codex_core::rollout::list.*$/gm,
+        ];
+        let filtered = stderr;
+        for (const pattern of benignPatterns) {
+          filtered = filtered.replace(pattern, "");
+        }
+        // Clean up extra blank lines
+        return filtered.replace(/\n{3,}/g, "\n\n").trim();
       }
-      // Clean up extra blank lines
-      return filtered.replace(/\n{3,}/g, "\n\n").trim();
-    }
 
-    if (result.exitCode && result.exitCode !== 0) {
-      const filteredStderr = filterBenignStderr(result.stderr);
-      const errorText =
-        filteredStderr ||
-        result.stdout.trim() ||
-        `CLI exited with code ${result.exitCode}`;
-      throw new Error(errorText);
-    }
+      if (result.exitCode && result.exitCode !== 0) {
+        const filteredStderr = filterBenignStderr(result.stderr);
+        const errorText =
+          filteredStderr ||
+          result.stdout.trim() ||
+          `CLI exited with code ${result.exitCode}`;
+        throw new Error(errorText);
+      }
 
-    const rawText = stdout.trim();
-    const outputFormat = commandSpec.outputFormat;
-    const extractedText =
-      outputFormat === "json" || outputFormat === "stream-json"
-        ? (extractTextFromJsonPayload(rawText) ?? rawText)
-        : rawText;
-    const output = tryParseJson(extractedText);
-    return buildGenerateResult(
-      extractedText,
-      output,
-      this.model ?? commandSpec.command,
-    );
+      const rawText = stdout.trim();
+      const outputFormat = commandSpec.outputFormat;
+      const extractedText =
+        outputFormat === "json" || outputFormat === "stream-json"
+          ? (extractTextFromJsonPayload(rawText) ?? rawText)
+          : rawText;
+      const output = tryParseJson(extractedText);
+      return buildGenerateResult(
+        extractedText,
+        output,
+        this.model ?? commandSpec.command,
+      );
+    } finally {
+      if (commandSpec.cleanup) {
+        await commandSpec.cleanup().catch(() => undefined);
+      }
+    }
   }
 
   async stream(options: any): Promise<StreamTextResult<any, any>> {
@@ -848,4 +849,3 @@ export function normalizeCodexConfig(config?: CodexConfigOverrides): string[] {
     return `${key}=${JSON.stringify(value)}`;
   });
 }
-

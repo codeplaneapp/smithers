@@ -3,6 +3,7 @@ export type AgentLike = {
   tools?: Record<string, any>;
   generate: (args: {
     options?: any;
+    abortSignal?: AbortSignal;
     prompt: string;
     timeout?: { totalMs: number } | undefined;
     onStdout?: (text: string) => void;
