@@ -385,6 +385,24 @@ export default smithers((ctx) => (
       expect(status).toBe(404);
       expect(data.error.code).toBe("NOT_FOUND");
     });
+
+    test("returns 404 for non-existent run when server DB is configured", async () => {
+      const { db, cleanup } = buildDb();
+      ensureSmithersTables(db as any);
+      startTestServer({ db: db as any });
+
+      const { status, data } = await request(
+        "/v1/runs/non-existent-run-id/nodes/some-node/approve",
+        {
+          method: "POST",
+          body: { iteration: 0 },
+        }
+      );
+
+      expect(status).toBe(404);
+      expect(data.error.code).toBe("NOT_FOUND");
+      cleanup();
+    });
   });
 
   describe("POST /v1/runs/:runId/nodes/:nodeId/deny", () => {
@@ -425,6 +443,24 @@ export default smithers((ctx) => (
 
       expect(status).toBe(404);
       expect(data.error.code).toBe("NOT_FOUND");
+    });
+
+    test("returns 404 for non-existent run when server DB is configured", async () => {
+      const { db, cleanup } = buildDb();
+      ensureSmithersTables(db as any);
+      startTestServer({ db: db as any });
+
+      const { status, data } = await request(
+        "/v1/runs/non-existent-run-id/nodes/some-node/deny",
+        {
+          method: "POST",
+          body: { iteration: 0 },
+        }
+      );
+
+      expect(status).toBe(404);
+      expect(data.error.code).toBe("NOT_FOUND");
+      cleanup();
     });
   });
 
