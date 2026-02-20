@@ -5,40 +5,8 @@ import {
   primaryKey,
 } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
-
-/**
- * Unwraps Zod wrapper types (nullable, optional, default) to get the base type.
- */
-export function unwrapZodType(t: any): any {
-  if (!t) return t;
-
-  // Zod v4 style
-  if (t._zod?.def) {
-    const typeName = t._zod.def.type;
-    if (
-      typeName === "nullable" ||
-      typeName === "optional" ||
-      typeName === "default"
-    ) {
-      const inner = t._zod.def.innerType;
-      return inner ? unwrapZodType(inner) : t;
-    }
-    return t;
-  }
-
-  // Zod v3 fallback
-  const typeName = t._def?.typeName;
-  if (typeName === "ZodNullable" || typeName === "ZodOptional") {
-    const inner = t._def?.innerType;
-    return inner ? unwrapZodType(inner) : t;
-  }
-  if (typeName === "ZodDefault") {
-    const inner = t._def?.innerType;
-    return inner ? unwrapZodType(inner) : t;
-  }
-
-  return t;
-}
+import { unwrapZodType } from "./unwrapZodType";
+import { camelToSnake } from "./camelToSnake";
 
 /**
  * Determines the Zod base type name from a (possibly unwrapped) Zod type.
@@ -59,13 +27,6 @@ function getZodBaseTypeName(zodType: any): string {
   if (typeName === "ZodLiteral") return "literal";
   if (typeName === "ZodUnion") return "union";
   return typeName ?? "unknown";
-}
-
-/**
- * Converts a camelCase string to snake_case.
- */
-export function camelToSnake(str: string): string {
-  return str.replace(/([A-Z])/g, "_$1").toLowerCase();
 }
 
 /**
@@ -116,40 +77,4 @@ export function zodToTable(tableName: string, schema: z.ZodObject<any>): any {
   return sqliteTable(tableName, columns, (t: any) => [
     primaryKey({ columns: [t.runId, t.nodeId, t.iteration] }),
   ]);
-}
-
-/**
- * Generates a CREATE TABLE IF NOT EXISTS SQL statement from a Zod schema.
- * Used for runtime table creation without Drizzle migrations.
- */
-export function zodToCreateTableSQL(
-  tableName: string,
-  schema: z.ZodObject<any>,
-): string {
-  const colDefs: string[] = [
-    `run_id TEXT NOT NULL`,
-    `node_id TEXT NOT NULL`,
-    `iteration INTEGER NOT NULL DEFAULT 0`,
-  ];
-
-  const shape = schema.shape;
-  for (const [key] of Object.entries(shape)) {
-    const colName = camelToSnake(key);
-    const baseType = unwrapZodType(shape[key]);
-    const baseTypeName = getZodBaseTypeName(baseType);
-
-    if (
-      baseTypeName === "number" ||
-      baseTypeName === "int" ||
-      baseTypeName === "float" ||
-      baseTypeName === "boolean"
-    ) {
-      colDefs.push(`"${colName}" INTEGER`);
-    } else {
-      colDefs.push(`"${colName}" TEXT`);
-    }
-  }
-
-  colDefs.push(`PRIMARY KEY (run_id, node_id, iteration)`);
-  return `CREATE TABLE IF NOT EXISTS "${tableName}" (${colDefs.join(", ")})`;
 }
