@@ -80,6 +80,19 @@ type RunCommandResult = {
   exitCode: number | null;
 };
 
+type CliCommandSpec = {
+  command: string;
+  args: string[];
+  stdin?: string;
+  outputFormat?: string;
+  outputFile?: string;
+  cleanup?: () => Promise<void>;
+  env?: Record<string, string>;
+  stdoutBannerPatterns?: RegExp[];
+  stdoutErrorPatterns?: RegExp[];
+  errorOnBannerOnly?: boolean;
+};
+
 export function resolveTimeoutMs(
   timeout: TimeoutInput,
   fallback?: number,
@@ -735,10 +748,13 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
       cwd,
       options,
     });
+    const commandEnv = commandSpec.env
+      ? ({ ...env, ...commandSpec.env } as Record<string, string>)
+      : env;
     try {
       const result = await runCommand(commandSpec.command, commandSpec.args, {
         cwd,
-        env,
+        env: commandEnv,
         input: commandSpec.stdin,
         timeoutMs: callTimeout,
         signal: options?.abortSignal,
@@ -775,7 +791,35 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
         throw new Error(errorText);
       }
 
-      const rawText = stdout.trim();
+      // Some CLIs may print extra banners to stdout. Allow individual agents
+      // to provide patterns so this logic stays opt-in and agent-specific.
+      const stdoutBannerPatterns = commandSpec.stdoutBannerPatterns ?? [];
+      let cleanedStdout = stdout;
+      for (const pattern of stdoutBannerPatterns) {
+        const regex = new RegExp(pattern.source, pattern.flags);
+        cleanedStdout = cleanedStdout.replace(regex, "");
+      }
+      const rawText = cleanedStdout.trim();
+
+      // Optionally treat "banner-only" output as an error when requested.
+      if (commandSpec.errorOnBannerOnly && !rawText && stdout.trim()) {
+        throw new Error(
+          `CLI agent error (stdout): output was only a banner with no model response`,
+        );
+      }
+
+      // Some CLIs report failures on stdout even with exit code 0. Keep
+      // detection patterns opt-in so normal model text is not misclassified.
+      const stdoutErrorPatterns = commandSpec.stdoutErrorPatterns ?? [];
+      if (rawText && !rawText.startsWith("{") && !rawText.startsWith("[")) {
+        for (const pattern of stdoutErrorPatterns) {
+          const regex = new RegExp(pattern.source, pattern.flags);
+          if (regex.test(rawText)) {
+            throw new Error(`CLI agent error (stdout): ${rawText.slice(0, 500)}`);
+          }
+        }
+      }
+
       const outputFormat = commandSpec.outputFormat;
       const extractedText =
         outputFormat === "json" || outputFormat === "stream-json"
@@ -805,14 +849,7 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
     systemPrompt?: string;
     cwd: string;
     options: any;
-  }): Promise<{
-    command: string;
-    args: string[];
-    stdin?: string;
-    outputFormat?: string;
-    outputFile?: string;
-    cleanup?: () => Promise<void>;
-  }>;
+  }): Promise<CliCommandSpec>;
 }
 
 export function pushFlag(

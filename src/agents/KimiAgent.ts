@@ -1,3 +1,6 @@
+import { mkdtempSync, cpSync, existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir, homedir } from "node:os";
 import {
   BaseCliAgent,
   pushFlag,
@@ -40,7 +43,32 @@ export class KimiAgent extends BaseCliAgent {
     options: any;
   }) {
     const args: string[] = [];
-    const yoloEnabled = this.opts.yolo ?? this.yolo;
+    let commandEnv: Record<string, string> | undefined;
+    let cleanup: (() => Promise<void>) | undefined;
+
+    // Isolate kimi metadata per invocation to avoid concurrent writes to
+    // ~/.kimi/kimi.json across parallel tasks. If caller explicitly provides
+    // KIMI_SHARE_DIR in opts.env, preserve that override.
+    if (!this.opts.env?.KIMI_SHARE_DIR) {
+      const defaultShareDir = process.env.KIMI_SHARE_DIR ?? join(homedir(), ".kimi");
+      const isolatedShareDir = mkdtempSync(join(tmpdir(), "kimi-share-"));
+      if (existsSync(defaultShareDir)) {
+        for (const name of ["config.toml", "credentials", "device_id", "latest_version.txt"]) {
+          const src = join(defaultShareDir, name);
+          if (existsSync(src)) {
+            try {
+              cpSync(src, join(isolatedShareDir, name), { recursive: true });
+            } catch {
+              // Best-effort seed only; missing copy should not prevent execution.
+            }
+          }
+        }
+      }
+      commandEnv = { KIMI_SHARE_DIR: isolatedShareDir };
+      cleanup = async () => {
+        rmSync(isolatedShareDir, { recursive: true, force: true });
+      };
+    }
 
     // Print mode is required for non-interactive execution
     // Note: --print implicitly adds --yolo
@@ -93,6 +121,18 @@ export class KimiAgent extends BaseCliAgent {
       command: "kimi",
       args,
       outputFormat,
+      env: commandEnv,
+      cleanup,
+      stdoutBannerPatterns: [/^YOLO mode is enabled\b[^\n]*/gm],
+      stdoutErrorPatterns: [
+        /^LLM not set/i,
+        /^LLM not supported/i,
+        /^Max steps reached/i,
+        /^Interrupted by user$/i,
+        /^Unknown error:/i,
+        /^Error:/i,
+      ],
+      errorOnBannerOnly: true,
     };
   }
 }
