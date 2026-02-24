@@ -69,7 +69,8 @@ type BaseCliAgentOptions = {
   cwd?: string;              // Working directory for the CLI process
   env?: Record<string, string>;  // Additional environment variables
   yolo?: boolean;            // Skip permission prompts (default: true)
-  timeoutMs?: number;        // Process timeout in milliseconds
+  timeoutMs?: number;        // Hard wall-clock timeout in milliseconds
+  idleTimeoutMs?: number;    // Inactivity timeout (no stdout/stderr) in milliseconds
   maxOutputBytes?: number;   // Max output capture size
   extraArgs?: string[];      // Additional CLI arguments appended to the command
 };
@@ -84,9 +85,28 @@ type BaseCliAgentOptions = {
 | `cwd` | Tool context rootDir or `process.cwd()` | Working directory for the spawned process |
 | `env` | `{}` | Extra environment variables merged with `process.env` |
 | `yolo` | `true` | When true, configures the CLI to skip all interactive permission prompts |
-| `timeoutMs` | `undefined` | Kill the process after this many milliseconds |
+| `timeoutMs` | `undefined` | Hard wall-clock timeout; kill the process after this many milliseconds |
+| `idleTimeoutMs` | `undefined` | Inactivity timeout; kill the process after this many milliseconds with no stdout/stderr |
 | `maxOutputBytes` | `undefined` | Truncate captured output to this size |
 | `extraArgs` | `[]` | Arbitrary additional CLI flags |
+
+---
+### Timeouts
+
+You can use either or both timeouts:
+
+- `timeoutMs`: hard wall‑clock cap (backwards compatible).
+- `idleTimeoutMs`: inactivity cap that resets on any stdout/stderr output.
+
+When invoking an agent directly, you can also override per-call timeouts via
+`options.timeout`:
+
+```ts
+await agent.generate({
+  prompt: "do the thing",
+  timeout: { totalMs: 15 * 60 * 1000, idleMs: 2 * 60 * 1000 },
+});
+```
 
 ---
 
@@ -98,7 +118,8 @@ Wraps the `claude` CLI with `--print` mode.
 const claude = new ClaudeCodeAgent({
   model: "claude-sonnet-4-20250514",
   systemPrompt: "You are a careful code reviewer.",
-  timeoutMs: 300_000,
+  timeoutMs: 30 * 60 * 1000,
+  idleTimeoutMs: 2 * 60 * 1000,
 });
 ```
 

@@ -5,7 +5,7 @@ import {
   combineNonEmpty,
   extractPrompt,
   extractTextFromPiNdjson,
-  resolveTimeoutMs,
+  resolveTimeouts,
   runCommand,
   runRpcCommand,
   tryParseJson,
@@ -61,7 +61,10 @@ export class PiAgent extends BaseCliAgent {
 
   async generate(options: any): Promise<GenerateTextResult<any, any>> {
     const { prompt, systemFromMessages } = extractPrompt(options);
-    const callTimeout = resolveTimeoutMs(options?.timeout, this.timeoutMs);
+    const callTimeouts = resolveTimeouts(options?.timeout, {
+      totalMs: this.timeoutMs,
+      idleMs: this.idleTimeoutMs,
+    });
     const cwd = this.cwd ?? getToolContext()?.rootDir ?? process.cwd();
     const env = { ...process.env, ...(this.env ?? {}) } as Record<string, string>;
     const combinedSystem = combineNonEmpty([this.systemPrompt, systemFromMessages]);
@@ -164,7 +167,8 @@ export class PiAgent extends BaseCliAgent {
       const result = await runCommand("pi", args, {
         cwd,
         env,
-        timeoutMs: callTimeout,
+        timeoutMs: callTimeouts.totalMs,
+        idleTimeoutMs: callTimeouts.idleMs,
         signal: options?.abortSignal,
         maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
         onStdout: options?.onStdout,
@@ -190,7 +194,8 @@ export class PiAgent extends BaseCliAgent {
       cwd,
       env,
       prompt,
-      timeoutMs: callTimeout,
+      timeoutMs: callTimeouts.totalMs,
+      idleTimeoutMs: callTimeouts.idleMs,
       signal: options?.abortSignal,
       maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
       onStderr: options?.onStderr,

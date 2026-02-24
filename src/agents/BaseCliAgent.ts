@@ -10,7 +10,7 @@ import type {
 } from "ai";
 import { getToolContext } from "../tools/context";
 
-type TimeoutInput = number | { totalMs?: number } | undefined;
+type TimeoutInput = number | { totalMs?: number; idleMs?: number } | undefined;
 
 export type BaseCliAgentOptions = {
   id?: string;
@@ -21,6 +21,7 @@ export type BaseCliAgentOptions = {
   env?: Record<string, string>;
   yolo?: boolean;
   timeoutMs?: number;
+  idleTimeoutMs?: number;
   maxOutputBytes?: number;
   extraArgs?: string[];
 };
@@ -49,6 +50,7 @@ type RunRpcCommandOptions = {
   env: Record<string, string>;
   prompt: string;
   timeoutMs?: number;
+  idleTimeoutMs?: number;
   signal?: AbortSignal;
   maxOutputBytes?: number;
   onStderr?: (chunk: string) => void;
@@ -68,6 +70,7 @@ type RunCommandOptions = {
   env: Record<string, string>;
   input?: string;
   timeoutMs?: number;
+  idleTimeoutMs?: number;
   signal?: AbortSignal;
   maxOutputBytes?: number;
   onStdout?: (chunk: string) => void;
@@ -93,18 +96,23 @@ type CliCommandSpec = {
   errorOnBannerOnly?: boolean;
 };
 
-export function resolveTimeoutMs(
+export function resolveTimeouts(
   timeout: TimeoutInput,
-  fallback?: number,
-): number | undefined {
-  if (typeof timeout === "number") return timeout;
-  if (
-    timeout &&
-    typeof timeout === "object" &&
-    typeof timeout.totalMs === "number"
-  )
-    return timeout.totalMs;
-  return fallback;
+  fallback?: { totalMs?: number; idleMs?: number },
+): { totalMs?: number; idleMs?: number } {
+  if (typeof timeout === "number") {
+    return { totalMs: timeout };
+  }
+  if (timeout && typeof timeout === "object") {
+    return {
+      totalMs: typeof timeout.totalMs === "number" ? timeout.totalMs : fallback?.totalMs,
+      idleMs: typeof timeout.idleMs === "number" ? timeout.idleMs : fallback?.idleMs,
+    };
+  }
+  return {
+    totalMs: fallback?.totalMs,
+    idleMs: fallback?.idleMs,
+  };
 }
 
 export function combineNonEmpty(parts: Array<string | undefined>): string | undefined {
@@ -279,6 +287,39 @@ export function truncateToBytes(text: string, maxBytes?: number): string {
   return buf.subarray(0, maxBytes).toString("utf8");
 }
 
+function createOneShotTimer(timeoutMs: number | undefined, onTimeout: () => void) {
+  if (!timeoutMs || !Number.isFinite(timeoutMs)) {
+    return { clear: () => {} };
+  }
+  const timer = setTimeout(onTimeout, timeoutMs);
+  return {
+    clear: () => clearTimeout(timer),
+  };
+}
+
+function createInactivityTimer(timeoutMs: number | undefined, onTimeout: () => void) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (!timeoutMs || !Number.isFinite(timeoutMs)) {
+    return {
+      reset: () => {},
+      clear: () => {},
+    };
+  }
+
+  const reset = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(onTimeout, timeoutMs);
+  };
+
+  const clear = () => {
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+  };
+
+  reset();
+  return { reset, clear };
+}
+
 function emptyUsage() {
   return {
     inputTokens: undefined,
@@ -424,6 +465,7 @@ export async function runCommand(
     env,
     input,
     timeoutMs,
+    idleTimeoutMs,
     signal,
     maxOutputBytes,
     onStdout,
@@ -440,6 +482,7 @@ export async function runCommand(
     });
 
     const onData = (chunk: Buffer, target: "stdout" | "stderr") => {
+      inactivity.reset();
       const text = chunk.toString("utf8");
       const next = truncateToBytes(
         target === "stdout" ? stdout + text : stderr + text,
@@ -476,13 +519,12 @@ export async function runCommand(
       finalize(new Error(reason));
     };
 
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    if (timeoutMs && Number.isFinite(timeoutMs)) {
-      timer = setTimeout(
-        () => kill(`CLI timed out after ${timeoutMs}ms`),
-        timeoutMs,
-      );
-    }
+    const totalTimeout = createOneShotTimer(timeoutMs, () =>
+      kill(`CLI timed out after ${timeoutMs}ms`),
+    );
+    const inactivity = createInactivityTimer(idleTimeoutMs, () =>
+      kill(`CLI idle timed out after ${idleTimeoutMs}ms`),
+    );
 
     if (signal) {
       if (signal.aborted) {
@@ -495,11 +537,13 @@ export async function runCommand(
     }
 
     child.on("error", (err) => {
-      if (timer) clearTimeout(timer);
+      inactivity.clear();
+      totalTimeout.clear();
       finalize(err);
     });
     child.on("close", () => {
-      if (timer) clearTimeout(timer);
+      inactivity.clear();
+      totalTimeout.clear();
       finalize();
     });
 
@@ -516,7 +560,7 @@ export async function runRpcCommand(command: string, args: string[], options: Ru
    stderr: string;
    exitCode: number | null;
  }> {
-   const { cwd, env, prompt, timeoutMs, signal, maxOutputBytes, onStderr, onExtensionUiRequest } = options;
+   const { cwd, env, prompt, timeoutMs, idleTimeoutMs, signal, maxOutputBytes, onStderr, onExtensionUiRequest } = options;
    return await new Promise((resolve, reject) => {
      let stderr = "";
      let settled = false;
@@ -543,7 +587,7 @@ export async function runRpcCommand(command: string, args: string[], options: Ru
        }
        reject(err);
      };
- 
+
      const finalize = (text: string, output: unknown) => {
        if (settled) return;
        settled = true;
@@ -554,7 +598,7 @@ export async function runRpcCommand(command: string, args: string[], options: Ru
        }
        resolve({ text, output, stderr, exitCode: child.exitCode });
      };
- 
+
      const terminateChild = () => {
        try {
          child.kill("SIGTERM");
@@ -575,12 +619,14 @@ export async function runRpcCommand(command: string, args: string[], options: Ru
        terminateChild();
        handleError(new Error(reason));
      };
- 
-     let timer: ReturnType<typeof setTimeout> | undefined;
-     if (timeoutMs && Number.isFinite(timeoutMs)) {
-       timer = setTimeout(() => kill(`CLI timed out after ${timeoutMs}ms`), timeoutMs);
-     }
- 
+
+     const totalTimeout = createOneShotTimer(timeoutMs, () =>
+       kill(`CLI timed out after ${timeoutMs}ms`),
+     );
+     const inactivity = createInactivityTimer(idleTimeoutMs, () =>
+       kill(`CLI idle timed out after ${idleTimeoutMs}ms`),
+     );
+
      if (signal) {
        if (signal.aborted) {
          kill("CLI aborted");
@@ -608,6 +654,7 @@ export async function runRpcCommand(command: string, args: string[], options: Ru
      };
  
      const handleLine = async (line: string) => {
+       inactivity.reset();
        let parsed: unknown;
        try {
          parsed = JSON.parse(line);
@@ -647,7 +694,8 @@ export async function runRpcCommand(command: string, args: string[], options: Ru
            }
            const extracted = finalMessage ? extractTextFromJsonValue(finalMessage) : undefined;
            const text = extracted ?? textDeltas;
-           if (timer) clearTimeout(timer);
+           inactivity.clear();
+           totalTimeout.clear();
            if (promptResponseError) {
              handleError(new Error(promptResponseError));
              return;
@@ -668,21 +716,28 @@ export async function runRpcCommand(command: string, args: string[], options: Ru
          handleError(err instanceof Error ? err : new Error(String(err)));
        });
      });
- 
+
+     child.stdout?.on("data", () => {
+       inactivity.reset();
+     });
+
      child.stderr?.on("data", (chunk) => {
+       inactivity.reset();
        const text = chunk.toString("utf8");
        stderr = truncateToBytes(stderr + text, maxOutputBytes);
        onStderr?.(text);
      });
- 
+
      child.on("error", (err) => {
-       if (timer) clearTimeout(timer);
+       inactivity.clear();
+       totalTimeout.clear();
        handleError(err);
      });
- 
+
      child.on("close", (code) => {
        exitCode = code ?? null;
-       if (timer) clearTimeout(timer);
+       inactivity.clear();
+       totalTimeout.clear();
        if (settled) return;
        if (promptResponseError) {
          handleError(new Error(promptResponseError));
@@ -715,6 +770,7 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
   protected readonly env?: Record<string, string>;
   protected readonly yolo: boolean;
   protected readonly timeoutMs?: number;
+  protected readonly idleTimeoutMs?: number;
   protected readonly maxOutputBytes?: number;
   protected readonly extraArgs?: string[];
 
@@ -726,13 +782,17 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
     this.env = opts.env;
     this.yolo = opts.yolo ?? true;
     this.timeoutMs = opts.timeoutMs;
+    this.idleTimeoutMs = opts.idleTimeoutMs;
     this.maxOutputBytes = opts.maxOutputBytes;
     this.extraArgs = opts.extraArgs;
   }
 
   async generate(options: any): Promise<GenerateTextResult<any, any>> {
     const { prompt, systemFromMessages } = extractPrompt(options);
-    const callTimeout = resolveTimeoutMs(options?.timeout, this.timeoutMs);
+    const callTimeouts = resolveTimeouts(options?.timeout, {
+      totalMs: this.timeoutMs,
+      idleMs: this.idleTimeoutMs,
+    });
     const cwd = this.cwd ?? getToolContext()?.rootDir ?? process.cwd();
     const env = { ...process.env, ...(this.env ?? {}) } as Record<
       string,
@@ -756,7 +816,8 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
         cwd,
         env: commandEnv,
         input: commandSpec.stdin,
-        timeoutMs: callTimeout,
+        timeoutMs: callTimeouts.totalMs,
+        idleTimeoutMs: callTimeouts.idleMs,
         signal: options?.abortSignal,
         maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
         onStdout: options?.onStdout,
