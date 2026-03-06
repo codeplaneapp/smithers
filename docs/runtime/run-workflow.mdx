@@ -71,8 +71,41 @@ type RunResult = {
 |---|---|---|
 | `runId` | `string` | The run identifier (either provided or auto-generated). |
 | `status` | `string` | Terminal status of the run. |
-| `output` | `unknown` | Rows from the `output` table in the schema, if the workflow finished successfully and the schema includes an `output` table. |
+| `output` | `unknown` | Rows from the `output` table in the schema, if the workflow finished successfully and the schema includes an `output` table. See note below. |
 | `error` | `unknown` | Error information if the run failed. Contains a serialized error object with `code`, `message`, and optional `details`. |
+
+### Understanding `result.output`
+
+The `output` field on `RunResult` is **only** populated if your schema passed to `createSmithers()` includes a key literally named `output`. For example:
+
+```ts
+// ✅ result.output WILL be populated
+const { Workflow, smithers } = createSmithers({
+  output: z.object({ summary: z.string() }),
+});
+```
+
+```ts
+// ❌ result.output will be undefined
+const { Workflow, smithers } = createSmithers({
+  page: z.object({ title: z.string(), html: z.string() }),
+});
+```
+
+If your schema uses other key names (like `page`, `analysis`, `research`, etc.), all task outputs are still persisted to SQLite — they're just not returned on `result.output`. To access them programmatically, query the SQLite database directly:
+
+```ts
+import { Database } from "bun:sqlite";
+
+const result = await runWorkflow(workflow, { input: {} });
+const db = new Database("smithers.db", { readonly: true });
+const rows = db.query(
+  "SELECT * FROM page WHERE run_id = ? ORDER BY iteration DESC"
+).all(result.runId);
+db.close();
+```
+
+Alternatively, name your schema key `output` if you want the convenience of `result.output`.
 
 ### Status Values
 
