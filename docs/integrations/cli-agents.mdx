@@ -1,6 +1,6 @@
 ---
 title: CLI Agents
-description: Run external AI CLI tools (Claude Code, Codex, Gemini CLI, PI, Kimi) as drop-in Smithers agents that implement the AI SDK agent interface.
+description: Run external AI CLI tools (Claude Code, Codex, Gemini CLI, PI, Kimi, Forge) as drop-in Smithers agents that implement the AI SDK agent interface.
 ---
 
 Smithers ships CLI-backed agent classes that wrap external AI command-line tools. Each agent implements the AI SDK `Agent` interface, so they work as drop-in replacements anywhere you would use an AI SDK agent -- including in `<Task>` components.
@@ -16,6 +16,7 @@ import {
   GeminiAgent,
   PiAgent,
   KimiAgent,
+  ForgeAgent,
   type PiAgentOptions,
   type PiExtensionUiRequest,
   type PiExtensionUiResponse,
@@ -33,17 +34,19 @@ Each agent requires its corresponding CLI tool installed and available in the sy
 | `GeminiAgent` | `gemini` | [Gemini CLI](https://github.com/google-gemini/gemini-cli) |
 | `PiAgent` | `pi` | [PI Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) |
 | `KimiAgent` | `kimi` | [Kimi CLI](https://moonshotai.github.io/kimi-cli/) |
+| `ForgeAgent` | `forge` | [Forge CLI](https://github.com/antinomyhq/forge) |
 
 ## Quick Start
 
 ```ts
-import { ClaudeCodeAgent, CodexAgent, GeminiAgent, PiAgent, KimiAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent, CodexAgent, GeminiAgent, PiAgent, KimiAgent, ForgeAgent } from "smithers-orchestrator";
 
 const claude = new ClaudeCodeAgent({ model: "claude-sonnet-4-20250514" });
 const codex = new CodexAgent({ model: "gpt-4.1" });
 const gemini = new GeminiAgent({ model: "gemini-2.5-pro" });
 const pi = new PiAgent({ provider: "openai", model: "gpt-5.2-codex" });
 const kimi = new KimiAgent({ model: "kimi-latest" });
+const forge = new ForgeAgent({ model: "anthropic/claude-sonnet-4-20250514" });
 ```
 
 Use them in workflows like any other agent:
@@ -418,6 +421,55 @@ type KimiAgentOptions = BaseCliAgentOptions & {
 | `maxRalphIterations` | Extra iterations after the first turn in Ralph mode |
 
 **Yolo mode behavior:** When `yolo` is `true` (the default), the agent passes `--print` which implicitly adds `--yolo`.
+
+**Input handling:** The prompt (with system prompt prepended) is passed via the `--prompt` flag.
+
+---
+
+## ForgeAgent
+
+Wraps the `forge` CLI (by Antinomy). Forge supports 300+ models and uses `--prompt` for non-interactive execution.
+
+```ts
+const forge = new ForgeAgent({
+  model: "anthropic/claude-sonnet-4-20250514",
+  provider: "anthropic",
+  directory: "/path/to/project",
+});
+```
+
+### Forge-Specific Options
+
+```ts
+type ForgeAgentOptions = BaseCliAgentOptions & {
+  directory?: string;       // -C, --directory <DIR>
+  provider?: string;        // --provider <PROVIDER>
+  agent?: string;           // --agent <AGENT>
+  conversationId?: string;  // --conversation-id <ID>
+  sandbox?: string;         // --sandbox <NAME>
+  restricted?: boolean;     // -r, --restricted
+  verbose?: boolean;        // --verbose
+  workflow?: string;        // -w, --workflow <FILE>
+  event?: string;           // -e, --event <JSON>
+  conversation?: string;    // --conversation <FILE>
+};
+```
+
+**Key options:**
+
+| Option | Description |
+|---|---|
+| `directory` | Working directory for forge (`-C`); defaults to `cwd` |
+| `provider` | Model provider name (`--provider`) |
+| `agent` | Agent type (`--agent`) |
+| `conversationId` | Resume a conversation by ID (`--conversation-id`) |
+| `sandbox` | Sandbox name (`--sandbox`) |
+| `restricted` | Enable restricted mode (`--restricted`) |
+| `workflow` | Workflow file path (`--workflow`) |
+| `event` | Event JSON for workflow triggers (`--event`) |
+| `conversation` | Conversation file path (`--conversation`) |
+
+**Yolo mode behavior:** Forge's `--prompt` mode auto-approves tool use; there is no separate yolo flag.
 
 **Input handling:** The prompt (with system prompt prepended) is passed via the `--prompt` flag.
 

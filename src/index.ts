@@ -35,6 +35,7 @@ export {
   GeminiAgent,
   PiAgent,
   KimiAgent,
+  ForgeAgent,
 } from "./agents";
 export type {
   PiExtensionUiRequest,
