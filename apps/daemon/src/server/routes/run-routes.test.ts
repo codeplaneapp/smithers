@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
+import path from "node:path"
 
 import { afterEach, describe, expect, it } from "bun:test"
 
@@ -6,26 +8,91 @@ import { insertWorkspaceRow } from "@/db/repositories/workspace-repository"
 import { createApp } from "@/server/app"
 
 const originalFetch = globalThis.fetch
+const workspacePathsToDelete = new Set<string>()
 
 function seedWorkspace() {
   const workspaceId = `test-workspace-${randomUUID()}`
+  const workspacePath = path.join("/tmp", workspaceId)
   const now = new Date().toISOString()
 
   insertWorkspaceRow({
     id: workspaceId,
     name: workspaceId,
-    path: `/tmp/${workspaceId}`,
+    path: workspacePath,
     sourceType: "create",
+    runtimeMode: "burns-managed",
     healthStatus: "healthy",
     createdAt: now,
     updatedAt: now,
   })
 
+  workspacePathsToDelete.add(workspacePath)
   return workspaceId
+}
+
+function writeWorkflowFile(workspaceId: string, workflowId: string, extension: "ts" | "tsx") {
+  const workflowPath = path.join(
+    "/tmp",
+    workspaceId,
+    ".mr-burns",
+    "workflows",
+    workflowId
+  )
+  mkdirSync(workflowPath, { recursive: true })
+  writeFileSync(path.join(workflowPath, `workflow.${extension}`), "export default {}", "utf8")
+}
+
+function createSmithersSseResponse(frames: string[]) {
+  const encoder = new TextEncoder()
+
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const frame of frames) {
+          controller.enqueue(encoder.encode(`${frame}\n\n`))
+        }
+        controller.close()
+      },
+    }),
+    {
+      headers: {
+        "content-type": "text/event-stream",
+      },
+    }
+  )
+}
+
+async function waitForRunEvents(
+  app: ReturnType<typeof createApp>,
+  workspaceId: string,
+  runId: string,
+  predicate: (events: Array<{ seq: number }>) => boolean
+) {
+  const deadline = Date.now() + 1_500
+
+  while (Date.now() < deadline) {
+    const response = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/runs/${runId}/events`, {
+        method: "GET",
+      })
+    )
+    const events = (await response.json()) as Array<{ seq: number }>
+    if (predicate(events)) {
+      return events
+    }
+
+    await Bun.sleep(25)
+  }
+
+  return []
 }
 
 afterEach(() => {
   globalThis.fetch = originalFetch
+  for (const workspacePath of workspacePathsToDelete) {
+    rmSync(workspacePath, { recursive: true, force: true })
+  }
+  workspacePathsToDelete.clear()
 })
 
 describe("run routes", () => {
@@ -47,6 +114,41 @@ describe("run routes", () => {
     })
   })
 
+  it("rejects non-object start-run input payloads", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+
+    const response = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workflowId: "issue-to-pr",
+          input: ["invalid"],
+        }),
+      })
+    )
+
+    expect(response.status).toBe(400)
+  })
+
+  it("rejects non-object resume-run input payloads", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+
+    const response = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/runs/run-1/resume`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          input: "invalid",
+        }),
+      })
+    )
+
+    expect(response.status).toBe(400)
+  })
+
   it("maps Smithers list runs responses to Burns run DTOs", async () => {
     const app = createApp()
     const workspaceId = seedWorkspace()
@@ -62,8 +164,7 @@ describe("run routes", () => {
             id: "run-123",
             workflowId: "issue-to-pr",
             workflowName: "Issue to PR",
-            status: "waiting_approval",
-            startedAt: "2026-03-11T10:00:00.000Z",
+            status: "in-progress",
             summary: {
               done: 2,
               running: 1,
@@ -87,8 +188,8 @@ describe("run routes", () => {
         workspaceId,
         workflowId: "issue-to-pr",
         workflowName: "Issue to PR",
-        status: "waiting-approval",
-        startedAt: "2026-03-11T10:00:00.000Z",
+        status: "running",
+        startedAt: "1970-01-01T00:00:00.000Z",
         finishedAt: null,
         summary: {
           finished: 2,
@@ -102,6 +203,7 @@ describe("run routes", () => {
   it("forwards start-run requests to Smithers with workflow path metadata", async () => {
     const app = createApp()
     const workspaceId = seedWorkspace()
+    writeWorkflowFile(workspaceId, "issue-to-pr", "tsx")
     const capturedBodies: unknown[] = []
 
     globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
@@ -160,5 +262,196 @@ describe("run routes", () => {
     expect(capturedBodies[0]).toMatchObject({
       workflowPath: expect.stringContaining(`/${workspaceId}/.mr-burns/workflows/issue-to-pr/workflow.tsx`),
     })
+  })
+
+  it("uses workflow.ts when workflow.tsx is absent", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+    writeWorkflowFile(workspaceId, "issue-to-pr", "ts")
+    const capturedBodies: unknown[] = []
+
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      if (init?.body && typeof init.body === "string") {
+        capturedBodies.push(JSON.parse(init.body))
+      }
+
+      return Response.json({
+        run: {
+          id: "run-created",
+          workflow: {
+            id: "issue-to-pr",
+            name: "issue-to-pr",
+          },
+          status: "running",
+          startedAt: "2026-03-11T11:00:00.000Z",
+          summary: {
+            finished: 0,
+            inProgress: 1,
+            pending: 0,
+          },
+        },
+      })
+    }) as typeof fetch
+
+    const response = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workflowId: "issue-to-pr",
+          input: {},
+        }),
+      })
+    )
+
+    expect(response.status).toBe(201)
+    expect(capturedBodies).toHaveLength(1)
+    expect(capturedBodies[0]).toMatchObject({
+      workflowPath: expect.stringContaining(`/${workspaceId}/.mr-burns/workflows/issue-to-pr/workflow.ts`),
+    })
+  })
+
+  it("forwards resume-run requests to Smithers with resolved workflow path", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+    writeWorkflowFile(workspaceId, "issue-to-pr", "ts")
+    const capturedBodies: unknown[] = []
+
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      const url = String(input)
+
+      if (url.includes("/v1/runs/run-7/resume")) {
+        if (typeof init?.body === "string") {
+          capturedBodies.push(JSON.parse(init.body))
+        }
+
+        return Response.json({
+          run: {
+            id: "run-7",
+            workflowId: "issue-to-pr",
+            status: "running",
+            startedAt: "2026-03-11T11:00:00.000Z",
+            summary: {
+              finished: 0,
+              inProgress: 1,
+              pending: 0,
+            },
+          },
+        })
+      }
+
+      if (url.includes("/v1/runs/run-7")) {
+        return Response.json({
+          run: {
+            id: "run-7",
+            workflowId: "issue-to-pr",
+            status: "waiting-approval",
+            startedAt: "2026-03-11T10:00:00.000Z",
+            summary: {
+              finished: 0,
+              inProgress: 0,
+              pending: 1,
+            },
+          },
+        })
+      }
+
+      return new Response(null, { status: 500 })
+    }) as typeof fetch
+
+    const response = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/runs/run-7/resume`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          input: {
+            continue: true,
+          },
+        }),
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(capturedBodies).toHaveLength(1)
+    expect(capturedBodies[0]).toMatchObject({
+      input: {
+        continue: true,
+      },
+      workflowPath: expect.stringContaining(`/${workspaceId}/.mr-burns/workflows/issue-to-pr/workflow.ts`),
+    })
+  })
+
+  it("persists run events in the background after start-run without SSE clients", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+    writeWorkflowFile(workspaceId, "issue-to-pr", "tsx")
+    let eventStreamRequestCount = 0
+
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      const url = String(input)
+      const method = init?.method ?? "GET"
+
+      if (url.includes("/v1/runs/run-bg/events") && method === "GET") {
+        eventStreamRequestCount += 1
+        return createSmithersSseResponse([
+          'event: smithers\ndata: {"seq":1,"runId":"run-bg","type":"approval.pending","nodeId":"deploy","message":"Awaiting approval"}',
+          'event: smithers\ndata: {"seq":2,"runId":"run-bg","type":"run.finished","message":"Done"}',
+        ])
+      }
+
+      if (url.endsWith("/v1/runs") && method === "POST") {
+        return Response.json({
+          run: {
+            id: "run-bg",
+            workflowId: "issue-to-pr",
+            status: "running",
+            startedAt: "2026-03-11T11:00:00.000Z",
+            summary: {
+              finished: 0,
+              inProgress: 1,
+              pending: 0,
+            },
+          },
+        })
+      }
+
+      return new Response(null, { status: 404 })
+    }) as typeof fetch
+
+    const startResponse = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workflowId: "issue-to-pr",
+          input: {},
+        }),
+      })
+    )
+
+    expect(startResponse.status).toBe(201)
+    const events = await waitForRunEvents(
+      app,
+      workspaceId,
+      "run-bg",
+      (runEvents) => runEvents.some((event) => event.seq === 2)
+    )
+
+    expect(eventStreamRequestCount).toBeGreaterThan(0)
+    expect(events).toMatchObject([
+      {
+        seq: 1,
+        runId: "run-bg",
+        type: "approval.pending",
+        nodeId: "deploy",
+        message: "Awaiting approval",
+      },
+      {
+        seq: 2,
+        runId: "run-bg",
+        type: "run.finished",
+        message: "Done",
+      },
+    ])
   })
 })

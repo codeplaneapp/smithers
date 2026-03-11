@@ -19,6 +19,19 @@ db.exec(`
   );
 `)
 
+const workspaceColumns = db
+  .query<{ name: string }, []>(`PRAGMA table_info(workspaces)`)
+  .all()
+const workspaceColumnNames = new Set(workspaceColumns.map((column) => column.name))
+
+if (!workspaceColumnNames.has("runtime_mode")) {
+  db.exec(`ALTER TABLE workspaces ADD COLUMN runtime_mode TEXT NOT NULL DEFAULT 'burns-managed';`)
+}
+
+if (!workspaceColumnNames.has("smithers_base_url")) {
+  db.exec(`ALTER TABLE workspaces ADD COLUMN smithers_base_url TEXT;`)
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS run_events (
     workspace_id TEXT NOT NULL,

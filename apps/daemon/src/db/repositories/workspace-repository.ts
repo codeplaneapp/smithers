@@ -11,6 +11,8 @@ type WorkspaceRow = {
   default_agent: string | null
   health_status: Workspace["healthStatus"]
   source_type: Workspace["sourceType"]
+  runtime_mode: Workspace["runtimeMode"]
+  smithers_base_url: string | null
   created_at: string
   updated_at: string
 }
@@ -25,6 +27,8 @@ function mapWorkspaceRow(row: WorkspaceRow): Workspace {
     defaultAgent: row.default_agent ?? undefined,
     healthStatus: row.health_status,
     sourceType: row.source_type,
+    runtimeMode: row.runtime_mode,
+    smithersBaseUrl: row.smithers_base_url ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -43,6 +47,8 @@ export function listWorkspaceRows() {
           default_agent,
           health_status,
           source_type,
+          runtime_mode,
+          smithers_base_url,
           created_at,
           updated_at
         FROM workspaces
@@ -67,6 +73,8 @@ export function findWorkspaceRowById(id: string) {
           default_agent,
           health_status,
           source_type,
+          runtime_mode,
+          smithers_base_url,
           created_at,
           updated_at
         FROM workspaces
@@ -91,9 +99,11 @@ export function insertWorkspaceRow(workspace: Workspace) {
           default_agent,
           health_status,
           source_type,
+          runtime_mode,
+          smithers_base_url,
           created_at,
           updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
       `
     )
     .run(
@@ -105,6 +115,8 @@ export function insertWorkspaceRow(workspace: Workspace) {
       workspace.defaultAgent ?? null,
       workspace.healthStatus,
       workspace.sourceType,
+      workspace.runtimeMode,
+      workspace.smithersBaseUrl ?? null,
       workspace.createdAt,
       workspace.updatedAt
     )

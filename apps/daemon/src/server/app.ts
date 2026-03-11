@@ -58,7 +58,7 @@ export function createApp(options: { logger?: BurnsLogger } = {}) {
             (await handleRunRoutes(request, pathname)) ??
             (await handleApprovalRoutes(request, pathname)) ??
             handleSettingsRoutes(request, pathname) ??
-            handleSystemRoutes(request, pathname) ??
+            (await handleSystemRoutes(request, pathname)) ??
             handleDiagnosticsRoutes(request, pathname)
 
           response = routeResponse ?? Response.json({ error: "Not found" }, { status: 404 })

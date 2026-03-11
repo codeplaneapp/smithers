@@ -36,6 +36,11 @@ const approvalListSchema = z.array(approvalSchema)
 const nativeFolderPickerResponseSchema = z.object({
   path: z.string().nullable(),
 })
+const validateSmithersUrlResponseSchema = z.object({
+  ok: z.boolean(),
+  status: z.number().nullable(),
+  message: z.string(),
+})
 
 export class BurnsClient {
   private readonly baseUrl: string
@@ -82,6 +87,19 @@ export class BurnsClient {
     })
 
     return nativeFolderPickerResponseSchema.parse(data).path
+  }
+
+  async validateSmithersUrl(baseUrl: string): Promise<{
+    ok: boolean
+    status: number | null
+    message: string
+  }> {
+    const data = await this.request<unknown>("/api/system/validate-smithers-url", {
+      method: "POST",
+      body: JSON.stringify({ baseUrl }),
+    })
+
+    return validateSmithersUrlResponseSchema.parse(data)
   }
 
   async listAgentClis(): Promise<AgentCli[]> {

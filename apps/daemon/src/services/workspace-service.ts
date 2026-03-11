@@ -94,6 +94,7 @@ function createWorkspaceRecord(input: CreateWorkspaceInput, workspacePath: strin
   const now = new Date().toISOString()
   const branch = getCurrentBranch(workspacePath)
   const repoUrl = input.sourceType === "clone" ? input.repoUrl : getOriginUrl(workspacePath)
+  const runtimeMode = input.runtimeMode ?? "burns-managed"
 
   return {
     id,
@@ -104,6 +105,8 @@ function createWorkspaceRecord(input: CreateWorkspaceInput, workspacePath: strin
     defaultAgent: input.defaultAgent ?? DEFAULT_AGENT,
     healthStatus: existsSync(workspacePath) ? "healthy" : "disconnected",
     sourceType: input.sourceType,
+    runtimeMode,
+    smithersBaseUrl: runtimeMode === "self-managed" ? input.smithersBaseUrl : undefined,
     createdAt: now,
     updatedAt: now,
   }
@@ -117,6 +120,7 @@ export function initializeWorkspaceService() {
   try {
     createWorkspace({
       name: "burns-web-app",
+      runtimeMode: "burns-managed",
       sourceType: "create",
       targetFolder: "burns-web-app",
       defaultAgent: DEFAULT_AGENT,
@@ -169,7 +173,7 @@ export function createWorkspace(input: CreateWorkspaceInput) {
   const workspace = createWorkspaceRecord(input, workspacePath)
   const persistedWorkspace = insertWorkspaceRow(workspace)
 
-  if (input.sourceType === "create") {
+  if (input.sourceType === "create" && input.runtimeMode === "burns-managed") {
     ensureDefaultWorkflowTemplates(persistedWorkspace.id, input.workflowTemplateIds)
   }
 

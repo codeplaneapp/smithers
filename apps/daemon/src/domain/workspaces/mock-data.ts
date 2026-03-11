@@ -10,6 +10,7 @@ export const workspaces: Workspace[] = [
     defaultAgent: "Claude Code",
     healthStatus: "healthy",
     sourceType: "create",
+    runtimeMode: "burns-managed",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },

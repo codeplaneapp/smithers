@@ -16,6 +16,7 @@ function seedWorkspace() {
     name: workspaceId,
     path: `/tmp/${workspaceId}`,
     sourceType: "create",
+    runtimeMode: "burns-managed",
     healthStatus: "healthy",
     createdAt: now,
     updatedAt: now,

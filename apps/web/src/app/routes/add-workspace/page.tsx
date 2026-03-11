@@ -1,31 +1,32 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type ReactNode,
-} from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import { useNavigate } from "react-router-dom"
 
-import type { CreateWorkspaceInput, WorkspaceSourceType } from "@mr-burns/shared"
-import { FolderOpenIcon } from "lucide-react"
-
-import {
-  Combobox11,
-  type Combobox11Option,
-} from "@/components/shadcn-studio/combobox/combobox-11"
+import type { Combobox11Option } from "@/components/shadcn-studio/combobox/combobox-11"
+import { Combobox11 } from "@/components/shadcn-studio/combobox/combobox-11"
 import { Button } from "@/components/ui/button"
-import { FieldDescription, FieldLabel } from "@/components/ui/field"
+import { FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { useSettings } from "@/features/settings/hooks/use-settings"
+import { ChoiceCardScreen } from "@/features/workspaces/add-workspace/components/choice-card-screen"
+import {
+  BrowserFolderPickerField,
+  DaemonFolderPickerField,
+} from "@/features/workspaces/add-workspace/components/folder-picker-field"
+import {
+  type ManagedWorkspaceSourceChoice,
+  managedSourceChoiceOptions,
+  type WizardStep,
+  type WorkspaceRuntimeChoice,
+  runtimeChoiceOptions,
+} from "@/features/workspaces/add-workspace/lib/models"
+import {
+  slugifyWorkspaceName,
+  validateLocalPath,
+  validateRepositoryUrl,
+  validateSmithersUrl,
+  validateTargetFolder,
+  validateWorkspaceName,
+} from "@/features/workspaces/add-workspace/lib/validation"
 import { useCreateWorkspace } from "@/features/workspaces/hooks/use-create-workspace"
 import { burnsClient, isLocalhostBurnsApiUrl } from "@/lib/api/client"
 
@@ -35,213 +36,11 @@ const workflowTemplateOptions = [
   { value: "approval-gate", label: "Approval gate" },
 ] satisfies Combobox11Option[]
 
-type WorkspaceSourceMode = Extract<WorkspaceSourceType, "local" | "clone" | "create">
-
-type BrowserFolderPickerFieldProps = {
-  id: string
-  value: string
-  onChange: (value: string) => void
-  placeholder: string
-  pickerLabel: string
-}
-
-type DaemonFolderPickerFieldProps = {
-  id: string
-  value: string
-  onChange: (value: string) => void
-  placeholder: string
-  pickerLabel: string
-  onPick: () => Promise<string | null>
-}
-
-type FileWithPath = File & {
-  webkitRelativePath?: string
-}
-
 type FormRowProps = {
   label: string
   htmlFor?: string
   description?: ReactNode
   children: ReactNode
-}
-
-function extractFolderSelection(files: FileList) {
-  const first = files.item(0) as FileWithPath | null
-  if (!first) {
-    return ""
-  }
-
-  const relativePath = first.webkitRelativePath ?? ""
-  return relativePath.split("/").filter(Boolean)[0] ?? ""
-}
-
-function isAbsolutePath(pathValue: string) {
-  return (
-    pathValue.startsWith("/") ||
-    pathValue.startsWith("\\\\") ||
-    /^[a-zA-Z]:[\\/]/.test(pathValue)
-  )
-}
-
-function validateLocalPath(pathValue: string) {
-  const trimmedPath = pathValue.trim()
-  if (!trimmedPath) {
-    return "Repository path is required."
-  }
-
-  if (!isAbsolutePath(trimmedPath)) {
-    return "Repository path must be an absolute path."
-  }
-
-  return null
-}
-
-function validateRepositoryUrl(repoUrl: string) {
-  const trimmedRepoUrl = repoUrl.trim()
-  if (!trimmedRepoUrl) {
-    return "Repository URL is required."
-  }
-
-  const sshUrlPattern = /^[\w.-]+@[\w.-]+:[\w./-]+(?:\.git)?$/u
-  if (sshUrlPattern.test(trimmedRepoUrl)) {
-    return null
-  }
-
-  try {
-    const parsedUrl = new URL(trimmedRepoUrl)
-    if (["http:", "https:", "ssh:", "git:"].includes(parsedUrl.protocol)) {
-      return null
-    }
-  } catch {
-    // Invalid URL; handled below.
-  }
-
-  return "Enter a valid git URL (HTTPS, SSH, or git protocol)."
-}
-
-function validateTargetFolder(targetFolder: string) {
-  const trimmedTargetFolder = targetFolder.trim()
-  if (!trimmedTargetFolder) {
-    return "Target folder is required."
-  }
-
-  if (isAbsolutePath(trimmedTargetFolder)) {
-    return "Target folder must be relative to workspace root."
-  }
-
-  if (trimmedTargetFolder.split(/[\\/]+/u).some((segment) => segment === "..")) {
-    return "Target folder cannot contain '..' segments."
-  }
-
-  return null
-}
-
-function BrowserFolderPickerField({
-  id,
-  value,
-  onChange,
-  placeholder,
-  pickerLabel,
-}: BrowserFolderPickerFieldProps) {
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  const [pickerNote, setPickerNote] = useState<string>("")
-
-  useEffect(() => {
-    const input = inputRef.current
-    if (!input) {
-      return
-    }
-
-    input.setAttribute("webkitdirectory", "")
-    input.setAttribute("directory", "")
-  }, [])
-
-  function handleInputPickerChange(event: ChangeEvent<HTMLInputElement>) {
-    const files = event.currentTarget.files
-    if (!files?.length) {
-      return
-    }
-
-    const selectedFolder = extractFolderSelection(files)
-    if (selectedFolder) {
-      onChange(selectedFolder)
-      setPickerNote("")
-    } else {
-      setPickerNote("Could not determine selected folder name from browser picker.")
-    }
-
-    event.currentTarget.value = ""
-  }
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <Input
-          id={id}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder={placeholder}
-        />
-        <Button type="button" variant="outline" onClick={() => inputRef.current?.click()}>
-          <FolderOpenIcon data-icon="inline-start" />
-          {pickerLabel}
-        </Button>
-        <input
-          ref={inputRef}
-          type="file"
-          className="hidden"
-          multiple
-          onChange={handleInputPickerChange}
-        />
-      </div>
-      {pickerNote ? <FieldDescription>{pickerNote}</FieldDescription> : null}
-    </div>
-  )
-}
-
-function DaemonFolderPickerField({
-  id,
-  value,
-  onChange,
-  placeholder,
-  pickerLabel,
-  onPick,
-}: DaemonFolderPickerFieldProps) {
-  const [isPicking, setIsPicking] = useState(false)
-  const [pickerNote, setPickerNote] = useState<string>("")
-
-  async function handlePickClick() {
-    try {
-      setIsPicking(true)
-      setPickerNote("")
-      const selectedPath = await onPick()
-      if (selectedPath) {
-        onChange(selectedPath)
-      }
-    } catch (error) {
-      setPickerNote(error instanceof Error ? error.message : "Failed to pick folder.")
-    } finally {
-      setIsPicking(false)
-    }
-  }
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <Input
-          id={id}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder={placeholder}
-        />
-        <Button type="button" variant="outline" disabled={isPicking} onClick={() => void handlePickClick()}>
-          <FolderOpenIcon data-icon="inline-start" />
-          {isPicking ? "Opening..." : pickerLabel}
-        </Button>
-      </div>
-      {pickerNote ? <FieldDescription>{pickerNote}</FieldDescription> : null}
-    </div>
-  )
 }
 
 function FormRow({ label, htmlFor, description, children }: FormRowProps) {
@@ -269,179 +68,338 @@ export function AddWorkspacePage() {
 
   const isLocalDaemonUrl = isLocalhostBurnsApiUrl()
 
+  const [step, setStep] = useState<WizardStep>("runtime-choice")
+  const [runtimeChoice, setRuntimeChoice] = useState<WorkspaceRuntimeChoice | null>(null)
+  const [managedSourceChoice, setManagedSourceChoice] = useState<ManagedWorkspaceSourceChoice | null>(null)
+
   const [name, setName] = useState("burns-web-app")
-  const [sourceType, setSourceType] = useState<WorkspaceSourceMode>("create")
-  const [sourceValue, setSourceValue] = useState("")
+  const [repoUrl, setRepoUrl] = useState("")
+  const [localPath, setLocalPath] = useState("")
   const [targetFolder, setTargetFolder] = useState("burns-web-app")
+  const [smithersBaseUrl, setSmithersBaseUrl] = useState("http://localhost:7331")
   const [selectedWorkflowTemplateIds, setSelectedWorkflowTemplateIds] = useState(
     workflowTemplateOptions.map((option) => option.value)
   )
+  const [smithersValidationMessage, setSmithersValidationMessage] = useState<string | null>(null)
+  const [isValidatingSmithersUrl, setIsValidatingSmithersUrl] = useState(false)
 
-  const sourceValueError = sourceType === "clone"
-    ? validateRepositoryUrl(sourceValue)
-    : sourceType === "local"
-      ? validateLocalPath(sourceValue)
-      : null
+  const sourceChoices = useMemo(
+    () =>
+      isLocalDaemonUrl
+        ? managedSourceChoiceOptions
+        : managedSourceChoiceOptions.filter((option) => option.value !== "local"),
+    [isLocalDaemonUrl]
+  )
 
-  const targetFolderError = sourceType === "local" ? null : validateTargetFolder(targetFolder)
+  const isBurnsManaged = runtimeChoice === "burns-managed"
+  const isSelfManaged = runtimeChoice === "self-managed"
+  const selectedManagedSource = managedSourceChoice
+
+  const nameError = validateWorkspaceName(name)
+  const repoUrlError = selectedManagedSource === "clone" ? validateRepositoryUrl(repoUrl) : null
+  const localPathError = selectedManagedSource === "local" ? validateLocalPath(localPath) : null
+  const targetFolderError =
+    isBurnsManaged && selectedManagedSource !== "local" ? validateTargetFolder(targetFolder) : null
+  const selfManagedUrlError = isSelfManaged ? validateSmithersUrl(smithersBaseUrl) : null
+
+  const finalFormError =
+    nameError ||
+    repoUrlError ||
+    localPathError ||
+    targetFolderError ||
+    selfManagedUrlError
+
+  function getPrimaryButtonLabel() {
+    if (step !== "final-config") {
+      return "Confirm"
+    }
+
+    if (isValidatingSmithersUrl) {
+      return "Validating..."
+    }
+
+    return createWorkspace.isPending ? "Confirming..." : "Confirm"
+  }
+
+  function canProceedCurrentStep() {
+    if (step === "runtime-choice") {
+      return runtimeChoice !== null
+    }
+
+    if (step === "source-choice") {
+      return managedSourceChoice !== null
+    }
+
+    return !finalFormError && !createWorkspace.isPending && !isValidatingSmithersUrl
+  }
+
+  function handleBack() {
+    if (step === "source-choice") {
+      setStep("runtime-choice")
+      return
+    }
+
+    if (step === "final-config") {
+      if (isBurnsManaged) {
+        setStep("source-choice")
+        return
+      }
+
+      setStep("runtime-choice")
+    }
+  }
 
   async function handlePickLocalRepoPath() {
     return burnsClient.openNativeFolderPicker()
   }
 
-  async function handleCreateWorkspace() {
+  async function handleFinalConfirm() {
     const trimmedName = name.trim()
-    const trimmedSourceValue = sourceValue.trim()
+    const trimmedRepoUrl = repoUrl.trim()
+    const trimmedLocalPath = localPath.trim()
     const trimmedTargetFolder = targetFolder.trim()
+    const trimmedSmithersBaseUrl = smithersBaseUrl.trim()
+    const fallbackTargetFolder = slugifyWorkspaceName(trimmedName)
 
-    const payload: CreateWorkspaceInput = sourceType === "local"
-      ? {
-          name: trimmedName,
-          sourceType: "local",
-          localPath: trimmedSourceValue,
-          workflowTemplateIds: selectedWorkflowTemplateIds,
+    if (!runtimeChoice) {
+      return
+    }
+
+    if (runtimeChoice === "self-managed") {
+      setSmithersValidationMessage(null)
+      setIsValidatingSmithersUrl(true)
+
+      try {
+        const validation = await burnsClient.validateSmithersUrl(trimmedSmithersBaseUrl)
+        setSmithersValidationMessage(validation.message)
+        if (!validation.ok) {
+          return
         }
-      : sourceType === "clone"
+      } finally {
+        setIsValidatingSmithersUrl(false)
+      }
+
+      const workspace = await createWorkspace.mutateAsync({
+        name: trimmedName,
+        runtimeMode: "self-managed",
+        sourceType: "create",
+        smithersBaseUrl: trimmedSmithersBaseUrl,
+        targetFolder: fallbackTargetFolder,
+      })
+      navigate(`/w/${workspace.id}/overview`)
+      return
+    }
+
+    if (!selectedManagedSource) {
+      return
+    }
+
+    const workspace = await createWorkspace.mutateAsync(
+      selectedManagedSource === "local"
         ? {
             name: trimmedName,
-            sourceType: "clone",
-            repoUrl: trimmedSourceValue,
-            targetFolder: trimmedTargetFolder,
+            runtimeMode: "burns-managed",
+            sourceType: "local",
+            localPath: trimmedLocalPath,
             workflowTemplateIds: selectedWorkflowTemplateIds,
           }
-        : {
-            name: trimmedName,
-            sourceType: "create",
-            targetFolder: trimmedTargetFolder,
-            workflowTemplateIds: selectedWorkflowTemplateIds,
-          }
+        : selectedManagedSource === "clone"
+          ? {
+              name: trimmedName,
+              runtimeMode: "burns-managed",
+              sourceType: "clone",
+              repoUrl: trimmedRepoUrl,
+              targetFolder: trimmedTargetFolder || fallbackTargetFolder,
+              workflowTemplateIds: selectedWorkflowTemplateIds,
+            }
+          : {
+              name: trimmedName,
+              runtimeMode: "burns-managed",
+              sourceType: "create",
+              targetFolder: trimmedTargetFolder || fallbackTargetFolder,
+              workflowTemplateIds: selectedWorkflowTemplateIds,
+            }
+    )
 
-    const workspace = await createWorkspace.mutateAsync(payload)
     navigate(`/w/${workspace.id}/overview`)
   }
 
-  const isCreateDisabled =
-    createWorkspace.isPending ||
-    !name.trim() ||
-    !!sourceValueError ||
-    !!targetFolderError
+  async function handlePrimaryAction() {
+    if (step === "runtime-choice") {
+      if (runtimeChoice === "self-managed") {
+        setManagedSourceChoice(null)
+        setStep("final-config")
+        return
+      }
+
+      setStep("source-choice")
+      return
+    }
+
+    if (step === "source-choice") {
+      setStep("final-config")
+      return
+    }
+
+    await handleFinalConfirm()
+  }
 
   return (
     <div className="flex flex-col p-6">
       <div className="mx-auto w-full max-w-4xl rounded-xl border bg-card">
         <div className="border-b px-6 py-5">
-          <h1 className="text-xl font-semibold tracking-tight">Create workspace</h1>
+          <h1 className="text-xl font-semibold tracking-tight">
+            {step === "runtime-choice"
+              ? "Smithers Runtime"
+              : step === "source-choice"
+                ? "Repository Source"
+                : "Final Configuration"}
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Set a title, pick a source, configure paths, and confirm.
+            {step === "runtime-choice"
+              ? "Choose who manages Smithers for this workspace."
+              : step === "source-choice"
+                ? "Choose how this workspace repository should be set up."
+                : "Configure the workspace fields and confirm."}
           </p>
         </div>
 
         <div className="px-6">
-          <FormRow
-            label="Title"
-            htmlFor="workspace-name"
-            description="Displayed in the workspace list."
-          >
-            <Input
-              id="workspace-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Workspace title"
-            />
-          </FormRow>
+          {step === "runtime-choice" ? (
+            <div className="py-5">
+              <ChoiceCardScreen
+                value={runtimeChoice}
+                onChange={(value) => {
+                  setRuntimeChoice(value)
+                  setSmithersValidationMessage(null)
+                }}
+                options={runtimeChoiceOptions}
+              />
+            </div>
+          ) : null}
 
-          <FormRow label="Source" description="Create new, clone, or add an existing local repository.">
-            <Select
-              value={sourceType}
-              onValueChange={(value) => setSourceType(value as WorkspaceSourceMode)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Choose source mode" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="create">Create new repo</SelectItem>
-                  <SelectItem value="clone">Clone repository</SelectItem>
-                  {isLocalDaemonUrl ? (
-                    <SelectItem value="local">Add existing repository</SelectItem>
+          {step === "source-choice" ? (
+            <div className="py-5">
+              <ChoiceCardScreen
+                value={managedSourceChoice}
+                onChange={setManagedSourceChoice}
+                options={sourceChoices}
+              />
+            </div>
+          ) : null}
+
+          {step === "final-config" ? (
+            <>
+              <FormRow
+                label="Title"
+                htmlFor="workspace-name"
+                description="Displayed in the workspace list."
+              >
+                <Input
+                  id="workspace-name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="Workspace title"
+                />
+                {nameError ? <p className="text-xs text-destructive">{nameError}</p> : null}
+              </FormRow>
+
+              {isSelfManaged ? (
+                <FormRow
+                  label="Smithers URL"
+                  htmlFor="smithers-base-url"
+                  description="Burns will validate that the Smithers HTTP server is reachable."
+                >
+                  <Input
+                    id="smithers-base-url"
+                    value={smithersBaseUrl}
+                    onChange={(event) => {
+                      setSmithersBaseUrl(event.target.value)
+                      setSmithersValidationMessage(null)
+                    }}
+                    placeholder="http://localhost:7331"
+                  />
+                  {selfManagedUrlError ? (
+                    <p className="text-xs text-destructive">{selfManagedUrlError}</p>
                   ) : null}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </FormRow>
-
-          {sourceType === "clone" ? (
-            <FormRow
-              label="Repository URL"
-              htmlFor="workspace-repo-url"
-              description="HTTPS, SSH, or git URL."
-            >
-              <Input
-                id="workspace-repo-url"
-                value={sourceValue}
-                onChange={(event) => setSourceValue(event.target.value)}
-                placeholder="https://github.com/acme/burns-web-app.git"
-              />
-              {sourceValueError ? (
-                <p className="text-xs text-destructive">{sourceValueError}</p>
+                  {smithersValidationMessage && !selfManagedUrlError ? (
+                    <p className="text-xs text-muted-foreground">{smithersValidationMessage}</p>
+                  ) : null}
+                </FormRow>
               ) : null}
-            </FormRow>
-          ) : null}
 
-          {sourceType === "local" ? (
-            <FormRow
-              label="Local repo path"
-              htmlFor="workspace-local-path"
-              description="Use the picker or paste an absolute path."
-            >
-              <DaemonFolderPickerField
-                id="workspace-local-path"
-                value={sourceValue}
-                onChange={setSourceValue}
-                placeholder="/Users/you/code/my-repo"
-                pickerLabel="Choose"
-                onPick={handlePickLocalRepoPath}
-              />
-              {sourceValueError ? (
-                <p className="text-xs text-destructive">{sourceValueError}</p>
+              {isBurnsManaged && selectedManagedSource === "clone" ? (
+                <FormRow
+                  label="Repository URL"
+                  htmlFor="workspace-repo-url"
+                  description="HTTPS, SSH, or git URL."
+                >
+                  <Input
+                    id="workspace-repo-url"
+                    value={repoUrl}
+                    onChange={(event) => setRepoUrl(event.target.value)}
+                    placeholder="https://github.com/acme/burns-web-app.git"
+                  />
+                  {repoUrlError ? <p className="text-xs text-destructive">{repoUrlError}</p> : null}
+                </FormRow>
               ) : null}
-            </FormRow>
-          ) : null}
 
-          {sourceType !== "local" ? (
-            <FormRow
-              label="Target folder"
-              htmlFor="workspace-target-folder"
-              description={`Relative to workspace root: ${settings?.workspaceRoot ?? "Loading..."}`}
-            >
-              <BrowserFolderPickerField
-                id="workspace-target-folder"
-                value={targetFolder}
-                onChange={setTargetFolder}
-                placeholder="burns-web-app"
-                pickerLabel="Choose"
-              />
-              {targetFolderError ? (
-                <p className="text-xs text-destructive">{targetFolderError}</p>
+              {isBurnsManaged && selectedManagedSource === "local" ? (
+                <FormRow
+                  label="Local repo path"
+                  htmlFor="workspace-local-path"
+                  description="Use native folder picker or paste an absolute path."
+                >
+                  <DaemonFolderPickerField
+                    id="workspace-local-path"
+                    value={localPath}
+                    onChange={setLocalPath}
+                    placeholder="/Users/you/code/my-repo"
+                    pickerLabel="Choose"
+                    onPick={handlePickLocalRepoPath}
+                  />
+                  {localPathError ? <p className="text-xs text-destructive">{localPathError}</p> : null}
+                </FormRow>
               ) : null}
-            </FormRow>
-          ) : null}
 
-          <FormRow
-            label="Workflows"
-            description="Select templates to pre-seed in .mr-burns/workflows."
-          >
-            <Combobox11
-              className="max-w-full"
-              label=""
-              placeholder="Select workflow templates"
-              searchPlaceholder="Search workflow template..."
-              emptyLabel="No workflow template found."
-              options={workflowTemplateOptions}
-              selectedValues={selectedWorkflowTemplateIds}
-              onChange={setSelectedWorkflowTemplateIds}
-            />
-          </FormRow>
+              {isBurnsManaged && selectedManagedSource !== "local" ? (
+                <FormRow
+                  label="Target folder"
+                  htmlFor="workspace-target-folder"
+                  description={`Relative to workspace root: ${settings?.workspaceRoot ?? "Loading..."}`}
+                >
+                  <BrowserFolderPickerField
+                    id="workspace-target-folder"
+                    value={targetFolder}
+                    onChange={setTargetFolder}
+                    placeholder={slugifyWorkspaceName(name)}
+                    pickerLabel="Choose"
+                  />
+                  {targetFolderError ? (
+                    <p className="text-xs text-destructive">{targetFolderError}</p>
+                  ) : null}
+                </FormRow>
+              ) : null}
+
+              {isBurnsManaged ? (
+                <FormRow
+                  label="Workflows"
+                  description="Select templates to pre-seed in .mr-burns/workflows."
+                >
+                  <Combobox11
+                    className="max-w-full"
+                    label=""
+                    placeholder="Select workflow templates"
+                    searchPlaceholder="Search workflow template..."
+                    emptyLabel="No workflow template found."
+                    options={workflowTemplateOptions}
+                    selectedValues={selectedWorkflowTemplateIds}
+                    onChange={setSelectedWorkflowTemplateIds}
+                  />
+                </FormRow>
+              ) : null}
+            </>
+          ) : null}
 
           {createWorkspace.error ? (
             <div className="py-4">
@@ -451,9 +409,14 @@ export function AddWorkspacePage() {
             </div>
           ) : null}
 
-          <div className="flex justify-end py-5">
-            <Button onClick={() => void handleCreateWorkspace()} disabled={isCreateDisabled}>
-              {createWorkspace.isPending ? "Confirming..." : "Confirm"}
+          <div className="flex items-center justify-end gap-2 py-5">
+            {step !== "runtime-choice" ? (
+              <Button variant="outline" onClick={handleBack} disabled={createWorkspace.isPending}>
+                Back
+              </Button>
+            ) : null}
+            <Button onClick={() => void handlePrimaryAction()} disabled={!canProceedCurrentStep()}>
+              {getPrimaryButtonLabel()}
             </Button>
           </div>
         </div>

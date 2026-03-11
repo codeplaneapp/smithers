@@ -437,6 +437,10 @@ export function getSmithersBaseUrlSettingValue() {
 }
 
 export function startWorkspaceSmithersInBackground(workspace: Workspace) {
+  if (workspace.runtimeMode === "self-managed") {
+    return
+  }
+
   if (!managedModeEnabled) {
     return
   }
@@ -454,6 +458,14 @@ export function startWorkspaceSmithersInBackground(workspace: Workspace) {
 }
 
 export async function ensureWorkspaceSmithersBaseUrl(workspace: Workspace) {
+  if (workspace.runtimeMode === "self-managed") {
+    if (!workspace.smithersBaseUrl) {
+      throw new Error(`Self-managed workspace ${workspace.id} is missing smithersBaseUrl`)
+    }
+
+    return workspace.smithersBaseUrl
+  }
+
   if (!managedModeEnabled) {
     return resolveFallbackBaseUrl()
   }
@@ -472,8 +484,9 @@ export async function warmWorkspaceSmithersInstances(workspaces: Workspace[]) {
     return
   }
 
-  const existingWorkspacePaths = workspaces.filter((workspace) => existsSync(workspace.path))
-  const skippedCount = workspaces.length - existingWorkspacePaths.length
+  const managedWorkspaces = workspaces.filter((workspace) => workspace.runtimeMode !== "self-managed")
+  const existingWorkspacePaths = managedWorkspaces.filter((workspace) => existsSync(workspace.path))
+  const skippedCount = managedWorkspaces.length - existingWorkspacePaths.length
 
   if (existingWorkspacePaths.length === 0) {
     return
@@ -484,7 +497,7 @@ export async function warmWorkspaceSmithersInstances(workspaces: Workspace[]) {
       {
         event: "smithers.instance.warm_skipped_disconnected",
         skippedCount,
-        total: workspaces.length,
+        total: managedWorkspaces.length,
       },
       "Skipped warming disconnected workspaces"
     )
