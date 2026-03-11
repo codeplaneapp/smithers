@@ -277,13 +277,6 @@ export function AddWorkspacePage() {
     workflowTemplateOptions.map((option) => option.value)
   )
 
-  useEffect(() => {
-    if (!isLocalDaemonUrl && sourceType === "local") {
-      setSourceType("create")
-      setSourceValue("")
-    }
-  }, [isLocalDaemonUrl, sourceType])
-
   const sourceValueError = sourceType === "clone"
     ? validateRepositoryUrl(sourceValue)
     : sourceType === "local"
