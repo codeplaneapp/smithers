@@ -31,10 +31,11 @@ Primary backend/control-plane application.
 Key directories:
 
 - `src/server`: HTTP app and route handlers
-- `src/services`: business logic for workspaces, workflows, git, diagnostics, and agent CLI integration
+- `src/services`: business logic for workspaces, workflows, runs/approvals, git, diagnostics, and Smithers instance lifecycle
+- `src/jobs`: process entrypoints used by daemon-managed child workers (for example workspace Smithers runner)
 - `src/agents`: wrappers for CLI-based agents (`claude`, `codex`, `gemini`, `pi`)
 - `src/db`: Bun SQLite client and workspace repository
-- `src/domain`: default workflow templates and mock run/approval data
+- `src/domain`: default workflow templates and seed fixture data
 - `src/config`: app defaults and filesystem paths
 
 Key runtime behavior:
@@ -43,6 +44,7 @@ Key runtime behavior:
 - Persists workspace metadata in `apps/daemon/.data/mr-burns.sqlite`
 - Manages default workspace folder root in `apps/daemon/.data/workspaces`
 - Stores workflow source files per workspace under `.mr-burns/workflows`
+- Supervises one Smithers process per workspace (when enabled), including crash restart and shutdown handling
 
 ## `apps/web`
 

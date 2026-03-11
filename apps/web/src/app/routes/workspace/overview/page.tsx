@@ -1,4 +1,3 @@
-import { PageHeader } from "@/components/app-shell/page-header"
 import {
   Card,
   CardContent,
@@ -19,7 +18,6 @@ export function WorkspaceOverviewPage() {
 
   return (
     <div className="flex flex-col">
-      <PageHeader title="Overview" description={`Workspace summary for ${workspace?.name ?? "selected workspace"}.`} />
       <div className="grid gap-4 p-6 xl:grid-cols-4">
         <Card>
           <CardHeader>

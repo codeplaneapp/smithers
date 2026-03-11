@@ -2,13 +2,7 @@ import { BaseCliAgent, type BaseCliAgentOptions, pushFlag } from "@/agents/BaseC
 
 export class ClaudeCodeAgent extends BaseCliAgent {
   constructor(options: BaseCliAgentOptions = {}) {
-    super({
-      ...options,
-      env: {
-        ...(options.env ?? {}),
-        ANTHROPIC_API_KEY: "",
-      },
-    })
+    super(options)
   }
 
   protected async buildCommand(params: { prompt: string; cwd: string }) {

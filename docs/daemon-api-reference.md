@@ -35,6 +35,9 @@ Returns daemon defaults:
 - `defaultAgent`
 - `smithersBaseUrl`
 - `allowNetwork`
+- `smithersManagedPerWorkspace`
+
+When `smithersManagedPerWorkspace` is `true`, Burns supervises one Smithers HTTP server per workspace and routes run/approval/event requests to the correct workspace-local instance.
 
 ## `GET /api/agents/clis`
 
@@ -64,6 +67,8 @@ Creates a workspace from one of three source types:
 - `create`: create a new repo with `git init`
 
 Request body is validated by `createWorkspaceInputSchema`.
+
+For new workspaces, daemon-managed Smithers mode starts a workspace-local Smithers server in the background.
 
 ## `GET /api/workspaces/:workspaceId`
 
@@ -140,19 +145,102 @@ Request body:
 }
 ```
 
-## Runs and approvals
+## Runs
 
 ## `GET /api/workspaces/:workspaceId/runs`
 
-Returns run list for workspace.
+Returns run list for workspace (Smithers-backed).
 
-Current implementation is mock-backed (`domain/workspaces/mock-data.ts`).
+When daemon-managed mode is enabled, Burns ensures the workspace Smithers instance is running before handling this request.
+
+## `POST /api/workspaces/:workspaceId/runs`
+
+Starts a new run for the selected workflow.
+
+Request body:
+
+```json
+{
+  "workflowId": "issue-to-pr",
+  "input": {}
+}
+```
+
+## `GET /api/workspaces/:workspaceId/runs/:runId`
+
+Returns one run by ID.
+
+## `POST /api/workspaces/:workspaceId/runs/:runId/resume`
+
+Resumes a run.
+
+Request body:
+
+```json
+{
+  "input": {}
+}
+```
+
+## `POST /api/workspaces/:workspaceId/runs/:runId/cancel`
+
+Cancels a run.
+
+Request body:
+
+```json
+{
+  "reason": "optional reason"
+}
+```
+
+## `GET /api/workspaces/:workspaceId/runs/:runId/events`
+
+Returns persisted run events from local SQLite.
+
+Optional query string:
+
+- `afterSeq=<number>` to fetch incremental events
+
+## `GET /api/workspaces/:workspaceId/runs/:runId/events/stream`
+
+SSE proxy stream to Smithers events endpoint.
+
+Response content type: `text/event-stream`.
+
+Incoming `event: smithers` payloads are persisted to SQLite.
+
+## Approvals
 
 ## `GET /api/workspaces/:workspaceId/approvals`
 
-Returns approval list for workspace.
+Returns workspace approvals from local persistence.
 
-Current implementation is mock-backed (`domain/workspaces/mock-data.ts`).
+## `POST /api/workspaces/:workspaceId/runs/:runId/nodes/:nodeId/approve`
+
+Sends approval decision to Smithers and persists local approval state.
+
+Request body:
+
+```json
+{
+  "decidedBy": "operator-name",
+  "note": "optional note"
+}
+```
+
+## `POST /api/workspaces/:workspaceId/runs/:runId/nodes/:nodeId/deny`
+
+Sends denial decision to Smithers and persists local approval state.
+
+Request body:
+
+```json
+{
+  "decidedBy": "operator-name",
+  "note": "optional note"
+}
+```
 
 ## Error behavior
 

@@ -19,12 +19,10 @@ Implemented today:
 - Workflow file management under `.mr-burns/workflows`
 - AI-assisted workflow generation and editing via installed local agent CLIs
 - Web UI for workspaces, workflows, settings, runs, and approvals
-
-Currently mocked/stubbed:
-
-- Run execution/orchestration data (`/runs`)
-- Approval actions (`/approvals` UI buttons are present but not wired)
-- Deep diagnostics and supervisor behavior
+- Smithers-backed run lifecycle APIs (start/list/detail/resume/cancel)
+- Run event persistence in SQLite with SSE proxy streaming
+- Approval decision APIs (approve/deny) wired from UI
+- Managed per-workspace Smithers server lifecycle (startup, crash restart, graceful shutdown)
 
 ## Prerequisites
 
@@ -72,7 +70,7 @@ VITE_BURNS_API_URL=http://localhost:7332
 Additional app-level scripts:
 
 - `apps/web`: `bun run lint`, `bun run preview`
-- `apps/daemon`: `bun run start`, `bun run typecheck`
+- `apps/daemon`: `bun run start`, `bun run typecheck`, `bun run test`
 
 ## Runtime data locations
 
@@ -87,6 +85,19 @@ Each managed workspace stores workflows at:
 <workspace-path>/.mr-burns/workflows/<workflow-id>/workflow.tsx
 ```
 
+Each managed workspace also stores Smithers runtime state at:
+
+```txt
+<workspace-path>/.mr-burns/state/smithers.sqlite
+```
+
+Optional Smithers lifecycle env vars:
+
+- `BURNS_SMITHERS_MANAGED_MODE=0` to disable daemon-managed per-workspace Smithers processes
+- `BURNS_SMITHERS_PORT_BASE=7440` to change the first managed Smithers port
+- `BURNS_SMITHERS_MAX_WORKSPACE_INSTANCES=1000` to change the managed port scan range
+- `BURNS_SMITHERS_ALLOW_NETWORK=1` to run managed Smithers servers with network access enabled
+
 ## Documentation index
 
 - [Codebase Layout](./docs/codebase-layout.md)
@@ -95,5 +106,5 @@ Each managed workspace stores workflows at:
 
 ## Notes
 
-- There is no automated test suite in the repository yet.
+- Daemon route/service coverage exists via `bun test` in `apps/daemon`.
 - The product spec describes target behavior; current implementation details are captured in the docs above.

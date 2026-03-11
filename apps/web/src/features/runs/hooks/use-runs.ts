@@ -7,5 +7,6 @@ export function useRuns(workspaceId?: string) {
     queryKey: ["runs", workspaceId],
     queryFn: () => burnsClient.listRuns(workspaceId!),
     enabled: Boolean(workspaceId),
+    refetchInterval: 5000,
   })
 }

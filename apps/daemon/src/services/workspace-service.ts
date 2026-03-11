@@ -19,6 +19,7 @@ import {
   initRepository,
   isGitRepository,
 } from "@/services/git-service"
+import { startWorkspaceSmithersInBackground } from "@/services/smithers-instance-service"
 import { ensureDefaultWorkflowTemplates } from "@/services/workflow-service"
 import { getLogger } from "@/logging/logger"
 import { HttpError } from "@/utils/http-error"
@@ -37,12 +38,45 @@ function ensureWorkflowDirectory(workspacePath: string) {
   mkdirSync(path.join(workspacePath, ".mr-burns", "workflows"), { recursive: true })
 }
 
-function resolveWorkspacePath(input: CreateWorkspaceInput, workspaceId: string) {
-  if (input.sourceType === "local") {
-    return path.resolve(input.localPath)
+function isPathWithinDirectory(targetPath: string, parentDirectory: string) {
+  const resolvedParent = path.resolve(parentDirectory)
+  const resolvedTarget = path.resolve(targetPath)
+  const parentWithSeparator = resolvedParent.endsWith(path.sep)
+    ? resolvedParent
+    : `${resolvedParent}${path.sep}`
+
+  return resolvedTarget === resolvedParent || resolvedTarget.startsWith(parentWithSeparator)
+}
+
+function resolveRelativeTargetFolder(targetFolder: string | undefined, workspaceId: string) {
+  const trimmedTargetFolder = targetFolder?.trim() || workspaceId
+  if (!trimmedTargetFolder) {
+    throw new HttpError(400, "Target folder is required")
   }
 
-  return path.resolve(DEFAULT_WORKSPACES_ROOT, input.targetFolder ?? workspaceId)
+  if (path.isAbsolute(trimmedTargetFolder)) {
+    throw new HttpError(400, "Target folder must be relative to workspace root")
+  }
+
+  const resolvedPath = path.resolve(DEFAULT_WORKSPACES_ROOT, trimmedTargetFolder)
+  if (!isPathWithinDirectory(resolvedPath, DEFAULT_WORKSPACES_ROOT)) {
+    throw new HttpError(400, "Target folder must stay within workspace root")
+  }
+
+  return resolvedPath
+}
+
+function resolveWorkspacePath(input: CreateWorkspaceInput, workspaceId: string) {
+  if (input.sourceType === "local") {
+    const localPath = input.localPath.trim()
+    if (!path.isAbsolute(localPath)) {
+      throw new HttpError(400, "Local repository path must be absolute")
+    }
+
+    return path.resolve(localPath)
+  }
+
+  return resolveRelativeTargetFolder(input.targetFolder, workspaceId)
 }
 
 function assertWorkspaceDoesNotExist(id: string, workspacePath: string) {
@@ -138,6 +172,8 @@ export function createWorkspace(input: CreateWorkspaceInput) {
   if (input.sourceType === "create") {
     ensureDefaultWorkflowTemplates(persistedWorkspace.id, input.workflowTemplateIds)
   }
+
+  startWorkspaceSmithersInBackground(persistedWorkspace)
 
   return persistedWorkspace
 }

@@ -1,4 +1,3 @@
-import { PageHeader } from "@/components/app-shell/page-header"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -14,10 +13,6 @@ export function SettingsPage() {
 
   return (
     <div className="flex flex-col">
-      <PageHeader
-        title="Settings"
-        description="Configure global Mr. Burns settings, agent defaults, and workspace root."
-      />
       <div className="grid gap-4 p-6 xl:grid-cols-2">
         <Card>
           <CardHeader>
@@ -36,6 +31,10 @@ export function SettingsPage() {
             </div>
             <div className="rounded-xl border bg-muted px-4 py-3">
               allowNetwork: {isLoading ? "Loading…" : String(settings?.allowNetwork ?? false)}
+            </div>
+            <div className="rounded-xl border bg-muted px-4 py-3">
+              smithersManagedPerWorkspace:{" "}
+              {isLoading ? "Loading…" : String(settings?.smithersManagedPerWorkspace ?? false)}
             </div>
           </CardContent>
         </Card>

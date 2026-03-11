@@ -124,7 +124,7 @@ function mapWorkflowFile(workspaceId: string, workflowId: string, filePath: stri
   }
 }
 
-export function ensureDefaultWorkflowTemplates(workspaceId: string) {
+export function ensureDefaultWorkflowTemplates(workspaceId: string, templateIds?: string[]) {
   const workflowRoot = getWorkflowRoot(workspaceId)
   mkdirSync(workflowRoot, { recursive: true })
 
@@ -140,7 +140,12 @@ export function ensureDefaultWorkflowTemplates(workspaceId: string) {
     return
   }
 
-  for (const template of defaultWorkflowTemplates) {
+  const selectedTemplateIds = new Set(templateIds ?? [])
+  const templatesToWrite = templateIds?.length
+    ? defaultWorkflowTemplates.filter((template) => selectedTemplateIds.has(template.id))
+    : defaultWorkflowTemplates
+
+  for (const template of templatesToWrite) {
     const workflowDir = path.join(workflowRoot, template.id)
     mkdirSync(workflowDir, { recursive: true })
     writeFileSync(path.join(workflowDir, "workflow.tsx"), `${template.source}\n`, "utf8")

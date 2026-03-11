@@ -7,6 +7,7 @@ import { handleDiagnosticsRoutes } from "@/server/routes/diagnostics-routes"
 import { handleHealthRequest } from "@/server/routes/health-routes"
 import { handleRunRoutes } from "@/server/routes/run-routes"
 import { handleSettingsRoutes } from "@/server/routes/settings-routes"
+import { handleSystemRoutes } from "@/server/routes/system-routes"
 import { handleWorkflowRoutes } from "@/server/routes/workflow-routes"
 import { handleWorkspaceRoutes } from "@/server/routes/workspace-routes"
 
@@ -57,6 +58,7 @@ export function createApp(options: { logger?: BurnsLogger } = {}) {
             (await handleRunRoutes(request, pathname)) ??
             (await handleApprovalRoutes(request, pathname)) ??
             handleSettingsRoutes(request, pathname) ??
+            handleSystemRoutes(request, pathname) ??
             handleDiagnosticsRoutes(request, pathname)
 
           response = routeResponse ?? Response.json({ error: "Not found" }, { status: 404 })

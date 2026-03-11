@@ -1,7 +1,6 @@
 import { useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
-import { PageHeader } from "@/components/app-shell/page-header"
 import { WorkflowEditorPane } from "@/components/code-editor/workflow-editor-pane"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -36,11 +35,6 @@ export function WorkflowsPage() {
 
   return (
     <div className="flex flex-col">
-      <PageHeader
-        title="Workflows"
-        description={`Author and iterate on workflows for ${workspace?.name ?? "the selected workspace"}.`}
-        actions={<Badge variant="secondary">{workflows.length} total</Badge>}
-      />
       <div className="grid gap-4 p-6 xl:grid-cols-[20rem_1fr]">
         <Card className="h-full">
           <CardHeader>
@@ -91,7 +85,7 @@ export function WorkflowsPage() {
               }
 
               const confirmed = window.confirm(
-                `Delete workflow \"${selectedWorkflowId}\"? This removes its workflow folder from disk.`
+                `Delete workflow "${selectedWorkflowId}"? This removes its workflow folder from disk.`
               )
               if (!confirmed) {
                 return

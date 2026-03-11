@@ -1,5 +1,5 @@
-import { CheckIcon, WandSparklesIcon } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { CheckIcon } from "lucide-react"
+import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 
 import {
@@ -10,11 +10,6 @@ import {
   CodeBlockHeader,
   CodeBlockTitle,
 } from "@/components/ai-elements/code-block"
-import {
-  FileTree,
-  FileTreeFile,
-  FileTreeFolder,
-} from "@/components/ai-elements/file-tree"
 import {
   ModelSelector,
   ModelSelectorContent,
@@ -37,10 +32,8 @@ import {
   PromptInputTextarea,
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input"
-import { PageHeader } from "@/components/app-shell/page-header"
 import {
   Field,
-  FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
@@ -48,19 +41,10 @@ import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { useAgentClis } from "@/features/agents/hooks/use-agent-clis"
 import { useActiveWorkspace } from "@/features/workspaces/hooks/use-active-workspace"
 import { useGenerateWorkflow } from "@/features/workflows/hooks/use-generate-workflow"
@@ -78,34 +62,19 @@ export function NewWorkflowPage() {
   const [selectedAgentId, setSelectedAgentId] = useState<string>("")
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false)
 
-  useEffect(() => {
-    if (!selectedAgentId && agentClis[0]) {
-      setSelectedAgentId(agentClis[0].id)
-    }
-  }, [selectedAgentId, agentClis])
+  const resolvedSelectedAgentId = selectedAgentId || agentClis[0]?.id || ""
 
   const selectedAgent = useMemo(
-    () => agentClis.find((agent) => agent.id === selectedAgentId) ?? null,
-    [agentClis, selectedAgentId]
+    () => agentClis.find((agent) => agent.id === resolvedSelectedAgentId) ?? null,
+    [agentClis, resolvedSelectedAgentId]
   )
 
   const generatedWorkflow = generateWorkflow.data ?? null
-  const generatedWorkflowFolder = generatedWorkflow
-    ? `.mr-burns/workflows/${generatedWorkflow.id}`
-    : null
-
-  const defaultExpanded = useMemo(
-    () =>
-      generatedWorkflow
-        ? new Set([".mr-burns", ".mr-burns/workflows", generatedWorkflowFolder!])
-        : new Set<string>(),
-    [generatedWorkflow, generatedWorkflowFolder]
-  )
 
   const submitStatus = generateWorkflow.isPending ? "submitted" : "ready"
 
   function handleAgentSubmit(message: PromptInputMessage) {
-    if (!workspace || !selectedAgentId) {
+    if (!workspace || !resolvedSelectedAgentId) {
       return
     }
 
@@ -117,29 +86,17 @@ export function NewWorkflowPage() {
     setPrompt(submittedPrompt)
     generateWorkflow.mutate({
       name,
-      agentId: selectedAgentId,
+      agentId: resolvedSelectedAgentId,
       prompt: submittedPrompt,
     })
   }
 
   return (
     <div className="flex flex-col">
-      <PageHeader
-        title="New workflow"
-        description={`Generate a workflow for ${workspace?.name ?? "the selected workspace"} using an installed agent CLI.`}
-        actions={
-          <Button variant="outline" onClick={() => navigate(`/workflows`)}>
-            Back to workflows
-          </Button>
-        }
-      />
       <div className="grid gap-4 p-6 xl:grid-cols-[28rem_1fr]">
         <Card>
           <CardHeader>
             <CardTitle>Workflow generator</CardTitle>
-            <CardDescription>
-              Build a new workflow by prompting an installed Smithers-compatible CLI agent.
-            </CardDescription>
           </CardHeader>
           <CardContent>
             <FieldGroup>
@@ -150,33 +107,6 @@ export function NewWorkflowPage() {
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                 />
-                <FieldDescription>
-                  This becomes the workflow folder under <code>.mr-burns/workflows</code>.
-                </FieldDescription>
-              </Field>
-
-              <Field>
-                <FieldLabel htmlFor="workflow-agent">Agent CLI</FieldLabel>
-                <Select
-                  value={selectedAgentId}
-                  onValueChange={(value) => setSelectedAgentId(value ?? "")}
-                >
-                  <SelectTrigger id="workflow-agent" className="w-full">
-                    <SelectValue placeholder="Select an installed agent CLI" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {agentClis.map((agent) => (
-                        <SelectItem key={agent.id} value={agent.id}>
-                          {agent.name}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-                <FieldDescription>
-                  Uses the Smithers-style normalized CLI adapter for generation.
-                </FieldDescription>
               </Field>
 
               <Field>
@@ -227,7 +157,7 @@ export function NewWorkflowPage() {
                                 >
                                   <ModelSelectorLogo provider={agent.logoProvider} />
                                   <ModelSelectorName>{agent.name}</ModelSelectorName>
-                                  {selectedAgentId === agent.id ? (
+                                  {resolvedSelectedAgentId === agent.id ? (
                                     <CheckIcon className="ml-auto" data-icon="inline-end" />
                                   ) : null}
                                 </ModelSelectorItem>
@@ -238,15 +168,11 @@ export function NewWorkflowPage() {
                       </ModelSelector>
                     </PromptInputTools>
                     <PromptInputSubmit
-                      disabled={!name.trim() || !prompt.trim() || !selectedAgentId || isAgentListLoading}
+                      disabled={!name.trim() || !prompt.trim() || !resolvedSelectedAgentId || isAgentListLoading}
                       status={submitStatus}
                     />
                   </PromptInputFooter>
                 </PromptInput>
-                <FieldDescription>
-                  On submit, Mr. Burns injects workflow-generation instructions before your prompt,
-                  asks the selected CLI to write <code>workflow.tsx</code> into the workspace, then reads the file back and previews it here.
-                </FieldDescription>
               </Field>
 
               {generateWorkflow.error ? (
@@ -262,41 +188,15 @@ export function NewWorkflowPage() {
           <Card>
             <CardHeader>
               <CardTitle>Generated workflow</CardTitle>
-              <CardDescription>
-                Review the generated file tree and source before opening the editor.
-              </CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-4 xl:grid-cols-[18rem_1fr]">
-              <div className="flex flex-col gap-3">
-                <FileTree
-                  defaultExpanded={defaultExpanded}
-                  selectedPath={generatedWorkflow?.relativePath}
-                >
-                  <FileTreeFolder name=".mr-burns" path=".mr-burns">
-                    <FileTreeFolder name="workflows" path=".mr-burns/workflows">
-                      {generatedWorkflow && generatedWorkflowFolder ? (
-                        <FileTreeFolder name={generatedWorkflow.id} path={generatedWorkflowFolder}>
-                          <FileTreeFile
-                            name="workflow.tsx"
-                            path={generatedWorkflow.relativePath}
-                          />
-                        </FileTreeFolder>
-                      ) : null}
-                    </FileTreeFolder>
-                  </FileTreeFolder>
-                </FileTree>
-                {generatedWorkflow ? (
-                  <Button
-                    onClick={() =>
-                      navigate(
-                        `/workflows/${generatedWorkflow.id}`
-                      )
-                    }
-                  >
+            <CardContent className="grid gap-4">
+              {generatedWorkflow ? (
+                 <div className="flex justify-end">
+                  <Button onClick={() => navigate(`/workflows/${generatedWorkflow.id}`)}>
                     Open in editor
                   </Button>
-                ) : null}
-              </div>
+                </div>
+              ) : null}
 
               {generatedWorkflow ? (
                 <CodeBlock
@@ -307,7 +207,6 @@ export function NewWorkflowPage() {
                 >
                   <CodeBlockHeader>
                     <CodeBlockTitle>
-                      <WandSparklesIcon data-icon="inline-start" />
                       <CodeBlockFilename>workflow.tsx</CodeBlockFilename>
                     </CodeBlockTitle>
                     <CodeBlockActions>

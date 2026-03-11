@@ -2,13 +2,19 @@ import {
   type AgentCli,
   agentCliSchema,
   type Approval,
+  type ApprovalDecisionInput,
   approvalSchema,
+  type CancelRunInput,
   type CreateWorkspaceInput,
   type EditWorkflowInput,
   type GenerateWorkflowInput,
   type Run,
+  type RunEvent,
+  runEventSchema,
   runSchema,
+  type ResumeRunInput,
   type Settings,
+  type StartRunInput,
   settingsSchema,
   type UpdateWorkflowInput,
   type Workflow,
@@ -25,13 +31,21 @@ const workflowListSchema = z.array(workflowSchema)
 const workflowDocumentListSchema = workflowDocumentSchema
 const agentCliListSchema = z.array(agentCliSchema)
 const runListSchema = z.array(runSchema)
+const runEventListSchema = z.array(runEventSchema)
 const approvalListSchema = z.array(approvalSchema)
+const nativeFolderPickerResponseSchema = z.object({
+  path: z.string().nullable(),
+})
 
 export class BurnsClient {
   private readonly baseUrl: string
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl
+  }
+
+  getBaseUrl() {
+    return this.baseUrl
   }
 
   async getHealth() {
@@ -60,6 +74,14 @@ export class BurnsClient {
   async getSettings(): Promise<Settings> {
     const data = await this.request<unknown>("/api/settings")
     return settingsSchema.parse(data)
+  }
+
+  async openNativeFolderPicker(): Promise<string | null> {
+    const data = await this.request<unknown>("/api/system/folder-picker", {
+      method: "POST",
+    })
+
+    return nativeFolderPickerResponseSchema.parse(data).path
   }
 
   async listAgentClis(): Promise<AgentCli[]> {
@@ -129,9 +151,106 @@ export class BurnsClient {
     return runListSchema.parse(data)
   }
 
+  async getRun(workspaceId: string, runId: string): Promise<Run> {
+    const data = await this.request<unknown>(`/api/workspaces/${workspaceId}/runs/${runId}`)
+    return runSchema.parse(data)
+  }
+
+  async startRun(workspaceId: string, input: StartRunInput): Promise<Run> {
+    const data = await this.request<unknown>(`/api/workspaces/${workspaceId}/runs`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
+
+    return runSchema.parse(data)
+  }
+
+  async resumeRun(
+    workspaceId: string,
+    runId: string,
+    input: ResumeRunInput = {}
+  ): Promise<Run> {
+    const data = await this.request<unknown>(`/api/workspaces/${workspaceId}/runs/${runId}/resume`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
+
+    return runSchema.parse(data)
+  }
+
+  async cancelRun(
+    workspaceId: string,
+    runId: string,
+    input: CancelRunInput = {}
+  ): Promise<Run> {
+    const data = await this.request<unknown>(`/api/workspaces/${workspaceId}/runs/${runId}/cancel`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
+
+    return runSchema.parse(data)
+  }
+
+  async listRunEvents(workspaceId: string, runId: string, afterSeq?: number): Promise<RunEvent[]> {
+    const search = new URLSearchParams()
+    if (afterSeq !== undefined) {
+      search.set("afterSeq", String(afterSeq))
+    }
+
+    const suffix = search.size > 0 ? `?${search.toString()}` : ""
+    const data = await this.request<unknown>(
+      `/api/workspaces/${workspaceId}/runs/${runId}/events${suffix}`
+    )
+
+    return runEventListSchema.parse(data)
+  }
+
+  getRunEventStreamUrl(workspaceId: string, runId: string, afterSeq?: number) {
+    const url = new URL(`/api/workspaces/${workspaceId}/runs/${runId}/events/stream`, this.baseUrl)
+    if (afterSeq !== undefined) {
+      url.searchParams.set("afterSeq", String(afterSeq))
+    }
+
+    return url
+  }
+
   async listApprovals(workspaceId: string): Promise<Approval[]> {
     const data = await this.request<unknown>(`/api/workspaces/${workspaceId}/approvals`)
     return approvalListSchema.parse(data)
+  }
+
+  async approveNode(
+    workspaceId: string,
+    runId: string,
+    nodeId: string,
+    input: ApprovalDecisionInput
+  ): Promise<Approval> {
+    const data = await this.request<unknown>(
+      `/api/workspaces/${workspaceId}/runs/${runId}/nodes/${nodeId}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    )
+
+    return approvalSchema.parse(data)
+  }
+
+  async denyNode(
+    workspaceId: string,
+    runId: string,
+    nodeId: string,
+    input: ApprovalDecisionInput
+  ): Promise<Approval> {
+    const data = await this.request<unknown>(
+      `/api/workspaces/${workspaceId}/runs/${runId}/nodes/${nodeId}/deny`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      }
+    )
+
+    return approvalSchema.parse(data)
   }
 
   private async request<T>(pathname: string, init?: RequestInit): Promise<T> {

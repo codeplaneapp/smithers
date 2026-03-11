@@ -28,6 +28,7 @@ export const createWorkspaceInputSchema = z.discriminatedUnion("sourceType", [
     sourceType: z.literal("local"),
     localPath: z.string().min(1),
     defaultAgent: z.string().optional(),
+    workflowTemplateIds: z.array(z.string()).optional(),
   }),
   z.object({
     name: z.string().min(1),
@@ -35,12 +36,14 @@ export const createWorkspaceInputSchema = z.discriminatedUnion("sourceType", [
     repoUrl: z.string().min(1),
     targetFolder: z.string().min(1).optional(),
     defaultAgent: z.string().optional(),
+    workflowTemplateIds: z.array(z.string()).optional(),
   }),
   z.object({
     name: z.string().min(1),
     sourceType: z.literal("create"),
     targetFolder: z.string().min(1).optional(),
     defaultAgent: z.string().optional(),
+    workflowTemplateIds: z.array(z.string()).optional(),
   }),
 ])
 

@@ -25,6 +25,22 @@ export const runSchema = z.object({
   summary: runSummarySchema,
 })
 
+export const startRunInputSchema = z.object({
+  workflowId: z.string().min(1),
+  input: z.unknown().optional(),
+})
+
+export const resumeRunInputSchema = z.object({
+  input: z.unknown().optional(),
+})
+
+export const cancelRunInputSchema = z.object({
+  reason: z.string().optional(),
+})
+
 export type Run = z.infer<typeof runSchema>
 export type RunStatus = z.infer<typeof runStatusSchema>
 export type RunSummary = z.infer<typeof runSummarySchema>
+export type StartRunInput = z.infer<typeof startRunInputSchema>
+export type ResumeRunInput = z.infer<typeof resumeRunInputSchema>
+export type CancelRunInput = z.infer<typeof cancelRunInputSchema>

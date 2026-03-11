@@ -1,4 +1,4 @@
-import { useLocation, useNavigate } from "react-router-dom"
+import { NavLink, useLocation, useNavigate } from "react-router-dom"
 
 import {
   Select,
@@ -51,9 +51,37 @@ export function WorkspaceSelector() {
         </SelectContent>
       </Select>
       {workspace ? (
-        <div className="flex flex-col gap-1 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
-          <span>{workspace.branch ?? "main"}</span>
-          <span className="truncate">{workspace.path}</span>
+        <div className="flex flex-col gap-1 rounded-lg">
+          <NavLink
+            to={`/w/${workspace.id}/overview`}
+            className={({ isActive }) =>
+              isActive
+                ? "rounded-md px-2 py-1.5 text-sm font-medium text-foreground"
+                : "rounded-md px-2 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+            }
+          >
+            Overview
+          </NavLink>
+          <NavLink
+            to={`/w/${workspace.id}/runs`}
+            className={({ isActive }) =>
+              isActive
+                ? "rounded-md px-2 py-1.5 text-sm font-medium text-foreground"
+                : "rounded-md px-2 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+            }
+          >
+            Runs
+          </NavLink>
+          <NavLink
+            to={`/w/${workspace.id}/approvals`}
+            className={({ isActive }) =>
+              isActive
+                ? "rounded-md px-2 py-1.5 text-sm font-medium text-foreground"
+                : "rounded-md px-2 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+            }
+          >
+            Approvals
+          </NavLink>
         </div>
       ) : null}
     </div>
