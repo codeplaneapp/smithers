@@ -182,7 +182,7 @@ export function AppShell() {
   }, [routeWorkspaceId])
 
   return (
-    <SidebarProvider>
+    <SidebarProvider className="h-svh min-h-0 overflow-hidden">
       <Sidebar collapsible="icon" variant="sidebar">
         <SidebarHeader>
           <SidebarMenu>
@@ -320,8 +320,8 @@ export function AppShell() {
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>
-      <SidebarInset className="min-h-screen bg-background text-foreground">
-        <header className="flex items-center justify-between border-b px-6 py-4">
+      <SidebarInset className="h-full min-h-0 overflow-hidden bg-background text-foreground">
+        <header className="flex shrink-0 items-center justify-between border-b px-6 py-4">
           <div className="flex items-center gap-2">
             <SidebarTrigger className="-ml-1" />
             <div className="flex items-center gap-2 text-sm font-medium">

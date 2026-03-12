@@ -1,6 +1,7 @@
 import {
   editWorkflowInputSchema,
   generateWorkflowInputSchema,
+  workflowLaunchFieldsResponseSchema,
   type WorkflowAuthoringStreamEvent,
   updateWorkflowInputSchema,
 } from "@mr-burns/shared"
@@ -11,6 +12,7 @@ import {
   editWorkflowFromPrompt,
   generateWorkflowFromPrompt,
   getWorkflow,
+  getWorkflowLaunchFields,
   listWorkflows,
   saveWorkflow,
 } from "@/services/workflow-service"
@@ -249,6 +251,17 @@ export async function handleWorkflowRoutes(request: Request, pathname: string) {
     }
 
     const workflowDetailMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/workflows\/([^/]+)$/)
+    const workflowLaunchFieldsMatch = pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/workflows\/([^/]+)\/launch-fields$/
+    )
+    if (workflowLaunchFieldsMatch && request.method === "GET") {
+      return Response.json(
+        workflowLaunchFieldsResponseSchema.parse(
+          getWorkflowLaunchFields(workflowLaunchFieldsMatch[1], workflowLaunchFieldsMatch[2])
+        )
+      )
+    }
+
     if (workflowDetailMatch && request.method === "GET") {
       return Response.json(getWorkflow(workflowDetailMatch[1], workflowDetailMatch[2]))
     }

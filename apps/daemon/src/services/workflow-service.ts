@@ -1,7 +1,12 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 
-import type { Workflow, WorkflowAuthoringStage, WorkflowDocument } from "@mr-burns/shared"
+import type {
+  Workflow,
+  WorkflowAuthoringStage,
+  WorkflowDocument,
+  WorkflowLaunchFieldsResponse,
+} from "@mr-burns/shared"
 
 import type { AgentCliEvent } from "@/agents/BaseCliAgent"
 import { defaultWorkflowTemplates } from "@/domain/workflows/templates"
@@ -280,6 +285,95 @@ function mapWorkflowFile(workspaceId: string, workflowId: string, filePath: stri
     relativePath,
     status: inferWorkflowStatus(workflowId),
     updatedAt: stats.mtime.toISOString(),
+  }
+}
+
+function toFieldLabel(key: string) {
+  const withSpaces = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+
+  if (!withSpaces) {
+    return key
+  }
+
+  return withSpaces[0].toUpperCase() + withSpaces.slice(1)
+}
+
+function extractFirstTaskSegment(source: string) {
+  const taskMatch = source.match(/<Task\b[\s\S]*?<\/Task>/)
+  if (!taskMatch?.[0]) {
+    return {
+      entryTaskId: null,
+      taskSegment: null,
+    }
+  }
+
+  const taskSegment = taskMatch[0]
+  const idMatch = taskSegment.match(/\bid\s*=\s*["']([^"']+)["']/)
+
+  return {
+    entryTaskId: idMatch?.[1] ?? null,
+    taskSegment,
+  }
+}
+
+function extractCtxInputKeys(source: string) {
+  const pattern = /ctx\.input\??\.([A-Za-z_$][\w$]*)/g
+  const keys: string[] = []
+  const seen = new Set<string>()
+
+  for (const match of source.matchAll(pattern)) {
+    const key = match[1]
+    if (!key || seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    keys.push(key)
+  }
+
+  return keys
+}
+
+export function getWorkflowLaunchFields(
+  workspaceId: string,
+  workflowId: string
+): WorkflowLaunchFieldsResponse {
+  const workflow = getWorkflow(workspaceId, workflowId)
+  const { entryTaskId, taskSegment } = extractFirstTaskSegment(workflow.source)
+
+  if (!taskSegment) {
+    return {
+      workflowId,
+      mode: "fallback",
+      entryTaskId: null,
+      fields: [],
+      message: "Unable to determine inputs automatically.",
+    }
+  }
+
+  const inputKeys = extractCtxInputKeys(taskSegment)
+  if (inputKeys.length === 0) {
+    return {
+      workflowId,
+      mode: "fallback",
+      entryTaskId,
+      fields: [],
+      message: "Unable to determine inputs automatically.",
+    }
+  }
+
+  return {
+    workflowId,
+    mode: "inferred",
+    entryTaskId,
+    fields: inputKeys.map((key) => ({
+      key,
+      label: toFieldLabel(key),
+      type: "string",
+    })),
   }
 }
 

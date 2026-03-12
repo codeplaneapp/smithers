@@ -54,9 +54,9 @@ export function WorkflowEditorPane({
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-1 flex-col gap-3 xl:min-h-0">
+      <CardContent className="flex flex-1 flex-col gap-3 overflow-hidden xl:min-h-0">
         {workflow ? (
-          <CodeBlock className="h-full min-h-0" code={workflow.source} language="tsx" showLineNumbers>
+          <CodeBlock className="flex-1 min-h-0" code={workflow.source} language="tsx" showLineNumbers>
             <CodeBlockHeader>
               <CodeBlockTitle>
                 <CodeBlockFilename>workflow.tsx</CodeBlockFilename>

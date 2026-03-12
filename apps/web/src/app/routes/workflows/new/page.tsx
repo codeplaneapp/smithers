@@ -114,7 +114,7 @@ export function NewWorkflowPage() {
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-x-hidden xl:overflow-y-hidden">
-      <div className="grid w-full min-w-0 max-w-full gap-4 p-6 xl:h-full xl:min-h-0 xl:grid-cols-[28rem_1fr] xl:overflow-hidden">
+      <div className="grid w-full min-w-0 max-w-full gap-4 p-6 xl:h-full xl:min-h-0 xl:grid-cols-[28rem_1fr] xl:grid-rows-[minmax(0,1fr)] xl:overflow-hidden">
         <Card className="min-w-0 xl:flex xl:min-h-0 xl:flex-col">
           <CardHeader>
             <CardTitle>Workflow generator</CardTitle>
@@ -211,7 +211,7 @@ export function NewWorkflowPage() {
             <CardHeader>
               <CardTitle>Generated workflow</CardTitle>
             </CardHeader>
-            <CardContent className="grid min-w-0 gap-4 xl:min-h-0 xl:flex-1">
+            <CardContent className="flex min-w-0 flex-1 flex-col gap-4 overflow-hidden xl:min-h-0">
               {generateWorkflow.isPending ? (
                 <WorkflowAuthoringConversationPanel
                   isStreaming={generateWorkflow.isPending}
@@ -219,7 +219,7 @@ export function NewWorkflowPage() {
                 />
               ) : generatedWorkflow ? (
                 <CodeBlock
-                  className="h-full min-h-0"
+                  className="flex-1 min-h-0"
                   code={generatedWorkflow.source}
                   language="tsx"
                   showLineNumbers

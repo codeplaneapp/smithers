@@ -51,6 +51,28 @@ export default smithers(() => (
 ))
 `
 
+const inferableLaunchFieldsSource = `import { createSmithers, Sequence } from "smithers-orchestrator"
+import { z } from "zod"
+
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  analysis: z.object({ summary: z.string() }),
+  fix: z.object({ patch: z.string() }),
+})
+
+export default smithers((ctx) => (
+  <Workflow name="code-review">
+    <Sequence>
+      <Task id="analyze" output={outputs.analysis}>
+        {\`Review repository \${ctx.input.repo} and area \${ctx.input.focusArea ?? "general"}\`}
+      </Task>
+      <Task id="fix" output={outputs.fix}>
+        {"Fix issues"}
+      </Task>
+    </Sequence>
+  </Workflow>
+))
+`
+
 describe("workflow routes", () => {
   it("saves valid workflow source", async () => {
     const app = createApp()
@@ -119,6 +141,68 @@ describe("workflow routes", () => {
     expect(events[0]).toMatchObject({
       type: "error",
       message: expect.stringContaining("Workspace not found"),
+    })
+  })
+
+  it("infers launch fields from first task ctx.input references", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+
+    const saveResponse = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/workflows/inferred-flow`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: inferableLaunchFieldsSource }),
+      })
+    )
+
+    expect(saveResponse.status).toBe(200)
+
+    const response = await app.fetch(
+      new Request(
+        `http://localhost:7332/api/workspaces/${workspaceId}/workflows/inferred-flow/launch-fields`
+      )
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      workflowId: "inferred-flow",
+      mode: "inferred",
+      entryTaskId: "analyze",
+      fields: [
+        { key: "repo", label: "Repo", type: "string" },
+        { key: "focusArea", label: "Focus Area", type: "string" },
+      ],
+    })
+  })
+
+  it("returns fallback mode when launch fields cannot be inferred", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+
+    const saveResponse = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/workflows/custom-flow`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: validWorkflowSource }),
+      })
+    )
+
+    expect(saveResponse.status).toBe(200)
+
+    const response = await app.fetch(
+      new Request(
+        `http://localhost:7332/api/workspaces/${workspaceId}/workflows/custom-flow/launch-fields`
+      )
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      workflowId: "custom-flow",
+      mode: "fallback",
+      entryTaskId: "plan",
+      fields: [],
+      message: "Unable to determine inputs automatically.",
     })
   })
 })

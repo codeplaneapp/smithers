@@ -36,7 +36,7 @@ export function WorkflowsPage() {
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-x-hidden xl:overflow-y-hidden">
-      <div className="grid w-full min-w-0 max-w-full gap-4 p-6 xl:h-full xl:min-h-0 xl:grid-cols-[20rem_1fr] xl:overflow-hidden">
+      <div className="grid w-full min-w-0 max-w-full gap-4 p-6 xl:h-full xl:min-h-0 xl:grid-cols-[20rem_1fr] xl:grid-rows-[minmax(0,1fr)] xl:overflow-hidden">
         <Card className="h-full min-w-0 xl:flex xl:min-h-0 xl:flex-col">
           <CardHeader>
             <CardTitle>Workspace workflows</CardTitle>
@@ -68,7 +68,7 @@ export function WorkflowsPage() {
           </CardContent>
         </Card>
 
-        <div className="flex min-w-0 flex-col gap-4 xl:min-h-0">
+        <div className="flex min-w-0 flex-col gap-4 xl:min-h-0 xl:overflow-hidden">
           <WorkflowEditorPane
             workflow={workflowDocument ?? null}
             isDeleting={deleteWorkflow.isPending}

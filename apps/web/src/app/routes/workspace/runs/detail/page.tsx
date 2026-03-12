@@ -27,7 +27,13 @@ export function WorkspaceRunDetailPage() {
   const { runId } = useParams()
   const { workspaceId } = useActiveWorkspace()
   const { data: run, isLoading, error } = useRun(workspaceId, runId)
-  const runEventsQuery = useRunEvents(workspaceId, runId)
+  const isTimelineStreaming = run
+    ? run.status === "running" || run.status === "waiting-approval"
+    : true
+  const runEventsQuery = useRunEvents(workspaceId, runId, {
+    enableStream: isTimelineStreaming,
+    refetchIntervalMs: isTimelineStreaming ? 5000 : false,
+  })
   const resumeRun = useResumeRun(workspaceId, runId)
   const cancelRun = useCancelRun(workspaceId, runId)
 
@@ -38,7 +44,9 @@ export function WorkspaceRunDetailPage() {
           <div className="flex flex-col gap-1">
             <h1 className="text-xl font-semibold">{runId ?? "Run"}</h1>
             <p className="text-sm text-muted-foreground">
-              Live events stream from Smithers with polling fallback.
+              {isTimelineStreaming
+                ? "Live event stream from Smithers with polling fallback."
+                : "Static event history for this completed run."}
             </p>
           </div>
           <div className="flex items-center gap-2">

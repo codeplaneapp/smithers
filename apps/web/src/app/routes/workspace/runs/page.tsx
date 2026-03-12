@@ -14,14 +14,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { useApprovals } from "@/features/approvals/hooks/use-approvals"
 import { useStartRun } from "@/features/runs/hooks/use-start-run"
 import { useRuns } from "@/features/runs/hooks/use-runs"
-import { ActivityFeedCard } from "@/features/workspace/components/activity-feed-card"
-import { ServerHealthCard } from "@/features/workspace/components/server-health-card"
-import { formatRelativeMinutes, formatTimestamp } from "@/features/workspace/lib/format"
+import { formatTimestamp } from "@/features/workspace/lib/format"
 import { useActiveWorkspace } from "@/features/workspaces/hooks/use-active-workspace"
+import { useWorkflowLaunchFields } from "@/features/workflows/hooks/use-workflow-launch-fields"
 import { useWorkflows } from "@/features/workflows/hooks/use-workflows"
 
 type RunFilter = "all" | RunStatus
@@ -82,13 +81,13 @@ function safeParseRunInput(rawValue: string) {
 
 export function WorkspaceRunsPage() {
   const navigate = useNavigate()
-  const { workspace, workspaceId } = useActiveWorkspace()
+  const { workspaceId } = useActiveWorkspace()
   const { data: workflows = [] } = useWorkflows(workspaceId)
   const { data: runs = [], isLoading } = useRuns(workspaceId)
-  const { data: approvals = [] } = useApprovals(workspaceId)
   const startRun = useStartRun(workspaceId)
 
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>("")
+  const [inferredInputValues, setInferredInputValues] = useState<Record<string, string>>({})
   const [runInputRaw, setRunInputRaw] = useState<string>("{}")
   const [runFilter, setRunFilter] = useState<RunFilter>("all")
 
@@ -100,6 +99,17 @@ export function WorkspaceRunsPage() {
     return workflows[0] ?? null
   }, [selectedWorkflowId, workflows])
 
+  const launchFieldsQuery = useWorkflowLaunchFields(workspaceId, selectedWorkflow?.id)
+  const inferredFields =
+    launchFieldsQuery.data?.mode === "inferred" ? launchFieldsQuery.data.fields : []
+  const isInferredMode = inferredFields.length > 0
+  const fallbackNotice =
+    launchFieldsQuery.data?.mode === "fallback"
+      ? (launchFieldsQuery.data.message ?? "Unable to determine inputs automatically.")
+      : launchFieldsQuery.isError
+        ? "Unable to determine inputs automatically."
+        : null
+
   const runInputState = useMemo(() => safeParseRunInput(runInputRaw), [runInputRaw])
 
   const filteredRuns = useMemo(() => {
@@ -110,15 +120,6 @@ export function WorkspaceRunsPage() {
     return runs.filter((run) => run.status === runFilter)
   }, [runFilter, runs])
 
-  const pendingApprovals = approvals.filter((approval) => approval.status === "pending")
-  const averagePendingWaitMinutes =
-    pendingApprovals.length === 0
-      ? 0
-      : Math.round(
-          pendingApprovals.reduce((sum, approval) => sum + approval.waitMinutes, 0) /
-            pendingApprovals.length
-        )
-
   const runCountsByStatus = {
     running: runs.filter((run) => run.status === "running").length,
     waitingApproval: runs.filter((run) => run.status === "waiting-approval").length,
@@ -127,13 +128,23 @@ export function WorkspaceRunsPage() {
   }
 
   const launchRun = () => {
-    if (!selectedWorkflow || runInputState.error) {
+    if (!selectedWorkflow || launchFieldsQuery.isLoading) {
+      return
+    }
+
+    const inputPayload: Record<string, unknown> = isInferredMode
+      ? Object.fromEntries(
+          inferredFields.map((field) => [field.key, inferredInputValues[field.key] ?? ""])
+        )
+      : runInputState.payload
+
+    if (!isInferredMode && runInputState.error) {
       return
     }
 
     const input: StartRunInput = {
       workflowId: selectedWorkflow.id,
-      input: runInputState.payload,
+      input: inputPayload,
     }
 
     startRun.mutate(input, {
@@ -177,7 +188,7 @@ export function WorkspaceRunsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Launch run</CardTitle>
-              <CardDescription>Start a run with structured JSON input.</CardDescription>
+              <CardDescription>Start a run with inferred inputs when available.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               {workflows.length === 0 ? (
@@ -203,30 +214,63 @@ export function WorkspaceRunsPage() {
                         </SelectGroup>
                       </SelectContent>
                     </Select>
-                    {selectedWorkflow ? (
-                      <p className="text-xs text-muted-foreground">{selectedWorkflow.relativePath}</p>
-                    ) : null}
-                  </div>
+                  {selectedWorkflow ? (
+                    <p className="text-xs text-muted-foreground">{selectedWorkflow.relativePath}</p>
+                  ) : null}
+                </div>
 
-                  <div className="flex flex-col gap-1">
-                    <p className="text-xs text-muted-foreground">Run input JSON object</p>
-                    <Textarea
-                      value={runInputRaw}
-                      className="min-h-40 font-mono text-xs"
-                      onChange={(event) => setRunInputRaw(event.target.value)}
-                    />
-                    {runInputState.error ? (
-                      <p className="text-sm text-destructive">{runInputState.error}</p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">Input is valid JSON object.</p>
-                    )}
+                {launchFieldsQuery.isLoading ? (
+                  <p className="text-sm text-muted-foreground">Detecting launch inputs...</p>
+                ) : isInferredMode ? (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs text-muted-foreground">Inferred launch inputs</p>
+                    {inferredFields.map((field) => (
+                      <div key={field.key} className="flex flex-col gap-1">
+                        <p className="text-xs text-muted-foreground">{field.label}</p>
+                        <Input
+                          value={inferredInputValues[field.key] ?? ""}
+                          onChange={(event) => {
+                            const nextValue = event.target.value
+                            setInferredInputValues((current) => ({
+                              ...current,
+                              [field.key]: nextValue,
+                            }))
+                          }}
+                        />
+                      </div>
+                    ))}
                   </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs text-muted-foreground">
+                      {fallbackNotice ?? "Unable to determine inputs automatically."}
+                    </p>
+                    <div className="flex flex-col gap-1">
+                      <p className="text-xs text-muted-foreground">Run input JSON object</p>
+                      <Textarea
+                        value={runInputRaw}
+                        className="min-h-40 font-mono text-xs"
+                        onChange={(event) => setRunInputRaw(event.target.value)}
+                      />
+                      {runInputState.error ? (
+                        <p className="text-sm text-destructive">{runInputState.error}</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Input is valid JSON object.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
 
-                  <Button
-                    disabled={startRun.isPending || !selectedWorkflow || Boolean(runInputState.error)}
-                    onClick={launchRun}
-                  >
-                    {startRun.isPending ? "Starting run..." : "Start run"}
+                <Button
+                  disabled={
+                    startRun.isPending ||
+                    !selectedWorkflow ||
+                    launchFieldsQuery.isLoading ||
+                    (!isInferredMode && Boolean(runInputState.error))
+                  }
+                  onClick={launchRun}
+                >
+                  {startRun.isPending ? "Starting run..." : "Start run"}
                   </Button>
                 </>
               )}
@@ -236,40 +280,6 @@ export function WorkspaceRunsPage() {
             </CardContent>
           </Card>
 
-          <div className="grid gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Approval queue summary</CardTitle>
-                <CardDescription>Current queue pressure for manual gates.</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-3 text-sm md:grid-cols-3">
-                <div className="rounded-lg border px-3 py-2">
-                  <p className="text-muted-foreground">Pending approvals</p>
-                  <p className="font-medium">{pendingApprovals.length}</p>
-                </div>
-                <div className="rounded-lg border px-3 py-2">
-                  <p className="text-muted-foreground">Average wait</p>
-                  <p className="font-medium">{formatRelativeMinutes(averagePendingWaitMinutes)}</p>
-                </div>
-                <div className="rounded-lg border px-3 py-2">
-                  <p className="text-muted-foreground">Longest wait</p>
-                  <p className="font-medium">
-                    {formatRelativeMinutes(
-                      pendingApprovals.reduce(
-                        (maxWait, approval) => Math.max(maxWait, approval.waitMinutes),
-                        0
-                      )
-                    )}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-
-            <ServerHealthCard workspace={workspace} workspaceId={workspaceId} />
-          </div>
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-[1.3fr_1fr]">
           <Card>
             <CardHeader>
               <CardTitle>Recent runs</CardTitle>
@@ -313,13 +323,6 @@ export function WorkspaceRunsPage() {
               )}
             </CardContent>
           </Card>
-
-          <ActivityFeedCard
-            workspaceId={workspaceId}
-            title="Live stream preview"
-            description="Latest workspace run events from persisted stream data."
-            limit={8}
-          />
         </div>
       </div>
     </div>

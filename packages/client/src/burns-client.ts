@@ -23,8 +23,10 @@ import {
   type Workflow,
   type WorkflowAuthoringStreamEvent,
   type WorkflowDocument,
+  type WorkflowLaunchFieldsResponse,
   workflowAuthoringStreamEventSchema,
   workflowDocumentSchema,
+  workflowLaunchFieldsResponseSchema,
   workflowSchema,
   type Workspace,
   type WorkspaceServerStatus,
@@ -38,6 +40,7 @@ const workspaceServerStatusDtoSchema = workspaceServerStatusSchema
 const deleteWorkspaceResultDtoSchema = deleteWorkspaceResultSchema
 const workflowListSchema = z.array(workflowSchema)
 const workflowDocumentListSchema = workflowDocumentSchema
+const workflowLaunchFieldsDtoSchema = workflowLaunchFieldsResponseSchema
 const agentCliListSchema = z.array(agentCliSchema)
 const runListSchema = z.array(runSchema)
 const runEventListSchema = z.array(runEventSchema)
@@ -193,6 +196,16 @@ export class BurnsClient {
   async getWorkflow(workspaceId: string, workflowId: string): Promise<WorkflowDocument> {
     const data = await this.request<unknown>(`/api/workspaces/${workspaceId}/workflows/${workflowId}`)
     return workflowDocumentListSchema.parse(data)
+  }
+
+  async getWorkflowLaunchFields(
+    workspaceId: string,
+    workflowId: string
+  ): Promise<WorkflowLaunchFieldsResponse> {
+    const data = await this.request<unknown>(
+      `/api/workspaces/${workspaceId}/workflows/${workflowId}/launch-fields`
+    )
+    return workflowLaunchFieldsDtoSchema.parse(data)
   }
 
   async saveWorkflow(

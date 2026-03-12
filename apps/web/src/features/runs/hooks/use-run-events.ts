@@ -41,19 +41,26 @@ export function getSseReconnectDelayMs(reconnectAttempts: number) {
   return Math.min(RECONNECT_DELAY_MAX_MS, RECONNECT_DELAY_BASE_MS * 2 ** reconnectAttempts)
 }
 
-export function useRunEvents(workspaceId?: string, runId?: string) {
+type UseRunEventsOptions = {
+  enableStream?: boolean
+  refetchIntervalMs?: number | false
+}
+
+export function useRunEvents(workspaceId?: string, runId?: string, options?: UseRunEventsOptions) {
   const queryClient = useQueryClient()
   const queryKey = ["run-events", workspaceId, runId] as const
+  const enableStream = options?.enableStream ?? true
+  const refetchIntervalMs = options?.refetchIntervalMs ?? 5000
 
   const query = useQuery({
     queryKey,
     queryFn: () => burnsClient.listRunEvents(workspaceId!, runId!),
     enabled: Boolean(workspaceId && runId),
-    refetchInterval: 5000,
+    refetchInterval: refetchIntervalMs,
   })
 
   useEffect(() => {
-    if (!workspaceId || !runId) {
+    if (!workspaceId || !runId || !enableStream) {
       return
     }
 
@@ -145,7 +152,7 @@ export function useRunEvents(workspaceId?: string, runId?: string) {
       clearReconnectTimer()
       closeSource()
     }
-  }, [queryClient, runId, workspaceId])
+  }, [enableStream, queryClient, runId, workspaceId])
 
   return query
 }

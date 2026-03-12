@@ -15,6 +15,20 @@ export const workflowDocumentSchema = workflowSchema.extend({
   source: z.string(),
 })
 
+export const workflowLaunchFieldSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  type: z.literal("string"),
+})
+
+export const workflowLaunchFieldsResponseSchema = z.object({
+  workflowId: z.string(),
+  mode: z.enum(["inferred", "fallback"]),
+  entryTaskId: z.string().nullable(),
+  fields: z.array(workflowLaunchFieldSchema),
+  message: z.string().optional(),
+})
+
 export const workflowAuthoringStageSchema = z.enum([
   "preparing",
   "running-agent",
@@ -110,6 +124,8 @@ export const updateWorkflowInputSchema = z.object({
 
 export type Workflow = z.infer<typeof workflowSchema>
 export type WorkflowDocument = z.infer<typeof workflowDocumentSchema>
+export type WorkflowLaunchField = z.infer<typeof workflowLaunchFieldSchema>
+export type WorkflowLaunchFieldsResponse = z.infer<typeof workflowLaunchFieldsResponseSchema>
 export type WorkflowStatus = z.infer<typeof workflowStatusSchema>
 export type WorkflowAuthoringStage = z.infer<typeof workflowAuthoringStageSchema>
 export type WorkflowAuthoringStatusEvent = z.infer<typeof workflowAuthoringStatusEventSchema>
