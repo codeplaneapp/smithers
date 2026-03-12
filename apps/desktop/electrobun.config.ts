@@ -9,7 +9,7 @@ export default {
   },
   build: {
     bun: {
-      entrypoint: "./src/main.ts",
+      entrypoint: "./src/index.ts",
     },
     copy: {
       "../web/dist": "views/mainview",
