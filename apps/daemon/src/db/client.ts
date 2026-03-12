@@ -45,9 +45,19 @@ db.exec(`
     timestamp TEXT NOT NULL,
     node_id TEXT,
     message TEXT,
+    raw_payload_json TEXT,
     PRIMARY KEY (workspace_id, run_id, seq)
   );
 `)
+
+const runEventColumns = db
+  .query<{ name: string }, []>(`PRAGMA table_info(run_events)`)
+  .all()
+const runEventColumnNames = new Set(runEventColumns.map((column) => column.name))
+
+if (!runEventColumnNames.has("raw_payload_json")) {
+  db.exec(`ALTER TABLE run_events ADD COLUMN raw_payload_json TEXT;`)
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS approvals (

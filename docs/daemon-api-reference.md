@@ -222,6 +222,9 @@ Request body:
 
 Returns persisted run events from local SQLite.
 
+Each event includes normalized fields (`seq`, `runId`, `type`, `timestamp`, optional `nodeId`/`message`) plus optional `rawPayload`, which is the original Smithers event payload when available.
+For legacy mirrored events that predate `rawPayload` persistence, Burns attempts to hydrate `rawPayload` from the workspace Smithers database (`.mr-burns/state/smithers.sqlite`) using `runId` + `seq`.
+
 Optional query string:
 
 - `afterSeq=<number>` to fetch incremental events

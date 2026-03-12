@@ -95,6 +95,32 @@ export default smithers((ctx) => {
 })
 `
 
+const inferableNullishChainSource = `import { createSmithers, Sequence } from "smithers-orchestrator"
+import { z } from "zod"
+
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  explain: z.object({ summary: z.string() }),
+})
+
+export default smithers((ctx) => {
+  const question =
+    ctx.input?.question ??
+    ctx.input?.query ??
+    ctx.input?.prompt ??
+    "fallback"
+
+  return (
+    <Workflow name="explain">
+      <Sequence>
+        <Task id="analyze" output={outputs.explain}>
+          {\`Question: \${question}\`}
+        </Task>
+      </Sequence>
+    </Workflow>
+  )
+})
+`
+
 describe("workflow routes", () => {
   it("saves valid workflow source", async () => {
     const app = createApp()
@@ -255,8 +281,36 @@ describe("workflow routes", () => {
       entryTaskId: "plan",
       fields: [
         { key: "feature", label: "Feature", type: "string" },
-        { key: "description", label: "Description", type: "string" },
       ],
+    })
+  })
+
+  it("keeps only the first ctx.input key in nullish-coalescing chains", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+
+    const saveResponse = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/workflows/explain-flow`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: inferableNullishChainSource }),
+      })
+    )
+
+    expect(saveResponse.status).toBe(200)
+
+    const response = await app.fetch(
+      new Request(
+        `http://localhost:7332/api/workspaces/${workspaceId}/workflows/explain-flow/launch-fields`
+      )
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      workflowId: "explain-flow",
+      mode: "inferred",
+      entryTaskId: "analyze",
+      fields: [{ key: "question", label: "Question", type: "string" }],
     })
   })
 })

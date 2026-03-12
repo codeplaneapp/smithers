@@ -466,12 +466,25 @@ describe("run routes", () => {
         type: "approval.pending",
         nodeId: "deploy",
         message: "Awaiting approval",
+        rawPayload: {
+          seq: 1,
+          runId: "run-bg",
+          type: "approval.pending",
+          nodeId: "deploy",
+          message: "Awaiting approval",
+        },
       },
       {
         seq: 2,
         runId: "run-bg",
         type: "run.finished",
         message: "Done",
+        rawPayload: {
+          seq: 2,
+          runId: "run-bg",
+          type: "run.finished",
+          message: "Done",
+        },
       },
     ])
   })

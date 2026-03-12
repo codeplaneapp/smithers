@@ -502,6 +502,33 @@ function extractFirstTaskSegment(source: string) {
 }
 
 function extractCtxInputKeys(source: string) {
+  const nullishChainPattern =
+    /ctx\.input\??\.[A-Za-z_$][\w$]*(?:\s*\?\?\s*ctx\.input\??\.[A-Za-z_$][\w$]*)+/g
+  const ctxInputKeyPattern = /ctx\.input\??\.([A-Za-z_$][\w$]*)/g
+  const nullishChainHeadKeys = new Set<string>()
+  const nullishChainTailKeys = new Set<string>()
+
+  for (const chainMatch of source.matchAll(nullishChainPattern)) {
+    const chainSource = chainMatch[0]
+    if (!chainSource) {
+      continue
+    }
+
+    const chainKeys = Array.from(
+      chainSource.matchAll(ctxInputKeyPattern),
+      (match) => match[1]
+    ).filter((key): key is string => Boolean(key))
+
+    if (chainKeys.length === 0) {
+      continue
+    }
+
+    nullishChainHeadKeys.add(chainKeys[0]!)
+    for (const key of chainKeys.slice(1)) {
+      nullishChainTailKeys.add(key)
+    }
+  }
+
   const pattern = /ctx\.input\??\.([A-Za-z_$][\w$]*)/g
   const keys: string[] = []
   const seen = new Set<string>()
@@ -509,6 +536,10 @@ function extractCtxInputKeys(source: string) {
   for (const match of source.matchAll(pattern)) {
     const key = match[1]
     if (!key || seen.has(key)) {
+      continue
+    }
+
+    if (nullishChainTailKeys.has(key) && !nullishChainHeadKeys.has(key)) {
       continue
     }
 

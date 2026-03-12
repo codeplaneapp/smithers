@@ -32,7 +32,7 @@ async function waitForRunEvents(params: {
   app: ReturnType<typeof createApp>
   workspaceId: string
   runId: string
-  predicate: (events: Array<{ seq: number; type: string; message?: string }>) => boolean
+  predicate: (events: Array<{ seq: number; type: string; message?: string; rawPayload?: unknown }>) => boolean
 }) {
   const deadline = Date.now() + 2_500
 
@@ -49,6 +49,7 @@ async function waitForRunEvents(params: {
       seq: number
       type: string
       message?: string
+      rawPayload?: unknown
     }>
     if (params.predicate(events)) {
       return events
@@ -280,7 +281,9 @@ describe("workspace run flow (e2e)", () => {
     expect(
       persistedEvents.some(
         (event) =>
-          event.type === "approval.pending" && event.message?.includes("waiting for approval")
+          event.type === "approval.pending" &&
+          event.message?.includes("waiting for approval") &&
+          typeof event.rawPayload === "object"
       )
     ).toBe(true)
   })

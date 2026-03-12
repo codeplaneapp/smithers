@@ -30,6 +30,7 @@ function normalizeEventPayload(payload: unknown, fallbackRunId: string, fallback
       typeof asObject.timestamp === "string" ? asObject.timestamp : new Date().toISOString(),
     nodeId: typeof asObject.nodeId === "string" ? asObject.nodeId : undefined,
     message: typeof asObject.message === "string" ? asObject.message : undefined,
+    rawPayload: payload,
   }
 }
 

@@ -10,6 +10,31 @@ type RunEventRow = {
   timestamp: string
   node_id: string | null
   message: string | null
+  raw_payload_json: string | null
+}
+
+function parseRawPayload(rawPayloadJson: string | null): unknown {
+  if (!rawPayloadJson) {
+    return undefined
+  }
+
+  try {
+    return JSON.parse(rawPayloadJson)
+  } catch {
+    return rawPayloadJson
+  }
+}
+
+function stringifyRawPayload(rawPayload: unknown): string | null {
+  if (rawPayload === undefined) {
+    return null
+  }
+
+  try {
+    return JSON.stringify(rawPayload)
+  } catch {
+    return JSON.stringify(String(rawPayload))
+  }
 }
 
 function mapRunEventRow(row: RunEventRow): RunEvent {
@@ -20,6 +45,7 @@ function mapRunEventRow(row: RunEventRow): RunEvent {
     timestamp: row.timestamp,
     nodeId: row.node_id ?? undefined,
     message: row.message ?? undefined,
+    rawPayload: parseRawPayload(row.raw_payload_json),
   }
 }
 
@@ -34,7 +60,8 @@ export function listRunEventRows(workspaceId: string, runId: string, afterSeq = 
           type,
           timestamp,
           node_id,
-          message
+          message,
+          raw_payload_json
         FROM run_events
         WHERE workspace_id = ?1
           AND run_id = ?2
@@ -76,8 +103,9 @@ export function insertRunEventRow(
           type,
           timestamp,
           node_id,
-          message
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+          message,
+          raw_payload_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
       `
     )
     .run(
@@ -87,7 +115,8 @@ export function insertRunEventRow(
       event.type,
       event.timestamp,
       event.nodeId ?? null,
-      event.message ?? null
+      event.message ?? null,
+      stringifyRawPayload(event.rawPayload)
     )
 }
 

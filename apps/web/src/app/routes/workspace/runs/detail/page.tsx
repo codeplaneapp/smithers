@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
 import { Badge } from "@/components/ui/badge"
@@ -22,6 +23,19 @@ function formatTimestamp(value?: string | null) {
   return date.toLocaleString()
 }
 
+function formatRawPayload(value: unknown) {
+  if (value === undefined) {
+    return "No raw payload available for this event."
+  }
+
+  try {
+    const serialized = JSON.stringify(value, null, 2)
+    return serialized ?? "null"
+  } catch {
+    return String(value)
+  }
+}
+
 export function WorkspaceRunDetailPage() {
   const navigate = useNavigate()
   const { runId } = useParams()
@@ -34,6 +48,23 @@ export function WorkspaceRunDetailPage() {
     enableStream: isTimelineStreaming,
     refetchIntervalMs: isTimelineStreaming ? 5000 : false,
   })
+  const events = runEventsQuery.data
+  const [selectedEventSeq, setSelectedEventSeq] = useState<number | null>(null)
+  const selectedEvent = useMemo(
+    () => {
+      if (!events || events.length === 0) {
+        return undefined
+      }
+
+      if (selectedEventSeq === null) {
+        return events[events.length - 1]
+      }
+
+      return events.find((event) => event.seq === selectedEventSeq) ?? events[events.length - 1]
+    },
+    [events, selectedEventSeq]
+  )
+
   const resumeRun = useResumeRun(workspaceId, runId)
   const cancelRun = useCancelRun(workspaceId, runId)
 
@@ -121,26 +152,60 @@ export function WorkspaceRunDetailPage() {
           <CardHeader>
             <CardTitle>Event timeline</CardTitle>
           </CardHeader>
-          <CardContent className="flex max-h-[32rem] flex-col gap-2 overflow-auto">
+          <CardContent className="grid gap-4 lg:grid-cols-2">
             {runEventsQuery.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading events…</p>
-            ) : (runEventsQuery.data?.length ?? 0) === 0 ? (
+            ) : (events?.length ?? 0) === 0 ? (
               <p className="text-sm text-muted-foreground">No events received yet.</p>
             ) : (
-              runEventsQuery.data!.map((event) => (
-                <div
-                  key={`${event.seq}-${event.type}`}
-                  className="rounded-lg border px-3 py-2 text-sm"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-medium">{event.type}</p>
-                    <span className="text-xs text-muted-foreground">seq {event.seq}</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{formatTimestamp(event.timestamp)}</p>
-                  {event.nodeId ? <p className="text-xs text-muted-foreground">node: {event.nodeId}</p> : null}
-                  {event.message ? <p className="mt-1">{event.message}</p> : null}
+              <>
+                <div className="flex max-h-[32rem] flex-col gap-2 overflow-auto">
+                  {events!.map((event) => {
+                    const isSelected = selectedEvent?.seq === event.seq
+
+                    return (
+                      <button
+                        key={`${event.seq}-${event.type}`}
+                        type="button"
+                        className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors hover:bg-accent ${
+                          isSelected ? "border-primary bg-accent" : ""
+                        }`}
+                        onClick={() => setSelectedEventSeq(event.seq)}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-medium">{event.type}</p>
+                          <span className="text-xs text-muted-foreground">seq {event.seq}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {formatTimestamp(event.timestamp)}
+                        </p>
+                        {event.nodeId ? (
+                          <p className="text-xs text-muted-foreground">node: {event.nodeId}</p>
+                        ) : null}
+                        {event.message ? <p className="mt-1">{event.message}</p> : null}
+                      </button>
+                    )
+                  })}
                 </div>
-              ))
+
+                <div className="flex max-h-[32rem] flex-col rounded-lg border">
+                  <div className="border-b px-3 py-2">
+                    <p className="font-medium">Raw event output</p>
+                    {selectedEvent ? (
+                      <p className="text-xs text-muted-foreground">
+                        {selectedEvent.type} • seq {selectedEvent.seq}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Select an event to inspect.</p>
+                    )}
+                  </div>
+                  <pre className="overflow-auto p-3 text-xs">
+                    {selectedEvent
+                      ? formatRawPayload(selectedEvent.rawPayload ?? selectedEvent)
+                      : "Select an event to inspect raw output."}
+                  </pre>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

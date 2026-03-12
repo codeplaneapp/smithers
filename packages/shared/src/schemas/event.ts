@@ -7,6 +7,7 @@ export const runEventSchema = z.object({
   timestamp: z.string(),
   nodeId: z.string().optional(),
   message: z.string().optional(),
+  rawPayload: z.unknown().optional(),
 })
 
 export type RunEvent = z.infer<typeof runEventSchema>
