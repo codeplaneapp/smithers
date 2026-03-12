@@ -103,7 +103,7 @@ jobs:
       - name: Upload canary artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mr-burns-canary-${{ steps.metadata.outputs.release_version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}
+          name: burns-canary-${{ steps.metadata.outputs.release_version }}-${{ matrix.target_os }}-${{ matrix.target_arch }}
           path: release-artifacts
           if-no-files-found: error
           retention-days: 14

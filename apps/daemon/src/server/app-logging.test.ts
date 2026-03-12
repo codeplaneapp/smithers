@@ -51,7 +51,7 @@ describe("app logging", () => {
 
     expect(received).toMatchObject({
       level: "info",
-      service: "mr-burns-daemon",
+      service: "burns-daemon",
       method: "GET",
       path: "/api/settings",
       event: "http.request.received",
@@ -59,7 +59,7 @@ describe("app logging", () => {
 
     expect(completed).toMatchObject({
       level: "info",
-      service: "mr-burns-daemon",
+      service: "burns-daemon",
       method: "GET",
       path: "/api/settings",
       statusCode: 200,

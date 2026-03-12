@@ -1,12 +1,12 @@
 {
-  "name": "@mr-burns/client",
+  "name": "@burns/client",
   "version": "0.1.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@mr-burns/shared": "workspace:*",
+    "@burns/shared": "workspace:*",
     "zod": "^4.1.12"
   }
 }

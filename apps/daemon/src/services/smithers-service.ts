@@ -1,7 +1,7 @@
 import path from "node:path"
 import { existsSync } from "node:fs"
 
-import type { CancelRunInput, ResumeRunInput, Run, StartRunInput } from "@mr-burns/shared"
+import type { CancelRunInput, ResumeRunInput, Run, StartRunInput } from "@burns/shared"
 
 import {
   cancelSmithersRun,
@@ -194,7 +194,7 @@ function assertWorkspace(workspaceId: string) {
 }
 
 function resolveWorkflowPath(workspacePath: string, workflowId: string) {
-  const workflowDirectory = path.join(workspacePath, ".mr-burns", "workflows", workflowId)
+  const workflowDirectory = path.join(workspacePath, ".burns", "workflows", workflowId)
   const tsxPath = path.join(workflowDirectory, "workflow.tsx")
   const tsPath = path.join(workflowDirectory, "workflow.ts")
 

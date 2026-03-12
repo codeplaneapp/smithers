@@ -1,16 +1,13 @@
 import { type ReactNode, useMemo, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useParams } from "react-router-dom"
 import { CheckCircle2, Clock3, LoaderCircle } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useRun } from "@/features/runs/hooks/use-run"
 import { useRunEvents } from "@/features/runs/hooks/use-run-events"
-import { useCancelRun } from "@/features/runs/hooks/use-cancel-run"
-import { useResumeRun } from "@/features/runs/hooks/use-resume-run"
 import { buildNodeRunTimeline } from "@/features/runs/lib/run-timeline"
 import {
   parseInlineCodeSegments,
@@ -71,7 +68,6 @@ function renderInlineCodeText(value: string): ReactNode[] {
 }
 
 export function WorkspaceRunDetailPage() {
-  const navigate = useNavigate()
   const { runId } = useParams()
   const { workspaceId } = useActiveWorkspace()
   const { data: run, isLoading, error } = useRun(workspaceId, runId)
@@ -130,15 +126,12 @@ export function WorkspaceRunDetailPage() {
     return JSON.stringify(parsedObjects, null, 2)
   }, [selectedNodeRun?.outputText])
 
-  const resumeRun = useResumeRun(workspaceId, runId)
-  const cancelRun = useCancelRun(workspaceId, runId)
-
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-x-hidden">
-      <div className="grid min-h-0 flex-1 gap-4 p-6">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-xl font-semibold">{runId ?? "Run"}</h1>
+      <div className="grid min-h-0 flex-1 gap-4 p-4">
+        <div className="grid min-h-0 flex-1 gap-4">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold">Event timeline</h2>
             {isLoading ? (
               <p className="text-sm text-muted-foreground">Loading run…</p>
             ) : error ? (
@@ -168,32 +161,7 @@ export function WorkspaceRunDetailPage() {
               <p className="text-sm text-muted-foreground">Run not found.</p>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => navigate(`/w/${workspaceId}/runs`)}>
-              Back to runs
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!runId || resumeRun.isPending}
-              onClick={() => resumeRun.mutate({})}
-            >
-              {resumeRun.isPending ? "Resuming…" : "Resume"}
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={!runId || cancelRun.isPending}
-              onClick={() => cancelRun.mutate({})}
-            >
-              {cancelRun.isPending ? "Cancelling…" : "Cancel"}
-            </Button>
-          </div>
-        </div>
-
-        <Card className="flex min-h-0 flex-1 flex-col">
-          <CardHeader>
-            <CardTitle>Event timeline</CardTitle>
-          </CardHeader>
-          <CardContent className="grid min-h-0 flex-1 gap-4 lg:grid-cols-3">
+          <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-3">
             {runEventsQuery.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading events…</p>
             ) : nodeTimeline.length === 0 ? (
@@ -364,8 +332,8 @@ export function WorkspaceRunDetailPage() {
                 </div>
               </>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </div>
   )

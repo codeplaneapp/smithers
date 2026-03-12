@@ -83,7 +83,7 @@ if [[ "$component" != "desktop" && "$component" != "cli" ]]; then
   exit 1
 fi
 
-base="mr-burns-${channel}-${component}-${version}-${target_os}-${target_arch}"
+base="burns-${channel}-${component}-${version}-${target_os}-${target_arch}"
 if [[ -n "$ordinal" ]]; then
   base="${base}-${ordinal}"
 fi

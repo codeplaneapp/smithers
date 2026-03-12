@@ -1,4 +1,4 @@
-import { BurnsClient } from "@mr-burns/client"
+import { BurnsClient } from "@burns/client"
 import { resolveBurnsApiUrlFromBrowserRuntime } from "@/lib/api/resolve-burns-api-url"
 
 const resolvedApiUrl = resolveBurnsApiUrlFromBrowserRuntime()

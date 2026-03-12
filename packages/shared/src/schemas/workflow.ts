@@ -15,6 +15,21 @@ export const workflowDocumentSchema = workflowSchema.extend({
   source: z.string(),
 })
 
+export const workflowFileSchema = z.object({
+  path: z.string(),
+})
+
+export const workflowFileListSchema = z.object({
+  workflowId: z.string(),
+  files: z.array(workflowFileSchema),
+})
+
+export const workflowFileDocumentSchema = z.object({
+  workflowId: z.string(),
+  path: z.string(),
+  source: z.string(),
+})
+
 export const workflowLaunchFieldSchema = z.object({
   key: z.string(),
   label: z.string(),
@@ -124,6 +139,9 @@ export const updateWorkflowInputSchema = z.object({
 
 export type Workflow = z.infer<typeof workflowSchema>
 export type WorkflowDocument = z.infer<typeof workflowDocumentSchema>
+export type WorkflowFile = z.infer<typeof workflowFileSchema>
+export type WorkflowFileList = z.infer<typeof workflowFileListSchema>
+export type WorkflowFileDocument = z.infer<typeof workflowFileDocumentSchema>
 export type WorkflowLaunchField = z.infer<typeof workflowLaunchFieldSchema>
 export type WorkflowLaunchFieldsResponse = z.infer<typeof workflowLaunchFieldsResponseSchema>
 export type WorkflowStatus = z.infer<typeof workflowStatusSchema>

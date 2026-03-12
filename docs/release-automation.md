@@ -29,7 +29,7 @@ Both workflows:
 Canonical file format:
 
 ```txt
-mr-burns-{channel}-{component}-{version}-{target_os}-{target_arch}[{-ordinal}].{ext}
+burns-{channel}-{component}-{version}-{target_os}-{target_arch}[{-ordinal}].{ext}
 ```
 
 Contract fields:

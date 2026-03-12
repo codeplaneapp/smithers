@@ -1,6 +1,6 @@
-# `@mr-burns/desktop`
+# `@burns/desktop`
 
-ElectroBun desktop shell package for Mr. Burns.
+ElectroBun desktop shell package for Burns.
 
 ## What this package does
 

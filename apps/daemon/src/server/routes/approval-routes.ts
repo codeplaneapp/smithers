@@ -1,4 +1,4 @@
-import { approvalDecisionInputSchema } from "@mr-burns/shared"
+import { approvalDecisionInputSchema } from "@burns/shared"
 
 import { decideApproval, listApprovals } from "@/services/approval-service"
 import { toErrorResponse } from "@/utils/http-error"

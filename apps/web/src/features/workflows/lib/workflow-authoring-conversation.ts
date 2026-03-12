@@ -1,7 +1,7 @@
 import type {
   WorkflowAuthoringStreamEvent,
   WorkflowAuthoringAgentEvent,
-} from "@mr-burns/shared"
+} from "@burns/shared"
 
 const MAX_ITEMS = 220
 const MAX_ITEM_TEXT = 24_000

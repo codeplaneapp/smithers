@@ -2,7 +2,7 @@ import { existsSync } from "node:fs"
 import { createHash } from "node:crypto"
 import path from "node:path"
 
-import type { RunEvent } from "@mr-burns/shared"
+import type { RunEvent } from "@burns/shared"
 import { Database } from "bun:sqlite"
 
 import {
@@ -136,7 +136,7 @@ function readSmithersEventCandidates(
     return [] as SmithersEventCandidate[]
   }
 
-  const smithersDbPath = path.join(workspace.path, ".mr-burns", "state", "smithers.sqlite")
+  const smithersDbPath = path.join(workspace.path, ".burns", "state", "smithers.sqlite")
   if (!existsSync(smithersDbPath)) {
     return [] as SmithersEventCandidate[]
   }

@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react"
 
-const STORAGE_KEY = "mr-burns.active-workspace-id"
+const STORAGE_KEY = "burns.active-workspace-id"
 
 type Listener = () => void
 

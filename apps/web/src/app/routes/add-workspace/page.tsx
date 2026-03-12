@@ -384,7 +384,7 @@ export function AddWorkspacePage() {
               {isBurnsManaged ? (
                 <FormRow
                   label="Workflows"
-                  description="Select templates to pre-seed in .mr-burns/workflows."
+                  description="Select templates to pre-seed in .burns/workflows."
                 >
                   <Combobox11
                     className="max-w-full"

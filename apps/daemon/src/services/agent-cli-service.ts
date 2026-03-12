@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 
-import type { AgentCli } from "@mr-burns/shared"
+import type { AgentCli } from "@burns/shared"
 
 import type { AgentCliEvent } from "@/agents/BaseCliAgent"
 import { createCliAgent, supportedAgentClis } from "@/agents"

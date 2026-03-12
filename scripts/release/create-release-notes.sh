@@ -63,7 +63,7 @@ release_date="$(date -u +%Y-%m-%d)"
 title_channel="$(printf '%s' "$channel" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
 
 cat > "$output_path" <<NOTES
-# Mr. Burns ${title_channel} Release ${version}
+# Burns ${title_channel} Release ${version}
 
 - Date: ${release_date}
 - Channel: ${channel}

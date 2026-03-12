@@ -2,10 +2,10 @@ import type { ElectrobunConfig } from "electrobun"
 
 export default {
   app: {
-    name: "Mr. Burns",
-    identifier: "ai.mrburns.desktop",
+    name: "Burns",
+    identifier: "ai.burns.desktop",
     version: "0.1.0",
-    description: "Mr. Burns desktop shell",
+    description: "Burns desktop shell",
   },
   build: {
     bun: {

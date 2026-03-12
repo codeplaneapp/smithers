@@ -1,4 +1,4 @@
-import { cancelRunInputSchema, resumeRunInputSchema, startRunInputSchema } from "@mr-burns/shared"
+import { cancelRunInputSchema, resumeRunInputSchema, startRunInputSchema } from "@burns/shared"
 
 import {
   getLatestRunEventSeq,

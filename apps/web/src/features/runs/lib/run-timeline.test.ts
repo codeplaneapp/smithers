@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
-import type { RunEvent } from "@mr-burns/shared"
+import type { RunEvent } from "@burns/shared"
 
 import { buildNodeRunTimeline, extractAgentOutputFromChunk } from "./run-timeline"
 

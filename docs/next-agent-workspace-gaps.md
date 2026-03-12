@@ -104,7 +104,7 @@ Files:
 
 Spec source:
 
-- `docs/mr-burns-spec.md` sections 5.4 and 9.3–9.6
+- `docs/burns-spec.md` sections 5.4 and 9.3–9.6
 
 Missing in Workspace section implementation:
 

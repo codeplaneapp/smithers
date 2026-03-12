@@ -19,7 +19,7 @@ Use a single runtime contract with this precedence order:
 2. `VITE_BURNS_API_URL` (web development override)
 3. fallback `http://localhost:7332`
 
-A shared schema in `@mr-burns/shared` defines runtime config payloads.
+A shared schema in `@burns/shared` defines runtime config payloads.
 
 ## Rationale
 

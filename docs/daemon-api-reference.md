@@ -15,7 +15,7 @@ Response:
 ```json
 {
   "ok": true,
-  "service": "mr-burns-daemon"
+  "service": "burns-daemon"
 }
 ```
 
@@ -113,7 +113,7 @@ Stops workspace Smithers runtime (managed mode) and returns server status payloa
 Workflows are stored on disk under:
 
 ```txt
-<workspace>/.mr-burns/workflows/<workflow-id>/workflow.tsx
+<workspace>/.burns/workflows/<workflow-id>/workflow.tsx
 ```
 
 ## `GET /api/workspaces/:workspaceId/workflows`
@@ -223,7 +223,7 @@ Request body:
 Returns persisted run events from local SQLite.
 
 Each event includes normalized fields (`seq`, `runId`, `type`, `timestamp`, optional `nodeId`/`message`) plus optional `rawPayload`, which is the original Smithers event payload when available.
-For legacy mirrored events that predate `rawPayload` persistence, Burns attempts to hydrate `rawPayload` from the workspace Smithers database (`.mr-burns/state/smithers.sqlite`) using `runId` + `seq`.
+For legacy mirrored events that predate `rawPayload` persistence, Burns attempts to hydrate `rawPayload` from the workspace Smithers database (`.burns/state/smithers.sqlite`) using `runId` + `seq`.
 
 Optional query string:
 

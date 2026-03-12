@@ -21,10 +21,14 @@ import {
   settingsSchema,
   type UpdateWorkflowInput,
   type Workflow,
+  type WorkflowFileDocument,
+  type WorkflowFileList,
   type WorkflowAuthoringStreamEvent,
   type WorkflowDocument,
   type WorkflowLaunchFieldsResponse,
   workflowAuthoringStreamEventSchema,
+  workflowFileDocumentSchema,
+  workflowFileListSchema,
   workflowDocumentSchema,
   workflowLaunchFieldsResponseSchema,
   workflowSchema,
@@ -32,7 +36,7 @@ import {
   type WorkspaceServerStatus,
   workspaceServerStatusSchema,
   workspaceSchema,
-} from "@mr-burns/shared"
+} from "@burns/shared"
 import { z } from "zod"
 
 const workspaceListSchema = z.array(workspaceSchema)
@@ -40,6 +44,8 @@ const workspaceServerStatusDtoSchema = workspaceServerStatusSchema
 const deleteWorkspaceResultDtoSchema = deleteWorkspaceResultSchema
 const workflowListSchema = z.array(workflowSchema)
 const workflowDocumentListSchema = workflowDocumentSchema
+const workflowFileListDtoSchema = workflowFileListSchema
+const workflowFileDocumentDtoSchema = workflowFileDocumentSchema
 const workflowLaunchFieldsDtoSchema = workflowLaunchFieldsResponseSchema
 const agentCliListSchema = z.array(agentCliSchema)
 const runListSchema = z.array(runSchema)
@@ -196,6 +202,25 @@ export class BurnsClient {
   async getWorkflow(workspaceId: string, workflowId: string): Promise<WorkflowDocument> {
     const data = await this.request<unknown>(`/api/workspaces/${workspaceId}/workflows/${workflowId}`)
     return workflowDocumentListSchema.parse(data)
+  }
+
+  async listWorkflowFiles(workspaceId: string, workflowId: string): Promise<WorkflowFileList> {
+    const data = await this.request<unknown>(
+      `/api/workspaces/${workspaceId}/workflows/${workflowId}/files`
+    )
+    return workflowFileListDtoSchema.parse(data)
+  }
+
+  async getWorkflowFile(
+    workspaceId: string,
+    workflowId: string,
+    filePath: string
+  ): Promise<WorkflowFileDocument> {
+    const search = new URLSearchParams({ path: filePath })
+    const data = await this.request<unknown>(
+      `/api/workspaces/${workspaceId}/workflows/${workflowId}/files/content?${search.toString()}`
+    )
+    return workflowFileDocumentDtoSchema.parse(data)
   }
 
   async getWorkflowLaunchFields(

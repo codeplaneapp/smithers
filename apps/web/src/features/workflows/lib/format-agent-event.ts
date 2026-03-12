@@ -1,4 +1,4 @@
-import type { WorkflowAuthoringAgentEvent } from "@mr-burns/shared"
+import type { WorkflowAuthoringAgentEvent } from "@burns/shared"
 
 function capitalize(value: string) {
   if (!value) {

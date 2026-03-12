@@ -1,4 +1,4 @@
-import type { WorkspaceSourceType } from "@mr-burns/shared"
+import type { WorkspaceSourceType } from "@burns/shared"
 
 export type WorkspaceRuntimeChoice = "burns-managed" | "self-managed"
 export type ManagedWorkspaceSourceChoice = Extract<WorkspaceSourceType, "create" | "clone" | "local">

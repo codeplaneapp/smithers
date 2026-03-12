@@ -1,4 +1,4 @@
-import type { GenerateWorkflowInput, WorkflowAuthoringStatusEvent } from "@mr-burns/shared"
+import type { GenerateWorkflowInput, WorkflowAuthoringStatusEvent } from "@burns/shared"
 
 import { useCallback, useRef, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"

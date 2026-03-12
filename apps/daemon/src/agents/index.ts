@@ -1,4 +1,4 @@
-import type { AgentCli } from "@mr-burns/shared"
+import type { AgentCli } from "@burns/shared"
 
 import { ClaudeCodeAgent } from "@/agents/ClaudeCodeAgent"
 import { CodexAgent } from "@/agents/CodexAgent"

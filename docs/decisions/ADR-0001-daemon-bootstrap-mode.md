@@ -5,7 +5,7 @@
 
 ## Context
 
-The ElectroBun desktop distribution must launch the Mr. Burns daemon and keep lifecycle behavior consistent with local development and CLI execution.
+The ElectroBun desktop distribution must launch the Burns daemon and keep lifecycle behavior consistent with local development and CLI execution.
 
 Two options were considered:
 

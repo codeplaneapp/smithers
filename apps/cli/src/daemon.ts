@@ -12,7 +12,7 @@ async function ensureEntrypointExists(entrypointPath: string) {
     throw new Error(
       [
         `Daemon entrypoint not found at ${entrypointPath}.`,
-        "Run this command from the Mr. Burns repository checkout.",
+        "Run this command from the Burns repository checkout.",
       ].join(" ")
     )
   }

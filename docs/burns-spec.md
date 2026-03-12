@@ -1,18 +1,18 @@
-# Mr. Burns Specification
+# Burns Specification
 
 > Status note: this document describes the target product direction. For implementation-accurate docs, use `README.md`, `docs/codebase-layout.md`, and `docs/daemon-api-reference.md`.
 
 ## Document type
 
-Reference-style product and technical specification for the first implementation of **Mr. Burns**.
+Reference-style product and technical specification for the first implementation of **Burns**.
 
 ## Audience
 
-Developers designing and implementing the Mr. Burns desktop/web app and its local backend services.
+Developers designing and implementing the Burns desktop/web app and its local backend services.
 
 ## Goal
 
-Define a practical V1 for **Mr. Burns**, a workspace-first control plane for Smithers that can:
+Define a practical V1 for **Burns**, a workspace-first control plane for Smithers that can:
 
 - manage multiple repos/workspaces
 - author and edit Smithers workflows
@@ -43,14 +43,14 @@ This spec does **not** fully define:
 
 # 1. Product summary
 
-## 1.1 What Mr. Burns is
+## 1.1 What Burns is
 
-Mr. Burns is a GUI and local control plane for Smithers.
+Burns is a GUI and local control plane for Smithers.
 
 It gives an operator one place to:
 
 - register repos as managed workspaces
-- keep workflow files under each repo at `.mr-burns/workflows`
+- keep workflow files under each repo at `.burns/workflows`
 - scaffold and edit workflows with agent assistance
 - launch runs against a selected workspace
 - watch live run progress through Smithers events and frames
@@ -59,7 +59,7 @@ It gives an operator one place to:
 
 ## 1.2 Product positioning
 
-Mr. Burns should be closer to **`takopi-smithers`** than to a simple run dashboard.
+Burns should be closer to **`takopi-smithers`** than to a simple run dashboard.
 
 That means the product is:
 
@@ -132,7 +132,7 @@ For the selected workspace:
 
 ## 5.1 Workspaces
 
-Mr. Burns must manage a registry of workspaces.
+Burns must manage a registry of workspaces.
 
 A workspace is a local repo plus the metadata needed to operate Smithers against it.
 
@@ -145,15 +145,15 @@ Each workspace includes:
 - workspace status and health
 - configured Smithers server information
 - default CLI agent for workflow scaffolding/editing
-- location of workflow files at `.mr-burns/workflows`
+- location of workflow files at `.burns/workflows`
 
 ### Supported workspace creation modes
 
 When adding a workspace, the user must be able to:
 
 1. **Add existing local repo**
-2. **Clone GitHub repo into the Mr. Burns workspace root**
-3. **Create a new repo in the Mr. Burns workspace root**
+2. **Clone GitHub repo into the Burns workspace root**
+3. **Create a new repo in the Burns workspace root**
 
 ### Workspace setup flow
 
@@ -173,7 +173,7 @@ The Add workspace flow has four steps:
 
 ### Workspace responsibilities
 
-A workspace must provide enough information for Mr. Burns to:
+A workspace must provide enough information for Burns to:
 
 - resolve workflow paths safely inside the workspace root
 - launch Smithers runs against local workflow files
@@ -188,7 +188,7 @@ A workspace must provide enough information for Mr. Burns to:
 Workflows are stored inside each workspace at:
 
 ```txt
-<workspace>/.mr-burns/workflows
+<workspace>/.burns/workflows
 ```
 
 ### Workflow page requirements
@@ -201,9 +201,9 @@ The Workflows page must include:
 
 ### Authoring capabilities
 
-Mr. Burns should support:
+Burns should support:
 
-- browsing workflow files in `.mr-burns/workflows`
+- browsing workflow files in `.burns/workflows`
 - viewing syntax-highlighted Smithers workflow code
 - creating a new workflow
 - saving edits
@@ -213,7 +213,7 @@ Mr. Burns should support:
 
 ### Authoring conventions
 
-Mr. Burns should guide authors toward Smithers best practices:
+Burns should guide authors toward Smithers best practices:
 
 - keep task IDs stable for resume support
 - prefer structured output schemas
@@ -236,7 +236,7 @@ Agent edits should be reviewable before save.
 
 ## 5.3 Orchestration functionality
 
-Mr. Burns is not just a file editor. It is an orchestration surface for Smithers.
+Burns is not just a file editor. It is an orchestration surface for Smithers.
 
 ### Required orchestration actions
 
@@ -253,7 +253,7 @@ For a selected workflow and workspace, the app must support:
 
 ### Smithers backend contract
 
-Mr. Burns should build around the documented Smithers HTTP server interface.
+Burns should build around the documented Smithers HTTP server interface.
 
 Core routes:
 
@@ -269,7 +269,7 @@ Core routes:
 
 ### Server expectations
 
-Mr. Burns should assume Smithers is started with a configuration equivalent to:
+Burns should assume Smithers is started with a configuration equivalent to:
 
 - `authToken` enabled for protected deployments
 - `rootDir` narrowed to the intended workspace or workspace root set
@@ -278,7 +278,7 @@ Mr. Burns should assume Smithers is started with a configuration equivalent to:
 
 ### Orchestration model
 
-At runtime, Mr. Burns needs to manage four layers:
+At runtime, Burns needs to manage four layers:
 
 1. **Workspace**
 2. **Workflow**
@@ -297,7 +297,7 @@ The workflow flow starts when a workspace is selected.
 
 The operator can:
 
-- view all workflows in `.mr-burns/workflows`
+- view all workflows in `.burns/workflows`
 - select one workflow
 - inspect the code
 - prompt for modifications
@@ -327,7 +327,7 @@ Run statuses should align with Smithers documentation:
 
 ### 5.4.3 Event flow
 
-Mr. Burns must treat the SSE event stream as the primary source for live updates.
+Burns must treat the SSE event stream as the primary source for live updates.
 
 Event flow requirements:
 
@@ -348,7 +348,7 @@ Events should power:
 
 ### 5.4.4 Approval flow
 
-When a run reaches a human approval gate, Mr. Burns must surface it in the workspace approval queue.
+When a run reaches a human approval gate, Burns must surface it in the workspace approval queue.
 
 Approval flow requirements:
 
@@ -384,7 +384,7 @@ Suggested fields:
 - `repoUrl`
 - `defaultBranch`
 - `workspaceRoot`
-- `workflowDir` default `.mr-burns/workflows`
+- `workflowDir` default `.burns/workflows`
 - `defaultAgent`
 - `serverBaseUrl`
 - `serverAuthMode`
@@ -500,7 +500,7 @@ Suggested fields:
 
 ## 7.1 High-level architecture
 
-Mr. Burns should have three layers:
+Burns should have three layers:
 
 1. **Frontend app**
    - routes, lists, editors, dashboards, approvals
@@ -529,7 +529,7 @@ A Burns-owned local service can:
 
 ## 7.3 Multi-workspace model
 
-Mr. Burns may support either:
+Burns may support either:
 
 - **one Smithers server per workspace**, or
 - **one shared Smithers server** with an indexed server-level DB and careful `rootDir` handling
@@ -543,7 +543,7 @@ V1 recommendation:
 
 # 8. Takopi-inspired functionality
 
-Mr. Burns should borrow the most useful operational ideas from `takopi-smithers`.
+Burns should borrow the most useful operational ideas from `takopi-smithers`.
 
 ## 8.1 Supervisor concept
 
@@ -558,7 +558,7 @@ This status should be shown on workspace Overview and used for health badges.
 
 ## 8.2 Auto-heal behavior
 
-Mr. Burns should optionally detect unhealthy orchestration situations and suggest or perform recovery actions such as:
+Burns should optionally detect unhealthy orchestration situations and suggest or perform recovery actions such as:
 
 - restart disconnected event stream subscribers
 - retry connection to a stopped local Smithers server
@@ -582,7 +582,7 @@ Useful `takopi-smithers` command ideas should appear as UI actions:
 
 ## 8.4 Worktree awareness
 
-If the repo uses git worktrees, Mr. Burns should remain aware of:
+If the repo uses git worktrees, Burns should remain aware of:
 
 - current branch/worktree path
 - active implementation branches
@@ -593,7 +593,7 @@ This can start as read-only visibility in V1.
 
 ## 8.5 SQLite-backed state
 
-Like `takopi-smithers`, Mr. Burns should favor SQLite-backed local state for:
+Like `takopi-smithers`, Burns should favor SQLite-backed local state for:
 
 - workspace registry
 - run index
@@ -699,7 +699,7 @@ Required settings:
 On workspace add or refresh, Burns should:
 
 - verify the path is a git repo or initialize one if creating new
-- ensure `.mr-burns/workflows` exists
+- ensure `.burns/workflows` exists
 - index known workflow files
 - record workspace metadata
 - test Smithers connectivity if configured
@@ -795,11 +795,11 @@ The first version does not need to include:
 
 # 13. Acceptance criteria
 
-Mr. Burns V1 is successful if an operator can:
+Burns V1 is successful if an operator can:
 
 1. add a local repo or clone a repo as a workspace
 2. see the workspace in the selector
-3. browse workflows under `.mr-burns/workflows`
+3. browse workflows under `.burns/workflows`
 4. edit a workflow and save changes
 5. prompt an agent to revise the workflow
 6. start a Smithers run from the selected workflow
@@ -837,4 +837,4 @@ These should be resolved before implementation hardens:
 
 # 16. One-sentence product definition
 
-**Mr. Burns is a workspace-first Smithers control plane for authoring workflows, supervising runs, and operating human-in-the-loop orchestration across multiple repos.**
+**Burns is a workspace-first Smithers control plane for authoring workflows, supervising runs, and operating human-in-the-loop orchestration across multiple repos.**

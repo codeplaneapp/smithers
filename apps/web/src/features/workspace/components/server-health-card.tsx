@@ -1,4 +1,4 @@
-import type { Workspace } from "@mr-burns/shared"
+import type { Workspace } from "@burns/shared"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -85,7 +85,7 @@ export function ServerHealthCard({
               {daemonOnline ? "online" : "unreachable"}
             </Badge>
             <span className="text-xs text-muted-foreground">
-              {daemonHealth.data?.service ?? "mr-burns daemon"}
+              {daemonHealth.data?.service ?? "burns daemon"}
             </span>
           </div>
         </div>

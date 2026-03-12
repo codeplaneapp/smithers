@@ -1,4 +1,4 @@
-import type { CancelRunInput } from "@mr-burns/shared"
+import type { CancelRunInput } from "@burns/shared"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 

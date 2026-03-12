@@ -1,6 +1,6 @@
-# @mr-burns/web
+# @burns/web
 
-React + Vite frontend for the Mr. Burns local control plane.
+React + Vite frontend for the Burns local control plane.
 
 ## What this app does
 
@@ -38,5 +38,5 @@ VITE_BURNS_API_URL=http://localhost:7332
 
 - Uses React Router for route-level navigation
 - Uses TanStack Query for server state
-- Uses `@mr-burns/client` as the typed API layer
+- Uses `@burns/client` as the typed API layer
 - Uses shadcn/base-ui components and ai-elements primitives for UI building blocks

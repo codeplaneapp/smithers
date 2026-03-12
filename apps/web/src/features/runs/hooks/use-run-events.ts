@@ -1,4 +1,4 @@
-import type { RunEvent } from "@mr-burns/shared"
+import type { RunEvent } from "@burns/shared"
 
 import { useEffect } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"

@@ -1,6 +1,6 @@
-# @mr-burns/cli
+# @burns/cli
 
-CLI distribution package for running Mr. Burns without the web dev server workflow.
+CLI distribution package for running Burns without the web dev server workflow.
 
 ## Prerequisites
 

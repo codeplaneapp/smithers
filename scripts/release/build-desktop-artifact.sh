@@ -87,7 +87,7 @@ if [[ ! -d "$desktop_artifact_dir" ]]; then
 fi
 
 mkdir -p "$resolved_output_dir"
-archive_name="mr-burns-desktop-${channel}-${version}.tar.gz"
+archive_name="burns-desktop-${channel}-${version}.tar.gz"
 archive_path="${resolved_output_dir}/${archive_name}"
 
 echo "[desktop artifact] archiving dist/desktop/{build,artifacts} -> ${archive_path}"

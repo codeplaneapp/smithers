@@ -1,4 +1,4 @@
-import type { Approval, ApprovalStatus } from "@mr-burns/shared"
+import type { Approval, ApprovalStatus } from "@burns/shared"
 
 import { useMemo, useState } from "react"
 

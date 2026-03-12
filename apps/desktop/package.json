@@ -1,5 +1,5 @@
 {
-  "name": "@mr-burns/desktop",
+  "name": "@burns/desktop",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@mr-burns/shared": "workspace:*",
+    "@burns/shared": "workspace:*",
     "electrobun": "^1.15.1"
   },
   "devDependencies": {

@@ -1,5 +1,5 @@
 {
-  "name": "@mr-burns/web",
+  "name": "@burns/web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -13,8 +13,8 @@
   "dependencies": {
     "@base-ui/react": "^1.2.0",
     "@fontsource-variable/geist": "^5.2.8",
-    "@mr-burns/client": "workspace:*",
-    "@mr-burns/shared": "workspace:*",
+    "@burns/client": "workspace:*",
+    "@burns/shared": "workspace:*",
     "@tanstack/react-query": "^5.90.5",
     "ai": "^6.0.116",
     "class-variance-authority": "^0.7.1",

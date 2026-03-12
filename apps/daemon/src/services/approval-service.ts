@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 
-import type { Approval, ApprovalDecisionInput } from "@mr-burns/shared"
+import type { Approval, ApprovalDecisionInput } from "@burns/shared"
 
 import {
   findApprovalRow,

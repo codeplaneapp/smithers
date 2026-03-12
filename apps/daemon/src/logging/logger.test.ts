@@ -41,7 +41,7 @@ describe("logger", () => {
     expect(entries).toHaveLength(1)
     expect(entries[0]).toMatchObject({
       level: "info",
-      service: "mr-burns-daemon",
+      service: "burns-daemon",
       event: "unit.test",
       workspaceId: "ws-1",
       message: "logger smoke test",

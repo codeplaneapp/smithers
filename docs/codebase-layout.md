@@ -1,4 +1,4 @@
-# Mr. Burns Codebase Layout
+# Burns Codebase Layout
 
 This document describes the current implemented layout of the repository.
 
@@ -16,7 +16,7 @@ burns/
   docs/
     codebase-layout.md
     daemon-api-reference.md
-    mr-burns-spec.md
+    burns-spec.md
   package.json
   bun.lock
   tsconfig.base.json
@@ -41,9 +41,9 @@ Key directories:
 Key runtime behavior:
 
 - Serves API on `http://localhost:7332`
-- Persists workspace metadata in `apps/daemon/.data/mr-burns.sqlite`
+- Persists workspace metadata in `apps/daemon/.data/burns.sqlite`
 - Manages default workspace folder root in `apps/daemon/.data/workspaces`
-- Stores workflow source files per workspace under `.mr-burns/workflows`
+- Stores workflow source files per workspace under `.burns/workflows`
 - Supervises one Smithers process per workspace (when enabled), including crash restart and shutdown handling
 
 ## `apps/web`
@@ -62,7 +62,7 @@ Key directories:
 State conventions:
 
 - Server state is managed with TanStack Query
-- Active workspace selection is stored in localStorage (`mr-burns.active-workspace-id`)
+- Active workspace selection is stored in localStorage (`burns.active-workspace-id`)
 
 ## Shared packages
 

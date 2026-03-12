@@ -14,7 +14,7 @@ mkdirSync(dataRoot, { recursive: true })
 
 export const DAEMON_ROOT = daemonRoot
 export const DATA_ROOT = dataRoot
-export const DATABASE_PATH = path.join(DATA_ROOT, "mr-burns.sqlite")
+export const DATABASE_PATH = path.join(DATA_ROOT, "burns.sqlite")
 export const DEFAULT_WORKSPACES_ROOT = path.join(DATA_ROOT, "workspaces")
 
 mkdirSync(DEFAULT_WORKSPACES_ROOT, { recursive: true })

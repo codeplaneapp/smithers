@@ -79,7 +79,7 @@ case "$packed_path" in
     ;;
 esac
 
-archive_name="mr-burns-cli-${channel}-${version}.tgz"
+archive_name="burns-cli-${channel}-${version}.tgz"
 archive_path="${resolved_output_dir}/${archive_name}"
 
 cp "$source_artifact" "$archive_path"

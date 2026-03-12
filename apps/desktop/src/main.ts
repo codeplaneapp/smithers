@@ -21,7 +21,7 @@ let daemonRuntime: DesktopDaemonRuntimeHandle | null = null
 let daemonStopPromise: Promise<void> | null = null
 let shouldQuitAfterCleanup = false
 const debugLogEnabled = process.env.BURNS_DESKTOP_DEBUG_LOG === "1"
-const debugLogPath = process.env.BURNS_DESKTOP_DEBUG_LOG_PATH ?? "/tmp/mr-burns-desktop-debug.log"
+const debugLogPath = process.env.BURNS_DESKTOP_DEBUG_LOG_PATH ?? "/tmp/burns-desktop-debug.log"
 
 function debugLog(message: string) {
   if (!debugLogEnabled) {
@@ -92,7 +92,7 @@ async function startDesktopShell() {
   debugLog(`startDesktopShell: sourceUrl=${sourceUrl}`)
 
   const mainWindow = new BrowserWindow({
-    title: "Mr. Burns",
+    title: "Burns",
     url: sourceUrl,
     renderer: "native",
     frame: {
@@ -146,7 +146,7 @@ startDesktopShell().catch(async (error: unknown) => {
   try {
     await Utils.showMessageBox({
       type: "error",
-      title: "Mr. Burns failed to start",
+      title: "Burns failed to start",
       message,
       buttons: ["Close"],
       defaultId: 0,

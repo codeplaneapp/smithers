@@ -7,7 +7,7 @@ Usage:
   validate-artifact-contract.sh --dir <artifact-dir>
 
 Validates artifact names against:
-  mr-burns-{channel}-{component}-{version}-{target_os}-{target_arch}[{-ordinal}].{ext}
+  burns-{channel}-{component}-{version}-{target_os}-{target_arch}[{-ordinal}].{ext}
 USAGE
 }
 
@@ -51,7 +51,7 @@ while IFS= read -r file_name; do
       ;;
   esac
 
-  if [[ ! "$file_name" =~ ^mr-burns-(canary|stable)-(desktop|cli)-[A-Za-z0-9._+-]+-(darwin|linux|windows)-(arm64|x64)(-[0-9]+)?\.[A-Za-z0-9]+$ ]]; then
+  if [[ ! "$file_name" =~ ^burns-(canary|stable)-(desktop|cli)-[A-Za-z0-9._+-]+-(darwin|linux|windows)-(arm64|x64)(-[0-9]+)?\.[A-Za-z0-9]+$ ]]; then
     echo "invalid artifact name: $file_name" >&2
     invalid_count=$((invalid_count + 1))
   fi

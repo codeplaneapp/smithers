@@ -1,22 +1,26 @@
 import {
   editWorkflowInputSchema,
   generateWorkflowInputSchema,
+  workflowFileDocumentSchema,
+  workflowFileListSchema,
   workflowLaunchFieldsResponseSchema,
   type WorkflowAuthoringStreamEvent,
   updateWorkflowInputSchema,
-} from "@mr-burns/shared"
+} from "@burns/shared"
 
 import type { AgentCliEvent } from "@/agents/BaseCliAgent"
 import {
   deleteWorkflow,
   editWorkflowFromPrompt,
   generateWorkflowFromPrompt,
+  getWorkflowFile,
   getWorkflow,
   getWorkflowLaunchFields,
+  listWorkflowFiles,
   listWorkflows,
   saveWorkflow,
 } from "@/services/workflow-service"
-import { toErrorResponse } from "@/utils/http-error"
+import { HttpError, toErrorResponse } from "@/utils/http-error"
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message.trim()) {
@@ -251,6 +255,32 @@ export async function handleWorkflowRoutes(request: Request, pathname: string) {
     }
 
     const workflowDetailMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/workflows\/([^/]+)$/)
+    const workflowFileListMatch = pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/workflows\/([^/]+)\/files$/
+    )
+    if (workflowFileListMatch && request.method === "GET") {
+      return Response.json(
+        workflowFileListSchema.parse(listWorkflowFiles(workflowFileListMatch[1], workflowFileListMatch[2]))
+      )
+    }
+
+    const workflowFileContentMatch = pathname.match(
+      /^\/api\/workspaces\/([^/]+)\/workflows\/([^/]+)\/files\/content$/
+    )
+    if (workflowFileContentMatch && request.method === "GET") {
+      const url = new URL(request.url)
+      const filePath = url.searchParams.get("path")
+      if (!filePath) {
+        throw new HttpError(400, "Missing file path")
+      }
+
+      return Response.json(
+        workflowFileDocumentSchema.parse(
+          getWorkflowFile(workflowFileContentMatch[1], workflowFileContentMatch[2], filePath)
+        )
+      )
+    }
+
     const workflowLaunchFieldsMatch = pathname.match(
       /^\/api\/workspaces\/([^/]+)\/workflows\/([^/]+)\/launch-fields$/
     )

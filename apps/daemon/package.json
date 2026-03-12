@@ -1,5 +1,5 @@
 {
-  "name": "@mr-burns/daemon",
+  "name": "@burns/daemon",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -12,7 +12,7 @@
     "test:cleanup-workspaces": "bun run src/testing/cleanup-test-workspaces.ts"
   },
   "dependencies": {
-    "@mr-burns/shared": "workspace:*",
+    "@burns/shared": "workspace:*",
     "drizzle-orm": "^0.45.1",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3",

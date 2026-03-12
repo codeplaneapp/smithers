@@ -1,4 +1,4 @@
-import type { RunEvent } from "@mr-burns/shared"
+import type { RunEvent } from "@burns/shared"
 
 import { useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"

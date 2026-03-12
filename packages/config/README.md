@@ -1,4 +1,4 @@
-# @mr-burns/config
+# @burns/config
 
 Reserved workspace package for shared repository tooling configuration.
 

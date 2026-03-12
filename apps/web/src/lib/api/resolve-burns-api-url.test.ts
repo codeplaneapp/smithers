@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { DEFAULT_BURNS_API_URL } from "@mr-burns/shared"
+import { DEFAULT_BURNS_API_URL } from "@burns/shared"
 
 import { resolveBurnsApiUrl } from "./resolve-burns-api-url"
 

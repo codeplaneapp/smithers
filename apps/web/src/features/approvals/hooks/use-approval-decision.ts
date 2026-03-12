@@ -1,4 +1,4 @@
-import type { ApprovalDecisionInput } from "@mr-burns/shared"
+import type { ApprovalDecisionInput } from "@burns/shared"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 

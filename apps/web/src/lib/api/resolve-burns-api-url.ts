@@ -2,7 +2,7 @@ import {
   burnsRuntimeConfigSchema,
   type BurnsResolvedApiUrl,
   DEFAULT_BURNS_API_URL,
-} from "@mr-burns/shared"
+} from "@burns/shared"
 
 type BurnsRuntimeConfigInput = {
   burnsApiUrl?: unknown

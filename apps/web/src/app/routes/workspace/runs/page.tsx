@@ -1,4 +1,4 @@
-import type { RunStatus, StartRunInput } from "@mr-burns/shared"
+import type { RunStatus, StartRunInput } from "@burns/shared"
 
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"

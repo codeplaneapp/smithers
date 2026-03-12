@@ -5,7 +5,7 @@ Status: Draft implementation plan
 
 ## Goal
 
-Create two supported distribution methods for Mr. Burns:
+Create two supported distribution methods for Burns:
 
 1. Desktop app distribution via ElectroBun that bundles and launches:
 - the daemon runtime

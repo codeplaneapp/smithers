@@ -1,4 +1,4 @@
-import { createWorkspaceInputSchema, deleteWorkspaceInputSchema } from "@mr-burns/shared"
+import { createWorkspaceInputSchema, deleteWorkspaceInputSchema } from "@burns/shared"
 
 import {
   getWorkspaceSmithersServerStatus,

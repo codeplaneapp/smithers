@@ -1,6 +1,6 @@
-# Mr. Burns
+# Burns
 
-Mr. Burns is a workspace-first local control plane for authoring and operating Smithers workflows.
+Burns is a workspace-first local control plane for authoring, running, and operating Smithers workflows.
 
 This repository is a Bun monorepo with:
 
@@ -17,20 +17,23 @@ This repository is a Bun monorepo with:
 Implemented today:
 
 - Workspace registry with SQLite persistence
-- Workspace creation flows: create repo, clone repo, add local repo
-- Workflow file management under `.mr-burns/workflows`
-- AI-assisted workflow generation and editing via installed local agent CLIs
-- Web UI for workspaces, workflows, settings, runs, and approvals
-- Smithers-backed run lifecycle APIs (start/list/detail/resume/cancel)
-- Run event persistence in SQLite via background ingestion and SSE proxy streaming
-- SSE reconnect logic in runs detail view using `afterSeq` resume
-- Approval decision APIs (approve/deny) wired from UI
+- Workspace onboarding flows for create, clone, and add-local-repo
+- Workflow storage under `.burns/workflows/<workflow-id>`
+- Workflow list and detail views, including per-workflow file tree browsing and source preview
+- AI-assisted workflow generation and prompt-driven editing via installed local agent CLIs
+- Launch-field inference from workflow source for run forms
+- Web UI for workspace overview, workflows, runs, approvals, inbox, and settings
+- Smithers-backed run lifecycle APIs (`start` / `list` / `detail` / `resume` / `cancel`)
+- Run event persistence in SQLite plus SSE proxy streaming with reconnect via `afterSeq`
+- Approval decision APIs (`approve` / `deny`) wired from UI
 - Managed per-workspace Smithers server lifecycle (startup, crash restart, graceful shutdown)
 - Workspace server control APIs (`start` / `restart` / `stop` / `status`)
+- Desktop shell that attaches to an existing daemon or spawns one in-process
+- CLI runtime that can start the daemon and serve built web assets
 
 ## Prerequisites
 
-- Bun `1.2.x`
+- Bun `1.2.19`
 - Git CLI
 - Optional for AI workflow generation/editing: at least one supported agent CLI installed on `PATH`
   - `claude`
@@ -61,7 +64,7 @@ Open `http://localhost:5173`.
 The web app defaults to `http://localhost:7332` for API calls. Override with:
 
 ```bash
-VITE_BURNS_API_URL=http://localhost:7332
+VITE_BURNS_API_URL=http://localhost:7332 bun run dev:web
 ```
 
 Desktop/CLI runtime contract can also inject:
@@ -71,6 +74,13 @@ window.__BURNS_RUNTIME_CONFIG__ = {
   burnsApiUrl: "http://localhost:7332",
   runtimeMode: "desktop" // or "cli"
 }
+```
+
+Other entry points:
+
+```bash
+bun run desktop:dev
+bun run cli:start
 ```
 
 ## Workspace scripts
@@ -99,12 +109,23 @@ Desktop dev mode env options:
 
 Additional app-level scripts:
 
-- `apps/web`: `bun run lint`, `bun run preview`
-- `apps/daemon`: `bun run start`, `bun run typecheck`, `bun run test`
+- `apps/web`: `bun run typecheck`, `bun run lint`, `bun run preview`
+- `apps/daemon`: `bun run start`, `bun run typecheck`, `bun run test`, `bun run test:raw`
+- `apps/cli`: `bun run start`, `bun run build:artifact`, `bun run typecheck`, `bun run test`
+- `apps/desktop`: `bun run build`, `bun run build:canary`, `bun run typecheck`, `bun run test`
+
+## Testing
+
+- `bun run typecheck`: monorepo typecheck
+- `cd apps/web && bun run lint`: web linting and React Compiler rules
+- `cd apps/daemon && bun run test`: daemon route/service/integration tests in isolated workspaces
+- `cd apps/cli && bun run test`: CLI argument and path resolution tests
+- `cd apps/desktop && bun run test`: desktop runtime and config contract tests
+- `bun run smoke:release`: desktop + CLI runtime smoke coverage
 
 ## Desktop + CLI release scaffolding
 
-Desktop and CLI packaging commands are still in progress. Release automation is script-driven so command wiring can land independently.
+Desktop and CLI artifact assembly is script-driven. Release automation is wired through the shell scripts in `scripts/release`.
 
 - Run an optional release build step:
   - `bash scripts/release/run-build-step.sh --label "desktop build" --command "<desktop-build-command>"`
@@ -118,21 +139,28 @@ Desktop and CLI packaging commands are still in progress. Release automation is 
 
 ## Runtime data locations
 
-The daemon stores local state in `apps/daemon/.data`:
+The daemon stores local state under `BURNS_DATA_ROOT` when that env var is set. Otherwise the default data root is `apps/daemon/.data`:
 
-- SQLite DB: `apps/daemon/.data/mr-burns.sqlite`
-- Managed workspace root: `apps/daemon/.data/workspaces`
+- SQLite DB: `<data-root>/burns.sqlite`
+- Managed workspace root: `<data-root>/workspaces`
 
 Each managed workspace stores workflows at:
 
 ```txt
-<workspace-path>/.mr-burns/workflows/<workflow-id>/workflow.tsx
+<workspace-path>/.burns/workflows/<workflow-id>/
+```
+
+Primary workflow entrypoints are resolved from:
+
+```txt
+<workspace-path>/.burns/workflows/<workflow-id>/workflow.tsx
+<workspace-path>/.burns/workflows/<workflow-id>/workflow.ts
 ```
 
 Each managed workspace also stores Smithers runtime state at:
 
 ```txt
-<workspace-path>/.mr-burns/state/smithers.sqlite
+<workspace-path>/.burns/state/smithers.sqlite
 ```
 
 Optional Smithers lifecycle env vars:
@@ -152,11 +180,9 @@ Optional Smithers lifecycle env vars:
 - [Release Runbook (Canary + Stable)](./docs/release-runbook.md)
 - [Release Checklist](./docs/release-checklist.md)
 - [Workspace + Runtime Handoff (Next Agent)](./docs/next-agent-workspace-gaps.md)
-- [Product Spec (target state)](./docs/mr-burns-spec.md)
-- [ElectroBun Release Plan](./docs/electrobun-release-plan.md)
-- [Docs Index](./docs/README.md)
+- [Product Spec (target state)](./docs/burns-spec.md)
 
 ## Notes
 
-- Daemon route/service coverage exists via `bun test` in `apps/daemon`.
+- The app-level READMEs under `apps/cli` and `apps/desktop` cover package-specific runtime behavior.
 - The product spec describes target behavior; current implementation details are captured in the docs above.

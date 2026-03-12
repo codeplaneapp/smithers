@@ -1,4 +1,4 @@
-import type { EditWorkflowInput, WorkflowAuthoringStatusEvent } from "@mr-burns/shared"
+import type { EditWorkflowInput, WorkflowAuthoringStatusEvent } from "@burns/shared"
 
 import { useCallback, useRef, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -44,6 +44,11 @@ export function useEditWorkflow(workspaceId?: string, workflowId?: string) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["workflows", workspaceId] }),
         queryClient.invalidateQueries({ queryKey: ["workflow", workspaceId, workflow.id] }),
+        queryClient.invalidateQueries({ queryKey: ["workflow-files", workspaceId, workflow.id] }),
+        queryClient.invalidateQueries({ queryKey: ["workflow-file", workspaceId, workflow.id] }),
+        queryClient.invalidateQueries({
+          queryKey: ["workflow-launch-fields", workspaceId, workflow.id],
+        }),
       ])
     },
     onSettled: () => {

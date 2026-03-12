@@ -1,7 +1,7 @@
 {
-  "name": "@mr-burns/cli",
+  "name": "@burns/cli",
   "version": "0.1.0",
-  "description": "Mr. Burns command-line runtime for daemon and packaged web UI",
+  "description": "Burns command-line runtime for daemon and packaged web UI",
   "type": "module",
   "bin": {
     "burns": "./src/bin.ts"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import type { Workspace } from "@mr-burns/shared"
+import type { Workspace } from "@burns/shared"
 
 import { DAEMON_HEALTH_PATH } from "@/server/routes/health-routes"
 
@@ -63,7 +63,7 @@ describe("daemon lifecycle", () => {
     expect(initializeCalls).toBe(1)
     expect(listCalls).toBe(1)
     expect(warmCalls).toEqual([workspaceSnapshot])
-    expect(serveCalls).toEqual([{ port: 7332, idleTimeout: 120 }])
+    expect(serveCalls).toEqual([{ port: 7332, idleTimeout: 255 }])
   })
 
   it("stops idempotently even when stop is called concurrently", async () => {

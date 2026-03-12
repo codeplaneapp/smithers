@@ -2,7 +2,7 @@ import {
   type BurnsRuntimeConfig,
   burnsRuntimeConfigSchema,
   DEFAULT_BURNS_API_URL,
-} from "@mr-burns/shared"
+} from "@burns/shared"
 
 export type { BurnsRuntimeConfig }
 

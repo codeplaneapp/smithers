@@ -1,4 +1,4 @@
-import type { Approval } from "@mr-burns/shared"
+import type { Approval } from "@burns/shared"
 
 import { db } from "@/db/client"
 

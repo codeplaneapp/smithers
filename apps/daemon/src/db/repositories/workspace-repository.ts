@@ -1,4 +1,4 @@
-import type { Workspace } from "@mr-burns/shared"
+import type { Workspace } from "@burns/shared"
 
 import { db } from "@/db/client"
 

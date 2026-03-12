@@ -1,4 +1,4 @@
-import type { DeleteWorkspaceInput, DeleteWorkspaceResult } from "@mr-burns/shared"
+import type { DeleteWorkspaceInput, DeleteWorkspaceResult } from "@burns/shared"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 

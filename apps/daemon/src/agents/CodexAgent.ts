@@ -546,7 +546,7 @@ export class CodexAgent extends BaseCliAgent {
   }
 
   protected async buildCommand(params: { prompt: string; cwd: string }) {
-    const outputFile = path.join(tmpdir(), `mr-burns-codex-${randomUUID()}.txt`)
+    const outputFile = path.join(tmpdir(), `burns-codex-${randomUUID()}.txt`)
     const args = [
       "exec",
       "--skip-git-repo-check",

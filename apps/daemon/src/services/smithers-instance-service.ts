@@ -4,7 +4,7 @@ import net from "node:net"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-import type { Workspace } from "@mr-burns/shared"
+import type { Workspace } from "@burns/shared"
 
 import {
   DEFAULT_SMITHERS_BASE_URL,
@@ -316,7 +316,7 @@ function onProcessExit(record: SmithersInstanceRecord, child: ChildProcess, code
 }
 
 function getDbPath(workspacePath: string) {
-  return path.join(workspacePath, ".mr-burns", "state", "smithers.sqlite")
+  return path.join(workspacePath, ".burns", "state", "smithers.sqlite")
 }
 
 async function startRecord(record: SmithersInstanceRecord) {

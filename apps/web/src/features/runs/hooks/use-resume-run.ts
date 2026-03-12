@@ -1,4 +1,4 @@
-import type { ResumeRunInput } from "@mr-burns/shared"
+import type { ResumeRunInput } from "@burns/shared"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 

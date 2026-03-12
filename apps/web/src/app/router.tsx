@@ -6,7 +6,7 @@ import { HomePage } from "@/app/routes/home/page"
 import { InboxPage } from "@/app/routes/inbox/page"
 import { AddWorkspacePage } from "@/app/routes/add-workspace/page"
 import { SettingsPage } from "@/app/routes/settings/page"
-import { EditWorkflowPage } from "@/app/routes/workflows/edit/page"
+import { WorkflowDetailPage } from "@/app/routes/workflows/detail/page"
 import { NewWorkflowPage } from "@/app/routes/workflows/new/page"
 import { WorkflowsPage } from "@/app/routes/workflows/page"
 import { WorkspaceApprovalsPage } from "@/app/routes/workspace/approvals/page"
@@ -69,12 +69,8 @@ export const router = createBrowserRouter([
             element: <NewWorkflowPage />,
           },
           {
-            path: "workflows/:workflowId/edit",
-            element: <EditWorkflowPage />,
-          },
-          {
             path: "workflows/:workflowId",
-            element: <WorkflowsPage />,
+            element: <WorkflowDetailPage />,
           },
         ],
       },

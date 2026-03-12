@@ -35,7 +35,7 @@ function writeWorkflowFile(workspaceId: string, workflowId: string, extension: "
   const workspacePath = resolveTestWorkspacePath(workspaceId)
   const workflowPath = path.join(
     workspacePath,
-    ".mr-burns",
+    ".burns",
     "workflows",
     workflowId
   )
@@ -47,7 +47,7 @@ function writeLegacyWorkflowTemplate(workspaceId: string, workflowId: string) {
   const workspacePath = resolveTestWorkspacePath(workspaceId)
   const workflowPath = path.join(
     workspacePath,
-    ".mr-burns",
+    ".burns",
     "workflows",
     workflowId
   )
@@ -281,7 +281,7 @@ describe("run routes", () => {
       },
     })
     expect(capturedBodies[0]).toMatchObject({
-      workflowPath: expect.stringContaining(`/${workspaceId}/.mr-burns/workflows/issue-to-pr/workflow.tsx`),
+      workflowPath: expect.stringContaining(`/${workspaceId}/.burns/workflows/issue-to-pr/workflow.tsx`),
     })
   })
 
@@ -328,7 +328,7 @@ describe("run routes", () => {
     expect(response.status).toBe(201)
     expect(capturedBodies).toHaveLength(1)
     expect(capturedBodies[0]).toMatchObject({
-      workflowPath: expect.stringContaining(`/${workspaceId}/.mr-burns/workflows/issue-to-pr/workflow.ts`),
+      workflowPath: expect.stringContaining(`/${workspaceId}/.burns/workflows/issue-to-pr/workflow.ts`),
     })
   })
 
@@ -398,7 +398,7 @@ describe("run routes", () => {
       input: {
         continue: true,
       },
-      workflowPath: expect.stringContaining(`/${workspaceId}/.mr-burns/workflows/issue-to-pr/workflow.ts`),
+      workflowPath: expect.stringContaining(`/${workspaceId}/.burns/workflows/issue-to-pr/workflow.ts`),
     })
   })
 
@@ -611,7 +611,7 @@ describe("run routes", () => {
     const repairedSource = readFileSync(
       path.join(
         resolveTestWorkspacePath(workspaceId),
-        ".mr-burns",
+        ".burns",
         "workflows",
         "issue-to-pr",
         "workflow.tsx"

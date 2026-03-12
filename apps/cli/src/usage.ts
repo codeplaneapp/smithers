@@ -1,5 +1,5 @@
 const FULL_USAGE = [
-  "Mr. Burns CLI",
+  "Burns CLI",
   "",
   "Usage:",
   "  burns start [--open] [--web-url <url>]",

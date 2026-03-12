@@ -11,9 +11,9 @@ import {
   ShieldCheckIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { NavLink, Outlet, useLocation } from "react-router-dom"
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
 
-import mrBurnsAvatar from "@/assets/mr-burns.png"
+import burnsAvatar from "@/assets/burns.png"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
@@ -37,6 +37,10 @@ import {
   SidebarSeparator,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { useDeleteWorkflow } from "@/features/workflows/hooks/use-delete-workflow"
+import { useCancelRun } from "@/features/runs/hooks/use-cancel-run"
+import { useResumeRun } from "@/features/runs/hooks/use-resume-run"
+import { useWorkflows } from "@/features/workflows/hooks/use-workflows"
 import { useActiveWorkspace } from "@/features/workspaces/hooks/use-active-workspace"
 
 type SidebarItem = {
@@ -63,7 +67,15 @@ function toTitleCase(value: string) {
     .replace(/\b\w/g, (character) => character.toUpperCase())
 }
 
-function buildBreadcrumbs(pathname: string, workspaceName?: string) {
+function buildBreadcrumbs(
+  pathname: string,
+  options?: {
+    workspaceName?: string
+    workflowName?: string
+  }
+) {
+  const workspaceName = options?.workspaceName
+  const workflowName = options?.workflowName
   const segments = pathname.split("/").filter(Boolean).map((segment) => decodeURIComponent(segment))
 
   if (segments.length === 0) {
@@ -106,6 +118,18 @@ function buildBreadcrumbs(pathname: string, workspaceName?: string) {
 
     if (segments[2]) {
       workspaceCrumbs.push(toTitleCase(segments[2]))
+    }
+
+    if (segments[2] === "workflows" && segments[3]) {
+      if (segments[3] === "new") {
+        workspaceCrumbs.push("New")
+      } else {
+        workspaceCrumbs.push(workflowName ?? segments[3])
+      }
+    }
+
+    if (segments[2] === "runs" && segments[3]) {
+      workspaceCrumbs.push(segments[3])
     }
 
     return workspaceCrumbs
@@ -154,15 +178,57 @@ function getWorkspaceNavItems(workspaceId: string): SidebarItem[] {
 }
 
 export function AppShell() {
+  const navigate = useNavigate()
   const location = useLocation()
   const { workspace, workspaces, isLoading } = useActiveWorkspace()
   const [expandedWorkspaceIds, setExpandedWorkspaceIds] = useState<Record<string, boolean>>({})
-  const breadcrumbs = buildBreadcrumbs(location.pathname, workspace?.name)
 
   const routeWorkspaceId = useMemo(() => {
     const match = location.pathname.match(/^\/w\/([^/]+)/)
     return match?.[1] ?? null
   }, [location.pathname])
+  const routeWorkflowId = useMemo(() => {
+    const match = location.pathname.match(/^\/w\/[^/]+\/workflows\/([^/]+)/)
+    if (!match?.[1] || match[1] === "new") {
+      return null
+    }
+
+    return decodeURIComponent(match[1])
+  }, [location.pathname])
+  const routeRunId = useMemo(() => {
+    const match = location.pathname.match(/^\/w\/[^/]+\/runs\/([^/]+)/)
+    if (!match?.[1]) {
+      return null
+    }
+
+    return decodeURIComponent(match[1])
+  }, [location.pathname])
+  const isWorkflowRoute = useMemo(
+    () => /^\/w\/[^/]+\/workflows(?:\/.*)?$/.test(location.pathname),
+    [location.pathname]
+  )
+  const isRunDetailRoute = useMemo(
+    () => /^\/w\/[^/]+\/runs\/[^/]+$/.test(location.pathname),
+    [location.pathname]
+  )
+  const isWorkflowsListRoute = useMemo(
+    () => /^\/w\/[^/]+\/workflows$/.test(location.pathname),
+    [location.pathname]
+  )
+  const workflowsBasePath = routeWorkspaceId ? `/w/${routeWorkspaceId}/workflows` : "/"
+  const runsBasePath = routeWorkspaceId ? `/w/${routeWorkspaceId}/runs` : "/"
+  const { data: workflowBreadcrumbs = [] } = useWorkflows(routeWorkspaceId ?? undefined)
+  const deleteWorkflow = useDeleteWorkflow(routeWorkspaceId ?? undefined)
+  const resumeRun = useResumeRun(routeWorkspaceId ?? undefined, routeRunId ?? undefined)
+  const cancelRun = useCancelRun(routeWorkspaceId ?? undefined, routeRunId ?? undefined)
+  const workflowName = useMemo(
+    () => workflowBreadcrumbs.find((entry) => entry.id === routeWorkflowId)?.name,
+    [routeWorkflowId, workflowBreadcrumbs]
+  )
+  const breadcrumbs = buildBreadcrumbs(location.pathname, {
+    workspaceName: workspace?.name,
+    workflowName,
+  })
 
   useEffect(() => {
     if (!routeWorkspaceId) {
@@ -187,12 +253,12 @@ export function AppShell() {
         <SidebarHeader>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton size="lg" tooltip="Mr. Burns">
+              <SidebarMenuButton size="lg" tooltip="Burns">
                 <div className="h-8 w-8 shrink-0 overflow-hidden rounded-md border bg-background">
-                  <img src={mrBurnsAvatar} alt="Mr. Burns" className="h-full w-full object-cover object-top" />
+                  <img src={burnsAvatar} alt="Burns" className="h-full w-full object-cover object-top" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">Mr. Burns</span>
+                  <span className="truncate font-semibold">Burns</span>
                   <span className="truncate text-xs text-muted-foreground">Smither&apos;s Manager</span>
                 </div>
               </SidebarMenuButton>
@@ -333,6 +399,78 @@ export function AppShell() {
               ))}
             </div>
           </div>
+          {isRunDetailRoute ? (
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => navigate(runsBasePath)}>
+                Back to runs
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!routeRunId || resumeRun.isPending}
+                onClick={() => {
+                  if (!routeRunId) {
+                    return
+                  }
+
+                  resumeRun.mutate({})
+                }}
+              >
+                {resumeRun.isPending ? "Resuming…" : "Resume"}
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={!routeRunId || cancelRun.isPending}
+                onClick={() => {
+                  if (!routeRunId) {
+                    return
+                  }
+
+                  cancelRun.mutate({})
+                }}
+              >
+                {cancelRun.isPending ? "Cancelling…" : "Cancel"}
+              </Button>
+            </div>
+          ) : isWorkflowRoute ? (
+            <div className="flex items-center gap-2">
+              {isWorkflowsListRoute ? (
+                <Button variant="outline" onClick={() => navigate(`${workflowsBasePath}/new`)}>
+                  New workflow
+                </Button>
+              ) : null}
+              {routeWorkflowId ? (
+                <Button
+                  variant="destructive"
+                  disabled={deleteWorkflow.isPending}
+                  onClick={() => {
+                    const confirmed = window.confirm(
+                      `Delete workflow "${workflowName ?? routeWorkflowId}"? This removes its workflow folder from disk.`
+                    )
+                    if (!confirmed) {
+                      return
+                    }
+
+                    deleteWorkflow.mutate(routeWorkflowId, {
+                      onSuccess: () => {
+                        const remainingWorkflows = workflowBreadcrumbs.filter(
+                          (workflow) => workflow.id !== routeWorkflowId
+                        )
+                        const nextWorkflow = remainingWorkflows[0]
+                        if (!nextWorkflow) {
+                          navigate(workflowsBasePath)
+                          return
+                        }
+
+                        navigate(`${workflowsBasePath}/${nextWorkflow.id}`)
+                      },
+                    })
+                  }}
+                >
+                  {deleteWorkflow.isPending ? "Deleting…" : "Delete workflow"}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </header>
         <main className="min-h-0 flex-1 overflow-hidden">
           <Outlet />

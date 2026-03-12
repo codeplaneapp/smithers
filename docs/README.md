@@ -2,7 +2,7 @@
 
 ## Product and architecture
 
-- [Product Spec (target state)](./mr-burns-spec.md)
+- [Product Spec (target state)](./burns-spec.md)
 - [Codebase Layout](./codebase-layout.md)
 - [Daemon API Reference](./daemon-api-reference.md)
 - [Workspace + Runtime Handoff (Next Agent)](./next-agent-workspace-gaps.md)

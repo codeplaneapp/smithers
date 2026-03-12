@@ -1,4 +1,4 @@
-import type { Approval, Run, Workspace } from "@mr-burns/shared"
+import type { Approval, Run, Workspace } from "@burns/shared"
 
 export const workspaces: Workspace[] = [
   {

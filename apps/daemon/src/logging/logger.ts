@@ -57,7 +57,7 @@ export function createLogger(options: CreateLoggerOptions = {}): BurnsLogger {
   const loggerOptions = {
     level: options.level ?? getDefaultLogLevel(),
     base: {
-      service: "mr-burns-daemon",
+      service: "burns-daemon",
       ...(options.base ?? {}),
     },
     messageKey: "message",

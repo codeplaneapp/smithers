@@ -7,7 +7,7 @@ import type {
   WorkflowAuthoringStage,
   WorkflowDocument,
   WorkflowLaunchFieldsResponse,
-} from "@mr-burns/shared"
+} from "@burns/shared"
 
 import type { AgentCliEvent } from "@/agents/BaseCliAgent"
 import { defaultWorkflowTemplates } from "@/domain/workflows/templates"
@@ -57,7 +57,7 @@ const smithersGuideDigest = [
   "Smithers authoring guidance (apply when relevant):",
   "- Tutorial workflow: start from a clear entry task that reads ctx.input and then sequence downstream steps.",
   "- Patterns: use Sequence/Parallel/Branch/Ralph intentionally; choose deterministic node IDs and explicit control flow.",
-  "- Project structure: for Mr. Burns, keep the primary workflow in the requested target file unless the user explicitly asks for a multi-file component split.",
+  "- Project structure: for Burns, keep the primary workflow in the requested target file unless the user explicitly asks for a multi-file component split.",
   "- Best practices: keep prompts task-specific, preserve stable task IDs, keep tasks composable, and avoid hidden side effects.",
   "- Model selection: use stronger models for planning/review-heavy tasks and faster models for straightforward transform tasks.",
   "- Review loop: when quality gates are requested, model them with bounded Ralph loops and explicit stop conditions.",
@@ -213,7 +213,7 @@ function getWorkflowRoot(workspaceId: string) {
     throw new HttpError(404, `Workspace not found: ${workspaceId}`)
   }
 
-  return path.join(workspace.path, ".mr-burns", "workflows")
+  return path.join(workspace.path, ".burns", "workflows")
 }
 
 function inferWorkflowStatus(workflowId: string): Workflow["status"] {
@@ -295,7 +295,7 @@ export function buildWorkflowGenerationPrompt(params: {
   availableAgentClis: AgentCli[]
 }) {
   return [
-    "You are authoring a Smithers workflow for Mr. Burns inside a real workspace.",
+    "You are authoring a Smithers workflow for Burns inside a real workspace.",
     "Use your file editing tools to create or overwrite the target workflow file.",
     "Do NOT return the workflow source in chat unless absolutely necessary.",
     "Your primary task is to write the file on disk.",
@@ -303,7 +303,7 @@ export function buildWorkflowGenerationPrompt(params: {
     "Use stable kebab-case task IDs.",
     `Workflow display name: ${params.workflowName}`,
     `Workflow folder id: ${params.workflowId}`,
-    `Target relative file: .mr-burns/workflows/${params.workflowId}/workflow.tsx`,
+    `Target relative file: .burns/workflows/${params.workflowId}/workflow.tsx`,
     `Workspace path: ${params.workspacePath}`,
     "The file must contain a default export that defines a valid Smithers workflow in TypeScript/TSX.",
     "Prefer a simple but production-leaning structure with clear plan/implement/validate style tasks when relevant.",
@@ -337,7 +337,7 @@ export function buildWorkflowEditPrompt(params: {
   availableAgentClis: AgentCli[]
 }) {
   return [
-    "You are editing an existing Smithers workflow for Mr. Burns inside a real workspace.",
+    "You are editing an existing Smithers workflow for Burns inside a real workspace.",
     "First read the current workflow file from disk before making changes.",
     "Then overwrite that same file on disk with the updated workflow.",
     "Do NOT create a new workflow folder or a second file.",
@@ -451,6 +451,46 @@ function getWorkflowFilePath(workspaceId: string, workflowId: string) {
   }
 
   throw new HttpError(404, `Workflow not found: ${workflowId}`)
+}
+
+function getWorkflowDirectoryPath(workspaceId: string, workflowId: string) {
+  const workflowRoot = getWorkflowRoot(workspaceId)
+  const workflowDirectoryPath = path.join(workflowRoot, workflowId)
+
+  if (!existsSync(workflowDirectoryPath) || !statSync(workflowDirectoryPath).isDirectory()) {
+    throw new HttpError(404, `Workflow not found: ${workflowId}`)
+  }
+
+  return workflowDirectoryPath
+}
+
+function normalizeWorkflowFilePath(inputPath: string) {
+  const normalized = inputPath.replaceAll("\\", "/").replace(/^\.?\//, "")
+  if (!normalized || normalized.includes("\0")) {
+    throw new HttpError(400, "Invalid workflow file path")
+  }
+  return normalized
+}
+
+function resolveWorkflowFilePath(workflowDirectoryPath: string, inputPath: string) {
+  const normalizedPath = normalizeWorkflowFilePath(inputPath)
+  const resolvedPath = path.resolve(workflowDirectoryPath, normalizedPath)
+  const rootPrefix = workflowDirectoryPath.endsWith(path.sep)
+    ? workflowDirectoryPath
+    : `${workflowDirectoryPath}${path.sep}`
+
+  if (resolvedPath !== workflowDirectoryPath && !resolvedPath.startsWith(rootPrefix)) {
+    throw new HttpError(400, "Workflow file path escapes workflow directory")
+  }
+
+  if (!existsSync(resolvedPath) || !statSync(resolvedPath).isFile()) {
+    throw new HttpError(404, `Workflow file not found: ${normalizedPath}`)
+  }
+
+  return {
+    normalizedPath,
+    resolvedPath,
+  }
 }
 
 function mapWorkflowFile(workspaceId: string, workflowId: string, filePath: string): Workflow {
@@ -652,6 +692,51 @@ export function getWorkflow(workspaceId: string, workflowId: string): WorkflowDo
   }
 }
 
+export function listWorkflowFiles(workspaceId: string, workflowId: string) {
+  const workflowDirectoryPath = getWorkflowDirectoryPath(workspaceId, workflowId)
+  const files: { path: string }[] = []
+
+  const walk = (directoryPath: string) => {
+    const entries = readdirSync(directoryPath, { withFileTypes: true }).sort((left, right) =>
+      left.name.localeCompare(right.name)
+    )
+
+    for (const entry of entries) {
+      const entryPath = path.join(directoryPath, entry.name)
+      if (entry.isDirectory()) {
+        walk(entryPath)
+        continue
+      }
+
+      if (!entry.isFile()) {
+        continue
+      }
+
+      files.push({
+        path: path.relative(workflowDirectoryPath, entryPath).replaceAll("\\", "/"),
+      })
+    }
+  }
+
+  walk(workflowDirectoryPath)
+
+  return {
+    workflowId,
+    files,
+  }
+}
+
+export function getWorkflowFile(workspaceId: string, workflowId: string, filePath: string) {
+  const workflowDirectoryPath = getWorkflowDirectoryPath(workspaceId, workflowId)
+  const { normalizedPath, resolvedPath } = resolveWorkflowFilePath(workflowDirectoryPath, filePath)
+
+  return {
+    workflowId,
+    path: normalizedPath,
+    source: readFileSync(resolvedPath, "utf8"),
+  }
+}
+
 export function saveWorkflow(workspaceId: string, workflowId: string, source: string) {
   const workflowRoot = getWorkflowRoot(workspaceId)
   const workflowDir = path.join(workflowRoot, workflowId)
@@ -839,7 +924,7 @@ export async function generateWorkflowFromPrompt(params: {
   const workflowRoot = getWorkflowRoot(params.workspaceId)
   const workflowDir = path.join(workflowRoot, workflowId)
   const filePath = path.join(workflowDir, "workflow.tsx")
-  const relativeFilePath = path.join(".mr-burns", "workflows", workflowId, "workflow.tsx")
+  const relativeFilePath = path.join(".burns", "workflows", workflowId, "workflow.tsx")
 
   mkdirSync(workflowDir, { recursive: true })
 

@@ -6,7 +6,7 @@ import type {
   DeleteWorkspaceInput,
   DeleteWorkspaceResult,
   Workspace,
-} from "@mr-burns/shared"
+} from "@burns/shared"
 
 import { DEFAULT_AGENT } from "@/config/app-config"
 import { DEFAULT_WORKSPACES_ROOT } from "@/config/paths"
@@ -47,7 +47,7 @@ function slugifyWorkspaceName(name: string) {
 }
 
 function ensureWorkflowDirectory(workspacePath: string) {
-  mkdirSync(path.join(workspacePath, ".mr-burns", "workflows"), { recursive: true })
+  mkdirSync(path.join(workspacePath, ".burns", "workflows"), { recursive: true })
 }
 
 function isPathWithinDirectory(targetPath: string, parentDirectory: string) {

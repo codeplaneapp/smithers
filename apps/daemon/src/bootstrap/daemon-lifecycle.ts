@@ -85,7 +85,7 @@ export function createDaemonLifecycle(dependencies: DaemonLifecycleDependencies 
     }
 
     startPromise = (async () => {
-      logger.info({ event: "daemon.startup.begin" }, "Starting Mr. Burns daemon")
+      logger.info({ event: "daemon.startup.begin" }, "Starting Burns daemon")
 
       try {
         initWorkspaceService()
@@ -121,7 +121,7 @@ export function createDaemonLifecycle(dependencies: DaemonLifecycleDependencies 
             startedAt: runtime.startedAt,
             hasFetchHandler: typeof server.fetch === "function",
           },
-          "Mr. Burns daemon is listening"
+          "Burns daemon is listening"
         )
 
         return runtime
@@ -156,13 +156,13 @@ export function createDaemonLifecycle(dependencies: DaemonLifecycleDependencies 
         return
       }
 
-      logger.info({ event: "daemon.shutdown.begin", signal }, "Shutting down Mr. Burns daemon")
+      logger.info({ event: "daemon.shutdown.begin", signal }, "Shutting down Burns daemon")
 
       try {
         await shutdownWorkspaceInstances()
         runtime.server.stop(true)
         runtime = null
-        logger.info({ event: "daemon.shutdown.complete", signal }, "Mr. Burns daemon stopped")
+        logger.info({ event: "daemon.shutdown.complete", signal }, "Burns daemon stopped")
       } catch (error) {
         logger.error(
           { event: "daemon.shutdown.failed", signal, err: error },
