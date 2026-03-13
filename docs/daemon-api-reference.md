@@ -36,8 +36,61 @@ Returns daemon defaults:
 - `smithersBaseUrl`
 - `allowNetwork`
 - `smithersManagedPerWorkspace`
+- `smithersAuthMode`
+- `hasSmithersAuthToken`
+- `rootDirPolicy`
+- `diagnosticsLogLevel`
+- `diagnosticsPrettyLogs`
 
 When `smithersManagedPerWorkspace` is `true`, Burns supervises one Smithers HTTP server per workspace and routes run/approval/event requests to the correct workspace-local instance.
+
+Auth tokens are never returned in plaintext. The API only returns `hasSmithersAuthToken` to indicate whether a token is currently stored.
+
+## `PUT /api/settings`
+
+Updates persisted Burns defaults.
+
+Request body must include the editable settings fields above. Optional auth-token controls:
+
+- `smithersAuthToken`: set or replace the stored Smithers auth token
+- `clearSmithersAuthToken`: clear the stored token without changing other fields
+
+## `POST /api/settings/reset`
+
+Resets persisted settings back to daemon defaults.
+
+This is non-destructive:
+
+- workspace registry is preserved
+- workspace files are preserved
+- onboarding completion is preserved
+
+## `POST /api/settings/factory-reset`
+
+Clears Burns application state and returns the app to first-run onboarding.
+
+Factory reset:
+
+- removes all workspace records from Burns
+- clears persisted settings
+- clears onboarding completion
+- preserves repo folders and existing `.smithers` data on disk
+
+## `GET /api/onboarding-status`
+
+Returns first-run onboarding state.
+
+Response:
+
+```json
+{
+  "completed": false
+}
+```
+
+## `POST /api/onboarding-status/complete`
+
+Marks first-run onboarding as completed.
 
 ## `GET /api/agents/clis`
 
@@ -113,7 +166,7 @@ Stops workspace Smithers runtime (managed mode) and returns server status payloa
 Workflows are stored on disk under:
 
 ```txt
-<workspace>/.burns/workflows/<workflow-id>/workflow.tsx
+<workspace>/.smithers/workflows/<workflow-id>/workflow.tsx
 ```
 
 ## `GET /api/workspaces/:workspaceId/workflows`
@@ -223,7 +276,7 @@ Request body:
 Returns persisted run events from local SQLite.
 
 Each event includes normalized fields (`seq`, `runId`, `type`, `timestamp`, optional `nodeId`/`message`) plus optional `rawPayload`, which is the original Smithers event payload when available.
-For legacy mirrored events that predate `rawPayload` persistence, Burns attempts to hydrate `rawPayload` from the workspace Smithers database (`.burns/state/smithers.sqlite`) using `runId` + `seq`.
+For legacy mirrored events that predate `rawPayload` persistence, Burns attempts to hydrate `rawPayload` from the workspace Smithers database (`.smithers/state/smithers.db`) using `runId` + `seq`.
 
 Optional query string:
 

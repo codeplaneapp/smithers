@@ -50,7 +50,7 @@ Burns is a GUI and local control plane for Smithers.
 It gives an operator one place to:
 
 - register repos as managed workspaces
-- keep workflow files under each repo at `.burns/workflows`
+- keep workflow files under each repo at `.smithers/workflows`
 - scaffold and edit workflows with agent assistance
 - launch runs against a selected workspace
 - watch live run progress through Smithers events and frames
@@ -145,7 +145,7 @@ Each workspace includes:
 - workspace status and health
 - configured Smithers server information
 - default CLI agent for workflow scaffolding/editing
-- location of workflow files at `.burns/workflows`
+- location of workflow files at `.smithers/workflows`
 
 ### Supported workspace creation modes
 
@@ -188,7 +188,7 @@ A workspace must provide enough information for Burns to:
 Workflows are stored inside each workspace at:
 
 ```txt
-<workspace>/.burns/workflows
+<workspace>/.smithers/workflows
 ```
 
 ### Workflow page requirements
@@ -203,7 +203,7 @@ The Workflows page must include:
 
 Burns should support:
 
-- browsing workflow files in `.burns/workflows`
+- browsing workflow files in `.smithers/workflows`
 - viewing syntax-highlighted Smithers workflow code
 - creating a new workflow
 - saving edits
@@ -297,7 +297,7 @@ The workflow flow starts when a workspace is selected.
 
 The operator can:
 
-- view all workflows in `.burns/workflows`
+- view all workflows in `.smithers/workflows`
 - select one workflow
 - inspect the code
 - prompt for modifications
@@ -384,7 +384,7 @@ Suggested fields:
 - `repoUrl`
 - `defaultBranch`
 - `workspaceRoot`
-- `workflowDir` default `.burns/workflows`
+- `workflowDir` default `.smithers/workflows`
 - `defaultAgent`
 - `serverBaseUrl`
 - `serverAuthMode`
@@ -699,7 +699,7 @@ Required settings:
 On workspace add or refresh, Burns should:
 
 - verify the path is a git repo or initialize one if creating new
-- ensure `.burns/workflows` exists
+- ensure `.smithers/workflows` exists
 - index known workflow files
 - record workspace metadata
 - test Smithers connectivity if configured
@@ -799,7 +799,7 @@ Burns V1 is successful if an operator can:
 
 1. add a local repo or clone a repo as a workspace
 2. see the workspace in the selector
-3. browse workflows under `.burns/workflows`
+3. browse workflows under `.smithers/workflows`
 4. edit a workflow and save changes
 5. prompt an agent to revise the workflow
 6. start a Smithers run from the selected workflow

@@ -41,9 +41,9 @@ Key directories:
 Key runtime behavior:
 
 - Serves API on `http://localhost:7332`
-- Persists workspace metadata in `apps/daemon/.data/burns.sqlite`
-- Manages default workspace folder root in `apps/daemon/.data/workspaces`
-- Stores workflow source files per workspace under `.burns/workflows`
+- Persists workspace metadata in `~/.burns/burns.sqlite` during direct daemon/web runs, or the platform app-data directory in desktop mode
+- Defaults the workspace creation root to `~/Documents/Burns`
+- Stores workflow source files per workspace under `.smithers/workflows`
 - Supervises one Smithers process per workspace (when enabled), including crash restart and shutdown handling
 
 ## `apps/web`
