@@ -64,6 +64,12 @@ describe("workflow authoring prompts", () => {
     expect(prompt).toContain("ClaudeCodeAgent")
     expect(prompt).toContain("CodexAgent")
     expect(prompt).toContain("<Ralph")
+    expect(prompt).toContain(
+      '{"Run the relevant validation for the latest implementation and return only JSON that matches the validate schema."}'
+    )
+    expect(prompt).toContain(
+      '{"Review the latest implementation only when validation passed. Return only JSON that matches the review schema."}'
+    )
     for (const link of guideLinks) {
       expect(prompt).toContain(link)
     }

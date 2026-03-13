@@ -17,87 +17,89 @@ import { getWorkspace } from "@/services/workspace-service"
 import { HttpError } from "@/utils/http-error"
 import { slugify } from "@/utils/slugify"
 
-const workflowPromptScaffold = `import { ClaudeCodeAgent, CodexAgent, createSmithers, Ralph, Sequence } from "smithers-orchestrator"
-import { z } from "zod"
-
-const { Workflow, Task, smithers, outputs } = createSmithers({
-  plan: z.object({
-    summary: z.string(),
-    acceptanceCriteria: z.array(z.string()),
-  }),
-  implement: z.object({
-    summary: z.string(),
-    filesChanged: z.array(z.string()),
-  }),
-  validate: z.object({
-    allPassed: z.boolean(),
-    summary: z.string(),
-  }),
-  review: z.object({
-    approved: z.boolean(),
-    findings: z.array(z.string()),
-  }),
-})
-
-const SHARED_SYSTEM_PROMPT =
-  "You are working inside a real repository. Preserve stable task IDs, keep the workflow coherent, and return only schema-matching JSON."
-
-const plannerAgent = new ClaudeCodeAgent({
-  model: "claude-sonnet-4-5-20250929",
-  permissionMode: "bypassPermissions",
-  timeoutMs: 10 * 60 * 1000,
-  systemPrompt: SHARED_SYSTEM_PROMPT,
-})
-
-const implementationAgent = new CodexAgent({
-  model: "gpt-5.3-codex",
-  sandbox: "workspace-write",
-  fullAuto: true,
-  timeoutMs: 20 * 60 * 1000,
-  config: { model_reasoning_effort: "high" },
-  systemPrompt: SHARED_SYSTEM_PROMPT,
-})
-
-const reviewAgent = new ClaudeCodeAgent({
-  model: "claude-opus-4-6",
-  permissionMode: "bypassPermissions",
-  timeoutMs: 10 * 60 * 1000,
-  systemPrompt: SHARED_SYSTEM_PROMPT,
-})
-
-export default smithers((ctx) => (
-  <Workflow name="example-workflow">
-    <Sequence>
-      <Task id="plan" output={outputs.plan} agent={plannerAgent} timeoutMs={10 * 60 * 1000} retries={1}>
-        {[
-          "Create a plan for: " + String(ctx.input?.request ?? "the requested change") + ".",
-          "",
-          "Return only JSON that matches the plan schema.",
-        ].join("\\n")}
-      </Task>
-      <Ralph id="implement-review-loop" until={Boolean(ctx.outputMaybe("review", { nodeId: "review" })?.approved)} maxIterations={3} onMaxReached="return-last">
-        <Sequence>
-          <Task id="implement" output={outputs.implement} agent={implementationAgent} timeoutMs={20 * 60 * 1000}>
-            {[
-              "Implement the plan.",
-              "",
-              "Acceptance criteria:",
-              JSON.stringify(ctx.outputMaybe("plan", { nodeId: "plan" })?.acceptanceCriteria ?? [], null, 2),
-              "",
-              "Return only JSON that matches the implement schema.",
-            ].join("\\n")}
-          </Task>
-          <Task id="validate" output={outputs.validate} agent={implementationAgent} timeoutMs={10 * 60 * 1000} retries={1}>
-            {"Run the relevant validation for the latest implementation and return only JSON that matches the validate schema."}
-          </Task>
-          <Task id="review" output={outputs.review} agent={reviewAgent} timeoutMs={10 * 60 * 1000} skipIf={!ctx.outputMaybe("validate", { nodeId: "validate" })?.allPassed}>
-            {"Review the latest implementation only when validation passed. Return only JSON that matches the review schema."}
-          </Task>
-        </Sequence>
-      </Ralph>
-    </Sequence>
-  </Workflow>
-))`
+const workflowPromptScaffold = [
+  'import { ClaudeCodeAgent, CodexAgent, createSmithers, Ralph, Sequence } from "smithers-orchestrator"',
+  'import { z } from "zod"',
+  "",
+  "const { Workflow, Task, smithers, outputs } = createSmithers({",
+  "  plan: z.object({",
+  "    summary: z.string(),",
+  "    acceptanceCriteria: z.array(z.string()),",
+  "  }),",
+  "  implement: z.object({",
+  "    summary: z.string(),",
+  "    filesChanged: z.array(z.string()),",
+  "  }),",
+  "  validate: z.object({",
+  "    allPassed: z.boolean(),",
+  "    summary: z.string(),",
+  "  }),",
+  "  review: z.object({",
+  "    approved: z.boolean(),",
+  "    findings: z.array(z.string()),",
+  "  }),",
+  "})",
+  "",
+  "const SHARED_SYSTEM_PROMPT =",
+  '  "You are working inside a real repository. Preserve stable task IDs, keep the workflow coherent, and return only schema-matching JSON."',
+  "",
+  "const plannerAgent = new ClaudeCodeAgent({",
+  '  model: "claude-sonnet-4-5-20250929",',
+  '  permissionMode: "bypassPermissions",',
+  "  timeoutMs: 10 * 60 * 1000,",
+  "  systemPrompt: SHARED_SYSTEM_PROMPT,",
+  "})",
+  "",
+  "const implementationAgent = new CodexAgent({",
+  '  model: "gpt-5.3-codex",',
+  '  sandbox: "workspace-write",',
+  "  fullAuto: true,",
+  "  timeoutMs: 20 * 60 * 1000,",
+  '  config: { model_reasoning_effort: "high" },',
+  "  systemPrompt: SHARED_SYSTEM_PROMPT,",
+  "})",
+  "",
+  "const reviewAgent = new ClaudeCodeAgent({",
+  '  model: "claude-opus-4-6",',
+  '  permissionMode: "bypassPermissions",',
+  "  timeoutMs: 10 * 60 * 1000,",
+  "  systemPrompt: SHARED_SYSTEM_PROMPT,",
+  "})",
+  "",
+  "export default smithers((ctx) => (",
+  '  <Workflow name="example-workflow">',
+  "    <Sequence>",
+  '      <Task id="plan" output={outputs.plan} agent={plannerAgent} timeoutMs={10 * 60 * 1000} retries={1}>',
+  "        {[",
+  '          "Create a plan for: " + String(ctx.input?.request ?? "the requested change") + ".",',
+  '          "",',
+  '          "Return only JSON that matches the plan schema.",',
+  '        ].join("\\n")}',
+  "      </Task>",
+  '      <Ralph id="implement-review-loop" until={Boolean(ctx.outputMaybe("review", { nodeId: "review" })?.approved)} maxIterations={3} onMaxReached="return-last">',
+  "        <Sequence>",
+  '          <Task id="implement" output={outputs.implement} agent={implementationAgent} timeoutMs={20 * 60 * 1000}>',
+  "            {[",
+  '              "Implement the plan.",',
+  '              "",',
+  '              "Acceptance criteria:",',
+  '              JSON.stringify(ctx.outputMaybe("plan", { nodeId: "plan" })?.acceptanceCriteria ?? [], null, 2),',
+  '              "",',
+  '              "Return only JSON that matches the implement schema.",',
+  '            ].join("\\n")}',
+  "          </Task>",
+  '          <Task id="validate" output={outputs.validate} agent={implementationAgent} timeoutMs={10 * 60 * 1000} retries={1}>',
+  '            {"Run the relevant validation for the latest implementation and return only JSON that matches the validate schema."}',
+  "          </Task>",
+  '          <Task id="review" output={outputs.review} agent={reviewAgent} timeoutMs={10 * 60 * 1000} skipIf={!ctx.outputMaybe("validate", { nodeId: "validate" })?.allPassed}>',
+  '            {"Review the latest implementation only when validation passed. Return only JSON that matches the review schema."}',
+  "          </Task>",
+  "        </Sequence>",
+  "      </Ralph>",
+  "    </Sequence>",
+  "  </Workflow>",
+  "))",
+].join("\n")
 
 const smithersGuideLinks = [
   "https://smithers.sh/guides/tutorial-workflow",
