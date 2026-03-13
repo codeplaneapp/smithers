@@ -2,20 +2,34 @@
 import { resolve, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFileSync } from "node:fs";
+import { Effect } from "effect";
 import { runWorkflow, renderFrame, resolveSchema } from "../engine";
 import { approveNode, denyNode } from "../engine/approvals";
 import { loadInput, loadOutputs } from "../db/snapshot";
 import { ensureSmithersTables } from "../db/ensure";
 import { SmithersDb } from "../db/adapter";
 import { buildContext } from "../context";
+import { fromPromise } from "../effect/interop";
+import { runPromise } from "../effect/runtime";
 import type { SmithersWorkflow } from "../SmithersWorkflow";
 import { revertToAttempt } from "../revert";
 
-async function loadWorkflow(path: string): Promise<SmithersWorkflow<any>> {
+async function loadWorkflowAsync(path: string): Promise<SmithersWorkflow<any>> {
   const abs = resolve(process.cwd(), path);
   const mod = await import(pathToFileURL(abs).href);
   if (!mod.default) throw new Error("Workflow must export default");
   return mod.default as SmithersWorkflow<any>;
+}
+
+function loadWorkflowEffect(path: string) {
+  return fromPromise("cli load workflow", () => loadWorkflowAsync(path)).pipe(
+    Effect.annotateLogs({ workflowPath: path }),
+    Effect.withLogSpan("cli:load-workflow"),
+  );
+}
+
+async function loadWorkflow(path: string): Promise<SmithersWorkflow<any>> {
+  return runPromise(loadWorkflowEffect(path));
 }
 
 function parseJsonOrExit(raw: string, label: string) {
@@ -69,7 +83,7 @@ function parseArgs(argv: string[]) {
   return args;
 }
 
-async function main() {
+async function mainAsync() {
   const argv = process.argv.slice(2);
   const cmd = argv[0];
   const args = parseArgs(argv.slice(1));
@@ -559,7 +573,14 @@ Run options:
   process.exit(4);
 }
 
-main().catch((err) => {
+function mainEffect() {
+  return fromPromise("cli main", () => mainAsync()).pipe(
+    Effect.annotateLogs({ argv: process.argv.slice(2).join(" ") }),
+    Effect.withLogSpan("cli:main"),
+  );
+}
+
+runPromise(mainEffect()).catch((err) => {
   console.error(err);
   process.exit(1);
 });

@@ -2,12 +2,15 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { createInterface } from "node:readline";
+import { Effect } from "effect";
 import type {
   Agent,
   GenerateTextResult,
   StreamTextResult,
   ModelMessage,
 } from "ai";
+import { spawnCaptureEffect } from "../effect/child-process";
+import { runPromise } from "../effect/runtime";
 import { getToolContext } from "../tools/context";
 
 type TimeoutInput = number | { totalMs?: number; idleMs?: number } | undefined;
@@ -455,11 +458,11 @@ export function buildStreamResult(
   } as unknown as StreamTextResult<any, any>;
 }
 
-export async function runCommand(
+export function runCommandEffect(
   command: string,
   args: string[],
   options: RunCommandOptions,
-): Promise<RunCommandResult> {
+): Effect.Effect<RunCommandResult, Error> {
   const {
     cwd,
     env,
@@ -471,97 +474,47 @@ export async function runCommand(
     onStdout,
     onStderr,
   } = options;
-  return await new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const child = spawn(command, args, {
+  return spawnCaptureEffect(command, args, {
+    cwd,
+    env,
+    input,
+    signal,
+    timeoutMs,
+    idleTimeoutMs,
+    maxOutputBytes,
+    onStdout,
+    onStderr,
+  }).pipe(
+    Effect.annotateLogs({
+      agentCommand: command,
+      agentArgs: args.join(" "),
       cwd,
-      env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    const onData = (chunk: Buffer, target: "stdout" | "stderr") => {
-      inactivity.reset();
-      const text = chunk.toString("utf8");
-      const next = truncateToBytes(
-        target === "stdout" ? stdout + text : stderr + text,
-        maxOutputBytes,
-      );
-      if (target === "stdout") {
-        stdout = next;
-        onStdout?.(text);
-      } else {
-        stderr = next;
-        onStderr?.(text);
-      }
-    };
-
-    child.stdout?.on("data", (chunk) => onData(chunk, "stdout"));
-    child.stderr?.on("data", (chunk) => onData(chunk, "stderr"));
-
-    const finalize = (err?: Error) => {
-      if (settled) return;
-      settled = true;
-      if (err) {
-        reject(err);
-      } else {
-        resolve({ stdout, stderr, exitCode: child.exitCode });
-      }
-    };
-
-    const kill = (reason: string) => {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // ignore
-      }
-      finalize(new Error(reason));
-    };
-
-    const totalTimeout = createOneShotTimer(timeoutMs, () =>
-      kill(`CLI timed out after ${timeoutMs}ms`),
-    );
-    const inactivity = createInactivityTimer(idleTimeoutMs, () =>
-      kill(`CLI idle timed out after ${idleTimeoutMs}ms`),
-    );
-
-    if (signal) {
-      if (signal.aborted) {
-        kill("CLI aborted");
-      } else {
-        signal.addEventListener("abort", () => kill("CLI aborted"), {
-          once: true,
-        });
-      }
-    }
-
-    child.on("error", (err) => {
-      inactivity.clear();
-      totalTimeout.clear();
-      finalize(err);
-    });
-    child.on("close", () => {
-      inactivity.clear();
-      totalTimeout.clear();
-      finalize();
-    });
-
-    if (input) {
-      child.stdin?.write(input);
-    }
-    child.stdin?.end();
-  });
+    }),
+    Effect.withLogSpan(`agent:${command}`),
+  );
 }
 
-export async function runRpcCommand(command: string, args: string[], options: RunRpcCommandOptions): Promise<{
+export async function runCommand(
+  command: string,
+  args: string[],
+  options: RunCommandOptions,
+): Promise<RunCommandResult> {
+  return runPromise(runCommandEffect(command, args, options));
+}
+
+export function runRpcCommandEffect(command: string, args: string[], options: RunRpcCommandOptions): Effect.Effect<{
    text: string;
    output: unknown;
    stderr: string;
    exitCode: number | null;
- }> {
+ }, Error> {
    const { cwd, env, prompt, timeoutMs, idleTimeoutMs, signal, maxOutputBytes, onStderr, onExtensionUiRequest } = options;
-   return await new Promise((resolve, reject) => {
+   return Effect.async<{
+     text: string;
+     output: unknown;
+     stderr: string;
+     exitCode: number | null;
+   }, Error>((resume) => {
      let stderr = "";
      let settled = false;
      let exitCode: number | null = null;
@@ -585,7 +538,7 @@ export async function runRpcCommand(command: string, args: string[], options: Ru
        } catch {
          // ignore
        }
-       reject(err);
+       resume(Effect.fail(err));
      };
 
      const finalize = (text: string, output: unknown) => {
@@ -596,7 +549,7 @@ export async function runRpcCommand(command: string, args: string[], options: Ru
        } catch {
          // ignore
        }
-       resolve({ text, output, stderr, exitCode: child.exitCode });
+       resume(Effect.succeed({ text, output, stderr, exitCode: child.exitCode }));
      };
 
      const terminateChild = () => {
@@ -752,13 +705,42 @@ export async function runRpcCommand(command: string, args: string[], options: Ru
      });
  
      const promptPayload = { id: randomUUID(), type: "prompt", message: prompt };
-    if (!child.stdin) {
-      handleError(new Error("Child process stdin is not available; cannot send prompt payload."));
-      return;
-    }
-    child.stdin.write(`${JSON.stringify(promptPayload)}\n`);
-   });
- }
+     if (!child.stdin) {
+       handleError(new Error("Child process stdin is not available; cannot send prompt payload."));
+       return;
+     }
+     child.stdin.write(`${JSON.stringify(promptPayload)}\n`);
+     return Effect.sync(() => {
+       try {
+         rl.close();
+       } catch {
+         // ignore
+       }
+       try {
+         child.kill("SIGKILL");
+       } catch {
+         // ignore
+       }
+     });
+   }).pipe(
+     Effect.annotateLogs({
+       agentCommand: command,
+       agentArgs: args.join(" "),
+       cwd,
+       rpc: true,
+     }),
+     Effect.withLogSpan(`agent:${command}:rpc`),
+   );
+}
+
+export async function runRpcCommand(command: string, args: string[], options: RunRpcCommandOptions): Promise<{
+   text: string;
+   output: unknown;
+   stderr: string;
+   exitCode: number | null;
+ }> {
+   return runPromise(runRpcCommandEffect(command, args, options));
+}
 
 export abstract class BaseCliAgent implements Agent<any, any, any> {
   readonly version = "agent-v1" as const;
