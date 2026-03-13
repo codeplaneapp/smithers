@@ -1,5 +1,6 @@
-import { createBrowserRouter } from "react-router-dom"
+import { createBrowserRouter, Navigate } from "react-router-dom"
 
+import { RouterErrorScreen } from "@/app/components/router-error-screen"
 import { AppShell } from "@/app/layouts/app-shell"
 import { WorkspaceLayout } from "@/app/layouts/workspace-layout"
 import { HomePage } from "@/app/routes/home/page"
@@ -18,12 +19,19 @@ import { WorkspaceSettingsPage } from "@/app/routes/workspace/settings/page"
 
 export const router = createBrowserRouter([
   {
+    path: "/index.html",
+    element: <Navigate to="/" replace />,
+    errorElement: <RouterErrorScreen />,
+  },
+  {
     path: "/onboarding",
     element: <OnboardingPage />,
+    errorElement: <RouterErrorScreen />,
   },
   {
     path: "/",
     element: <AppShell />,
+    errorElement: <RouterErrorScreen />,
     children: [
       {
         index: true,
@@ -44,6 +52,7 @@ export const router = createBrowserRouter([
       {
         path: "w/:workspaceId",
         element: <WorkspaceLayout />,
+        errorElement: <RouterErrorScreen />,
         children: [
           {
             path: "overview",

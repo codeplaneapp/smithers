@@ -41,10 +41,12 @@ import { useDeleteWorkflow } from "@/features/workflows/hooks/use-delete-workflo
 import { useCancelRun } from "@/features/runs/hooks/use-cancel-run"
 import { useResumeRun } from "@/features/runs/hooks/use-resume-run"
 import { useOpenWorkflowFolder } from "@/features/workflows/hooks/use-open-workflow-folder"
-import { useCopyWorkflowCdCommand } from "@/features/workflows/hooks/use-copy-workflow-cd-command"
+import { useCopyWorkflowPath } from "@/features/workflows/hooks/use-copy-workflow-path"
 import { useWorkflows } from "@/features/workflows/hooks/use-workflows"
 import { useRuntimeContext } from "@/features/system/hooks/use-runtime-context"
 import { useActiveWorkspace } from "@/features/workspaces/hooks/use-active-workspace"
+import { useCopyWorkspacePath } from "@/features/workspaces/hooks/use-copy-workspace-path"
+import { useOpenWorkspaceFolder } from "@/features/workspaces/hooks/use-open-workspace-folder"
 
 type SidebarItem = {
   label: string
@@ -68,6 +70,22 @@ function toTitleCase(value: string) {
   return value
     .replace(/[-_]/g, " ")
     .replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
+function formatRuntimeOs(value: string | undefined) {
+  if (value === "darwin") {
+    return "MacOS"
+  }
+
+  if (value === "linux") {
+    return "Linux"
+  }
+
+  if (value === "windows") {
+    return "Windows"
+  }
+
+  return "Unknown"
 }
 
 function buildBreadcrumbs(
@@ -218,6 +236,10 @@ export function AppShell() {
     () => /^\/w\/[^/]+\/runs\/[^/]+$/.test(location.pathname),
     [location.pathname]
   )
+  const isWorkspaceOverviewRoute = useMemo(
+    () => /^\/w\/[^/]+\/overview$/.test(location.pathname),
+    [location.pathname]
+  )
   const isWorkflowsListRoute = useMemo(
     () => /^\/w\/[^/]+\/workflows$/.test(location.pathname),
     [location.pathname]
@@ -226,11 +248,29 @@ export function AppShell() {
   const runsBasePath = routeWorkspaceId ? `/w/${routeWorkspaceId}/runs` : "/"
   const { data: runtimeContext } = useRuntimeContext()
   const canOpenFolder = runtimeContext?.capabilities.openNativeFolderPicker ?? false
-  const canCopyWorkflowCdCommand = runtimeContext?.capabilities.openTerminal ?? false
+  const canCopyPath = runtimeContext?.capabilities.openNativeFolderPicker ?? false
+  const runtimeStatus = runtimeContext
+    ? [
+        toTitleCase(runtimeContext.environment),
+        toTitleCase(runtimeContext.runtimeMode),
+        formatRuntimeOs(runtimeContext.os),
+        runtimeContext.gitCommitShort,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null
   const { data: workflowBreadcrumbs = [] } = useWorkflows(routeWorkspaceId ?? undefined)
   const deleteWorkflow = useDeleteWorkflow(routeWorkspaceId ?? undefined)
-  const openWorkflowFolder = useOpenWorkflowFolder(routeWorkspaceId, routeWorkflowId)
-  const copyWorkflowCdCommand = useCopyWorkflowCdCommand(routeWorkspaceId, routeWorkflowId)
+  const openWorkflowFolder = useOpenWorkflowFolder(
+    routeWorkspaceId ?? undefined,
+    routeWorkflowId ?? undefined
+  )
+  const openWorkspaceFolder = useOpenWorkspaceFolder(routeWorkspaceId ?? undefined)
+  const copyWorkflowPath = useCopyWorkflowPath(
+    routeWorkspaceId ?? undefined,
+    routeWorkflowId ?? undefined
+  )
+  const copyWorkspacePath = useCopyWorkspacePath(routeWorkspaceId ?? undefined)
   const resumeRun = useResumeRun(routeWorkspaceId ?? undefined, routeRunId ?? undefined)
   const cancelRun = useCancelRun(routeWorkspaceId ?? undefined, routeRunId ?? undefined)
   const workflowName = useMemo(
@@ -316,6 +356,7 @@ export function AppShell() {
                 <div className="space-y-2 rounded-lg border border-dashed border-sidebar-border px-3 py-2 group-data-[collapsible=icon]:hidden">
                   <p className="text-xs text-sidebar-foreground/70">No workspaces yet.</p>
                   <Button
+                    nativeButton={false}
                     size="sm"
                     variant="outline"
                     className="w-full"
@@ -395,6 +436,11 @@ export function AppShell() {
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
+          {runtimeStatus ? (
+            <div className="px-2 pt-0.5 text-center text-[10px] leading-tight text-sidebar-foreground/60 group-data-[collapsible=icon]:hidden">
+              {runtimeStatus}
+            </div>
+          ) : null}
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>
@@ -443,6 +489,23 @@ export function AppShell() {
                 {cancelRun.isPending ? "Cancelling…" : "Cancel"}
               </Button>
             </div>
+          ) : isWorkspaceOverviewRoute ? (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                disabled={openWorkspaceFolder.isPending}
+                onClick={() => openWorkspaceFolder.mutate()}
+              >
+                {openWorkspaceFolder.isPending ? "Opening folder…" : "Open Folder"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={copyWorkspacePath.isPending}
+                onClick={() => copyWorkspacePath.mutate()}
+              >
+                {copyWorkspacePath.isPending ? "Copying path…" : "Copy Path"}
+              </Button>
+            </div>
           ) : isWorkflowRoute ? (
             <div className="flex items-center gap-2">
               {isWorkflowsListRoute ? (
@@ -461,13 +524,13 @@ export function AppShell() {
                       {openWorkflowFolder.isPending ? "Opening folder…" : "Open Folder"}
                     </Button>
                   ) : null}
-                  {canCopyWorkflowCdCommand ? (
+                  {canCopyPath ? (
                     <Button
                       variant="outline"
-                      disabled={copyWorkflowCdCommand.isPending}
-                      onClick={() => copyWorkflowCdCommand.mutate()}
+                      disabled={copyWorkflowPath.isPending}
+                      onClick={() => copyWorkflowPath.mutate()}
                     >
-                      {copyWorkflowCdCommand.isPending ? "Copying cd command…" : "Copy cd Command"}
+                      {copyWorkflowPath.isPending ? "Copying path…" : "Copy Path"}
                     </Button>
                   ) : null}
                   <Button
