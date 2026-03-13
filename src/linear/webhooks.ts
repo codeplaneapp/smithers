@@ -1,7 +1,11 @@
 import { LinearWebhookClient } from "@linear/sdk/webhooks";
 import type { LinearWebhookHandler } from "@linear/sdk/webhooks";
+import { Effect } from "effect";
 import { getLinearClient } from "./client";
 import React from "react";
+import { fromPromise } from "../effect/interop";
+import { logError, logInfo, logWarning } from "../effect/logging";
+import { runPromise } from "../effect/runtime";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -79,6 +83,12 @@ export type UseLinearWebhookResult = {
 export async function startWebhookServer(
   opts: WebhookServerOptions,
 ): Promise<WebhookServer> {
+  return runPromise(startWebhookServerEffect(opts));
+}
+
+export function startWebhookServerEffect(
+  opts: WebhookServerOptions,
+) {
   const {
     port = 3456,
     publicUrl,
@@ -92,68 +102,127 @@ export async function startWebhookServer(
   const webhookClient = new LinearWebhookClient(secret);
   const handler = webhookClient.createHandler();
 
-  const server = Bun.serve({
-    port,
-    async fetch(req) {
-      const url = new URL(req.url);
-      if (req.method === "POST" && url.pathname === "/webhook") {
-        return handler(req);
-      }
-      if (req.method === "GET" && url.pathname === "/health") {
-        return new Response("ok");
-      }
-      return new Response("Not Found", { status: 404 });
-    },
-  });
+  return Effect.gen(function* () {
+    const server = Bun.serve({
+      port,
+      async fetch(req) {
+        const url = new URL(req.url);
+        if (req.method === "POST" && url.pathname === "/webhook") {
+          return handler(req);
+        }
+        if (req.method === "GET" && url.pathname === "/health") {
+          return new Response("ok");
+        }
+        return new Response("Not Found", { status: 404 });
+      },
+    });
 
-  console.log(`Webhook server listening on port ${port}`);
+    logInfo("started linear webhook server", {
+      port,
+      publicUrl,
+      teamId: teamId ?? null,
+      resourceTypes: resourceTypes.join(","),
+      label,
+    }, "linear:webhook");
 
-  const linearClient = getLinearClient();
-  const webhookUrl = `${publicUrl.replace(/\/$/, "")}/webhook`;
+    const linearClient = getLinearClient();
+    const webhookUrl = `${publicUrl.replace(/\/$/, "")}/webhook`;
 
-  const result = await linearClient.createWebhook({
-    url: webhookUrl,
-    resourceTypes,
-    secret,
-    teamId: teamId ?? undefined,
-    label,
-    enabled: true,
-  });
+    const result = yield* fromPromise("create linear webhook", () =>
+      linearClient.createWebhook({
+        url: webhookUrl,
+        resourceTypes,
+        secret,
+        teamId: teamId ?? undefined,
+        label,
+        enabled: true,
+      }),
+    );
 
-  const webhook = await result.webhook;
-  if (!webhook) {
-    server.stop();
-    throw new Error("Failed to create Linear webhook — no webhook returned");
-  }
-
-  const webhookId = webhook.id;
-  console.log(`Registered Linear webhook ${webhookId} → ${webhookUrl}`);
-
-  let shutdownCalled = false;
-
-  async function shutdown() {
-    if (shutdownCalled) return;
-    shutdownCalled = true;
-    console.log("Shutting down webhook server...");
-    try {
-      await linearClient.deleteWebhook(webhookId);
-      console.log(`Deregistered Linear webhook ${webhookId}`);
-    } catch (err) {
-      console.error(`Failed to deregister webhook ${webhookId}:`, err);
+    const webhookRef = result.webhook;
+    const webhook = webhookRef
+      ? yield* fromPromise("resolve created linear webhook", () => webhookRef)
+      : undefined;
+    if (!webhook) {
+      server.stop();
+      throw new Error("Failed to create Linear webhook — no webhook returned");
     }
-    server.stop();
-    console.log("Webhook server stopped");
-  }
 
-  if (signal) {
-    if (signal.aborted) {
-      await shutdown();
-    } else {
-      signal.addEventListener("abort", () => void shutdown(), { once: true });
+    const webhookId = webhook.id;
+    logInfo("registered linear webhook", {
+      webhookId,
+      webhookUrl,
+      teamId: teamId ?? null,
+    }, "linear:webhook");
+
+    let shutdownCalled = false;
+
+    const shutdownEffect = Effect.gen(function* () {
+      if (shutdownCalled) return;
+      shutdownCalled = true;
+      logInfo("shutting down linear webhook server", {
+        webhookId,
+      }, "linear:webhook");
+      const deleted = yield* Effect.either(
+        fromPromise("delete linear webhook", () =>
+          linearClient.deleteWebhook(webhookId),
+        ),
+      );
+      if (deleted._tag === "Left") {
+        logWarning("failed to deregister linear webhook", {
+          webhookId,
+          error:
+            deleted.left instanceof Error
+              ? deleted.left.message
+              : String(deleted.left),
+        }, "linear:webhook");
+      } else {
+        logInfo("deregistered linear webhook", {
+          webhookId,
+        }, "linear:webhook");
+      }
+      yield* Effect.sync(() => {
+        server.stop();
+      });
+      logInfo("stopped linear webhook server", {
+        webhookId,
+      }, "linear:webhook");
+    }).pipe(
+      Effect.annotateLogs({
+        port,
+        webhookId,
+      }),
+      Effect.withLogSpan("linear:webhook-shutdown"),
+    );
+
+    const shutdown = () => runPromise(shutdownEffect);
+
+    if (signal) {
+      if (signal.aborted) {
+        yield* shutdownEffect;
+      } else {
+        signal.addEventListener("abort", () => {
+          void runPromise(shutdownEffect).catch((error) => {
+            logError("failed to shutdown linear webhook server after abort", {
+              webhookId,
+              error:
+                error instanceof Error ? error.message : String(error),
+            }, "linear:webhook");
+          });
+        }, { once: true });
+      }
     }
-  }
 
-  return { handler, webhookId, shutdown };
+    return { handler, webhookId, shutdown };
+  }).pipe(
+    Effect.annotateLogs({
+      port,
+      publicUrl,
+      teamId: teamId ?? "",
+      label,
+    }),
+    Effect.withLogSpan("linear:webhook-start"),
+  );
 }
 
 // ---------------------------------------------------------------------------
