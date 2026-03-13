@@ -76,7 +76,7 @@ bun run cli:start
 
 ## Current State
 
-Today Burns includes workspace onboarding, workflow browsing, AI-assisted workflow generation and editing, launch-field inference, Smithers-backed run APIs, approvals, managed per-workspace Smithers processes, and desktop/CLI runtime shells.
+Today Burns includes workspace onboarding, workspace overview quick actions, workflow browsing, AI-assisted workflow generation and editing, launch-field inference, Smithers-backed run APIs, approvals, managed per-workspace Smithers processes, and desktop/CLI runtime shells.
 
 ## For Developers
 

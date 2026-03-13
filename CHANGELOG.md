@@ -21,6 +21,7 @@ The format follows Keep a Changelog and this project currently tracks SemVer-sty
 
 - Hardened canary/stable workflows with runtime smoke checks, strict artifact collection, and artifact integrity verification.
 - Updated release docs and README entries for new smoke and release artifact commands.
+- Added local workspace `Open Folder` and `Copy Path` actions, and changed workflow path copying to return the raw folder path instead of a `cd` command.
 - Replaced the read-only settings page with editable forms that save daemon defaults and preserve existing workspaces during reset.
 - Removed automatic default-workspace seeding so first-run users land in onboarding instead of a precreated workspace.
 - Moved repo-local workflow and Smithers state storage from `.burns`/legacy `.mr-burns` into `.smithers`, with one-time migration of legacy workspace directories and top-level `smithers.db*` files.

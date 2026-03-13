@@ -101,10 +101,23 @@ function openTerminalCommands(directoryPath: string, platform: NodeJS.Platform) 
   ]
 }
 
-function assertWorkflowDirectoryExists(workflowDirectoryPath: string) {
-  const workflowDirectoryInfo = statSync(workflowDirectoryPath)
-  if (!workflowDirectoryInfo.isDirectory()) {
-    throw new HttpError(400, `Workflow path is not a directory: ${workflowDirectoryPath}`)
+function assertDirectoryExists(directoryPath: string) {
+  const directoryInfo = statSync(directoryPath)
+  if (!directoryInfo.isDirectory()) {
+    throw new HttpError(400, `Path is not a directory: ${directoryPath}`)
+  }
+}
+
+export function openDirectoryFolder(directoryPath: string, options: WorkflowOpenOptions = {}) {
+  const runCommand = options.runCommand ?? defaultRunCommand
+  const platform = options.platform ?? process.platform
+
+  assertDirectoryExists(directoryPath)
+
+  const { command, args } = openFolderCommand(directoryPath, platform)
+  const result = runCommand(command, args)
+  if (result.exitCode !== 0) {
+    throw new HttpError(500, toCommandError("open folder", command, result))
   }
 }
 
@@ -112,16 +125,7 @@ export function openWorkflowFolder(
   workflowDirectoryPath: string,
   options: WorkflowOpenOptions = {}
 ) {
-  const runCommand = options.runCommand ?? defaultRunCommand
-  const platform = options.platform ?? process.platform
-
-  assertWorkflowDirectoryExists(workflowDirectoryPath)
-
-  const { command, args } = openFolderCommand(workflowDirectoryPath, platform)
-  const result = runCommand(command, args)
-  if (result.exitCode !== 0) {
-    throw new HttpError(500, toCommandError("open workflow folder", command, result))
-  }
+  openDirectoryFolder(workflowDirectoryPath, options)
 }
 
 export function openWorkflowTerminal(
@@ -131,7 +135,7 @@ export function openWorkflowTerminal(
   const runCommand = options.runCommand ?? defaultRunCommand
   const platform = options.platform ?? process.platform
 
-  assertWorkflowDirectoryExists(workflowDirectoryPath)
+  assertDirectoryExists(workflowDirectoryPath)
 
   const commands = openTerminalCommands(workflowDirectoryPath, platform)
   let lastError: CommandResult | null = null

@@ -1,6 +1,6 @@
 import {
   burnsRuntimeContextSchema,
-  type BurnsRuntimeContext,
+  type RuntimeContext,
 } from "@burns/shared"
 import { pickDirectoryWithNativeDialog } from "@/services/native-folder-picker-service"
 import { validateSmithersBaseUrl } from "@/services/smithers-validation-service"
@@ -42,7 +42,7 @@ export async function handleSystemRoutes(
 
     if (pathname === "/api/system/runtime-context" && request.method === "GET") {
       const requestUrl = new URL(request.url)
-      const runtimeContext: BurnsRuntimeContext = burnsRuntimeContextSchema.parse(
+      const runtimeContext: RuntimeContext = burnsRuntimeContextSchema.parse(
         buildRuntimeContext({
           runtimeMode: process.env.BURNS_RUNTIME_MODE,
           requestHostname: requestUrl.hostname,

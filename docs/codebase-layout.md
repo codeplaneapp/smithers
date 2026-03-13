@@ -99,7 +99,7 @@ Reserved package for shared linting/TypeScript config. It is present but intenti
 
 ## Workspace UI behavior (current)
 
-- Overview route provides workspace summary cards for branch, workflows, active runs, and approvals.
+- Overview route provides workspace summary cards for branch, workflows, active runs, and approvals, plus local `Open Folder` and `Copy Path` quick actions when using a loopback daemon URL.
 - Runs route supports one-click run starts per workflow and run list navigation to run detail.
 - Run detail consumes persisted event history and attaches SSE with reconnect using `afterSeq`.
 - Approvals route provides pending approval actions (approve/deny) with operator attribution.

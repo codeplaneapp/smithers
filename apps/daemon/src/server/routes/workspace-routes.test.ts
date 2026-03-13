@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 
 import { insertWorkspaceRow } from "@/db/repositories/workspace-repository"
 import { createApp } from "@/server/app"
+import { handleWorkspaceRoutes } from "@/server/routes/workspace-routes"
 import { resolveTestWorkspacePath } from "@/testing/test-workspace-path"
 
 const originalFetch = globalThis.fetch
@@ -120,6 +121,61 @@ describe("workspace routes", () => {
       })
     )
     expect(actionResponse.status).toBe(404)
+  })
+
+  it("opens a workspace folder path on localhost requests", async () => {
+    const workspaceId = seedWorkspace()
+    const workspacePath = resolveTestWorkspacePath(workspaceId)
+    mkdirSync(workspacePath, { recursive: true })
+
+    let openedPath = ""
+    const response = await handleWorkspaceRoutes(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/open-folder`, {
+        method: "POST",
+      }),
+      `/api/workspaces/${workspaceId}/open-folder`,
+      {
+        openWorkspaceFolder: (directoryPath) => {
+          openedPath = directoryPath
+        },
+      }
+    )
+
+    expect(response?.status).toBe(204)
+    expect(openedPath).toBe(workspacePath)
+  })
+
+  it("provides a workspace path on local requests", async () => {
+    const workspaceId = seedWorkspace()
+
+    const response = await handleWorkspaceRoutes(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/path`, {
+        method: "POST",
+      }),
+      `/api/workspaces/${workspaceId}/path`
+    )
+
+    expect(response?.status).toBe(200)
+    expect(await response?.json()).toMatchObject({
+      path: resolveTestWorkspacePath(workspaceId),
+    })
+  })
+
+  it("blocks workspace path from non-localhost requests", async () => {
+    const workspaceId = seedWorkspace()
+
+    const response = await handleWorkspaceRoutes(
+      new Request(`http://example.com/api/workspaces/${workspaceId}/path`, {
+        method: "POST",
+      }),
+      `/api/workspaces/${workspaceId}/path`
+    )
+
+    expect(response?.status).toBe(403)
+    expect(await response?.json()).toEqual({
+      error: "Workspace path actions are only available on local daemon URLs.",
+      details: null,
+    })
   })
 
   it("probes self-managed heartbeat in workspace server status route", async () => {

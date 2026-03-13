@@ -6,6 +6,10 @@ import {
   shutdownWorkspaceSmithersInstances,
   warmWorkspaceSmithersInstances,
 } from "@/services/smithers-instance-service"
+import {
+  pruneMissingWorkspaces,
+  startMissingWorkspaceMonitor,
+} from "@/services/workspace-reconciliation-service"
 import { initializeWorkspaceService, listWorkspaces } from "@/services/workspace-service"
 
 type DaemonServer = {
@@ -51,6 +55,8 @@ type DaemonLifecycleDependencies = {
     workspaces: ReturnType<typeof listWorkspaces>
   ) => ReturnType<typeof warmWorkspaceSmithersInstances>
   shutdownWorkspaceSmithersInstances?: typeof shutdownWorkspaceSmithersInstances
+  pruneMissingWorkspaces?: typeof pruneMissingWorkspaces
+  startMissingWorkspaceMonitor?: typeof startMissingWorkspaceMonitor
 }
 
 // Bun.serve enforces a max idleTimeout of 255 seconds.
@@ -71,10 +77,15 @@ export function createDaemonLifecycle(dependencies: DaemonLifecycleDependencies 
     dependencies.warmWorkspaceSmithersInstances ?? warmWorkspaceSmithersInstances
   const shutdownWorkspaceInstances =
     dependencies.shutdownWorkspaceSmithersInstances ?? shutdownWorkspaceSmithersInstances
+  const pruneMissingWorkspacePaths =
+    dependencies.pruneMissingWorkspaces ?? pruneMissingWorkspaces
+  const startWorkspaceMonitor =
+    dependencies.startMissingWorkspaceMonitor ?? startMissingWorkspaceMonitor
 
   let runtime: DaemonRuntimeHandle | null = null
   let startPromise: Promise<DaemonRuntimeHandle> | null = null
   let stopPromise: Promise<void> | null = null
+  let stopWorkspaceMonitor: (() => void) | null = null
 
   function createLifecycleLogger() {
     return (dependencies.logger ?? getLogger()).child({ component: "bootstrap" })
@@ -95,6 +106,8 @@ export function createDaemonLifecycle(dependencies: DaemonLifecycleDependencies 
 
       try {
         initWorkspaceService()
+        await pruneMissingWorkspacePaths()
+        stopWorkspaceMonitor = startWorkspaceMonitor()
         void warmWorkspaceInstances(getWorkspaceList())
 
         const app = buildApp({ port: options.port })
@@ -132,6 +145,10 @@ export function createDaemonLifecycle(dependencies: DaemonLifecycleDependencies 
 
         return runtime
       } catch (error) {
+        if (stopWorkspaceMonitor) {
+          stopWorkspaceMonitor()
+          stopWorkspaceMonitor = null
+        }
         logger.error({ event: "daemon.startup.failed", err: error }, "Failed to start daemon")
         throw error
       }
@@ -160,12 +177,20 @@ export function createDaemonLifecycle(dependencies: DaemonLifecycleDependencies 
       }
 
       if (!runtime) {
+        if (stopWorkspaceMonitor) {
+          stopWorkspaceMonitor()
+          stopWorkspaceMonitor = null
+        }
         return
       }
 
       logger.info({ event: "daemon.shutdown.begin", signal }, "Shutting down Burns daemon")
 
       try {
+        if (stopWorkspaceMonitor) {
+          stopWorkspaceMonitor()
+          stopWorkspaceMonitor = null
+        }
         await shutdownWorkspaceInstances()
         runtime.server.stop(true)
         runtime = null

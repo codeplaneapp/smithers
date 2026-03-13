@@ -122,6 +122,28 @@ export default smithers((ctx) => {
 })
 `
 
+const directCtxInputSource = `import { createSmithers } from "smithers-orchestrator"
+import { z } from "zod"
+
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  echo: z.object({
+    summary: z.string(),
+    echoedInput: z.string(),
+  }),
+})
+
+export default smithers((ctx) => (
+  <Workflow name="echo">
+    <Task id="echo" output={outputs.echo}>
+      {{
+        summary: "Echoed the workflow input.",
+        echoedInput: JSON.stringify(ctx.input ?? null),
+      }}
+    </Task>
+  </Workflow>
+))
+`
+
 describe("workflow routes", () => {
   it("saves valid workflow source", async () => {
     const app = createApp()
@@ -315,6 +337,34 @@ describe("workflow routes", () => {
     })
   })
 
+  it("returns JSON object guidance when a workflow reads ctx.input directly", async () => {
+    const app = createApp()
+    const workspaceId = seedWorkspace()
+
+    const saveResponse = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/workflows/echo-flow`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: directCtxInputSource }),
+      })
+    )
+
+    expect(saveResponse.status).toBe(200)
+
+    const response = await app.fetch(
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/workflows/echo-flow/launch-fields`)
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      workflowId: "echo-flow",
+      mode: "fallback",
+      entryTaskId: "echo",
+      fields: [],
+      message: "Workflow reads ctx.input directly. Provide a JSON object for the run input.",
+    })
+  })
+
   it("opens a workflow folder path on localhost requests", async () => {
     const app = createApp()
     const workspaceId = seedWorkspace()
@@ -346,7 +396,7 @@ describe("workflow routes", () => {
     expect(openedPath).toBeTruthy()
   })
 
-  it("provides a cd command for a workflow path on local requests", async () => {
+  it("provides a workflow path on local requests", async () => {
     const app = createApp()
     const workspaceId = seedWorkspace()
 
@@ -360,22 +410,19 @@ describe("workflow routes", () => {
     expect(saveResponse.status).toBe(200)
 
     const response = await handleWorkflowRoutes(
-      new Request(
-        `http://localhost:7332/api/workspaces/${workspaceId}/workflows/custom-flow/cd-command`,
-        {
-          method: "POST",
-        }
-      ),
-      `/api/workspaces/${workspaceId}/workflows/custom-flow/cd-command`
+      new Request(`http://localhost:7332/api/workspaces/${workspaceId}/workflows/custom-flow/path`, {
+        method: "POST",
+      }),
+      `/api/workspaces/${workspaceId}/workflows/custom-flow/path`
     )
 
     expect(response?.status).toBe(200)
     expect(await response?.json()).toMatchObject({
-      command: expect.stringContaining("custom-flow"),
+      path: expect.stringContaining("custom-flow"),
     })
   })
 
-  it("blocks workflow cd command from non-localhost requests", async () => {
+  it("blocks workflow path from non-localhost requests", async () => {
     const app = createApp()
     const workspaceId = seedWorkspace()
 
@@ -389,16 +436,16 @@ describe("workflow routes", () => {
     expect(saveResponse.status).toBe(200)
 
     const response = await handleWorkflowRoutes(
-      new Request(`http://example.com/api/workspaces/${workspaceId}/workflows/custom-flow/cd-command`, {
+      new Request(`http://example.com/api/workspaces/${workspaceId}/workflows/custom-flow/path`, {
         method: "POST",
       }),
-      `/api/workspaces/${workspaceId}/workflows/custom-flow/cd-command`,
+      `/api/workspaces/${workspaceId}/workflows/custom-flow/path`,
       {}
     )
 
     expect(response?.status).toBe(403)
     expect(await response?.json()).toEqual({
-      error: "Workflow command actions are only available on local daemon URLs.",
+      error: "Workflow path actions are only available on local daemon URLs.",
       details: null,
     })
   })

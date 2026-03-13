@@ -149,11 +149,6 @@ type WorkflowRouteOptions = {
   openWorkflowFolder?: (directoryPath: string) => void
 }
 
-function toCdCommand(workflowDirectoryPath: string) {
-  const escapedPath = workflowDirectoryPath.replaceAll('"', "\\\"")
-  return `cd "${escapedPath}"`
-}
-
 export async function handleWorkflowRoutes(
   request: Request,
   pathname: string,
@@ -335,24 +330,22 @@ export async function handleWorkflowRoutes(
       return new Response(null, { status: 204 })
     }
 
-    const workflowCdCommandMatch = pathname.match(
-      /^\/api\/workspaces\/([^/]+)\/workflows\/([^/]+)\/cd-command$/
-    )
-    if (workflowCdCommandMatch && request.method === "POST") {
-      const workspaceId = workflowCdCommandMatch[1]
-      const workflowId = workflowCdCommandMatch[2]
+    const workflowPathMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/workflows\/([^/]+)\/path$/)
+    if (workflowPathMatch && request.method === "POST") {
+      const workspaceId = workflowPathMatch[1]
+      const workflowId = workflowPathMatch[2]
       const requestUrl = new URL(request.url)
       const runtimeContext = buildRuntimeContext({
         runtimeMode: process.env.BURNS_RUNTIME_MODE,
         requestHostname: requestUrl.hostname,
       })
 
-      if (!runtimeContext.capabilities.openTerminal) {
-        throw new HttpError(403, "Workflow command actions are only available on local daemon URLs.")
+      if (!runtimeContext.capabilities.openNativeFolderPicker) {
+        throw new HttpError(403, "Workflow path actions are only available on local daemon URLs.")
       }
 
       const workflowDirectoryPath = getWorkflowDirectoryPath(workspaceId, workflowId)
-      return Response.json({ command: toCdCommand(workflowDirectoryPath) })
+      return Response.json({ path: workflowDirectoryPath })
     }
 
     if (workflowDetailMatch && request.method === "GET") {

@@ -129,6 +129,20 @@ Returns one workspace by ID.
 
 Returns `404` if workspace does not exist.
 
+## `POST /api/workspaces/:workspaceId/open-folder`
+
+Opens the workspace directory in the native file manager.
+
+Available only from loopback/local daemon URLs.
+
+Returns `204 No Content` on success.
+
+## `POST /api/workspaces/:workspaceId/path`
+
+Returns the absolute workspace directory path.
+
+Available only from loopback/local daemon URLs.
+
 ## `GET /api/workspaces/:workspaceId/health`
 
 Returns workspace status based on filesystem presence:
@@ -194,6 +208,20 @@ Request body:
 Deletes the workflow directory recursively.
 
 Returns `204 No Content` on success.
+
+## `POST /api/workspaces/:workspaceId/workflows/:workflowId/open-folder`
+
+Opens the workflow directory in the native file manager.
+
+Available only from loopback/local daemon URLs.
+
+Returns `204 No Content` on success.
+
+## `POST /api/workspaces/:workspaceId/workflows/:workflowId/path`
+
+Returns the absolute workflow directory path.
+
+Available only from loopback/local daemon URLs.
 
 ## `POST /api/workspaces/:workspaceId/workflows/generate`
 

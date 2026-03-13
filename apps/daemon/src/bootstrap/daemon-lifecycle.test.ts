@@ -22,6 +22,9 @@ describe("daemon lifecycle", () => {
     ]
     let initializeCalls = 0
     let listCalls = 0
+    let pruneCalls = 0
+    let monitorStarts = 0
+    let monitorStops = 0
     const warmCalls: unknown[][] = []
     const serveCalls: Array<{ port: number; idleTimeout?: number }> = []
 
@@ -42,6 +45,20 @@ describe("daemon lifecycle", () => {
       initializeWorkspaceService: () => {
         initializeCalls += 1
       },
+      pruneMissingWorkspaces: async () => {
+        pruneCalls += 1
+        return {
+          checkedWorkspaces: workspaceSnapshot.length,
+          removedWorkspaces: 0,
+          failedWorkspaces: 0,
+        }
+      },
+      startMissingWorkspaceMonitor: () => {
+        monitorStarts += 1
+        return () => {
+          monitorStops += 1
+        }
+      },
       listWorkspaces: () => {
         listCalls += 1
         return workspaceSnapshot
@@ -61,9 +78,14 @@ describe("daemon lifecycle", () => {
     expect(typeof runtime.stop).toBe("function")
 
     expect(initializeCalls).toBe(1)
+    expect(pruneCalls).toBe(1)
+    expect(monitorStarts).toBe(1)
     expect(listCalls).toBe(1)
     expect(warmCalls).toEqual([workspaceSnapshot])
     expect(serveCalls).toEqual([{ port: 7332, idleTimeout: 255 }])
+
+    await runtime.stop()
+    expect(monitorStops).toBe(1)
   })
 
   it("stops idempotently even when stop is called concurrently", async () => {
@@ -83,6 +105,12 @@ describe("daemon lifecycle", () => {
         },
       }),
       initializeWorkspaceService: () => undefined,
+      pruneMissingWorkspaces: async () => ({
+        checkedWorkspaces: 0,
+        removedWorkspaces: 0,
+        failedWorkspaces: 0,
+      }),
+      startMissingWorkspaceMonitor: () => () => undefined,
       listWorkspaces: () => [],
       warmWorkspaceSmithersInstances: async () => undefined,
       shutdownWorkspaceSmithersInstances: async () => {
@@ -123,6 +151,12 @@ describe("daemon lifecycle", () => {
         stop: () => undefined,
       }),
       initializeWorkspaceService: () => undefined,
+      pruneMissingWorkspaces: async () => ({
+        checkedWorkspaces: 0,
+        removedWorkspaces: 0,
+        failedWorkspaces: 0,
+      }),
+      startMissingWorkspaceMonitor: () => () => undefined,
       listWorkspaces: () => [],
       warmWorkspaceSmithersInstances: async () => undefined,
       shutdownWorkspaceSmithersInstances: async () => undefined,

@@ -1,5 +1,6 @@
 import { createWorkspaceInputSchema, deleteWorkspaceInputSchema } from "@burns/shared"
 
+import { buildRuntimeContext } from "@/runtime-context"
 import {
   getWorkspaceSmithersRuntimeConfig,
   getWorkspaceSmithersServerStatus,
@@ -14,9 +15,18 @@ import {
   getWorkspace,
   listWorkspaces,
 } from "@/services/workspace-service"
+import { openDirectoryFolder } from "@/services/workflow-open-service"
 import { HttpError, toErrorResponse } from "@/utils/http-error"
 
-export async function handleWorkspaceRoutes(request: Request, pathname: string) {
+type WorkspaceRouteOptions = {
+  openWorkspaceFolder?: (directoryPath: string) => void
+}
+
+export async function handleWorkspaceRoutes(
+  request: Request,
+  pathname: string,
+  options: WorkspaceRouteOptions = {}
+) {
   try {
     if (pathname === "/api/workspaces" && request.method === "GET") {
       return Response.json(listWorkspaces())
@@ -61,6 +71,58 @@ export async function handleWorkspaceRoutes(request: Request, pathname: string) 
       }
 
       return Response.json(await stopWorkspaceSmithersServer(workspaceId))
+    }
+
+    const workspaceOpenFolderMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/open-folder$/)
+    if (workspaceOpenFolderMatch && request.method === "POST") {
+      const workspaceId = workspaceOpenFolderMatch[1]
+      const workspace = getWorkspace(workspaceId)
+      if (!workspace) {
+        throw new HttpError(404, `Workspace not found: ${workspaceId}`)
+      }
+
+      const requestUrl = new URL(request.url)
+      const runtimeContext = buildRuntimeContext({
+        runtimeMode: process.env.BURNS_RUNTIME_MODE,
+        requestHostname: requestUrl.hostname,
+      })
+
+      if (!runtimeContext.capabilities.openNativeFolderPicker) {
+        throw new HttpError(
+          403,
+          "Workspace folder actions are only available on local daemon URLs."
+        )
+      }
+
+      const openFolder = options.openWorkspaceFolder ?? ((targetPath) => {
+        openDirectoryFolder(targetPath)
+      })
+      openFolder(workspace.path)
+      return new Response(null, { status: 204 })
+    }
+
+    const workspacePathMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/path$/)
+    if (workspacePathMatch && request.method === "POST") {
+      const workspaceId = workspacePathMatch[1]
+      const workspace = getWorkspace(workspaceId)
+      if (!workspace) {
+        throw new HttpError(404, `Workspace not found: ${workspaceId}`)
+      }
+
+      const requestUrl = new URL(request.url)
+      const runtimeContext = buildRuntimeContext({
+        runtimeMode: process.env.BURNS_RUNTIME_MODE,
+        requestHostname: requestUrl.hostname,
+      })
+
+      if (!runtimeContext.capabilities.openNativeFolderPicker) {
+        throw new HttpError(
+          403,
+          "Workspace path actions are only available on local daemon URLs."
+        )
+      }
+
+      return Response.json({ path: workspace.path })
     }
 
     const workspaceMatch = pathname.match(/^\/api\/workspaces\/([^/]+)$/)

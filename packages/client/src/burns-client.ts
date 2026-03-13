@@ -63,8 +63,8 @@ const runListSchema = z.array(runSchema)
 const runEventListSchema = z.array(runEventSchema)
 const approvalListSchema = z.array(approvalSchema)
 const runtimeContextSchema = burnsRuntimeContextSchema
-const workflowCdCommandDtoSchema = z.object({
-  command: z.string(),
+const filesystemPathDtoSchema = z.object({
+  path: z.string(),
 })
 const nativeFolderPickerResponseSchema = z.object({
   path: z.string().nullable(),
@@ -240,15 +240,29 @@ export class BurnsClient {
     })
   }
 
-  async getWorkflowCdCommand(workspaceId: string, workflowId: string): Promise<string> {
+  async openWorkspaceFolder(workspaceId: string) {
+    await this.request(`/api/workspaces/${workspaceId}/open-folder`, {
+      method: "POST",
+    })
+  }
+
+  async getWorkflowPath(workspaceId: string, workflowId: string): Promise<string> {
     const data = await this.request<unknown>(
-      `/api/workspaces/${workspaceId}/workflows/${workflowId}/cd-command`,
+      `/api/workspaces/${workspaceId}/workflows/${workflowId}/path`,
       {
         method: "POST",
       }
     )
 
-    return workflowCdCommandDtoSchema.parse(data).command
+    return filesystemPathDtoSchema.parse(data).path
+  }
+
+  async getWorkspacePath(workspaceId: string): Promise<string> {
+    const data = await this.request<unknown>(`/api/workspaces/${workspaceId}/path`, {
+      method: "POST",
+    })
+
+    return filesystemPathDtoSchema.parse(data).path
   }
 
   async getRuntimeContext() {
