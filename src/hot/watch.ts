@@ -1,6 +1,10 @@
 import { watch, type FSWatcher } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { resolve, relative } from "node:path";
+import { Effect } from "effect";
+import { fromPromise } from "../effect/interop";
+import { logDebug, logInfo } from "../effect/logging";
+import { runPromise } from "../effect/runtime";
 
 const DEFAULT_IGNORE = [
   "node_modules",
@@ -34,7 +38,7 @@ export class WatchTree {
 
   /** Start watching. Call once. */
   async start(): Promise<void> {
-    await this.watchDir(this.rootDir);
+    await runPromise(this.startEffect());
   }
 
   /**
@@ -49,9 +53,7 @@ export class WatchTree {
       this.changedFiles.clear();
       return Promise.resolve(files);
     }
-    return new Promise<string[]>((resolve) => {
-      this.waitResolve = resolve;
-    });
+    return runPromise(this.waitEffect());
   }
 
   /** Stop all watchers and clean up. */
@@ -67,6 +69,43 @@ export class WatchTree {
       this.waitResolve([]);
       this.waitResolve = null;
     }
+    logInfo("closed hot watch tree", {
+      rootDir: this.rootDir,
+    }, "hot:watch");
+  }
+
+  startEffect() {
+    return fromPromise("start hot watch tree", () => this.watchDir(this.rootDir)).pipe(
+      Effect.annotateLogs({
+        rootDir: this.rootDir,
+        debounceMs: this.debounceMs,
+      }),
+      Effect.withLogSpan("hot:watch-start"),
+    );
+  }
+
+  waitEffect() {
+    return Effect.async<string[]>((resume) => {
+      if (this.changedFiles.size > 0) {
+        const files = [...this.changedFiles];
+        this.changedFiles.clear();
+        resume(Effect.succeed(files));
+        return;
+      }
+      this.waitResolve = (files) => {
+        resume(Effect.succeed(files));
+      };
+      return Effect.sync(() => {
+        if (this.waitResolve) {
+          this.waitResolve = null;
+        }
+      });
+    }).pipe(
+      Effect.annotateLogs({
+        rootDir: this.rootDir,
+      }),
+      Effect.withLogSpan("hot:watch-wait"),
+    );
   }
 
   private shouldIgnore(name: string): boolean {
@@ -87,6 +126,11 @@ export class WatchTree {
         if (parts.some((p) => this.shouldIgnore(p))) return;
 
         const fullPath = resolve(dir, filename);
+        logDebug("hot watch tree observed file change", {
+          rootDir: this.rootDir,
+          eventType,
+          fullPath,
+        }, "hot:watch");
         this.onFileChange(fullPath);
       });
       this.watchers.push(watcher);
@@ -117,6 +161,11 @@ export class WatchTree {
     if (this.changedFiles.size === 0) return;
     const files = [...this.changedFiles];
     this.changedFiles.clear();
+    logInfo("flushing hot watch changes", {
+      rootDir: this.rootDir,
+      changedFileCount: files.length,
+      changedFiles: files.join(","),
+    }, "hot:watch");
 
     if (this.waitResolve) {
       this.waitResolve(files);

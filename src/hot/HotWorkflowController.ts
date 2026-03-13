@@ -1,10 +1,18 @@
 import { resolve, dirname } from "node:path";
 import { mkdir, rm } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import { Effect } from "effect";
 import { WatchTree } from "./watch";
-import { buildOverlay, cleanupGenerations, resolveOverlayEntry } from "./overlay";
+import {
+  buildOverlayEffect,
+  cleanupGenerationsEffect,
+  resolveOverlayEntry,
+} from "./overlay";
 import type { SmithersWorkflow } from "../SmithersWorkflow";
 import type { HotReloadOptions } from "../RunOptions";
+import { fromPromise } from "../effect/interop";
+import { logInfo, logWarning } from "../effect/logging";
+import { runPromise } from "../effect/runtime";
 
 export type HotReloadEvent =
   | { type: "reloaded"; generation: number; changedFiles: string[]; newBuild: SmithersWorkflow<any>["build"] }
@@ -39,8 +47,7 @@ export class HotWorkflowController {
 
   /** Initialize: start file watchers. Call once before using wait/reload. */
   async init(): Promise<void> {
-    await mkdir(this.outDir, { recursive: true });
-    await this.watcher.start();
+    await runPromise(this.initEffect());
   }
 
   /** Current generation number. */
@@ -54,7 +61,7 @@ export class HotWorkflowController {
    * Use this in Promise.race with inflight tasks to wake the engine loop.
    */
   async wait(): Promise<string[]> {
-    return this.watcher.wait();
+    return runPromise(this.waitEffect());
   }
 
   /**
@@ -67,76 +74,165 @@ export class HotWorkflowController {
    * The caller is responsible for swapping workflow.build on success.
    */
   async reload(changedFiles: string[]): Promise<HotReloadEvent> {
+    return runPromise(this.reloadEffect(changedFiles));
+  }
+
+  initEffect() {
+    return Effect.gen(this, function* () {
+      yield* fromPromise("create hot reload output dir", () =>
+        mkdir(this.outDir, { recursive: true }),
+      );
+      yield* this.watcher.startEffect();
+      yield* Effect.sync(() => {
+        logInfo("initialized hot workflow controller", {
+          entryPath: this.entryPath,
+          hotRoot: this.hotRoot,
+          outDir: this.outDir,
+        }, "hot:controller");
+      });
+    }).pipe(
+      Effect.annotateLogs({
+        entryPath: this.entryPath,
+        hotRoot: this.hotRoot,
+        outDir: this.outDir,
+      }),
+      Effect.withLogSpan("hot:init"),
+    );
+  }
+
+  waitEffect() {
+    return this.watcher.waitEffect().pipe(
+      Effect.annotateLogs({
+        entryPath: this.entryPath,
+        generation: this.generation,
+      }),
+      Effect.withLogSpan("hot:wait"),
+    );
+  }
+
+  reloadEffect(changedFiles: string[]) {
     this.generation += 1;
     const gen = this.generation;
 
-    try {
-      // 1. Build overlay
-      const genDir = await buildOverlay(this.hotRoot, this.outDir, gen);
-
-      // 2. Resolve entry path in overlay
-      const overlayEntry = resolveOverlayEntry(this.entryPath, this.hotRoot, genDir);
-      const overlayUrl = pathToFileURL(overlayEntry).href;
-
-      // 3. Import fresh module
-      let mod: any;
+    return Effect.gen(this, function* () {
       try {
-        mod = await import(overlayUrl);
+        const genDir = yield* buildOverlayEffect(this.hotRoot, this.outDir, gen);
+        const overlayEntry = resolveOverlayEntry(
+          this.entryPath,
+          this.hotRoot,
+          genDir,
+        );
+        const overlayUrl = pathToFileURL(overlayEntry).href;
+
+        const mod = yield* Effect.either(
+          fromPromise("import hot workflow generation", () => import(overlayUrl)),
+        );
+        if (mod._tag === "Left") {
+          logWarning("hot workflow import failed", {
+            entryPath: this.entryPath,
+            generation: gen,
+            changedFileCount: changedFiles.length,
+            error:
+              mod.left instanceof Error ? mod.left.message : String(mod.left),
+          }, "hot:reload");
+          return { type: "failed", generation: gen, changedFiles, error: mod.left } satisfies HotReloadEvent;
+        }
+
+        const workflow = mod.right.default as SmithersWorkflow<any> | undefined;
+        if (!workflow) {
+          return {
+            type: "failed",
+            generation: gen,
+            changedFiles,
+            error: new Error("Reloaded module does not export default"),
+          } satisfies HotReloadEvent;
+        }
+        if (typeof workflow.build !== "function") {
+          return {
+            type: "failed",
+            generation: gen,
+            changedFiles,
+            error: new Error("Reloaded module default does not have a build function"),
+          } satisfies HotReloadEvent;
+        }
+
+        yield* cleanupGenerationsEffect(this.outDir, this.maxGenerations);
+        logInfo("reloaded hot workflow generation", {
+          entryPath: this.entryPath,
+          generation: gen,
+          changedFileCount: changedFiles.length,
+        }, "hot:reload");
+        return {
+          type: "reloaded",
+          generation: gen,
+          changedFiles,
+          newBuild: workflow.build,
+        } satisfies HotReloadEvent;
       } catch (err: any) {
-        return { type: "failed", generation: gen, changedFiles, error: err };
-      }
-
-      // 4. Validate module shape
-      const workflow = mod.default as SmithersWorkflow<any> | undefined;
-      if (!workflow) {
+        if (err?.message?.includes("Schema change detected")) {
+          logWarning("hot workflow reload marked unsafe", {
+            entryPath: this.entryPath,
+            generation: gen,
+            changedFileCount: changedFiles.length,
+            reason: err.message,
+          }, "hot:reload");
+          return {
+            type: "unsafe",
+            generation: gen,
+            changedFiles,
+            reason: err.message,
+          } satisfies HotReloadEvent;
+        }
+        logWarning("hot workflow reload failed", {
+          entryPath: this.entryPath,
+          generation: gen,
+          changedFileCount: changedFiles.length,
+          error: err instanceof Error ? err.message : String(err),
+        }, "hot:reload");
         return {
           type: "failed",
           generation: gen,
           changedFiles,
-          error: new Error("Reloaded module does not export default"),
-        };
+          error: err,
+        } satisfies HotReloadEvent;
       }
-      if (typeof workflow.build !== "function") {
-        return {
-          type: "failed",
-          generation: gen,
-          changedFiles,
-          error: new Error("Reloaded module default does not have a build function"),
-        };
-      }
-
-      // 5. Cleanup old generations
-      await cleanupGenerations(this.outDir, this.maxGenerations);
-
-      // 6. Return success with the new build function
-      return {
-        type: "reloaded",
+    }).pipe(
+      Effect.annotateLogs({
+        entryPath: this.entryPath,
+        hotRoot: this.hotRoot,
         generation: gen,
-        changedFiles,
-        newBuild: workflow.build,
-      };
-    } catch (err: any) {
-      if (err?.message?.includes("Schema change detected")) {
-        return {
-          type: "unsafe",
-          generation: gen,
-          changedFiles,
-          reason: err.message,
-        };
-      }
-      return { type: "failed", generation: gen, changedFiles, error: err };
-    }
+      }),
+      Effect.withLogSpan("hot:reload"),
+    );
   }
 
   /** Stop watchers and clean up overlay directory. */
   async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    this.watcher.close();
-    try {
-      await rm(this.outDir, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup errors
-    }
+    await runPromise(this.closeEffect());
+  }
+
+  closeEffect() {
+    return Effect.gen(this, function* () {
+      if (this.closed) return;
+      this.closed = true;
+      this.watcher.close();
+      yield* Effect.either(
+        fromPromise("remove hot reload output dir", () =>
+          rm(this.outDir, { recursive: true, force: true }),
+        ),
+      );
+      logInfo("closed hot workflow controller", {
+        entryPath: this.entryPath,
+        outDir: this.outDir,
+        generation: this.generation,
+      }, "hot:controller");
+    }).pipe(
+      Effect.annotateLogs({
+        entryPath: this.entryPath,
+        outDir: this.outDir,
+        generation: this.generation,
+      }),
+      Effect.withLogSpan("hot:close"),
+    );
   }
 }

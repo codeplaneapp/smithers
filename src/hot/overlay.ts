@@ -1,6 +1,9 @@
-import { readdir, mkdir, link, copyFile, rm, stat } from "node:fs/promises";
+import { readdir, mkdir, link, copyFile, rm } from "node:fs/promises";
 import { resolve, relative, join, dirname } from "node:path";
 import { existsSync } from "node:fs";
+import { Effect } from "effect";
+import { fromPromise } from "../effect/interop";
+import { runPromise } from "../effect/runtime";
 
 const DEFAULT_EXCLUDE = [
   "node_modules",
@@ -21,82 +24,127 @@ export type OverlayOptions = {
  *
  * Returns the absolute path to the overlay directory.
  */
+export function buildOverlayEffect(
+  hotRoot: string,
+  outDir: string,
+  generation: number,
+  opts?: OverlayOptions,
+): Effect.Effect<string, Error> {
+  const exclude = new Set(opts?.exclude ?? DEFAULT_EXCLUDE);
+  const genDir = join(outDir, `gen-${generation}`);
+  return Effect.gen(function* () {
+    yield* fromPromise("create hot overlay generation dir", () =>
+      mkdir(genDir, { recursive: true }),
+    );
+    yield* mirrorTreeEffect(hotRoot, genDir, exclude);
+    return genDir;
+  }).pipe(
+    Effect.annotateLogs({
+      hotRoot,
+      outDir,
+      generation,
+      excludeCount: exclude.size,
+    }),
+    Effect.withLogSpan("hot:build-overlay"),
+  );
+}
+
 export async function buildOverlay(
   hotRoot: string,
   outDir: string,
   generation: number,
   opts?: OverlayOptions,
 ): Promise<string> {
-  const exclude = new Set(opts?.exclude ?? DEFAULT_EXCLUDE);
-  const genDir = join(outDir, `gen-${generation}`);
-  await mkdir(genDir, { recursive: true });
-  await mirrorTree(hotRoot, genDir, exclude);
-  return genDir;
+  return runPromise(buildOverlayEffect(hotRoot, outDir, generation, opts));
 }
 
 /**
  * Recursively mirror `src` into `dest`, using hardlinks where possible
  * and falling back to copy. Skips excluded directory basenames.
  */
-async function mirrorTree(
+function mirrorTreeEffect(
   src: string,
   dest: string,
   exclude: Set<string>,
-): Promise<void> {
-  const entries = await readdir(src, { withFileTypes: true });
+): Effect.Effect<void, Error> {
+  return Effect.gen(function* () {
+    const entries = yield* fromPromise("read hot overlay source dir", () =>
+      readdir(src, { withFileTypes: true }),
+    );
 
-  for (const entry of entries) {
-    if (exclude.has(entry.name)) continue;
-    // Skip hidden files/dirs (dotfiles)
-    if (entry.name.startsWith(".")) continue;
+    for (const entry of entries) {
+      if (exclude.has(entry.name)) continue;
+      if (entry.name.startsWith(".")) continue;
 
-    const srcPath = join(src, entry.name);
-    const destPath = join(dest, entry.name);
+      const srcPath = join(src, entry.name);
+      const destPath = join(dest, entry.name);
 
-    if (entry.isDirectory()) {
-      await mkdir(destPath, { recursive: true });
-      await mirrorTree(srcPath, destPath, exclude);
-    } else if (entry.isFile()) {
-      try {
-        await link(srcPath, destPath);
-      } catch {
-        // Hardlink failed (cross-device, permissions, etc.) — fall back to copy
-        await mkdir(dirname(destPath), { recursive: true });
-        await copyFile(srcPath, destPath);
+      if (entry.isDirectory()) {
+        yield* fromPromise("create mirrored hot overlay dir", () =>
+          mkdir(destPath, { recursive: true }),
+        );
+        yield* mirrorTreeEffect(srcPath, destPath, exclude);
+      } else if (entry.isFile()) {
+        const linked = yield* Effect.either(
+          fromPromise("hardlink overlay file", () => link(srcPath, destPath)),
+        );
+        if (linked._tag === "Left") {
+          yield* fromPromise("create overlay file parent dir", () =>
+            mkdir(dirname(destPath), { recursive: true }),
+          );
+          yield* fromPromise("copy overlay file", () =>
+            copyFile(srcPath, destPath),
+          );
+        }
       }
     }
-    // Skip symlinks, sockets, etc.
-  }
+  });
 }
 
 /**
  * Remove old generation directories, keeping only the last `keepLast`.
  */
+export function cleanupGenerationsEffect(
+  outDir: string,
+  keepLast: number,
+): Effect.Effect<void, Error> {
+  return Effect.gen(function* () {
+    if (!existsSync(outDir)) return;
+
+    const entries = yield* fromPromise("read hot overlay generations", () =>
+      readdir(outDir, { withFileTypes: true }),
+    );
+    const genDirs = entries
+      .filter((e) => e.isDirectory() && e.name.startsWith("gen-"))
+      .map((e) => {
+        const num = parseInt(e.name.slice(4), 10);
+        return { name: e.name, num: isNaN(num) ? -1 : num };
+      })
+      .filter((e) => e.num >= 0)
+      .sort((a, b) => a.num - b.num);
+
+    const toRemove = genDirs.slice(0, Math.max(0, genDirs.length - keepLast));
+    for (const dir of toRemove) {
+      yield* Effect.either(
+        fromPromise("remove stale hot overlay generation", () =>
+          rm(join(outDir, dir.name), { recursive: true, force: true }),
+        ),
+      );
+    }
+  }).pipe(
+    Effect.annotateLogs({
+      outDir,
+      keepLast,
+    }),
+    Effect.withLogSpan("hot:cleanup-generations"),
+  );
+}
+
 export async function cleanupGenerations(
   outDir: string,
   keepLast: number,
 ): Promise<void> {
-  if (!existsSync(outDir)) return;
-
-  const entries = await readdir(outDir, { withFileTypes: true });
-  const genDirs = entries
-    .filter((e) => e.isDirectory() && e.name.startsWith("gen-"))
-    .map((e) => {
-      const num = parseInt(e.name.slice(4), 10);
-      return { name: e.name, num: isNaN(num) ? -1 : num };
-    })
-    .filter((e) => e.num >= 0)
-    .sort((a, b) => a.num - b.num);
-
-  // Keep only the last `keepLast` generations
-  const toRemove = genDirs.slice(0, Math.max(0, genDirs.length - keepLast));
-  for (const dir of toRemove) {
-    try {
-      await rm(join(outDir, dir.name), { recursive: true, force: true });
-    } catch {
-      // Best effort
-    }
-  }
+  await runPromise(cleanupGenerationsEffect(outDir, keepLast));
 }
 
 /**
