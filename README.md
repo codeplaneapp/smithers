@@ -1,82 +1,71 @@
+<p align="center">
+  <img src="./apps/web/src/assets/burns.png" alt="Burns logo" width="160" />
+</p>
+
 # Burns
 
-Burns is a workspace-first local control plane for authoring, running, and operating Smithers workflows.
+**A workspace-first local control plane for authoring, running, and supervising Smithers workflows.**
 
-This repository is a Bun monorepo with:
+Burns gives you one place to work with AI workflows that live inside real repositories.
 
-- `apps/web`: React + Vite frontend
-- `apps/daemon`: local Bun HTTP daemon
-- `apps/desktop`: ElectroBun desktop shell package
-- `apps/cli`: CLI runtime and distribution path
-- `packages/shared`: shared Zod schemas and domain types
-- `packages/client`: typed API client used by the frontend
-- `packages/config`: placeholder package for shared tooling config
+- Register local repos as managed workspaces
+- Author and edit Smithers workflows in `.smithers/workflows`
+- Generate and revise workflows with local agent CLIs such as `codex` and `claude`
+- Launch runs, stream events, inspect frames, and resume or cancel work
+- Handle human approval gates without leaving the app
+- Run as a web app, desktop shell, or CLI-backed local runtime
 
-## Current implementation status
+## What Burns does
 
-Implemented today:
+Burns sits on top of Smithers and adds the operator-facing layer around it.
 
-- Workspace registry with SQLite persistence
-- First-run onboarding flow that captures Burns defaults before the first workspace is created
-- Workspace onboarding flows for create, clone, and add-local-repo
-- Workflow storage under `.smithers/workflows/<workflow-id>`
-- Workflow list and detail views, including per-workflow file tree browsing and source preview
-- AI-assisted workflow generation and prompt-driven editing via installed local agent CLIs
-- Launch-field inference from workflow source for run forms
-- Editable settings UI with reset-to-defaults, advanced Smithers auth/rootDir controls, and onboarding completion tracking
-- Web UI for workspace overview, workflows, runs, approvals, inbox, and settings
-- Smithers-backed run lifecycle APIs (`start` / `list` / `detail` / `resume` / `cancel`)
-- Run event persistence in SQLite plus SSE proxy streaming with reconnect via `afterSeq`
-- Approval decision APIs (`approve` / `deny`) wired from UI
-- Managed per-workspace Smithers server lifecycle (startup, crash restart, graceful shutdown)
-- Workspace server control APIs (`start` / `restart` / `stop` / `status`)
-- Desktop shell that attaches to an existing daemon or spawns one in-process
-- CLI runtime that can start the daemon and serve built web assets
+Smithers handles workflow execution, persistence, validation, and resumability. Burns handles the workspace model, workflow authoring surfaces, local runtime supervision, approvals, and the UI for operating all of it.
 
-## Prerequisites
+This makes Burns useful when you want more than `smithers run workflow.tsx`. It is for cases where you need to manage multiple repositories, inspect workflow files, guide authors toward good workflow structure, and supervise long-running local runs from a single control plane.
 
-- Bun `1.2.19`
-- Git CLI
-- Optional for AI workflow generation/editing: at least one supported agent CLI installed on `PATH`
-  - `claude`
-  - `codex`
-  - `gemini`
-  - `pi`
+## How It Works
 
-## Quick start
+1. Add or create a repository as a Burns workspace.
+2. Burns stores workspace metadata and resolves workflows from `.smithers/workflows/<workflow-id>/`.
+3. The daemon manages a Smithers runtime for that workspace and exposes local APIs for workflows, runs, approvals, and settings.
+4. The web or desktop UI talks to the daemon to browse workflows, edit files, start runs, and watch run state in real time.
+5. When AI-assisted authoring is used, Burns shells out to installed local agent CLIs and writes the resulting workflow files back into the repo.
+6. Smithers executes the workflow, persists task outputs and state, and Burns layers on event streaming, approval actions, and workspace supervision.
+
+## Architecture
+
+| Part | Role |
+| --- | --- |
+| `apps/web` | React UI for workspaces, workflows, runs, approvals, and settings |
+| `apps/daemon` | Local Bun HTTP daemon, workspace registry, Smithers lifecycle manager, and workflow authoring APIs |
+| `apps/desktop` | ElectroBun desktop shell that starts or attaches to the daemon |
+| `apps/cli` | CLI runtime for starting the daemon and serving built web assets |
+| `packages/shared` | Shared schemas and domain types |
+| `packages/client` | Typed API client used by the frontend |
+
+## What Burns Leverages
+
+- **Smithers** for workflow execution, structured outputs, persistence, resumability, and approval-aware orchestration
+- **Bun** for the monorepo toolchain, daemon runtime, and CLI packaging
+- **SQLite** for Burns workspace state and persisted run/event data
+- **Local agent CLIs** for workflow generation and editing inside real repositories
+- **React + Vite** for the primary UI
+- **ElectroBun** for the desktop shell
+
+## Run Locally
 
 ```bash
 bun install
-```
-
-Start daemon:
-
-```bash
 bun run dev:daemon
 ```
 
-Start web app in a second terminal:
+In a second terminal:
 
 ```bash
 bun run dev:web
 ```
 
-Open `http://localhost:5173`.
-
-The web app defaults to `http://localhost:7332` for API calls. Override with:
-
-```bash
-VITE_BURNS_API_URL=http://localhost:7332 bun run dev:web
-```
-
-Desktop/CLI runtime contract can also inject:
-
-```ts
-window.__BURNS_RUNTIME_CONFIG__ = {
-  burnsApiUrl: "http://localhost:7332",
-  runtimeMode: "desktop" // or "cli"
-}
-```
+Open `http://localhost:5173`. The web app talks to the daemon at `http://localhost:7332` by default.
 
 Other entry points:
 
@@ -85,106 +74,14 @@ bun run desktop:dev
 bun run cli:start
 ```
 
-## Workspace scripts
+## Current State
 
-- `bun run dev:web`: run Vite dev server
-- `bun run dev:daemon`: run daemon with watch mode
-- `bun run build:web`: build frontend
-- `bun run desktop:dev`: run ElectroBun desktop app
-- `bun run desktop:build:canary`: build desktop canary artifacts
-- `bun run desktop:build:stable`: build desktop stable artifacts
-- `bun run desktop:build:artifact`: build desktop archive into `dist/desktop` (channel/version via env)
-- `bun run cli:build:artifact`: build CLI archive into `dist/cli` (channel/version via env)
-- `bun run smoke:desktop-runtime`: desktop runtime smoke (daemon lifecycle + runtime config contract)
-- `bun run smoke:cli-runtime`: CLI runtime smoke (daemon + static web serving)
-- `bun run smoke:release`: run both smoke checks
-- `bun run cli:start`: run CLI daemon + web startup flow
-- `bun run cli:daemon`: run CLI daemon-only flow
-- `bun run cli:web`: serve built web assets from CLI
-- `bun run typecheck`: typecheck shared, client, web, daemon, cli, and desktop packages
+Today Burns includes workspace onboarding, workflow browsing, AI-assisted workflow generation and editing, launch-field inference, Smithers-backed run APIs, approvals, managed per-workspace Smithers processes, and desktop/CLI runtime shells.
 
-Desktop dev mode env options:
+## For Developers
 
-- `BURNS_DESKTOP_DEV_SOURCE=views|vite` (`views` default)
-- `BURNS_DESKTOP_DEV_VITE_URL=http://localhost:5173`
-- `BURNS_DESKTOP_FORCE_API_URL=http://localhost:7332` (debug override)
-
-Additional app-level scripts:
-
-- `apps/web`: `bun run typecheck`, `bun run lint`, `bun run preview`
-- `apps/daemon`: `bun run start`, `bun run typecheck`, `bun run test`, `bun run test:raw`
-- `apps/cli`: `bun run start`, `bun run build:artifact`, `bun run typecheck`, `bun run test`
-- `apps/desktop`: `bun run build`, `bun run build:canary`, `bun run typecheck`, `bun run test`
-
-## Testing
-
-- `bun run typecheck`: monorepo typecheck
-- `cd apps/web && bun run lint`: web linting and React Compiler rules
-- `cd apps/daemon && bun run test`: daemon route/service/integration tests in isolated workspaces
-- `cd apps/cli && bun run test`: CLI argument and path resolution tests
-- `cd apps/desktop && bun run test`: desktop runtime and config contract tests
-- `bun run smoke:release`: desktop + CLI runtime smoke coverage
-
-## Desktop + CLI release scaffolding
-
-Desktop and CLI artifact assembly is script-driven. Release automation is wired through the shell scripts in `scripts/release`.
-
-- Run an optional release build step:
-  - `bash scripts/release/run-build-step.sh --label "desktop build" --command "<desktop-build-command>"`
-  - `bash scripts/release/run-build-step.sh --label "cli build" --command "<cli-build-command>"`
-- Generate contract-compliant artifact names:
-  - `bash scripts/release/artifact-name.sh --channel canary --component desktop --version 0.0.0-canary.1+abc12345 --target-os darwin --target-arch arm64 --extension zip`
-- Collect and rename artifacts:
-  - `bash scripts/release/collect-artifacts.sh --channel canary --version 0.0.0-canary.1+abc12345 --target-os darwin --target-arch arm64 --desktop-pattern "dist/desktop/*" --cli-pattern "dist/cli/*" --output-dir release-artifacts`
-- Draft release notes:
-  - `bash scripts/release/create-release-notes.sh --channel canary --version 0.0.0-canary.1+abc12345 --commit <sha>`
-
-## Runtime data locations
-
-The daemon stores local state under `BURNS_DATA_ROOT` when that env var is set. Otherwise the default data root is `apps/daemon/.data`:
-
-- SQLite DB: `<data-root>/burns.sqlite`
-- Managed workspace root: `<data-root>/workspaces`
-
-Each managed workspace stores workflows at:
-
-```txt
-<workspace-path>/.smithers/workflows/<workflow-id>/
-```
-
-Primary workflow entrypoints are resolved from:
-
-```txt
-<workspace-path>/.smithers/workflows/<workflow-id>/workflow.tsx
-<workspace-path>/.smithers/workflows/<workflow-id>/workflow.ts
-```
-
-Each managed workspace also stores Smithers runtime state at:
-
-```txt
-<workspace-path>/.smithers/state/smithers.db
-```
-
-Optional Smithers lifecycle env vars:
-
-- `BURNS_SMITHERS_MANAGED_MODE=0` to disable daemon-managed per-workspace Smithers processes
-- `BURNS_SMITHERS_PORT_BASE=7440` to change the first managed Smithers port
-- `BURNS_SMITHERS_MAX_WORKSPACE_INSTANCES=1000` to change the managed port scan range
-- `BURNS_SMITHERS_ALLOW_NETWORK=1` to run managed Smithers servers with network access enabled
-
-## Documentation index
-
+- [Repository Guide](./docs/repository-guide.md)
 - [Documentation Index](./docs/README.md)
 - [Codebase Layout](./docs/codebase-layout.md)
 - [Daemon API Reference](./docs/daemon-api-reference.md)
-- [ElectroBun Release Plan](./docs/electrobun-release-plan.md)
-- [Release Automation Reference](./docs/release-automation.md)
-- [Release Runbook (Canary + Stable)](./docs/release-runbook.md)
-- [Release Checklist](./docs/release-checklist.md)
-- [Workspace + Runtime Handoff (Next Agent)](./docs/next-agent-workspace-gaps.md)
-- [Product Spec (target state)](./docs/burns-spec.md)
-
-## Notes
-
-- The app-level READMEs under `apps/cli` and `apps/desktop` cover package-specific runtime behavior.
-- The product spec describes target behavior; current implementation details are captured in the docs above.
+- [Product Spec](./docs/burns-spec.md)

@@ -2,6 +2,7 @@
 
 ## Product and architecture
 
+- [Repository Guide](./repository-guide.md)
 - [Product Spec (target state)](./burns-spec.md)
 - [Codebase Layout](./codebase-layout.md)
 - [Daemon API Reference](./daemon-api-reference.md)
