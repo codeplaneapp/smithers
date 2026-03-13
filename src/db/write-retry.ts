@@ -1,3 +1,6 @@
+import { Effect } from "effect";
+import { runPromise } from "../effect/runtime";
+
 const DEFAULT_MAX_ATTEMPTS = 6;
 const DEFAULT_BASE_DELAY_MS = 50;
 const DEFAULT_MAX_DELAY_MS = 2_000;
@@ -36,33 +39,67 @@ function computeDelayMs(attempt: number, baseDelayMs: number, maxDelayMs: number
   return Math.max(1, Math.round(backoff * jitter));
 }
 
-export async function withSqliteWriteRetry<T>(
-  operation: () => Promise<T>,
+export function withSqliteWriteRetryEffect<A>(
+  operation: () => Effect.Effect<A, Error>,
   opts: SqliteWriteRetryOptions = {},
-): Promise<T> {
+): Effect.Effect<A, Error> {
   const {
     label = "sqlite write",
     maxAttempts = DEFAULT_MAX_ATTEMPTS,
     baseDelayMs = DEFAULT_BASE_DELAY_MS,
     maxDelayMs = DEFAULT_MAX_DELAY_MS,
-    sleep = (ms) => Bun.sleep(ms),
+    sleep,
   } = opts;
 
-  let attempt = 0;
-  while (true) {
-    attempt += 1;
-    try {
-      return await operation();
-    } catch (error) {
-      if (!isRetryableSqliteWriteError(error) || attempt >= maxAttempts) {
-        throw error;
-      }
+  const loop = (attempt: number): Effect.Effect<A, Error> =>
+    operation().pipe(
+      Effect.catchAll((error) => {
+        if (!isRetryableSqliteWriteError(error) || attempt >= maxAttempts) {
+          return Effect.fail(error);
+        }
+        const delayMs = computeDelayMs(attempt, baseDelayMs, maxDelayMs);
+        return Effect.gen(function* () {
+          yield* Effect.logWarning(
+            `${label} failed with ${describeSqliteWriteError(error)}; retrying in ${delayMs}ms (${attempt}/${maxAttempts})`,
+          );
+          if (sleep) {
+            yield* Effect.tryPromise({
+              try: () => sleep(delayMs),
+              catch: (cause) =>
+                cause instanceof Error ? cause : new Error(String(cause)),
+            });
+          } else {
+            yield* Effect.sleep(delayMs);
+          }
+          return yield* loop(attempt + 1);
+        }).pipe(
+          Effect.annotateLogs({
+            retryable: true,
+            retryAttempt: attempt,
+            retryMaxAttempts: maxAttempts,
+            retryDelayMs: delayMs,
+            retryLabel: label,
+          }),
+        );
+      }),
+    );
 
-      const delayMs = computeDelayMs(attempt, baseDelayMs, maxDelayMs);
-      console.warn(
-        `[smithers] ${label} failed with ${describeSqliteWriteError(error)}; retrying in ${delayMs}ms (${attempt}/${maxAttempts})`,
-      );
-      await sleep(delayMs);
-    }
-  }
+  return loop(1).pipe(Effect.withLogSpan("sqlite-write-retry"));
+}
+
+export async function withSqliteWriteRetry<T>(
+  operation: () => Promise<T>,
+  opts: SqliteWriteRetryOptions = {},
+): Promise<T> {
+  return runPromise(
+    withSqliteWriteRetryEffect(
+      () =>
+        Effect.tryPromise({
+          try: () => operation(),
+          catch: (cause) =>
+            cause instanceof Error ? cause : new Error(String(cause)),
+        }),
+      opts,
+    ),
+  );
 }

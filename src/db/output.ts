@@ -2,8 +2,11 @@ import { and, eq } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import type { AnyColumn, Table } from "drizzle-orm";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
+import { Effect } from "effect";
 import { z } from "zod";
-import { withSqliteWriteRetry } from "./write-retry";
+import { fromPromise } from "../effect/interop";
+import { runPromise } from "../effect/runtime";
+import { withSqliteWriteRetryEffect } from "./write-retry";
 
 export type OutputKey = { runId: string; nodeId: string; iteration?: number };
 
@@ -33,26 +36,46 @@ export function buildKeyWhere(table: Table, key: OutputKey) {
   return and(...clauses);
 }
 
+export function selectOutputRowEffect<T>(
+  db: any,
+  table: Table,
+  key: OutputKey,
+): Effect.Effect<T | undefined, Error> {
+  const where = buildKeyWhere(table, key);
+  return fromPromise<T[]>(
+    `select output ${(table as any)["_"]?.name ?? "output"}`,
+    () =>
+      db
+        .select()
+        .from(table as any)
+        .where(where)
+        .limit(1),
+  ).pipe(
+    Effect.map((rows) => rows[0] as T | undefined),
+    Effect.annotateLogs({
+      outputTable: (table as any)["_"]?.name ?? "output",
+      runId: key.runId,
+      nodeId: key.nodeId,
+      iteration: key.iteration ?? 0,
+    }),
+    Effect.withLogSpan("db:select-output-row"),
+  );
+}
+
 export async function selectOutputRow<T>(
   db: any,
   table: Table,
   key: OutputKey,
 ): Promise<T | undefined> {
-  const where = buildKeyWhere(table, key);
-  const rows = await db
-    .select()
-    .from(table as any)
-    .where(where)
-    .limit(1);
-  return rows[0] as T | undefined;
+  return runPromise(selectOutputRowEffect<T>(db, table, key));
 }
 
-export async function upsertOutputRow(
+export function upsertOutputRowEffect(
   db: any,
   table: Table,
   key: OutputKey,
   payload: Record<string, unknown>,
-) {
+): Effect.Effect<void, Error> {
   const cols = getKeyColumns(table);
   const values: Record<string, unknown> = { ...payload };
   values.runId = key.runId;
@@ -65,17 +88,39 @@ export async function upsertOutputRow(
     ? [cols.runId, cols.nodeId, cols.iteration]
     : [cols.runId, cols.nodeId];
 
-  await withSqliteWriteRetry(
+  return withSqliteWriteRetryEffect(
     () =>
-      db
-        .insert(table as any)
-        .values(values)
-        .onConflictDoUpdate({
-          target,
-          set: values,
-        }),
+      fromPromise<any[]>(
+        `upsert output ${(table as any)["_"]?.name ?? "output"}`,
+        () =>
+          db
+            .insert(table as any)
+            .values(values)
+            .onConflictDoUpdate({
+              target,
+              set: values,
+            }),
+      ),
     { label: `upsert output ${(table as any)["_"]?.name ?? "output"}` },
+  ).pipe(
+    Effect.asVoid,
+    Effect.annotateLogs({
+      outputTable: (table as any)["_"]?.name ?? "output",
+      runId: key.runId,
+      nodeId: key.nodeId,
+      iteration: key.iteration ?? 0,
+    }),
+    Effect.withLogSpan("db:upsert-output-row"),
   );
+}
+
+export async function upsertOutputRow(
+  db: any,
+  table: Table,
+  key: OutputKey,
+  payload: Record<string, unknown>,
+) {
+  await runPromise(upsertOutputRowEffect(db, table, key, payload));
 }
 
 export function validateOutput(

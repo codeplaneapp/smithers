@@ -1,5 +1,8 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+import { Effect } from "effect";
+import { fromPromise, fromSync } from "../effect/interop";
+import { runPromise } from "../effect/runtime";
 import {
   smithersRuns,
   smithersNodes,
@@ -11,23 +14,46 @@ import {
   smithersEvents,
   smithersRalph,
 } from "./internal-schema";
-import { withSqliteWriteRetry } from "./write-retry";
+import { withSqliteWriteRetryEffect } from "./write-retry";
 
 export class SmithersDb {
   constructor(private db: BunSQLiteDatabase<any>) {}
 
-  private write<T>(label: string, operation: () => Promise<T>) {
-    return withSqliteWriteRetry(operation, { label });
+  private readEffect<A>(
+    label: string,
+    operation: () => PromiseLike<A>,
+  ): Effect.Effect<A, Error> {
+    return fromPromise(label, operation).pipe(
+      Effect.annotateLogs({ dbOperation: label }),
+      Effect.withLogSpan(`db:${label}`),
+    );
   }
 
-  async insertRun(row: any) {
-    await this.write("insert run", () =>
+  private writeEffect<A>(
+    label: string,
+    operation: () => PromiseLike<A>,
+  ): Effect.Effect<A, Error> {
+    return withSqliteWriteRetryEffect(
+      () => fromPromise(label, operation),
+      { label },
+    ).pipe(
+      Effect.annotateLogs({ dbOperation: label }),
+      Effect.withLogSpan(`db:${label}`),
+    );
+  }
+
+  insertRunEffect(row: any) {
+    return this.writeEffect("insert run", () =>
       this.db.insert(smithersRuns).values(row).onConflictDoNothing(),
     );
   }
 
-  async updateRun(runId: string, patch: any) {
-    await this.write(`update run ${runId}`, () =>
+  insertRun(row: any) {
+    return runPromise(this.insertRunEffect(row));
+  }
+
+  updateRunEffect(runId: string, patch: any) {
+    return this.writeEffect(`update run ${runId}`, () =>
       this.db
         .update(smithersRuns)
         .set(patch)
@@ -35,8 +61,16 @@ export class SmithersDb {
     );
   }
 
-  async heartbeatRun(runId: string, runtimeOwnerId: string, heartbeatAtMs: number) {
-    await this.write(`heartbeat run ${runId}`, () =>
+  updateRun(runId: string, patch: any) {
+    return runPromise(this.updateRunEffect(runId, patch));
+  }
+
+  heartbeatRunEffect(
+    runId: string,
+    runtimeOwnerId: string,
+    heartbeatAtMs: number,
+  ) {
+    return this.writeEffect(`heartbeat run ${runId}`, () =>
       this.db
         .update(smithersRuns)
         .set({ heartbeatAtMs })
@@ -49,8 +83,14 @@ export class SmithersDb {
     );
   }
 
-  async requestRunCancel(runId: string, cancelRequestedAtMs: number) {
-    await this.write(`cancel run ${runId}`, () =>
+  heartbeatRun(runId: string, runtimeOwnerId: string, heartbeatAtMs: number) {
+    return runPromise(
+      this.heartbeatRunEffect(runId, runtimeOwnerId, heartbeatAtMs),
+    );
+  }
+
+  requestRunCancelEffect(runId: string, cancelRequestedAtMs: number) {
+    return this.writeEffect(`cancel run ${runId}`, () =>
       this.db
         .update(smithersRuns)
         .set({ cancelRequestedAtMs })
@@ -58,30 +98,45 @@ export class SmithersDb {
     );
   }
 
-  async getRun(runId: string) {
-    const rows = await this.db
-      .select()
-      .from(smithersRuns)
-      .where(eq(smithersRuns.runId, runId))
-      .limit(1);
-    return rows[0];
+  requestRunCancel(runId: string, cancelRequestedAtMs: number) {
+    return runPromise(this.requestRunCancelEffect(runId, cancelRequestedAtMs));
   }
 
-  async listRuns(limit = 50, status?: string) {
+  getRunEffect(runId: string) {
+    return this.readEffect(`get run ${runId}`, () =>
+      this.db
+        .select()
+        .from(smithersRuns)
+        .where(eq(smithersRuns.runId, runId))
+        .limit(1),
+    ).pipe(Effect.map((rows) => rows[0]));
+  }
+
+  getRun(runId: string) {
+    return runPromise(this.getRunEffect(runId));
+  }
+
+  listRunsEffect(limit = 50, status?: string) {
     const where = status ? eq(smithersRuns.status, status) : undefined;
-    const query = this.db
-      .select()
-      .from(smithersRuns)
-      .orderBy(desc(smithersRuns.createdAtMs))
-      .limit(limit);
-    if (where) {
-      return query.where(where);
-    }
-    return query;
+    return this.readEffect(`list runs ${status ?? "all"}`, () => {
+      const query = this.db
+        .select()
+        .from(smithersRuns)
+        .orderBy(desc(smithersRuns.createdAtMs))
+        .limit(limit);
+      if (where) {
+        return query.where(where);
+      }
+      return query;
+    });
   }
 
-  async insertNode(row: any) {
-    await this.write(`insert node ${row.nodeId}`, () =>
+  listRuns(limit = 50, status?: string) {
+    return runPromise(this.listRunsEffect(limit, status));
+  }
+
+  insertNodeEffect(row: any) {
+    return this.writeEffect(`insert node ${row.nodeId}`, () =>
       this.db
         .insert(smithersNodes)
         .values(row)
@@ -96,45 +151,69 @@ export class SmithersDb {
     );
   }
 
-  async getNode(runId: string, nodeId: string, iteration: number) {
-    const rows = await this.db
-      .select()
-      .from(smithersNodes)
-      .where(
-        and(
-          eq(smithersNodes.runId, runId),
-          eq(smithersNodes.nodeId, nodeId),
-          eq(smithersNodes.iteration, iteration),
-        ),
-      )
-      .limit(1);
-    return rows[0];
+  insertNode(row: any) {
+    return runPromise(this.insertNodeEffect(row));
   }
 
-  async listNodes(runId: string) {
-    return this.db
-      .select()
-      .from(smithersNodes)
-      .where(eq(smithersNodes.runId, runId));
+  getNodeEffect(runId: string, nodeId: string, iteration: number) {
+    return this.readEffect(`get node ${nodeId}`, () =>
+      this.db
+        .select()
+        .from(smithersNodes)
+        .where(
+          and(
+            eq(smithersNodes.runId, runId),
+            eq(smithersNodes.nodeId, nodeId),
+            eq(smithersNodes.iteration, iteration),
+          ),
+        )
+        .limit(1),
+    ).pipe(Effect.map((rows) => rows[0]));
   }
 
-  async insertAttempt(row: any) {
-    await this.write(`insert attempt ${row.nodeId}#${row.attempt}`, () =>
+  getNode(runId: string, nodeId: string, iteration: number) {
+    return runPromise(this.getNodeEffect(runId, nodeId, iteration));
+  }
+
+  listNodesEffect(runId: string) {
+    return this.readEffect(`list nodes ${runId}`, () =>
+      this.db
+        .select()
+        .from(smithersNodes)
+        .where(eq(smithersNodes.runId, runId)),
+    );
+  }
+
+  listNodes(runId: string) {
+    return runPromise(this.listNodesEffect(runId));
+  }
+
+  insertAttemptEffect(row: any) {
+    return this.writeEffect(`insert attempt ${row.nodeId}#${row.attempt}`, () =>
       this.db.insert(smithersAttempts).values(row).onConflictDoUpdate({
-        target: [smithersAttempts.runId, smithersAttempts.nodeId, smithersAttempts.iteration, smithersAttempts.attempt],
+        target: [
+          smithersAttempts.runId,
+          smithersAttempts.nodeId,
+          smithersAttempts.iteration,
+          smithersAttempts.attempt,
+        ],
         set: row,
       }),
     );
   }
 
-  async updateAttempt(
+  insertAttempt(row: any) {
+    return runPromise(this.insertAttemptEffect(row));
+  }
+
+  updateAttemptEffect(
     runId: string,
     nodeId: string,
     iteration: number,
     attempt: number,
     patch: any,
   ) {
-    await this.write(`update attempt ${nodeId}#${attempt}`, () =>
+    return this.writeEffect(`update attempt ${nodeId}#${attempt}`, () =>
       this.db
         .update(smithersAttempts)
         .set(patch)
@@ -149,62 +228,97 @@ export class SmithersDb {
     );
   }
 
-  async listAttempts(runId: string, nodeId: string, iteration: number) {
-    return this.db
-      .select()
-      .from(smithersAttempts)
-      .where(
-        and(
-          eq(smithersAttempts.runId, runId),
-          eq(smithersAttempts.nodeId, nodeId),
-          eq(smithersAttempts.iteration, iteration),
-        ),
-      )
-      .orderBy(desc(smithersAttempts.attempt));
+  updateAttempt(
+    runId: string,
+    nodeId: string,
+    iteration: number,
+    attempt: number,
+    patch: any,
+  ) {
+    return runPromise(
+      this.updateAttemptEffect(runId, nodeId, iteration, attempt, patch),
+    );
   }
 
-  async getAttempt(
+  listAttemptsEffect(runId: string, nodeId: string, iteration: number) {
+    return this.readEffect(`list attempts ${nodeId}`, () =>
+      this.db
+        .select()
+        .from(smithersAttempts)
+        .where(
+          and(
+            eq(smithersAttempts.runId, runId),
+            eq(smithersAttempts.nodeId, nodeId),
+            eq(smithersAttempts.iteration, iteration),
+          ),
+        )
+        .orderBy(desc(smithersAttempts.attempt)),
+    );
+  }
+
+  listAttempts(runId: string, nodeId: string, iteration: number) {
+    return runPromise(this.listAttemptsEffect(runId, nodeId, iteration));
+  }
+
+  getAttemptEffect(
     runId: string,
     nodeId: string,
     iteration: number,
     attempt: number,
   ) {
-    const rows = await this.db
-      .select()
-      .from(smithersAttempts)
-      .where(
-        and(
-          eq(smithersAttempts.runId, runId),
-          eq(smithersAttempts.nodeId, nodeId),
-          eq(smithersAttempts.iteration, iteration),
-          eq(smithersAttempts.attempt, attempt),
+    return this.readEffect(`get attempt ${nodeId}#${attempt}`, () =>
+      this.db
+        .select()
+        .from(smithersAttempts)
+        .where(
+          and(
+            eq(smithersAttempts.runId, runId),
+            eq(smithersAttempts.nodeId, nodeId),
+            eq(smithersAttempts.iteration, iteration),
+            eq(smithersAttempts.attempt, attempt),
+          ),
+        )
+        .limit(1),
+    ).pipe(Effect.map((rows) => rows[0]));
+  }
+
+  getAttempt(runId: string, nodeId: string, iteration: number, attempt: number) {
+    return runPromise(this.getAttemptEffect(runId, nodeId, iteration, attempt));
+  }
+
+  listInProgressAttemptsEffect(runId: string) {
+    return this.readEffect(`list in-progress attempts ${runId}`, () =>
+      this.db
+        .select()
+        .from(smithersAttempts)
+        .where(
+          and(
+            eq(smithersAttempts.runId, runId),
+            eq(smithersAttempts.state, "in-progress"),
+          ),
         ),
-      )
-      .limit(1);
-    return rows[0];
+    );
   }
 
-  async listInProgressAttempts(runId: string) {
-    return this.db
-      .select()
-      .from(smithersAttempts)
-      .where(
-        and(
-          eq(smithersAttempts.runId, runId),
-          eq(smithersAttempts.state, "in-progress"),
-        ),
-      );
+  listInProgressAttempts(runId: string) {
+    return runPromise(this.listInProgressAttemptsEffect(runId));
   }
 
-  async listAllInProgressAttempts() {
-    return this.db
-      .select()
-      .from(smithersAttempts)
-      .where(eq(smithersAttempts.state, "in-progress"));
+  listAllInProgressAttemptsEffect() {
+    return this.readEffect("list all in-progress attempts", () =>
+      this.db
+        .select()
+        .from(smithersAttempts)
+        .where(eq(smithersAttempts.state, "in-progress")),
+    );
   }
 
-  async insertFrame(row: any) {
-    await this.write(`insert frame ${row.frameNo}`, () =>
+  listAllInProgressAttempts() {
+    return runPromise(this.listAllInProgressAttemptsEffect());
+  }
+
+  insertFrameEffect(row: any) {
+    return this.writeEffect(`insert frame ${row.frameNo}`, () =>
       this.db
         .insert(smithersFrames)
         .values(row)
@@ -215,18 +329,27 @@ export class SmithersDb {
     );
   }
 
-  async getLastFrame(runId: string) {
-    const rows = await this.db
-      .select()
-      .from(smithersFrames)
-      .where(eq(smithersFrames.runId, runId))
-      .orderBy(desc(smithersFrames.frameNo))
-      .limit(1);
-    return rows[0];
+  insertFrame(row: any) {
+    return runPromise(this.insertFrameEffect(row));
   }
 
-  async insertOrUpdateApproval(row: any) {
-    await this.write(`upsert approval ${row.nodeId}`, () =>
+  getLastFrameEffect(runId: string) {
+    return this.readEffect(`get last frame ${runId}`, () =>
+      this.db
+        .select()
+        .from(smithersFrames)
+        .where(eq(smithersFrames.runId, runId))
+        .orderBy(desc(smithersFrames.frameNo))
+        .limit(1),
+    ).pipe(Effect.map((rows) => rows[0]));
+  }
+
+  getLastFrame(runId: string) {
+    return runPromise(this.getLastFrameEffect(runId));
+  }
+
+  insertOrUpdateApprovalEffect(row: any) {
+    return this.writeEffect(`upsert approval ${row.nodeId}`, () =>
       this.db
         .insert(smithersApprovals)
         .values(row)
@@ -241,121 +364,176 @@ export class SmithersDb {
     );
   }
 
-  async getApproval(runId: string, nodeId: string, iteration: number) {
-    const rows = await this.db
-      .select()
-      .from(smithersApprovals)
-      .where(
-        and(
-          eq(smithersApprovals.runId, runId),
-          eq(smithersApprovals.nodeId, nodeId),
-          eq(smithersApprovals.iteration, iteration),
-        ),
-      )
-      .limit(1);
-    return rows[0];
+  insertOrUpdateApproval(row: any) {
+    return runPromise(this.insertOrUpdateApprovalEffect(row));
   }
 
-  async insertToolCall(row: any) {
-    await this.write(`insert tool call ${row.toolName}`, () =>
+  getApprovalEffect(runId: string, nodeId: string, iteration: number) {
+    return this.readEffect(`get approval ${nodeId}`, () =>
+      this.db
+        .select()
+        .from(smithersApprovals)
+        .where(
+          and(
+            eq(smithersApprovals.runId, runId),
+            eq(smithersApprovals.nodeId, nodeId),
+            eq(smithersApprovals.iteration, iteration),
+          ),
+        )
+        .limit(1),
+    ).pipe(Effect.map((rows) => rows[0]));
+  }
+
+  getApproval(runId: string, nodeId: string, iteration: number) {
+    return runPromise(this.getApprovalEffect(runId, nodeId, iteration));
+  }
+
+  insertToolCallEffect(row: any) {
+    return this.writeEffect(`insert tool call ${row.toolName}`, () =>
       this.db.insert(smithersToolCalls).values(row).onConflictDoNothing(),
     );
   }
 
-  async insertEvent(row: any) {
-    await this.write(`insert event ${row.type}`, () =>
+  insertToolCall(row: any) {
+    return runPromise(this.insertToolCallEffect(row));
+  }
+
+  insertEventEffect(row: any) {
+    return this.writeEffect(`insert event ${row.type}`, () =>
       this.db.insert(smithersEvents).values(row).onConflictDoNothing(),
     );
   }
 
-  async insertEventWithNextSeq(row: {
+  insertEvent(row: any) {
+    return runPromise(this.insertEventEffect(row));
+  }
+
+  insertEventWithNextSeqEffect(row: {
     runId: string;
     timestampMs: number;
     type: string;
     payloadJson: string;
   }) {
-    return this.write(`insert event ${row.type}`, async () => {
-      const existing = await this.db
-        .select({ seq: smithersEvents.seq })
+    const label = `insert event ${row.type}`;
+    const self = this;
+    return withSqliteWriteRetryEffect(
+      () =>
+        Effect.gen(function* () {
+          const existing = yield* self.readEffect(label, () =>
+            self.db
+              .select({ seq: smithersEvents.seq })
+              .from(smithersEvents)
+              .where(
+                and(
+                  eq(smithersEvents.runId, row.runId),
+                  eq(smithersEvents.timestampMs, row.timestampMs),
+                  eq(smithersEvents.type, row.type),
+                  eq(smithersEvents.payloadJson, row.payloadJson),
+                ),
+              )
+              .orderBy(desc(smithersEvents.seq))
+              .limit(1),
+          );
+          if (existing[0]?.seq !== undefined) {
+            return existing[0].seq as number;
+          }
+
+          const client = (self.db as any).$client;
+          if (
+            !client ||
+            typeof client.exec !== "function" ||
+            typeof client.query !== "function"
+          ) {
+            const lastSeq = (yield* self.getLastEventSeqEffect(row.runId)) ?? -1;
+            const seq = lastSeq + 1;
+            yield* fromPromise("insert fallback event row", () =>
+              self.db
+                .insert(smithersEvents)
+                .values({ ...row, seq })
+                .onConflictDoNothing(),
+            );
+            return seq;
+          }
+
+          return yield* fromSync("insert event transaction", () => {
+            client.exec("BEGIN IMMEDIATE");
+            try {
+              const res = client
+                .query(
+                  "SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_events WHERE run_id = ?",
+                )
+                .get(row.runId);
+              const seq = Number(res?.seq ?? 0);
+              client
+                .query(
+                  "INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json) VALUES (?, ?, ?, ?, ?)",
+                )
+                .run(row.runId, seq, row.timestampMs, row.type, row.payloadJson);
+              client.exec("COMMIT");
+              return seq;
+            } catch (error) {
+              try {
+                client.exec("ROLLBACK");
+              } catch {
+                // ignore rollback failures
+              }
+              throw error;
+            }
+          });
+        }),
+      { label },
+    ).pipe(
+      Effect.annotateLogs({ dbOperation: label }),
+      Effect.withLogSpan(`db:${label}`),
+    );
+  }
+
+  insertEventWithNextSeq(row: {
+    runId: string;
+    timestampMs: number;
+    type: string;
+    payloadJson: string;
+  }) {
+    return runPromise(this.insertEventWithNextSeqEffect(row));
+  }
+
+  getLastEventSeqEffect(runId: string) {
+    return this.readEffect(`get last event seq ${runId}`, () =>
+      this.db
+        .select()
+        .from(smithersEvents)
+        .where(eq(smithersEvents.runId, runId))
+        .orderBy(desc(smithersEvents.seq))
+        .limit(1),
+    ).pipe(Effect.map((rows) => rows[0]?.seq as number | undefined));
+  }
+
+  getLastEventSeq(runId: string) {
+    return runPromise(this.getLastEventSeqEffect(runId));
+  }
+
+  listEventsEffect(runId: string, afterSeq: number, limit = 200) {
+    return this.readEffect(`list events ${runId}`, () =>
+      this.db
+        .select()
         .from(smithersEvents)
         .where(
           and(
-            eq(smithersEvents.runId, row.runId),
-            eq(smithersEvents.timestampMs, row.timestampMs),
-            eq(smithersEvents.type, row.type),
-            eq(smithersEvents.payloadJson, row.payloadJson),
+            eq(smithersEvents.runId, runId),
+            sql`${smithersEvents.seq} > ${afterSeq}`,
           ),
         )
-        .orderBy(desc(smithersEvents.seq))
-        .limit(1);
-      if (existing[0]?.seq !== undefined) {
-        return existing[0].seq as number;
-      }
-
-      const client: any = (this.db as any).$client;
-      if (
-        !client ||
-        typeof client.exec !== "function" ||
-        typeof client.query !== "function"
-      ) {
-        const lastSeq = (await this.getLastEventSeq(row.runId)) ?? -1;
-        const seq = lastSeq + 1;
-        await this.db.insert(smithersEvents).values({ ...row, seq }).onConflictDoNothing();
-        return seq;
-      }
-
-      try {
-        client.exec("BEGIN IMMEDIATE");
-        const res = client
-          .query(
-            "SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_events WHERE run_id = ?",
-          )
-          .get(row.runId);
-        const seq = Number(res?.seq ?? 0);
-        client
-          .query(
-            "INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json) VALUES (?, ?, ?, ?, ?)",
-          )
-          .run(row.runId, seq, row.timestampMs, row.type, row.payloadJson);
-        client.exec("COMMIT");
-        return seq;
-      } catch (err) {
-        try {
-          client.exec("ROLLBACK");
-        } catch {
-          // ignore
-        }
-        throw err;
-      }
-    });
+        .orderBy(smithersEvents.seq)
+        .limit(limit),
+    );
   }
 
-  async getLastEventSeq(runId: string) {
-    const rows = await this.db
-      .select()
-      .from(smithersEvents)
-      .where(eq(smithersEvents.runId, runId))
-      .orderBy(desc(smithersEvents.seq))
-      .limit(1);
-    return rows[0]?.seq as number | undefined;
+  listEvents(runId: string, afterSeq: number, limit = 200) {
+    return runPromise(this.listEventsEffect(runId, afterSeq, limit));
   }
 
-  async listEvents(runId: string, afterSeq: number, limit = 200) {
-    return this.db
-      .select()
-      .from(smithersEvents)
-      .where(
-        and(
-          eq(smithersEvents.runId, runId),
-          sql`${smithersEvents.seq} > ${afterSeq}`,
-        ),
-      )
-      .orderBy(smithersEvents.seq)
-      .limit(limit);
-  }
-
-  async insertOrUpdateRalph(row: any) {
-    await this.write(`upsert ralph ${row.ralphId}`, () =>
+  insertOrUpdateRalphEffect(row: any) {
+    return this.writeEffect(`upsert ralph ${row.ralphId}`, () =>
       this.db
         .insert(smithersRalph)
         .values(row)
@@ -366,41 +544,65 @@ export class SmithersDb {
     );
   }
 
-  async listRalph(runId: string) {
-    return this.db
-      .select()
-      .from(smithersRalph)
-      .where(eq(smithersRalph.runId, runId));
+  insertOrUpdateRalph(row: any) {
+    return runPromise(this.insertOrUpdateRalphEffect(row));
   }
 
-  async getRalph(runId: string, ralphId: string) {
-    const rows = await this.db
-      .select()
-      .from(smithersRalph)
-      .where(
-        and(eq(smithersRalph.runId, runId), eq(smithersRalph.ralphId, ralphId)),
-      )
-      .limit(1);
-    return rows[0];
+  listRalphEffect(runId: string) {
+    return this.readEffect(`list ralph ${runId}`, () =>
+      this.db
+        .select()
+        .from(smithersRalph)
+        .where(eq(smithersRalph.runId, runId)),
+    );
   }
 
-  async insertCache(row: any) {
-    await this.write(`insert cache ${row.cacheKey}`, () =>
+  listRalph(runId: string) {
+    return runPromise(this.listRalphEffect(runId));
+  }
+
+  getRalphEffect(runId: string, ralphId: string) {
+    return this.readEffect(`get ralph ${ralphId}`, () =>
+      this.db
+        .select()
+        .from(smithersRalph)
+        .where(
+          and(eq(smithersRalph.runId, runId), eq(smithersRalph.ralphId, ralphId)),
+        )
+        .limit(1),
+    ).pipe(Effect.map((rows) => rows[0]));
+  }
+
+  getRalph(runId: string, ralphId: string) {
+    return runPromise(this.getRalphEffect(runId, ralphId));
+  }
+
+  insertCacheEffect(row: any) {
+    return this.writeEffect(`insert cache ${row.cacheKey}`, () =>
       this.db.insert(smithersCache).values(row).onConflictDoNothing(),
     );
   }
 
-  async getCache(cacheKey: string) {
-    const rows = await this.db
-      .select()
-      .from(smithersCache)
-      .where(eq(smithersCache.cacheKey, cacheKey))
-      .limit(1);
-    return rows[0];
+  insertCache(row: any) {
+    return runPromise(this.insertCacheEffect(row));
   }
 
-  async deleteFramesAfter(runId: string, frameNo: number) {
-    await this.write(`delete frames after ${frameNo}`, () =>
+  getCacheEffect(cacheKey: string) {
+    return this.readEffect(`get cache ${cacheKey}`, () =>
+      this.db
+        .select()
+        .from(smithersCache)
+        .where(eq(smithersCache.cacheKey, cacheKey))
+        .limit(1),
+    ).pipe(Effect.map((rows) => rows[0]));
+  }
+
+  getCache(cacheKey: string) {
+    return runPromise(this.getCacheEffect(cacheKey));
+  }
+
+  deleteFramesAfterEffect(runId: string, frameNo: number) {
+    return this.writeEffect(`delete frames after ${frameNo}`, () =>
       this.db
         .delete(smithersFrames)
         .where(
@@ -412,7 +614,11 @@ export class SmithersDb {
     );
   }
 
-  async listFrames(runId: string, limit: number, afterFrameNo?: number) {
+  deleteFramesAfter(runId: string, frameNo: number) {
+    return runPromise(this.deleteFramesAfterEffect(runId, frameNo));
+  }
+
+  listFramesEffect(runId: string, limit: number, afterFrameNo?: number) {
     const where =
       afterFrameNo !== undefined
         ? and(
@@ -420,20 +626,31 @@ export class SmithersDb {
             sql`${smithersFrames.frameNo} > ${afterFrameNo}`,
           )
         : eq(smithersFrames.runId, runId);
-    return this.db
-      .select()
-      .from(smithersFrames)
-      .where(where)
-      .orderBy(desc(smithersFrames.frameNo))
-      .limit(limit);
+    return this.readEffect(`list frames ${runId}`, () =>
+      this.db
+        .select()
+        .from(smithersFrames)
+        .where(where)
+        .orderBy(desc(smithersFrames.frameNo))
+        .limit(limit),
+    );
   }
 
-  async countNodesByState(runId: string) {
-    const rows = await this.db
-      .select({ state: smithersNodes.state, count: sql<number>`count(*)` })
-      .from(smithersNodes)
-      .where(eq(smithersNodes.runId, runId))
-      .groupBy(smithersNodes.state);
-    return rows;
+  listFrames(runId: string, limit: number, afterFrameNo?: number) {
+    return runPromise(this.listFramesEffect(runId, limit, afterFrameNo));
+  }
+
+  countNodesByStateEffect(runId: string) {
+    return this.readEffect(`count nodes by state ${runId}`, () =>
+      this.db
+        .select({ state: smithersNodes.state, count: sql<number>`count(*)` })
+        .from(smithersNodes)
+        .where(eq(smithersNodes.runId, runId))
+        .groupBy(smithersNodes.state),
+    );
+  }
+
+  countNodesByState(runId: string) {
+    return runPromise(this.countNodesByStateEffect(runId));
   }
 }
