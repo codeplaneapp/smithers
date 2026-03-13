@@ -10,6 +10,10 @@ import {
   insertRunEventRow,
   listRunEventRows,
 } from "@/db/repositories/run-event-repository"
+import {
+  ensureWorkspaceSmithersLayout,
+  getManagedSmithersDbPath,
+} from "@/services/workspace-layout"
 import { getWorkspace } from "@/services/workspace-service"
 
 type SmithersEventRow = {
@@ -136,7 +140,11 @@ function readSmithersEventCandidates(
     return [] as SmithersEventCandidate[]
   }
 
-  const smithersDbPath = path.join(workspace.path, ".burns", "state", "smithers.sqlite")
+  const smithersDbPath = getManagedSmithersDbPath(workspace.path)
+  if (!existsSync(smithersDbPath)) {
+    ensureWorkspaceSmithersLayout(workspace.path)
+  }
+
   if (!existsSync(smithersDbPath)) {
     return [] as SmithersEventCandidate[]
   }

@@ -15,13 +15,15 @@ function seedWorkspace() {
   const workspaceId = `test-workspace-${randomUUID()}`
   const workspacePath = resolveTestWorkspacePath(workspaceId)
   const now = new Date().toISOString()
+  mkdirSync(workspacePath, { recursive: true })
 
   insertWorkspaceRow({
     id: workspaceId,
     name: workspaceId,
     path: workspacePath,
     sourceType: "create",
-    runtimeMode: "burns-managed",
+    runtimeMode: "self-managed",
+    smithersBaseUrl: "http://127.0.0.1:7331",
     healthStatus: "healthy",
     createdAt: now,
     updatedAt: now,
@@ -35,7 +37,7 @@ function writeWorkflowFile(workspaceId: string, workflowId: string, extension: "
   const workspacePath = resolveTestWorkspacePath(workspaceId)
   const workflowPath = path.join(
     workspacePath,
-    ".burns",
+    ".smithers",
     "workflows",
     workflowId
   )
@@ -47,7 +49,7 @@ function writeLegacyWorkflowTemplate(workspaceId: string, workflowId: string) {
   const workspacePath = resolveTestWorkspacePath(workspaceId)
   const workflowPath = path.join(
     workspacePath,
-    ".burns",
+    ".smithers",
     "workflows",
     workflowId
   )
@@ -281,7 +283,7 @@ describe("run routes", () => {
       },
     })
     expect(capturedBodies[0]).toMatchObject({
-      workflowPath: expect.stringContaining(`/${workspaceId}/.burns/workflows/issue-to-pr/workflow.tsx`),
+      workflowPath: expect.stringContaining(`/${workspaceId}/.smithers/workflows/issue-to-pr/workflow.tsx`),
     })
   })
 
@@ -328,7 +330,7 @@ describe("run routes", () => {
     expect(response.status).toBe(201)
     expect(capturedBodies).toHaveLength(1)
     expect(capturedBodies[0]).toMatchObject({
-      workflowPath: expect.stringContaining(`/${workspaceId}/.burns/workflows/issue-to-pr/workflow.ts`),
+      workflowPath: expect.stringContaining(`/${workspaceId}/.smithers/workflows/issue-to-pr/workflow.ts`),
     })
   })
 
@@ -398,7 +400,7 @@ describe("run routes", () => {
       input: {
         continue: true,
       },
-      workflowPath: expect.stringContaining(`/${workspaceId}/.burns/workflows/issue-to-pr/workflow.ts`),
+      workflowPath: expect.stringContaining(`/${workspaceId}/.smithers/workflows/issue-to-pr/workflow.ts`),
     })
   })
 
@@ -611,7 +613,7 @@ describe("run routes", () => {
     const repairedSource = readFileSync(
       path.join(
         resolveTestWorkspacePath(workspaceId),
-        ".burns",
+        ".smithers",
         "workflows",
         "issue-to-pr",
         "workflow.tsx"

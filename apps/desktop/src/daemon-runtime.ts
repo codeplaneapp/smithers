@@ -1,4 +1,6 @@
-import { startDaemon, type DaemonRuntimeHandle } from "../../daemon/src/bootstrap/daemon-lifecycle"
+import type { DaemonRuntimeHandle } from "../../daemon/src/bootstrap/daemon-lifecycle"
+
+import { resolveDesktopDataRoot } from "./desktop-data-root"
 
 export const DEFAULT_DESKTOP_DAEMON_URL = "http://localhost:7332"
 export const DAEMON_HEALTH_PATH = "/api/health"
@@ -15,6 +17,14 @@ type ResolveDesktopDaemonRuntimeOptions = {
   daemonUrlEnv?: string
   fetchImpl?: FetchLike
   start?: () => Promise<DaemonRuntimeHandle>
+}
+
+async function loadStartDaemon() {
+  process.env.BURNS_RUNTIME_MODE = "desktop"
+  process.env.BURNS_DATA_ROOT = resolveDesktopDataRoot()
+
+  const module = await import("../../daemon/src/bootstrap/daemon-lifecycle")
+  return module.startDaemon
 }
 
 function parseDaemonUrl(candidate: string | undefined): string | null {
@@ -112,7 +122,6 @@ export async function resolveDesktopDaemonRuntime(
   options: ResolveDesktopDaemonRuntimeOptions = {}
 ): Promise<DesktopDaemonRuntimeHandle> {
   const fetchImpl = options.fetchImpl ?? fetch
-  const start = options.start ?? startDaemon
   const candidates = buildDaemonUrlCandidates(
     options.daemonUrlEnv ?? process.env.BURNS_DESKTOP_DAEMON_URL
   )
@@ -123,6 +132,7 @@ export async function resolveDesktopDaemonRuntime(
   }
 
   try {
+    const start = options.start ?? (await loadStartDaemon())
     const runtime = await start()
     return {
       source: "spawned",

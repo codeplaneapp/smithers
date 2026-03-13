@@ -1,3 +1,5 @@
+import { getSettings } from "@/services/settings-service"
+import { getSettingsWithSensitiveValues } from "@/services/settings-service"
 import { HttpError } from "@/utils/http-error"
 
 function buildSmithersUrl(baseUrl: string, pathname: string, searchParams?: URLSearchParams) {
@@ -47,10 +49,19 @@ function extractErrorMessage(payload: unknown): string | null {
 }
 
 async function requestJson<T>(baseUrl: string, pathname: string, init?: RequestInit): Promise<T> {
+  const { settings, smithersAuthToken } = getSettingsWithSensitiveValues()
+  const authHeaders: Record<string, string> =
+    settings.hasSmithersAuthToken && smithersAuthToken
+      ? settings.smithersAuthMode === "x-smithers-key"
+        ? { "x-smithers-key": smithersAuthToken }
+        : { authorization: `Bearer ${smithersAuthToken}` }
+      : {}
+
   const response = await fetch(buildSmithersUrl(baseUrl, pathname), {
     ...init,
     headers: {
       "content-type": "application/json",
+      ...authHeaders,
       ...(init?.headers ?? {}),
     },
   })

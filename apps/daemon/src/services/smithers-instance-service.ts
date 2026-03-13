@@ -7,11 +7,16 @@ import { fileURLToPath } from "node:url"
 import type { Workspace } from "@burns/shared"
 
 import {
-  DEFAULT_SMITHERS_BASE_URL,
   DEFAULT_SMITHERS_MAX_WORKSPACE_INSTANCES,
   DEFAULT_SMITHERS_PORT_BASE,
 } from "@/config/app-config"
+import { getDefaultSmithersManagedPerWorkspace } from "@/config/settings-defaults"
 import { getLogger } from "@/logging/logger"
+import {
+  ensureWorkspaceSmithersLayout,
+  getManagedSmithersDbPath,
+} from "@/services/workspace-layout"
+import { getSettings } from "@/services/settings-service"
 import { getWorkspace } from "@/services/workspace-service"
 import { HttpError } from "@/utils/http-error"
 
@@ -47,9 +52,6 @@ export type WorkspaceServerStatus = {
 }
 
 const logger = getLogger().child({ component: "smithers.instance.service" })
-
-const managedModeEnabled =
-  process.env.BURNS_SMITHERS_MANAGED_MODE !== "0" && process.env.NODE_ENV !== "test"
 
 const runnerScriptPath = fileURLToPath(new URL("../jobs/smithers-server-runner.ts", import.meta.url))
 const instances = new Map<string, SmithersInstanceRecord>()
@@ -93,8 +95,20 @@ function resolveBunExecutable() {
   return bunBinary ?? process.execPath
 }
 
+function isManagedModeEnabled() {
+  return getSettings().smithersManagedPerWorkspace ?? getDefaultSmithersManagedPerWorkspace()
+}
+
 function resolveFallbackBaseUrl() {
-  return process.env.BURNS_SMITHERS_BASE_URL ?? DEFAULT_SMITHERS_BASE_URL
+  return getSettings().smithersBaseUrl
+}
+
+function getAllowNetworkSetting() {
+  return getSettings().allowNetwork
+}
+
+function getRootDirPolicySetting() {
+  return getSettings().rootDirPolicy
 }
 
 function getSmithersPortBase() {
@@ -316,7 +330,7 @@ function onProcessExit(record: SmithersInstanceRecord, child: ChildProcess, code
 }
 
 function getDbPath(workspacePath: string) {
-  return path.join(workspacePath, ".burns", "state", "smithers.sqlite")
+  return getManagedSmithersDbPath(workspacePath)
 }
 
 async function startRecord(record: SmithersInstanceRecord) {
@@ -346,6 +360,7 @@ async function startRecord(record: SmithersInstanceRecord) {
     }
 
     const port = await allocatePort(record)
+    ensureWorkspaceSmithersLayout(record.workspace.path)
     const dbPath = getDbPath(record.workspace.path)
     const baseUrl = `http://127.0.0.1:${port}`
     const env = {
@@ -354,7 +369,8 @@ async function startRecord(record: SmithersInstanceRecord) {
       BURNS_SMITHERS_WORKSPACE_PATH: record.workspace.path,
       BURNS_SMITHERS_DB_PATH: dbPath,
       BURNS_SMITHERS_PORT: String(port),
-      BURNS_SMITHERS_ALLOW_NETWORK: process.env.BURNS_SMITHERS_ALLOW_NETWORK ?? "0",
+      BURNS_SMITHERS_ALLOW_NETWORK: getAllowNetworkSetting() ? "1" : "0",
+      BURNS_SMITHERS_ROOT_DIR_POLICY: getRootDirPolicySetting(),
       BURNS_DAEMON_PID: String(process.pid),
     } satisfies NodeJS.ProcessEnv
 
@@ -602,11 +618,11 @@ async function stopRecord(record: SmithersInstanceRecord) {
 }
 
 export function isWorkspaceSmithersManaged() {
-  return managedModeEnabled
+  return isManagedModeEnabled()
 }
 
 export function getSmithersBaseUrlSettingValue() {
-  return managedModeEnabled ? "managed-per-workspace (daemon-supervised)" : resolveFallbackBaseUrl()
+  return resolveFallbackBaseUrl()
 }
 
 export function startWorkspaceSmithersInBackground(workspace: Workspace) {
@@ -614,7 +630,7 @@ export function startWorkspaceSmithersInBackground(workspace: Workspace) {
     return
   }
 
-  if (!managedModeEnabled) {
+  if (!isManagedModeEnabled()) {
     return
   }
 
@@ -639,7 +655,7 @@ export async function ensureWorkspaceSmithersBaseUrl(workspace: Workspace) {
     return workspace.smithersBaseUrl
   }
 
-  if (!managedModeEnabled) {
+  if (!isManagedModeEnabled()) {
     return resolveFallbackBaseUrl()
   }
 
@@ -659,7 +675,7 @@ export async function getWorkspaceSmithersServerStatus(workspaceId: string) {
     return await toSelfManagedStatus(workspace)
   }
 
-  if (!managedModeEnabled) {
+  if (!isManagedModeEnabled()) {
     return toDisabledStatus(workspace)
   }
 
@@ -675,7 +691,7 @@ export async function startWorkspaceSmithersServer(workspaceId: string) {
     return await toSelfManagedStatus(workspace)
   }
 
-  if (!managedModeEnabled) {
+  if (!isManagedModeEnabled()) {
     return toDisabledStatus(workspace)
   }
 
@@ -691,7 +707,7 @@ export async function restartWorkspaceSmithersServer(workspaceId: string) {
     return await toSelfManagedStatus(workspace)
   }
 
-  if (!managedModeEnabled) {
+  if (!isManagedModeEnabled()) {
     return toDisabledStatus(workspace)
   }
 
@@ -710,7 +726,7 @@ export async function stopWorkspaceSmithersServer(workspaceId: string) {
     return await toSelfManagedStatus(workspace)
   }
 
-  if (!managedModeEnabled) {
+  if (!isManagedModeEnabled()) {
     return toDisabledStatus(workspace)
   }
 
@@ -735,7 +751,7 @@ export function dropWorkspaceSmithersRecord(workspaceId: string) {
 }
 
 export async function warmWorkspaceSmithersInstances(workspaces: Workspace[]) {
-  if (!managedModeEnabled || workspaces.length === 0) {
+  if (!isManagedModeEnabled() || workspaces.length === 0) {
     return
   }
 

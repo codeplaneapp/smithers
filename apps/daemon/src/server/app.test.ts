@@ -1,6 +1,11 @@
-import { describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "bun:test"
 
 import { createApp } from "./app"
+import { clearSettingsForTests } from "@/services/settings-service"
+
+afterEach(() => {
+  clearSettingsForTests()
+})
 
 describe("daemon route method guards", () => {
   it("returns 404 for non-GET requests on read-only routes", async () => {
@@ -26,6 +31,8 @@ describe("daemon route method guards", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toMatchObject({
       allowNetwork: false,
+      smithersAuthMode: "bearer",
+      rootDirPolicy: "workspace-root",
     })
   })
 })

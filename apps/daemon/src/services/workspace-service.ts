@@ -9,9 +9,7 @@ import type {
 } from "@burns/shared"
 
 import { DEFAULT_AGENT } from "@/config/app-config"
-import { DEFAULT_WORKSPACES_ROOT } from "@/config/paths"
 import {
-  countWorkspaces,
   deleteWorkspaceRowById,
   findWorkspaceRowById,
   insertWorkspaceRow,
@@ -32,11 +30,10 @@ import {
   startWorkspaceSmithersInBackground,
   stopWorkspaceSmithersServer,
 } from "@/services/smithers-instance-service"
+import { getSettings } from "@/services/settings-service"
+import { ensureWorkspaceSmithersLayout } from "@/services/workspace-layout"
 import { ensureDefaultWorkflowTemplates } from "@/services/workflow-service"
-import { getLogger } from "@/logging/logger"
 import { HttpError } from "@/utils/http-error"
-
-const logger = getLogger().child({ component: "workspace.service" })
 
 function slugifyWorkspaceName(name: string) {
   return name
@@ -47,7 +44,7 @@ function slugifyWorkspaceName(name: string) {
 }
 
 function ensureWorkflowDirectory(workspacePath: string) {
-  mkdirSync(path.join(workspacePath, ".burns", "workflows"), { recursive: true })
+  ensureWorkspaceSmithersLayout(workspacePath)
 }
 
 function isPathWithinDirectory(targetPath: string, parentDirectory: string) {
@@ -61,6 +58,7 @@ function isPathWithinDirectory(targetPath: string, parentDirectory: string) {
 }
 
 function resolveRelativeTargetFolder(targetFolder: string | undefined, workspaceId: string) {
+  const { workspaceRoot } = getSettings()
   const trimmedTargetFolder = targetFolder?.trim() || workspaceId
   if (!trimmedTargetFolder) {
     throw new HttpError(400, "Target folder is required")
@@ -70,8 +68,8 @@ function resolveRelativeTargetFolder(targetFolder: string | undefined, workspace
     throw new HttpError(400, "Target folder must be relative to workspace root")
   }
 
-  const resolvedPath = path.resolve(DEFAULT_WORKSPACES_ROOT, trimmedTargetFolder)
-  if (!isPathWithinDirectory(resolvedPath, DEFAULT_WORKSPACES_ROOT)) {
+  const resolvedPath = path.resolve(workspaceRoot, trimmedTargetFolder)
+  if (!isPathWithinDirectory(resolvedPath, workspaceRoot)) {
     throw new HttpError(400, "Target folder must stay within workspace root")
   }
 
@@ -111,6 +109,7 @@ function assertWorkspaceDoesNotExist(id: string, workspacePath: string) {
 }
 
 function createWorkspaceRecord(input: CreateWorkspaceInput, workspacePath: string): Workspace {
+  const settings = getSettings()
   const id = slugifyWorkspaceName(input.name)
   const now = new Date().toISOString()
   const branch = getCurrentBranch(workspacePath)
@@ -123,7 +122,7 @@ function createWorkspaceRecord(input: CreateWorkspaceInput, workspacePath: strin
     path: workspacePath,
     branch,
     repoUrl,
-    defaultAgent: input.defaultAgent ?? DEFAULT_AGENT,
+    defaultAgent: input.defaultAgent ?? settings.defaultAgent ?? DEFAULT_AGENT,
     healthStatus: existsSync(workspacePath) ? "healthy" : "disconnected",
     sourceType: input.sourceType,
     runtimeMode,
@@ -134,21 +133,7 @@ function createWorkspaceRecord(input: CreateWorkspaceInput, workspacePath: strin
 }
 
 export function initializeWorkspaceService() {
-  if (countWorkspaces() > 0) {
-    return
-  }
-
-  try {
-    createWorkspace({
-      name: "burns-web-app",
-      runtimeMode: "burns-managed",
-      sourceType: "create",
-      targetFolder: "burns-web-app",
-      defaultAgent: DEFAULT_AGENT,
-    })
-  } catch (error) {
-    logger.warn({ event: "workspace.seed_failed", err: error }, "Failed to seed initial workspace")
-  }
+  void getSettings()
 }
 
 export function listWorkspaces() {
@@ -230,4 +215,16 @@ export async function deleteWorkspace(
     path: workspace.path,
     filesDeleted: input.mode === "delete",
   }
+}
+
+export async function factoryResetWorkspaces() {
+  const workspaces = listWorkspaceRows()
+
+  for (const workspace of workspaces) {
+    await deleteWorkspace(workspace.id, {
+      mode: "unlink",
+    })
+  }
+
+  return workspaces.length
 }

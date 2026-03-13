@@ -105,6 +105,10 @@ function buildBreadcrumbs(
     return ["Workspace", "New"]
   }
 
+  if (segments[0] === "onboarding") {
+    return ["Onboarding"]
+  }
+
   if (segments[0] === "settings") {
     return ["Settings"]
   }

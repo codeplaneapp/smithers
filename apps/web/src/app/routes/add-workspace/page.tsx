@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useNavigate } from "react-router-dom"
 
 import type { Combobox11Option } from "@/components/shadcn-studio/combobox/combobox-11"
@@ -82,6 +82,16 @@ export function AddWorkspacePage() {
   )
   const [smithersValidationMessage, setSmithersValidationMessage] = useState<string | null>(null)
   const [isValidatingSmithersUrl, setIsValidatingSmithersUrl] = useState(false)
+
+  useEffect(() => {
+    if (!settings?.smithersBaseUrl) {
+      return
+    }
+
+    setSmithersBaseUrl((currentValue) =>
+      currentValue === "http://localhost:7331" ? settings.smithersBaseUrl : currentValue
+    )
+  }, [settings?.smithersBaseUrl])
 
   const sourceChoices = useMemo(
     () =>
@@ -384,7 +394,7 @@ export function AddWorkspacePage() {
               {isBurnsManaged ? (
                 <FormRow
                   label="Workflows"
-                  description="Select templates to pre-seed in .burns/workflows."
+                  description="Select templates to pre-seed in .smithers/workflows."
                 >
                   <Combobox11
                     className="max-w-full"

@@ -65,7 +65,7 @@ export function createApp(options: CreateAppOptions = {}) {
             (await handleWorkflowRoutes(request, pathname)) ??
             (await handleRunRoutes(request, pathname)) ??
             (await handleApprovalRoutes(request, pathname)) ??
-            handleSettingsRoutes(request, pathname) ??
+            (await handleSettingsRoutes(request, pathname)) ??
             (await handleSystemRoutes(request, pathname)) ??
             handleDiagnosticsRoutes(request, pathname)
 

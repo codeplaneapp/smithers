@@ -4,7 +4,7 @@ export const workspaces: Workspace[] = [
   {
     id: "burns-web-app",
     name: "burns-web-app",
-    path: "/Users/lewi/Documents/ai/burns/apps/daemon/.data/workspaces/burns-web-app",
+    path: "/Users/lewi/Documents/Burns/burns-web-app",
     branch: "main",
     repoUrl: "github.com/acme/burns-web-app",
     defaultAgent: "Claude Code",

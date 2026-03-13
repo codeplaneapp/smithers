@@ -18,7 +18,7 @@ function seedWorkspace() {
   const workspacePath = resolveTestWorkspacePath(workspaceId)
   const now = new Date().toISOString()
 
-  mkdirSync(path.join(workspacePath, ".burns", "state"), { recursive: true })
+  mkdirSync(path.join(workspacePath, ".smithers", "state"), { recursive: true })
   insertWorkspaceRow({
     id: workspaceId,
     name: workspaceId,
@@ -85,7 +85,7 @@ describe("run event service", () => {
     const { workspaceId, workspacePath } = seedWorkspace()
     const runId = "run-with-node-output"
     const timestamp = "2026-03-12T18:10:00.000Z"
-    const smithersDbPath = path.join(workspacePath, ".burns", "state", "smithers.sqlite")
+    const smithersDbPath = path.join(workspacePath, ".smithers", "state", "smithers.db")
     const smithersDb = new Database(smithersDbPath, { create: true })
 
     try {
@@ -154,7 +154,7 @@ describe("run event service", () => {
     const runId = "run-legacy-seq-mismatch"
     const nodeId = "determine-intent"
     const timestamp = "2026-03-12T16:59:11.151Z"
-    const smithersDbPath = path.join(workspacePath, ".burns", "state", "smithers.sqlite")
+    const smithersDbPath = path.join(workspacePath, ".smithers", "state", "smithers.db")
     const smithersDb = new Database(smithersDbPath, { create: true })
 
     try {

@@ -19,6 +19,12 @@ import {
   type Settings,
   type StartRunInput,
   settingsSchema,
+  type UpdateSettingsInput,
+  updateSettingsInputSchema,
+  type OnboardingStatus,
+  onboardingStatusSchema,
+  type FactoryResetResult,
+  factoryResetResultSchema,
   type UpdateWorkflowInput,
   type Workflow,
   type WorkflowFileDocument,
@@ -166,6 +172,42 @@ export class BurnsClient {
   async getSettings(): Promise<Settings> {
     const data = await this.request<unknown>("/api/settings")
     return settingsSchema.parse(data)
+  }
+
+  async updateSettings(input: UpdateSettingsInput): Promise<Settings> {
+    const data = await this.request<unknown>("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify(updateSettingsInputSchema.parse(input)),
+    })
+
+    return settingsSchema.parse(data)
+  }
+
+  async resetSettings(): Promise<Settings> {
+    const data = await this.request<unknown>("/api/settings/reset", {
+      method: "POST",
+    })
+
+    return settingsSchema.parse(data)
+  }
+
+  async getOnboardingStatus(): Promise<OnboardingStatus> {
+    const data = await this.request<unknown>("/api/onboarding-status")
+    return onboardingStatusSchema.parse(data)
+  }
+
+  async completeOnboarding(): Promise<OnboardingStatus> {
+    const data = await this.request<unknown>("/api/onboarding-status/complete", {
+      method: "POST",
+    })
+    return onboardingStatusSchema.parse(data)
+  }
+
+  async factoryReset(): Promise<FactoryResetResult> {
+    const data = await this.request<unknown>("/api/settings/factory-reset", {
+      method: "POST",
+    })
+    return factoryResetResultSchema.parse(data)
   }
 
   async openNativeFolderPicker(): Promise<string | null> {

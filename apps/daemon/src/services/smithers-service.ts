@@ -12,6 +12,7 @@ import {
   streamSmithersRunEvents,
 } from "@/integrations/smithers/http-client"
 import { ensureWorkspaceSmithersBaseUrl } from "@/services/smithers-instance-service"
+import { getWorkspaceWorkflowRootPath } from "@/services/workspace-layout"
 import { repairLegacyDefaultWorkflowTemplate } from "@/services/workflow-service"
 import { getWorkspace } from "@/services/workspace-service"
 import { HttpError } from "@/utils/http-error"
@@ -194,7 +195,7 @@ function assertWorkspace(workspaceId: string) {
 }
 
 function resolveWorkflowPath(workspacePath: string, workflowId: string) {
-  const workflowDirectory = path.join(workspacePath, ".burns", "workflows", workflowId)
+  const workflowDirectory = path.join(getWorkspaceWorkflowRootPath(workspacePath), workflowId)
   const tsxPath = path.join(workflowDirectory, "workflow.tsx")
   const tsPath = path.join(workflowDirectory, "workflow.ts")
 

@@ -12,6 +12,7 @@ import type {
 import type { AgentCliEvent } from "@/agents/BaseCliAgent"
 import { defaultWorkflowTemplates } from "@/domain/workflows/templates"
 import { listInstalledAgentClis, runWorkflowGenerationAgent } from "@/services/agent-cli-service"
+import { ensureWorkspaceSmithersLayout } from "@/services/workspace-layout"
 import { getWorkspace } from "@/services/workspace-service"
 import { HttpError } from "@/utils/http-error"
 import { slugify } from "@/utils/slugify"
@@ -213,7 +214,7 @@ function getWorkflowRoot(workspaceId: string) {
     throw new HttpError(404, `Workspace not found: ${workspaceId}`)
   }
 
-  return path.join(workspace.path, ".burns", "workflows")
+  return ensureWorkspaceSmithersLayout(workspace.path).workflowRoot
 }
 
 function inferWorkflowStatus(workflowId: string): Workflow["status"] {
@@ -303,7 +304,7 @@ export function buildWorkflowGenerationPrompt(params: {
     "Use stable kebab-case task IDs.",
     `Workflow display name: ${params.workflowName}`,
     `Workflow folder id: ${params.workflowId}`,
-    `Target relative file: .burns/workflows/${params.workflowId}/workflow.tsx`,
+    `Target relative file: .smithers/workflows/${params.workflowId}/workflow.tsx`,
     `Workspace path: ${params.workspacePath}`,
     "The file must contain a default export that defines a valid Smithers workflow in TypeScript/TSX.",
     "Prefer a simple but production-leaning structure with clear plan/implement/validate style tasks when relevant.",
@@ -924,7 +925,7 @@ export async function generateWorkflowFromPrompt(params: {
   const workflowRoot = getWorkflowRoot(params.workspaceId)
   const workflowDir = path.join(workflowRoot, workflowId)
   const filePath = path.join(workflowDir, "workflow.tsx")
-  const relativeFilePath = path.join(".burns", "workflows", workflowId, "workflow.tsx")
+  const relativeFilePath = path.join(".smithers", "workflows", workflowId, "workflow.tsx")
 
   mkdirSync(workflowDir, { recursive: true })
 

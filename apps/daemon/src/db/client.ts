@@ -87,3 +87,21 @@ db.exec(`
     UNIQUE(workspace_id, run_id, node_id)
   );
 `)
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    workspace_root TEXT NOT NULL,
+    default_agent TEXT NOT NULL,
+    smithers_base_url TEXT NOT NULL,
+    allow_network INTEGER NOT NULL DEFAULT 0,
+    smithers_managed_per_workspace INTEGER NOT NULL DEFAULT 0,
+    smithers_auth_mode TEXT,
+    smithers_auth_token TEXT,
+    root_dir_policy TEXT NOT NULL DEFAULT 'workspace-root',
+    diagnostics_log_level TEXT NOT NULL DEFAULT 'info',
+    diagnostics_pretty_logs INTEGER NOT NULL DEFAULT 0,
+    onboarding_completed INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+  );
+`)

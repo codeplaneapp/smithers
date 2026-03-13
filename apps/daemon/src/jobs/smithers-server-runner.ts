@@ -50,6 +50,7 @@ const workspacePath = requireEnv("BURNS_SMITHERS_WORKSPACE_PATH")
 const dbPath = requireEnv("BURNS_SMITHERS_DB_PATH")
 const port = parsePort(requireEnv("BURNS_SMITHERS_PORT"))
 const allowNetwork = parseBoolean(process.env.BURNS_SMITHERS_ALLOW_NETWORK)
+const rootDirPolicy = process.env.BURNS_SMITHERS_ROOT_DIR_POLICY?.trim() || "workspace-root"
 const daemonPid = parseOptionalPid(process.env.BURNS_DAEMON_PID)
 
 mkdirSync(path.dirname(dbPath), { recursive: true })
@@ -64,7 +65,7 @@ const db = drizzle(sqlite)
 const server = startServer({
   port,
   db,
-  rootDir: workspacePath,
+  rootDir: rootDirPolicy === "workspace-root" ? workspacePath : undefined,
   allowNetwork,
 })
 

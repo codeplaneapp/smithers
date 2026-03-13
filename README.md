@@ -17,11 +17,13 @@ This repository is a Bun monorepo with:
 Implemented today:
 
 - Workspace registry with SQLite persistence
+- First-run onboarding flow that captures Burns defaults before the first workspace is created
 - Workspace onboarding flows for create, clone, and add-local-repo
-- Workflow storage under `.burns/workflows/<workflow-id>`
+- Workflow storage under `.smithers/workflows/<workflow-id>`
 - Workflow list and detail views, including per-workflow file tree browsing and source preview
 - AI-assisted workflow generation and prompt-driven editing via installed local agent CLIs
 - Launch-field inference from workflow source for run forms
+- Editable settings UI with reset-to-defaults, advanced Smithers auth/rootDir controls, and onboarding completion tracking
 - Web UI for workspace overview, workflows, runs, approvals, inbox, and settings
 - Smithers-backed run lifecycle APIs (`start` / `list` / `detail` / `resume` / `cancel`)
 - Run event persistence in SQLite plus SSE proxy streaming with reconnect via `afterSeq`
@@ -147,20 +149,20 @@ The daemon stores local state under `BURNS_DATA_ROOT` when that env var is set. 
 Each managed workspace stores workflows at:
 
 ```txt
-<workspace-path>/.burns/workflows/<workflow-id>/
+<workspace-path>/.smithers/workflows/<workflow-id>/
 ```
 
 Primary workflow entrypoints are resolved from:
 
 ```txt
-<workspace-path>/.burns/workflows/<workflow-id>/workflow.tsx
-<workspace-path>/.burns/workflows/<workflow-id>/workflow.ts
+<workspace-path>/.smithers/workflows/<workflow-id>/workflow.tsx
+<workspace-path>/.smithers/workflows/<workflow-id>/workflow.ts
 ```
 
 Each managed workspace also stores Smithers runtime state at:
 
 ```txt
-<workspace-path>/.burns/state/smithers.sqlite
+<workspace-path>/.smithers/state/smithers.db
 ```
 
 Optional Smithers lifecycle env vars:
