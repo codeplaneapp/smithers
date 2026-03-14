@@ -57,6 +57,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.36",
+    "@ai-sdk/openai": "^3.0.41",
     "@effect/opentelemetry": "^0.61.0",
     "@effect/platform": "^0.94.5",
     "@effect/platform-bun": "^0.87.1",
