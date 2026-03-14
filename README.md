@@ -24,7 +24,7 @@ If you already know Smithers, Burns is the layer around it.
 
 Burns is useful when `smithers run workflow.tsx` is no longer enough on its own. Use it when you want to manage multiple repos, browse workflow files, guide workflow authoring from a UI, or supervise long-running local runs from one place.
 
-## Quick Start For Contributors
+## Quick Start
 
 Install dependencies:
 
