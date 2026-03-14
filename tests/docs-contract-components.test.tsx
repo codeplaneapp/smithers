@@ -307,6 +307,40 @@ describe("docs: <Workflow>", () => {
   });
 });
 
+describe("docs: structured output", () => {
+  test("schema validation retries agent output up to 2 times", async () => {
+    const { smithers, outputs, cleanup } = createTestSmithers({
+      output: z.object({ value: z.number() }),
+    });
+
+    let calls = 0;
+    const agent: any = {
+      id: "schema-retry",
+      tools: {},
+      async generate() {
+        calls += 1;
+        if (calls === 1) {
+          return { text: "{\"value\":\"bad\"}" };
+        }
+        return { text: "{\"value\":1}" };
+      },
+    };
+
+    const workflow = smithers(() => (
+      <Workflow name="schema-retry" cache={false}>
+        <Task id="retry" output={outputs.output} agent={agent}>
+          Return value.
+        </Task>
+      </Workflow>
+    ));
+
+    const result = await runWorkflow(workflow, { input: {} });
+    expect(result.status).toBe("finished");
+    expect(calls).toBe(2);
+    cleanup();
+  });
+});
+
 describe("docs: control flow components", () => {
   test("<Sequence> skipIf removes all child tasks", async () => {
     const { smithers, outputs, cleanup } = createTestSmithers(outputSchemas);
