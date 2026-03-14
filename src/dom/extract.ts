@@ -2,6 +2,7 @@ import type { XmlNode, XmlElement } from "../XmlNode";
 import type { TaskDescriptor } from "../TaskDescriptor";
 import { resolveStableId } from "../utils/tree-ids";
 import { isAbsolute, resolve as resolvePath } from "node:path";
+import { getTableName } from "drizzle-orm";
 import {
   DEFAULT_MERGE_QUEUE_CONCURRENCY,
   WORKTREE_EMPTY_PATH_ERROR,
@@ -34,6 +35,20 @@ export type ExtractOptions = {
   /** Base directory for resolving relative Worktree paths */
   baseRootDir?: string;
 };
+
+function isDrizzleTable(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  try {
+    const name = getTableName(value as any);
+    return typeof name === "string" && name.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function isZodObject(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" && "shape" in (value as any));
+}
 
 function toXmlNode(node: HostNode): XmlNode {
   if (node.kind === "text") {
@@ -198,10 +213,24 @@ export function extractFromHost(
         throw new Error(`Task ${nodeId} is missing output.`);
       }
 
-      // ZodObject — engine will resolve table + name via zodToKeyName map
-      const outputTable: any = null;
-      const outputTableName = "";
+      const outputTable: any = isDrizzleTable(outputRaw) ? outputRaw : null;
+      const outputTableName = outputTable
+        ? getTableName(outputTable)
+        : typeof outputRaw === "string"
+          ? outputRaw
+          : "";
+      const outputSchema =
+        raw.outputSchema ??
+        (!outputTable && isZodObject(outputRaw) ? outputRaw : undefined);
       const needsApproval = Boolean(raw.needsApproval);
+      const approvalMode =
+        raw.approvalMode === "decision" ? "decision" : "gate";
+      const approvalOnDeny =
+        raw.approvalOnDeny === "continue" ||
+        raw.approvalOnDeny === "skip" ||
+        raw.approvalOnDeny === "fail"
+          ? raw.approvalOnDeny
+          : undefined;
       const skipIf = Boolean(raw.skipIf);
       const retries = typeof raw.retries === "number" ? raw.retries : 0;
       const timeoutMs =
@@ -223,6 +252,9 @@ export function extractFromHost(
       const staticPayload = isAgent || isCompute
         ? undefined
         : (raw.__smithersPayload ?? raw.__payload ?? raw.children);
+      const dependsOn = Array.isArray(raw.dependsOn)
+        ? raw.dependsOn.filter((value: unknown) => typeof value === "string")
+        : undefined;
 
       const parallelGroup = nextParallelStack[nextParallelStack.length - 1];
 
@@ -237,8 +269,11 @@ export function extractFromHost(
         worktreeBranch: topWorktree?.branch,
         outputTable,
         outputTableName,
-        outputSchema: outputRaw,
+        outputSchema,
+        dependsOn,
         needsApproval,
+        approvalMode,
+        approvalOnDeny,
         skipIf,
         retries,
         timeoutMs,

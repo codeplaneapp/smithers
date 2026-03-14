@@ -51,6 +51,7 @@ import type { HotReloadOptions } from "../RunOptions";
 import { spawn as nodeSpawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { platform } from "node:os";
+import { withTaskRuntime } from "../effect/task-runtime";
 
 /**
  * Track which worktree paths have already been created this run so we don't
@@ -303,6 +304,41 @@ function buildInputRow(
     return { runId, payload: input };
   }
   return { runId, ...input };
+}
+
+function buildOutputRow(
+  outputTable: any,
+  runId: string,
+  nodeId: string,
+  iteration: number,
+  payload: unknown,
+) {
+  const cols = getTableColumns(outputTable as any) as Record<string, any>;
+  const keys = Object.keys(cols);
+  const hasPayload = keys.includes("payload");
+  const payloadOnly =
+    hasPayload &&
+    keys.every(
+      (key) =>
+        key === "runId" ||
+        key === "nodeId" ||
+        key === "iteration" ||
+        key === "payload",
+    );
+  if (payloadOnly) {
+    return {
+      runId,
+      nodeId,
+      iteration,
+      payload: (payload ?? null) as any,
+    };
+  }
+  return {
+    ...((payload ?? {}) as Record<string, unknown>),
+    runId,
+    nodeId,
+    iteration,
+  };
 }
 
 function resolveRootDir(
@@ -565,19 +601,26 @@ export function resolveSchema(db: any): Record<string, any> {
 function resolveTaskOutputs(tasks: TaskDescriptor[], workflow: SmithersWorkflow<any>) {
   for (const task of tasks) {
     // Already resolved (has a table)
-    if (task.outputTable) continue;
+    if (task.outputTable) {
+      if (!task.outputSchema && task.outputTableName && workflow.schemaRegistry) {
+        const entry = workflow.schemaRegistry.get(task.outputTableName);
+        if (entry) {
+          task.outputSchema = entry.zodSchema;
+        }
+      }
+      continue;
+    }
 
     const raw = task.outputSchema;
-    if (!raw) continue;
-
     // Resolve ZodObject via zodToKeyName
-    if (workflow.zodToKeyName) {
+    if (raw && typeof raw === "object" && workflow.zodToKeyName) {
       const keyName = workflow.zodToKeyName.get(raw);
       if (keyName && workflow.schemaRegistry) {
         const entry = workflow.schemaRegistry.get(keyName);
         if (entry) {
           task.outputTable = entry.table;
           task.outputTableName = keyName;
+          if (!task.outputSchema) task.outputSchema = entry.zodSchema;
         }
       }
       if (!task.outputTable) {
@@ -586,6 +629,35 @@ function resolveTaskOutputs(tasks: TaskDescriptor[], workflow: SmithersWorkflow<
           `Task "${task.nodeId}" uses an output ZodObject that is not registered in createSmithers()`,
         );
       }
+    }
+
+    if (!task.outputTable) {
+      const keyName =
+        typeof task.outputTableName === "string" && task.outputTableName.length > 0
+          ? task.outputTableName
+          : typeof raw === "string"
+            ? raw
+            : undefined;
+      if (keyName && workflow.schemaRegistry) {
+        const entry = workflow.schemaRegistry.get(keyName);
+        if (entry) {
+          task.outputTable = entry.table;
+          task.outputTableName = keyName;
+          if (!task.outputSchema || typeof task.outputSchema === "string") {
+            task.outputSchema = entry.zodSchema;
+          }
+        }
+      }
+    }
+
+    if (!task.outputTable) {
+      throw new SmithersError(
+        "UNKNOWN_OUTPUT_SCHEMA",
+        `Task "${task.nodeId}" uses an output schema key that is not registered in createSmithers()`,
+        {
+          output: task.outputTableName ?? (typeof raw === "string" ? raw : undefined),
+        },
+      );
     }
   }
 }
@@ -678,7 +750,12 @@ async function computeTaskStates(
         desc.iteration,
       );
       if (approval?.status === "denied") {
-        const state: TaskState = desc.continueOnFail ? "skipped" : "failed";
+        const state: TaskState =
+          desc.approvalMode === "decision" && desc.approvalOnDeny !== "fail"
+            ? "pending"
+            : desc.continueOnFail
+              ? "skipped"
+              : "failed";
         stateMap.set(key, state);
         await adapter.insertNode({
           runId,
@@ -690,9 +767,30 @@ async function computeTaskStates(
           outputTable: desc.outputTableName,
           label: desc.label ?? null,
         });
+        if (state === "pending") {
+          continue;
+        }
         continue;
       }
       if (!approval || approval.status !== "approved") {
+        if (
+          desc.approvalMode === "decision" &&
+          approval?.status === "denied" &&
+          desc.approvalOnDeny !== "fail"
+        ) {
+          stateMap.set(key, "pending");
+          await adapter.insertNode({
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            state: "pending",
+            lastAttempt: null,
+            updatedAtMs: nowMs(),
+            outputTable: desc.outputTableName,
+            label: desc.label ?? null,
+          });
+          continue;
+        }
         if (!approval) {
           await adapter.insertOrUpdateApproval({
             runId,
@@ -1384,7 +1482,19 @@ async function executeTask(
           payload = output;
         }
       } else if (desc.computeFn) {
-        const computePromise = Promise.resolve().then(() => desc.computeFn!());
+        const computePromise = Promise.resolve().then(() =>
+          withTaskRuntime(
+            {
+              runId,
+              stepId: desc.nodeId,
+              attempt: attemptNo,
+              iteration: desc.iteration,
+              signal: signal ?? new AbortController().signal,
+              db,
+            },
+            () => desc.computeFn!(),
+          ),
+        );
         const races: Array<Promise<unknown>> = [computePromise];
         if (desc.timeoutMs) {
           races.push(
@@ -1422,12 +1532,13 @@ async function executeTask(
           throw new Error("Payload iteration does not match task iteration");
         }
       }
-      const payloadWithKeys = {
-        ...(payload ?? {}),
+      const payloadWithKeys = buildOutputRow(
+        desc.outputTable as any,
         runId,
-        nodeId: desc.nodeId,
-        iteration: desc.iteration,
-      };
+        desc.nodeId,
+        desc.iteration,
+        payload,
+      );
       let validation = validateOutput(desc.outputTable as any, payloadWithKeys);
 
       // If the Drizzle insert schema passed but we have a stricter Zod schema
