@@ -188,3 +188,25 @@ test("loadToon respects retry backoff delays", async () => {
     sqlite.close();
   }
 });
+
+test("loadToon evaluates JS expressions in skipIf and component with", async () => {
+  const dbPath = makeTempDb();
+  const workflow = Smithers.loadToon("tests/fixtures/toon-expressions.toon");
+
+  // score=8 > 7, so skipIf ternary evaluates true → skippable is skipped
+  const highScore = await Effect.runPromise(
+    workflow
+      .execute({ score: 8, tags: ["fast", "clean"] })
+      .pipe(Effect.provide(Smithers.sqlite({ filename: dbPath }))),
+  );
+  expect(highScore).toEqual({ label: "pass" });
+
+  // score=3 <= 7, so skipIf ternary evaluates false → skippable runs
+  const dbPath2 = makeTempDb();
+  const lowScore = await Effect.runPromise(
+    workflow
+      .execute({ score: 3, tags: ["slow"] })
+      .pipe(Effect.provide(Smithers.sqlite({ filename: dbPath2 }))),
+  );
+  expect(lowScore).toEqual({ label: "fail" });
+});
