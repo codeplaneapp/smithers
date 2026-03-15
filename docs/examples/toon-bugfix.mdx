@@ -9,9 +9,8 @@ A multi-step bugfix workflow that imports schemas from TypeScript and uses inlin
 
 ```toon
 imports:
-  schemas[1]:
-    - from: ./schemas.ts
-      use[1]: TicketInput
+  schemas[1]{from,use}:
+    ./schemas.ts,TicketInput
 
 name: bugfix
 agents:
