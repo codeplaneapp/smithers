@@ -9,6 +9,105 @@ This file contains the complete Smithers documentation. Each section below corre
 
 ---
 
+## Introduction
+
+> Choose the Smithers API that matches how you want to author workflows.
+> Source: https://smithers.sh/introduction
+
+Smithers supports three authoring APIs. They all compile to the same durable execution engine, but they optimize for different ways of building workflows.
+
+## Choose an API
+
+| API | Best for | Start here |
+| --- | --- | --- |
+| **TOON** | Prompt-first workflows and the fastest path to a working flow | [Overview](/toon/overview), [Installation](/toon/installation), [Quickstart](/toon/quickstart) |
+| **JSX** | TSX composition, render-time branching, and MDX prompts | [Overview](/jsx/overview), [Installation](/jsx/installation), [Quickstart](/jsx/quickstart) |
+| **Effect Builder** | Typed step handles, `Layer` composition, and low-level control | [Overview](/effect/overview), [Installation](/effect/installation), [Quickstart](/effect/quickstart) |
+
+## Shared Runtime
+
+No matter which API you choose, Smithers handles the same runtime concerns:
+
+- durable execution and resumability
+- retries, timeouts, and approval gates
+- SQLite persistence
+- parallel execution and loops
+- structured events, metrics, and observability
+
+The sidebar sections for Core Concepts, Runtime, CLI, and Integrations are shared across all three API tabs because they describe the common engine underneath the authoring layers.
+
+## Next Steps
+
+- [TOON Overview](/toon/overview) — Start with the declarative API.
+- [JSX API](/jsx/overview) — Build workflows as TSX components.
+- [Effect Builder](/effect/overview) — Use the low-level typed builder.
+
+---
+
+## Installation
+
+> Choose the installation guide for the Smithers API you want to use.
+> Source: https://smithers.sh/installation
+
+Smithers has separate installation guides for each authoring API.
+
+## Pick an Installation Guide
+
+| API | Use this when | Installation guide |
+| --- | --- | --- |
+| **TOON** | You want declarative `.toon` files and the least setup | [TOON Installation](/toon/installation) |
+| **JSX** | You want TSX workflows, MDX prompts, and render-time branching | [JSX Installation](/jsx/installation) |
+| **Effect Builder** | You want `Layer`, `Context.Tag`, and low-level graph construction | [Effect Installation](/effect/installation) |
+
+## Shared Requirements
+
+All three APIs run on the same underlying runtime, so these show up everywhere:
+
+- Bun
+- local SQLite persistence
+- optional model or provider credentials
+- the shared runtime docs for observability, CLI usage, and integrations
+
+## Next Steps
+
+- [TOON Installation](/toon/installation) — Start with the declarative path.
+- [JSX Installation](/jsx/installation) — Set up TSX and optional MDX prompts.
+- [Effect Installation](/effect/installation) — Install the low-level builder stack.
+
+---
+
+## Quickstart
+
+> Choose the quickstart for the Smithers API you want to use.
+> Source: https://smithers.sh/quickstart
+
+Smithers has a different quickstart for each authoring API.
+
+## Pick a Quickstart
+
+| API | What you build | Quickstart |
+| --- | --- | --- |
+| **TOON** | A declarative `.toon` workflow with inline schemas and prompts | [TOON Quickstart](/toon/quickstart) |
+| **JSX** | A TSX workflow with `<Task>` components and `ctx.outputMaybe(...)` | [JSX Quickstart](/jsx/quickstart) |
+| **Effect Builder** | A low-level workflow graph built with `$.step()` and `Layer` | [Effect Quickstart](/effect/quickstart) |
+
+## Same Runtime, Different Authoring Style
+
+All three quickstarts end up on the same runtime:
+
+- steps are persisted to SQLite
+- completed work resumes after restarts
+- retries, approvals, and loops use the same engine
+- observability and CLI tooling are shared
+
+## Next Steps
+
+- [TOON Quickstart](/toon/quickstart) — Start with the declarative flow.
+- [JSX Quickstart](/jsx/quickstart) — Build a render-driven TSX workflow.
+- [Effect Quickstart](/effect/quickstart) — Build the same idea with typed step handles.
+
+---
+
 ## Execution Model
 
 > How Smithers turns a builder graph into a durable Effect workflow.
@@ -293,7 +392,7 @@ That is a better fit for workflow orchestration than reusing a UI renderer as th
 ## Next Steps
 
 - [Data Model](/concepts/data-model) -- See how `Schema`, `Model`, and workflow metadata fit together.
-- [Context](/concepts/context) -- Understand what data a running step receives.
+- [Data Model](/concepts/data-model) -- Understand what data a running step receives.
 - [Approvals](/concepts/approvals) -- Design durable approval gates on top of Effect primitives.
 
 ---
@@ -556,7 +655,7 @@ If a field only matters to orchestration, it probably does not belong in your do
 
 ## Next Steps
 
-- [Context](/concepts/context) -- Learn what data a step receives at runtime.
+- [Execution Model](/concepts/execution-model) -- Learn what data a step receives at runtime.
 - [Approvals](/concepts/approvals) -- See how approval state should be modeled durably.
 - [Caching](/concepts/caching) -- Understand where reusable outputs fit into the data model.
 
@@ -842,11 +941,11 @@ The control plane should target approval nodes directly.
 For example:
 
 ```bash
-smithers approve workflow.ts --execution-id <id> --gate approve-deploy --note "Ship it"
-smithers deny workflow.ts --execution-id <id> --gate approve-deploy --note "Blocked by QA"
+smithers approve workflow.ts --run-id <id> --node-id approve-deploy --note "Ship it"
+smithers deny workflow.ts --run-id <id> --node-id approve-deploy --note "Blocked by QA"
 ```
 
-The exact transport can vary, but the key should be `(executionId, gateId)`, not a hidden internal row id.
+The exact transport can vary, but the key should be `(runId, nodeId)`, not a hidden internal row id.
 
 ## Why Explicit Gates Matter
 
@@ -1095,7 +1194,7 @@ If that sentence feels false, the step probably should not use caching.
 
 ## Next Steps
 
-- [Renderer Internals](/concepts/renderer-internals) -- This page will be replaced with graph/planner internals in the new API.
+- [Planner Internals](/concepts/planner-internals) -- See how the workflow graph is planned and scheduled internally.
 - [Execution Model](/concepts/execution-model) -- See where cache lookup happens in the durable step lifecycle.
 - [Runtime Events](/runtime/events) -- This page will need cache-hit and cache-miss events in the new design.
 
@@ -1378,6 +1477,19 @@ function runWorkflow<Schema>(
 | `allowNetwork` | `boolean` | `false` | Whether the `bash` tool is permitted to make network requests. |
 | `maxOutputBytes` | `number` | `200000` | Maximum number of bytes a single tool call can return. Output is truncated beyond this limit. |
 | `toolTimeoutMs` | `number` | `60000` | Maximum wall-clock time (in milliseconds) for a single tool call before it is killed. |
+| `hot` | `boolean \| HotReloadOptions` | `undefined` | Enable hot-reload mode. Pass `true` for defaults or a `HotReloadOptions` object to customize. See below. |
+
+### HotReloadOptions
+
+When `hot` is set to a `HotReloadOptions` object, the following sub-options are available:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `rootDir` | `string` | Auto-detect from workflow entry | Root directory to watch for file changes. |
+| `outDir` | `string` | `.smithers/hmr/<runId>` | Directory for generation overlays. |
+| `maxGenerations` | `number` | `3` | Maximum number of overlay generations to keep. |
+| `cancelUnmounted` | `boolean` | `false` | Whether to cancel tasks that become unmounted after a hot reload. |
+| `debounceMs` | `number` | `100` | Debounce interval in milliseconds for file change events. |
 
 ## RunResult
 
@@ -1557,13 +1669,20 @@ console.log(snapshot.xml);           // XML tree representation
 ```ts
 function renderFrame<Schema>(
   workflow: SmithersWorkflow<Schema>,
-  ctx: RenderContext,
+  ctx: {
+    runId: string;
+    iteration: number;
+    iterations?: Record<string, number>;
+    input: object;
+    outputs: object;
+  },
+  opts?: { baseRootDir?: string },
 ): Promise<GraphSnapshot>;
 ```
 
-### RenderContext
+### Context Object
 
-The second argument is a context object that provides the data your workflow's JSX tree needs to render. It mirrors the `SmithersCtx` that `runWorkflow` builds internally.
+The second argument is a plain object that provides the data your workflow's JSX tree needs to render. It mirrors the `SmithersCtx` that `runWorkflow` builds internally. The parameter is typed as `any` in source, but it expects the shape shown above.
 
 | Field | Type | Description |
 |---|---|---|
@@ -1572,6 +1691,12 @@ The second argument is a context object that provides the data your workflow's J
 | `iterations` | `Record<string, number>` | Per-loop iteration counts, keyed by loop ID. Optional. |
 | `input` | `object` | The input data the workflow expects from `ctx.input`. |
 | `outputs` | `object` | Previously computed outputs, keyed by table name. Pass `{}` to render the initial state. |
+
+### Options (third argument)
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `baseRootDir` | `string` | `undefined` | Base root directory used to resolve relative paths inside the workflow tree. |
 
 ## GraphSnapshot
 
@@ -1621,21 +1746,31 @@ type TaskDescriptor = {
   ordinal: number;
   iteration: number;
   ralphId?: string;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  worktreeId?: string;
+  worktreePath?: string;
+  worktreeBranch?: string;
 
   outputTable: Table | null;
   outputTableName: string;
+  outputRef?: ZodObject<any>;
   outputSchema?: ZodObject<any>;
 
   parallelGroupId?: string;
   parallelMaxConcurrency?: number;
 
   needsApproval: boolean;
+  approvalMode?: "gate" | "decision";
+  approvalOnDeny?: "fail" | "continue" | "skip";
   skipIf: boolean;
   retries: number;
+  retryPolicy?: RetryPolicy;
   timeoutMs: number | null;
   continueOnFail: boolean;
+  cachePolicy?: CachePolicy;
 
-  agent?: AgentLike;
+  agent?: AgentLike | AgentLike[];
   prompt?: string;
   staticPayload?: unknown;
   computeFn?: () => unknown | Promise<unknown>;
@@ -1651,17 +1786,27 @@ type TaskDescriptor = {
 | `ordinal` | Position in the task list (0-indexed). |
 | `iteration` | The loop iteration this task belongs to. |
 | `ralphId` | The ID of the enclosing `<Loop>` component, if any. |
+| `dependsOn` | Array of node IDs this task explicitly depends on. |
+| `needs` | Named dependencies. Keys become context keys, values are task node IDs. |
+| `worktreeId` | ID of the git worktree assigned to this task. |
+| `worktreePath` | Filesystem path to the git worktree. |
+| `worktreeBranch` | Branch name for the git worktree. |
 | `outputTable` | The Drizzle table object for the task's output. |
 | `outputTableName` | String name of the output table. |
+| `outputRef` | Zod schema reference from the `<Task>` `output` prop (used for schema resolution). |
 | `outputSchema` | Optional Zod schema for validating agent output. |
 | `parallelGroupId` | ID of the `<Parallel>` group this task belongs to. |
 | `parallelMaxConcurrency` | Per-group concurrency limit from the enclosing `<Parallel>`. |
 | `needsApproval` | Whether this task requires human approval before executing. |
+| `approvalMode` | Approval style: `"gate"` pauses before execution, `"decision"` records a decision. |
+| `approvalOnDeny` | Behavior when approval is denied: `"fail"`, `"continue"`, or `"skip"`. |
 | `skipIf` | Whether this task should be skipped. |
 | `retries` | Number of retry attempts on failure. |
+| `retryPolicy` | Retry backoff configuration (`{ backoff?, initialDelayMs? }`). |
 | `timeoutMs` | Per-task timeout in milliseconds, or `null` for the global default. |
 | `continueOnFail` | Whether the workflow continues if this task fails. |
-| `agent` | The AI agent assigned to this task. |
+| `cachePolicy` | Cache configuration (`{ by?, version? }`). |
+| `agent` | The AI agent (or array of agents for fallback) assigned to this task. |
 | `prompt` | The resolved prompt string (from `<Task>` children). |
 | `staticPayload` | Static output data (for tasks without an agent). |
 | `computeFn` | Callback function invoked at execution time (for compute tasks). |
@@ -2458,16 +2603,17 @@ bunx smithers <command> [options]
 
 ### run
 
-Execute a workflow from a `.tsx` file.
+Execute a workflow from a `.tsx` or `.toon` file.
 
 ```bash
-smithers run <workflow.tsx> [options]
+smithers run <workflow.tsx | workflow.toon> [options]
 ```
 
 | Option | Description |
 |---|---|
 | `--input JSON` | Input data as a JSON string. Parsed and passed to `runWorkflow`. |
 | `--run-id ID` | Provide a specific run ID. Must not already exist (use `resume` for existing runs). |
+| `--resume` | Resume a previous run instead of starting fresh. Requires `--run-id`. This is an alternative to the standalone `smithers resume` command. |
 | `--max-concurrency N` | Maximum parallel tasks. Default: `4`. |
 | `--root PATH` | Root directory for the tool sandbox. Default: the workflow file's directory. |
 | `--log-dir PATH` | Directory for NDJSON event logs. Relative to root. Default: `.smithers/executions/<runId>/logs`. |
@@ -2492,15 +2638,27 @@ The command prints the `RunResult` as JSON to stdout and exits with the appropri
 Resume a paused or crashed run. Smithers reloads persisted state from SQLite and continues from the last checkpoint.
 
 ```bash
-smithers resume <workflow.tsx> --run-id ID [options]
+smithers resume <workflow.tsx | workflow.toon> --run-id ID [options]
 ```
 
-Accepts the same options as `run` (except `--input`, which is loaded from the database). Use `--hot` to enable hot reload during resumed runs.
+Accepts the same options as `run`. Use `--hot` to enable hot reload during resumed runs.
+
+| Option | Description |
+|---|---|
+| `--run-id ID` | **(required)** Run ID to resume. |
+| `--input JSON` | Input data as a JSON string. Overrides the input persisted in the database. |
+| `--force` | Resume even if the run is still marked as running. Without this flag, resuming a run with status `"running"` will fail. |
 
 **Example:**
 
 ```bash
 smithers resume workflow.tsx --run-id abc123
+```
+
+Force-resume a run that is still marked as running (e.g. after a crash):
+
+```bash
+smithers resume workflow.tsx --run-id abc123 --force
 ```
 
 ---
@@ -2733,8 +2891,10 @@ These options apply to `run` and `resume` commands:
 | `--max-output-bytes N` | Maximum bytes returned from a single tool call. | `200000` |
 | `--tool-timeout-ms N` | Maximum time in milliseconds for a single tool call. | `60000` |
 | `--max-concurrency N` | Maximum number of tasks running in parallel. | `4` |
-| `--input JSON` | Input data as a JSON string (for `run` only). | `{}` |
+| `--input JSON` | Input data as a JSON string. For `run`, provides the initial input; for `resume`, overrides the persisted input. | `{}` |
 | `--run-id ID` | Explicit run identifier. | Auto-generated |
+| `--resume` | Resume a previous run via the `run` command (requires `--run-id`). | Disabled |
+| `--force` | Resume even if the run is still marked as running (for `resume` only). | Disabled |
 | `--hot` | Enable [hot module replacement](/guides/hot-reload). Watches workflow files and reloads on save. In-flight tasks continue; new tasks use updated code. | Disabled |
 | `--version`, `-v` | Print version and exit. | -- |
 | `--help`, `-h` | Print help and exit. | -- |
@@ -2751,7 +2911,11 @@ These options apply to `run` and `resume` commands:
 
 ## Workflow File
 
-Every command (except `--version` and `--help`) takes a `<workflow.tsx>` path as its first positional argument. This file must have a default export that is a `SmithersWorkflow` object, typically created by calling `smithers(...)`.
+Every command (except `--version` and `--help`) takes a workflow path as its first positional argument. Smithers supports two workflow formats:
+
+### `.tsx` workflows
+
+A `.tsx` file must have a default export that is a `SmithersWorkflow` object, typically created by calling `smithers(...)`.
 
 ```tsx
 // workflow.tsx
@@ -2769,6 +2933,17 @@ export default smithers((ctx) => (
 ```
 
 The workflow file is dynamically imported at runtime, so it can use any TypeScript features supported by Bun.
+
+### `.toon` workflows
+
+A `.toon` file defines a workflow using the TOON declarative format. When a `.toon` file is passed to `run` or `resume`, Smithers loads it via `Smithers.loadToon()` and stores its database at `smithers.db` in the same directory as the workflow file.
+
+```bash
+smithers run workflow.toon --input '{"description": "Fix auth bug"}'
+smithers resume workflow.toon --run-id abc123
+```
+
+See the [TOON documentation](/toon/overview) for the full `.toon` file format reference.
 
 ## Typical Workflow
 
@@ -3027,26 +3202,20 @@ Execute a shell command.
 
 By default, the `bash` tool blocks commands that access the network. This is controlled by the `allowNetwork` option in `RunOptions`, the CLI (`--allow-network`), or the server configuration.
 
-When `allowNetwork` is `false` (the default), the following are blocked:
+When `allowNetwork` is `false` (the default), the tool checks whether the command string (executable + arguments joined together) contains any blocked fragment. If a match is found, the command is rejected with an error.
 
-**Blocked executables:**
+**Blocked fragments:**
 
-| Category | Commands |
+| Category | Blocked strings |
 |---|---|
 | HTTP clients | `curl`, `wget` |
-| Remote shells | `ssh`, `scp`, `sftp`, `ftp`, `telnet` |
-| Network tools | `nc` / `netcat`, `ping`, `traceroute`, `dig`, `nslookup`, `nmap`, `openssl` |
-| Package managers | `npm`, `bun`, `pip`, `pip3`, `pnpm`, `yarn`, `apt`, `apt-get`, `brew`, `cargo`, `go`, `gem` |
+| URL prefixes | `http://`, `https://` |
+| Package managers | `npm`, `bun`, `pip` |
 | Version control (remote ops) | `git push`, `git pull`, `git fetch`, `git clone`, `git remote` |
-| Other | `hg`, `svn`, `powershell`, `pwsh` |
 
-**URL detection:** Any argument containing `://`, `www.`, `http://`, `https://`, `ws://`, `wss://`, `git@`, or `ssh://` is blocked.
+Git remote operations are only checked when `git` appears in the command string. Local `git` commands (e.g., `git status`, `git diff`, `git log`) are allowed even when network access is disabled.
 
-**IP detection:** Arguments matching an IP address pattern (e.g., `192.168.1.1:8080`) are blocked.
-
-**Proxy detection:** Arguments containing `--proxy`, `http_proxy`, or `https_proxy` are blocked.
-
-Local `git` commands (e.g., `git status`, `git diff`, `git log`) are allowed even when network access is disabled.
+> **Note:** The current blocked list is intentionally minimal. Additional commands and detection patterns (e.g., remote shells, network utilities, proxy arguments) may be blocked in future versions.
 
 **Example:**
 
@@ -3164,6 +3333,12 @@ import {
 import { useLinear, linearTools, startWebhookServer } from "smithers-orchestrator/linear";
 ```
 
+> **Subpath-only exports:** Some symbols are only available from `smithers-orchestrator/linear` and are *not* re-exported from the main `smithers-orchestrator` barrel:
+>
+> - `resetLinearClient` — clears the cached Linear SDK client (useful in tests)
+> - Individual tool functions: `linearListIssues`, `linearGetIssue`, `linearUpdateIssue`, `linearAddComment`, `linearListTeams`
+> - Types: `LinearProject`, `LinearIssueStatus`, `ListIssuesParams`
+
 ## useLinear
 
 A hook that returns typed operations for interacting with Linear. All return values are plain serializable objects (not SDK lazy models), safe to pass between tasks.
@@ -3221,13 +3396,15 @@ Post a markdown comment on an issue.
 const commentId = await linear.addComment(issue.id, "## Done\nShipped in v1.2.0");
 ```
 
-### listComments
+### listComments <span style={{opacity:0.6}}>(programmatic only)</span>
 
 Fetch all comments on an issue.
 
 ```ts
 const comments = await linear.listComments(issue.id);
 ```
+
+> `listComments` is only available as a programmatic method on the `useLinear()` hook. There is no corresponding agent tool in `linearTools`.
 
 ### listTeams
 
@@ -3238,7 +3415,7 @@ const teams = await linear.listTeams();
 const team = teams.find(t => t.key === "ENG");
 ```
 
-### listProjects
+### listProjects <span style={{opacity:0.6}}>(programmatic only)</span>
 
 List all projects in the workspace.
 
@@ -3246,7 +3423,9 @@ List all projects in the workspace.
 const projects = await linear.listProjects();
 ```
 
-### listIssueStatuses
+> `listProjects` is only available as a programmatic method on the `useLinear()` hook. There is no corresponding agent tool in `linearTools`.
+
+### listIssueStatuses <span style={{opacity:0.6}}>(programmatic only)</span>
 
 List all workflow states for a team.
 
@@ -3254,6 +3433,8 @@ List all workflow states for a team.
 const statuses = await linear.listIssueStatuses(team.id);
 const inProgress = statuses.find(s => s.name === "In Progress");
 ```
+
+> `listIssueStatuses` is only available as a programmatic method on the `useLinear()` hook. There is no corresponding agent tool in `linearTools`.
 
 ## linearTools
 
@@ -3281,6 +3462,27 @@ const triageAgent = new Agent({
 | `linearUpdateIssue` | Update an issue's state |
 | `linearAddComment` | Add a comment to an issue |
 | `linearListTeams` | List all workspace teams |
+
+### Importing individual tools
+
+If you only need a subset of Linear tools, you can import them individually from the subpath instead of using the bundled `linearTools` object:
+
+```ts
+import {
+  linearListIssues,
+  linearGetIssue,
+  linearUpdateIssue,
+  linearAddComment,
+  linearListTeams,
+} from "smithers-orchestrator/linear";
+
+const agent = new Agent({
+  model: anthropic("claude-sonnet-4-20250514"),
+  tools: { linearListIssues, linearGetIssue, read, grep },
+});
+```
+
+> These individual tool exports are only available from `smithers-orchestrator/linear`, not from the main `smithers-orchestrator` barrel.
 
 ## Types
 
@@ -3496,13 +3698,21 @@ const client = getLinearClient();
 const viewer = await client.viewer;
 ```
 
-The client is a lazy singleton — it's created once on first access using `LINEAR_API_KEY` and cached for the process lifetime. Call `resetLinearClient()` to clear the cache (useful in tests).
+The client is a lazy singleton — it's created once on first access using `LINEAR_API_KEY` and cached for the process lifetime. Call `resetLinearClient()` to clear the cache (useful in tests):
+
+```ts
+import { resetLinearClient } from "smithers-orchestrator/linear";
+
+resetLinearClient();
+```
+
+> `resetLinearClient` is only available from `smithers-orchestrator/linear`, not from the main barrel export.
 
 ---
 
 ## CLI Agents
 
-> Run external AI CLI tools (Claude Code, Codex, Gemini CLI, PI, Kimi, Forge) as drop-in Smithers agents that implement the AI SDK agent interface.
+> Run external AI CLI tools (Claude Code, Codex, Gemini CLI, PI, Kimi, Forge, Amp) as drop-in Smithers agents that implement the AI SDK agent interface.
 > Source: https://smithers.sh/integrations/cli-agents
 
 Smithers ships CLI-backed agent classes that wrap external AI command-line tools. Each agent implements the AI SDK `Agent` interface, so they work as drop-in replacements anywhere you would use an AI SDK agent -- including in `<Task>` components.
@@ -3521,6 +3731,7 @@ import {
   PiAgent,
   KimiAgent,
   ForgeAgent,
+  AmpAgent,
   type PiAgentOptions,
   type PiExtensionUiRequest,
   type PiExtensionUiResponse,
@@ -3539,11 +3750,12 @@ Each agent requires its corresponding CLI tool installed and available in the sy
 | `PiAgent` | `pi` | [PI Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) |
 | `KimiAgent` | `kimi` | [Kimi CLI](https://moonshotai.github.io/kimi-cli/) |
 | `ForgeAgent` | `forge` | [Forge CLI](https://github.com/antinomyhq/forge) |
+| `AmpAgent` | `amp` | [Amp CLI](https://github.com/nichochar/amp-cli) |
 
 ## Quick Start
 
 ```ts
-import { ClaudeCodeAgent, CodexAgent, GeminiAgent, PiAgent, KimiAgent, ForgeAgent } from "smithers-orchestrator";
+import { ClaudeCodeAgent, CodexAgent, GeminiAgent, PiAgent, KimiAgent, ForgeAgent, AmpAgent } from "smithers-orchestrator";
 
 const claude = new ClaudeCodeAgent({ model: "claude-sonnet-4-20250514" });
 const codex = new CodexAgent({ model: "gpt-4.1" });
@@ -3551,6 +3763,7 @@ const gemini = new GeminiAgent({ model: "gemini-2.5-pro" });
 const pi = new PiAgent({ provider: "openai", model: "gpt-5.2-codex" });
 const kimi = new KimiAgent({ model: "kimi-latest" });
 const forge = new ForgeAgent({ model: "anthropic/claude-sonnet-4-20250514" });
+const amp = new AmpAgent({ model: "claude-sonnet-4-20250514" });
 ```
 
 Use them in workflows like any other agent:
@@ -3787,7 +4000,7 @@ type GeminiAgentOptions = BaseCliAgentOptions & {
 | `allowedTools` | Whitelist of tool names |
 | `extensions` | Gemini CLI extensions to load |
 | `includeDirectories` | Additional directories to include |
-| `outputFormat` | Output format: `"text"`, `"json"`, or `"stream-json"` (default: `"text"`) |
+| `outputFormat` | Output format: `"text"`, `"json"`, or `"stream-json"` (default: `"json"`) |
 
 **Yolo mode behavior:** When `yolo` is `true` and `approvalMode` is not set, the agent passes `--yolo`.
 
@@ -3980,6 +4193,50 @@ type ForgeAgentOptions = BaseCliAgentOptions & {
 
 ---
 
+## AmpAgent
+
+Wraps the `amp` CLI using `--execute` mode for non-interactive execution.
+
+```ts
+const amp = new AmpAgent({
+  model: "claude-sonnet-4-20250514",
+  visibility: "private",
+  logLevel: "info",
+});
+```
+
+### Amp-Specific Options
+
+```ts
+type AmpAgentOptions = BaseCliAgentOptions & {
+  visibility?: "private" | "public" | "workspace" | "group";
+  mcpConfig?: string;
+  settingsFile?: string;
+  logLevel?: "error" | "warn" | "info" | "debug" | "audit";
+  logFile?: string;
+  dangerouslyAllowAll?: boolean;
+  ide?: boolean;
+  jetbrains?: boolean;
+};
+```
+
+**Key options:**
+
+| Option | Description |
+|---|---|
+| `visibility` | Thread visibility: `"private"`, `"public"`, `"workspace"`, or `"group"` |
+| `mcpConfig` | Path to MCP configuration file |
+| `settingsFile` | Path to custom settings file |
+| `logLevel` | Log verbosity: `"error"`, `"warn"`, `"info"`, `"debug"`, or `"audit"` |
+| `logFile` | Path to log output file |
+| `dangerouslyAllowAll` | Allow all tool calls without confirmation |
+
+**Yolo mode behavior:** When `yolo` is `true` (the default) or `dangerouslyAllowAll` is `true`, the agent passes `--dangerously-allow-all`.
+
+**Input handling:** The prompt (with system prompt prepended) is passed via the `--execute` flag. The agent automatically passes `--no-ide`, `--no-jetbrains`, `--no-color`, and `--archive` for headless execution.
+
+---
+
 ## Agent Interface
 
 All CLI agents implement the AI SDK `Agent` interface with two methods:
@@ -4060,6 +4317,126 @@ export default smithers((ctx) => (
   </Workflow>
 ));
 ```
+
+---
+
+## SDK Agents
+
+> Provider-backed AI SDK agent wrappers for Anthropic and OpenAI that work like first-class Smithers agents.
+> Source: https://smithers.sh/integrations/sdk-agents
+
+Smithers ships direct SDK agent classes for the API-billed path:
+
+- `AnthropicAgent`
+- `OpenAIAgent`
+
+They are thin wrappers around the AI SDK `ToolLoopAgent`, but they let you configure agents with the same class-style ergonomics as the CLI-backed agents.
+
+## Import
+
+```ts
+import {
+  AnthropicAgent,
+  OpenAIAgent,
+  tools,
+} from "smithers-orchestrator";
+import { stepCountIs } from "ai";
+```
+
+## Quick Start
+
+```ts
+const claude = new AnthropicAgent({
+  model: "claude-opus-4-6",
+  tools,
+  instructions: "You are a careful planner.",
+  stopWhen: stepCountIs(40),
+});
+
+const codex = new OpenAIAgent({
+  model: "gpt-5.3-codex",
+  tools,
+  instructions: "You are a precise implementation agent.",
+  stopWhen: stepCountIs(40),
+});
+```
+
+Use them anywhere Smithers accepts an `agent`:
+
+```tsx
+{/* outputs comes from createSmithers() */}
+<Task id="plan" output={outputs.plan} agent={claude}>
+  Analyze the repository and propose a migration plan.
+</Task>
+```
+
+## Model Input
+
+Both classes accept either:
+
+- a model id string, such as `"claude-opus-4-6"` or `"gpt-5.3-codex"`
+- a prebuilt AI SDK language model instance for advanced setups
+
+That means you can stay with the simple string form in application code, but still inject a custom model object in tests.
+
+## Options
+
+The constructors forward the normal AI SDK `ToolLoopAgent` settings, including:
+
+- `instructions`
+- `tools`
+- `stopWhen`
+- `maxOutputTokens`
+- `temperature`
+- `providerOptions`
+- `prepareCall`
+
+The only Smithers-specific difference is the `model` prop: the wrapper resolves model-id strings for you.
+
+## TOON Support
+
+TOON agent configs can now use direct SDK agent types directly:
+
+```toon
+agents:
+  planner:
+    type: anthropic
+    model: claude-opus-4-6
+    instructions: You are a careful planner.
+
+  implementer:
+    type: openai
+    model: gpt-5.3-codex
+    instructions: You are a precise implementation agent.
+```
+
+The older `type: api` shape with `provider` + `model` still works.
+
+## CLI vs SDK
+
+- Use [CLI Agents](/integrations/cli-agents) when you want the provider's native CLI tool ecosystem and subscription billing.
+- Use SDK agents when you want API billing, provider options, or Smithers' own tool sandbox via `tools`.
+- You can still pass a raw `ToolLoopAgent` instance if you prefer. The wrappers are convenience, not a separate runtime.
+
+## Example Dual Setup
+
+```ts
+const useCli = process.env.USE_CLI_AGENTS === "1";
+
+export const claude = useCli
+  ? new ClaudeCodeAgent({
+      model: "claude-opus-4-6",
+      dangerouslySkipPermissions: true,
+    })
+  : new AnthropicAgent({
+      model: "claude-opus-4-6",
+      tools,
+      instructions: "You are a careful planner.",
+      stopWhen: stepCountIs(40),
+    });
+```
+
+For a broader comparison, see [Model Selection](/guides/model-selection).
 
 ---
 
@@ -4971,12 +5348,103 @@ console.log(`Final status: ${status.status}`);
 
 ---
 
+## PI Integration
+
+> Use PI as a Smithers workflow CLI backend and understand how PI extensibility composes with Smithers declarative orchestration.
+> Source: https://smithers.sh/integrations/pi-integration
+
+This guide explains how PI and Smithers fit together for workflow execution in this repo. Chat-provider UI integration is out of scope here.
+
+## Why Combine PI and Smithers
+
+- Smithers gives deterministic orchestration: workflow graph, approvals, retries, and durable run data.
+- PI gives adaptive agent capabilities: providers/models, extensions, skills, prompt templates, and package ecosystem.
+
+Use both together when you want deterministic execution with flexible agent behavior.
+
+## Integration Modes
+
+### 1) PI as Workflow Agent (`PiAgent`)
+
+Use `PiAgent` in workflow tasks like any other CLI-backed agent:
+
+```tsx
+import { PiAgent } from "smithers-orchestrator";
+
+const pi = new PiAgent({
+  provider: "openai",
+  model: "gpt-5.2-codex",
+  mode: "text",
+});
+
+{/* outputs comes from createSmithers() */}
+<Task id="implementation" output={outputs.implementation} agent={pi}>
+  {`Implement feature X and explain tradeoffs.`}
+</Task>
+```
+
+`PiAgent` supports common PI CLI flags including provider/model, tools, extension paths, skill paths, prompt templates, themes, and session flags. Text mode uses `--print` by default (no explicit `--mode` flag), while JSON/RPC modes set `--mode` and do not enable `--print`. PI’s extensibility surface is broader than the other CLI agents (extensions + skills + prompt templates + themes), so expose those explicitly when you need adaptive behavior.
+
+### 2) PI Server Client (`pi-plugin`)
+
+Use `pi-plugin` when you need to drive Smithers server APIs from a PI extension or another Node process:
+
+```ts
+import { runWorkflow, approve, streamEvents } from "smithers-orchestrator/pi-plugin";
+```
+
+The client is a thin HTTP wrapper for Smithers server endpoints and remains unchanged by PI agent support.
+
+### 3) PI Extensibility + Smithers Orchestration (Hybrid)
+
+Recommended split:
+
+- Keep orchestration in Smithers (`<Sequence>`, `<Parallel>`, `<Branch>`, `<Loop>`).
+- Run adaptive logic in PI tasks (extensions/skills/provider overrides).
+
+Pattern examples:
+
+1. PI skill-driven coding task in a Smithers `<Task>`.
+2. PI extension command that starts or resumes Smithers workflows via server API or pi-plugin.
+3. Smithers workflow output persisted to SQLite and consumed by later PI-assisted tasks.
+
+## End-to-End Setup
+
+1. Install PI CLI and ensure it is on `PATH`.
+2. Configure PI credentials/provider environment as required by your PI setup (prefer env/config over CLI args for API keys).
+3. For workflows, instantiate `PiAgent` with explicit options.
+4. For server-driven workflows, use `pi-plugin` to call Smithers server APIs.
+
+Quick sanity checks:
+
+```bash
+pi --version
+bun run test
+```
+
+## Design Guidance
+
+Use `PiAgent` task nodes when:
+
+- You need PI capabilities inside deterministic workflows.
+- You want PI calls as explicit, auditable workflow steps.
+
+Use Smithers-native tasks/tools when:
+
+- You need strict reproducibility and narrow tool contracts.
+
+## Limitations and Expectations
+
+Chat-provider integration lives in host applications, not this repo.
+
+---
+
 ## TOON Overview
 
 > Declarative .toon files for defining Smithers workflows without TypeScript boilerplate.
 > Source: https://smithers.sh/toon/overview
 
-TOON is the primary way to define Smithers workflows. A `.toon` file is a declarative document — similar to MDX but for workflow orchestration — that compiles to the same durable execution engine as the Effect builder API.
+TOON is the primary way to define Smithers workflows. A `.toon` file uses the [TOON format](https://github.com/toon-format/toon) (Token-Oriented Object Notation) — a compact, line-oriented data format that combines YAML-style indentation for objects with CSV-style tabular layout for uniform arrays. TOON is **not** YAML: it requires explicit array lengths (`[N]`), supports tabular `{field}` headers, and has no comment syntax. Smithers compiles `.toon` files to the same durable execution engine as the Effect builder API.
 
 ## What Is a TOON File?
 
@@ -5262,9 +5730,8 @@ You can also import agents defined in TypeScript:
 
 ```toon
 imports:
-  agents[1]:
-    - from: ./agents.ts
-      use[2]: coder,reviewer
+  agents[1]{from,use}:
+    ./agents.ts,"coder,reviewer"
 ```
 
 This lets you share agent configurations across workflows or use agents with custom setup that can't be expressed in TOON syntax.
@@ -5408,22 +5875,30 @@ Use this when you want things like:
 - `handler:` functions that run Effect code
 - shared services loaded through `imports:`
 
-## Optional TOON Plugins
+## Agents in TOON
 
-If you want TOON-specific plugins for model providers or custom node kinds, install them alongside the core runtime:
+TOON files declare agents inline using the `agents:` block. No extra packages are needed — Smithers ships with built-in support for multiple providers (Anthropic, OpenAI, Gemini, and more) through the Vercel AI SDK.
 
-```bash
-bun add smithers-plugin-anthropic
+```toon
+agents:
+  assistant:
+    type: anthropic
+    model: claude-sonnet-4-20250514
+    instructions: You are a concise assistant.
 ```
 
-Then reference them from your `.toon` file:
+Supported agent types include `anthropic`, `claude-code`, `openai`, `gemini`, `codex`, and others. See the [TOON Overview](/toon/overview) for details on declaring agents.
+
+## Optional TOON Plugins
+
+If you need custom node kinds or additional services, write a local plugin file and import it:
 
 ```toon
 imports:
   plugins[1]:
-    - from: smithers-plugin-anthropic
+    - from: ./my-plugin.ts
       config:
-        defaultModel: claude-sonnet-4-20250514
+        suffix: "!"
 ```
 
 Plugins are loaded when Smithers compiles the `.toon` file. They can register providers, node kinds, interpolation helpers, and supporting services.
@@ -5602,9 +6077,8 @@ For complex or shared schemas, import them from TypeScript:
 
 ```toon
 imports:
-  schemas[1]:
-    - from: ./schemas.ts
-      use[2]: TicketInput,AnalysisOutput
+  schemas[1]{from,use}:
+    ./schemas.ts,"TicketInput,AnalysisOutput"
 
 name: bugfix
 input: TicketInput
@@ -5817,11 +6291,17 @@ steps[1]:
     maxConcurrency: 2
     children[3]:
       - id: task-1
-        # ...
+        prompt: Do task 1.
+        output:
+          result: string
       - id: task-2
-        # ...
+        prompt: Do task 2.
+        output:
+          result: string
       - id: task-3
-        # ...
+        prompt: Do task 3.
+        output:
+          result: string
 ```
 
 ## Loop
@@ -6065,8 +6545,6 @@ steps[2]:
       maxWords: 100
       format: "bullet"
 
-  # Generates steps: first-pass-summarize
-
   - id: second-pass
     kind: component
     use: Summarizer
@@ -6074,8 +6552,6 @@ steps[2]:
       text: "{first-pass-summarize.summary}"
       maxWords: 50
       format: "prose"
-
-  # Generates steps: second-pass-summarize
 ```
 
 The `{id}` token in the component definition is replaced with the caller's `id` value at compile time.
@@ -6130,11 +6606,9 @@ Components can be imported from other `.toon` files:
 
 ```toon
 imports:
-  components[2]:
-    - from: ./shared/review.toon
-      use[1]: ReviewCycle
-    - from: ./shared/deploy.toon
-      use[1]: GuardedDeploy
+  components[2]{from,use}:
+    ./shared/review.toon,ReviewCycle
+    ./shared/deploy.toon,GuardedDeploy
 
 name: full-pipeline
 input:
@@ -6336,10 +6810,12 @@ components:
 **Reference specific fields.** Instead of passing an entire object, reference the specific fields the model needs:
 
 ```toon
-# Prefer this
 prompt: "Summary: {analysis.summary}\nSeverity: {analysis.severity}"
+```
 
-# Over this
+Over passing entire objects:
+
+```toon
 prompt: "Analysis: {analysis}"
 ```
 
@@ -6520,7 +6996,7 @@ steps[1]:
 > Import schemas, services, components, and other .toon files into your workflow.
 > Source: https://smithers.sh/toon/imports
 
-The `imports:` block at the top of a `.toon` file lets you bring in external TypeScript types, Effect services, TOON components, and plugins.
+The `imports:` block at the top of a `.toon` file lets you bring in external TypeScript types, Effect services, TOON components, and plugins. Import arrays use TOON's tabular format for compact, readable declarations.
 
 ## Importing Schemas
 
@@ -6528,9 +7004,8 @@ Import `Schema.Class` or `Model.Class` definitions for use as input or output ty
 
 ```toon
 imports:
-  schemas[1]:
-    - from: ./schemas.ts
-      use[3]: TicketInput,AnalysisOutput,ReviewOutput
+  schemas[1]{from,use}:
+    ./schemas.ts,"TicketInput,AnalysisOutput,ReviewOutput"
 
 name: bugfix
 input: TicketInput
@@ -6551,11 +7026,9 @@ Import Effect services to make them available in `handler:` functions and `run:`
 
 ```toon
 imports:
-  services[2]:
-    - from: ./services/coder.ts
-      use[1]: Coder
-    - from: ./services/jj.ts
-      use[1]: JJ
+  services[2]{from,use}:
+    ./services/coder.ts,Coder
+    ./services/jj.ts,JJ
 
 steps[1]:
   - id: fix
@@ -6572,11 +7045,9 @@ Import reusable components from other `.toon` files:
 
 ```toon
 imports:
-  components[2]:
-    - from: ./shared/review-cycle.toon
-      use[1]: ReviewCycle
-    - from: ./shared/deploy-gate.toon
-      use[1]: GuardedDeploy
+  components[2]{from,use}:
+    ./shared/review-cycle.toon,ReviewCycle
+    ./shared/deploy-gate.toon,GuardedDeploy
 
 steps[1]:
   - id: review
@@ -6593,9 +7064,8 @@ Import an entire `.toon` file as a sub-workflow:
 
 ```toon
 imports:
-  workflows[1]:
-    - from: ./sub-workflows/research.toon
-      as: research
+  workflows[1]{from,as}:
+    ./sub-workflows/research.toon,research
 
 steps[2]:
   - id: do-research
@@ -6612,7 +7082,7 @@ steps[2]:
 
 ## Plugin Setup
 
-Plugins extend TOON with custom node kinds, model providers, or services. Register them in the `imports:` block:
+Plugins extend TOON with custom node kinds, model providers, or services. Plugins have per-entry config, so they use expanded list items:
 
 ```toon
 imports:
@@ -6638,7 +7108,7 @@ Imports are resolved relative to the `.toon` file's directory:
 ```
 project/
   workflows/
-    main.toon           # imports from: "./shared/review.toon"
+    main.toon
     shared/
       review.toon
   schemas/
@@ -6661,15 +7131,12 @@ Combine different import types freely:
 
 ```toon
 imports:
-  schemas[1]:
-    - from: ./schemas.ts
-      use[2]: Input,Output
-  services[1]:
-    - from: ./services/index.ts
-      use[3]: Coder,Reviewer,Deployer
-  components[1]:
-    - from: ./shared/patterns.toon
-      use[2]: ReviewLoop,DeployGate
+  schemas[1]{from,use}:
+    ./schemas.ts,"Input,Output"
+  services[1]{from,use}:
+    ./services/index.ts,"Coder,Reviewer,Deployer"
+  components[1]{from,use}:
+    ./shared/patterns.toon,"ReviewLoop,DeployGate"
   plugins[1]:
     - from: smithers-plugin-anthropic
 ```
@@ -6793,9 +7260,8 @@ A multi-step bugfix workflow that imports schemas from TypeScript and uses inlin
 
 ```toon
 imports:
-  schemas[1]:
-    - from: ./schemas.ts
-      use[1]: TicketInput
+  schemas[1]{from,use}:
+    ./schemas.ts,TicketInput
 
 name: bugfix
 agents:
@@ -7113,7 +7579,7 @@ A `.toon` file is a TOON (Token-Oriented Object Notation) document with the foll
 ```toon
 imports:        # optional — external schemas, services, components, plugins, agents
 name:           # required — workflow name
-agents:         # required — named agent declarations
+agents:         # optional — named agent declarations (not needed if agents are imported or steps use run/handler)
 input:          # required — input schema
 schemas:        # optional — reusable output schemas
 components:     # optional — reusable step groups
@@ -7148,28 +7614,31 @@ input: TicketInput
 
 ### `agents`
 
-**Required** (for workflows with `prompt:` steps). Named agent declarations.
+**Optional.** Named agent declarations. Required only when steps use `prompt:` and agents are not imported.
 
 ```toon
 agents:
   coder:
     type: claude-code
-    model: claude-opus-4-6
     subscription: true
     instructions: You are a senior software engineer.
 
   reviewer:
     type: codex
-    model: gpt-5.4
     fullAuto: true
+
+  analyst:
+    type: anthropic
+    model: claude-opus-4-6
+    instructions: You are a data analyst.
 ```
 
 Each agent has:
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `type` | string | yes | Agent runtime: `claude-code`, `codex`, `gemini`, `pi`, `kimi`, `forge`, `api` |
-| `model` | string | yes | Model identifier |
+| `type` | string | yes | Agent runtime: `claude-code`, `codex`, `gemini`, `pi`, `kimi`, `forge`, `anthropic`, `openai`, `api` |
+| `model` | string | conditional | Model identifier. Required for `anthropic`, `openai`, and `api` types. Optional for CLI agents (`claude-code`, `codex`, `gemini`, `pi`, `kimi`, `forge`) which have built-in defaults. |
 | `instructions` | string | no | System prompt / persona |
 | `tools` | "string[]" | no | Tool names the agent can use |
 | `subscription` | boolean | no | Use subscription billing (Claude Code) |
@@ -7177,6 +7646,24 @@ Each agent has:
 | `idleTimeoutMs` | number | no | Inactivity timeout in milliseconds |
 
 Additional type-specific fields are passed through to the underlying agent constructor (e.g., `fullAuto` for Codex, `permissionMode` for Claude Code, `sandbox` for Gemini).
+
+#### `type: api`
+
+The `api` type is a generic provider-based agent that requires explicit `provider` and `model` fields. Currently supported providers are `anthropic` and `openai`.
+
+```toon
+agents:
+  custom-agent:
+    type: api
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+    instructions: You are a helpful assistant.
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `provider` | string | yes | Provider name: `anthropic` or `openai` |
+| `model` | string | yes | Model identifier for the provider |
 
 ### `schemas`
 
@@ -7236,22 +7723,42 @@ Every entry in `steps:` is a node. Nodes are either **steps** (default) or **con
 ### Step Node (default)
 
 ```toon
-- id: analyze            # required — unique identifier
-  agent: coder            # required for prompt steps — references a declared agent
-  prompt: ...             # prompt text (mutually exclusive with run/handler)
-  run: ...                # inline TypeScript (mutually exclusive with prompt/handler)
-  handler: ...            # TypeScript function reference (mutually exclusive with prompt/run)
-  output: ...             # required — output schema (inline or reference)
-  needs[2]: step-id-1,step-id-2  # optional — explicit dependencies
-  retry:                  # optional — retry policy
-    maxAttempts: 3
-    backoff: exponential | linear | fixed
-    initialDelay: 250ms
-  timeout: 5m             # optional — step timeout
-  cache:                  # optional — cache policy
-    by[1]: field
-    version: "v1"
-  skipIf: "expression"    # optional — skip condition
+- id: analyze
+  agent: coder
+  prompt: Analyze the code.
+  output: AnalysisOutput
+  needs[2]: step-id-1,step-id-2
+  maxAttempts: 3
+  timeout: 5m
+  skipIf: "expression"
+```
+
+Each step must define exactly one of `prompt`, `run`, or `handler`.
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | yes | Unique step identifier |
+| `agent` | string | for prompt | References a declared agent |
+| `prompt` | string | no | Prompt text (mutually exclusive with run/handler) |
+| `run` | string | no | Inline TypeScript (mutually exclusive with prompt/handler) |
+| `handler` | string | no | TypeScript function reference (mutually exclusive with prompt/run) |
+| `output` | schema/string | yes | Output schema — inline block or named reference |
+| `needs` | string/array | no | Explicit dependencies on other step ids |
+| `maxAttempts` | number | no | Retry count (flat alternative to nested `retry:` block) |
+| `retry` | object | no | Retry policy with `maxAttempts`, `backoff`, `initialDelay` |
+| `timeout` | duration | no | Step timeout (e.g. `5m`, `30s`) |
+| `cache` | object | no | Cache policy with `by` and `version` |
+| `skipIf` | string | no | Condition expression to skip the step |
+
+#### `handler` (advanced)
+
+The `handler` field references an external TypeScript module that exports a function. The format is `./path/to/module.ts` or `./path/to/module.ts#namedExport`. If no export name is specified, the default export is used. The function receives the step context (with `input`, upstream step outputs, and services) and returns the step output.
+
+```toon
+- id: transform
+  handler: ./handlers/transform.ts#processData
+  output:
+    result: string
 ```
 
 ### `kind: sequence`
@@ -7325,6 +7832,19 @@ Every entry in `steps:` is a node. Nodes are either **steps** (default) or **con
       ...
 ```
 
+### `kind: workflow`
+
+Invokes an imported workflow as a sub-workflow. The `use` field references a workflow alias declared in `imports.workflows`. Input fields are mapped via the `input` block and support interpolation.
+
+```toon
+- kind: workflow
+  id: run-tests            # required — step identifier
+  use: testSuite           # required — workflow alias from imports
+  input:                   # optional — input mapping
+    repo: "{input.repoUrl}"
+    branch: "{checkout.branch}"
+```
+
 ### `kind: component`
 
 ```toon
@@ -7377,43 +7897,43 @@ Timeouts and delays use duration strings:
 
 ## Import Blocks
 
+Imports use TOON's tabular array format for compact declarations. Each import category is a tabular array with `{from,use}` or `{from,as}` field headers.
+
 ### Schema Import
 
 ```toon
 imports:
-  schemas[1]:
-    - from: ./path.ts
-      use[1]: TypeName
+  schemas[1]{from,use}:
+    ./path.ts,TypeName
 ```
 
 ### Service Import
 
 ```toon
 imports:
-  services[1]:
-    - from: ./path.ts
-      use[1]: ServiceTag
+  services[1]{from,use}:
+    ./path.ts,ServiceTag
 ```
 
 ### Component Import
 
 ```toon
 imports:
-  components[1]:
-    - from: ./path.toon
-      use[1]: ComponentName
+  components[1]{from,use}:
+    ./path.toon,ComponentName
 ```
 
 ### Workflow Import
 
 ```toon
 imports:
-  workflows[1]:
-    - from: ./path.toon
-      as: aliasName
+  workflows[1]{from,as}:
+    ./path.toon,aliasName
 ```
 
 ### Plugin Import
+
+Plugins have per-entry config objects, so they use expanded list items:
 
 ```toon
 imports:
@@ -7431,6 +7951,7 @@ imports:
 - `kind: loop` repeats children until `until:` is true or `maxIterations` is reached
 - `kind: approval` **suspends** execution durably
 - `kind: branch` takes one path based on `condition:`
+- `kind: workflow` invokes an imported workflow as a sub-workflow
 - Dependencies declared in `needs:` are resolved before the step runs
 - Implicit dependencies from `{stepId.field}` interpolation are also resolved
 
@@ -7907,7 +8428,8 @@ import { Task } from "smithers-orchestrator";
 | `id` | `string` | **(required)** | Stable node identity. Must be unique within the workflow. Duplicate ids throw an error at render time. |
 | `output` | `z.ZodObject \| Table \| string` | **(required)** | Where to store the task's result. Pass a Zod schema from the `outputs` object (recommended), a Drizzle table, or a string key. When using `createSmithers`, this is type-checked against the registered schemas. |
 | `outputSchema` | `z.ZodObject` | `undefined` | Optional Zod schema describing the expected agent output structure. When `output` is already a Zod schema this is inferred automatically. When provided with a React element child, the schema example is auto-injected via a `schema` prop. |
-| `agent` | `AgentLike` | `undefined` | An AI SDK agent. When present, the task runs in agent mode and children become the prompt. |
+| `agent` | `AgentLike \| AgentLike[]` | `undefined` | An AI SDK agent or array of agents `[primary, fallback1, fallback2, ...]`. When present, the task runs in agent mode and children become the prompt. When an array is provided, agents are tried in order on retries. |
+| `fallbackAgent` | `AgentLike` | `undefined` | Convenience alias for a single retry fallback agent. Appended to the `agent` chain without requiring array syntax in JSX. |
 | `dependsOn` | `string[]` | `undefined` | Explicit dependency on other task node IDs. The task will not run until all listed tasks complete. |
 | `needs` | `Record<string, string>` | `undefined` | Named dependencies on other tasks. Keys become context keys, values are task node IDs. |
 | `key` | `string` | `undefined` | React key for the element (standard React prop). |
@@ -7915,7 +8437,9 @@ import { Task } from "smithers-orchestrator";
 | `needsApproval` | `boolean` | `false` | When `true`, the runtime pauses before executing and waits for approval. |
 | `timeoutMs` | `number` | `undefined` | Maximum execution time in milliseconds. The task fails if it exceeds this duration. |
 | `retries` | `number` | `0` | Number of retry attempts on failure before the task is marked as failed. |
+| `retryPolicy` | `RetryPolicy` | `undefined` | Retry timing configuration. `{ backoff?: "fixed" \| "linear" \| "exponential", initialDelayMs?: number }`. Controls the delay between retry attempts. |
 | `continueOnFail` | `boolean` | `false` | When `true`, the workflow continues executing subsequent tasks even if this task fails. |
+| `cache` | `CachePolicy` | `undefined` | Caching configuration. `{ by?: (ctx) => unknown, version?: string }`. When provided, the engine can skip re-execution if a cached result with the same key and version exists. |
 | `label` | `string` | `undefined` | Human-readable label for UI display and metadata. |
 | `meta` | `Record<string, unknown>` | `undefined` | Arbitrary metadata attached to the task descriptor. |
 | `children` | `string \| Row \| (() => Row \| Promise<Row>) \| ReactNode` | **(required)** | In agent mode: the prompt text or JSX that renders to markdown. In compute mode: a callback function invoked at execution time. In static mode: the output object or value. |
@@ -8281,6 +8805,7 @@ import { Parallel } from "smithers-orchestrator";
 
 | Prop | Type | Default | Description |
 | --- | --- | --- | --- |
+| `id` | `string` | `undefined` | Optional stable id for tracking and deduping the parallel group. |
 | `maxConcurrency` | `number` | `Infinity` | Maximum number of child tasks that can run simultaneously. When the limit is reached, remaining tasks wait until a running task completes before starting. |
 | `skipIf` | `boolean` | `false` | When `true`, the entire parallel group and all its children are skipped. The component returns `null` and no child tasks are mounted. |
 | `children` | `ReactNode` | `undefined` | The tasks and control-flow components to execute concurrently. |
@@ -8516,7 +9041,7 @@ Internally, `<Branch>` renders the chosen child (`then` or `else`) wrapped in a 
 ## <Loop>
 
 > Iterative loop that re-executes its children until a condition is met or the maximum iteration count is reached.
-> Source: https://smithers.sh/components/ralph
+> Source: https://smithers.sh/components/loop
 
 > **Warning:** **JSX API** — This page documents the JSX-based API. For alternative approaches, see [TOON](/toon/overview) (declarative) or the [Effect builder](/effect/overview) (TypeScript).
 
@@ -8761,6 +9286,137 @@ Internally, `<Loop>` renders as a `<smithers:ralph>` host element (or `null` whe
 
 ---
 
+## <Approval>
+
+> A first-class JSX approval node that pauses durably and resolves to an ApprovalDecision value.
+> Source: https://smithers.sh/components/approval
+
+> **Warning:** **JSX API** — This page documents the JSX-based API. For alternative approaches, see [TOON](/toon/overview) (declarative) or the [Effect builder](/effect/overview) (TypeScript).
+
+
+`<Approval>` is the explicit approval-node counterpart to `$.approval()` in the Effect builder and `kind: approval` in TOON.
+
+It pauses the workflow until a human approves or denies the node, then writes an `ApprovalDecision` row to the configured output table:
+
+```ts
+type ApprovalDecision = {
+  approved: boolean;
+  note: string | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
+};
+```
+
+## Import
+
+```tsx
+import { Approval, approvalDecisionSchema } from "smithers-orchestrator";
+```
+
+## Props
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | **(required)** | Stable node id. Must be unique within the workflow. |
+| `output` | `z.ZodObject \| Table \| string` | **(required)** | Where to persist the `ApprovalDecision` output. Pass a Zod schema from `outputs` (recommended), a Drizzle table, or a string key. |
+| `outputSchema` | `z.ZodObject` | `approvalDecisionSchema` | Override the decision schema when using the manual DB API. |
+| `request` | `{ title: string; summary?: string; metadata?: Record<string, unknown> }` | **(required)** | Human-facing approval request metadata. `title` becomes the node label; `summary` and `metadata` are stored in task metadata. |
+| `onDeny` | `"fail" \| "continue" \| "skip"` | `"fail"` | What happens after a denial. `"continue"` and `"skip"` still persist a denial decision object. |
+| `dependsOn` | `string[]` | `undefined` | Explicit dependency on other task node IDs. The approval will not run until all listed tasks complete. |
+| `needs` | `Record<string, string>` | `undefined` | Named dependencies on other tasks. Keys become context keys, values are task node IDs. |
+| `skipIf` | `boolean` | `false` | Skip the approval node entirely. |
+| `timeoutMs` | `number` | `undefined` | Maximum time in milliseconds to wait for an approval decision. The node fails if it exceeds this duration. |
+| `retries` | `number` | `0` | Number of retry attempts on failure before the node is marked as failed. |
+| `retryPolicy` | `RetryPolicy` | `undefined` | Retry timing configuration. `{ backoff?: "fixed" \| "linear" \| "exponential", initialDelayMs?: number }`. Controls the delay between retry attempts. |
+| `continueOnFail` | `boolean` | `false` | When `true`, the workflow continues executing subsequent nodes even if this approval fails. |
+| `cache` | `CachePolicy` | `undefined` | Caching configuration. `{ by?: (ctx) => unknown, version?: string }`. When provided, the engine can skip re-execution if a cached result with the same key and version exists. |
+| `label` | `string` | `request.title` | Optional display label override. |
+| `meta` | `Record<string, unknown>` | `undefined` | Additional metadata merged with `request.summary` / `request.metadata`. |
+
+## Schema-driven Example
+
+```tsx
+import {
+  Approval,
+  Sequence,
+  Task,
+  Workflow,
+  approvalDecisionSchema,
+  createSmithers,
+} from "smithers-orchestrator";
+import { z } from "zod";
+
+const { smithers, outputs } = createSmithers({
+  publishApproval: approvalDecisionSchema,
+  publishResult: z.object({
+    status: z.enum(["published", "rejected"]),
+  }),
+});
+
+export default smithers((ctx) => {
+  const decision = ctx.outputMaybe(outputs.publishApproval, {
+    nodeId: "approve-publish",
+  });
+
+  return (
+    <Workflow name="publish-flow">
+      <Sequence>
+        <Approval
+          id="approve-publish"
+          output={outputs.publishApproval}
+          request={{
+            title: "Publish the draft?",
+            summary: "Human review is required before production publish.",
+            metadata: { channel: "blog" },
+          }}
+          onDeny="continue"
+        />
+
+        {decision ? (
+          <Task id="record-decision" output={outputs.publishResult}>
+            {{
+              status: decision.approved ? "published" : "rejected",
+            }}
+          </Task>
+        ) : null}
+      </Sequence>
+    </Workflow>
+  );
+});
+```
+
+## Manual API Example
+
+When you use the lower-level manual JSX API, pass `outputSchema={approvalDecisionSchema}` if your `output` prop is a Drizzle table instead of a schema key.
+
+```tsx
+<Approval
+  id="approve-deploy"
+  output={deployApprovalTable}
+  outputSchema={approvalDecisionSchema}
+  request={{
+    title: "Deploy to production?",
+    summary: "Build 2026.03.15 passed all checks.",
+  }}
+/>
+```
+
+## Behavior
+
+- The workflow enters `waiting-approval` when the node is reached.
+- `smithers approve` or `smithers deny` updates the approval record durably.
+- On resume, the node resolves to a decision object and downstream JSX can branch on that value.
+- `onDeny="fail"` behaves like a hard gate.
+- `onDeny="continue"` lets you branch explicitly on `decision.approved`.
+
+## When to Use `<Approval>` vs `needsApproval`
+
+Use `<Approval>` when the approval is a real workflow node whose decision should be persisted as data and reused by downstream logic.
+
+Use `needsApproval` on `<Task>` when you only need a simple pause before the task runs and you do not need a separate decision value in the graph.
+
+---
+
 ## <MergeQueue>
 
 > Queue tasks so at most maxConcurrency run; defaults to 1.
@@ -8852,6 +9508,7 @@ import { Worktree, Task, Parallel, MergeQueue } from "smithers";
 | --- | --- | --- | --- |
 | `id` | `string` | auto-generated | Optional stable id for tracking and deduping. |
 | `path` | `string` | — | Filesystem path for the JJ workspace root. Required; non-empty. |
+| `branch` | `string` | `undefined` | Git/JJ branch name to check out in the worktree. When omitted, the worktree uses the current branch. |
 | `skipIf` | `boolean` | `false` | Skip the subtree when true. |
 | `children` | `ReactNode` | — | Nested tasks and control-flow nodes. |
 
@@ -9303,7 +9960,7 @@ import { ReviewOutput } from "./components/Review.schema";
 import { ReviewFixOutput } from "./components/ReviewFix.schema";
 import { ReportOutput } from "./components/Report.schema";
 
-export const { Workflow, Task, useCtx, smithers, tables } = createSmithers({
+export const { Workflow, Task, useCtx, smithers, tables, outputs } = createSmithers({
   discover: DiscoverOutput,
   implement: ImplementOutput,
   validate: ValidateOutput,
@@ -9504,7 +10161,7 @@ The `{props.schema}` variable is auto-injected by Smithers with a JSON example g
 ### 3. Component (`Component.tsx`)
 
 ```tsx
-import { Task, useCtx, tables } from "../smithers";
+import { Task, useCtx, tables, outputs } from "../smithers";
 import { codex } from "../agents";
 import ImplementPrompt from "./Implement.mdx";
 import type { Ticket } from "./Discover.schema";
@@ -9797,7 +10454,7 @@ The loop repeats until both reviewers approve or `maxIterations` is hit.
 import { createSmithers, Task, Sequence, Parallel, Loop } from "smithers-orchestrator";
 import { z } from "zod";
 
-const { Workflow, smithers, tables } = createSmithers({
+const { Workflow, smithers, tables, outputs } = createSmithers({
   implement: z.object({
     summary: z.string(),
     filesChanged: z.array(z.string()),
@@ -9875,7 +10532,7 @@ The Review component runs Claude and Codex in parallel. Using two different mode
 ```tsx
 // components/Review.tsx
 import { Parallel } from "smithers-orchestrator";
-import { Task, useCtx, tables } from "../smithers";
+import { Task, useCtx, tables, outputs } from "../smithers";
 import { claude, codex } from "../agents";
 import ReviewPrompt from "./Review.mdx";
 import type { Ticket } from "./Discover.schema";
@@ -9926,7 +10583,7 @@ On subsequent iterations, the Implement component reads previous review issues a
 
 ```tsx
 // components/Implement.tsx
-import { Task, useCtx, tables } from "../smithers";
+import { Task, useCtx, tables, outputs } from "../smithers";
 import { codex } from "../agents";
 import ImplementPrompt from "./Implement.mdx";
 import type { Ticket } from "./Discover.schema";
@@ -9966,7 +10623,7 @@ The ReviewFix component only runs if there are actual issues to fix. If both rev
 
 ```tsx
 // components/ReviewFix.tsx
-import { Task, useCtx, tables } from "../smithers";
+import { Task, useCtx, tables, outputs } from "../smithers";
 import { codex } from "../agents";
 import ReviewFixPrompt from "./ReviewFix.mdx";
 import type { Ticket } from "./Discover.schema";
@@ -10044,7 +10701,7 @@ The workflow has three key parts:
 import { Sequence, Branch } from "smithers-orchestrator";
 import { Discover, TicketPipeline } from "./components";
 import { Ticket } from "./components/Discover.schema";
-import { Workflow, smithers, tables } from "./smithers";
+import { Workflow, smithers, tables, outputs } from "./smithers";
 
 export default smithers((ctx) => {
   const discoverOutput = ctx.latest(tables.discover, "discover-codex");
@@ -10083,7 +10740,7 @@ Discover uses an agent to analyze the codebase and produce structured tickets:
 // components/Discover.tsx
 import { codex } from "../agents";
 import DiscoverPrompt from "./Discover.mdx";
-import { Task, useCtx, tables } from "../smithers";
+import { Task, useCtx, tables, outputs } from "../smithers";
 import { Ticket } from "./Discover.schema";
 
 export function Discover() {
@@ -12561,6 +13218,45 @@ This means that if the workspace changes (tracked by JJ), cached results for aff
 
 ---
 
+## Troubleshooting
+
+> Common setup, runtime, and workflow issues, with the fastest path to diagnose each one.
+> Source: https://smithers.sh/guides/troubleshooting
+
+Use this page as the quick index when something in Smithers feels wrong and you do not yet know which subsystem is responsible.
+
+## Start With the Symptom
+
+- Workflow state, stuck runs, and SQLite inspection: [Debugging](/guides/debugging)
+- Retries, timeouts, skips, and graceful degradation: [Error Handling](/guides/error-handling)
+- File-watcher and prompt reload behavior: [Hot Reload](/guides/hot-reload)
+- Event streaming, approvals, and server APIs: [Server Integration](/integrations/server)
+- Workspace snapshots and revert behavior: [VCS Integration](/guides/vcs)
+
+## Common Failure Modes
+
+### A task did not rerun
+
+Smithers resumes by `runId`. If a node already completed for the current `runId`, it will be skipped on resume. Use a new `runId` for a fresh run, or inspect the persisted attempts with the CLI before assuming the scheduler is stuck.
+
+### An MDX prompt rendered as `[object Object]`
+
+That usually means the MDX preload was not registered. Confirm that your preload script calls `mdxPlugin()` and that `bunfig.toml` points at the preload file.
+
+### The workflow code changed but the running task did not
+
+Hot reload only affects work that has not been scheduled yet. In-flight tasks continue with the code and prompt they started with.
+
+## When in Doubt
+
+1. Check `smithers status` for the current run.
+2. Inspect recent frames with `smithers frames`.
+3. Query the SQLite database if the CLI summary is not enough.
+
+Those steps usually tell you whether the issue is scheduling, agent execution, schema validation, or environment setup.
+
+---
+
 ## Hello World
 
 > A minimal workflow with a single agent task that generates a greeting.
@@ -13197,7 +13893,7 @@ If you need per-node labels (like `Publish blog post`), query `_smithers_nodes` 
 
 # Tools Agent
 
-Smithers agents can be given **tools** that let them interact with the filesystem and shell. This is useful for tasks like codebase analysis, log searching, or automated refactoring. The built-in tools from `smithers-orchestrator` provide `read`, `grep`, and `bash` capabilities.
+Smithers agents can be given **tools** that let them interact with the filesystem and shell. This is useful for tasks like codebase analysis, log searching, or automated refactoring. The built-in tools from `smithers-orchestrator` provide `read`, `write`, `edit`, `grep`, and `bash` capabilities.
 
 ## Workflow Definition
 
@@ -13287,12 +13983,14 @@ Import all tools at once or pick individual ones:
 import { tools } from "smithers-orchestrator";
 
 // Or import individually
-import { read, grep, bash } from "smithers-orchestrator";
+import { read, write, edit, grep, bash } from "smithers-orchestrator";
 ```
 
 | Tool | Description |
 |------|-------------|
 | `read` | Read file contents by path. Supports line ranges for large files. |
+| `write` | Write content to a file by path. Creates the file if it does not exist. |
+| `edit` | Apply targeted edits to a file using search-and-replace. Safer than full rewrites for small changes. |
 | `grep` | Search file contents with regex patterns. Returns matching files, lines, and context. |
 | `bash` | Execute shell commands. Useful for running build tools, git, or custom scripts. |
 
@@ -13714,15 +14412,13 @@ const claudeCli = new ClaudeCodeAgent({
 
 export const claude = USE_CLI ? claudeCli : claudeApi;
 
-// Codex — same dual-mode pattern
-const codexCli = new CodexAgent({
+// Codex — CLI agent (CodexAgent does not have an API mode)
+export const codex = new CodexAgent({
   model: "gpt-5.3-codex",
   systemPrompt: SYSTEM_PROMPT,
   yolo: UNSAFE,
   timeoutMs: 30 * 60 * 1000,
 });
-
-export const codex = USE_CLI ? codexCli : codexApi;
 ```
 
 ## The Validation Loop — ValidationLoop.tsx
@@ -14848,6 +15544,7 @@ type RunOptions = {
   allowNetwork?: boolean;
   maxOutputBytes?: number;
   toolTimeoutMs?: number;
+  hot?: boolean | HotReloadOptions;
 };
 ```
 
@@ -14865,6 +15562,31 @@ type RunOptions = {
 | `allowNetwork` | `boolean` | `false` | Allow network access in the `bash` tool |
 | `maxOutputBytes` | `number` | `200000` | Maximum output bytes for tool calls |
 | `toolTimeoutMs` | `number` | `60000` | Timeout for tool executions in milliseconds |
+| `hot` | `boolean \| HotReloadOptions` | `undefined` | Enable hot-reload mode. Pass `true` for defaults or a `HotReloadOptions` object to customize |
+
+---
+
+### HotReloadOptions
+
+Options for configuring hot-reload behavior when `hot` is set to an object.
+
+```ts
+type HotReloadOptions = {
+  rootDir?: string;
+  outDir?: string;
+  maxGenerations?: number;
+  cancelUnmounted?: boolean;
+  debounceMs?: number;
+};
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `rootDir` | `string` | Auto-detect from workflow entry | Root directory to watch for file changes |
+| `outDir` | `string` | `.smithers/hmr/<runId>` | Directory for generation overlays |
+| `maxGenerations` | `number` | `3` | Maximum number of overlay generations to keep |
+| `cancelUnmounted` | `boolean` | `false` | Whether to cancel tasks that become unmounted after a hot reload |
+| `debounceMs` | `number` | `100` | Debounce interval in milliseconds for file change events |
 
 ---
 
@@ -14925,21 +15647,31 @@ type TaskDescriptor = {
   ordinal: number;
   iteration: number;
   ralphId?: string;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  worktreeId?: string;
+  worktreePath?: string;
+  worktreeBranch?: string;
 
   outputTable: Table | null;
   outputTableName: string;
+  outputRef?: import("zod").ZodObject<any>;
   outputSchema?: import("zod").ZodObject<any>;
 
   parallelGroupId?: string;
   parallelMaxConcurrency?: number;
 
   needsApproval: boolean;
+  approvalMode?: "gate" | "decision";
+  approvalOnDeny?: "fail" | "continue" | "skip";
   skipIf: boolean;
   retries: number;
+  retryPolicy?: RetryPolicy;
   timeoutMs: number | null;
   continueOnFail: boolean;
+  cachePolicy?: CachePolicy;
 
-  agent?: AgentLike;
+  agent?: AgentLike | AgentLike[];
   prompt?: string;
   staticPayload?: unknown;
   computeFn?: () => unknown | Promise<unknown>;
@@ -14953,19 +15685,29 @@ type TaskDescriptor = {
 |---|---|---|
 | `nodeId` | `string` | Unique identifier for this task (from the `id` prop) |
 | `ordinal` | `number` | Position in the execution order (depth-first traversal) |
-| `iteration` | `number` | Current Ralph loop iteration |
-| `ralphId` | `string` | ID of the parent Ralph loop (if any) |
+| `iteration` | `number` | Current Loop iteration |
+| `ralphId` | `string` | ID of the parent Loop (if any) |
+| `dependsOn` | `string[]` | Array of node IDs this task explicitly depends on |
+| `needs` | `Record<string, string>` | Named dependencies. Keys become context keys, values are task node IDs |
+| `worktreeId` | `string` | ID of the git worktree assigned to this task |
+| `worktreePath` | `string` | Filesystem path to the git worktree |
+| `worktreeBranch` | `string` | Branch name for the git worktree |
 | `outputTable` | `Table \| null` | Drizzle table for persisting the output |
 | `outputTableName` | `string` | Name of the output table |
+| `outputRef` | `ZodObject<any>` | Zod schema reference from the `<Task>` `output` prop (used for schema resolution) |
 | `outputSchema` | `ZodObject<any>` | Optional Zod schema for validating agent output |
 | `parallelGroupId` | `string` | ID of the parent `<Parallel>` group (if any) |
 | `parallelMaxConcurrency` | `number` | Max concurrency limit from the parent `<Parallel>` |
 | `needsApproval` | `boolean` | Whether the task requires human approval before execution |
+| `approvalMode` | `"gate" \| "decision"` | Approval style: `"gate"` pauses before execution, `"decision"` records a decision |
+| `approvalOnDeny` | `"fail" \| "continue" \| "skip"` | Behavior when approval is denied |
 | `skipIf` | `boolean` | Whether this task should be skipped |
 | `retries` | `number` | Number of retry attempts on failure |
+| `retryPolicy` | `RetryPolicy` | Retry backoff configuration (`{ backoff?, initialDelayMs? }`) |
 | `timeoutMs` | `number \| null` | Task-level timeout in milliseconds |
 | `continueOnFail` | `boolean` | Whether to continue the workflow if this task fails |
-| `agent` | `AgentLike` | The AI agent assigned to execute this task |
+| `cachePolicy` | `CachePolicy` | Cache configuration (`{ by?, version? }`) |
+| `agent` | `AgentLike \| AgentLike[]` | The AI agent (or array of agents for fallback) assigned to execute this task |
 | `prompt` | `string` | The prompt text for the agent (from task children) |
 | `staticPayload` | `unknown` | Pre-computed payload (for non-agent tasks) |
 | `computeFn` | `() => unknown \| Promise<unknown>` | Callback invoked at execution time (for compute tasks) |
@@ -14981,6 +15723,44 @@ Type alias for any object that implements the AI SDK `Agent` interface.
 ```ts
 type AgentLike = Agent<any, any, any>;
 ```
+
+---
+
+### RetryPolicy
+
+Configuration for retry backoff behavior.
+
+```ts
+type RetryBackoff = "fixed" | "linear" | "exponential";
+
+type RetryPolicy = {
+  backoff?: RetryBackoff;
+  initialDelayMs?: number;
+};
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `backoff` | `"fixed" \| "linear" \| "exponential"` | `undefined` | Backoff strategy between retries |
+| `initialDelayMs` | `number` | `undefined` | Initial delay in milliseconds before the first retry |
+
+---
+
+### CachePolicy
+
+Configuration for task output caching.
+
+```ts
+type CachePolicy<Ctx = any> = {
+  by?: (ctx: Ctx) => unknown;
+  version?: string;
+};
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `by` | `(ctx: Ctx) => unknown` | `undefined` | Function that returns a cache key from the context. Tasks with the same key reuse cached output |
+| `version` | `string` | `undefined` | Cache version string. Changing this invalidates existing cached outputs |
 
 ---
 
@@ -15270,12 +16050,12 @@ type BranchProps = {
 
 ---
 
-### RalphProps
+### LoopProps
 
-Props for the `<Ralph>` component. Loops its children until a condition is met.
+Props for the `<Loop>` component. Loops its children until a condition is met. This is the primary loop API.
 
 ```ts
-type RalphProps = {
+type LoopProps = {
   id?: string;
   until: boolean;
   maxIterations?: number;
@@ -15287,12 +16067,82 @@ type RalphProps = {
 
 | Prop | Type | Required | Description |
 |---|---|---|---|
-| `id` | `string` | No | Unique identifier for the Ralph loop (auto-generated if omitted) |
+| `id` | `string` | No | Unique identifier for the loop (auto-generated if omitted) |
 | `until` | `boolean` | Yes | Exit condition. When `true`, the loop stops. |
 | `maxIterations` | `number` | No | Maximum number of loop iterations |
 | `onMaxReached` | `"fail" \| "return-last"` | No | Behavior when `maxIterations` is exceeded: fail the run or return the last successful output |
 | `skipIf` | `boolean` | No | Skip the loop entirely when true |
 | `children` | `ReactNode` | No | Child tasks executed each iteration |
+
+---
+
+### RalphProps
+
+> **Deprecated:** Use `LoopProps` instead. `RalphProps` is a type alias for `LoopProps`.
+
+```ts
+type RalphProps = LoopProps;
+```
+
+---
+
+### ApprovalProps\<Row\>
+
+Props for the `<Approval>` component. Represents a human approval gate within a workflow.
+
+```ts
+type ApprovalProps<Row = ApprovalDecision> = {
+  id: string;
+  output: ZodObject<any> | Table | string;
+  outputSchema?: import("zod").ZodObject<any>;
+  request: ApprovalRequest;
+  onDeny?: "fail" | "continue" | "skip";
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  skipIf?: boolean;
+  timeoutMs?: number;
+  retries?: number;
+  retryPolicy?: RetryPolicy;
+  continueOnFail?: boolean;
+  cache?: CachePolicy;
+  label?: string;
+  meta?: Record<string, unknown>;
+  key?: string;
+  children?: React.ReactNode;
+};
+
+type ApprovalRequest = {
+  title: string;
+  summary?: string;
+  metadata?: Record<string, unknown>;
+};
+
+type ApprovalDecision = {
+  approved: boolean;
+  note: string | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
+};
+```
+
+| Prop | Type | Required | Description |
+|---|---|---|---|
+| `id` | `string` | Yes | Unique identifier for the approval node |
+| `output` | `ZodObject<any> \| Table \| string` | Yes | Where to persist the approval decision. Pass a Zod schema from `outputs` (recommended), a Drizzle table, or a string key |
+| `outputSchema` | `ZodObject<any>` | No | Zod schema for validating the decision output |
+| `request` | `ApprovalRequest` | Yes | Approval request details (title, summary, metadata) |
+| `onDeny` | `"fail" \| "continue" \| "skip"` | No | Behavior when approval is denied |
+| `dependsOn` | `string[]` | No | Explicit dependency on other task node IDs |
+| `needs` | `Record<string, string>` | No | Named dependencies. Keys become context keys, values are task node IDs |
+| `skipIf` | `boolean` | No | Skip this approval when true |
+| `timeoutMs` | `number` | No | Timeout in milliseconds |
+| `retries` | `number` | No | Number of retry attempts on failure |
+| `retryPolicy` | `RetryPolicy` | No | Retry backoff configuration |
+| `continueOnFail` | `boolean` | No | Continue the workflow if this approval fails |
+| `cache` | `CachePolicy` | No | Cache configuration |
+| `label` | `string` | No | Human-readable label (defaults to `request.title`) |
+| `meta` | `Record<string, unknown>` | No | Arbitrary metadata |
+| `children` | `ReactNode` | No | Child elements |
 
 ---
 
@@ -15505,13 +16355,13 @@ Use the Effect builder when you want full control over typed step handles, `Cont
 Install the core builder dependencies:
 
 ```bash
-bun add smithers-orchestrator effect @effect/sql @effect/sql-sqlite-bun
+bun add smithers-orchestrator effect @effect/sql drizzle-orm
 ```
 
-If you plan to call hosted models through Effect services, add the provider packages you need. For example:
+If you plan to call hosted models, add the Vercel AI SDK packages you need. For example:
 
 ```bash
-bun add @effect/ai @effect/ai-anthropic
+bun add ai @ai-sdk/anthropic
 ```
 
 ## What Each Package Does
@@ -15521,8 +16371,8 @@ bun add @effect/ai @effect/ai-anthropic
 | `smithers-orchestrator` | Workflow builder, durable runtime, SQLite helpers, CLI |
 | `effect` | `Effect`, `Layer`, `Context.Tag`, `Schedule`, and `Schema` |
 | `@effect/sql` | `Model` and typed SQL integration |
-| `@effect/sql-sqlite-bun` | SQLite client layer for Bun |
-| `@effect/ai` + provider packages | Optional model integrations |
+| `drizzle-orm` | SQLite client layer (uses `bun:sqlite` under the hood) |
+| `ai` + `@ai-sdk/anthropic` | Optional model integrations via the Vercel AI SDK |
 
 ## Minimal TypeScript Setup
 
@@ -15774,7 +16624,8 @@ const analyze = $.step("analyze", {
 | `output` | `Model.Class` | yes | The persisted output model |
 | `run` | `(ctx) => Effect<Output>` | yes | The step body |
 | `needs` | `Record<string, StepHandle>` | no | Upstream dependencies |
-| `retry` | `Schedule` | no | Effect retry schedule |
+| `retry` | `any` | no | Retry configuration — accepts an Effect `Schedule` or a plain number (retry count) |
+| `retryPolicy` | `RetryPolicy` | no | Declarative retry policy with backoff strategy (`{ backoff?: "fixed" \| "linear" \| "exponential", initialDelayMs?: number }`) |
 | `timeout` | `DurationInput` | no | Step timeout |
 | `cache` | `CachePolicy` | no | Cache configuration |
 | `skipIf` | `(ctx) => boolean` | no | Condition to skip |
@@ -15934,7 +16785,7 @@ References a reusable workflow fragment:
 ```ts
 const ReviewCycle = Smithers.component({
   name: "ReviewCycle",
-  params: { content: Schema.String, reviewer: Schema.String },
+  params: { content: "string", reviewer: "string" },
 }).build(($, params) => {
   const review = $.step("review", {
     output: Review,
@@ -15975,6 +16826,26 @@ return $.sequence(
   deploy,
 );
 ```
+
+## `Smithers.loadToon()`
+
+Loads a `.toon` file and returns a workflow that can be executed like any builder workflow:
+
+```ts
+const MyWorkflow = Smithers.loadToon("./workflows/my-workflow.toon");
+
+const result = await Effect.runPromise(
+  MyWorkflow.execute(new Input({ ... })).pipe(
+    Effect.provide(AppLive),
+  ),
+);
+```
+
+| Param | Type | Description |
+| --- | --- | --- |
+| `path` | `string` | File path to the `.toon` workflow definition |
+
+Returns a `BuiltSmithersWorkflow` with an `execute` method that accepts the workflow input and optional execution options.
 
 ## Executing a Workflow
 
@@ -16037,16 +16908,19 @@ The `run` argument is the step context.
 
 ## Step Context Interface
 
+The source type is named `BuilderStepContext` (also referred to as `StepContext` in some older docs).
+
 Conceptually, Smithers provides something like:
 
 ```ts
-type StepContext<Input, Needs> = {
+type BuilderStepContext<Input, Needs> = {
   readonly input: Input;
   readonly executionId: string;
   readonly stepId: string;
   readonly attempt: number;
   readonly signal: AbortSignal;
   readonly iteration: number;
+  readonly loop: { iteration: number };
 } & Needs;
 ```
 
@@ -16137,6 +17011,10 @@ An `AbortSignal` that fires when:
 ### `iteration`
 
 For looped workflows, this identifies the current durable iteration. For non-loop steps, it is usually `0`.
+
+### `loop`
+
+An object with loop metadata: `{ iteration: number }`. Provides structured access to the current loop iteration. This is available on every step context; for non-looped steps, `loop.iteration` is `0`.
 
 ## No Hook API
 
@@ -16423,9 +17301,8 @@ TOON workflows can use Effect services through `handler:` functions and the `imp
 
 ```toon
 imports:
-  services[1]:
-    - from: ./services/coder.ts
-      use[1]: Coder
+  services[1]{from,use}:
+    ./services/coder.ts,Coder
 
 steps[1]:
   - id: analyze
