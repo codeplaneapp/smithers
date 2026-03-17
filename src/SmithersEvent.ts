@@ -179,4 +179,19 @@ export type SmithersEvent =
       reason: string;
       changedFiles: string[];
       timestampMs: number;
+    }
+  | {
+      type: "TokenUsageReported";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+      model: string;
+      agent: string;
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens?: number;
+      cacheWriteTokens?: number;
+      reasoningTokens?: number;
+      timestampMs: number;
     };
