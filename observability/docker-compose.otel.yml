@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.115.0
+    image: otel/opentelemetry-collector-contrib:latest
     command: ["--config", "/etc/otelcol/config.yml"]
     volumes:
       - ./otel-collector-config.yml:/etc/otelcol/config.yml:ro
@@ -41,7 +41,7 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "3000:3000"
+      - "3001:3000"
     depends_on:
       - prometheus
       - tempo

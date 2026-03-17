@@ -15,6 +15,8 @@ import { runPromise } from "../effect/runtime";
 import type { SmithersWorkflow } from "../SmithersWorkflow";
 import { Smithers } from "../effect/builder";
 import { revertToAttempt } from "../revert";
+import { trackEvent } from "../effect/metrics";
+import { runSync } from "../effect/runtime";
 
 async function loadWorkflowAsync(path: string): Promise<SmithersWorkflow<any>> {
   const abs = resolve(process.cwd(), path);
@@ -101,6 +103,9 @@ function buildProgressReporter() {
   };
 
   return (event: any) => {
+    // Push smithers metrics through the Effect OTel pipeline
+    try { runSync(trackEvent(event)); } catch {}
+
     const ts = formatElapsed();
     switch (event.type) {
       case "NodeStarted":
