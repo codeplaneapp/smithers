@@ -17,6 +17,7 @@
     "./server": "./src/server/index.ts",
     "./observability": "./src/observability/index.ts",
     "./pi-plugin": "./src/pi-plugin/index.ts",
+    "./pi-extension": "./src/pi-plugin/extension.ts",
     "./mdx-plugin": "./src/mdx-plugin.ts",
     "./dom/renderer": "./src/dom/renderer.ts",
     "./linear": "./src/linear/index.ts"
