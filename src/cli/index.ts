@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { resolve, dirname, extname } from "node:path";
 import { pathToFileURL } from "node:url";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { Effect } from "effect";
 import { Cli, z } from "incur";
 import { runWorkflow, renderFrame, resolveSchema } from "../engine";
@@ -17,6 +17,7 @@ import { Smithers } from "../effect/builder";
 import { revertToAttempt } from "../revert";
 import { trackEvent } from "../effect/metrics";
 import { runSync } from "../effect/runtime";
+import { spawn } from "node:child_process";
 
 async function loadWorkflowAsync(path: string): Promise<SmithersWorkflow<any>> {
   const abs = resolve(process.cwd(), path);
@@ -822,11 +823,129 @@ const cli = Cli.create({
         });
       }
     },
+  })
+  .command("tui", {
+    description: "Launch the PI coding agent with the Smithers extension for interactive workflow management.",
+    options: z.object({
+      url: z.string().default("http://127.0.0.1:7331").describe("Smithers server URL"),
+      key: z.string().optional().describe("Smithers API key"),
+      provider: z.string().optional().describe("PI model provider (e.g. anthropic, openai)"),
+      model: z.string().optional().describe("PI model to use (e.g. claude-opus-4-6)"),
+      theme: z.string().optional().describe("PI theme name"),
+      session: z.string().optional().describe("PI session ID to resume"),
+      continue: z.boolean().default(false).describe("Continue the last PI session"),
+      resume: z.boolean().default(false).describe("Resume a PI session"),
+      print: z.boolean().default(false).describe("Run in non-interactive print mode"),
+      prompt: z.string().optional().describe("Initial prompt to send (non-interactive)"),
+      extension: z.array(z.string()).default([]).describe("Additional PI extensions to load"),
+      verbose: z.boolean().default(false).describe("Enable verbose output"),
+    }),
+    alias: { url: "u", key: "k", provider: "p", model: "m", session: "s" },
+    async run({ options, ok, error }) {
+      const fail: FailFn = (opts) => {
+        commandExitOverride = opts.exitCode ?? 1;
+        return error(opts);
+      };
+
+      // Resolve the smithers extension path
+      const extensionPath = resolve(dirname(new URL(import.meta.url).pathname), "../pi-plugin/extension.ts");
+      if (!existsSync(extensionPath)) {
+        return fail({
+          code: "EXTENSION_NOT_FOUND",
+          message: `Smithers PI extension not found at ${extensionPath}`,
+          exitCode: 1,
+        });
+      }
+
+      const args: string[] = [];
+
+      // Load smithers extension + any user-provided extensions
+      args.push("--extension", extensionPath);
+      for (const ext of options.extension) {
+        args.push("--extension", ext);
+      }
+
+      // Pass smithers connection flags
+      args.push("--smithers-url", options.url);
+      if (options.key) {
+        args.push("--smithers-key", options.key);
+      } else if (process.env.SMITHERS_API_KEY) {
+        args.push("--smithers-key", process.env.SMITHERS_API_KEY);
+      }
+
+      // PI model/provider flags
+      if (options.provider) args.push("--provider", options.provider);
+      if (options.model) args.push("--model", options.model);
+      if (options.theme) args.push("--theme", options.theme);
+
+      // Session flags
+      if (options.session) args.push("--session", options.session);
+      if (options.continue) args.push("--continue");
+      if (options.resume) args.push("--resume");
+
+      if (options.verbose) args.push("--verbose");
+
+      // Non-interactive mode
+      if (options.print) {
+        args.push("--print");
+        if (options.prompt) args.push(options.prompt);
+
+        const result = await new Promise<{ exitCode: number }>((resolve) => {
+          const child = spawn("pi", args, {
+            stdio: "inherit",
+            env: process.env,
+          });
+          child.on("close", (code) => resolve({ exitCode: code ?? 0 }));
+          child.on("error", (err) => {
+            process.stderr.write(`Failed to launch pi: ${err.message}\n`);
+            process.stderr.write(`Make sure pi is installed: npm i -g @mariozechner/pi-coding-agent\n`);
+            resolve({ exitCode: 1 });
+          });
+        });
+
+        process.exitCode = result.exitCode;
+        return ok({ exitCode: result.exitCode });
+      }
+
+      // Interactive mode — hand off stdio entirely
+      if (options.prompt) args.push(options.prompt);
+
+      const child = spawn("pi", args, {
+        stdio: "inherit",
+        env: process.env,
+      });
+
+      const result = await new Promise<{ exitCode: number }>((resolve) => {
+        child.on("close", (code) => resolve({ exitCode: code ?? 0 }));
+        child.on("error", (err) => {
+          process.stderr.write(`Failed to launch pi: ${err.message}\n`);
+          process.stderr.write(`Make sure pi is installed: npm i -g @mariozechner/pi-coding-agent\n`);
+          resolve({ exitCode: 1 });
+        });
+      });
+
+      process.exitCode = result.exitCode;
+      return ok({ exitCode: result.exitCode });
+    },
   });
 
 async function main() {
   const rawArgv = process.argv.slice(2);
   const argv = rawArgv.map((arg) => (arg === "-v" ? "--version" : arg));
+
+  // --mcp mode: the MCP server needs to stay alive listening on stdin.
+  // Do not call process.exit() — let the process stay open until stdin closes.
+  if (argv.includes("--mcp")) {
+    try {
+      await cli.serve(argv);
+    } catch (err: any) {
+      console.error(err?.message ?? String(err));
+      process.exit(1);
+    }
+    // Keep process alive — MCP server is listening on stdin
+    return;
+  }
+
   let exitCodeFromServe: number | undefined;
 
   try {
