@@ -234,9 +234,29 @@ export default smithers(db, (ctx) => (
 
 Internally, `<Loop>` renders as a `<smithers:ralph>` host element (or `null` when skipped). The runtime manages iteration state and re-renders the workflow tree on each iteration, re-evaluating the `until` condition with the latest context.
 
+## Nested loops
+
+Direct nesting — placing a `<Ralph>` as an immediate child of another `<Ralph>` — is not supported and throws `"Nested <Ralph> is not supported."` at render time. However, you can nest loops by wrapping the inner `<Ralph>` in a `<Sequence>`:
+
+```tsx
+<Workflow name="nested-loops">
+  <Ralph id="outer" until={outerDone} maxIterations={5}>
+    <Sequence>
+      <Ralph id="inner" until={innerDone} maxIterations={3}>
+        <Task id="innerTask" output="innerOutput" agent={agent}>
+          Run the inner loop body.
+        </Task>
+      </Ralph>
+    </Sequence>
+  </Ralph>
+</Workflow>
+```
+
+A common pattern is an outer loop driving the overall pipeline with an inner loop handling a review-until-LGTM cycle on each iteration.
+
 ## Restrictions
 
-- **Nesting is not supported.** Placing a `<Loop>` inside another `<Loop>` throws an error at render time.
+- **Direct nesting throws.** Placing a `<Loop>` as an immediate child of another `<Loop>` throws an error. Wrap the inner loop in a `<Sequence>` to nest loops (see [Nested loops](#nested-loops) above).
 - **Duplicate ids throw.** If two `<Loop>` loops share the same `id` (explicit or auto-generated), an error is thrown.
 
 ## Notes
