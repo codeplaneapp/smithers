@@ -54,7 +54,19 @@ function key(nodeId: string, iteration: number) {
   return `${nodeId}::${iteration}`;
 }
 
-export function buildPlanTree(xml: XmlNode | null): {
+function buildLoopScope(
+  loopStack: { ralphId: string; iteration: number }[],
+): string {
+  if (loopStack.length === 0) return "";
+  return (
+    "@@" + loopStack.map((l) => `${l.ralphId}=${l.iteration}`).join(",")
+  );
+}
+
+export function buildPlanTree(
+  xml: XmlNode | null,
+  ralphState?: RalphStateMap,
+): {
   plan: PlanNode | null;
   ralphs: RalphMeta[];
 } {
@@ -64,7 +76,11 @@ export function buildPlanTree(xml: XmlNode | null): {
 
   function walk(
     node: XmlNode,
-    ctx: { path: number[]; parentIsRalph: boolean },
+    ctx: {
+      path: number[];
+      parentIsRalph: boolean;
+      loopStack: { ralphId: string; iteration: number }[];
+    },
   ): PlanNode | null {
     if (node.kind === "text") return null;
     const tag = node.tag;
@@ -73,19 +89,42 @@ export function buildPlanTree(xml: XmlNode | null): {
       throw new Error("Nested <Ralph> is not supported.");
     }
 
+    let loopStack = ctx.loopStack;
+
+    // Scope ralph IDs by ancestor loop iterations for nested loops
+    let scopedRalphId: string | undefined;
+    if (tag === "smithers:ralph") {
+      const logicalId = resolveStableId(node.props.id, "ralph", ctx.path);
+      const scope = buildLoopScope(loopStack);
+      scopedRalphId = logicalId + scope;
+      const currentIter = ralphState?.get(scopedRalphId)?.iteration ?? 0;
+      loopStack = [...loopStack, { ralphId: logicalId, iteration: currentIter }];
+    }
+
     const children: PlanNode[] = [];
     let elementIndex = 0;
     const isRalph = tag === "smithers:ralph";
     for (const child of node.children) {
       const nextPath =
         child.kind === "element" ? [...ctx.path, elementIndex++] : ctx.path;
-      const built = walk(child, { path: nextPath, parentIsRalph: isRalph });
+      const built = walk(child, {
+        path: nextPath,
+        parentIsRalph: isRalph,
+        loopStack,
+      });
       if (built) children.push(built);
     }
 
     if (tag === "smithers:task") {
-      const nodeId = node.props.id;
-      if (!nodeId) return null;
+      const logicalId = node.props.id;
+      if (!logicalId) return null;
+      // Scope task nodeId by ancestor loops (all except the innermost,
+      // which is captured by desc.iteration).
+      const ancestorScope =
+        loopStack.length > 1
+          ? buildLoopScope(loopStack.slice(0, -1))
+          : "";
+      const nodeId = logicalId + ancestorScope;
       return { kind: "task", nodeId };
     }
     if (tag === "smithers:workflow") {
@@ -109,7 +148,7 @@ export function buildPlanTree(xml: XmlNode | null): {
       return { kind: "group", children };
     }
     if (tag === "smithers:ralph") {
-      const id = resolveStableId(node.props.id, "ralph", ctx.path);
+      const id = scopedRalphId!;
       if (seenRalph.has(id)) {
         throw new Error(`Duplicate Ralph id detected: ${id}`);
       }
@@ -133,7 +172,7 @@ export function buildPlanTree(xml: XmlNode | null): {
     return { kind: "group", children };
   }
 
-  const plan = walk(xml, { path: [], parentIsRalph: false });
+  const plan = walk(xml, { path: [], parentIsRalph: false, loopStack: [] });
   return { plan, ralphs };
 }
 

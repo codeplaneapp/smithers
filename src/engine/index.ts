@@ -796,9 +796,54 @@ function ralphIterationsFromState(state: RalphStateMap): Map<string, number> {
 
 function ralphIterationsObject(state: RalphStateMap): Record<string, number> {
   const obj: Record<string, number> = {};
+
+  // First pass: set all entries including scoped ones
   for (const [id, value] of state.entries()) {
     obj[id] = value.iteration ?? 0;
   }
+
+  // Second pass: for scoped ralph IDs like "inner@@outer=0", set the logical
+  // shortcut "inner" to the iteration of the scoped variant whose ancestor
+  // scope matches the current ancestor iterations.
+  //
+  // Collect all logical IDs that have scoped variants so we can detect when
+  // the current-scope variant doesn't exist yet (meaning it should default to 0).
+  const logicalIdsWithScope = new Set<string>();
+  for (const id of state.keys()) {
+    const atIdx = id.indexOf("@@");
+    if (atIdx >= 0) logicalIdsWithScope.add(id.slice(0, atIdx));
+  }
+
+  // Initialize logical shortcuts to 0 (for when current scope variant hasn't
+  // been created yet, e.g. outer just advanced but inner hasn't been initialized).
+  for (const logicalId of logicalIdsWithScope) {
+    obj[logicalId] = 0;
+  }
+
+  for (const [id, value] of state.entries()) {
+    const atIdx = id.indexOf("@@");
+    if (atIdx < 0) continue;
+    const logicalId = id.slice(0, atIdx);
+    const scopeSuffix = id.slice(atIdx + 2);
+    const parts = scopeSuffix.split(",");
+    let isCurrent = true;
+    for (const part of parts) {
+      const eqIdx = part.indexOf("=");
+      if (eqIdx < 0) { isCurrent = false; break; }
+      const ancestorId = part.slice(0, eqIdx);
+      const ancestorIter = Number(part.slice(eqIdx + 1));
+      // Look up the ancestor's current iteration (unscoped entry)
+      const currentAncestorIter = obj[ancestorId];
+      if (currentAncestorIter !== ancestorIter) {
+        isCurrent = false;
+        break;
+      }
+    }
+    if (isCurrent) {
+      obj[logicalId] = value.iteration ?? 0;
+    }
+  }
+
   return obj;
 }
 
@@ -1358,6 +1403,7 @@ async function executeTask(
         cacheBase = {
           workflowName,
           nodeId: desc.nodeId,
+          iteration: desc.iteration,
           outputTableName: desc.outputTableName,
           schemaSig,
           outputSchemaSig,
@@ -1371,6 +1417,7 @@ async function executeTask(
         cacheBase = {
           workflowName,
           nodeId: desc.nodeId,
+          iteration: desc.iteration,
           outputTableName: desc.outputTableName,
           schemaSig,
           outputSchemaSig,
@@ -2578,7 +2625,7 @@ async function runWorkflowBody<Schema>(
         continue;
       }
 
-      const { plan, ralphs } = buildPlanTree(xml);
+      const { plan, ralphs } = buildPlanTree(xml, ralphState);
       for (const ralph of ralphs) {
         if (!ralphState.has(ralph.id)) {
           const iteration = 0;

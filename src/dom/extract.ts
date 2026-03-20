@@ -122,6 +122,16 @@ export function extractFromHost(
     return [...stack, { id, max }];
   }
 
+  function buildLoopScope(
+    loopStack: { ralphId: string; iteration: number }[],
+  ): string {
+    if (loopStack.length === 0) return "";
+    return (
+      "@@" +
+      loopStack.map((l) => `${l.ralphId}=${l.iteration}`).join(",")
+    );
+  }
+
   function walk(
     node: HostNode,
     ctx: {
@@ -135,6 +145,8 @@ export function extractFromHost(
        * The top of the stack controls the effective root override for tasks.
        */
       worktreeStack: { id: string; path: string; branch?: string; baseBranch?: string }[];
+      /** Stack of ancestor loop scopes (outermost -> innermost). */
+      loopStack: { ralphId: string; iteration: number }[];
     },
   ) {
     if (node.kind === "text") return;
@@ -143,18 +155,24 @@ export function extractFromHost(
     const parallelStack = ctx.parallelStack;
     let ralphId = ctx.ralphId;
     const worktreeStack = ctx.worktreeStack;
+    let loopStack = ctx.loopStack;
 
     if (node.tag === "smithers:ralph") {
       if (ctx.parentIsRalph) {
         throw new Error("Nested <Ralph> is not supported.");
       }
-      const id = resolveStableId(node.rawProps?.id, "ralph", ctx.path);
+      const logicalId = resolveStableId(node.rawProps?.id, "ralph", ctx.path);
+      // Scope ralph ID by ancestor loop iterations for nested loops
+      const scope = buildLoopScope(loopStack);
+      const id = logicalId + scope;
       if (seenRalph.has(id)) {
         throw new Error(`Duplicate Ralph id detected: ${id}`);
       }
       seenRalph.add(id);
       ralphId = id;
       iteration = getRalphIteration(opts, id);
+      // Push this loop onto the stack for children
+      loopStack = [...loopStack, { ralphId: logicalId, iteration }];
     }
 
     let nextParallelStack = parallelStack;
@@ -201,10 +219,17 @@ export function extractFromHost(
     }
     if (node.tag === "smithers:task") {
       const raw = node.rawProps || {};
-      const nodeId = raw.id;
-      if (!nodeId || typeof nodeId !== "string") {
+      const logicalNodeId = raw.id;
+      if (!logicalNodeId || typeof logicalNodeId !== "string") {
         throw new Error("Task id is required and must be a string.");
       }
+      // Scope task nodeId by ancestor loops (all except the innermost, which
+      // is already captured by desc.iteration).
+      const ancestorScope =
+        loopStack.length > 1
+          ? buildLoopScope(loopStack.slice(0, -1))
+          : "";
+      const nodeId = logicalNodeId + ancestorScope;
       if (seen.has(nodeId)) {
         throw new Error(`Duplicate Task id detected: ${nodeId}`);
       }
@@ -325,11 +350,12 @@ export function extractFromHost(
         parentIsRalph: node.tag === "smithers:ralph",
         parallelStack: nextParallelStack,
         worktreeStack: nextWorktreeStack,
+        loopStack,
       });
     }
   }
 
-  walk(root, { path: [], iteration: 0, parentIsRalph: false, parallelStack: [], worktreeStack: [] });
+  walk(root, { path: [], iteration: 0, parentIsRalph: false, parallelStack: [], worktreeStack: [], loopStack: [] });
 
   return { xml: toXmlNode(root), tasks, mountedTaskIds };
 }

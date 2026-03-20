@@ -46,7 +46,7 @@ describe("issue #111 – buildPlanTree nested ralph", () => {
     const { plan, ralphs } = buildPlanTree(xml);
     expect(plan).toBeDefined();
     expect(ralphs).toHaveLength(2);
-    expect(ralphs.map((r) => r.id).sort()).toEqual(["inner", "outer"]);
+    expect(ralphs.map((r) => r.id).sort()).toEqual(["inner@@outer=0", "outer"]);
   });
 
   test("ralph > parallel > ralph is allowed", () => {
@@ -136,7 +136,7 @@ describe("issue #111 – extractFromHost nested ralph", () => {
     ]);
     const result = extractFromHost(root);
     expect(result.tasks).toHaveLength(1);
-    expect(result.tasks[0].ralphId).toBe("inner");
+    expect(result.tasks[0].ralphId).toBe("inner@@outer=0");
   });
 
   test("inner task gets innermost ralphId", () => {
@@ -157,9 +157,11 @@ describe("issue #111 – extractFromHost nested ralph", () => {
       ]),
     ]);
     const result = extractFromHost(root);
-    const t1 = result.tasks.find((t) => t.nodeId === "t1")!;
+    // t1 is inside inner loop, scoped by outer=0
+    const t1 = result.tasks.find((t) => t.nodeId === "t1@@outer=0")!;
+    // t2 is only inside outer loop, no scope suffix
     const t2 = result.tasks.find((t) => t.nodeId === "t2")!;
-    expect(t1.ralphId).toBe("inner");
+    expect(t1.ralphId).toBe("inner@@outer=0");
     expect(t2.ralphId).toBe("outer");
   });
 });
