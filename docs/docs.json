@@ -125,7 +125,8 @@
           {
             "group": "Reference",
             "pages": [
-              "reference/toon-spec"
+              "reference/toon-spec",
+              "reference/errors"
             ]
           }
         ]
@@ -223,7 +224,8 @@
         {
           "group": "Reference",
           "pages": [
-              "reference/types"
+              "reference/types",
+              "reference/errors"
           ]
         }
       ]

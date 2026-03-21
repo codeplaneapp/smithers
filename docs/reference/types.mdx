@@ -784,11 +784,11 @@ type ApprovalDecision = {
 
 ### SmithersError
 
-Standard error shape returned by the HTTP server.
+Standard error shape returned by the HTTP server and thrown by the `SmithersError` class.
 
 ```ts
 type SmithersError = {
-  code: string;
+  code: SmithersErrorCode;
   message: string;
   details?: Record<string, unknown>;
 };
@@ -796,9 +796,25 @@ type SmithersError = {
 
 | Field | Type | Description |
 |---|---|---|
-| `code` | `string` | Machine-readable error code (e.g., `"INVALID_REQUEST"`, `"UNAUTHORIZED"`) |
+| `code` | `SmithersErrorCode` | Machine-readable error code (e.g., `"INVALID_INPUT"`, `"AGENT_CLI_ERROR"`) |
 | `message` | `string` | Human-readable error description |
 | `details` | `Record<string, unknown>` | Optional additional error context |
+
+### SmithersErrorCode
+
+A union of all known error codes. Includes a `(string & {})` escape hatch so custom codes still compile.
+
+```ts
+type SmithersErrorCode =
+  | "INVALID_INPUT" | "MISSING_INPUT" | "MISSING_INPUT_TABLE"
+  | "RESUME_METADATA_MISMATCH" | "UNKNOWN_OUTPUT_SCHEMA"
+  | "INVALID_OUTPUT" | "WORKTREE_CREATE_FAILED" | "VCS_NOT_FOUND"
+  | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "DUPLICATE_ID"
+  // ... 35 more codes
+  | (string & {});
+```
+
+See the [Error Reference](/reference/errors) for the full list of codes and when each is thrown.
 
 ---
 

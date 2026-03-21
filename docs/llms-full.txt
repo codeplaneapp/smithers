@@ -8105,6 +8105,210 @@ A `.toon` file compiles to the same `WorkflowNode` graph as the Effect builder A
 
 ---
 
+## Error Reference
+
+> Complete reference for all SmithersError codes and HTTP API error codes.
+> Source: https://smithers.sh/reference/errors
+
+## Overview
+
+Smithers uses structured errors with machine-readable codes. Every error thrown by the framework is an instance of `SmithersError`:
+
+```ts
+import { SmithersErrorInstance, isSmithersError } from "smithers-orchestrator";
+import type { SmithersErrorCode } from "smithers-orchestrator";
+```
+
+| Export | Kind | Description |
+|---|---|---|
+| `SmithersErrorInstance` | class | The `SmithersError` class (renamed to avoid conflict with the type alias) |
+| `isSmithersError(err)` | function | Type guard — returns `true` if the value has a `code` property |
+| `errorToJson(err)` | function | Serializes any error (including `SmithersError`) to a JSON-safe object |
+| `SmithersErrorCode` | type | Union of all known error codes with `(string & {})` escape hatch |
+
+## Using Error Codes
+
+```ts
+import { isSmithersError } from "smithers-orchestrator";
+import type { SmithersErrorCode } from "smithers-orchestrator";
+
+try {
+  await runWorkflow(workflow, { input: {} });
+} catch (err) {
+  if (isSmithersError(err)) {
+    switch (err.code) {
+      case "INVALID_INPUT":
+        console.error("Bad input:", err.message);
+        break;
+      case "AGENT_CLI_ERROR":
+        console.error("Agent failed:", err.message);
+        break;
+      default:
+        console.error(`[${err.code}] ${err.message}`);
+    }
+  }
+}
+```
+
+---
+
+## Engine Errors
+
+Thrown during workflow run lifecycle.
+
+| Code | When | Details |
+|---|---|---|
+| `INVALID_INPUT` | Run input fails validation or has wrong shape | — |
+| `MISSING_INPUT` | Resume attempted without existing input row | — |
+| `MISSING_INPUT_TABLE` | Input table not found in database | — |
+| `RESUME_METADATA_MISMATCH` | Resume run ID or metadata doesn't match stored run | — |
+| `UNKNOWN_OUTPUT_SCHEMA` | Output table referenced by a task is not in the schema registry | — |
+| `INVALID_OUTPUT` | Agent response is not valid JSON or cannot be parsed | — |
+| `WORKTREE_CREATE_FAILED` | Git or jj worktree creation failed | `{ worktreePath, vcsType, branch? }` |
+| `VCS_NOT_FOUND` | No git or jj repository found from the root directory | `{ rootDir }` |
+
+---
+
+## Component Errors
+
+Thrown during DOM extraction or component rendering.
+
+| Code | When | Details |
+|---|---|---|
+| `TASK_ID_REQUIRED` | A `<Task>` is missing its `id` prop or `id` is not a string | — |
+| `TASK_MISSING_OUTPUT` | A `<Task>` is missing its `output` prop | `{ nodeId }` |
+| `DUPLICATE_ID` | Two tasks, loops, or worktrees share the same ID | `{ kind: "task"\|"ralph"\|"worktree", id }` |
+| `NESTED_LOOP` | A `<Loop>` (Ralph) is nested inside another `<Loop>` | — |
+| `WORKTREE_EMPTY_PATH` | A `<Worktree>` has an empty or missing `path` prop | — |
+| `MDX_PRELOAD_INACTIVE` | Task prompt resolved to `[object Object]` — MDX preload is not active | — |
+| `CONTEXT_OUTSIDE_WORKFLOW` | `useCtx()` called outside a `<Workflow>` created by `createSmithers()` | — |
+| `MISSING_OUTPUT` | `ctx.output()` called for a node that hasn't produced output yet | `{ nodeId, iteration }` |
+
+---
+
+## Tool Errors
+
+Thrown by the built-in tool implementations (read, write, edit, bash, grep).
+
+| Code | When | Details |
+|---|---|---|
+| `TOOL_PATH_INVALID` | Path argument is not a string | — |
+| `TOOL_PATH_ESCAPE` | Resolved path escapes the sandbox root directory (including via symlink) | — |
+| `TOOL_FILE_TOO_LARGE` | File exceeds `maxOutputBytes` limit | — |
+| `TOOL_CONTENT_TOO_LARGE` | Write content exceeds `maxOutputBytes` limit | — |
+| `TOOL_PATCH_TOO_LARGE` | Edit patch exceeds `maxOutputBytes` limit | — |
+| `TOOL_PATCH_FAILED` | Unified diff patch could not be applied | — |
+| `TOOL_NETWORK_DISABLED` | Bash command attempts network access when `allowNetwork` is false | — |
+| `TOOL_GIT_REMOTE_DISABLED` | Bash command attempts git remote operations when `allowNetwork` is false | — |
+| `TOOL_COMMAND_FAILED` | Bash command exited with a non-zero exit code | — |
+| `TOOL_GREP_FAILED` | `rg` (ripgrep) exited with error code 2 | — |
+
+---
+
+## Agent Errors
+
+Thrown by CLI-based agent wrappers.
+
+| Code | When | Details |
+|---|---|---|
+| `AGENT_CLI_ERROR` | CLI agent exited with a non-zero code or produced an error on stdout | — |
+| `AGENT_RPC_FILE_ARGS` | RPC mode was used with file arguments (not supported) | — |
+| `AGENT_BUILD_COMMAND` | `buildCommand()` called on an agent that overrides `generate()` directly | — |
+
+---
+
+## TOON Builder Errors
+
+Thrown when parsing and validating `.toon` workflow files via the Effect builder.
+
+| Code | When | Details |
+|---|---|---|
+| `TOON_INVALID_FILE` | TOON file could not be parsed or is structurally invalid | — |
+| `TOON_SCHEMA_INVALID` | Schema type is unknown, array definition is unsupported, or definition is invalid | — |
+| `TOON_DUPLICATE_SCHEMA` | Two schemas share the same name | — |
+| `TOON_DUPLICATE_COMPONENT` | Two components share the same name | — |
+| `TOON_COMPONENT_MISSING_STEPS` | A component definition has no steps | — |
+| `TOON_DUPLICATE_STEP` | Two steps share the same ID | — |
+| `TOON_UNKNOWN_DEPENDENCY` | A step references a dependency that doesn't exist | — |
+| `TOON_AGENT_CONFIG_INVALID` | Agent definition is missing required fields (type, model, provider) | — |
+| `TOON_NOT_FOUND` | Referenced schema, agent, service, component, or workflow not found | — |
+| `TOON_PLUGIN_INVALID` | Plugin module did not export a valid plugin object | — |
+| `TOON_UNKNOWN_NODE` | TOON node has an unrecognized kind | — |
+| `TOON_STEP_MISSING_OUTPUT` | Step is missing its output schema | — |
+| `TOON_STEP_AMBIGUOUS` | Step defines more than one of `prompt`, `run`, or `handler` | — |
+| `TOON_STEP_MISSING_AGENT` | Prompt-based step has no agent configured | — |
+| `TOON_HANDLER_INVALID` | Handler module did not export a function | — |
+| `TOON_WORKFLOW_INVALID` | Workflow is missing name, input schema, steps, or has structural issues | — |
+| `TOON_NESTED_LOOP` | Nested builder loops are not supported | — |
+| `TOON_DUPLICATE_ALIAS` | Two workflows share the same alias | — |
+
+---
+
+## Database Errors
+
+Thrown when interacting with the SQLite database layer.
+
+| Code | When | Details |
+|---|---|---|
+| `DB_MISSING_COLUMNS` | Output or input table is missing required `runId`/`nodeId` columns | — |
+| `DB_REQUIRES_BUN_SQLITE` | Database client does not have the required `exec()` method (not a Bun SQLite instance) | — |
+
+---
+
+## BAML Plugin Errors
+
+Thrown by the BAML plugin during code generation and manifest resolution.
+
+| Code | When | Details |
+|---|---|---|
+| `BAML_COMMAND_FAILED` | BAML CLI command exited with a non-zero code | — |
+| `BAML_MANIFEST_NOT_FOUND` | BAML manifest file does not exist at the expected path | — |
+| `BAML_MANIFEST_INVALID` | BAML manifest file exists but has an invalid structure | — |
+| `BAML_ENTRY_NOT_FOUND` | No manifest entry found for the given source path | — |
+| `BAML_REQUIRES_BUN` | `bamlPlugin()` called outside Bun runtime | — |
+
+---
+
+## Other Errors
+
+| Code | When | Details |
+|---|---|---|
+| `SCHEMA_CHANGE_HOT` | Hot reload detected a schema change that requires a restart | — |
+| `APPROVAL_OUTSIDE_TASK` | Approval decision resolved outside of an executing task | — |
+| `TASK_RUNTIME_UNAVAILABLE` | `requireTaskRuntime()` called outside of an executing builder step | — |
+| `WORKFLOW_MISSING_DEFAULT` | Workflow module does not have a default export | — |
+
+---
+
+## HTTP API Errors
+
+These are server-internal `HttpError` codes returned in the JSON error response body. They are **not** `SmithersError` instances.
+
+| Code | Status | When |
+|---|---|---|
+| `INVALID_REQUEST` | 400 | Request body or query parameters are invalid |
+| `PAYLOAD_TOO_LARGE` | 413 | Request body exceeds `maxBodyBytes` |
+| `INVALID_JSON` | 400 | Request body is not valid JSON |
+| `SERVER_ERROR` | 500 | Unexpected server error |
+| `UNAUTHORIZED` | 401 | Missing or invalid authorization token |
+| `WORKFLOW_PATH_OUTSIDE_ROOT` | 400 | Workflow path resolves outside the server root directory |
+| `RUN_ID_REQUIRED` | 400 | `runId` is required when `resume` is true |
+| `RUN_ALREADY_EXISTS` | 409 | A run with the given ID already exists |
+| `RUN_NOT_FOUND` | 404 | No run found with the given ID |
+| `RUN_NOT_ACTIVE` | 409 | Run is not currently active (cannot cancel) |
+| `NOT_FOUND` | 404 | Route or resource not found |
+| `DB_NOT_CONFIGURED` | 400 | Server database not configured (required for listing runs) |
+
+---
+
+## Next Steps
+
+- [Error Handling Guide](/guides/error-handling) — patterns for catching and handling errors in workflows
+- [Debugging Guide](/guides/debugging) — tools for diagnosing workflow failures
+- [Troubleshooting](/guides/troubleshooting) — common issues and solutions
+
+---
+
 ## JSX API
 
 > Build Smithers workflows as JSX trees with render-time branching, reusable components, and MDX prompts.
@@ -16368,11 +16572,11 @@ type ApprovalDecision = {
 
 ### SmithersError
 
-Standard error shape returned by the HTTP server.
+Standard error shape returned by the HTTP server and thrown by the `SmithersError` class.
 
 ```ts
 type SmithersError = {
-  code: string;
+  code: SmithersErrorCode;
   message: string;
   details?: Record<string, unknown>;
 };
@@ -16380,9 +16584,25 @@ type SmithersError = {
 
 | Field | Type | Description |
 |---|---|---|
-| `code` | `string` | Machine-readable error code (e.g., `"INVALID_REQUEST"`, `"UNAUTHORIZED"`) |
+| `code` | `SmithersErrorCode` | Machine-readable error code (e.g., `"INVALID_INPUT"`, `"AGENT_CLI_ERROR"`) |
 | `message` | `string` | Human-readable error description |
 | `details` | `Record<string, unknown>` | Optional additional error context |
+
+### SmithersErrorCode
+
+A union of all known error codes. Includes a `(string & {})` escape hatch so custom codes still compile.
+
+```ts
+type SmithersErrorCode =
+  | "INVALID_INPUT" | "MISSING_INPUT" | "MISSING_INPUT_TABLE"
+  | "RESUME_METADATA_MISMATCH" | "UNKNOWN_OUTPUT_SCHEMA"
+  | "INVALID_OUTPUT" | "WORKTREE_CREATE_FAILED" | "VCS_NOT_FOUND"
+  | "TASK_ID_REQUIRED" | "TASK_MISSING_OUTPUT" | "DUPLICATE_ID"
+  // ... 35 more codes
+  | (string & {});
+```
+
+See the [Error Reference](/reference/errors) for the full list of codes and when each is thrown.
 
 ---
 
