@@ -18,11 +18,12 @@ import { revertToAttempt } from "../revert";
 import { trackEvent } from "../effect/metrics";
 import { runSync } from "../effect/runtime";
 import { spawn } from "node:child_process";
+import { SmithersError } from "../utils/errors";
 
 async function loadWorkflowAsync(path: string): Promise<SmithersWorkflow<any>> {
   const abs = resolve(process.cwd(), path);
   const mod = await import(pathToFileURL(abs).href);
-  if (!mod.default) throw new Error("Workflow must export default");
+  if (!mod.default) throw new SmithersError("WORKFLOW_MISSING_DEFAULT", "Workflow must export default");
   return mod.default as SmithersWorkflow<any>;
 }
 
@@ -822,6 +823,67 @@ const cli = Cli.create({
           exitCode: 1,
         });
       }
+    },
+  })
+  .command("observability", {
+    description: "Start the local observability stack (Grafana, Prometheus, Tempo, OTLP Collector) via Docker Compose.",
+    options: z.object({
+      detach: z.boolean().default(false).describe("Run containers in the background"),
+      down: z.boolean().default(false).describe("Stop and remove the observability stack"),
+    }),
+    alias: { detach: "d" },
+    async run({ options, ok, error }) {
+      const fail: FailFn = (opts) => {
+        commandExitOverride = opts.exitCode ?? 1;
+        return error(opts);
+      };
+
+      // Resolve the observability directory relative to the package
+      const composeDir = resolve(dirname(new URL(import.meta.url).pathname), "../../observability");
+      const composeFile = resolve(composeDir, "docker-compose.otel.yml");
+
+      if (!existsSync(composeFile)) {
+        return fail({
+          code: "COMPOSE_NOT_FOUND",
+          message: `Docker Compose file not found at ${composeFile}. Ensure the smithers-orchestrator package includes the observability/ directory.`,
+          exitCode: 1,
+        });
+      }
+
+      const composeArgs = [
+        "compose",
+        "-f", composeFile,
+        ...(options.down ? ["down"] : ["up", ...(options.detach ? ["-d"] : [])]),
+      ];
+
+      process.stderr.write(
+        options.down
+          ? `[smithers] Stopping observability stack...\n`
+          : `[smithers] Starting observability stack...\n` +
+            `  Grafana:    http://localhost:3001\n` +
+            `  Prometheus: http://localhost:9090\n` +
+            `  Tempo:      http://localhost:3200\n`,
+      );
+
+      const child = spawn("docker", composeArgs, {
+        stdio: "inherit",
+        cwd: composeDir,
+      });
+
+      const result = await new Promise<{ exitCode: number }>((resolve) => {
+        child.on("close", (code) => resolve({ exitCode: code ?? 0 }));
+        child.on("error", (err) => {
+          process.stderr.write(`Failed to run docker compose: ${err.message}\n`);
+          process.stderr.write(`Make sure Docker is installed and running.\n`);
+          resolve({ exitCode: 1 });
+        });
+      });
+
+      process.exitCode = result.exitCode;
+      return ok({
+        action: options.down ? "down" : "up",
+        exitCode: result.exitCode,
+      });
     },
   })
   .command("tui", {
