@@ -309,26 +309,39 @@ export function trackEvent(event: SmithersEvent): Effect.Effect<void> {
 
     case "TokenUsageReported": {
       const effects: Effect.Effect<void>[] = [countEvent];
+
+      const tags: Record<string, string> = {};
+      if (event.model && event.model !== "unknown") tags.model = event.model;
+      if (event.agent && event.agent !== "unknown") tags.agent = event.agent;
+
+      const tagMetric = <A extends Metric.Metric<any, any, any>>(m: A): A => {
+        let res: any = m;
+        for (const [k, v] of Object.entries(tags)) {
+          res = Metric.tagged(res, k, v);
+        }
+        return res as A;
+      };
+
       if (event.inputTokens > 0) {
         effects.push(
-          Metric.incrementBy(tokensInputTotal, event.inputTokens),
-          Metric.update(tokensInputPerCall, event.inputTokens),
+          Metric.incrementBy(tagMetric(tokensInputTotal), event.inputTokens),
+          Metric.update(tagMetric(tokensInputPerCall), event.inputTokens),
         );
       }
       if (event.outputTokens > 0) {
         effects.push(
-          Metric.incrementBy(tokensOutputTotal, event.outputTokens),
-          Metric.update(tokensOutputPerCall, event.outputTokens),
+          Metric.incrementBy(tagMetric(tokensOutputTotal), event.outputTokens),
+          Metric.update(tagMetric(tokensOutputPerCall), event.outputTokens),
         );
       }
       if (event.cacheReadTokens && event.cacheReadTokens > 0) {
-        effects.push(Metric.incrementBy(tokensCacheReadTotal, event.cacheReadTokens));
+        effects.push(Metric.incrementBy(tagMetric(tokensCacheReadTotal), event.cacheReadTokens));
       }
       if (event.cacheWriteTokens && event.cacheWriteTokens > 0) {
-        effects.push(Metric.incrementBy(tokensCacheWriteTotal, event.cacheWriteTokens));
+        effects.push(Metric.incrementBy(tagMetric(tokensCacheWriteTotal), event.cacheWriteTokens));
       }
       if (event.reasoningTokens && event.reasoningTokens > 0) {
-        effects.push(Metric.incrementBy(tokensReasoningTotal, event.reasoningTokens));
+        effects.push(Metric.incrementBy(tagMetric(tokensReasoningTotal), event.reasoningTokens));
       }
       return Effect.all(effects, { discard: true });
     }
