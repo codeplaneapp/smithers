@@ -12,6 +12,7 @@ import type {
 import { spawnCaptureEffect } from "../effect/child-process";
 import { runPromise } from "../effect/runtime";
 import { getToolContext } from "../tools/context";
+import { SmithersError } from "../utils/errors";
 
 type TimeoutInput = number | { totalMs?: number; idleMs?: number } | undefined;
 
@@ -835,7 +836,7 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
             filteredStderr ||
             result.stdout.trim() ||
             `CLI exited with code ${result.exitCode}`;
-          throw new Error(errorText);
+          throw new SmithersError("AGENT_CLI_ERROR", errorText);
         }
       }
 
@@ -851,7 +852,8 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
 
       // Optionally treat "banner-only" output as an error when requested.
       if (commandSpec.errorOnBannerOnly && !rawText && stdout.trim()) {
-        throw new Error(
+        throw new SmithersError(
+          "AGENT_CLI_ERROR",
           `CLI agent error (stdout): output was only a banner with no model response`,
         );
       }
@@ -863,7 +865,7 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
         for (const pattern of stdoutErrorPatterns) {
           const regex = new RegExp(pattern.source, pattern.flags);
           if (regex.test(rawText)) {
-            throw new Error(`CLI agent error (stdout): ${rawText.slice(0, 500)}`);
+            throw new SmithersError("AGENT_CLI_ERROR", `CLI agent error (stdout): ${rawText.slice(0, 500)}`);
           }
         }
       }

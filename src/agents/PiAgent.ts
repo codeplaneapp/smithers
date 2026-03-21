@@ -13,6 +13,7 @@ import {
 } from "./BaseCliAgent";
 import type { BaseCliAgentOptions, PiExtensionUiRequest, PiExtensionUiResponse } from "./BaseCliAgent";
 import { getToolContext } from "../tools/context";
+import { SmithersError } from "../utils/errors";
 
 export type { PiExtensionUiRequest, PiExtensionUiResponse };
 
@@ -72,7 +73,7 @@ export class PiAgent extends BaseCliAgent {
     const mode = this.opts.mode ?? "text";
 
     if (mode === "rpc" && this.opts.files?.length) {
-      throw new Error("RPC mode does not support file arguments");
+      throw new SmithersError("AGENT_RPC_FILE_ARGS", "RPC mode does not support file arguments");
     }
 
     const args: string[] = [];
@@ -176,7 +177,7 @@ export class PiAgent extends BaseCliAgent {
       });
 
       if (result.exitCode && result.exitCode !== 0) {
-        throw new Error(result.stderr.trim() || result.stdout.trim() || `CLI exited with code ${result.exitCode}`);
+        throw new SmithersError("AGENT_CLI_ERROR", result.stderr.trim() || result.stdout.trim() || `CLI exited with code ${result.exitCode}`);
       }
 
       const rawText = result.stdout.trim();
@@ -219,6 +220,6 @@ export class PiAgent extends BaseCliAgent {
     cleanup?: () => Promise<void>;
   }> {
     // PiAgent overrides generate() directly, so buildCommand is not used
-    throw new Error("PiAgent does not use buildCommand");
+    throw new SmithersError("AGENT_BUILD_COMMAND", "PiAgent does not use buildCommand");
   }
 }
