@@ -38,6 +38,32 @@ async function loadWorkflow(path: string): Promise<SmithersWorkflow<any>> {
   return runPromise(loadWorkflowEffect(path));
 }
 
+/**
+ * Load a workflow and return a SmithersDb adapter.
+ * Handles both .tsx (dynamic import) and .toon (SQLite DB next to the file) workflows.
+ */
+async function loadWorkflowDb(
+  workflowPath: string,
+): Promise<{ adapter: SmithersDb; cleanup?: () => void }> {
+  const resolvedPath = resolve(process.cwd(), workflowPath);
+  if (extname(resolvedPath) === ".toon") {
+    const { Database } = await import("bun:sqlite");
+    const { drizzle } = await import("drizzle-orm/bun-sqlite");
+    const dbPath = resolve(dirname(resolvedPath), "smithers.db");
+    const sqlite = new Database(dbPath);
+    const db = drizzle(sqlite);
+    ensureSmithersTables(db as any);
+    return {
+      adapter: new SmithersDb(db as any),
+      cleanup: () => { try { sqlite.close(); } catch {} },
+    };
+  }
+  const workflow = await loadWorkflow(workflowPath);
+  ensureSmithersTables(workflow.db as any);
+  setupSqliteCleanup(workflow);
+  return { adapter: new SmithersDb(workflow.db as any) };
+}
+
 function readPackageVersion(): string {
   try {
     const pkgUrl = new URL("../../package.json", import.meta.url);
@@ -525,22 +551,24 @@ const cli = Cli.create({
         return error(opts);
       };
       try {
-        const workflow = await loadWorkflow(args.workflow);
-        ensureSmithersTables(workflow.db as any);
-        const adapter = new SmithersDb(workflow.db as any);
-        await approveNode(
-          adapter,
-          options.runId,
-          options.nodeId,
-          options.iteration,
-          options.note,
-          options.decidedBy,
-        );
-        return ok({
-          runId: options.runId,
-          nodeId: options.nodeId,
-          status: "approve",
-        });
+        const { adapter, cleanup } = await loadWorkflowDb(args.workflow);
+        try {
+          await approveNode(
+            adapter,
+            options.runId,
+            options.nodeId,
+            options.iteration,
+            options.note,
+            options.decidedBy,
+          );
+          return ok({
+            runId: options.runId,
+            nodeId: options.nodeId,
+            status: "approve",
+          });
+        } finally {
+          cleanup?.();
+        }
       } catch (err: any) {
         return fail({
           code: "APPROVE_FAILED",
@@ -561,22 +589,24 @@ const cli = Cli.create({
         return error(opts);
       };
       try {
-        const workflow = await loadWorkflow(args.workflow);
-        ensureSmithersTables(workflow.db as any);
-        const adapter = new SmithersDb(workflow.db as any);
-        await denyNode(
-          adapter,
-          options.runId,
-          options.nodeId,
-          options.iteration,
-          options.note,
-          options.decidedBy,
-        );
-        return ok({
-          runId: options.runId,
-          nodeId: options.nodeId,
-          status: "deny",
-        });
+        const { adapter, cleanup } = await loadWorkflowDb(args.workflow);
+        try {
+          await denyNode(
+            adapter,
+            options.runId,
+            options.nodeId,
+            options.iteration,
+            options.note,
+            options.decidedBy,
+          );
+          return ok({
+            runId: options.runId,
+            nodeId: options.nodeId,
+            status: "deny",
+          });
+        } finally {
+          cleanup?.();
+        }
       } catch (err: any) {
         return fail({
           code: "DENY_FAILED",
@@ -597,11 +627,13 @@ const cli = Cli.create({
         return error(opts);
       };
       try {
-        const workflow = await loadWorkflow(args.workflow);
-        ensureSmithersTables(workflow.db as any);
-        const adapter = new SmithersDb(workflow.db as any);
-        const run = await adapter.getRun(options.runId);
-        return ok(run);
+        const { adapter, cleanup } = await loadWorkflowDb(args.workflow);
+        try {
+          const run = await adapter.getRun(options.runId);
+          return ok(run);
+        } finally {
+          cleanup?.();
+        }
       } catch (err: any) {
         return fail({
           code: "STATUS_FAILED",
@@ -622,29 +654,31 @@ const cli = Cli.create({
         return error(opts);
       };
       try {
-        const workflow = await loadWorkflow(args.workflow);
-        ensureSmithersTables(workflow.db as any);
-        const adapter = new SmithersDb(workflow.db as any);
-        const frames = await adapter.listFrames(options.runId, options.tail);
-        if (!options.compact) return ok(frames);
-        const compact = frames.map((frame: any) => {
-          const result: Record<string, any> = {
-            frameNo: frame.frameNo,
-            createdAtMs: frame.createdAtMs,
-          };
-          if (frame.taskIndexJson) {
-            try {
-              result.tasks = JSON.parse(frame.taskIndexJson);
-            } catch {}
-          }
-          if (frame.mountedTaskIdsJson) {
-            try {
-              result.mountedTaskIds = JSON.parse(frame.mountedTaskIdsJson);
-            } catch {}
-          }
-          return result;
-        });
-        return ok(compact);
+        const { adapter, cleanup } = await loadWorkflowDb(args.workflow);
+        try {
+          const frames = await adapter.listFrames(options.runId, options.tail);
+          if (!options.compact) return ok(frames);
+          const compact = frames.map((frame: any) => {
+            const result: Record<string, any> = {
+              frameNo: frame.frameNo,
+              createdAtMs: frame.createdAtMs,
+            };
+            if (frame.taskIndexJson) {
+              try {
+                result.tasks = JSON.parse(frame.taskIndexJson);
+              } catch {}
+            }
+            if (frame.mountedTaskIdsJson) {
+              try {
+                result.mountedTaskIds = JSON.parse(frame.mountedTaskIdsJson);
+              } catch {}
+            }
+            return result;
+          });
+          return ok(compact);
+        } finally {
+          cleanup?.();
+        }
       } catch (err: any) {
         return fail({
           code: "FRAMES_FAILED",
@@ -665,11 +699,13 @@ const cli = Cli.create({
         return error(opts);
       };
       try {
-        const workflow = await loadWorkflow(args.workflow);
-        ensureSmithersTables(workflow.db as any);
-        const adapter = new SmithersDb(workflow.db as any);
-        const runs = await adapter.listRuns(options.limit, options.status);
-        return ok(runs);
+        const { adapter, cleanup } = await loadWorkflowDb(args.workflow);
+        try {
+          const runs = await adapter.listRuns(options.limit, options.status);
+          return ok(runs);
+        } finally {
+          cleanup?.();
+        }
       } catch (err: any) {
         return fail({
           code: "LIST_FAILED",
@@ -690,6 +726,14 @@ const cli = Cli.create({
         return error(opts);
       };
       try {
+        const resolvedWorkflowPath = resolve(process.cwd(), args.workflow);
+        if (extname(resolvedWorkflowPath) === ".toon") {
+          return fail({
+            code: "GRAPH_UNSUPPORTED",
+            message: "The graph command is not yet supported for .toon workflows. Use a .tsx workflow instead.",
+            exitCode: 1,
+          });
+        }
         const workflow = await loadWorkflow(args.workflow);
         ensureSmithersTables(workflow.db as any);
         const schema = resolveSchema(workflow.db);
@@ -706,7 +750,6 @@ const cli = Cli.create({
           input: inputRow ?? {},
           outputs,
         });
-        const resolvedWorkflowPath = resolve(process.cwd(), args.workflow);
         const baseRootDir = dirname(resolvedWorkflowPath);
         const snap = await renderFrame(workflow, ctx, { baseRootDir });
         const seen = new WeakSet<object>();
@@ -742,18 +785,20 @@ const cli = Cli.create({
         return error(opts);
       };
       try {
-        const workflow = await loadWorkflow(args.workflow);
-        ensureSmithersTables(workflow.db as any);
-        const adapter = new SmithersDb(workflow.db as any);
-        const result = await revertToAttempt(adapter, {
-          runId: options.runId,
-          nodeId: options.nodeId,
-          iteration: options.iteration,
-          attempt: options.attempt,
-          onProgress: (e) => console.log(JSON.stringify(e)),
-        });
-        process.exitCode = result.success ? 0 : 1;
-        return ok(result);
+        const { adapter, cleanup } = await loadWorkflowDb(args.workflow);
+        try {
+          const result = await revertToAttempt(adapter, {
+            runId: options.runId,
+            nodeId: options.nodeId,
+            iteration: options.iteration,
+            attempt: options.attempt,
+            onProgress: (e) => console.log(JSON.stringify(e)),
+          });
+          process.exitCode = result.success ? 0 : 1;
+          return ok(result);
+        } finally {
+          cleanup?.();
+        }
       } catch (err: any) {
         return fail({
           code: "REVERT_FAILED",
@@ -774,48 +819,50 @@ const cli = Cli.create({
         return error(opts);
       };
       try {
-        const workflow = await loadWorkflow(args.workflow);
-        ensureSmithersTables(workflow.db as any);
-        const adapter = new SmithersDb(workflow.db as any);
-        const run = await adapter.getRun(options.runId);
-        if (!run) {
-          return fail({
-            code: "RUN_NOT_FOUND",
-            message: `Run not found: ${options.runId}`,
-            exitCode: 4,
+        const { adapter, cleanup } = await loadWorkflowDb(args.workflow);
+        try {
+          const run = await adapter.getRun(options.runId);
+          if (!run) {
+            return fail({
+              code: "RUN_NOT_FOUND",
+              message: `Run not found: ${options.runId}`,
+              exitCode: 4,
+            });
+          }
+          if (run.status !== "running" && run.status !== "waiting-approval") {
+            return fail({
+              code: "RUN_NOT_ACTIVE",
+              message: `Run is not active (status: ${run.status})`,
+              exitCode: 4,
+            });
+          }
+          const inProgress = await adapter.listInProgressAttempts(options.runId);
+          const now = Date.now();
+          for (const attempt of inProgress) {
+            await adapter.updateAttempt(
+              options.runId,
+              attempt.nodeId,
+              attempt.iteration,
+              attempt.attempt,
+              {
+                state: "cancelled",
+                finishedAtMs: now,
+              },
+            );
+          }
+          await adapter.updateRun(options.runId, {
+            status: "cancelled",
+            finishedAtMs: now,
           });
-        }
-        if (run.status !== "running" && run.status !== "waiting-approval") {
-          return fail({
-            code: "RUN_NOT_ACTIVE",
-            message: `Run is not active (status: ${run.status})`,
-            exitCode: 4,
+          process.exitCode = 2;
+          return ok({
+            runId: options.runId,
+            status: "cancelled",
+            cancelledAttempts: inProgress.length,
           });
+        } finally {
+          cleanup?.();
         }
-        const inProgress = await adapter.listInProgressAttempts(options.runId);
-        const now = Date.now();
-        for (const attempt of inProgress) {
-          await adapter.updateAttempt(
-            options.runId,
-            attempt.nodeId,
-            attempt.iteration,
-            attempt.attempt,
-            {
-              state: "cancelled",
-              finishedAtMs: now,
-            },
-          );
-        }
-        await adapter.updateRun(options.runId, {
-          status: "cancelled",
-          finishedAtMs: now,
-        });
-        process.exitCode = 2;
-        return ok({
-          runId: options.runId,
-          status: "cancelled",
-          cancelledAttempts: inProgress.length,
-        });
       } catch (err: any) {
         return fail({
           code: "CANCEL_FAILED",
