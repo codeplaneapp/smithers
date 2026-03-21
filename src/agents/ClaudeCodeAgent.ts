@@ -86,7 +86,10 @@ export class ClaudeCodeAgent extends BaseCliAgent {
     options: any;
   }) {
     const args: string[] = ["--print"];
-    const outputFormat = this.opts.outputFormat ?? "text";
+    // Default to "stream-json" to capture NDJSON events that include token
+    // usage (message_start has input_tokens, message_delta has output_tokens).
+    // BaseCliAgent.extractUsageFromOutput will parse these for metrics.
+    const outputFormat = this.opts.outputFormat ?? "stream-json";
 
     pushList(args, "--add-dir", this.opts.addDir);
     pushFlag(args, "--agent", this.opts.agent);

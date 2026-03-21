@@ -203,7 +203,7 @@ export class PiAgent extends BaseCliAgent {
       onExtensionUiRequest: this.opts.onExtensionUiRequest,
     });
 
-    return buildGenerateResult(rpcResult.text, rpcResult.output, this.opts.model ?? "pi");
+    return buildGenerateResult(rpcResult.text, rpcResult.output, this.opts.model ?? "pi", rpcResult.usage);
   }
 
   protected async buildCommand(_params: {

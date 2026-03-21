@@ -71,7 +71,10 @@ export class CodexAgent extends BaseCliAgent {
     pushList(args, "--add-dir", this.opts.addDir);
     pushFlag(args, "--output-schema", this.opts.outputSchema);
     pushFlag(args, "--color", this.opts.color);
-    if (this.opts.json) args.push("--json");
+    // Always enable JSON output to capture JSONL events including
+    // turn.completed with token usage for metrics. extractUsageFromOutput
+    // in BaseCliAgent will parse these automatically.
+    args.push("--json");
 
     // Auto-wire output schema from task context if not explicitly set
     let schemaCleanupFile: string | null = null;
@@ -106,6 +109,7 @@ export class CodexAgent extends BaseCliAgent {
       args,
       stdin: fullPrompt,
       outputFile,
+      outputFormat: "stream-json" as const,
       stdoutBannerPatterns: [
         // Codex CLI prints a startup banner like:
         // "OpenAI Codex v0.99.0-alpha.13 (research preview)"
