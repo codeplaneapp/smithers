@@ -74,21 +74,21 @@ describe("unwrapZodType", () => {
 
 describe("SmithersError", () => {
   test("creates error with code and message", () => {
-    const err = new SmithersError("ERR_TASK", "Task failed");
-    expect(err.code).toBe("ERR_TASK");
+    const err = new SmithersError("AGENT_CLI_ERROR", "Task failed");
+    expect(err.code).toBe("AGENT_CLI_ERROR");
     expect(err.message).toBe("Task failed");
     expect(err).toBeInstanceOf(Error);
   });
 
   test("includes optional details", () => {
-    const err = new SmithersError("ERR", "msg", { nodeId: "a" });
+    const err = new SmithersError("MISSING_OUTPUT", "msg", { nodeId: "a" });
     expect(err.details).toEqual({ nodeId: "a" });
   });
 });
 
 describe("isSmithersError", () => {
   test("returns true for SmithersError", () => {
-    const err = new SmithersError("ERR", "msg");
+    const err = new SmithersError("MISSING_OUTPUT", "msg");
     expect(isSmithersError(err)).toBe(true);
   });
 
@@ -116,9 +116,9 @@ describe("errorToJson", () => {
   });
 
   test("serializes SmithersError with code and details", () => {
-    const err = new SmithersError("ERR_X", "failed", { key: "val" });
+    const err = new SmithersError("INVALID_INPUT", "failed", { key: "val" });
     const json = errorToJson(err) as any;
-    expect(json.code).toBe("ERR_X");
+    expect(json.code).toBe("INVALID_INPUT");
     expect(json.details).toEqual({ key: "val" });
   });
 
