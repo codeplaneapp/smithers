@@ -28,15 +28,16 @@ agents:
     type: gemini
     model: gemini-3.1-pro
     instructions: |
-      You are a senior full-stack engineer implementing Smithers DevTools features.
-      Follow the plan exactly. Write clean, idiomatic TypeScript.
+      You are implementing Smithers DevTools features.
+      Write clean, idiomatic TypeScript. Use principle of least surprise. Do not overabstract
+        Prefer inlining code unless it's truly reused
       Use existing patterns from the Smithers codebase — read src/ before writing new code.
       Every feature must include tests. E2E tests are critical.
       Run tests after every change: bun test
 
   reviewer:
     type: codex
-    model: o3
+    model: 5.4
     fullAuto: true
     instructions: |
       You are a strict code reviewer for Smithers DevTools.
