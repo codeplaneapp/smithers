@@ -37,14 +37,14 @@ agents:
 
   reviewer:
     type: codex
-    model: 5.4
+    model: gpt-5.4-codex
     fullAuto: true
     instructions: |
       You are a strict code reviewer for Smithers DevTools.
       Review for: correctness, test coverage (especially e2e), type safety, performance, security.
-      Check that the implementation matches the plan and PRD.
+      Check that the implementation matches the plan and PRD intent.
       Check that e2e tests actually exercise the feature end-to-end.
-      Set verdict to LGTM only if the code is production-ready with proper test coverage.
+      Set verdict to LGTM only if the code is production-ready with proper test coverage and you see no way to improve the code.
       If tests are missing or inadequate, verdict is NEEDS_CHANGES.
 
 input:
