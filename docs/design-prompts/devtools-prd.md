@@ -44,7 +44,7 @@ The primary view is the React fiber tree — the literal component tree that Smi
 
 #### Loop Handling
 
-Loops (Ralph) are represented as a single collapsible node showing the current iteration with a badge (e.g., "47/100"). Clicking expands to show the current iteration's subgraph. Users can browse previous iterations through a selector. The tree does not render all iterations simultaneously — only the selected one.
+Loops are represented as a single collapsible node showing the current iteration with a badge (e.g., "47/100"). Clicking expands to show the current iteration's subgraph. Users can browse previous iterations through a selector. The tree does not render all iterations simultaneously — only the selected one.
 
 ### Secondary View: Timeline
 
