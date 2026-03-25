@@ -7,12 +7,12 @@ description: How Smithers compiles a builder graph into an executable durable pl
   This page describes internal architecture. You do not need it to write workflows, but it is useful when designing new primitives or debugging scheduler behavior.
 </Warning>
 
-Smithers compiles workflow definitions — whether from TOON files or JSX — into a normalized internal plan and drives execution from durable state transitions.
+Smithers compiles JSX workflow definitions into a normalized internal plan and drives execution from durable state transitions.
 
 ## Pipeline Overview
 
 ```txt
-TOON File / JSX
+JSX Workflow
   ->
 Workflow Graph
   ->
@@ -29,26 +29,25 @@ The internal architecture should be centered on those phases.
 
 ## Stage 1: Builder Capture
 
-The workflow definition captures a typed graph. For example, in TOON:
+The workflow definition captures a typed graph. For example, in JSX:
 
-```toon
-name: bugfix
-input:
-  title: string
-steps[3]:
-  - id: analyze
-    run: "return { summary: input.title };\n"
-    output:
-      summary: string
-  - kind: approval
-    id: approve
-    request:
-      title: "Approve fix for {analyze.summary}?"
-    onDeny: fail
-  - id: fix
-    run: "return { patch: 'fix applied' };\n"
-    output:
-      patch: string
+```tsx
+<Workflow name="bugfix">
+  <Sequence>
+    <Task id="analyze" output={outputs.analysis}>
+      {{ summary: String(ctx.input.title) }}
+    </Task>
+    <Approval
+      id="approve"
+      output={outputs.approval}
+      request={{ title: "Approve fix?" }}
+      onDeny="fail"
+    />
+    <Task id="fix" output={outputs.fix}>
+      {{ patch: "fix applied" }}
+    </Task>
+  </Sequence>
+</Workflow>
 ```
 
 At this point Smithers should have an internal graph with explicit node kinds, stable ids, and typed handles.

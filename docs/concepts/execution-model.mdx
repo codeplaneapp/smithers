@@ -28,29 +28,21 @@ Unlike the old JSX API, the workflow definition is not re-rendered after each st
 
 ## Phase 1: Build the Graph
 
-The workflow graph can be produced from either of Smithers' two definition layers:
+Smithers builds the workflow graph from JSX. The renderer walks the component tree and extracts task descriptors, dependency edges, and control-flow nodes into a typed execution plan.
 
-- **TOON** — a `.toon` file is compiled into a workflow graph at build time
-- **JSX** — the React renderer extracts `TaskDescriptor` objects from a component tree
+For example:
 
-Both produce the same internal graph structure. The rest of the execution model is identical regardless of which layer defined the workflow.
-
-A TOON workflow describes the graph declaratively:
-
-```toon
-name: review-loop
-input:
-  topic: string
-steps[2]:
-  - id: analyze
-    run: "return { summary: `Analysis of ${input.topic}` };\n"
-    output:
-      summary: string
-  - id: review
-    run: "return { approved: true, feedback: 'LGTM' };\n"
-    output:
-      approved: boolean
-      feedback: string
+```tsx
+<Workflow name="review-loop">
+  <Sequence>
+    <Task id="analyze" output={outputs.analysis}>
+      {{ summary: `Analysis of ${ctx.input.topic}` }}
+    </Task>
+    <Task id="review" output={outputs.review}>
+      {{ approved: true, feedback: "LGTM" }}
+    </Task>
+  </Sequence>
+</Workflow>
 ```
 
 This phase is pure:

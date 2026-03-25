@@ -16,20 +16,17 @@ It should not depend on hidden renderer state or ad hoc prompt hashing.
 
 Caching belongs on the step that produces reusable work.
 
-**In TOON:**
+For example:
 
-```toon
-steps[1]:
-  - id: analyze
-    prompt: Analyze {input.description}.
-    output:
-      summary: string
-      severity: "low" | "medium" | "high"
-    cache:
-      by[2]: input.ticketId,input.description
-      version: analysis-v1
+```ts
+cache: {
+  by: ({ input }) => ({
+    ticketId: input.ticketId,
+    description: input.description,
+  }),
+  version: "analysis-v1",
+}
 ```
-
 
 This says:
 

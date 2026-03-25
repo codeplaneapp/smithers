@@ -23,7 +23,7 @@ Instead of:
 needsApproval: true
 ```
 
-approvals are explicit nodes in JSX and TOON.
+approvals are explicit workflow nodes.
 
 **In JSX:**
 
@@ -69,32 +69,6 @@ export default smithers((ctx) => {
   );
 });
 ```
-
-**In TOON:**
-
-```toon
-steps[3]:
-  - id: build
-    prompt: Build the deployment package.
-    output:
-      version: string
-      commitSha: string
-
-  - kind: approval
-    id: approve-deploy
-    needs[1]: build
-    request:
-      title: "Deploy {build.version}?"
-      summary: "Commit {build.commitSha} passed all checks."
-    onDeny: fail
-
-  - id: deploy
-    needs[2]: build,approve-deploy
-    prompt: Deploy version {build.version}.
-    output:
-      url: string
-```
-
 
 This is better for three reasons:
 

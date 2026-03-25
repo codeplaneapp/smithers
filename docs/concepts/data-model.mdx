@@ -15,14 +15,7 @@ Those layers serve different purposes and should stay separate.
 
 Workflow input is the external boundary of the run.
 
-**In TOON:**
-
-```toon
-input:
-  ticketId: string
-  description: string
-```
-
+At the framework boundary, describe that input with a schema type rather than with a persisted model.
 
 Smithers validates input against this schema before the workflow starts. After validation, steps receive a typed `input` value.
 
@@ -36,20 +29,7 @@ Use `Schema` for input because:
 
 Step outputs are domain records that Smithers persists.
 
-**In TOON:**
-
-```toon
-steps[1]:
-  - id: analyze
-    output:
-      summary: string
-      severity: "low" | "medium" | "high"
-```
-
-TOON output schemas compile to `Model.Class` definitions automatically.
-
-
-TOON output schemas compile to model definitions automatically.
+Those outputs should be modeled as business data, not as workflow bookkeeping rows.
 
 You should not need to add fields like:
 
