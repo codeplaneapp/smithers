@@ -57,7 +57,7 @@ To run durably, Smithers needs internal state that is distinct from user models:
 
 This data should live in framework-managed tables, not inside every output model.
 
-That separation is the main difference from the old API, where the user had to think in terms of `(runId, nodeId, iteration)` rows.
+This separation means you never have to think in terms of `(runId, nodeId, iteration)` rows — Smithers manages that bookkeeping internally.
 
 ## What Gets Persisted
 
