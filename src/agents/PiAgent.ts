@@ -14,8 +14,6 @@ import {
 import type { BaseCliAgentOptions, PiExtensionUiRequest, PiExtensionUiResponse } from "./BaseCliAgent";
 import { getToolContext } from "../tools/context";
 import { SmithersError } from "../utils/errors";
-import { capturePiNdjson } from "../agent-trace";
-import { capturePiEvent } from "../agent-trace";
 
 export type { PiExtensionUiRequest, PiExtensionUiResponse };
 
@@ -188,17 +186,6 @@ export class PiAgent extends BaseCliAgent {
       const extractedText = mode === "json"
         ? (extractTextFromPiNdjson(rawText) ?? rawText)
         : rawText;
-      // Capture canonical trace events for Pi NDJSON stream (assistant deltas, tool lifecycle)
-      try {
-        if (mode === "json") {
-          capturePiNdjson(rawText, "cli-json", {
-            agentId: this.id,
-            model: this.opts.model ?? this.model,
-          });
-        }
-      } catch {
-        // Best-effort capture; never fail the agent call due to trace capture.
-      }
       const output = tryParseJson(extractedText);
       return buildGenerateResult(extractedText, output, this.opts.model ?? "pi");
     }
@@ -214,16 +201,6 @@ export class PiAgent extends BaseCliAgent {
       maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
       onStderr: options?.onStderr,
       onExtensionUiRequest: this.opts.onExtensionUiRequest,
-      onEvent: (evt) => {
-        try {
-          capturePiEvent(evt, "rpc-events", {
-            agentId: this.id,
-            model: this.opts.model ?? this.model,
-          });
-        } catch {
-          /* ignore */
-        }
-      },
     });
 
     return buildGenerateResult(rpcResult.text, rpcResult.output, this.opts.model ?? "pi", rpcResult.usage);

@@ -3,9 +3,6 @@ import { afterEach, describe, expect, test } from "bun:test";
  import { join } from "node:path";
  import { tmpdir } from "node:os";
  import { PiAgent } from "../src/agents";
- import { EventBus } from "../src/events";
- import { runWithToolContext } from "../src/tools/context";
- import type { SmithersAgentTraceEvent } from "../src/SmithersEvent";
  
  const originalPath = process.env.PATH ?? "";
  
@@ -63,8 +60,7 @@ import { afterEach, describe, expect, test } from "bun:test";
          thinking: "low",
          verbose: true,
          env: { PATH: process.env.PATH! },
-  });
-
+       });
  
        const result = await agent.generate({
          messages: [
@@ -184,6 +180,48 @@ import { afterEach, describe, expect, test } from "bun:test";
      } finally {
        await rm(fake.dir, { recursive: true, force: true });
        await rm(argsFileDir, { recursive: true, force: true });
+     }
+   });
+ 
+   test("PiAgent RPC mode waits past tool-use turns for the final assistant answer", async () => {
+     const fake = await makeFakePi(`
+ let buffer = "";
+ process.stdin.on("data", (chunk) => {
+   buffer += chunk.toString("utf8");
+   const lines = buffer.split(/\\r?\\n/);
+   buffer = lines.pop();
+   for (const line of lines) {
+     if (!line.trim()) continue;
+     const msg = JSON.parse(line);
+     if (msg.type === "prompt") {
+       process.stdout.write(JSON.stringify({ type: "response", command: "prompt", success: true, id: msg.id }) + "\\n");
+       process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Thinking" } }) + "\\n");
+       process.stdout.write(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "Tool turn" }], stopReason: "toolUse" } }) + "\\n");
+       setTimeout(() => {
+         process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: " final answer" } }) + "\\n");
+         process.stdout.write(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "Final answer" }], stopReason: "stop" } }) + "\\n");
+       }, 20);
+     }
+   }
+ });
+ `);
+ 
+     try {
+       process.env.PATH = `${fake.dir}:${originalPath}`;
+ 
+       const agent = new PiAgent({
+         mode: "rpc",
+         model: "gpt-4o-mini",
+         env: { PATH: process.env.PATH! },
+       });
+ 
+       const result = await agent.generate({
+         messages: [{ role: "user", content: "Use a tool and then answer" }],
+       });
+ 
+       expect(result.text).toBe("Final answer");
+     } finally {
+       await rm(fake.dir, { recursive: true, force: true });
      }
    });
  
@@ -313,8 +351,7 @@ import { afterEach, describe, expect, test } from "bun:test";
          mode: "json",
          model: "test-model",
          env: { PATH: process.env.PATH! },
-  });
-
+       });
 
        const result = await agent.generate({
          messages: [{ role: "user", content: "Hello" }],
@@ -326,124 +363,6 @@ import { afterEach, describe, expect, test } from "bun:test";
        expect(result.output).not.toHaveProperty("type", "session");
      } finally {
        await rm(fake.dir, { recursive: true, force: true });
-     }
-   });
-
-   test("PiAgent json mode emits canonical trace events and persists them", async () => {
-     // Fake Pi emits NDJSON with assistant text deltas and a tool lifecycle
-     const fake = await makeFakePi(`
-const lines = [
- JSON.stringify({ type: "session", version: 3, id: "sess-1" }),
- JSON.stringify({ type: "agent_start" }),
- JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Hello" } }),
- JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: ", world" } }),
- JSON.stringify({ type: "tool_execution_start", toolCall: { id: "t1", name: "read", args: { path: "README.md" } } }),
- JSON.stringify({ type: "tool_execution_end", toolCall: { id: "t1", name: "read" }, result: { ok: true } }),
- JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "Hello, world" }], stopReason: "stop" } })
-];
-process.stdout.write(lines.join("\\n") + "\\n");
-`);
-
-     const memoryEvents: { seq: number; row: any }[] = [];
-     const db = {
-       insertEventWithNextSeq: ({ runId, timestampMs, type, payloadJson }: any) => {
-         const seq = (memoryEvents.length > 0 ? memoryEvents[memoryEvents.length - 1].seq : -1) + 1;
-         memoryEvents.push({ seq, row: { runId, timestampMs, type, payloadJson } });
-         return Promise.resolve(seq);
-       },
-     } as any;
-
-     const logDir = await mkdtemp(join(tmpdir(), "smithers-agent-trace-"));
-     const bus = new EventBus({ db, logDir });
-
-     try {
-       process.env.PATH = `${fake.dir}:${originalPath}`;
-       const agent = new PiAgent({ mode: "json", model: "pi-test-model", env: { PATH: process.env.PATH! } });
-
-       const captured: SmithersAgentTraceEvent[] = [];
-
-       await runWithToolContext(
-         {
-           db: db as any,
-           runId: "run-1",
-           nodeId: "node-A",
-           iteration: 1,
-           attempt: 1,
-           workflowPath: "/tmp/workflows/pi-workflow.tsx",
-           workflowHash: "workflow-hash-1",
-           rootDir: process.cwd(),
-           allowNetwork: true,
-           maxOutputBytes: 200_000,
-           timeoutMs: 30_000,
-           seq: 0,
-           emitEvent: (e: any) => {
-             if (e && e.type === "AgentTraceEvent") {
-               captured.push(e as SmithersAgentTraceEvent);
-             }
-             return bus.emitEventQueued(e as any);
-           },
-         },
-         async () => {
-           const result = await agent.generate({ messages: [{ role: "user", content: "Ping" }] });
-           expect(result.text).toContain("Hello, world");
-         },
-       );
-       await bus.flush();
-
-       const sequences = captured.map((e) => e.event.sequence);
-       expect(sequences).toEqual([1, 2, 3, 4]);
-
-       // We should have assistant deltas and tool lifecycle mapped
-       const kinds = captured.map((e) => e.event.kind);
-       expect(kinds).toEqual([
-         "assistant.text.delta",
-         "assistant.text.delta",
-         "tool.execution.start",
-         "tool.execution.end",
-       ]);
-
-       // Correlation and truthfulness fields present
-       for (const e of captured) {
-         expect(e.traceVersion).toBe(1);
-         expect(e.traceCompleteness).toBe("partial-observed");
-         expect(e.unsupportedEventKinds).toContain("assistant.thinking.delta");
-         expect(e.runId).toBe("run-1");
-         expect(e.workflowPath).toBe("/tmp/workflows/pi-workflow.tsx");
-         expect(e.workflowHash).toBe("workflow-hash-1");
-         expect(e.nodeId).toBe("node-A");
-         expect(e.iteration).toBe(1);
-         expect(e.attempt).toBe(1);
-         expect(e.source.agentFamily).toBe("pi");
-         expect(e.source.agentId).toBe(agent.id);
-         expect(e.source.model).toBe("pi-test-model");
-         expect(e.source.captureMode).toBe("cli-json");
-       }
-
-       // Persisted to DB rows as durable event entries
-       const persistedTraceRows = memoryEvents.filter((r) => r.row.type === "AgentTraceEvent");
-       expect(persistedTraceRows).toHaveLength(captured.length);
-       expect(
-         persistedTraceRows.map((row) => JSON.parse(row.row.payloadJson).event.sequence),
-       ).toEqual([1, 2, 3, 4]);
-
-       // Persisted to a dedicated, flattened local trace log for later querying/export.
-       const persistedTraceLog = await readFile(join(logDir, "agent-trace.ndjson"), "utf8");
-       const persistedTraceRecords = persistedTraceLog
-         .trim()
-         .split(/\r?\n/)
-         .filter(Boolean)
-         .map((line) => JSON.parse(line) as Record<string, unknown>);
-       expect(persistedTraceRecords).toHaveLength(4);
-       expect(persistedTraceRecords.map((record) => record.eventKind)).toEqual(kinds);
-       expect(persistedTraceRecords[0]?.traceCompleteness).toBe("partial-observed");
-       expect(persistedTraceRecords[0]?.unsupportedEventKinds).toContain("assistant.thinking.delta");
-       expect(persistedTraceRecords[0]?.runId).toBe("run-1");
-       expect(persistedTraceRecords[0]?.nodeId).toBe("node-A");
-       expect(persistedTraceRecords[0]?.attempt).toBe(1);
-       expect(persistedTraceRecords[0]?.captureMode).toBe("cli-json");
-     } finally {
-       await rm(fake.dir, { recursive: true, force: true });
-       await rm(logDir, { recursive: true, force: true });
      }
    });
 

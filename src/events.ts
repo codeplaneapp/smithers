@@ -1,12 +1,11 @@
 import { EventEmitter } from "node:events";
-import { promises as fs } from "node:fs";
+import * as FileSystem from "@effect/platform/FileSystem";
 import { join } from "node:path";
 import { Effect } from "effect";
 import type { SmithersEvent } from "./SmithersEvent";
 import { fromPromise } from "./effect/interop";
 import { runPromise } from "./effect/runtime";
 import { trackEvent } from "./effect/metrics";
-import { isAgentTraceEvent, toPersistedAgentTraceRecord } from "./observability";
 
 export class EventBus extends EventEmitter {
   private seq = 0;
@@ -144,16 +143,14 @@ export class EventBus extends EventEmitter {
   private persistLogEffect(event: SmithersEvent) {
     if (!this.logDir) return Effect.void;
     const dir = this.logDir;
-    return fromPromise("persist event log", async () => {
-      await fs.mkdir(dir, { recursive: true });
-      await fs.appendFile(join(dir, "stream.ndjson"), `${JSON.stringify(event)}\n`, "utf8");
-      if (isAgentTraceEvent(event)) {
-        await fs.appendFile(
-          join(dir, "agent-trace.ndjson"),
-          `${JSON.stringify(toPersistedAgentTraceRecord(event))}\n`,
-          "utf8",
-        );
-      }
+    return Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      yield* fs.makeDirectory(dir, { recursive: true });
+      const file = join(dir, "stream.ndjson");
+      const line = JSON.stringify(event) + "\n";
+      const current = yield* Effect.option(fs.readFileString(file, "utf8"));
+      const prefix = current._tag === "Some" ? current.value : "";
+      yield* fs.writeFileString(file, prefix + line);
     });
   }
 }

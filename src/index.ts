@@ -12,13 +12,7 @@ export type { SchemaRegistryEntry } from "./SchemaRegistryEntry";
 export type { SmithersWorkflow } from "./SmithersWorkflow";
 export type { SmithersCtx } from "./SmithersCtx";
 export type { OutputAccessor, InferRow, InferOutputEntry } from "./OutputAccessor";
-export type {
-  AgentTraceCaptureMode,
-  AgentTraceCompleteness,
-  AgentTraceEventKind,
-  SmithersAgentTraceEvent,
-  SmithersEvent,
-} from "./SmithersEvent";
+export type { SmithersEvent } from "./SmithersEvent";
 export type { SmithersError } from "./SmithersError";
 export { SmithersError as SmithersErrorInstance, isSmithersError, errorToJson } from "./utils/errors";
 export type { SmithersErrorCode } from "./utils/errors";
@@ -105,13 +99,10 @@ export type { ServerOptions } from "./server/index";
 // Observability
 export {
   SmithersObservability,
-  PI_AGENT_TRACE_CAPABILITY_PROFILE,
   createSmithersObservabilityLayer,
   createSmithersOtelLayer,
   createSmithersRuntimeLayer,
-  isAgentTraceEvent,
   smithersMetrics,
-  toPersistedAgentTraceRecord,
   trackSmithersEvent,
   activeNodes,
   activeRuns,

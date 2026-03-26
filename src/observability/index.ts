@@ -65,17 +65,6 @@ import {
   updateProcessMetrics,
   vcsDuration,
 } from "../effect/metrics";
-import {
-  CANONICAL_AGENT_TRACE_VERSION,
-  PI_AGENT_TRACE_SUPPORTED_EVENT_KINDS,
-  PI_AGENT_TRACE_UNSUPPORTED_EVENT_KINDS,
-} from "../SmithersEvent";
-import type {
-  AgentTraceCaptureMode,
-  AgentTraceCompleteness,
-  AgentTraceEventKind,
-  SmithersAgentTraceEvent,
-} from "../SmithersEvent";
 
 export type SmithersLogFormat = "json" | "pretty" | "string" | "logfmt";
 
@@ -111,84 +100,6 @@ export class SmithersObservability extends Context.Tag("SmithersObservability")<
   SmithersObservability,
   SmithersObservabilityService
 >() {}
-
-export type AgentTraceCapabilityProfile = {
-  readonly traceVersion: typeof CANONICAL_AGENT_TRACE_VERSION;
-  readonly agentFamily: "pi";
-  readonly captureModes: readonly AgentTraceCaptureMode[];
-  readonly traceCompleteness: AgentTraceCompleteness;
-  readonly supportedEventKinds: readonly AgentTraceEventKind[];
-  readonly unsupportedEventKinds: readonly AgentTraceEventKind[];
-};
-
-export type PersistedAgentTraceRecord = {
-  readonly traceVersion: typeof CANONICAL_AGENT_TRACE_VERSION;
-  readonly traceCompleteness: AgentTraceCompleteness;
-  readonly unsupportedEventKinds: AgentTraceEventKind[];
-  readonly runId: string;
-  readonly workflowPath: string | null;
-  readonly workflowHash: string | null;
-  readonly nodeId: string;
-  readonly iteration: number;
-  readonly attempt: number;
-  readonly timestampMs: number;
-  readonly eventSequence: number;
-  readonly eventKind: AgentTraceEventKind;
-  readonly eventPhase: SmithersAgentTraceEvent["event"]["phase"];
-  readonly agentFamily: SmithersAgentTraceEvent["source"]["agentFamily"];
-  readonly agentId: string | null;
-  readonly agentModel: string | null;
-  readonly captureMode: AgentTraceCaptureMode;
-  readonly rawType: string | null;
-  readonly observed: boolean;
-  readonly payload: Record<string, unknown> | null;
-  readonly raw: unknown;
-  readonly redaction: SmithersAgentTraceEvent["redaction"];
-  readonly annotations: SmithersAgentTraceEvent["annotations"];
-};
-
-export const PI_AGENT_TRACE_CAPABILITY_PROFILE: AgentTraceCapabilityProfile = {
-  traceVersion: CANONICAL_AGENT_TRACE_VERSION,
-  agentFamily: "pi",
-  captureModes: ["cli-json", "rpc-events"],
-  traceCompleteness: "partial-observed",
-  supportedEventKinds: [...PI_AGENT_TRACE_SUPPORTED_EVENT_KINDS],
-  unsupportedEventKinds: [...PI_AGENT_TRACE_UNSUPPORTED_EVENT_KINDS],
-};
-
-export function isAgentTraceEvent(event: unknown): event is SmithersAgentTraceEvent {
-  return !!event && typeof event === "object" && (event as { type?: unknown }).type === "AgentTraceEvent";
-}
-
-export function toPersistedAgentTraceRecord(
-  event: SmithersAgentTraceEvent,
-): PersistedAgentTraceRecord {
-  return {
-    traceVersion: event.traceVersion,
-    traceCompleteness: event.traceCompleteness,
-    unsupportedEventKinds: [...event.unsupportedEventKinds],
-    runId: event.runId,
-    workflowPath: event.workflowPath ?? null,
-    workflowHash: event.workflowHash ?? null,
-    nodeId: event.nodeId,
-    iteration: event.iteration,
-    attempt: event.attempt,
-    timestampMs: event.timestampMs,
-    eventSequence: event.event.sequence,
-    eventKind: event.event.kind,
-    eventPhase: event.event.phase,
-    agentFamily: event.source.agentFamily,
-    agentId: event.source.agentId ?? null,
-    agentModel: event.source.model ?? null,
-    captureMode: event.source.captureMode,
-    rawType: event.source.rawType ?? null,
-    observed: event.source.observed,
-    payload: event.payload ?? null,
-    raw: event.raw,
-    redaction: event.redaction,
-    annotations: event.annotations,
-  };
-}
 
 export const prometheusContentType =
   "text/plain; version=0.0.4; charset=utf-8";
