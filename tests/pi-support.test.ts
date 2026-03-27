@@ -183,6 +183,48 @@ import { afterEach, describe, expect, test } from "bun:test";
      }
    });
  
+   test("PiAgent RPC mode waits past tool-use turns for the final assistant answer", async () => {
+     const fake = await makeFakePi(`
+ let buffer = "";
+ process.stdin.on("data", (chunk) => {
+   buffer += chunk.toString("utf8");
+   const lines = buffer.split(/\\r?\\n/);
+   buffer = lines.pop();
+   for (const line of lines) {
+     if (!line.trim()) continue;
+     const msg = JSON.parse(line);
+     if (msg.type === "prompt") {
+       process.stdout.write(JSON.stringify({ type: "response", command: "prompt", success: true, id: msg.id }) + "\\n");
+       process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Thinking" } }) + "\\n");
+       process.stdout.write(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "Tool turn" }], stopReason: "toolUse" } }) + "\\n");
+       setTimeout(() => {
+         process.stdout.write(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: " final answer" } }) + "\\n");
+         process.stdout.write(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "Final answer" }], stopReason: "stop" } }) + "\\n");
+       }, 20);
+     }
+   }
+ });
+ `);
+ 
+     try {
+       process.env.PATH = `${fake.dir}:${originalPath}`;
+ 
+       const agent = new PiAgent({
+         mode: "rpc",
+         model: "gpt-4o-mini",
+         env: { PATH: process.env.PATH! },
+       });
+ 
+       const result = await agent.generate({
+         messages: [{ role: "user", content: "Use a tool and then answer" }],
+       });
+ 
+       expect(result.text).toBe("Final answer");
+     } finally {
+       await rm(fake.dir, { recursive: true, force: true });
+     }
+   });
+ 
    test("PiAgent RPC mode handles extension UI requests", async () => {
      const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-pi-rpc-ui-"));
      const argsFile = join(argsFileDir, "prompt.json");

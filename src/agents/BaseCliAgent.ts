@@ -63,6 +63,7 @@ type RunRpcCommandOptions = {
     | Promise<PiExtensionUiResponse | null>
     | PiExtensionUiResponse
     | null;
+  onEvent?: (event: unknown) => void;
 };
 
 type PromptParts = {
@@ -712,16 +713,21 @@ export function runRpcCommandEffect(command: string, args: string[], options: Ru
       child.stdin.write(`${JSON.stringify(normalized)}\n`);
      };
  
-     const handleLine = async (line: string) => {
-       inactivity.reset();
-       let parsed: unknown;
-       try {
-         parsed = JSON.parse(line);
-       } catch {
-         return;
-       }
-       if (!parsed || typeof parsed !== "object") return;
-       const event = parsed as Record<string, unknown>;
+    const handleLine = async (line: string) => {
+      inactivity.reset();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (!parsed || typeof parsed !== "object") return;
+      try {
+        options.onEvent?.(parsed);
+      } catch {
+        // ignore observer errors
+      }
+      const event = parsed as Record<string, unknown>;
        const type = event.type;
        if (type === "response" && event.command === "prompt" && event.success === false) {
          const errorMessage = typeof event.error === "string" ? event.error : "PI RPC prompt failed";
@@ -755,19 +761,55 @@ export function runRpcCommandEffect(command: string, args: string[], options: Ru
            if (message.usage) extractedUsage = message.usage;
            if (message.stopReason === "error" || message.stopReason === "aborted") {
              promptResponseError = message.errorMessage || `Request ${message.stopReason}`;
-           }
-           const extracted = finalMessage ? extractTextFromJsonValue(finalMessage) : undefined;
-           const text = extracted ?? textDeltas;
-           inactivity.clear();
-           totalTimeout.clear();
-           if (promptResponseError) {
+             inactivity.clear();
+             totalTimeout.clear();
              handleError(new Error(promptResponseError));
              return;
            }
-           finalize(text, finalMessage ?? text);
-           child.stdin?.end();
-           terminateChild();
+           // Do not finalize on tool-use turns. Pi continues with additional
+           // turns after tool execution and only reaches the real final answer
+           // on a later turn/agent_end.
+           if (message.stopReason !== "toolUse") {
+             const extracted = finalMessage ? extractTextFromJsonValue(finalMessage) : undefined;
+             const text = extracted ?? textDeltas;
+             inactivity.clear();
+             totalTimeout.clear();
+             finalize(text, finalMessage ?? text);
+             child.stdin?.end();
+             terminateChild();
+             return;
+           }
          }
+       }
+       if (type === "agent_end") {
+         const messages = (event as any).messages as Array<any> | undefined;
+         if (Array.isArray(messages)) {
+           for (let i = messages.length - 1; i >= 0; i--) {
+             const message = messages[i];
+             if (message?.role === "assistant") {
+               finalMessage = message;
+               if (message.usage) extractedUsage = message.usage;
+               if (message.stopReason === "error" || message.stopReason === "aborted") {
+                 promptResponseError = message.errorMessage || `Request ${message.stopReason}`;
+               }
+               break;
+             }
+           }
+         }
+         if (promptResponseError) {
+           inactivity.clear();
+           totalTimeout.clear();
+           handleError(new Error(promptResponseError));
+           return;
+         }
+         const extracted = finalMessage ? extractTextFromJsonValue(finalMessage) : undefined;
+         const text = extracted ?? textDeltas;
+         inactivity.clear();
+         totalTimeout.clear();
+         finalize(text, finalMessage ?? text);
+         child.stdin?.end();
+         terminateChild();
+         return;
        }
        if (type === "extension_ui_request") {
          await maybeWriteExtensionResponse(event as PiExtensionUiRequest);
