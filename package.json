@@ -23,7 +23,11 @@
     "./dom/renderer": "./src/dom/renderer.ts",
     "./linear": "./src/linear/index.ts",
     "./serve": "./src/server/serve.ts",
-    "./scorers": "./src/scorers/index.ts"
+    "./scorers": "./src/scorers/index.ts",
+    "./voice": "./src/voice/index.ts",
+    "./rag": "./src/rag/index.ts",
+    "./mcp": "./src/mcp/index.ts",
+    "./openapi": "./src/openapi/index.ts"
   },
   "files": [
     "src/",
@@ -65,6 +69,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.36",
     "@ai-sdk/openai": "^3.0.41",
+    "@modelcontextprotocol/sdk": "^1.27.0",
     "@effect/opentelemetry": "^0.61.0",
     "@effect/platform": "^0.94.5",
     "@effect/platform-bun": "^0.87.1",
@@ -92,6 +97,7 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-reconciler": "^0.31.0",
+    "ws": "^8.18.0",
     "zod": "^4.3.6"
   },
   "peerDependencies": {
@@ -102,6 +108,7 @@
     "@playwright/test": "^1.52.0",
     "@types/bun": "latest",
     "@types/diff": "^5.2.0",
-    "@types/react": "^19.2.10"
+    "@types/react": "^19.2.10",
+    "@types/ws": "^8.5.12"
   }
 }
