@@ -15,8 +15,11 @@ export function grepToolEffect(pattern: string, path?: string) {
   const root = ctx?.rootDir ?? process.cwd();
   const started = nowMs();
   let seq: number | undefined;
+  let toolCallId: string | undefined;
   return Effect.gen(function* () {
-    seq = yield* logToolCallStartEffect("grep", started);
+    const startedCall = yield* logToolCallStartEffect("grep", started);
+    seq = startedCall?.seq;
+    toolCallId = startedCall?.toolCallId;
     const resolvedRoot = yield* fromSync("resolve sandbox path", () =>
       resolveSandboxPath(root, path ?? "."),
     );
@@ -45,6 +48,7 @@ export function grepToolEffect(pattern: string, path?: string) {
       undefined,
       started,
       seq,
+      toolCallId,
     );
     return result.stdout;
   }).pipe(
@@ -64,6 +68,7 @@ export function grepToolEffect(pattern: string, path?: string) {
         error,
         started,
         seq,
+        toolCallId,
       ),
     ),
   );

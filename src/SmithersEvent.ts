@@ -109,6 +109,7 @@ export type SmithersEvent =
       nodeId: string;
       iteration: number;
       attempt: number;
+      toolCallId: string;
       toolName: string;
       seq: number;
       timestampMs: number;
@@ -119,6 +120,7 @@ export type SmithersEvent =
       nodeId: string;
       iteration: number;
       attempt: number;
+      toolCallId: string;
       toolName: string;
       seq: number;
       status: "success" | "error";

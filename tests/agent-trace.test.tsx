@@ -55,13 +55,17 @@ describe("agent trace capture", () => {
             assistantMessageEvent: { type: "text_delta", delta: "hello" },
           }) + "\n",
         );
-        await runPromise(logToolCallStartEffect("bash"));
+        const startedCall = await runPromise(logToolCallStartEffect("bash"));
         await runPromise(
           logToolCallEffect(
             "bash",
             { cmd: "echo secret=sk_live_123456789" },
             { ok: true },
             "success",
+            undefined,
+            undefined,
+            startedCall?.seq,
+            startedCall?.toolCallId,
           ),
         );
         args.onStdout?.(
@@ -411,7 +415,7 @@ describe("agent trace capture", () => {
       .filter((event: any) => event.type === "AgentTraceEvent")
       .map((event: any) => JSON.parse(event.payloadJson).trace);
 
-    expect(summary.traceCompleteness).toBe("full-observed");
+    expect(summary.traceCompleteness).toBe("partial-observed");
     expect(summary.unsupportedEventKinds).not.toContain("artifact.created");
     expect(
       traceEvents.some(
@@ -427,7 +431,21 @@ describe("agent trace capture", () => {
           event.payload.text === "claude real final",
       ),
     ).toBe(true);
-    expect(traceEvents.filter((event: any) => event.event.kind === "usage").length).toBe(1);
+    expect(traceEvents.filter((event: any) => event.event.kind === "usage").length).toBe(2);
+    expect(
+      traceEvents.some(
+        (event: any) =>
+          event.event.kind === "usage" &&
+          event.payload.outputTokens === 20,
+      ),
+    ).toBe(true);
+    expect(
+      traceEvents.some(
+        (event: any) =>
+          event.event.kind === "assistant.message.final" &&
+          event.source.observed === false,
+      ),
+    ).toBe(true);
 
     cleanup();
   });
@@ -661,7 +679,7 @@ describe("agent trace capture", () => {
       .filter((event: any) => event.type === "AgentTraceEvent")
       .map((event: any) => JSON.parse(event.payloadJson).trace);
 
-    expect(summary.traceCompleteness).toBe("full-observed");
+    expect(summary.traceCompleteness).toBe("partial-observed");
     expect(
       traceEvents.some(
         (event: any) =>
@@ -681,6 +699,13 @@ describe("agent trace capture", () => {
         (event: any) =>
           event.event.kind === "assistant.message.final" &&
           event.payload.text === "gemini real final",
+      ),
+    ).toBe(true);
+    expect(
+      traceEvents.some(
+        (event: any) =>
+          event.event.kind === "assistant.message.final" &&
+          event.source.observed === false,
       ),
     ).toBe(true);
     expect(
@@ -876,7 +901,7 @@ describe("agent trace capture", () => {
       id = "openai-sdk-tools-fake";
       tools = {};
       async generate() {
-        const seq = await runPromise(logToolCallStartEffect("bash"));
+        const startedCall = await runPromise(logToolCallStartEffect("bash"));
         await runPromise(
           logToolCallEffect(
             "bash",
@@ -885,7 +910,8 @@ describe("agent trace capture", () => {
             "success",
             undefined,
             undefined,
-            typeof seq === "number" ? seq : undefined,
+            startedCall?.seq,
+            startedCall?.toolCallId,
           ),
         );
         return {
@@ -930,6 +956,14 @@ describe("agent trace capture", () => {
         (event: any) => event.event.kind === "tool.execution.end",
       ),
     ).toBe(true);
+    const toolStart = traceEvents.find(
+      (event: any) => event.event.kind === "tool.execution.start",
+    );
+    const toolEnd = traceEvents.find(
+      (event: any) => event.event.kind === "tool.execution.end",
+    );
+    expect(toolStart?.payload.toolCallId).toBe("bash:1");
+    expect(toolEnd?.payload.toolCallId).toBe("bash:1");
 
     cleanup();
   });

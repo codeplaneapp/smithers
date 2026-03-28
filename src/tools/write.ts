@@ -20,8 +20,11 @@ export function writeToolEffect(path: string, content: string) {
   const contentBytes = Buffer.byteLength(content, "utf8");
   const logInput = { path, contentBytes, contentHash: sha256Hex(content) };
   let seq: number | undefined;
+  let toolCallId: string | undefined;
   return Effect.gen(function* () {
-    seq = yield* logToolCallStartEffect("write", started);
+    const startedCall = yield* logToolCallStartEffect("write", started);
+    seq = startedCall?.seq;
+    toolCallId = startedCall?.toolCallId;
     const fs = yield* FileSystem.FileSystem;
     const resolved = yield* fromSync("resolve sandbox path", () =>
       resolveSandboxPath(root, path),
@@ -40,6 +43,7 @@ export function writeToolEffect(path: string, content: string) {
       undefined,
       started,
       seq,
+      toolCallId,
     );
     return "ok";
   }).pipe(
@@ -51,7 +55,16 @@ export function writeToolEffect(path: string, content: string) {
     }),
     Effect.withLogSpan("tool:write"),
     Effect.tapError((error) =>
-      logToolCallEffect("write", logInput, null, "error", error, started, seq),
+      logToolCallEffect(
+        "write",
+        logInput,
+        null,
+        "error",
+        error,
+        started,
+        seq,
+        toolCallId,
+      ),
     ),
   );
 }

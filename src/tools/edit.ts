@@ -20,8 +20,11 @@ export function editToolEffect(path: string, patch: string) {
   const patchBytes = Buffer.byteLength(patch, "utf8");
   const logInput = { path, patchBytes, patchHash: sha256Hex(patch) };
   let seq: number | undefined;
+  let toolCallId: string | undefined;
   return Effect.gen(function* () {
-    seq = yield* logToolCallStartEffect("edit", started);
+    const startedCall = yield* logToolCallStartEffect("edit", started);
+    seq = startedCall?.seq;
+    toolCallId = startedCall?.toolCallId;
     const fs = yield* FileSystem.FileSystem;
     const resolved = yield* fromSync("resolve sandbox path", () =>
       resolveSandboxPath(root, path),
@@ -50,6 +53,7 @@ export function editToolEffect(path: string, patch: string) {
       undefined,
       started,
       seq,
+      toolCallId,
     );
     return "ok";
   }).pipe(
@@ -61,7 +65,16 @@ export function editToolEffect(path: string, patch: string) {
     }),
     Effect.withLogSpan("tool:edit"),
     Effect.tapError((error) =>
-      logToolCallEffect("edit", logInput, null, "error", error, started, seq),
+      logToolCallEffect(
+        "edit",
+        logInput,
+        null,
+        "error",
+        error,
+        started,
+        seq,
+        toolCallId,
+      ),
     ),
   );
 }

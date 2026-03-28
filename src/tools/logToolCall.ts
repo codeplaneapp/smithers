@@ -14,11 +14,13 @@ export function logToolCallEffect(
   error?: unknown,
   startedAtMs?: number,
   seqOverride?: number,
+  toolCallIdOverride?: string,
 ) {
   const ctx = getToolContext();
   if (!ctx) return Effect.void;
   const seq =
     typeof seqOverride === "number" ? seqOverride : nextToolSeq(ctx);
+  const toolCallId = toolCallIdOverride ?? `${toolName}:${seq}`;
   const started = startedAtMs ?? nowMs();
   const finished = nowMs();
   const durationMs = finished - started;
@@ -32,6 +34,7 @@ export function logToolCallEffect(
     nodeId: ctx.nodeId,
     iteration: ctx.iteration,
     attempt: ctx.attempt,
+    toolCallId,
     toolName,
     seq,
     status,
@@ -89,6 +92,7 @@ export function logToolCallStartEffect(
   const ctx = getToolContext();
   if (!ctx) return Effect.succeed(undefined);
   const seq = nextToolSeq(ctx);
+  const toolCallId = `${toolName}:${seq}`;
   const started = startedAtMs ?? nowMs();
   void ctx.emitEvent?.({
     type: "ToolCallStarted",
@@ -96,11 +100,12 @@ export function logToolCallStartEffect(
     nodeId: ctx.nodeId,
     iteration: ctx.iteration,
     attempt: ctx.attempt,
+    toolCallId,
     toolName,
     seq,
     timestampMs: started,
   });
-  return Effect.succeed(seq);
+  return Effect.succeed({ seq, toolCallId });
 }
 
 export function truncateToBytes(text: string, maxBytes: number): string {

@@ -19,8 +19,11 @@ export function readToolEffect(path: string) {
   const root = ctx?.rootDir ?? process.cwd();
   const started = nowMs();
   let seq: number | undefined;
+  let toolCallId: string | undefined;
   return Effect.gen(function* () {
-    seq = yield* logToolCallStartEffect("read", started);
+    const startedCall = yield* logToolCallStartEffect("read", started);
+    seq = startedCall?.seq;
+    toolCallId = startedCall?.toolCallId;
     const fs = yield* FileSystem.FileSystem;
     const resolved = yield* fromSync("resolve sandbox path", () =>
       resolveSandboxPath(root, path),
@@ -41,6 +44,7 @@ export function readToolEffect(path: string) {
       undefined,
       started,
       seq,
+      toolCallId,
     );
     return output;
   }).pipe(
@@ -51,7 +55,16 @@ export function readToolEffect(path: string) {
     }),
     Effect.withLogSpan("tool:read"),
     Effect.tapError((error) =>
-      logToolCallEffect("read", { path }, null, "error", error, started, seq),
+      logToolCallEffect(
+        "read",
+        { path },
+        null,
+        "error",
+        error,
+        started,
+        seq,
+        toolCallId,
+      ),
     ),
   );
 }

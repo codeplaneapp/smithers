@@ -24,8 +24,11 @@ export function bashToolEffect(
   const allowNetwork = ctx?.allowNetwork ?? false;
   const started = nowMs();
   let seq: number | undefined;
+  let toolCallId: string | undefined;
   return Effect.gen(function* () {
-    seq = yield* logToolCallStartEffect("bash", started);
+    const startedCall = yield* logToolCallStartEffect("bash", started);
+    seq = startedCall?.seq;
+    toolCallId = startedCall?.toolCallId;
     const cwd = opts?.cwd
       ? yield* fromSync("resolve sandbox path", () =>
           resolveSandboxPath(root, opts.cwd!),
@@ -78,6 +81,7 @@ export function bashToolEffect(
       undefined,
       started,
       seq,
+      toolCallId,
     );
     return output;
   }).pipe(
@@ -98,6 +102,7 @@ export function bashToolEffect(
         error,
         started,
         seq,
+        toolCallId,
       ),
     ),
   );
