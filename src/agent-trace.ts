@@ -3,7 +3,9 @@ import { join } from "node:path";
 import type { SmithersEvent } from "./SmithersEvent";
 import type { EventBus } from "./events";
 import { logErrorAwait, logInfoAwait, logWarningAwait } from "./effect/logging";
+import { extractTextFromJsonValue } from "./utils/text-extraction";
 import { nowMs } from "./utils/time";
+import { normalizeTokenUsage } from "./utils/usage";
 
 export type AgentFamily =
   | "pi"
@@ -146,11 +148,6 @@ export type AgentTraceCapabilityProfile = {
   compactionEvents: boolean;
   rawStderrDiagnostics: boolean;
   persistedSessionArtifact: boolean;
-};
-
-type PushOptions = {
-  recordSeen?: boolean;
-  direct?: boolean;
 };
 
 export const agentTraceCapabilities: Record<
@@ -487,6 +484,87 @@ function kindPhase(
   return "capture";
 }
 
+type PayloadKind = "message" | "tool" | "pi" | "none";
+
+type MappedStructuredEvent = {
+  kind: CanonicalAgentTraceEventKind;
+  payloadKind: PayloadKind;
+  expect?: CanonicalAgentTraceEventKind;
+};
+
+const piSimpleEventMap: Record<string, MappedStructuredEvent> = {
+  session: { kind: "session.start", payloadKind: "pi" },
+  agent_start: { kind: "session.start", payloadKind: "pi" },
+  agent_end: { kind: "session.end", payloadKind: "pi" },
+  turn_start: {
+    kind: "turn.start",
+    payloadKind: "pi",
+    expect: "turn.end",
+  },
+  message_start: { kind: "message.start", payloadKind: "pi" },
+  tool_execution_start: {
+    kind: "tool.execution.start",
+    payloadKind: "tool",
+    expect: "tool.execution.end",
+  },
+  tool_execution_update: {
+    kind: "tool.execution.update",
+    payloadKind: "tool",
+    expect: "tool.execution.end",
+  },
+  tool_execution_end: { kind: "tool.execution.end", payloadKind: "tool" },
+  auto_compaction_start: { kind: "compaction.start", payloadKind: "pi" },
+  auto_compaction_end: { kind: "compaction.end", payloadKind: "pi" },
+  auto_retry_start: { kind: "retry.start", payloadKind: "pi" },
+  auto_retry_end: { kind: "retry.end", payloadKind: "pi" },
+};
+
+const genericStructuredEventMap: Record<string, MappedStructuredEvent> = {
+  message_start: { kind: "message.start", payloadKind: "message" },
+  assistant_message_start: { kind: "message.start", payloadKind: "message" },
+  "response.started": { kind: "message.start", payloadKind: "message" },
+  tool_call_start: {
+    kind: "tool.execution.start",
+    payloadKind: "tool",
+    expect: "tool.execution.end",
+  },
+  tool_execution_start: {
+    kind: "tool.execution.start",
+    payloadKind: "tool",
+    expect: "tool.execution.end",
+  },
+  "tool_call.started": {
+    kind: "tool.execution.start",
+    payloadKind: "tool",
+    expect: "tool.execution.end",
+  },
+  tool_call_delta: {
+    kind: "tool.execution.update",
+    payloadKind: "tool",
+    expect: "tool.execution.end",
+  },
+  tool_call_update: {
+    kind: "tool.execution.update",
+    payloadKind: "tool",
+    expect: "tool.execution.end",
+  },
+  tool_execution_update: {
+    kind: "tool.execution.update",
+    payloadKind: "tool",
+    expect: "tool.execution.end",
+  },
+  "tool_call.delta": {
+    kind: "tool.execution.update",
+    payloadKind: "tool",
+    expect: "tool.execution.end",
+  },
+  tool_call_end: { kind: "tool.execution.end", payloadKind: "tool" },
+  tool_execution_end: { kind: "tool.execution.end", payloadKind: "tool" },
+  "tool_call.completed": { kind: "tool.execution.end", payloadKind: "tool" },
+  tool_result: { kind: "tool.result", payloadKind: "tool" },
+  "tool_result.completed": { kind: "tool.result", payloadKind: "tool" },
+};
+
 export function canonicalTraceEventToOtelLogRecord(
   event: CanonicalAgentTraceEvent,
   context?: { agentId?: string; model?: string },
@@ -641,37 +719,30 @@ export class AgentTraceCollector {
       this.finalText = text;
     }
     if (this.captureMode === "sdk-events" && text) {
-      this.push(
+      this.pushDerived(
         "assistant.message.final",
         { text },
         text,
-        false,
-        undefined,
-        { recordSeen: true, direct: true },
       );
     }
-    const usage = this.normalizeUsage(result?.usage ?? result?.totalUsage);
+    const usage = normalizeTokenUsage(result?.usage ?? result?.totalUsage);
     if (usage) {
-      this.push(
+      this.pushDerived(
         "usage",
         usage,
         usage,
-        false,
         "usage",
-        { recordSeen: true, direct: true },
       );
     }
   }
 
   observeError(error: unknown) {
     this.failures.push(error instanceof Error ? error.message : String(error));
-    this.push(
+    this.pushDerived(
       "capture.error",
       { error: this.failures.at(-1) },
       { error: this.failures.at(-1) },
-      false,
       "error",
-      { recordSeen: true, direct: true },
     );
   }
 
@@ -684,14 +755,13 @@ export class AgentTraceCollector {
       !this.seenKinds.has("assistant.message.final") &&
       this.finalText
     ) {
-        this.push(
-          "assistant.message.final",
-          { text: this.finalText },
-          this.finalText,
-          false,
-          undefined,
-          { recordSeen: true },
-        );
+      this.pushDerived(
+        "assistant.message.final",
+        { text: this.finalText },
+        this.finalText,
+        undefined,
+        false,
+      );
     }
     if (
       (this.captureMode === "cli-json-stream" ||
@@ -703,13 +773,11 @@ export class AgentTraceCollector {
       this.warnings.push(
         "structured stream ended without a terminal assistant message",
       );
-      this.push(
+      this.pushDerived(
         "capture.warning",
         { reason: "missing-terminal-event" },
         { reason: "missing-terminal-event" },
-        false,
         "capture",
-        { recordSeen: true, direct: true },
       );
     }
 
@@ -717,6 +785,7 @@ export class AgentTraceCollector {
     let missingExpectedEventKinds = [...this.expectedKinds].filter(
       (kind) => !this.directKinds.has(kind),
     );
+    this.applyTraceCompleteness(traceCompleteness);
     let summary: AgentTraceSummary = {
       traceVersion: "1",
       runId: this.runId,
@@ -743,7 +812,7 @@ export class AgentTraceCollector {
     if (persistedArtifact.ok && persistedArtifact.file) {
       const artifactPath = persistedArtifact.file;
       this.rawArtifactRefs.push(artifactPath);
-      this.push(
+      this.pushDerived(
         "artifact.created",
         {
           artifactKind: "agent-trace.ndjson",
@@ -755,26 +824,24 @@ export class AgentTraceCollector {
           artifactPath,
           contentType: "application/x-ndjson",
         },
-        false,
         "artifact",
-        { recordSeen: true, direct: true },
       );
+      this.applyTraceCompleteness(traceCompleteness);
       summary = { ...summary, rawArtifactRefs: [...this.rawArtifactRefs] };
       await this.rewriteNdjson(artifactPath, summary);
     } else if (!persistedArtifact.ok) {
       this.warnings.push(persistedArtifact.error);
-      this.push(
+      this.pushDerived(
         "capture.warning",
         { reason: "artifact-write-failed", error: persistedArtifact.error },
         { reason: "artifact-write-failed", error: persistedArtifact.error },
-        false,
         "artifact",
-        { recordSeen: true, direct: true },
       );
       traceCompleteness = this.resolveCompleteness();
       missingExpectedEventKinds = [...this.expectedKinds].filter(
         (kind) => !this.directKinds.has(kind),
       );
+      this.applyTraceCompleteness(traceCompleteness);
       summary = {
         ...summary,
         traceCompleteness,
@@ -783,8 +850,8 @@ export class AgentTraceCollector {
       };
     }
 
+    this.applyTraceCompleteness(traceCompleteness);
     for (const event of this.events) {
-      event.traceCompleteness = traceCompleteness;
       const smithersEvent: AgentTraceSmithersEvent = {
         type: "AgentTraceEvent",
         runId: this.runId,
@@ -824,18 +891,12 @@ export class AgentTraceCollector {
   private processChunk(stream: "stdout" | "stderr", text: string) {
     if (stream === "stderr") {
       this.stderrBuffer += text;
-      this.push("stderr", { text }, text, true, stream, {
-        recordSeen: true,
-        direct: true,
-      });
+      this.pushObserved("stderr", { text }, text, stream);
       return;
     }
     this.stdoutBuffer += text;
     if (this.captureMode === "cli-text" || this.captureMode === "sdk-events") {
-      this.push("stdout", { text }, text, true, stream, {
-        recordSeen: true,
-        direct: true,
-      });
+      this.pushObserved("stdout", { text }, text, stream);
       return;
     }
     const lines = this.stdoutBuffer.split(/\r?\n/);
@@ -859,13 +920,11 @@ export class AgentTraceCollector {
     if (!line) return;
 
     this.failures.push(`truncated structured stream: ${line.slice(0, 200)}`);
-    this.push(
+    this.pushObserved(
       "capture.error",
       { reason: "truncated-json-stream", linePreview: line.slice(0, 200) },
       line,
-      true,
       "stdout",
-      { recordSeen: true, direct: true },
     );
   }
 
@@ -875,13 +934,11 @@ export class AgentTraceCollector {
       parsed = JSON.parse(line);
     } catch {
       this.failures.push(`malformed upstream JSON: ${line.slice(0, 200)}`);
-      this.push(
+      this.pushObserved(
         "capture.error",
         { linePreview: line.slice(0, 200), reason: "malformed-json" },
         line,
-        true,
         "stdout",
-        { recordSeen: true, direct: true },
       );
       return;
     }
@@ -900,48 +957,35 @@ export class AgentTraceCollector {
       const text = this.extractGenericMessageText(parsed?.message ?? parsed);
       if (typeof text === "string" && text) {
         this.appendAssistantText(text);
-        this.push(
+        this.pushObserved(
           "assistant.text.delta",
           { text },
           parsed,
-          true,
           rawType,
-          { recordSeen: true, direct: true },
         );
       } else {
-        this.push("stdout", { eventType: rawType }, parsed, true, rawType, {
-          recordSeen: true,
-          direct: true,
-        });
+        this.pushObserved("stdout", { eventType: rawType }, parsed, rawType);
       }
-      const usage = this.normalizeUsage(parsed?.message?.usage);
+      const usage = normalizeTokenUsage(parsed?.message?.usage);
       if (usage) {
-        this.push("usage", usage, parsed, true, rawType, {
-          recordSeen: true,
-          direct: true,
-        });
+        this.pushObserved("usage", usage, parsed, rawType);
       }
       return;
     }
 
     if (this.agentFamily === "claude-code" && rawType === "result") {
-      const usage = this.normalizeUsage(parsed?.usage);
+      const usage = normalizeTokenUsage(parsed?.usage);
       if (usage) {
-        this.push("usage", usage, parsed, true, rawType, {
-          recordSeen: true,
-          direct: true,
-        });
+        this.pushObserved("usage", usage, parsed, rawType);
       }
       const text = this.extractGenericMessageText(parsed);
       if (typeof text === "string" && text) {
         this.setFinalAssistantText(text);
-        this.push(
+        this.pushObserved(
           "assistant.message.final",
           { text },
           parsed,
-          true,
           rawType,
-          { recordSeen: true, direct: true },
         );
       }
       return;
@@ -956,42 +1000,31 @@ export class AgentTraceCollector {
         } else {
           this.setFinalAssistantText(text);
         }
-        this.push(
+        this.pushObserved(
           parsed?.delta ? "assistant.text.delta" : "assistant.message.final",
           { text },
           parsed,
-          true,
           rawType,
-          { recordSeen: true, direct: true },
         );
         return;
       }
     }
 
     if (this.agentFamily === "gemini" && rawType === "result" && parsed?.stats) {
-      const usage = this.normalizeUsage(parsed.stats);
+      const usage = normalizeTokenUsage(parsed.stats);
       if (usage) {
-        this.push("usage", usage, parsed, true, rawType, {
-          recordSeen: true,
-          direct: true,
-        });
+        this.pushObserved("usage", usage, parsed, rawType);
       }
       return;
     }
 
     if (this.agentFamily === "codex" && rawType === "thread.started") {
-      this.push("stdout", { eventType: rawType }, parsed, true, rawType, {
-        recordSeen: true,
-        direct: true,
-      });
+      this.pushObserved("stdout", { eventType: rawType }, parsed, rawType);
       return;
     }
 
     if (this.agentFamily === "codex" && rawType === "turn.started") {
-      this.push("turn.start", {}, parsed, true, rawType, {
-        recordSeen: true,
-        direct: true,
-      });
+      this.pushObserved("turn.start", {}, parsed, rawType);
       this.expectedKinds.add("turn.end");
       return;
     }
@@ -1004,31 +1037,25 @@ export class AgentTraceCollector {
       const text = this.extractGenericMessageText(parsed.item);
       if (typeof text === "string" && text) {
         this.setFinalAssistantText(text);
-        this.push(
+        this.pushObserved(
           "assistant.message.final",
           { text },
           parsed,
-          true,
           rawType,
-          { recordSeen: true, direct: true },
         );
         return;
       }
     }
 
-    if (
-      ["message_start", "assistant_message_start", "response.started"].includes(
-        rawType,
-      )
-    ) {
-      this.push(
-        "message.start",
-        this.extractGenericMessagePayload(parsed),
+    const mapped = genericStructuredEventMap[rawType];
+    if (mapped) {
+      this.pushObserved(
+        mapped.kind,
+        this.extractMappedPayload(parsed, mapped.payloadKind),
         parsed,
-        true,
         rawType,
-        { recordSeen: true, direct: true },
       );
+      if (mapped.expect) this.expectedKinds.add(mapped.expect);
       return;
     }
 
@@ -1044,13 +1071,11 @@ export class AgentTraceCollector {
       const text = this.extractGenericDeltaText(parsed);
       if (typeof text === "string" && text) {
         this.appendAssistantText(text);
-        this.push(
+        this.pushObserved(
           "assistant.text.delta",
           { text },
           parsed,
-          true,
           rawType,
-          { recordSeen: true, direct: true },
         );
         return;
       }
@@ -1065,13 +1090,11 @@ export class AgentTraceCollector {
     ) {
       const text = this.extractGenericDeltaText(parsed);
       if (typeof text === "string" && text) {
-        this.push(
+        this.pushObserved(
           "assistant.thinking.delta",
           { text },
           parsed,
-          true,
           rawType,
-          { recordSeen: true, direct: true },
         );
         return;
       }
@@ -1085,355 +1108,130 @@ export class AgentTraceCollector {
         "message_stop",
       ].includes(rawType)
     ) {
-      this.push(
+      this.pushObserved(
         "message.end",
         this.extractGenericMessagePayload(parsed),
         parsed,
-        true,
         rawType,
-        { recordSeen: true, direct: true },
       );
       const text = this.extractGenericMessageText(parsed);
       if (text) {
         this.setFinalAssistantText(text);
-        this.push(
+        this.pushObserved(
           "assistant.message.final",
           { text },
           parsed,
-          true,
           rawType,
-          { recordSeen: true, direct: true },
         );
       }
-      const usage = this.normalizeUsage(parsed?.usage);
+      const usage = normalizeTokenUsage(parsed?.usage);
       if (usage) {
-        this.push("usage", usage, parsed, true, rawType, {
-          recordSeen: true,
-          direct: true,
-        });
+        this.pushObserved("usage", usage, parsed, rawType);
       }
-      return;
-    }
-
-    if (
-      ["tool_call_start", "tool_execution_start", "tool_call.started"].includes(
-        rawType,
-      )
-    ) {
-      this.push(
-        "tool.execution.start",
-        this.extractGenericToolPayload(parsed),
-        parsed,
-        true,
-        rawType,
-        { recordSeen: true, direct: true },
-      );
-      this.expectedKinds.add("tool.execution.end");
-      return;
-    }
-
-    if (
-      [
-        "tool_call_delta",
-        "tool_call_update",
-        "tool_execution_update",
-        "tool_call.delta",
-      ].includes(rawType)
-    ) {
-      this.push(
-        "tool.execution.update",
-        this.extractGenericToolPayload(parsed),
-        parsed,
-        true,
-        rawType,
-        { recordSeen: true, direct: true },
-      );
-      this.expectedKinds.add("tool.execution.end");
-      return;
-    }
-
-    if (
-      ["tool_call_end", "tool_execution_end", "tool_call.completed"].includes(
-        rawType,
-      )
-    ) {
-      this.push(
-        "tool.execution.end",
-        this.extractGenericToolPayload(parsed),
-        parsed,
-        true,
-        rawType,
-        { recordSeen: true, direct: true },
-      );
-      return;
-    }
-
-    if (["tool_result", "tool_result.completed"].includes(rawType)) {
-      this.push(
-        "tool.result",
-        this.extractGenericToolPayload(parsed),
-        parsed,
-        true,
-        rawType,
-        { recordSeen: true, direct: true },
-      );
       return;
     }
 
     if (rawType === "turn.completed" && parsed?.usage) {
-      const usage = this.normalizeUsage(parsed.usage);
+      const usage = normalizeTokenUsage(parsed.usage);
       if (usage) {
-        this.push("usage", usage, parsed, true, rawType, {
-          recordSeen: true,
-          direct: true,
-        });
+        this.pushObserved("usage", usage, parsed, rawType);
       }
       if (this.agentFamily === "codex") {
-        this.push("turn.end", {}, parsed, true, rawType, {
-          recordSeen: true,
-          direct: true,
-        });
+        this.pushObserved("turn.end", {}, parsed, rawType);
       }
       const text = this.extractGenericMessageText(parsed);
       if (text) {
         this.setFinalAssistantText(text);
-        this.push(
+        this.pushObserved(
           "assistant.message.final",
           { text },
           parsed,
-          true,
           rawType,
-          { recordSeen: true, direct: true },
         );
       }
       return;
     }
 
-    this.push("stdout", { eventType: rawType }, parsed, true, rawType, {
-      recordSeen: true,
-      direct: true,
-    });
+    this.pushObserved("stdout", { eventType: rawType }, parsed, rawType);
   }
 
   private processPiEvent(parsed: any) {
     const type = String(parsed?.type ?? "unknown");
-    switch (type) {
-      case "session":
-      case "agent_start":
-        this.push(
-          "session.start",
-          this.extractPiPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        return;
-      case "agent_end":
-        this.push(
-          "session.end",
-          this.extractPiPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        return;
-      case "turn_start":
-        this.push(
-          "turn.start",
-          this.extractPiPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        this.expectedKinds.add("turn.end");
-        return;
-      case "turn_end": {
-        this.push(
-          "turn.end",
-          this.extractPiPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        const finalText = this.extractText(parsed?.message);
-        if (finalText) {
-          this.setFinalAssistantText(finalText);
-          this.push(
-            "assistant.message.final",
-            { text: finalText },
-            parsed?.message,
-            true,
-            type,
-            { recordSeen: true, direct: true },
-          );
-        }
-        const usage = this.normalizeUsage(parsed?.message?.usage);
-        if (usage) {
-          this.push(
-            "usage",
-            usage,
-            parsed.message.usage,
-            true,
-            "usage",
-            { recordSeen: true, direct: true },
-          );
-        }
-        return;
-      }
-      case "message_start":
-        this.push(
-          "message.start",
-          this.extractPiPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        return;
-      case "message_end": {
-        this.push(
-          "message.end",
-          this.extractPiPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        const finalText = this.extractText(parsed?.message);
-        if (parsed?.message?.role === "assistant" && finalText) {
-          this.setFinalAssistantText(finalText);
-          this.push(
-            "assistant.message.final",
-            { text: finalText },
-            parsed?.message,
-            true,
-            type,
-            { recordSeen: true, direct: true },
-          );
-        }
-        return;
-      }
-      case "message_update": {
-        const evt = parsed?.assistantMessageEvent;
-        if (evt?.type === "text_delta" && typeof evt.delta === "string") {
-          this.appendAssistantText(evt.delta);
-          this.push(
-            "assistant.text.delta",
-            { text: evt.delta },
-            parsed,
-            true,
-            evt.type,
-            { recordSeen: true, direct: true },
-          );
-          return;
-        }
-        if (
-          (evt?.type === "thinking_delta" || evt?.type === "reasoning_delta") &&
-          typeof evt.delta === "string"
-        ) {
-          this.push(
-            "assistant.thinking.delta",
-            { text: evt.delta },
-            parsed,
-            true,
-            evt.type,
-            { recordSeen: true, direct: true },
-          );
-          return;
-        }
-        this.push(
-          "message.update",
-          this.extractPiPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        return;
-      }
-      case "tool_execution_start":
-        this.push(
-          "tool.execution.start",
-          this.extractPiToolPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        this.expectedKinds.add("tool.execution.end");
-        return;
-      case "tool_execution_update":
-        this.push(
-          "tool.execution.update",
-          this.extractPiToolPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        this.expectedKinds.add("tool.execution.end");
-        return;
-      case "tool_execution_end":
-        this.push(
-          "tool.execution.end",
-          this.extractPiToolPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        return;
-      case "auto_compaction_start":
-        this.push(
-          "compaction.start",
-          this.extractPiPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        return;
-      case "auto_compaction_end":
-        this.push(
-          "compaction.end",
-          this.extractPiPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        return;
-      case "auto_retry_start":
-        this.push(
-          "retry.start",
-          this.extractPiPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        return;
-      case "auto_retry_end":
-        this.push(
-          "retry.end",
-          this.extractPiPayload(parsed),
-          parsed,
-          true,
-          type,
-          { recordSeen: true, direct: true },
-        );
-        return;
-      default:
-        this.push("stdout", { eventType: type }, parsed, true, type, {
-          recordSeen: true,
-          direct: true,
-        });
-        return;
+    const simple = piSimpleEventMap[type];
+    if (simple) {
+      this.pushObserved(
+        simple.kind,
+        this.extractMappedPayload(parsed, simple.payloadKind),
+        parsed,
+        type,
+      );
+      if (simple.expect) this.expectedKinds.add(simple.expect);
+      return;
     }
+
+    if (type === "turn_end") {
+      this.pushObserved("turn.end", this.extractPiPayload(parsed), parsed, type);
+      const finalText = this.extractGenericMessageText(parsed?.message);
+      if (finalText) {
+        this.setFinalAssistantText(finalText);
+        this.pushObserved(
+          "assistant.message.final",
+          { text: finalText },
+          parsed?.message,
+          type,
+        );
+      }
+      const usage = normalizeTokenUsage(parsed?.message?.usage);
+      if (usage) {
+        this.pushObserved("usage", usage, parsed.message.usage, "usage");
+      }
+      return;
+    }
+
+    if (type === "message_end") {
+      this.pushObserved("message.end", this.extractPiPayload(parsed), parsed, type);
+      const finalText = this.extractGenericMessageText(parsed?.message);
+      if (parsed?.message?.role === "assistant" && finalText) {
+        this.setFinalAssistantText(finalText);
+        this.pushObserved(
+          "assistant.message.final",
+          { text: finalText },
+          parsed?.message,
+          type,
+        );
+      }
+      return;
+    }
+
+    if (type === "message_update") {
+      const evt = parsed?.assistantMessageEvent;
+      if (evt?.type === "text_delta" && typeof evt.delta === "string") {
+        this.appendAssistantText(evt.delta);
+        this.pushObserved(
+          "assistant.text.delta",
+          { text: evt.delta },
+          parsed,
+          evt.type,
+        );
+        return;
+      }
+      if (
+        (evt?.type === "thinking_delta" || evt?.type === "reasoning_delta") &&
+        typeof evt.delta === "string"
+      ) {
+        this.pushObserved(
+          "assistant.thinking.delta",
+          { text: evt.delta },
+          parsed,
+          evt.type,
+        );
+        return;
+      }
+      this.pushObserved("message.update", this.extractPiPayload(parsed), parsed, type);
+      return;
+    }
+
+    this.pushObserved("stdout", { eventType: type }, parsed, type);
   }
 
   private extractGenericDeltaText(parsed: any): string | undefined {
@@ -1454,36 +1252,9 @@ export class AgentTraceCollector {
   }
 
   private extractGenericMessageText(parsed: any): string | undefined {
-    const message =
-      parsed?.message ?? parsed?.response ?? parsed?.item ?? parsed;
-    if (typeof message?.text === "string") return message.text;
-    if (typeof message?.content === "string") return message.content;
-    if (typeof parsed?.result === "string") return parsed.result;
-    if (typeof parsed?.text === "string") return parsed.text;
-    if (Array.isArray(message?.content)) {
-      const text = message.content
-        .map((part: any) => {
-          if (typeof part === "string") return part;
-          if (typeof part?.text === "string") return part.text;
-          if (typeof part?.content === "string") return part.content;
-          if (typeof part?.output_text === "string") return part.output_text;
-          return "";
-        })
-        .join("");
-      if (text) return text;
-    }
-    if (Array.isArray(parsed?.output)) {
-      const text = parsed.output
-        .map((part: any) => {
-          if (typeof part?.text === "string") return part.text;
-          if (typeof part?.content === "string") return part.content;
-          if (typeof part?.output_text === "string") return part.output_text;
-          return "";
-        })
-        .join("");
-      if (text) return text;
-    }
-    return undefined;
+    return extractTextFromJsonValue(
+      parsed?.message ?? parsed?.response ?? parsed?.item ?? parsed,
+    );
   }
 
   private appendAssistantText(text: string) {
@@ -1526,38 +1297,10 @@ export class AgentTraceCollector {
   private extractPiPayload(parsed: any): Record<string, unknown> {
     const payload: Record<string, unknown> = {};
     if (parsed?.message?.role) payload.role = parsed.message.role;
-    const text = this.extractText(parsed?.message);
+    const text = this.extractGenericMessageText(parsed?.message);
     if (text) payload.text = text;
     if (parsed?.id) payload.id = parsed.id;
     return payload;
-  }
-
-  private extractPiToolPayload(parsed: any): Record<string, unknown> {
-    const tool = parsed?.toolExecution ?? parsed?.tool ?? parsed;
-    return {
-      toolCallId: tool?.id ?? tool?.toolCallId ?? parsed?.id,
-      toolName: tool?.name ?? tool?.toolName ?? parsed?.toolName,
-      argsPreview: tool?.args ?? tool?.arguments ?? parsed?.args,
-      resultPreview: tool?.result ?? parsed?.result,
-      isError: Boolean(tool?.isError ?? parsed?.isError ?? parsed?.error),
-    };
-  }
-
-  private extractText(message: any): string | undefined {
-    if (typeof message?.text === "string") return message.text;
-    if (typeof message?.content === "string") return message.content;
-    if (Array.isArray(message?.content)) {
-      const parts = message.content
-        .map((part: any) => {
-          if (typeof part === "string") return part;
-          if (typeof part?.text === "string") return part.text;
-          if (typeof part?.content === "string") return part.content;
-          return "";
-        })
-        .join("");
-      return parts || undefined;
-    }
-    return undefined;
   }
 
   private observeSmithersEvent(event: SmithersEvent) {
@@ -1567,22 +1310,22 @@ export class AgentTraceCollector {
       (event as any).iteration === this.iteration &&
       (event as any).attempt === this.attempt;
     if (!sameAttempt) return;
+    if (this.agentFamily === "pi") return;
+
     if (event.type === "ToolCallStarted") {
-      this.push(
+      this.pushDerived(
         "tool.execution.start",
         {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
         },
         event,
-        false,
         event.type,
-        { recordSeen: true, direct: true },
       );
       this.expectedKinds.add("tool.execution.end");
     }
     if (event.type === "ToolCallFinished") {
-      this.push(
+      this.pushDerived(
         "tool.execution.end",
         {
           toolCallId: event.toolCallId,
@@ -1590,13 +1333,11 @@ export class AgentTraceCollector {
           isError: event.status === "error",
         },
         event,
-        false,
         event.type,
-        { recordSeen: true, direct: true },
       );
     }
     if (event.type === "TokenUsageReported") {
-      this.push(
+      this.pushDerived(
         "usage",
         {
           model: event.model,
@@ -1608,9 +1349,7 @@ export class AgentTraceCollector {
           reasoningTokens: event.reasoningTokens,
         },
         event,
-        false,
         event.type,
-        { recordSeen: true, direct: true },
       );
     }
   }
@@ -1664,83 +1403,14 @@ export class AgentTraceCollector {
     return "full-observed";
   }
 
-  private hasMeaningfulUsage(usage: any): boolean {
-    if (!usage || typeof usage !== "object") return false;
-
-    const values = [
-      usage.inputTokens,
-      usage.promptTokens,
-      usage.outputTokens,
-      usage.completionTokens,
-      usage.cacheReadTokens,
-      usage.cacheWriteTokens,
-      usage.reasoningTokens,
-      usage.inputTokenDetails?.cacheReadTokens,
-      usage.inputTokenDetails?.cacheWriteTokens,
-      usage.outputTokenDetails?.reasoningTokens,
-    ];
-
-    return values.some(
-      (value) => typeof value === "number" && Number.isFinite(value) && value > 0,
-    );
-  }
-
-  private normalizeUsage(usage: any): Record<string, number> | null {
-    if (!usage || typeof usage !== "object") return null;
-
-    const normalized = {
-      ...(typeof (usage.inputTokens ?? usage.promptTokens ?? usage.input_tokens ?? usage.input ?? usage.models?.gemini?.tokens?.input) === "number"
-        ? {
-            inputTokens:
-              usage.inputTokens ??
-              usage.promptTokens ??
-              usage.input_tokens ??
-              usage.input ??
-              usage.models?.gemini?.tokens?.input,
-          }
-        : {}),
-      ...(typeof (usage.outputTokens ?? usage.completionTokens ?? usage.output_tokens ?? usage.output ?? usage.models?.gemini?.tokens?.output) === "number"
-        ? {
-            outputTokens:
-              usage.outputTokens ??
-              usage.completionTokens ??
-              usage.output_tokens ??
-              usage.output ??
-              usage.models?.gemini?.tokens?.output,
-          }
-        : {}),
-      ...(typeof (usage.cacheReadTokens ?? usage.cache_read_input_tokens ?? usage.inputTokenDetails?.cacheReadTokens ?? usage.cache_read_tokens) === "number"
-        ? {
-            cacheReadTokens:
-              usage.cacheReadTokens ??
-              usage.cache_read_input_tokens ??
-              usage.inputTokenDetails?.cacheReadTokens ??
-              usage.cache_read_tokens,
-          }
-        : {}),
-      ...(typeof (usage.cacheWriteTokens ?? usage.cache_write_input_tokens ?? usage.inputTokenDetails?.cacheWriteTokens ?? usage.cache_write_tokens) === "number"
-        ? {
-            cacheWriteTokens:
-              usage.cacheWriteTokens ??
-              usage.cache_write_input_tokens ??
-              usage.inputTokenDetails?.cacheWriteTokens ??
-              usage.cache_write_tokens,
-          }
-        : {}),
-      ...(typeof (usage.reasoningTokens ?? usage.reasoning_tokens ?? usage.outputTokenDetails?.reasoningTokens) === "number"
-        ? {
-            reasoningTokens:
-              usage.reasoningTokens ??
-              usage.reasoning_tokens ??
-              usage.outputTokenDetails?.reasoningTokens,
-          }
-        : {}),
-      ...(typeof (usage.totalTokens ?? usage.total_tokens) === "number"
-        ? { totalTokens: usage.totalTokens ?? usage.total_tokens }
-        : {}),
-    };
-
-    return this.hasMeaningfulUsage(normalized) ? normalized : null;
+  private extractMappedPayload(
+    parsed: any,
+    payloadKind: PayloadKind,
+  ): Record<string, unknown> | null {
+    if (payloadKind === "message") return this.extractGenericMessagePayload(parsed);
+    if (payloadKind === "tool") return this.extractGenericToolPayload(parsed);
+    if (payloadKind === "pi") return this.extractPiPayload(parsed);
+    return {};
   }
 
   private push(
@@ -1749,7 +1419,7 @@ export class AgentTraceCollector {
     raw: unknown,
     observed: boolean,
     rawType?: string,
-    options: PushOptions = {},
+    direct = true,
   ) {
     const redactedPayload = redactValue(payload);
     const redactedRaw = redactValue(raw);
@@ -1785,8 +1455,33 @@ export class AgentTraceCollector {
       annotations: this.annotations,
     };
     this.events.push(event);
-    if (options.recordSeen) this.seenKinds.add(kind);
-    if (options.direct) this.directKinds.add(kind);
+    this.seenKinds.add(kind);
+    if (direct) this.directKinds.add(kind);
+  }
+
+  private pushObserved(
+    kind: CanonicalAgentTraceEventKind,
+    payload: Record<string, unknown> | null,
+    raw: unknown,
+    rawType?: string,
+  ) {
+    this.push(kind, payload, raw, true, rawType);
+  }
+
+  private pushDerived(
+    kind: CanonicalAgentTraceEventKind,
+    payload: Record<string, unknown> | null,
+    raw: unknown,
+    rawType?: string,
+    direct = true,
+  ) {
+    this.push(kind, payload, raw, false, rawType, direct);
+  }
+
+  private applyTraceCompleteness(traceCompleteness: TraceCompleteness) {
+    for (const event of this.events) {
+      event.traceCompleteness = traceCompleteness;
+    }
   }
 
   private async persistNdjson(

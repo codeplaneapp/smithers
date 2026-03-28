@@ -13,6 +13,8 @@ import { spawnCaptureEffect } from "../effect/child-process";
 import { runPromise } from "../effect/runtime";
 import { getToolContext } from "../tools/context";
 import { SmithersError } from "../utils/errors";
+import { extractTextFromJsonValue } from "../utils/text-extraction";
+import { normalizeTokenUsage } from "../utils/usage";
 import { launchDiagnostics, enrichReportWithErrorAnalysis } from "./diagnostics";
 
 type TimeoutInput = number | { totalMs?: number; idleMs?: number } | undefined;
@@ -201,30 +203,7 @@ export function tryParseJson(text: string): unknown | undefined {
   return undefined;
 }
 
-export function extractTextFromJsonValue(value: any): string | undefined {
-  if (typeof value === "string") return value;
-  if (!value || typeof value !== "object") return undefined;
-  if (typeof value.text === "string") return value.text;
-  if (typeof value.content === "string") return value.content;
-  if (Array.isArray(value.content)) {
-    const parts = value.content
-      .map((part: any) => {
-        if (!part) return "";
-        if (typeof part === "string") return part;
-        if (typeof part.text === "string") return part.text;
-        if (typeof part.content === "string") return part.content;
-        return "";
-      })
-      .join("");
-    if (parts.trim()) return parts;
-  }
-  if (value.response) return extractTextFromJsonValue(value.response);
-  if (value.message) return extractTextFromJsonValue(value.message);
-  if (value.result) return extractTextFromJsonValue(value.result);
-  if (value.output) return extractTextFromJsonValue(value.output);
-  if (value.data) return extractTextFromJsonValue(value.data);
-  return undefined;
-}
+export { extractTextFromJsonValue };
 
 function extractTextFromJsonPayload(raw: string): string | undefined {
   const trimmed = raw.trim();
@@ -315,6 +294,19 @@ export function extractUsageFromOutput(raw: string): CliUsageInfo | undefined {
   const usage: CliUsageInfo = {};
   let found = false;
 
+  const addUsage = (next: CliUsageInfo | null | undefined) => {
+    if (!next) return false;
+    let changed = false;
+    for (const [key, value] of Object.entries(next) as Array<
+      [keyof CliUsageInfo, number | undefined]
+    >) {
+      if (typeof value !== "number" || value <= 0) continue;
+      usage[key] = (usage[key] ?? 0) + value;
+      changed = true;
+    }
+    return changed;
+  };
+
   for (const line of lines) {
     let parsed: any;
     try { parsed = JSON.parse(line); } catch { continue; }
@@ -322,56 +314,34 @@ export function extractUsageFromOutput(raw: string): CliUsageInfo | undefined {
 
     // Claude Code stream-json: message_start contains input token counts
     if (parsed.type === "message_start" && parsed.message?.usage) {
-      const u = parsed.message.usage;
-      usage.inputTokens = (usage.inputTokens ?? 0) + (u.input_tokens ?? 0);
-      if (u.cache_read_input_tokens) {
-        usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) + u.cache_read_input_tokens;
-      }
-      if (u.cache_creation_input_tokens) {
-        usage.cacheWriteTokens = (usage.cacheWriteTokens ?? 0) + u.cache_creation_input_tokens;
-      }
-      found = true;
+      const normalized = normalizeTokenUsage(parsed.message.usage);
+      found = addUsage({
+        inputTokens: normalized?.inputTokens,
+        cacheReadTokens: normalized?.cacheReadTokens,
+        cacheWriteTokens: normalized?.cacheWriteTokens,
+      }) || found;
       continue;
     }
 
     // Claude Code stream-json: message_delta has output token count
     if (parsed.type === "message_delta" && parsed.usage) {
-      if (parsed.usage.output_tokens) {
-        usage.outputTokens = (usage.outputTokens ?? 0) + parsed.usage.output_tokens;
-      }
-      found = true;
+      const normalized = normalizeTokenUsage(parsed.usage);
+      found = addUsage({
+        outputTokens: normalized?.outputTokens,
+      }) || found;
       continue;
     }
 
     // Codex --json: turn.completed event
     if (parsed.type === "turn.completed" && parsed.usage) {
-      const u = parsed.usage;
-      if (u.input_tokens) usage.inputTokens = (usage.inputTokens ?? 0) + u.input_tokens;
-      if (u.output_tokens) usage.outputTokens = (usage.outputTokens ?? 0) + u.output_tokens;
-      if (u.cached_input_tokens) usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) + u.cached_input_tokens;
-      found = true;
+      found = addUsage(normalizeTokenUsage(parsed.usage)) || found;
       continue;
     }
 
     // Generic: any event with a top-level "usage" containing token fields
     if (parsed.usage && typeof parsed.usage === "object") {
-      const u = parsed.usage;
-      const inTok = u.input_tokens ?? u.inputTokens ?? u.prompt_tokens ?? 0;
-      const outTok = u.output_tokens ?? u.outputTokens ?? u.completion_tokens ?? 0;
-      if (inTok > 0 || outTok > 0) {
-        usage.inputTokens = (usage.inputTokens ?? 0) + inTok;
-        usage.outputTokens = (usage.outputTokens ?? 0) + outTok;
-        if (u.cache_read_input_tokens || u.cacheReadTokens || u.cached_input_tokens) {
-          usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) +
-            (u.cache_read_input_tokens ?? u.cacheReadTokens ?? u.cached_input_tokens ?? 0);
-        }
-        if (u.reasoning_tokens ?? u.reasoningTokens) {
-          usage.reasoningTokens = (usage.reasoningTokens ?? 0) +
-            (u.reasoning_tokens ?? u.reasoningTokens ?? 0);
-        }
-        found = true;
-        continue;
-      }
+      found = addUsage(normalizeTokenUsage(parsed.usage)) || found;
+      continue;
     }
   }
 
@@ -382,9 +352,7 @@ export function extractUsageFromOutput(raw: string): CliUsageInfo | undefined {
       if (parsed?.stats?.models && typeof parsed.stats.models === "object") {
         for (const data of Object.values(parsed.stats.models as Record<string, any>)) {
           if (data?.tokens) {
-            usage.inputTokens = (usage.inputTokens ?? 0) + (data.tokens.input ?? data.tokens.prompt ?? 0);
-            usage.outputTokens = (usage.outputTokens ?? 0) + (data.tokens.output ?? 0);
-            found = true;
+            found = addUsage(normalizeTokenUsage(data.tokens)) || found;
           }
         }
       }

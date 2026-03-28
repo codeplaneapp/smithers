@@ -123,6 +123,16 @@ describe("agent trace capture", () => {
       events.find((event: any) => event.type === "AgentTraceSummary")!
         .payloadJson,
     ).summary;
+    const artifactEvent = traceEvents.find(
+      (event: any) => event.event.kind === "artifact.created",
+    );
+    const persistedRows = readFileSync(
+      artifactEvent?.payload?.artifactPath,
+      "utf8",
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
 
     expect(summary.agentFamily).toBe("pi");
     expect(summary.captureMode).toBe("cli-json-stream");
@@ -140,6 +150,24 @@ describe("agent trace capture", () => {
     const sequences = traceEvents.map((event: any) => event.event.sequence);
     expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
     expect(new Set(sequences).size).toBe(sequences.length);
+    expect(
+      traceEvents.filter(
+        (event: any) => event.event.kind === "tool.execution.start",
+      ),
+    ).toHaveLength(1);
+    expect(
+      traceEvents.filter(
+        (event: any) => event.event.kind === "tool.execution.end",
+      ),
+    ).toHaveLength(1);
+    expect(
+      persistedRows
+        .filter((row: any) => "event" in row)
+        .every((row: any) => row.traceCompleteness === "full-observed"),
+    ).toBe(true);
+    expect(persistedRows.at(-1)?.summary?.traceCompleteness).toBe(
+      "full-observed",
+    );
 
     const redacted = JSON.stringify(traceEvents);
     expect(redacted).not.toContain("sk_abc123456789");
@@ -624,6 +652,7 @@ describe("agent trace capture", () => {
         (event: any) =>
           event.event.kind === "usage" &&
           event.payload.inputTokens === 10 &&
+          event.payload.cacheReadTokens === 2 &&
           event.payload.outputTokens === 4,
       ),
     ).toBe(true);
