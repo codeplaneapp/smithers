@@ -477,11 +477,12 @@ const cli = Cli.create({
               cta: {
                 description: "Next steps:",
                 commands: [
-                  { command: `logs ${effectiveRunId}`, description: "Tail run logs" },
-                  { command: `ps`, description: "List all runs" },
-                  { command: `inspect ${effectiveRunId}`, description: "Inspect run state" },
-                ],
-              },
+                { command: `logs ${effectiveRunId}`, description: "Tail run logs" },
+                { command: `chat ${effectiveRunId} --follow`, description: "Watch agent chat" },
+                { command: `ps`, description: "List all runs" },
+                { command: `inspect ${effectiveRunId}`, description: "Inspect run state" },
+              ],
+            },
             },
           );
         }
@@ -561,6 +562,7 @@ const cli = Cli.create({
               commands: [
                 { command: `inspect ${resultRunId}`, description: "Inspect run state" },
                 { command: `logs ${resultRunId}`, description: "View run logs" },
+                { command: `chat ${resultRunId}`, description: "View agent chat" },
               ],
             } : undefined,
           });
@@ -589,6 +591,7 @@ const cli = Cli.create({
             commands: [
               { command: `inspect ${result.runId}`, description: "Inspect run state" },
               { command: `logs ${result.runId}`, description: "View run logs" },
+              { command: `chat ${result.runId}`, description: "View agent chat" },
             ],
           } : undefined,
         });
@@ -633,6 +636,7 @@ const cli = Cli.create({
           const firstWaiting = rows.find((r) => r.status === "waiting-approval");
           if (firstActive) {
             ctaCommands.push({ command: `logs ${firstActive.id}`, description: "Tail active run" });
+            ctaCommands.push({ command: `chat ${firstActive.id} --follow`, description: "Watch agent chat" });
           }
           if (firstWaiting) {
             ctaCommands.push({ command: `approve ${firstWaiting.id}`, description: "Approve waiting run" });
@@ -743,6 +747,278 @@ const cli = Cli.create({
   })
 
   // =========================================================================
+  // smithers chat [run_id]
+  // =========================================================================
+  .command("chat", {
+    description: "Show agent chat output for the latest run or a specific run.",
+    args: chatArgs,
+    options: chatOptions,
+    alias: { follow: "f", tail: "n", all: "a" },
+    async *run(c) {
+      let cleanup: (() => void) | undefined;
+      try {
+        const db = await findAndOpenDb();
+        const adapter = db.adapter;
+        cleanup = db.cleanup;
+
+        let run: any | undefined;
+        if (c.args.runId) {
+          run = await adapter.getRun(c.args.runId);
+        } else {
+          const latestRuns = await adapter.listRuns(1);
+          run = (latestRuns as any[])[0];
+        }
+
+        if (!run) {
+          yield c.args.runId
+            ? `Error: Run not found: ${c.args.runId}`
+            : "Error: No runs found.";
+          return;
+        }
+
+        const runId = run.runId;
+        const baseMs = (run as any).startedAtMs ?? (run as any).createdAtMs ?? Date.now();
+        const printedHeaders = new Set<string>();
+        const emittedBlockIds = new Set<string>();
+        const stdoutSeenAttempts = new Set<string>();
+        const selectedAttemptKeys = new Set<string>();
+
+        const attemptByKey = new Map<string, any>();
+        const knownOutputAttemptKeys = new Set<string>();
+
+        const renderLines = (blocks: Array<{ attemptKey: string; blockId: string; timestampMs: number; text: string }>) => {
+          const lines: string[] = [];
+          for (const block of blocks) {
+            if (emittedBlockIds.has(block.blockId)) continue;
+            emittedBlockIds.add(block.blockId);
+            const attempt = attemptByKey.get(block.attemptKey);
+            if (!attempt) continue;
+            if (!printedHeaders.has(block.attemptKey)) {
+              if (lines.length > 0) lines.push("");
+              lines.push(formatChatAttemptHeader(attempt));
+              printedHeaders.add(block.attemptKey);
+            }
+            lines.push(block.text);
+          }
+          return lines;
+        };
+
+        const buildPromptBlock = (attempt: any) => {
+          const attemptKey = chatAttemptKey(attempt);
+          const meta = parseChatAttemptMeta(attempt.metaJson);
+          const prompt = typeof meta.prompt === "string" ? meta.prompt.trim() : "";
+          if (!prompt) return null;
+          return {
+            attemptKey,
+            blockId: `prompt:${attemptKey}`,
+            timestampMs: attempt.startedAtMs ?? baseMs,
+            text: formatChatBlock({
+              baseMs,
+              timestampMs: attempt.startedAtMs ?? baseMs,
+              role: "user",
+              attempt,
+              text: prompt,
+            }),
+          };
+        };
+
+        const buildOutputBlock = (event: ReturnType<typeof parseNodeOutputEvent>) => {
+          if (!event) return null;
+          const attemptKey = chatAttemptKey(event);
+          if (!selectedAttemptKeys.has(attemptKey)) return null;
+          if (event.stream === "stderr" && !c.options.stderr) return null;
+          if (event.stream === "stdout") {
+            stdoutSeenAttempts.add(attemptKey);
+          }
+          return {
+            attemptKey,
+            blockId: `event:${event.seq}`,
+            timestampMs: event.timestampMs,
+            text: formatChatBlock({
+              baseMs,
+              timestampMs: event.timestampMs,
+              role: event.stream === "stderr" ? "stderr" : "assistant",
+              attempt: event,
+              text: event.text,
+            }),
+          };
+        };
+
+        const buildFallbackBlock = (attempt: any) => {
+          const attemptKey = chatAttemptKey(attempt);
+          const responseText = typeof attempt.responseText === "string"
+            ? attempt.responseText.trim()
+            : "";
+          if (!responseText || stdoutSeenAttempts.has(attemptKey)) return null;
+          return {
+            attemptKey,
+            blockId: `response:${attemptKey}`,
+            timestampMs: attempt.finishedAtMs ?? attempt.startedAtMs ?? baseMs,
+            text: formatChatBlock({
+              baseMs,
+              timestampMs: attempt.finishedAtMs ?? attempt.startedAtMs ?? baseMs,
+              role: "assistant",
+              attempt,
+              text: responseText,
+            }),
+          };
+        };
+
+        const syncAttempts = (attempts: any[]) => {
+          for (const attempt of attempts) {
+            attemptByKey.set(chatAttemptKey(attempt), attempt);
+          }
+          const selected = selectChatAttempts(
+            attempts,
+            knownOutputAttemptKeys,
+            c.options.all,
+          );
+          if (c.options.all || selectedAttemptKeys.size === 0) {
+            for (const attempt of selected) {
+              selectedAttemptKeys.add(chatAttemptKey(attempt));
+            }
+          }
+          return selected;
+        };
+
+        const initialAttempts = await adapter.listAttemptsForRun(runId);
+        syncAttempts(initialAttempts as any[]);
+
+        const initialEvents = await listAllEvents(adapter, runId);
+        const parsedInitialOutputs = (initialEvents as any[])
+          .map((event) => parseNodeOutputEvent(event))
+          .filter(Boolean) as Array<NonNullable<ReturnType<typeof parseNodeOutputEvent>>>;
+
+        for (const event of parsedInitialOutputs) {
+          knownOutputAttemptKeys.add(chatAttemptKey(event));
+        }
+
+        const selectedInitialAttempts = syncAttempts(initialAttempts as any[]);
+        const initialBlocks: Array<{ attemptKey: string; blockId: string; timestampMs: number; text: string }> = [];
+
+        for (const attempt of selectedInitialAttempts) {
+          const promptBlock = buildPromptBlock(attempt);
+          if (promptBlock) initialBlocks.push(promptBlock);
+        }
+
+        for (const event of parsedInitialOutputs) {
+          const block = buildOutputBlock(event);
+          if (block) initialBlocks.push(block);
+        }
+
+        for (const attempt of selectedInitialAttempts) {
+          const fallbackBlock = buildFallbackBlock(attempt);
+          if (fallbackBlock) initialBlocks.push(fallbackBlock);
+        }
+
+        initialBlocks.sort((a, b) => {
+          if (a.timestampMs !== b.timestampMs) return a.timestampMs - b.timestampMs;
+          return a.blockId.localeCompare(b.blockId);
+        });
+
+        const visibleInitialBlocks = c.options.tail
+          ? initialBlocks.slice(-c.options.tail)
+          : initialBlocks;
+
+        const initialLines = renderLines(visibleInitialBlocks);
+        for (const line of initialLines) {
+          yield line;
+        }
+
+        if (selectedAttemptKeys.size === 0 && !c.options.follow) {
+          yield `No agent chat logs found for run: ${runId}`;
+          return;
+        }
+
+        let lastSeq = (initialEvents as any[]).length > 0
+          ? (initialEvents as any[])[(initialEvents as any[]).length - 1]!.seq
+          : -1;
+
+        if (!c.options.follow) {
+          return c.ok(undefined, {
+            cta: {
+              commands: [
+                { command: `inspect ${runId}`, description: "Inspect run state" },
+                { command: `logs ${runId}`, description: "Tail lifecycle events" },
+              ],
+            },
+          });
+        }
+
+        while (true) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+
+          const attempts = await adapter.listAttemptsForRun(runId);
+          const selectedAttempts = syncAttempts(attempts as any[]);
+
+          const newRows = await adapter.listEvents(runId, lastSeq, 200);
+          const newBlocks: Array<{ attemptKey: string; blockId: string; timestampMs: number; text: string }> = [];
+
+          for (const eventRow of newRows as any[]) {
+            lastSeq = eventRow.seq;
+            const parsed = parseNodeOutputEvent(eventRow);
+            if (!parsed) continue;
+            knownOutputAttemptKeys.add(chatAttemptKey(parsed));
+            if (c.options.all || selectedAttemptKeys.size === 0) {
+              syncAttempts(attempts as any[]);
+            }
+            const block = buildOutputBlock(parsed);
+            if (block) newBlocks.push(block);
+          }
+
+          for (const attempt of (attempts as any[]).filter((entry) => selectedAttemptKeys.has(chatAttemptKey(entry)))) {
+            const promptBlock = buildPromptBlock(attempt);
+            if (promptBlock && !emittedBlockIds.has(promptBlock.blockId)) {
+              newBlocks.push(promptBlock);
+            }
+            const fallbackBlock = buildFallbackBlock(attempt);
+            if (fallbackBlock && !emittedBlockIds.has(fallbackBlock.blockId)) {
+              newBlocks.push(fallbackBlock);
+            }
+          }
+
+          newBlocks.sort((a, b) => {
+            if (a.timestampMs !== b.timestampMs) return a.timestampMs - b.timestampMs;
+            return a.blockId.localeCompare(b.blockId);
+          });
+
+          const newLines = renderLines(newBlocks);
+          for (const line of newLines) {
+            yield line;
+          }
+
+          const currentRun = await adapter.getRun(runId);
+          const currentStatus = (currentRun as any)?.status;
+          if (currentStatus !== "running" && currentStatus !== "waiting-approval") {
+            const finalAttempts = await adapter.listAttemptsForRun(runId);
+            syncAttempts(finalAttempts as any[]);
+            const finalBlocks = (finalAttempts as any[])
+              .filter((attempt) => selectedAttemptKeys.has(chatAttemptKey(attempt)))
+              .map((attempt) => buildFallbackBlock(attempt))
+              .filter(Boolean) as Array<{ attemptKey: string; blockId: string; timestampMs: number; text: string }>;
+
+            const finalLines = renderLines(finalBlocks);
+            for (const line of finalLines) {
+              yield line;
+            }
+
+            return c.ok(undefined, {
+              cta: {
+                commands: [
+                  { command: `inspect ${runId}`, description: "Inspect run state" },
+                  { command: `logs ${runId}`, description: "Tail lifecycle events" },
+                ],
+              },
+            });
+          }
+        }
+      } finally {
+        cleanup?.();
+      }
+    },
+  })
+
+  // =========================================================================
   // smithers inspect <run_id>
   // =========================================================================
   .command("inspect", {
@@ -820,6 +1096,7 @@ const cli = Cli.create({
 
           const ctaCommands: any[] = [
             { command: `logs ${c.args.runId}`, description: "Tail run logs" },
+            { command: `chat ${c.args.runId}`, description: "View agent chat" },
           ];
           if (r.status === "running" || r.status === "waiting-approval") {
             ctaCommands.push({ command: `cancel ${c.args.runId}`, description: "Cancel run" });
@@ -1234,7 +1511,7 @@ const cli = Cli.create({
 // ---------------------------------------------------------------------------
 
 const KNOWN_COMMANDS = new Set([
-  "init", "up", "down", "ps", "logs", "inspect", "approve", "deny",
+  "init", "up", "down", "ps", "logs", "chat", "inspect", "approve", "deny",
   "cancel", "graph", "revert", "observability", "workflow", "ask",
 ]);
 
