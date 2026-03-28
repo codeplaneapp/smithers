@@ -21,6 +21,14 @@ import { runSync } from "../effect/runtime";
 import { spawn } from "node:child_process";
 import { SmithersError } from "../utils/errors";
 import { findAndOpenDb } from "./find-db";
+import {
+  chatAttemptKey,
+  formatChatAttemptHeader,
+  formatChatBlock,
+  parseChatAttemptMeta,
+  parseNodeOutputEvent,
+  selectChatAttempts,
+} from "./chat";
 import { formatAge, formatElapsedCompact, formatEventLine } from "./format";
 import { detectAvailableAgents } from "./agent-detection";
 import { initWorkflowPack } from "./workflow-pack";
@@ -191,6 +199,19 @@ function setupAbortSignal() {
   return abort;
 }
 
+async function listAllEvents(adapter: SmithersDb, runId: string) {
+  const events: any[] = [];
+  let lastSeq = -1;
+  while (true) {
+    const batch = await adapter.listEvents(runId, lastSeq, 1000);
+    if ((batch as any[]).length === 0) break;
+    events.push(...(batch as any[]));
+    lastSeq = (batch as any[])[(batch as any[]).length - 1]!.seq;
+    if ((batch as any[]).length < 1000) break;
+  }
+  return events;
+}
+
 // ---------------------------------------------------------------------------
 // Schemas
 // ---------------------------------------------------------------------------
@@ -225,6 +246,17 @@ const logsOptions = z.object({
   follow: z.boolean().default(true).describe("Keep tailing (default true for active runs)"),
   since: z.number().int().optional().describe("Start from event sequence number"),
   tail: z.number().int().min(1).default(50).describe("Show last N events first"),
+});
+
+const chatArgs = z.object({
+  runId: z.string().optional().describe("Run ID to inspect (default: latest run)"),
+});
+
+const chatOptions = z.object({
+  all: z.boolean().default(false).describe("Show all agent attempts in the run (default: latest only)"),
+  follow: z.boolean().default(false).describe("Watch for new agent output"),
+  tail: z.number().int().min(1).optional().describe("Show only the last N chat blocks"),
+  stderr: z.boolean().default(true).describe("Include agent stderr output"),
 });
 
 const inspectArgs = z.object({
