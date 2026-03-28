@@ -33,13 +33,10 @@ import {
   toolOutputTruncatedTotal,
   voiceOperationsTotal,
   voiceErrorsTotal,
-  mcpToolCallsTotal,
-  mcpToolCallErrorsTotal,
   eventsEmittedTotal,
   activeRuns,
   activeNodes,
   schedulerQueueDepth,
-  mcpActiveConnections,
   approvalPending,
   nodeDuration,
   attemptDuration,
@@ -55,7 +52,6 @@ import {
   responseSizeBytes,
   approvalWaitDuration,
   voiceDuration,
-  mcpToolDuration,
   schedulerWaitDuration,
   updateProcessMetrics,
 } from "../src/effect/metrics";
@@ -95,8 +91,6 @@ describe("effect/metrics definitions", () => {
       toolOutputTruncatedTotal,
       voiceOperationsTotal,
       voiceErrorsTotal,
-      mcpToolCallsTotal,
-      mcpToolCallErrorsTotal,
       eventsEmittedTotal,
     ];
 
@@ -110,8 +104,7 @@ describe("effect/metrics definitions", () => {
       activeRuns,
       activeNodes,
       schedulerQueueDepth,
-      mcpActiveConnections,
-      approvalPending,
+          approvalPending,
     ];
 
     for (const gauge of gauges) {
@@ -136,8 +129,7 @@ describe("effect/metrics definitions", () => {
       responseSizeBytes,
       approvalWaitDuration,
       voiceDuration,
-      mcpToolDuration,
-      schedulerWaitDuration,
+          schedulerWaitDuration,
     ];
 
     for (const histogram of histograms) {
