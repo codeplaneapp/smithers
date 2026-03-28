@@ -1301,6 +1301,18 @@ async function executeTask(
     desc.iteration,
   );
   const attemptNo = (attempts[0]?.attempt ?? 0) + 1;
+  const attemptMeta: Record<string, unknown> = {
+    kind: desc.agent ? "agent" : desc.computeFn ? "compute" : "static",
+    prompt: desc.prompt ?? null,
+    staticPayload: desc.staticPayload ?? null,
+    label: desc.label ?? null,
+    outputTable: desc.outputTableName,
+    needsApproval: desc.needsApproval,
+    retries: desc.retries,
+    timeoutMs: desc.timeoutMs,
+    agentId: null,
+    agentModel: null,
+  };
 
   await adapter.insertAttempt({
     runId,
@@ -1314,15 +1326,7 @@ async function executeTask(
     jjPointer: null,
     jjCwd: desc.worktreePath ?? toolConfig.rootDir,
     cached: false,
-    metaJson: JSON.stringify({
-      prompt: desc.prompt ?? null,
-      staticPayload: desc.staticPayload ?? null,
-      label: desc.label ?? null,
-      outputTable: desc.outputTableName,
-      needsApproval: desc.needsApproval,
-      retries: desc.retries,
-      timeoutMs: desc.timeoutMs,
-    }),
+    metaJson: JSON.stringify(attemptMeta),
   });
   await adapter.insertNode({
     runId,
@@ -1490,10 +1494,34 @@ async function executeTask(
       effectiveAgent = agents.length > 0
         ? agents[Math.min(attemptNo - 1, agents.length - 1)]
         : allAgents[Math.min(attemptNo - 1, allAgents.length - 1)]; // fallback to disabled agent if all disabled
+      const emitOutput = (text: string, stream: "stdout" | "stderr") => {
+        void eventBus.emitEventQueued({
+          type: "NodeOutput",
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          attempt: attemptNo,
+          text,
+          stream,
+          timestampMs: nowMs(),
+        });
+      };
       // Capture the agent result at this scope so schema-retry can build
       // conversation history from the original response messages.
       let agentResult: any;
       if (effectiveAgent) {
+        attemptMeta.agentId =
+          (effectiveAgent as any).id ??
+          (effectiveAgent as any).constructor?.name ??
+          null;
+        attemptMeta.agentModel =
+          (effectiveAgent as any).model ??
+          (effectiveAgent as any).modelId ??
+          null;
+        await adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
+          metaJson: JSON.stringify(attemptMeta),
+        });
+
         // Use fallback agent on retry attempts when available
         const result = await runWithToolContext(
           {
@@ -1534,18 +1562,6 @@ async function executeTask(
                 jsonInstructions,
               ].join("\n");
             }
-            const emitOutput = (text: string, stream: "stdout" | "stderr") => {
-              void eventBus.emitEventQueued({
-                type: "NodeOutput",
-                runId,
-                nodeId: desc.nodeId,
-                iteration: desc.iteration,
-                attempt: attemptNo,
-                text,
-                stream,
-                timestampMs: nowMs(),
-              });
-            };
             return (effectiveAgent as any).generate({
               options: undefined as any,
               abortSignal: signal,
@@ -1776,8 +1792,11 @@ async function executeTask(
               abortSignal: signal,
               prompt: jsonPrompt,
               timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
+              onStdout: (text: string) => emitOutput(text, "stdout"),
+              onStderr: (text: string) => emitOutput(text, "stderr"),
             });
             const retryText = (retryResult as any).text ?? "";
+            responseText = retryText || responseText;
             try {
               const trimmed = retryText.trim();
               if (trimmed.startsWith("{")) {
@@ -1974,8 +1993,11 @@ async function executeTask(
           abortSignal: signal,
           messages: retryMessages,
           timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
+          onStdout: (text: string) => emitOutput(text, "stdout"),
+          onStderr: (text: string) => emitOutput(text, "stderr"),
         });
         const retryText = ((schemaRetryResult as any).text ?? "").trim();
+        responseText = retryText || responseText;
 
         // Update conversation history for the next iteration
         const retryResponseMessages = (schemaRetryResult as any)?.response?.messages;
