@@ -1,6 +1,10 @@
 import { openai } from "@ai-sdk/openai";
 import { ToolLoopAgent, type ToolSet } from "ai";
-import { resolveSdkModel, type SdkAgentOptions } from "./sdk-shared";
+import {
+  resolveSdkModel,
+  streamResultToGenerateResult,
+  type SdkAgentOptions,
+} from "./sdk-shared";
 
 export type OpenAIAgentOptions<
   CALL_OPTIONS = never,
@@ -28,11 +32,20 @@ export class OpenAIAgent<
     onStderr?: (text: string) => void;
     outputSchema?: import("zod").ZodObject<any>;
   }) {
-    return super.generate({
+    if (!args.onStdout) {
+      return super.generate({
+        options: args.options as CALL_OPTIONS,
+        abortSignal: args.abortSignal,
+        prompt: args.prompt,
+        timeout: args.timeout as any,
+      } as any);
+    }
+
+    return super.stream({
       options: args.options as CALL_OPTIONS,
       abortSignal: args.abortSignal,
       prompt: args.prompt,
       timeout: args.timeout as any,
-    } as any);
+    } as any).then((stream) => streamResultToGenerateResult(stream, args.onStdout));
   }
 }

@@ -176,30 +176,34 @@ export class PiAgent extends BaseCliAgent {
           onText: options?.onStdout,
         });
 
-        const result = await runCommand("pi", args, {
-          cwd,
-          env,
-          timeoutMs: callTimeouts.totalMs,
-          idleTimeoutMs: callTimeouts.idleMs,
-          signal: options?.abortSignal,
-          maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
-          onStdout: stdoutEmitter.push,
-          onStderr: options?.onStderr,
-        });
+        try {
+          const result = await runCommand("pi", args, {
+            cwd,
+            env,
+            timeoutMs: callTimeouts.totalMs,
+            idleTimeoutMs: callTimeouts.idleMs,
+            signal: options?.abortSignal,
+            maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
+            onStdout: stdoutEmitter.push,
+            onStderr: options?.onStderr,
+          });
 
-        if (result.exitCode && result.exitCode !== 0) {
-          throw new SmithersError("AGENT_CLI_ERROR", result.stderr.trim() || result.stdout.trim() || `CLI exited with code ${result.exitCode}`);
+          if (result.exitCode && result.exitCode !== 0) {
+            throw new SmithersError("AGENT_CLI_ERROR", result.stderr.trim() || result.stdout.trim() || `CLI exited with code ${result.exitCode}`);
+          }
+
+          const rawText = result.stdout.trim();
+          // In json mode, pi outputs NDJSON stream. Extract text from turn_end message
+          // rather than returning the first JSON object (session metadata).
+          const extractedText = mode === "json"
+            ? (extractTextFromPiNdjson(rawText) ?? rawText)
+            : rawText;
+          stdoutEmitter.flush(extractedText);
+          const output = tryParseJson(extractedText);
+          return buildGenerateResult(extractedText, output, this.opts.model ?? "pi");
+        } finally {
+          stdoutEmitter.flush();
         }
-
-        const rawText = result.stdout.trim();
-        // In json mode, pi outputs NDJSON stream. Extract text from turn_end message
-        // rather than returning the first JSON object (session metadata).
-        const extractedText = mode === "json"
-          ? (extractTextFromPiNdjson(rawText) ?? rawText)
-          : rawText;
-        stdoutEmitter.flush(extractedText);
-        const output = tryParseJson(extractedText);
-        return buildGenerateResult(extractedText, output, this.opts.model ?? "pi");
       }
 
       // RPC mode
