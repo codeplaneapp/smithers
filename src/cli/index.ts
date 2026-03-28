@@ -1149,7 +1149,7 @@ const cli = Cli.create({
             nodeId = (pending as any[])[0].nodeId;
           }
 
-          await approveNode(adapter, c.args.runId, nodeId, c.options.iteration, c.options.note, c.options.by);
+          await approveNode(adapter, c.args.runId, nodeId!, c.options.iteration, c.options.note, c.options.by);
 
           return c.ok(
             { runId: c.args.runId, nodeId, status: "approved" },
@@ -1205,7 +1205,7 @@ const cli = Cli.create({
             nodeId = (pending as any[])[0].nodeId;
           }
 
-          await denyNode(adapter, c.args.runId, nodeId, c.options.iteration, c.options.note, c.options.by);
+          await denyNode(adapter, c.args.runId, nodeId!, c.options.iteration, c.options.note, c.options.by);
 
           return c.ok(
             { runId: c.args.runId, nodeId, status: "denied" },
