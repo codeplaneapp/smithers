@@ -339,7 +339,7 @@ function extractCliStreamTextChunks(
     }
   }
 
-  if (/delta/i.test(type)) {
+  if (/delta/i.test(type) && type !== "content_block_delta" && type !== "message_update") {
     if (typeof parsed?.delta === "string") {
       emitDelta(parsed.delta);
     } else if (typeof parsed?.delta?.text === "string") {
