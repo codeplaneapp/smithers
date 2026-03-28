@@ -31,3 +31,6 @@ export type { LoopProps, RalphProps } from "./Ralph";
 
 export { Worktree } from "./Worktree";
 export type { WorktreeProps } from "./Worktree";
+
+export { Voice } from "./Voice";
+export type { VoiceProps } from "./Voice";
