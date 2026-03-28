@@ -83,21 +83,20 @@ describe("read tool", () => {
     }
   });
 
-  test("truncates output when file exceeds maxOutputBytes", async () => {
+  test("rejects file that exceeds maxOutputBytes with TOOL_FILE_TOO_LARGE", async () => {
     const root = makeTempDir();
     try {
       // Create file larger than maxOutputBytes
       const bigContent = "A".repeat(500);
       writeFileSync(join(root, "big.txt"), bigContent, "utf8");
 
-      const result = await withToolContext(
-        root,
-        () => execTool<string>(read, { path: "big.txt" }),
-        { maxOutputBytes: 100 },
-      );
-
-      // File is 500 bytes, maxOutput is 100 — should be truncated
-      expect(result.length).toBeLessThanOrEqual(100);
+      await expect(
+        withToolContext(
+          root,
+          () => execTool<string>(read, { path: "big.txt" }),
+          { maxOutputBytes: 100 },
+        ),
+      ).rejects.toThrow("File too large");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

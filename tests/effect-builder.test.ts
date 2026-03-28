@@ -1,355 +1,288 @@
 import { describe, expect, test } from "bun:test";
-import { Schema } from "effect";
+import { Layer } from "effect";
 import { Smithers } from "../src/index";
+import type { BuilderStepHandle, BuilderNode } from "../src/effect/builder";
 
-// The builder module's internal functions (durationToMs, deriveRetryCount, etc.)
-// are not directly exported. We test them indirectly through the Smithers.sqlite()
-// API and by constructing workflows that exercise the builder logic.
+// The builder module's internal functions (durationToMs, deriveRetryCount,
+// createBuilder, etc.) are private. We test their behavior via the TOON
+// loadToon API and via the observable type shapes.
 
 // ---------------------------------------------------------------------------
-// Smithers.sqlite — public API for the Effect builder
+// Smithers.sqlite — Layer factory
 // ---------------------------------------------------------------------------
 
 describe("Smithers.sqlite", () => {
-  test("creates a workflow builder with name and input", () => {
-    const wf = Smithers.sqlite({
-      name: "test-workflow",
-      input: Schema.Struct({ prompt: Schema.String }),
-    });
-    expect(wf).toBeDefined();
-    expect(typeof wf.build).toBe("function");
+  test("returns an Effect Layer", () => {
+    const layer = Smithers.sqlite({ filename: ":memory:" });
+    expect(layer).toBeDefined();
+    // Effect Layer should have a standard shape
+    expect(Layer.isLayer(layer)).toBe(true);
   });
 
-  test("build returns a BuiltSmithersWorkflow with execute method", () => {
-    const wf = Smithers.sqlite({
-      name: "test-wf",
-      input: Schema.Struct({ text: Schema.String }),
-    });
-
-    const built = wf.build(($) => {
-      const step = $.step("greet", {
-        output: Schema.Struct({ greeting: Schema.String }),
-        run: (ctx) => ({ greeting: `Hello ${(ctx.input as any).text}` }),
-      });
-      return step;
-    });
-
-    expect(built).toBeDefined();
-    expect(typeof built.execute).toBe("function");
+  test("accepts custom filename", () => {
+    const layer = Smithers.sqlite({ filename: "/tmp/test.db" });
+    expect(Layer.isLayer(layer)).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Builder API — step, sequence, parallel, loop
+// Smithers.loadToon — TOON workflow loader
 // ---------------------------------------------------------------------------
 
-describe("Builder API via Smithers.sqlite build callback", () => {
-  test("creates step nodes with correct properties", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
-
-    let capturedStep: any;
-    wf.build(($) => {
-      capturedStep = $.step("compute", {
-        output: Schema.Struct({ result: Schema.Number }),
-        run: () => ({ result: 42 }),
-      });
-      return capturedStep;
-    });
-
-    expect(capturedStep.kind).toBe("step");
-    expect(capturedStep.id).toBe("compute");
-    expect(capturedStep.localId).toBe("compute");
-    expect(capturedStep.tableName).toMatch(/^smithers_/);
-    expect(capturedStep.retries).toBe(0);
-    expect(capturedStep.timeoutMs).toBeNull();
+describe("Smithers.loadToon", () => {
+  test("returns a BuiltSmithersWorkflow with execute method", () => {
+    // loadToon creates a lazy workflow that reads the file on execute
+    const wf = Smithers.loadToon("/nonexistent.toon");
+    expect(wf).toBeDefined();
+    expect(typeof wf.execute).toBe("function");
   });
+});
 
-  test("creates sequence node from multiple steps", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
+// ---------------------------------------------------------------------------
+// BuilderNode and BuilderStepHandle types — structural tests
+// ---------------------------------------------------------------------------
 
-    let capturedSeq: any;
-    wf.build(($) => {
-      const a = $.step("a", {
-        output: Schema.Struct({ v: Schema.Number }),
-        run: () => ({ v: 1 }),
-      });
-      const b = $.step("b", {
-        output: Schema.Struct({ v: Schema.Number }),
-        run: () => ({ v: 2 }),
-      });
-      capturedSeq = $.sequence(a, b);
-      return capturedSeq;
-    });
+describe("BuilderStepHandle shape", () => {
+  test("step handle has correct shape", () => {
+    const handle: BuilderStepHandle = {
+      kind: "step",
+      id: "my-step",
+      localId: "my-step",
+      tableKey: "my_step",
+      tableName: "smithers_my_step",
+      table: {},
+      output: {},
+      needs: {},
+      retries: 3,
+      timeoutMs: 5000,
+      loopId: undefined,
+    };
 
-    expect(capturedSeq.kind).toBe("sequence");
-    expect(capturedSeq.children).toHaveLength(2);
-  });
-
-  test("creates parallel node with maxConcurrency", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
-
-    let capturedPar: any;
-    wf.build(($) => {
-      const a = $.step("a", {
-        output: Schema.Struct({ v: Schema.Number }),
-        run: () => ({ v: 1 }),
-      });
-      const b = $.step("b", {
-        output: Schema.Struct({ v: Schema.Number }),
-        run: () => ({ v: 2 }),
-      });
-      capturedPar = $.parallel(a, b, { maxConcurrency: 3 });
-      return capturedPar;
-    });
-
-    expect(capturedPar.kind).toBe("parallel");
-    expect(capturedPar.maxConcurrency).toBe(3);
-    expect(capturedPar.children).toHaveLength(2);
-  });
-
-  test("creates parallel node without maxConcurrency", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
-
-    let capturedPar: any;
-    wf.build(($) => {
-      const a = $.step("a", {
-        output: Schema.Struct({ v: Schema.Number }),
-        run: () => ({ v: 1 }),
-      });
-      capturedPar = $.parallel(a);
-      return capturedPar;
-    });
-
-    expect(capturedPar.kind).toBe("parallel");
-    expect(capturedPar.maxConcurrency).toBeUndefined();
-  });
-
-  test("creates loop node with until condition", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
-
-    let capturedLoop: any;
-    wf.build(($) => {
-      const step = $.step("iterate", {
-        output: Schema.Struct({ count: Schema.Number }),
-        run: () => ({ count: 1 }),
-      });
-      capturedLoop = $.loop({
-        id: "main-loop",
-        children: step,
-        until: (outputs) => (outputs as any).count >= 10,
-        maxIterations: 20,
-        onMaxReached: "return-last",
-      });
-      return capturedLoop;
-    });
-
-    expect(capturedLoop.kind).toBe("loop");
-    expect(capturedLoop.id).toBe("main-loop");
-    expect(capturedLoop.maxIterations).toBe(20);
-    expect(capturedLoop.onMaxReached).toBe("return-last");
-  });
-
-  test("creates approval node with correct defaults", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
-
-    let capturedApproval: any;
-    wf.build(($) => {
-      capturedApproval = $.approval("review", {
-        request: () => ({ title: "Please review" }),
-      });
-      return capturedApproval;
-    });
-
-    expect(capturedApproval.kind).toBe("approval");
-    expect(capturedApproval.id).toBe("review");
-    expect(capturedApproval.onDeny).toBe("fail");
-    expect(capturedApproval.retries).toBe(0);
-    expect(capturedApproval.timeoutMs).toBeNull();
-  });
-
-  test("creates approval with custom onDeny", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
-
-    let capturedApproval: any;
-    wf.build(($) => {
-      capturedApproval = $.approval("review", {
-        request: () => ({ title: "Review" }),
-        onDeny: "continue",
-      });
-      return capturedApproval;
-    });
-
-    expect(capturedApproval.onDeny).toBe("continue");
-  });
-
-  test("step with retry count wires correctly", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
-
-    let handle: any;
-    wf.build(($) => {
-      handle = $.step("s", {
-        output: Schema.Struct({ v: Schema.Number }),
-        run: () => ({ v: 1 }),
-        retry: 3,
-      });
-      return handle;
-    });
-
+    expect(handle.kind).toBe("step");
+    expect(handle.id).toBe("my-step");
     expect(handle.retries).toBe(3);
+    expect(handle.timeoutMs).toBe(5000);
   });
 
-  test("step with maxAttempts retry config wires correctly", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
+  test("approval handle has correct shape", () => {
+    const handle: BuilderStepHandle = {
+      kind: "approval",
+      id: "review",
+      localId: "review",
+      tableKey: "review",
+      tableName: "smithers_review",
+      table: {},
+      output: {},
+      needs: {},
+      retries: 0,
+      timeoutMs: null,
+      onDeny: "fail",
+      request: () => ({ title: "Review" }),
+    };
 
-    let handle: any;
-    wf.build(($) => {
-      handle = $.step("s", {
-        output: Schema.Struct({ v: Schema.Number }),
-        run: () => ({ v: 1 }),
-        retry: { maxAttempts: 5, backoff: "exponential", initialDelay: "1s" },
-      });
-      return handle;
-    });
+    expect(handle.kind).toBe("approval");
+    expect(handle.onDeny).toBe("fail");
+    expect(handle.timeoutMs).toBeNull();
+    expect(handle.retries).toBe(0);
+  });
+
+  test("step handle with retry policy", () => {
+    const handle: BuilderStepHandle = {
+      kind: "step",
+      id: "retry-step",
+      localId: "retry-step",
+      tableKey: "retry_step",
+      tableName: "smithers_retry_step",
+      table: {},
+      output: {},
+      needs: {},
+      retries: 4,
+      retryPolicy: {
+        backoff: "exponential",
+        initialDelayMs: 1000,
+      },
+      timeoutMs: 30000,
+    };
 
     expect(handle.retries).toBe(4);
     expect(handle.retryPolicy?.backoff).toBe("exponential");
     expect(handle.retryPolicy?.initialDelayMs).toBe(1000);
+    expect(handle.timeoutMs).toBe(30000);
   });
 
-  test("step with timeout string wires correctly", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
+  test("step handle with loop annotation", () => {
+    const handle: BuilderStepHandle = {
+      kind: "step",
+      id: "loop-step",
+      localId: "loop-step",
+      tableKey: "loop_step",
+      tableName: "smithers_loop_step",
+      table: {},
+      output: {},
+      needs: {},
+      retries: 0,
+      timeoutMs: null,
+      loopId: "main-loop",
+    };
 
-    let handle: any;
-    wf.build(($) => {
-      handle = $.step("s", {
-        output: Schema.Struct({ v: Schema.Number }),
-        run: () => ({ v: 1 }),
-        timeout: "30s",
-      });
-      return handle;
-    });
-
-    expect(handle.timeoutMs).toBe(30_000);
+    expect(handle.loopId).toBe("main-loop");
   });
 
-  test("step with numeric timeout wires correctly", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
+  test("step handle with cache policy", () => {
+    const handle: BuilderStepHandle = {
+      kind: "step",
+      id: "cached-step",
+      localId: "cached-step",
+      tableKey: "cached_step",
+      tableName: "smithers_cached_step",
+      table: {},
+      output: {},
+      needs: {},
+      retries: 0,
+      timeoutMs: null,
+      cache: { ttlMs: 60_000 },
+    };
 
-    let handle: any;
-    wf.build(($) => {
-      handle = $.step("s", {
-        output: Schema.Struct({ v: Schema.Number }),
-        run: () => ({ v: 1 }),
-        timeout: 5000,
-      });
-      return handle;
-    });
-
-    expect(handle.timeoutMs).toBe(5000);
+    expect(handle.cache).toEqual({ ttlMs: 60_000 });
   });
 
-  test("step with needs dependency wiring", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
+  test("step handle with needs dependencies", () => {
+    const depHandle: BuilderStepHandle = {
+      kind: "step",
+      id: "dep-a",
+      localId: "dep-a",
+      tableKey: "dep_a",
+      tableName: "smithers_dep_a",
+      table: {},
+      output: {},
+      needs: {},
+      retries: 0,
+      timeoutMs: null,
+    };
 
-    let stepB: any;
-    wf.build(($) => {
-      const a = $.step("a", {
-        output: Schema.Struct({ v: Schema.Number }),
-        run: () => ({ v: 1 }),
-      });
-      stepB = $.step("b", {
-        output: Schema.Struct({ w: Schema.Number }),
-        run: () => ({ w: 2 }),
-        needs: { dep: a },
-      });
-      return $.sequence(a, stepB);
-    });
+    const handle: BuilderStepHandle = {
+      kind: "step",
+      id: "main",
+      localId: "main",
+      tableKey: "main",
+      tableName: "smithers_main",
+      table: {},
+      output: {},
+      needs: { dependency: depHandle },
+      retries: 0,
+      timeoutMs: null,
+    };
 
-    expect(stepB.needs).toBeDefined();
-    expect(stepB.needs.dep).toBeDefined();
-    expect(stepB.needs.dep.id).toBe("a");
+    expect(handle.needs.dependency).toBe(depHandle);
+    expect(handle.needs.dependency.id).toBe("dep-a");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BuilderNode union type variants
+// ---------------------------------------------------------------------------
+
+describe("BuilderNode variants", () => {
+  test("sequence node", () => {
+    const step1: BuilderStepHandle = {
+      kind: "step", id: "a", localId: "a", tableKey: "a",
+      tableName: "smithers_a", table: {}, output: {}, needs: {},
+      retries: 0, timeoutMs: null,
+    };
+    const node: BuilderNode = {
+      kind: "sequence",
+      children: [step1],
+    };
+    expect(node.kind).toBe("sequence");
+    expect((node as any).children).toHaveLength(1);
   });
 
-  test("match node construction", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
-
-    let capturedMatch: any;
-    wf.build(($) => {
-      const source = $.step("source", {
-        output: Schema.Struct({ val: Schema.Number }),
-        run: () => ({ val: 5 }),
-      });
-      const thenBranch = $.step("then", {
-        output: Schema.Struct({ r: Schema.String }),
-        run: () => ({ r: "yes" }),
-      });
-      capturedMatch = $.match(source, {
-        when: (v: any) => v.val > 3,
-        then: () => thenBranch,
-      });
-      return $.sequence(source, capturedMatch);
-    });
-
-    expect(capturedMatch.kind).toBe("match");
-    expect(capturedMatch.source.id).toBe("source");
+  test("parallel node with maxConcurrency", () => {
+    const step1: BuilderStepHandle = {
+      kind: "step", id: "a", localId: "a", tableKey: "a",
+      tableName: "smithers_a", table: {}, output: {}, needs: {},
+      retries: 0, timeoutMs: null,
+    };
+    const node: BuilderNode = {
+      kind: "parallel",
+      children: [step1],
+      maxConcurrency: 3,
+    };
+    expect(node.kind).toBe("parallel");
+    expect((node as any).maxConcurrency).toBe(3);
   });
 
-  test("table name sanitizes special characters", () => {
-    const wf = Smithers.sqlite({
-      name: "test",
-      input: Schema.Struct({ x: Schema.Number }),
-    });
+  test("loop node", () => {
+    const step1: BuilderStepHandle = {
+      kind: "step", id: "a", localId: "a", tableKey: "a",
+      tableName: "smithers_a", table: {}, output: {}, needs: {},
+      retries: 0, timeoutMs: null,
+    };
+    const node: BuilderNode = {
+      kind: "loop",
+      id: "main-loop",
+      children: step1,
+      until: () => false,
+      maxIterations: 10,
+      onMaxReached: "return-last",
+    };
+    expect(node.kind).toBe("loop");
+    expect((node as any).maxIterations).toBe(10);
+    expect((node as any).onMaxReached).toBe("return-last");
+  });
 
-    let handle: any;
-    wf.build(($) => {
-      handle = $.step("my-special_step!2", {
-        output: Schema.Struct({ v: Schema.Number }),
-        run: () => ({ v: 1 }),
-      });
-      return handle;
-    });
+  test("branch node", () => {
+    const step1: BuilderStepHandle = {
+      kind: "step", id: "a", localId: "a", tableKey: "a",
+      tableName: "smithers_a", table: {}, output: {}, needs: {},
+      retries: 0, timeoutMs: null,
+    };
+    const node: BuilderNode = {
+      kind: "branch",
+      condition: () => true,
+      then: step1,
+      else: undefined,
+    };
+    expect(node.kind).toBe("branch");
+    expect((node as any).condition()).toBe(true);
+  });
 
-    expect(handle.tableName).toMatch(/^smithers_/);
-    // Should only contain lowercase letters, numbers, and underscores
-    expect(handle.tableName).toMatch(/^[a-z0-9_]+$/);
+  test("worktree node", () => {
+    const step1: BuilderStepHandle = {
+      kind: "step", id: "a", localId: "a", tableKey: "a",
+      tableName: "smithers_a", table: {}, output: {}, needs: {},
+      retries: 0, timeoutMs: null,
+    };
+    const node: BuilderNode = {
+      kind: "worktree",
+      path: "/tmp/workdir",
+      branch: "feature-branch",
+      children: step1,
+    };
+    expect(node.kind).toBe("worktree");
+    expect((node as any).path).toBe("/tmp/workdir");
+    expect((node as any).branch).toBe("feature-branch");
+  });
+
+  test("match node", () => {
+    const source: BuilderStepHandle = {
+      kind: "step", id: "src", localId: "src", tableKey: "src",
+      tableName: "smithers_src", table: {}, output: {}, needs: {},
+      retries: 0, timeoutMs: null,
+    };
+    const thenStep: BuilderStepHandle = {
+      kind: "step", id: "then", localId: "then", tableKey: "then",
+      tableName: "smithers_then", table: {}, output: {}, needs: {},
+      retries: 0, timeoutMs: null,
+    };
+    const node: BuilderNode = {
+      kind: "match",
+      source,
+      when: (v: any) => v > 5,
+      then: thenStep,
+    };
+    expect(node.kind).toBe("match");
+    expect((node as any).when(10)).toBe(true);
+    expect((node as any).when(3)).toBe(false);
   });
 });

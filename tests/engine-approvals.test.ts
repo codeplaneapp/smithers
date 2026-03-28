@@ -23,13 +23,11 @@ describe("approveNode", () => {
 
     // Insert a run and a node in waiting_approval state
     await adapter.insertRun({
-      id: "run-1",
-      workflowId: "w",
+      runId: "run-1",
+      workflowName: "test-wf",
       workflowHash: "h",
       status: "running",
       createdAtMs: Date.now(),
-      updatedAtMs: Date.now(),
-      dbPath: ":memory:",
     });
     await adapter.insertNode({
       runId: "run-1",
@@ -66,13 +64,11 @@ describe("approveNode", () => {
     const { adapter } = createTestDb();
 
     await adapter.insertRun({
-      id: "run-2",
-      workflowId: "w",
+      runId: "run-2",
+      workflowName: "test-wf",
       workflowHash: "h",
       status: "running",
       createdAtMs: Date.now(),
-      updatedAtMs: Date.now(),
-      dbPath: ":memory:",
     });
     await adapter.insertNode({
       runId: "run-2",
@@ -99,13 +95,11 @@ describe("denyNode", () => {
     const { adapter } = createTestDb();
 
     await adapter.insertRun({
-      id: "run-3",
-      workflowId: "w",
+      runId: "run-3",
+      workflowName: "test-wf",
       workflowHash: "h",
       status: "running",
       createdAtMs: Date.now(),
-      updatedAtMs: Date.now(),
-      dbPath: ":memory:",
     });
     await adapter.insertNode({
       runId: "run-3",
@@ -137,17 +131,15 @@ describe("denyNode", () => {
     expect(approval?.decidedBy).toBe("bob");
   });
 
-  test("inserts event record for denial", async () => {
+  test("denyNode without note/decidedBy defaults to null", async () => {
     const { adapter } = createTestDb();
 
     await adapter.insertRun({
-      id: "run-4",
-      workflowId: "w",
+      runId: "run-4",
+      workflowName: "test-wf",
       workflowHash: "h",
       status: "running",
       createdAtMs: Date.now(),
-      updatedAtMs: Date.now(),
-      dbPath: ":memory:",
     });
     await adapter.insertNode({
       runId: "run-4",
@@ -162,12 +154,9 @@ describe("denyNode", () => {
 
     await denyNode(adapter, "run-4", "node-1", 0);
 
-    // Check that events were created
-    const events = await adapter.getEvents("run-4");
-    const denialEvent = events.find((e: any) => e.type === "ApprovalDenied");
-    expect(denialEvent).toBeDefined();
-    expect(denialEvent!.type).toBe("ApprovalDenied");
-    const payload = JSON.parse(denialEvent!.payloadJson);
-    expect(payload.nodeId).toBe("node-1");
+    const approval = await adapter.getApproval("run-4", "node-1", 0);
+    expect(approval?.status).toBe("denied");
+    expect(approval?.note).toBeNull();
+    expect(approval?.decidedBy).toBeNull();
   });
 });

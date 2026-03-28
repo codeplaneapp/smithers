@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { buildContext, createSmithersContext } from "../src/context";
 import { z } from "zod";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 describe("buildContext edge cases", () => {
   test("output with iteration=0 matches when ctx iteration=0", () => {
@@ -200,5 +202,44 @@ describe("createSmithersContext", () => {
     const ctx1 = createSmithersContext();
     const ctx2 = createSmithersContext();
     expect(ctx1.SmithersContext).not.toBe(ctx2.SmithersContext);
+  });
+
+  test("useCtx reads only from its matching provider", () => {
+    const ctx1 = createSmithersContext();
+    const ctx2 = createSmithersContext();
+    const value = buildContext({
+      runId: "ctx-run",
+      iteration: 0,
+      input: {},
+      outputs: {},
+    });
+
+    function MatchingReader() {
+      return React.createElement("span", null, ctx1.useCtx().runId);
+    }
+
+    function WrongReader() {
+      ctx2.useCtx();
+      return React.createElement("span", null, "wrong");
+    }
+
+    const html = renderToStaticMarkup(
+      React.createElement(
+        ctx1.SmithersContext.Provider,
+        { value },
+        React.createElement(MatchingReader),
+      ),
+    );
+
+    expect(html).toContain("ctx-run");
+    expect(() =>
+      renderToStaticMarkup(
+        React.createElement(
+          ctx1.SmithersContext.Provider,
+          { value },
+          React.createElement(WrongReader),
+        ),
+      ),
+    ).toThrow("useCtx() must be called inside a <Workflow> created by createSmithers()");
   });
 });
