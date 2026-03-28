@@ -2,8 +2,18 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { spawnCaptureEffect } from "../src/effect/child-process";
 import { runPromise } from "../src/effect/runtime";
+import { renderPrometheusMetrics } from "../src/observability";
 
 const CWD = "/tmp";
+
+function metricValue(name: string): number {
+  const prefix = `${name} `;
+  const line = renderPrometheusMetrics()
+    .split("\n")
+    .find((entry) => entry.startsWith(prefix));
+  if (!line) return 0;
+  return Number(line.slice(prefix.length));
+}
 
 describe("spawnCaptureEffect", () => {
   // ---------------------------------------------------------------------------
@@ -91,6 +101,22 @@ describe("spawnCaptureEffect", () => {
       expect(result.stdout.trim()).toBe("out-line");
       expect(result.stderr.trim()).toBe("err-line");
       expect(result.exitCode).toBe(0);
+    });
+
+    test("increments truncation metric when output exceeds maxOutputBytes", async () => {
+      const before = metricValue("smithers_tool_output_truncated_total");
+      const result = await runPromise(
+        spawnCaptureEffect(
+          "sh",
+          ["-c", "i=0; while [ $i -lt 256 ]; do printf x; i=$((i + 1)); done"],
+          {
+            cwd: CWD,
+            maxOutputBytes: 32,
+          },
+        ),
+      );
+      expect(Buffer.byteLength(result.stdout, "utf8")).toBeLessThanOrEqual(32);
+      expect(metricValue("smithers_tool_output_truncated_total")).toBe(before + 1);
     });
   });
 
