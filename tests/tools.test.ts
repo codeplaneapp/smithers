@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { read, grep, bash } from "../src/tools/index";
@@ -146,6 +147,49 @@ describe("tools behavior", () => {
         withToolContext(root, () => execTool(bash, { cmd: "sleep", args: ["1"] }), { timeoutMs: 10 }),
       ).rejects.toThrow("timed out");
     } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("bash denies socket access when allowNetwork is false", async () => {
+    if (process.platform !== "darwin" || !Bun.which("sandbox-exec") || !Bun.which("node")) {
+      return;
+    }
+
+    const root = makeTempDir("smithers-root-");
+    const server = createServer((socket) => socket.end("ok"));
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.listen(0, "127.0.0.1", () => resolve());
+        server.once("error", reject);
+      });
+
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Failed to resolve test server address");
+      }
+
+      const args = [
+        "-e",
+        `const net=require("node:net");const socket=net.createConnection({host:"127.0.0.1",port:${address.port}});socket.on("connect",()=>{socket.end();process.exit(0);});socket.on("error",()=>process.exit(1));`,
+      ];
+
+      await expect(
+        withToolContext(root, () => execTool(bash, { cmd: "node", args }), {
+          allowNetwork: true,
+          timeoutMs: 1000,
+        }),
+      ).resolves.toBe("");
+
+      await expect(
+        withToolContext(root, () => execTool(bash, { cmd: "node", args }), {
+          allowNetwork: false,
+          timeoutMs: 1000,
+        }),
+      ).rejects.toThrow("Command failed with exit code");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
       rmSync(root, { recursive: true, force: true });
     }
   });
