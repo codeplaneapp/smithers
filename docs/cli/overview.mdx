@@ -15,7 +15,7 @@ smithers <command> [options]
 |---|---|
 | `init` | Install a local `.smithers/` workflow pack. |
 | `up` | Start or resume a workflow execution. |
-| `tui` | Open the interactive terminal dashboard. |
+| `tui` | Open the chat-first terminal control plane. |
 | `ps` | List recent and active runs. |
 | `logs` | Stream lifecycle events for a run. |
 | `chat` | Show agent prompts, responses, and stderr. |
@@ -149,11 +149,24 @@ smithers workflow.tsx --input '{"description":"Direct file shorthand"}'
 
 ### tui
 
-Open the interactive terminal dashboard backed by the nearest `smithers.db`.
+Open the chat-first terminal control plane. Connects to the nearest `smithers.db` and provides a unified workspace for orchestrating, monitoring, and steering workflows.
+
+```bash
+smithers tui [options]
+```
+
+| Option | Description |
+|---|---|
+| `--attach` | Attach to an existing broker instead of starting a new one. |
+| `--broker-only` | Start the broker daemon without attaching the UI client. For debugging. |
 
 ```bash
 smithers tui
+smithers tui --attach
+smithers tui --broker-only
 ```
+
+See the [TUI guide](/guides/tui) for the full keyboard model, workspace system, and feature reference.
 
 ### ps
 
