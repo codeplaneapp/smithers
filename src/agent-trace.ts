@@ -84,6 +84,7 @@ export type CanonicalAgentTraceEvent = {
     agentFamily: AgentFamily;
     captureMode: AgentCaptureMode;
     rawType?: string;
+    rawEventId?: string;
     observed: boolean;
   };
   traceCompleteness: TraceCompleteness;
@@ -590,6 +591,7 @@ export function canonicalTraceEventToOtelLogRecord(
     "event.phase": event.event.phase,
     "event.sequence": event.event.sequence,
     "source.raw_type": event.source.rawType,
+    "source.raw_event_id": event.source.rawEventId,
     "source.observed": event.source.observed,
   };
   for (const [key, value] of Object.entries(event.annotations)) {
@@ -654,10 +656,12 @@ export class AgentTraceCollector {
   private readonly failures: string[] = [];
   private readonly warnings: string[] = [];
   private sequence = 0;
+  private rawEventSequence = 0;
   private stdoutBuffer = "";
   private stderrBuffer = "";
   private assistantTextBuffer = "";
   private finalText: string | null = null;
+  private currentRawEventId?: string;
   private listener?: (event: SmithersEvent) => void;
 
   constructor(opts: TraceCollectorOptions) {
@@ -710,6 +714,7 @@ export class AgentTraceCollector {
 
   observeResult(result: any) {
     const text = String(result?.text ?? "").trim();
+    const rawEventId = this.nextRawEventId("result");
     if (
       text &&
       (!this.finalText ||
@@ -723,6 +728,9 @@ export class AgentTraceCollector {
         "assistant.message.final",
         { text },
         text,
+        undefined,
+        true,
+        rawEventId,
       );
     }
     const usage = normalizeTokenUsage(result?.usage ?? result?.totalUsage);
@@ -732,17 +740,22 @@ export class AgentTraceCollector {
         usage,
         usage,
         "usage",
+        true,
+        rawEventId,
       );
     }
   }
 
   observeError(error: unknown) {
     this.failures.push(error instanceof Error ? error.message : String(error));
+    const rawEventId = this.nextRawEventId("error");
     this.pushDerived(
       "capture.error",
       { error: this.failures.at(-1) },
       { error: this.failures.at(-1) },
       "error",
+      true,
+      rawEventId,
     );
   }
 
@@ -753,7 +766,8 @@ export class AgentTraceCollector {
     if (
       this.captureMode !== "sdk-events" &&
       !this.seenKinds.has("assistant.message.final") &&
-      this.finalText
+      this.finalText &&
+      this.failures.length === 0
     ) {
       this.pushDerived(
         "assistant.message.final",
@@ -828,7 +842,30 @@ export class AgentTraceCollector {
       );
       this.applyTraceCompleteness(traceCompleteness);
       summary = { ...summary, rawArtifactRefs: [...this.rawArtifactRefs] };
-      await this.rewriteNdjson(artifactPath, summary);
+      try {
+        await this.rewriteNdjson(artifactPath, summary);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : String(error);
+        this.warnings.push(message);
+        this.pushDerived(
+          "capture.warning",
+          { reason: "artifact-rewrite-failed", error: message },
+          { reason: "artifact-rewrite-failed", error: message },
+          "artifact",
+        );
+        traceCompleteness = this.resolveCompleteness();
+        missingExpectedEventKinds = [...this.expectedKinds].filter(
+          (kind) => !this.directKinds.has(kind),
+        );
+        this.applyTraceCompleteness(traceCompleteness);
+        summary = {
+          ...summary,
+          traceCompleteness,
+          missingExpectedEventKinds,
+          rawArtifactRefs: [...this.rawArtifactRefs],
+        };
+      }
     } else if (!persistedArtifact.ok) {
       this.warnings.push(persistedArtifact.error);
       this.pushDerived(
@@ -942,11 +979,23 @@ export class AgentTraceCollector {
       );
       return;
     }
+    const rawType =
+      typeof parsed?.type === "string" ? parsed.type : "structured";
+    const previousRawEventId = this.currentRawEventId;
+    this.currentRawEventId = this.nextRawEventId(rawType);
     if (this.agentFamily === "pi") {
-      this.processPiEvent(parsed);
+      try {
+        this.processPiEvent(parsed);
+      } finally {
+        this.currentRawEventId = previousRawEventId;
+      }
       return;
     }
-    this.processGenericStructuredEvent(parsed);
+    try {
+      this.processGenericStructuredEvent(parsed);
+    } finally {
+      this.currentRawEventId = previousRawEventId;
+    }
   }
 
   private processGenericStructuredEvent(parsed: any) {
@@ -956,10 +1005,9 @@ export class AgentTraceCollector {
     if (this.agentFamily === "claude-code" && rawType === "assistant") {
       const text = this.extractGenericMessageText(parsed?.message ?? parsed);
       if (typeof text === "string" && text) {
-        this.appendAssistantText(text);
         this.pushObserved(
-          "assistant.text.delta",
-          { text },
+          "message.update",
+          this.extractGenericMessagePayload(parsed?.message ?? parsed),
           parsed,
           rawType,
         );
@@ -1131,8 +1179,8 @@ export class AgentTraceCollector {
       return;
     }
 
-    if (rawType === "turn.completed" && parsed?.usage) {
-      const usage = normalizeTokenUsage(parsed.usage);
+    if (rawType === "turn.completed") {
+      const usage = normalizeTokenUsage(parsed?.usage);
       if (usage) {
         this.pushObserved("usage", usage, parsed, rawType);
       }
@@ -1313,6 +1361,7 @@ export class AgentTraceCollector {
     if (this.agentFamily === "pi") return;
 
     if (event.type === "ToolCallStarted") {
+      const rawEventId = this.nextRawEventId(event.type);
       this.pushDerived(
         "tool.execution.start",
         {
@@ -1321,10 +1370,13 @@ export class AgentTraceCollector {
         },
         event,
         event.type,
+        true,
+        rawEventId,
       );
       this.expectedKinds.add("tool.execution.end");
     }
     if (event.type === "ToolCallFinished") {
+      const rawEventId = this.nextRawEventId(event.type);
       this.pushDerived(
         "tool.execution.end",
         {
@@ -1334,9 +1386,12 @@ export class AgentTraceCollector {
         },
         event,
         event.type,
+        true,
+        rawEventId,
       );
     }
     if (event.type === "TokenUsageReported") {
+      const rawEventId = this.nextRawEventId(event.type);
       this.pushDerived(
         "usage",
         {
@@ -1350,6 +1405,8 @@ export class AgentTraceCollector {
         },
         event,
         event.type,
+        true,
+        rawEventId,
       );
     }
   }
@@ -1420,6 +1477,7 @@ export class AgentTraceCollector {
     observed: boolean,
     rawType?: string,
     direct = true,
+    rawEventId?: string,
   ) {
     const redactedPayload = redactValue(payload);
     const redactedRaw = redactValue(raw);
@@ -1441,6 +1499,11 @@ export class AgentTraceCollector {
         agentFamily: this.agentFamily,
         captureMode: this.captureMode,
         rawType,
+        rawEventId:
+          rawEventId ??
+          (observed
+            ? (this.currentRawEventId ?? this.nextRawEventId(rawType ?? kind))
+            : undefined),
         observed,
       },
       traceCompleteness: "partial-observed",
@@ -1464,8 +1527,9 @@ export class AgentTraceCollector {
     payload: Record<string, unknown> | null,
     raw: unknown,
     rawType?: string,
+    rawEventId?: string,
   ) {
-    this.push(kind, payload, raw, true, rawType);
+    this.push(kind, payload, raw, true, rawType, true, rawEventId);
   }
 
   private pushDerived(
@@ -1474,14 +1538,19 @@ export class AgentTraceCollector {
     raw: unknown,
     rawType?: string,
     direct = true,
+    rawEventId?: string,
   ) {
-    this.push(kind, payload, raw, false, rawType, direct);
+    this.push(kind, payload, raw, false, rawType, direct, rawEventId);
   }
 
   private applyTraceCompleteness(traceCompleteness: TraceCompleteness) {
     for (const event of this.events) {
       event.traceCompleteness = traceCompleteness;
     }
+  }
+
+  private nextRawEventId(rawType: string) {
+    return `${rawType}:${this.rawEventSequence++}`;
   }
 
   private async persistNdjson(

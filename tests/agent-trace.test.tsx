@@ -4,7 +4,10 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Workflow, Task, runWorkflow } from "../src";
-import { canonicalTraceEventToOtelLogRecord } from "../src/agent-trace";
+import {
+  AgentTraceCollector,
+  canonicalTraceEventToOtelLogRecord,
+} from "../src/agent-trace";
 import { CodexAgent } from "../src/agents";
 import { SmithersDb } from "../src/db/adapter";
 import { runPromise } from "../src/effect/runtime";
@@ -281,6 +284,12 @@ describe("agent trace capture", () => {
     expect(traceEvents.some((event: any) => event.event.kind === "usage")).toBe(
       true,
     );
+    const finalMessage = traceEvents.find(
+      (event: any) => event.event.kind === "assistant.message.final",
+    );
+    const usage = traceEvents.find((event: any) => event.event.kind === "usage");
+    expect(finalMessage?.source.rawEventId).toBeTruthy();
+    expect(finalMessage?.source.rawEventId).toBe(usage?.source.rawEventId);
 
     cleanup();
   });
@@ -449,10 +458,17 @@ describe("agent trace capture", () => {
     expect(
       traceEvents.some(
         (event: any) =>
-          event.event.kind === "assistant.text.delta" &&
+          event.event.kind === "message.update" &&
           event.payload.text === "claude real final",
       ),
     ).toBe(true);
+    expect(
+      traceEvents.some(
+        (event: any) =>
+          event.event.kind === "assistant.text.delta" &&
+          event.payload.text === "claude real final",
+      ),
+    ).toBe(false);
     expect(
       traceEvents.some(
         (event: any) =>
@@ -476,6 +492,20 @@ describe("agent trace capture", () => {
           event.source.rawType === "result",
       ),
     ).toBe(true);
+    const assistantUpdate = traceEvents.find(
+      (event: any) =>
+        event.event.kind === "message.update" &&
+        event.source.rawType === "assistant",
+    );
+    const assistantUsage = traceEvents.find(
+      (event: any) =>
+        event.event.kind === "usage" &&
+        event.source.rawType === "assistant",
+    );
+    expect(assistantUpdate?.source.rawEventId).toBeTruthy();
+    expect(assistantUpdate?.source.rawEventId).toBe(
+      assistantUsage?.source.rawEventId,
+    );
 
     cleanup();
   });
@@ -554,6 +584,85 @@ describe("agent trace capture", () => {
       true,
     );
     expect(summary.unsupportedEventKinds).not.toContain("assistant.text.delta");
+    const turnUsage = traceEvents.find(
+      (event: any) => event.event.kind === "usage",
+    );
+    const turnEnd = traceEvents.find(
+      (event: any) => event.event.kind === "turn.end",
+    );
+    const finalMessage = traceEvents.find(
+      (event: any) => event.event.kind === "assistant.message.final",
+    );
+    expect(turnUsage?.source.rawEventId).toBeTruthy();
+    expect(turnUsage?.source.rawEventId).toBe(turnEnd?.source.rawEventId);
+    expect(turnUsage?.source.rawEventId).toBe(finalMessage?.source.rawEventId);
+    cleanup();
+  });
+
+  test("treats Codex turn.completed without usage as a terminal structured event", async () => {
+    const { smithers, outputs, db, cleanup } = createTestSmithers({
+      result: z.object({ answer: z.string() }),
+    });
+    const runId = "agent-trace-codex-turn-completed-no-usage";
+
+    class CodexNoUsageAgentFake {
+      id = "codex-no-usage-fake";
+      opts = { outputFormat: "stream-json", json: true };
+      async generate(args: { onStdout?: (text: string) => void }) {
+        args.onStdout?.(
+          JSON.stringify({
+            type: "turn.started",
+          }) + "\n",
+        );
+        args.onStdout?.(
+          JSON.stringify({
+            type: "turn.completed",
+            message: { role: "assistant", content: "codex final without usage" },
+          }) + "\n",
+        );
+        return {
+          text: '{"answer":"codex final without usage"}',
+          output: { answer: "codex final without usage" },
+        };
+      }
+    }
+
+    const workflow = smithers(() => (
+      <Workflow name="codex-no-usage-trace">
+        <Task
+          id="task"
+          output={outputs.result}
+          agent={new CodexNoUsageAgentFake() as any}
+        >
+          codex without usage please
+        </Task>
+      </Workflow>
+    ));
+
+    const result = await runWorkflow(workflow, { input: {}, runId });
+    expect(result.status).toBe("finished");
+
+    const events = await listRunEvents(db, runId);
+    const summary = JSON.parse(
+      events.find((event: any) => event.type === "AgentTraceSummary")!
+        .payloadJson,
+    ).summary;
+    const traceEvents = events
+      .filter((event: any) => event.type === "AgentTraceEvent")
+      .map((event: any) => JSON.parse(event.payloadJson).trace);
+
+    expect(summary.traceCompleteness).toBe("full-observed");
+    expect(
+      traceEvents.some((event: any) => event.event.kind === "turn.end"),
+    ).toBe(true);
+    expect(
+      traceEvents.some(
+        (event: any) =>
+          event.event.kind === "assistant.message.final" &&
+          event.payload.text === "codex final without usage",
+      ),
+    ).toBe(true);
+
     cleanup();
   });
 
@@ -1097,6 +1206,9 @@ describe("agent trace capture", () => {
     );
     expect(toolStart?.payload.toolCallId).toBe("bash:1");
     expect(toolEnd?.payload.toolCallId).toBe("bash:1");
+    expect(toolStart?.source.rawEventId).toBeTruthy();
+    expect(toolEnd?.source.rawEventId).toBeTruthy();
+    expect(toolStart?.source.rawEventId).not.toBe(toolEnd?.source.rawEventId);
 
     cleanup();
   });
@@ -1157,6 +1269,11 @@ describe("agent trace capture", () => {
           event.payload.reason === "truncated-json-stream",
       ),
     ).toBe(true);
+    expect(
+      traceEvents.some(
+        (event: any) => event.event.kind === "assistant.message.final",
+      ),
+    ).toBe(false);
 
     cleanup();
   });
@@ -1244,6 +1361,82 @@ describe("agent trace capture", () => {
     ).toBe(false);
 
     cleanup();
+  });
+
+  test("records artifact rewrite failures as capture warnings without failing the run", async () => {
+    const { smithers, outputs, db, cleanup } = createTestSmithers({
+      result: z.object({ answer: z.string() }),
+    });
+    const runId = "agent-trace-artifact-rewrite-fail";
+    const originalRewriteNdjson = (AgentTraceCollector.prototype as any).rewriteNdjson;
+    (AgentTraceCollector.prototype as any).rewriteNdjson = async function () {
+      throw new Error("rewrite exploded");
+    };
+
+    class PiAgentRewriteFake {
+      id = "pi-rewrite-fake";
+      opts = { mode: "json" };
+      async generate(args: { onStdout?: (text: string) => void }) {
+        args.onStdout?.(JSON.stringify({ type: "session", id: "sess-1" }) + "\n");
+        args.onStdout?.(JSON.stringify({ type: "turn_start" }) + "\n");
+        args.onStdout?.(
+          JSON.stringify({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "rewrite final" }],
+            },
+          }) + "\n",
+        );
+        return {
+          text: '{"answer":"rewrite final"}',
+          output: { answer: "rewrite final" },
+        };
+      }
+    }
+
+    try {
+      const workflow = smithers(() => (
+        <Workflow name="artifact-rewrite-fail-trace">
+          <Task
+            id="task"
+            output={outputs.result}
+            agent={new PiAgentRewriteFake() as any}
+          >
+            rewrite fail please
+          </Task>
+        </Workflow>
+      ));
+
+      const result = await runWorkflow(workflow, { input: {}, runId });
+      expect(result.status).toBe("finished");
+
+      const events = await listRunEvents(db, runId);
+      const summary = JSON.parse(
+        events.find((event: any) => event.type === "AgentTraceSummary")!
+          .payloadJson,
+      ).summary;
+      const traceEvents = events
+        .filter((event: any) => event.type === "AgentTraceEvent")
+        .map((event: any) => JSON.parse(event.payloadJson).trace);
+
+      expect(summary.traceCompleteness).toBe("partial-observed");
+      expect(
+        traceEvents.some(
+          (event: any) =>
+            event.event.kind === "capture.warning" &&
+            event.payload.reason === "artifact-rewrite-failed",
+        ),
+      ).toBe(true);
+      expect(
+        traceEvents.some(
+          (event: any) => event.event.kind === "artifact.created",
+        ),
+      ).toBe(true);
+    } finally {
+      (AgentTraceCollector.prototype as any).rewriteNdjson = originalRewriteNdjson;
+      cleanup();
+    }
   });
 
   test("records persisted trace artifacts with a canonical artifact.created event", async () => {
@@ -1339,6 +1532,7 @@ describe("agent trace capture", () => {
           agentFamily: "pi",
           captureMode: "cli-json-stream",
           rawType: "thinking_delta",
+          rawEventId: "thinking_delta:0",
           observed: true,
         },
         traceCompleteness: "full-observed",
@@ -1358,6 +1552,7 @@ describe("agent trace capture", () => {
     expect(record.attributes["node.id"]).toBe("pi-rich-trace");
     expect(record.attributes["node.attempt"]).toBe(1);
     expect(record.attributes["event.kind"]).toBe("assistant.thinking.delta");
+    expect(record.attributes["source.raw_event_id"]).toBe("thinking_delta:0");
     expect(record.attributes["custom.ticket"]).toBe("OBS-1");
     expect(record.body).toContain("REDACTED_SECRET");
     expect(record.body).not.toContain("sk_live_");
