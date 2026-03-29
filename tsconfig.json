@@ -29,5 +29,5 @@
     },
     "typeRoots": ["./src/types", "./node_modules/@types"]
   },
-  "include": ["src/**/*", "examples/**/*", "tests/**/*"]
+  "include": ["src/**/*", "tests/**/*"]
 }
