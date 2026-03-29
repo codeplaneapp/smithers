@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { Effect } from "effect";
 import { fromPromise } from "../effect/interop";
 import { runPromise } from "../effect/runtime";
+import type { SmithersError } from "../utils/errors";
 
 const DEFAULT_EXCLUDE = [
   "node_modules",
@@ -29,12 +30,16 @@ export function buildOverlayEffect(
   outDir: string,
   generation: number,
   opts?: OverlayOptions,
-): Effect.Effect<string, Error> {
+): Effect.Effect<string, SmithersError> {
   const exclude = new Set(opts?.exclude ?? DEFAULT_EXCLUDE);
   const genDir = join(outDir, `gen-${generation}`);
   return Effect.gen(function* () {
     yield* fromPromise("create hot overlay generation dir", () =>
       mkdir(genDir, { recursive: true }),
+    {
+      code: "HOT_OVERLAY_FAILED",
+      details: { hotRoot, outDir, generation },
+    },
     );
     yield* mirrorTreeEffect(hotRoot, genDir, exclude);
     return genDir;
@@ -66,10 +71,14 @@ function mirrorTreeEffect(
   src: string,
   dest: string,
   exclude: Set<string>,
-): Effect.Effect<void, Error> {
+): Effect.Effect<void, SmithersError> {
   return Effect.gen(function* () {
     const entries = yield* fromPromise("read hot overlay source dir", () =>
       readdir(src, { withFileTypes: true }),
+    {
+      code: "HOT_OVERLAY_FAILED",
+      details: { src, dest },
+    },
     );
 
     for (const entry of entries) {
@@ -82,18 +91,33 @@ function mirrorTreeEffect(
       if (entry.isDirectory()) {
         yield* fromPromise("create mirrored hot overlay dir", () =>
           mkdir(destPath, { recursive: true }),
+        {
+          code: "HOT_OVERLAY_FAILED",
+          details: { srcPath, destPath },
+        },
         );
         yield* mirrorTreeEffect(srcPath, destPath, exclude);
       } else if (entry.isFile()) {
         const linked = yield* Effect.either(
-          fromPromise("hardlink overlay file", () => link(srcPath, destPath)),
+          fromPromise("hardlink overlay file", () => link(srcPath, destPath), {
+            code: "HOT_OVERLAY_FAILED",
+            details: { srcPath, destPath },
+          }),
         );
         if (linked._tag === "Left") {
           yield* fromPromise("create overlay file parent dir", () =>
             mkdir(dirname(destPath), { recursive: true }),
+          {
+            code: "HOT_OVERLAY_FAILED",
+            details: { srcPath, destPath },
+          },
           );
           yield* fromPromise("copy overlay file", () =>
             copyFile(srcPath, destPath),
+          {
+            code: "HOT_OVERLAY_FAILED",
+            details: { srcPath, destPath },
+          },
           );
         }
       }
@@ -107,12 +131,16 @@ function mirrorTreeEffect(
 export function cleanupGenerationsEffect(
   outDir: string,
   keepLast: number,
-): Effect.Effect<void, Error> {
+): Effect.Effect<void, SmithersError> {
   return Effect.gen(function* () {
     if (!existsSync(outDir)) return;
 
     const entries = yield* fromPromise("read hot overlay generations", () =>
       readdir(outDir, { withFileTypes: true }),
+    {
+      code: "HOT_OVERLAY_FAILED",
+      details: { outDir, keepLast },
+    },
     );
     const genDirs = entries
       .filter((e) => e.isDirectory() && e.name.startsWith("gen-"))
@@ -128,6 +156,10 @@ export function cleanupGenerationsEffect(
       yield* Effect.either(
         fromPromise("remove stale hot overlay generation", () =>
           rm(join(outDir, dir.name), { recursive: true, force: true }),
+        {
+          code: "HOT_OVERLAY_FAILED",
+          details: { outDir, generationDir: dir.name },
+        },
         ),
       );
     }

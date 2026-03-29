@@ -2,7 +2,7 @@
 // $ref resolution within an OpenAPI spec
 // ---------------------------------------------------------------------------
 
-import type { OpenApiSpec, RefObject, SchemaObject } from "./types";
+import type { OpenApiSpec, RefObject } from "./types";
 
 export function isRef(obj: unknown): obj is RefObject {
   return (
@@ -14,10 +14,9 @@ export function isRef(obj: unknown): obj is RefObject {
 }
 
 /**
- * Resolve a JSON pointer ($ref) within the spec. Only supports local
- * references of the form `#/components/schemas/Foo`.
+ * Resolve a local JSON pointer ($ref) anywhere within the OpenAPI spec.
  */
-export function resolveRef<T = SchemaObject>(
+export function resolveRef<T = unknown>(
   spec: OpenApiSpec,
   ref: string,
 ): T {
@@ -40,7 +39,7 @@ export function resolveRef<T = SchemaObject>(
  * If the value is a $ref, resolve it. Otherwise return as-is.
  * Handles one level of indirection (resolved value is not recursively resolved).
  */
-export function deref<T>(spec: OpenApiSpec, value: T | RefObject): T {
+export function deref<T = unknown>(spec: OpenApiSpec, value: T | RefObject): T {
   if (isRef(value)) {
     return resolveRef<T>(spec, value.$ref);
   }

@@ -1,5 +1,5 @@
 import { tool, zodSchema } from "ai";
-import { Effect } from "effect";
+import { Effect, Metric } from "effect";
 import { z } from "zod";
 import { nowMs } from "../utils/time";
 import { spawnCaptureEffect } from "../effect/child-process";
@@ -8,11 +8,36 @@ import { runPromise } from "../effect/runtime";
 import { resolveSandboxPath, assertPathWithinRootEffect } from "./utils";
 import { getToolContext } from "./context";
 import { SmithersError } from "../utils/errors";
+import { toolOutputTruncatedTotal } from "../effect/metrics";
 import {
   logToolCallEffect,
   logToolCallStartEffect,
   truncateToBytes,
 } from "./logToolCall";
+
+const DARWIN_NETWORK_DENY_PROFILE = "(version 1) (allow default) (deny network*)";
+
+type ResolvedCommand = {
+  command: string;
+  args: string[];
+};
+
+function resolveNetworkIsolatedCommand(
+  cmd: string,
+  args: string[],
+): ResolvedCommand {
+  if (process.platform === "darwin") {
+    const sandboxExec = typeof Bun !== "undefined" ? Bun.which("sandbox-exec") : null;
+    if (sandboxExec) {
+      return {
+        command: sandboxExec,
+        args: ["-p", DARWIN_NETWORK_DENY_PROFILE, cmd, ...args],
+      };
+    }
+  }
+
+  return { command: cmd, args };
+}
 
 export function bashToolEffect(
   cmd: string,
@@ -56,7 +81,10 @@ export function bashToolEffect(
 
     const timeoutMs = ctx?.timeoutMs ?? 60_000;
     const maxOutputBytes = ctx?.maxOutputBytes ?? 200_000;
-    const result = yield* spawnCaptureEffect(cmd, args ?? [], {
+    const resolvedCommand = !allowNetwork
+      ? resolveNetworkIsolatedCommand(cmd, args ?? [])
+      : { command: cmd, args: args ?? [] };
+    const result = yield* spawnCaptureEffect(resolvedCommand.command, resolvedCommand.args, {
       cwd,
       env: process.env,
       detached: true,
@@ -67,6 +95,9 @@ export function bashToolEffect(
       `${result.stdout}${result.stderr}`,
       maxOutputBytes,
     );
+    if (Buffer.byteLength(`${result.stdout}${result.stderr}`, "utf8") > maxOutputBytes) {
+      yield* Metric.increment(toolOutputTruncatedTotal);
+    }
     if (result.exitCode !== 0) {
       throw new SmithersError("TOOL_COMMAND_FAILED", `Command failed with exit code ${result.exitCode}`);
     }
@@ -103,7 +134,7 @@ export function bashToolEffect(
   );
 }
 
-export const bash = tool({
+export const bash: any = tool({
   description: "Execute a shell command",
   inputSchema: zodSchema(
     z.object({

@@ -1,4 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { resolve, dirname, sep, basename } from "node:path";
 import { Effect } from "effect";
@@ -12,7 +14,7 @@ import { Metric } from "effect";
 import { fromPromise } from "../effect/interop";
 import { logError, logInfo, logWarning } from "../effect/logging";
 import { runPromise, runSync } from "../effect/runtime";
-import { httpRequests, httpRequestDuration } from "../effect/metrics";
+import { httpRequests, httpRequestDuration, trackEvent } from "../effect/metrics";
 import { approveNode, denyNode } from "../engine/approvals";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { nowMs } from "../utils/time";
@@ -133,30 +135,15 @@ async function readBody(req: IncomingMessage, maxBytes: number): Promise<any> {
   }
 }
 
-function readBodyEffect(req: IncomingMessage, maxBytes: number) {
-  return Effect.tryPromise({
-    try: () => readBody(req, maxBytes),
-    catch: (cause) =>
-      cause instanceof HttpError
-        ? cause
-        : new HttpError(
-            500,
-            "SERVER_ERROR",
-            cause instanceof Error ? cause.message : String(cause),
-          ),
-  }).pipe(
-    Effect.annotateLogs({
-      contentLength: req.headers["content-length"] ?? null,
-      maxBytes,
-      method: req.method ?? "",
-      url: req.url ?? "",
-    }),
-    Effect.withLogSpan("server:read-body"),
-  );
-}
-
 async function loadWorkflow(absPath: string): Promise<SmithersWorkflow<any>> {
-  const mod = await import(pathToFileURL(absPath).href);
+  const source = await readFile(absPath);
+  const version = createHash("sha1").update(source).digest("hex");
+  const extIdx = absPath.lastIndexOf(".");
+  const ext = extIdx >= 0 ? absPath.slice(extIdx) : "";
+  const base = basename(absPath, ext);
+  const shadowPath = resolve(dirname(absPath), `.${base}.smithers-${version}${ext}`);
+  await writeFile(shadowPath, source);
+  const mod = await import(pathToFileURL(shadowPath).href);
   if (!mod.default) throw new SmithersError("WORKFLOW_MISSING_DEFAULT", "Workflow must export default");
   return mod.default as SmithersWorkflow<any>;
 }
@@ -505,7 +492,7 @@ function startServerInternal(opts: ServerOptions = {}) {
       }
 
       if (method === "POST" && url.pathname === "/v1/runs") {
-        const body = await runPromise(readBodyEffect(req, maxBodyBytes));
+        const body = await readBody(req, maxBodyBytes);
         if (!body?.workflowPath || typeof body.workflowPath !== "string") {
           throw new HttpError(
             400,
@@ -619,7 +606,7 @@ function startServerInternal(opts: ServerOptions = {}) {
       const resumeMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/resume$/);
       if (method === "POST" && resumeMatch) {
         const runId = resumeMatch[1]!;
-        const body = await runPromise(readBodyEffect(req, maxBodyBytes));
+        const body = await readBody(req, maxBodyBytes);
         if (!body?.workflowPath || typeof body.workflowPath !== "string") {
           throw new HttpError(
             400,
@@ -731,6 +718,11 @@ function startServerInternal(opts: ServerOptions = {}) {
         }
         if (run.status === "waiting-approval") {
           const cancelledAtMs = nowMs();
+          const cancelEvent = {
+            type: "RunCancelled" as const,
+            runId,
+            timestampMs: cancelledAtMs,
+          };
           logInfo("cancelling waiting-approval run", {
             runId,
             status: run.status,
@@ -746,12 +738,9 @@ function startServerInternal(opts: ServerOptions = {}) {
             runId,
             timestampMs: cancelledAtMs,
             type: "RunCancelled",
-            payloadJson: JSON.stringify({
-              type: "RunCancelled",
-              runId,
-              timestampMs: cancelledAtMs,
-            }),
+            payloadJson: JSON.stringify(cancelEvent),
           });
+          await runPromise(trackEvent(cancelEvent));
           return sendJson(res, 200, { runId });
         }
         if (run.status !== "running" || !isRunHeartbeatFresh(run)) {

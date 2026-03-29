@@ -15,6 +15,7 @@ import { fromPromise } from "../effect/interop";
 import { logInfo, logWarning } from "../effect/logging";
 import { runPromise } from "../effect/runtime";
 import { hotReloads, hotReloadFailures, hotReloadDuration } from "../effect/metrics";
+import { SmithersError } from "../utils/errors";
 
 export type HotReloadEvent =
   | { type: "reloaded"; generation: number; changedFiles: string[]; newBuild: SmithersWorkflow<any>["build"] }
@@ -115,97 +116,110 @@ export class HotWorkflowController {
   reloadEffect(changedFiles: string[]) {
     this.generation += 1;
     const gen = this.generation;
+    const entryPath = this.entryPath;
+    const hotRoot = this.hotRoot;
+    const outDir = this.outDir;
+    const maxGenerations = this.maxGenerations;
 
     return Effect.gen(this, function* () {
       const reloadStart = performance.now();
-      try {
-        const genDir = yield* buildOverlayEffect(this.hotRoot, this.outDir, gen);
-        const overlayEntry = resolveOverlayEntry(
-          this.entryPath,
-          this.hotRoot,
-          genDir,
-        );
-        const overlayUrl = pathToFileURL(overlayEntry).href;
+      const genDir = yield* buildOverlayEffect(hotRoot, outDir, gen);
+      const overlayEntry = resolveOverlayEntry(
+        entryPath,
+        hotRoot,
+        genDir,
+      );
+      const overlayUrl = pathToFileURL(overlayEntry).href;
 
-        const mod = yield* Effect.either(
-          fromPromise("import hot workflow generation", () => import(overlayUrl)),
-        );
-        if (mod._tag === "Left") {
-          logWarning("hot workflow import failed", {
-            entryPath: this.entryPath,
-            generation: gen,
-            changedFileCount: changedFiles.length,
-            error:
-              mod.left instanceof Error ? mod.left.message : String(mod.left),
-          }, "hot:reload");
-          return { type: "failed", generation: gen, changedFiles, error: mod.left } satisfies HotReloadEvent;
-        }
-
-        const workflow = mod.right.default as SmithersWorkflow<any> | undefined;
-        if (!workflow) {
-          return {
-            type: "failed",
-            generation: gen,
-            changedFiles,
-            error: new Error("Reloaded module does not export default"),
-          } satisfies HotReloadEvent;
-        }
-        if (typeof workflow.build !== "function") {
-          return {
-            type: "failed",
-            generation: gen,
-            changedFiles,
-            error: new Error("Reloaded module default does not have a build function"),
-          } satisfies HotReloadEvent;
-        }
-
-        yield* cleanupGenerationsEffect(this.outDir, this.maxGenerations);
-        yield* Metric.increment(hotReloads);
-        yield* Metric.update(hotReloadDuration, performance.now() - reloadStart);
-        logInfo("reloaded hot workflow generation", {
-          entryPath: this.entryPath,
+      const mod = yield* Effect.either(
+        fromPromise("import hot workflow generation", () => import(overlayUrl)),
+      );
+      if (mod._tag === "Left") {
+        logWarning("hot workflow import failed", {
+          entryPath,
           generation: gen,
           changedFileCount: changedFiles.length,
+          error:
+            mod.left instanceof Error ? mod.left.message : String(mod.left),
         }, "hot:reload");
-        return {
-          type: "reloaded",
-          generation: gen,
-          changedFiles,
-          newBuild: workflow.build,
-        } satisfies HotReloadEvent;
-      } catch (err: any) {
-        yield* Metric.increment(hotReloadFailures);
-        if (err?.message?.includes("Schema change detected")) {
-          logWarning("hot workflow reload marked unsafe", {
-            entryPath: this.entryPath,
-            generation: gen,
-            changedFileCount: changedFiles.length,
-            reason: err.message,
-          }, "hot:reload");
-          return {
-            type: "unsafe",
-            generation: gen,
-            changedFiles,
-            reason: err.message,
-          } satisfies HotReloadEvent;
-        }
-        logWarning("hot workflow reload failed", {
-          entryPath: this.entryPath,
-          generation: gen,
-          changedFileCount: changedFiles.length,
-          error: err instanceof Error ? err.message : String(err),
-        }, "hot:reload");
+        return { type: "failed", generation: gen, changedFiles, error: mod.left } satisfies HotReloadEvent;
+      }
+
+      const workflow = mod.right.default as SmithersWorkflow<any> | undefined;
+      if (!workflow) {
         return {
           type: "failed",
           generation: gen,
           changedFiles,
-          error: err,
+          error: new SmithersError(
+            "HOT_RELOAD_INVALID_MODULE",
+            "Reloaded module does not export default",
+            { changedFiles, entryPath, generation: gen },
+          ),
         } satisfies HotReloadEvent;
       }
+      if (typeof workflow.build !== "function") {
+        return {
+          type: "failed",
+          generation: gen,
+          changedFiles,
+          error: new SmithersError(
+            "HOT_RELOAD_INVALID_MODULE",
+            "Reloaded module default does not have a build function",
+            { changedFiles, entryPath, generation: gen },
+          ),
+        } satisfies HotReloadEvent;
+      }
+
+      yield* cleanupGenerationsEffect(outDir, maxGenerations);
+      yield* Metric.increment(hotReloads);
+      yield* Metric.update(hotReloadDuration, performance.now() - reloadStart);
+      logInfo("reloaded hot workflow generation", {
+        entryPath,
+        generation: gen,
+        changedFileCount: changedFiles.length,
+      }, "hot:reload");
+      return {
+        type: "reloaded",
+        generation: gen,
+        changedFiles,
+        newBuild: workflow.build,
+      } satisfies HotReloadEvent;
     }).pipe(
+      Effect.catchAll((err) =>
+        Effect.gen(function* () {
+          yield* Metric.increment(hotReloadFailures);
+          if (err instanceof Error && err.message?.includes("Schema change detected")) {
+            logWarning("hot workflow reload marked unsafe", {
+              entryPath,
+              generation: gen,
+              changedFileCount: changedFiles.length,
+              reason: err.message,
+            }, "hot:reload");
+            return {
+              type: "unsafe",
+              generation: gen,
+              changedFiles,
+              reason: err.message,
+            } satisfies HotReloadEvent;
+          }
+          logWarning("hot workflow reload failed", {
+            entryPath,
+            generation: gen,
+            changedFileCount: changedFiles.length,
+            error: err instanceof Error ? err.message : String(err),
+          }, "hot:reload");
+          return {
+            type: "failed",
+            generation: gen,
+            changedFiles,
+            error: err,
+          } satisfies HotReloadEvent;
+        }),
+      ),
       Effect.annotateLogs({
-        entryPath: this.entryPath,
-        hotRoot: this.hotRoot,
+        entryPath,
+        hotRoot,
         generation: gen,
       }),
       Effect.withLogSpan("hot:reload"),

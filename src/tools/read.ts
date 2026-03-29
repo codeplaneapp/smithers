@@ -1,6 +1,6 @@
 import { tool, zodSchema } from "ai";
 import * as FileSystem from "@effect/platform/FileSystem";
-import { Effect } from "effect";
+import { Effect, Metric } from "effect";
 import { z } from "zod";
 import { nowMs } from "../utils/time";
 import { fromSync } from "../effect/interop";
@@ -8,6 +8,7 @@ import { runPromise } from "../effect/runtime";
 import { resolveSandboxPath, assertPathWithinRootEffect } from "./utils";
 import { getToolContext } from "./context";
 import { SmithersError } from "../utils/errors";
+import { toolOutputTruncatedTotal } from "../effect/metrics";
 import {
   logToolCallEffect,
   logToolCallStartEffect,
@@ -33,6 +34,9 @@ export function readToolEffect(path: string) {
     }
     const content = yield* fs.readFileString(resolved, "utf8");
     const output = truncateToBytes(content, max);
+    if (Buffer.byteLength(content, "utf8") > max) {
+      yield* Metric.increment(toolOutputTruncatedTotal);
+    }
     yield* logToolCallEffect(
       "read",
       { path },

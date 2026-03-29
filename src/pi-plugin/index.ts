@@ -1,4 +1,5 @@
 import type { SmithersEvent } from "../SmithersEvent";
+import { SmithersError } from "../utils/errors";
 
 const DEFAULT_BASE = "http://127.0.0.1:7331";
 
@@ -18,7 +19,13 @@ async function post(path: string, body: any, opts: RequestOptions = {}) {
     headers: buildHeaders(opts, true),
     body: JSON.stringify(body ?? {}),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    throw new SmithersError("PI_HTTP_ERROR", `Smithers HTTP ${res.status}`, {
+      baseUrl: base,
+      path,
+      status: res.status,
+    });
+  }
   return res.json();
 }
 
@@ -123,7 +130,13 @@ export async function getStatus(args: {
       false,
     ),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    throw new SmithersError("PI_HTTP_ERROR", `Smithers HTTP ${res.status}`, {
+      baseUrl: base,
+      path: `/v1/runs/${args.runId}`,
+      status: res.status,
+    });
+  }
   return res.json();
 }
 
@@ -143,7 +156,13 @@ export async function getFrames(args: {
       ),
     },
   );
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    throw new SmithersError("PI_HTTP_ERROR", `Smithers HTTP ${res.status}`, {
+      baseUrl: base,
+      path: `/v1/runs/${args.runId}/frames`,
+      status: res.status,
+    });
+  }
   return res.json();
 }
 
@@ -178,6 +197,12 @@ export async function listRuns(
       false,
     ),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    throw new SmithersError("PI_HTTP_ERROR", `Smithers HTTP ${res.status}`, {
+      baseUrl: base,
+      path: `/v1/runs${qs ? `?${qs}` : ""}`,
+      status: res.status,
+    });
+  }
   return res.json();
 }

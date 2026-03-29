@@ -45,6 +45,7 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 import { Text, truncateToWidth, matchesKey } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { SmithersError } from "../utils/errors";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -211,7 +212,11 @@ async function jsonFetch(
   const res = await smithersFetch(base, path, opts);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Smithers HTTP ${res.status}: ${text}`);
+    throw new SmithersError(
+      "PI_HTTP_ERROR",
+      `Smithers HTTP ${res.status}: ${text}`,
+      { baseUrl: base, path, status: res.status },
+    );
   }
   return res.json();
 }
@@ -833,7 +838,7 @@ export default function (pi: ExtensionAPI) {
               const text = result.content[0];
               return new Text(theme.fg("error", `✗ ${text?.type === "text" ? text.text : "error"}`), 0, 0);
             }
-            return undefined; // Use default rendering
+            return new Text("", 0, 0);
           },
         });
       }
@@ -858,7 +863,7 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.setFooter((_tui, theme, footerData) => ({
         render(width: number): string[] {
           const statuses = footerData.getExtensionStatuses();
-          const smithersStatus = statuses["smithers"] ?? "";
+          const smithersStatus = statuses.get("smithers") ?? "";
           const branch = footerData.getGitBranch();
           const branchText = branch ? theme.fg("dim", ` ${branch}`) : "";
           const left = smithersStatus
@@ -897,7 +902,7 @@ export default function (pi: ExtensionAPI) {
       "The user is running PI with the Smithers extension. When they ask about capabilities, slash commands, or how to use this environment, refer to this section.\n",
       "### Tools (available to you, the agent)",
       "You have native smithers tools that map to CLI commands. Use these instead of running bash commands when possible:",
-      "- `smithers_run` — Start a workflow from a .tsx or .toon file",
+      "- `smithers_run` — Start a workflow from a .tsx file",
       "- `smithers_resume` — Resume a paused or crashed run",
       "- `smithers_status` — Get run status as JSON",
       "- `smithers_approve` — Approve a node waiting for human approval",
@@ -938,7 +943,7 @@ export default function (pi: ExtensionAPI) {
       "- `--smithers-key` / `-k` — Smithers API key (also reads SMITHERS_API_KEY env var)",
       "",
       "### Typical Workflows",
-      "1. **Write a workflow** → Use your knowledge of smithers to help the user write .tsx or .toon workflow files.",
+      "1. **Write a workflow** → Use your knowledge of smithers to help the user write .tsx workflow files.",
       "2. **Run it** → Use the `smithers_run` tool with the workflow path and input.",
       "3. **Monitor** → Tell the user to run `/smithers` for the dashboard, or use `smithers_status` to check progress.",
       "4. **Approve** → If nodes need approval, use `smithers_approve` or tell the user about `/smithers-approve`.",
@@ -1492,7 +1497,7 @@ export default function (pi: ExtensionAPI) {
             if (matchesKey(data, "j") || data === "\x1b[B") scrollOffset = Math.min(scrollOffset + 1, Math.max(0, node.output.length - 10));
             if (matchesKey(data, "k") || data === "\x1b[A") scrollOffset = Math.max(scrollOffset - 1, 0);
             if (matchesKey(data, "g")) scrollOffset = 0;
-            if (matchesKey(data, "G")) scrollOffset = Math.max(0, node.output.length - 30);
+            if (matchesKey(data, "shift+g")) scrollOffset = Math.max(0, node.output.length - 30);
           },
           render(width: number): string[] {
             if (cachedLines && cachedWidth === width) return cachedLines;
@@ -1646,7 +1651,13 @@ export default function (pi: ExtensionAPI) {
     if (!details) return undefined;
     const color = statusColor(details.status ?? "running");
     const icon = statusIcon(details.status ?? "running");
-    let text = `${theme.fg(color, icon)} ${theme.fg("muted", message.content)}`;
+    const content =
+      typeof message.content === "string"
+        ? message.content
+        : message.content
+            .map((part) => (part.type === "text" ? part.text : "[image]"))
+            .join(" ");
+    let text = `${theme.fg(color, icon)} ${theme.fg("muted", content)}`;
     if (expanded && details.runId) text += `\n${theme.fg("dim", `  run: ${details.runId}`)}`;
     return new Text(text, 0, 0);
   });

@@ -61,6 +61,9 @@ import {
   toolCallsTotal,
   toolDuration,
   toolOutputTruncatedTotal,
+  scorerEventsStarted,
+  scorerEventsFinished,
+  scorerEventsFailed,
   trackEvent,
   updateProcessMetrics,
   vcsDuration,
@@ -489,6 +492,10 @@ export const smithersMetrics = {
   processUptimeSeconds,
   processMemoryRssBytes,
   processHeapUsedBytes,
+  // scorers
+  scorerEventsStarted,
+  scorerEventsFinished,
+  scorerEventsFailed,
 };
 
 export {
@@ -541,6 +548,9 @@ export {
   toolCallsTotal,
   toolDuration,
   toolOutputTruncatedTotal,
+  scorerEventsStarted,
+  scorerEventsFinished,
+  scorerEventsFailed,
   trackEvent as trackSmithersEvent,
   updateProcessMetrics,
   vcsDuration,
