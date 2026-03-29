@@ -1,9 +1,9 @@
 import { eq } from "drizzle-orm";
 import { getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import type { OutputSnapshot } from "../context";
-import { fromPromise } from "../effect/interop";
+import { fromPromise, fromSync } from "../effect/interop";
 import { runPromise } from "../effect/runtime";
 import { SmithersError } from "../utils/errors";
 
@@ -58,7 +58,7 @@ export function loadInputEffect(
   db: any,
   inputTable: any,
   runId: string,
-): Effect.Effect<any, Error> {
+): Effect.Effect<any, SmithersError> {
   const cols = getTableColumns(inputTable as any) as Record<string, any>;
   const runIdCol = cols.runId;
   if (!runIdCol) {
@@ -70,6 +70,10 @@ export function loadInputEffect(
       .from(inputTable)
       .where(eq(runIdCol, runId))
       .limit(1),
+  {
+    code: "DB_QUERY_FAILED",
+    details: { runId },
+  },
   ).pipe(
     Effect.map((rows) => rows[0]),
     Effect.annotateLogs({ runId }),
@@ -85,31 +89,37 @@ export function loadOutputsEffect(
   db: any,
   schema: Record<string, any>,
   runId: string,
-): Effect.Effect<OutputSnapshot, Error> {
+): Effect.Effect<OutputSnapshot, SmithersError> {
   return Effect.gen(function* () {
     const out: OutputSnapshot = {};
     for (const [key, table] of Object.entries(schema)) {
       if (!table || typeof table !== "object") continue;
       if (key === "input") continue;
-      let cols: Record<string, any>;
-      try {
-        cols = getTableColumns(table as any) as Record<string, any>;
-      } catch {
-        continue;
-      }
+      const colsOpt = yield* fromSync(
+        "get table columns",
+        () => getTableColumns(table as any) as Record<string, any>,
+        { code: "DB_QUERY_FAILED", details: { runId, schemaKey: key } },
+      ).pipe(Effect.option);
+      if (Option.isNone(colsOpt)) continue;
+      const cols = colsOpt.value;
       const runIdCol = cols.runId;
       if (!runIdCol) continue;
-      let tableName: string;
-      try {
-        tableName = getTableName(table as any);
-      } catch {
-        continue;
-      }
+      const tableNameOpt = yield* fromSync(
+        "get table name",
+        () => getTableName(table as any),
+        { code: "DB_QUERY_FAILED", details: { runId, schemaKey: key } },
+      ).pipe(Effect.option);
+      if (Option.isNone(tableNameOpt)) continue;
+      const tableName = tableNameOpt.value;
       const rawRows = yield* fromPromise<any[]>(`load outputs ${tableName}`, () =>
         db
           .select()
           .from(table as any)
           .where(eq(runIdCol, runId)),
+      {
+        code: "DB_QUERY_FAILED",
+        details: { runId, tableName },
+      },
       );
       const boolKeys = getBooleanColumnKeys(table);
       const rows = coerceBooleanColumns(rawRows, boolKeys);

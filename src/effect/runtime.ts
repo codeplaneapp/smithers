@@ -1,5 +1,6 @@
 import { Cause, Effect, Exit, ManagedRuntime } from "effect";
 import { createSmithersRuntimeLayer } from "../observability";
+import { type SmithersError, toSmithersError } from "../utils/errors";
 
 const SmithersRuntimeLayer = createSmithersRuntimeLayer();
 
@@ -9,9 +10,8 @@ function decorate<A, E, R>(effect: Effect.Effect<A, E, R>) {
   return effect.pipe(Effect.annotateLogs("service", "smithers"));
 }
 
-function normalizeRejection(cause: unknown) {
-  if (cause instanceof Error) return cause;
-  return new Error(String(cause));
+function normalizeRejection(cause: unknown): SmithersError {
+  return toSmithersError(cause);
 }
 
 export async function runPromise<A, E, R>(
@@ -30,16 +30,6 @@ export async function runPromise<A, E, R>(
     throw normalizeRejection(failure.value);
   }
   throw normalizeRejection(Cause.squash(exit.cause));
-}
-
-export function runPromiseExit<A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-  options?: { signal?: AbortSignal },
-) {
-  return runtime.runPromiseExit(
-    decorate(effect) as Effect.Effect<A, E, never>,
-    options,
-  );
 }
 
 export function runFork<A, E, R>(effect: Effect.Effect<A, E, R>) {

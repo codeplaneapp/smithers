@@ -42,7 +42,7 @@ export function selectOutputRowEffect<T>(
   db: any,
   table: Table,
   key: OutputKey,
-): Effect.Effect<T | undefined, Error> {
+): Effect.Effect<T | undefined, SmithersError> {
   const where = buildKeyWhere(table, key);
   return fromPromise<T[]>(
     `select output ${(table as any)["_"]?.name ?? "output"}`,
@@ -52,6 +52,10 @@ export function selectOutputRowEffect<T>(
         .from(table as any)
         .where(where)
         .limit(1),
+    {
+      code: "DB_QUERY_FAILED",
+      details: { outputTable: (table as any)["_"]?.name ?? "output" },
+    },
   ).pipe(
     Effect.map((rows) => rows[0] as T | undefined),
     Effect.annotateLogs({
@@ -77,7 +81,7 @@ export function upsertOutputRowEffect(
   table: Table,
   key: OutputKey,
   payload: Record<string, unknown>,
-): Effect.Effect<void, Error> {
+): Effect.Effect<void, SmithersError> {
   const cols = getKeyColumns(table);
   const values: Record<string, unknown> = { ...payload };
   values.runId = key.runId;
@@ -102,6 +106,10 @@ export function upsertOutputRowEffect(
               target,
               set: values,
             }),
+        {
+          code: "DB_WRITE_FAILED",
+          details: { outputTable: (table as any)["_"]?.name ?? "output" },
+        },
       ),
     { label: `upsert output ${(table as any)["_"]?.name ?? "output"}` },
   ).pipe(

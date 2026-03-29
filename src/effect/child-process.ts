@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process";
-import { Effect } from "effect";
-import { toError } from "./interop";
+import { Effect, Metric } from "effect";
+import { fromSync, ignoreSyncError, toError } from "./interop";
+import { SmithersError } from "../utils/errors";
+import { runPromise } from "./runtime";
+import { toolOutputTruncatedTotal } from "./metrics";
+import { logDebug, logWarning } from "./logging";
 
 export type SpawnCaptureOptions = {
   cwd: string;
@@ -31,7 +35,7 @@ export function spawnCaptureEffect(
   command: string,
   args: string[],
   options: SpawnCaptureOptions,
-): Effect.Effect<SpawnCaptureResult, Error> {
+): Effect.Effect<SpawnCaptureResult, SmithersError> {
   const {
     cwd,
     env,
@@ -44,11 +48,30 @@ export function spawnCaptureEffect(
     onStdout,
     onStderr,
   } = options;
+  const errorDetails = {
+    command,
+    args,
+    cwd,
+    timeoutMs,
+    idleTimeoutMs,
+  };
+  const logAnnotations = {
+    command,
+    args: args.join(" "),
+    cwd,
+    timeoutMs: timeoutMs ?? null,
+    idleTimeoutMs: idleTimeoutMs ?? null,
+  };
+  const span = `process:${command}`;
 
-  return Effect.async<SpawnCaptureResult, Error>((resume) => {
+  return (Effect.async<SpawnCaptureResult, SmithersError>((resume) => {
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
+
+    logDebug("spawning child process", logAnnotations, span);
 
     const child = spawn(command, args, {
       cwd,
@@ -57,7 +80,19 @@ export function spawnCaptureEffect(
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    const kill = (reason: string) => {
+    const kill = (
+      reason: string,
+      code: "PROCESS_ABORTED" | "PROCESS_TIMEOUT" | "PROCESS_IDLE_TIMEOUT",
+    ) => {
+      logWarning(
+        "child process interrupted",
+        {
+          ...logAnnotations,
+          reason,
+          errorCode: code,
+        },
+        span,
+      );
       try {
         if (detached && child.pid) {
           process.kill(-child.pid, "SIGKILL");
@@ -73,7 +108,7 @@ export function spawnCaptureEffect(
       }
       if (!settled) {
         settled = true;
-        resume(Effect.fail(new Error(reason)));
+        resume(Effect.fail(new SmithersError(code, reason, errorDetails)));
       }
     };
 
@@ -83,14 +118,17 @@ export function spawnCaptureEffect(
       if (idleTimer) clearTimeout(idleTimer);
       if (idleTimeoutMs) {
         idleTimer = setTimeout(() => {
-          kill(`CLI idle timed out after ${idleTimeoutMs}ms`);
+          kill(
+            `CLI idle timed out after ${idleTimeoutMs}ms`,
+            "PROCESS_IDLE_TIMEOUT",
+          );
         }, idleTimeoutMs);
       }
     };
 
     if (timeoutMs) {
       totalTimer = setTimeout(() => {
-        kill(`CLI timed out after ${timeoutMs}ms`);
+        kill(`CLI timed out after ${timeoutMs}ms`, "PROCESS_TIMEOUT");
       }, timeoutMs);
     }
     resetIdle();
@@ -100,14 +138,24 @@ export function spawnCaptureEffect(
       settled = true;
       if (totalTimer) clearTimeout(totalTimer);
       if (idleTimer) clearTimeout(idleTimer);
+      logDebug(
+        "child process completed",
+        {
+          ...logAnnotations,
+          exitCode: result.exitCode,
+          stderrBytes: Buffer.byteLength(result.stderr, "utf8"),
+          stdoutBytes: Buffer.byteLength(result.stdout, "utf8"),
+        },
+        span,
+      );
       resume(Effect.succeed(result));
     };
 
     if (signal) {
       if (signal.aborted) {
-        kill("CLI aborted");
+        kill("CLI aborted", "PROCESS_ABORTED");
       } else {
-        signal.addEventListener("abort", () => kill("CLI aborted"), {
+        signal.addEventListener("abort", () => kill("CLI aborted", "PROCESS_ABORTED"), {
           once: true,
         });
       }
@@ -116,14 +164,42 @@ export function spawnCaptureEffect(
     child.stdout?.on("data", (chunk: Buffer) => {
       resetIdle();
       const text = chunk.toString("utf8");
-      stdout = truncateToBytes(stdout + text, maxOutputBytes);
+      const nextStdout = stdout + text;
+      if (!stdoutTruncated && Buffer.byteLength(nextStdout, "utf8") > maxOutputBytes) {
+        stdoutTruncated = true;
+        void runPromise(Metric.increment(toolOutputTruncatedTotal));
+        logWarning(
+          "child process stdout truncated",
+          {
+            ...logAnnotations,
+            maxOutputBytes,
+            stream: "stdout",
+          },
+          span,
+        );
+      }
+      stdout = truncateToBytes(nextStdout, maxOutputBytes);
       onStdout?.(text);
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
       resetIdle();
       const text = chunk.toString("utf8");
-      stderr = truncateToBytes(stderr + text, maxOutputBytes);
+      const nextStderr = stderr + text;
+      if (!stderrTruncated && Buffer.byteLength(nextStderr, "utf8") > maxOutputBytes) {
+        stderrTruncated = true;
+        void runPromise(Metric.increment(toolOutputTruncatedTotal));
+        logWarning(
+          "child process stderr truncated",
+          {
+            ...logAnnotations,
+            maxOutputBytes,
+            stream: "stderr",
+          },
+          span,
+        );
+      }
+      stderr = truncateToBytes(nextStderr, maxOutputBytes);
       onStderr?.(text);
     });
 
@@ -132,7 +208,21 @@ export function spawnCaptureEffect(
       if (idleTimer) clearTimeout(idleTimer);
       if (!settled) {
         settled = true;
-        resume(Effect.fail(toError(error, `spawn ${command}`)));
+        const smithersError = toError(error, `spawn ${command}`, {
+          code: "PROCESS_SPAWN_FAILED",
+          details: errorDetails,
+        });
+        logWarning(
+          "failed to spawn child process",
+          {
+            ...logAnnotations,
+            error: smithersError.message,
+          },
+          span,
+        );
+        resume(
+          Effect.fail(smithersError),
+        );
       }
     });
 
@@ -145,33 +235,28 @@ export function spawnCaptureEffect(
     }
     child.stdin?.end();
 
-    return Effect.sync(() => {
+    return Effect.gen(function* () {
       if (totalTimer) clearTimeout(totalTimer);
       if (idleTimer) clearTimeout(idleTimer);
-      try {
-        if (!settled) {
+      if (!settled) {
+        yield* fromSync("kill process group", () => {
           if (detached && child.pid) {
             process.kill(-child.pid, "SIGKILL");
           } else {
             child.kill("SIGKILL");
           }
-        }
-      } catch {
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          // ignore
-        }
+        }, {
+          code: "PROCESS_ABORTED",
+          details: errorDetails,
+        }).pipe(
+          Effect.catchAll(() => ignoreSyncError("kill fallback", () => child.kill("SIGKILL"))),
+        );
       }
     });
-  }).pipe(
+  })).pipe(
     Effect.annotateLogs({
-      command,
-      args: args.join(" "),
-      cwd,
-      timeoutMs: timeoutMs ?? null,
-      idleTimeoutMs: idleTimeoutMs ?? null,
+      ...logAnnotations,
     }),
-    Effect.withLogSpan(`process:${command}`),
+    Effect.withLogSpan(span),
   );
 }

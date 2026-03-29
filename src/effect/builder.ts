@@ -21,6 +21,7 @@ import type { AgentLike } from "../AgentLike";
 import type { CachePolicy } from "../CachePolicy";
 import type { RetryPolicy } from "../RetryPolicy";
 import {
+  AmpAgent,
   AnthropicAgent,
   ClaudeCodeAgent,
   CodexAgent,
@@ -32,6 +33,7 @@ import {
 } from "../agents";
 import { SmithersDb } from "../db/adapter";
 import { runWorkflow } from "../engine";
+import { ignoreSyncError } from "./interop";
 import { runPromise } from "./runtime";
 import { requireTaskRuntime } from "./task-runtime";
 import {
@@ -916,9 +918,15 @@ async function extractResult(
 function normalizeExecutionError(result: { status: string; error?: unknown }) {
   if (result.error instanceof Error) return result.error;
   if (typeof result.error === "string" && result.error.length > 0) {
-    return new Error(result.error);
+    return new SmithersError("TOON_EXECUTION_FAILED", result.error, {
+      status: result.status,
+    });
   }
-  return new Error(`Workflow execution ended with status "${result.status}"`);
+  return new SmithersError(
+    "TOON_EXECUTION_FAILED",
+    `Workflow execution ended with status "${result.status}"`,
+    { status: result.status },
+  );
 }
 
 export type BuiltSmithersWorkflow = {
@@ -945,38 +953,36 @@ function createWorkflow(options: { name: string; input: AnySchema }) {
               JSON.stringify(encodeSchema(options.input, decodedInput) ?? {}),
             ) as Record<string, unknown>;
 
-            return yield* Effect.promise(async () => {
-              const runtime = createBuilderDb(sqliteConfig.filename, handles);
-              try {
-                const workflow = {
-                  db: runtime.db,
-                  build: (ctx: any) =>
-                    React.createElement(
-                      Workflow,
-                      { name: options.name },
-                      renderNode(ctx && root ? root : root, ctx, decodedInput, env),
-                    ),
-                  opts: {},
-                } as any;
+            return yield* Effect.acquireUseRelease(
+              Effect.sync(() => createBuilderDb(sqliteConfig.filename, handles)),
+              (runtime) =>
+                Effect.promise(async () => {
+                  const workflow = {
+                    db: runtime.db,
+                    build: (ctx: any) =>
+                      React.createElement(
+                        Workflow,
+                        { name: options.name },
+                        renderNode(ctx && root ? root : root, ctx, decodedInput, env),
+                      ),
+                    opts: {},
+                  } as any;
 
-                const result = await runWorkflow(workflow, {
-                  ...(opts ?? {}),
-                  input: encodedInput as Record<string, unknown>,
-                });
+                  const result = await runWorkflow(workflow, {
+                    ...(opts ?? {}),
+                    input: encodedInput as Record<string, unknown>,
+                  });
 
-                if (result.status === "finished") {
-                  return await extractResult(root, runtime.db, result.runId, decodedInput);
-                }
-                if (result.status === "waiting-approval") {
-                  return result;
-                }
-                throw normalizeExecutionError(result);
-              } finally {
-                try {
-                  runtime.sqlite.close();
-                } catch {}
-              }
-            });
+                  if (result.status === "finished") {
+                    return await extractResult(root, runtime.db, result.runId, decodedInput);
+                  }
+                  if (result.status === "waiting-approval") {
+                    return result;
+                  }
+                  throw normalizeExecutionError(result);
+                }),
+              (runtime) => ignoreSyncError("close builder sqlite", () => runtime.sqlite.close()),
+            );
           });
         },
       };
@@ -1562,6 +1568,8 @@ async function buildAgentFromConfig(name: string, config: Record<string, any>): 
       return new KimiAgent(opts);
     case "forge":
       return new ForgeAgent(opts);
+    case "amp":
+      return new AmpAgent(opts);
     case "api": {
       const providerName = opts.provider;
       const modelName = opts.model;

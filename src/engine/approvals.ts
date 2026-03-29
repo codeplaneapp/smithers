@@ -1,7 +1,8 @@
-import { Effect } from "effect";
+import { Effect, Metric } from "effect";
 import { nowMs } from "../utils/time";
 import { SmithersDb } from "../db/adapter";
 import { runPromise } from "../effect/runtime";
+import { approvalWaitDuration, trackEvent } from "../effect/metrics";
 
 export function approveNodeEffect(
   adapter: SmithersDb,
@@ -12,7 +13,18 @@ export function approveNodeEffect(
   decidedBy?: string,
 ) {
   const ts = nowMs();
+  const event = {
+    type: "ApprovalGranted" as const,
+    runId,
+    nodeId,
+    iteration,
+    timestampMs: ts,
+  };
   return Effect.gen(function* () {
+    const existing = yield* adapter.getApprovalEffect(runId, nodeId, iteration);
+    if (existing?.requestedAtMs) {
+      yield* Metric.update(approvalWaitDuration, ts - existing.requestedAtMs);
+    }
     yield* adapter.insertOrUpdateApprovalEffect({
       runId,
       nodeId,
@@ -27,14 +39,9 @@ export function approveNodeEffect(
       runId,
       timestampMs: ts,
       type: "ApprovalGranted",
-      payloadJson: JSON.stringify({
-        type: "ApprovalGranted",
-        runId,
-        nodeId,
-        iteration,
-        timestampMs: ts,
-      }),
+      payloadJson: JSON.stringify(event),
     });
+    yield* trackEvent(event);
     yield* adapter.insertNodeEffect({
       runId,
       nodeId,
@@ -45,8 +52,15 @@ export function approveNodeEffect(
       outputTable: "",
       label: null,
     });
+    yield* Effect.logInfo("approval granted");
   }).pipe(
-    Effect.annotateLogs({ runId, nodeId, iteration, approvalStatus: "approved" }),
+    Effect.annotateLogs({
+      runId,
+      nodeId,
+      iteration,
+      approvalStatus: "approved",
+      approvalDecidedBy: decidedBy ?? null,
+    }),
     Effect.withLogSpan("approval:grant"),
   );
 }
@@ -73,7 +87,18 @@ export function denyNodeEffect(
   decidedBy?: string,
 ) {
   const ts = nowMs();
+  const event = {
+    type: "ApprovalDenied" as const,
+    runId,
+    nodeId,
+    iteration,
+    timestampMs: ts,
+  };
   return Effect.gen(function* () {
+    const existing = yield* adapter.getApprovalEffect(runId, nodeId, iteration);
+    if (existing?.requestedAtMs) {
+      yield* Metric.update(approvalWaitDuration, ts - existing.requestedAtMs);
+    }
     yield* adapter.insertOrUpdateApprovalEffect({
       runId,
       nodeId,
@@ -88,14 +113,9 @@ export function denyNodeEffect(
       runId,
       timestampMs: ts,
       type: "ApprovalDenied",
-      payloadJson: JSON.stringify({
-        type: "ApprovalDenied",
-        runId,
-        nodeId,
-        iteration,
-        timestampMs: ts,
-      }),
+      payloadJson: JSON.stringify(event),
     });
+    yield* trackEvent(event);
     yield* adapter.insertNodeEffect({
       runId,
       nodeId,
@@ -106,8 +126,15 @@ export function denyNodeEffect(
       outputTable: "",
       label: null,
     });
+    yield* Effect.logInfo("approval denied");
   }).pipe(
-    Effect.annotateLogs({ runId, nodeId, iteration, approvalStatus: "denied" }),
+    Effect.annotateLogs({
+      runId,
+      nodeId,
+      iteration,
+      approvalStatus: "denied",
+      approvalDecidedBy: decidedBy ?? null,
+    }),
     Effect.withLogSpan("approval:deny"),
   );
 }

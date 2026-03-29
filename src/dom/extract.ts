@@ -345,6 +345,7 @@ export function extractFromHost(
         computeFn,
         label: raw.label,
         meta: raw.meta,
+        scorers: raw.scorers,
         parallelGroupId: parallelGroup?.id,
         parallelMaxConcurrency: parallelGroup?.max,
         voice: topVoice?.provider,
