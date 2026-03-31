@@ -75,7 +75,46 @@
         "components/approval",
         "components/merge-queue",
         "components/worktree",
-        "components/voice"
+        "components/voice",
+        {
+          "group": "Composite Components",
+          "pages": [
+            "components/kanban",
+            "components/classify-and-route",
+            "components/gather-and-synthesize",
+            "components/panel",
+            "components/check-suite",
+            "components/debate",
+            "components/review-loop",
+            "components/optimizer",
+            "components/content-pipeline",
+            "components/approval-gate",
+            "components/escalation-chain",
+            "components/decision-table",
+            "components/drift-detector",
+            "components/scan-fix-verify",
+            "components/poller",
+            "components/supervisor",
+            "components/runbook"
+          ]
+        },
+        {
+          "group": "Engine Primitives",
+          "pages": [
+            "components/subflow",
+            "components/wait-for-event",
+            "components/human-task",
+            "components/saga",
+            "components/try-catch-finally"
+          ]
+        },
+        {
+          "group": "Core Enhancements",
+          "pages": [
+            "components/aspects",
+            "components/super-smithers"
+          ]
+        }
       ]
     },
     {

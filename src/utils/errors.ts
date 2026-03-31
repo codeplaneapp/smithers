@@ -109,6 +109,16 @@ export const smithersErrorDefinitions = {
     when: "Code calls ctx.output() for a node result that does not exist.",
     details: "{ nodeId, iteration }",
   },
+  DEP_NOT_SATISFIED: {
+    category: "components",
+    when: "A typed dep on <Task> references an upstream output that has not been produced yet.",
+    details: "{ taskId, depKey, resolvedNodeId }",
+  },
+  ASPECT_BUDGET_EXCEEDED: {
+    category: "components",
+    when: "An Aspects budget (tokens, latency, or cost) has been exceeded.",
+    details: "{ kind, limit, current }",
+  },
   APPROVAL_OUTSIDE_TASK: {
     category: "components",
     when: "<Approval> is resolved outside the active task runtime.",

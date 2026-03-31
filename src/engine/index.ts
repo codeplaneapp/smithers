@@ -3364,6 +3364,24 @@ async function runWorkflowBody<Schema>(
           return { runId, status: "waiting-approval" };
         }
 
+        if (schedule.waitingEventExists) {
+          await adapter.updateRun(runId, {
+            status: "waiting-event",
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            cancelRequestedAtMs: null,
+            hijackRequestedAtMs: null,
+            hijackTarget: null,
+          });
+          await eventBus.emitEventWithPersist({
+            type: "RunStatusChanged",
+            runId,
+            status: "waiting-event",
+            timestampMs: nowMs(),
+          });
+          return { runId, status: "waiting-event" };
+        }
+
         const failedTasks = tasks.filter((t) => {
           const state = stateMap.get(buildStateKey(t.nodeId, t.iteration));
           return state === "failed" && !t.continueOnFail;

@@ -93,6 +93,8 @@ export function extractFromHost(
   const seen = new Set<string>();
   const seenRalph = new Set<string>();
   const seenWorktree = new Set<string>();
+  const seenSaga = new Set<string>();
+  const seenTcf = new Set<string>();
   let ordinal = 0;
 
   function pushGroup(
@@ -230,6 +232,200 @@ export function extractFromHost(
         const voiceSpeaker = node.rawProps?.speaker ? String(node.rawProps.speaker) : undefined;
         nextVoiceStack = [...voiceStack, { provider: voiceProvider, speaker: voiceSpeaker }];
       }
+    }
+    if (node.tag === "smithers:subflow") {
+      const raw = node.rawProps || {};
+      const logicalNodeId = raw.id;
+      if (!logicalNodeId || typeof logicalNodeId !== "string") {
+        throw new SmithersError("TASK_ID_REQUIRED", "Subflow id is required and must be a string.");
+      }
+      const ancestorScope =
+        loopStack.length > 1
+          ? buildLoopScope(loopStack.slice(0, -1))
+          : "";
+      const nodeId = logicalNodeId + ancestorScope;
+      if (seen.has(nodeId)) {
+        throw new SmithersError("DUPLICATE_ID", `Duplicate Subflow id detected: ${nodeId}`, { kind: "subflow", id: nodeId });
+      }
+      seen.add(nodeId);
+
+      const outputRaw = raw.output;
+      if (!outputRaw) {
+        throw new SmithersError("TASK_MISSING_OUTPUT", `Subflow ${nodeId} is missing output.`, { nodeId });
+      }
+      const outputTable: any = isDrizzleTable(outputRaw) ? outputRaw : null;
+      const outputTableName = outputTable
+        ? getTableName(outputTable)
+        : typeof outputRaw === "string"
+          ? outputRaw
+          : "";
+      const outputRef = !outputTable && isZodObject(outputRaw) ? outputRaw : undefined;
+      const retries = typeof raw.retries === "number" ? raw.retries : 0;
+      const retryPolicy =
+        raw.retryPolicy && typeof raw.retryPolicy === "object"
+          ? raw.retryPolicy
+          : undefined;
+      const timeoutMs =
+        typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
+      const continueOnFail = Boolean(raw.continueOnFail);
+      const cachePolicy =
+        raw.cache && typeof raw.cache === "object" ? raw.cache : undefined;
+      const dependsOn = Array.isArray(raw.dependsOn)
+        ? raw.dependsOn.filter((v: unknown) => typeof v === "string")
+        : undefined;
+      const needs =
+        raw.needs && typeof raw.needs === "object" && !Array.isArray(raw.needs)
+          ? (Object.fromEntries(
+              Object.entries(raw.needs).filter(
+                ([, v]) => typeof v === "string",
+              ),
+            ) as Record<string, string>)
+          : undefined;
+
+      const mode = raw.__smithersSubflowMode ?? raw.mode ?? "childRun";
+      const parallelGroup = nextParallelStack[nextParallelStack.length - 1];
+      const topWorktree = nextWorktreeStack[nextWorktreeStack.length - 1];
+
+      const descriptor: TaskDescriptor = {
+        nodeId,
+        ordinal: ordinal++,
+        iteration,
+        ralphId,
+        worktreeId: topWorktree?.id,
+        worktreePath: topWorktree?.path,
+        worktreeBranch: topWorktree?.branch,
+        worktreeBaseBranch: topWorktree?.baseBranch,
+        outputTable,
+        outputTableName,
+        outputRef,
+        outputSchema: undefined,
+        dependsOn,
+        needs,
+        needsApproval: false,
+        skipIf: Boolean(raw.skipIf),
+        retries,
+        retryPolicy,
+        timeoutMs,
+        continueOnFail,
+        cachePolicy,
+        agent: undefined,
+        prompt: undefined,
+        staticPayload: undefined,
+        computeFn: raw.__smithersSubflowWorkflow,
+        label: raw.label,
+        meta: {
+          ...(raw.meta ?? {}),
+          __subflow: true,
+          __subflowMode: mode,
+          __subflowInput: raw.__smithersSubflowInput,
+        },
+        parallelGroupId: parallelGroup?.id,
+        parallelMaxConcurrency: parallelGroup?.max,
+      };
+
+      tasks.push(descriptor);
+      mountedTaskIds.push(`${nodeId}::${iteration}`);
+    }
+    if (node.tag === "smithers:wait-for-event") {
+      const raw = node.rawProps || {};
+      const logicalNodeId = raw.id;
+      if (!logicalNodeId || typeof logicalNodeId !== "string") {
+        throw new SmithersError("TASK_ID_REQUIRED", "WaitForEvent id is required and must be a string.");
+      }
+      const ancestorScope =
+        loopStack.length > 1
+          ? buildLoopScope(loopStack.slice(0, -1))
+          : "";
+      const nodeId = logicalNodeId + ancestorScope;
+      if (seen.has(nodeId)) {
+        throw new SmithersError("DUPLICATE_ID", `Duplicate WaitForEvent id detected: ${nodeId}`, { kind: "wait-for-event", id: nodeId });
+      }
+      seen.add(nodeId);
+
+      const outputRaw = raw.output;
+      if (!outputRaw) {
+        throw new SmithersError("TASK_MISSING_OUTPUT", `WaitForEvent ${nodeId} is missing output.`, { nodeId });
+      }
+      const outputTable: any = isDrizzleTable(outputRaw) ? outputRaw : null;
+      const outputTableName = outputTable
+        ? getTableName(outputTable)
+        : typeof outputRaw === "string"
+          ? outputRaw
+          : "";
+      const outputRef = !outputTable && isZodObject(outputRaw) ? outputRaw : undefined;
+      const outputSchema = raw.outputSchema ?? outputRef;
+      const timeoutMs =
+        typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
+      const dependsOn = Array.isArray(raw.dependsOn)
+        ? raw.dependsOn.filter((v: unknown) => typeof v === "string")
+        : undefined;
+      const needs =
+        raw.needs && typeof raw.needs === "object" && !Array.isArray(raw.needs)
+          ? (Object.fromEntries(
+              Object.entries(raw.needs).filter(
+                ([, v]) => typeof v === "string",
+              ),
+            ) as Record<string, string>)
+          : undefined;
+
+      const onTimeout = raw.__smithersOnTimeout ?? raw.onTimeout ?? "fail";
+      const parallelGroup = nextParallelStack[nextParallelStack.length - 1];
+      const topWorktree = nextWorktreeStack[nextWorktreeStack.length - 1];
+
+      const descriptor: TaskDescriptor = {
+        nodeId,
+        ordinal: ordinal++,
+        iteration,
+        ralphId,
+        worktreeId: topWorktree?.id,
+        worktreePath: topWorktree?.path,
+        worktreeBranch: topWorktree?.branch,
+        worktreeBaseBranch: topWorktree?.baseBranch,
+        outputTable,
+        outputTableName,
+        outputRef,
+        outputSchema,
+        dependsOn,
+        needs,
+        needsApproval: false,
+        skipIf: Boolean(raw.skipIf),
+        retries: 0,
+        timeoutMs,
+        continueOnFail: onTimeout === "continue" || onTimeout === "skip",
+        agent: undefined,
+        prompt: undefined,
+        staticPayload: undefined,
+        computeFn: undefined,
+        label: raw.label,
+        meta: {
+          ...(raw.meta ?? {}),
+          __waitForEvent: true,
+          __eventName: raw.__smithersEventName ?? raw.event,
+          __correlationId: raw.__smithersCorrelationId ?? raw.correlationId,
+          __onTimeout: onTimeout,
+        },
+        parallelGroupId: parallelGroup?.id,
+        parallelMaxConcurrency: parallelGroup?.max,
+      };
+
+      tasks.push(descriptor);
+      mountedTaskIds.push(`${nodeId}::${iteration}`);
+    }
+    // Track Saga nodes for duplicate detection
+    if (node.tag === "smithers:saga") {
+      const id = resolveStableId(node.rawProps?.id, "saga", ctx.path);
+      if (seenSaga.has(id)) {
+        throw new SmithersError("DUPLICATE_ID", `Duplicate Saga id detected: ${id}`, { kind: "saga", id });
+      }
+      seenSaga.add(id);
+    }
+    // Track TryCatchFinally nodes for duplicate detection
+    if (node.tag === "smithers:try-catch-finally") {
+      const id = resolveStableId(node.rawProps?.id, "tcf", ctx.path);
+      if (seenTcf.has(id)) {
+        throw new SmithersError("DUPLICATE_ID", `Duplicate TryCatchFinally id detected: ${id}`, { kind: "try-catch-finally", id });
+      }
+      seenTcf.add(id);
     }
     if (node.tag === "smithers:task") {
       const raw = node.rawProps || {};

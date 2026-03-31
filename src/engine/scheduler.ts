@@ -16,11 +16,25 @@ export type PlanNode =
       maxIterations: number;
       onMaxReached: "fail" | "return-last";
     }
-  | { kind: "group"; children: PlanNode[] };
+  | { kind: "group"; children: PlanNode[] }
+  | {
+      kind: "saga";
+      id: string;
+      children: PlanNode[];
+      onFailure: "compensate" | "compensate-and-fail" | "fail";
+    }
+  | {
+      kind: "try-catch-finally";
+      id: string;
+      tryChildren: PlanNode[];
+      catchChildren: PlanNode[];
+      finallyChildren: PlanNode[];
+    };
 
 export type TaskState =
   | "pending"
   | "waiting-approval"
+  | "waiting-event"
   | "in-progress"
   | "finished"
   | "failed"
@@ -33,6 +47,7 @@ export type ScheduleResult = {
   runnable: TaskDescriptor[];
   pendingExists: boolean;
   waitingApprovalExists: boolean;
+  waitingEventExists: boolean;
   readyRalphs: RalphMeta[];
   nextRetryAtMs?: number;
 };
@@ -148,6 +163,32 @@ export function buildPlanTree(
     if (tag === "smithers:worktree") {
       return { kind: "group", children };
     }
+    if (tag === "smithers:subflow") {
+      const mode = node.props.mode ?? "childRun";
+      if (mode === "inline") {
+        // Inline mode: treat subflow children as a sequence in the parent plan
+        return { kind: "sequence", children };
+      }
+      // childRun mode: behaves like a single task node
+      const logicalId = node.props.id;
+      if (!logicalId) return null;
+      const ancestorScope =
+        loopStack.length > 1
+          ? buildLoopScope(loopStack.slice(0, -1))
+          : "";
+      const nodeId = logicalId + ancestorScope;
+      return { kind: "task", nodeId };
+    }
+    if (tag === "smithers:wait-for-event") {
+      const logicalId = node.props.id;
+      if (!logicalId) return null;
+      const ancestorScope =
+        loopStack.length > 1
+          ? buildLoopScope(loopStack.slice(0, -1))
+          : "";
+      const nodeId = logicalId + ancestorScope;
+      return { kind: "task", nodeId };
+    }
     if (tag === "smithers:ralph") {
       const id = scopedRalphId!;
       if (seenRalph.has(id)) {
@@ -168,6 +209,31 @@ export function buildPlanTree(
         until,
         maxIterations,
         onMaxReached,
+      };
+    }
+    if (tag === "smithers:saga") {
+      const id = resolveStableId(node.props.id, "saga", ctx.path);
+      const onFailure =
+        (node.props.onFailure as "compensate" | "compensate-and-fail" | "fail") ??
+        "compensate";
+      return {
+        kind: "saga",
+        id,
+        children,
+        onFailure,
+      };
+    }
+    if (tag === "smithers:try-catch-finally") {
+      const id = resolveStableId(node.props.id, "tcf", ctx.path);
+      // Children are structured: try block children come first,
+      // catch and finally are mounted by the engine on demand.
+      // At plan-build time, only the try children are present.
+      return {
+        kind: "try-catch-finally",
+        id,
+        tryChildren: children,
+        catchChildren: [],
+        finallyChildren: [],
       };
     }
     return { kind: "group", children };
@@ -211,6 +277,7 @@ export function scheduleTasks(
   const runnable: TaskDescriptor[] = [];
   let pendingExists = false;
   let waitingApprovalExists = false;
+  let waitingEventExists = false;
   const readyRalphs: RalphMeta[] = [];
   let nextRetryAtMs: number | undefined;
 
@@ -239,6 +306,7 @@ export function scheduleTasks(
         if (!desc) return { terminal: true };
         const state = states.get(key(desc.nodeId, desc.iteration)) ?? "pending";
         if (state === "waiting-approval") waitingApprovalExists = true;
+        if (state === "waiting-event") waitingEventExists = true;
         if (state === "pending" || state === "cancelled") pendingExists = true;
         const terminal = isTerminal(state, desc);
         if (!terminal && (state === "pending" || state === "cancelled")) {
@@ -302,6 +370,38 @@ export function scheduleTasks(
         }
         return { terminal: false };
       }
+      case "saga": {
+        // Saga runs its action steps sequentially (like a sequence).
+        // If any step fails and onFailure !== "fail", compensation
+        // steps are triggered by the engine in reverse order.
+        for (const child of node.children) {
+          const res = walk(child);
+          if (!res.terminal) {
+            return { terminal: false };
+          }
+        }
+        return { terminal: true };
+      }
+      case "try-catch-finally": {
+        // Try children run first (sequentially).
+        let tryTerminal = true;
+        for (const child of node.tryChildren) {
+          const res = walk(child);
+          if (!res.terminal) tryTerminal = false;
+        }
+        if (!tryTerminal) return { terminal: false };
+        // Once try is terminal, check catch children if any were mounted.
+        for (const child of node.catchChildren) {
+          const res = walk(child);
+          if (!res.terminal) return { terminal: false };
+        }
+        // Finally children run last.
+        for (const child of node.finallyChildren) {
+          const res = walk(child);
+          if (!res.terminal) return { terminal: false };
+        }
+        return { terminal: true };
+      }
       case "group": {
         let terminal = true;
         for (const child of node.children) {
@@ -323,6 +423,7 @@ export function scheduleTasks(
     runnable,
     pendingExists,
     waitingApprovalExists,
+    waitingEventExists,
     readyRalphs,
     nextRetryAtMs,
   };

@@ -10,6 +10,7 @@ import type { ScorersMap } from "../scorers/types";
 import type { TaskMemoryConfig } from "../memory/types";
 import { SmithersContext } from "../context";
 import type { InferOutputEntry } from "../OutputAccessor";
+import { AspectContext, type AspectContextValue } from "../aspects/AspectContext";
 
 /**
  * Valid output targets: a Zod schema (recommended with createSmithers),
@@ -148,6 +149,7 @@ function resolveDeps(
   ctx: any,
   deps: DepsSpec | undefined,
   needs: Record<string, string> | undefined,
+  taskId?: string,
 ): Record<string, unknown> | null {
   if (!deps) return Object.create(null);
   const keys = Object.keys(deps);
@@ -164,12 +166,38 @@ function resolveDeps(
   return resolved;
 }
 
+/**
+ * Validate that all deps are satisfied. Throws a descriptive SmithersError
+ * naming which dep is missing and which task needs it.
+ */
+function validateDeps(
+  ctx: any,
+  deps: DepsSpec,
+  needs: Record<string, string> | undefined,
+  taskId: string,
+): void {
+  for (const key of Object.keys(deps)) {
+    const target = deps[key];
+    const nodeId = needs?.[key] ?? key;
+    const value = ctx.outputMaybe(target as any, { nodeId });
+    if (value === undefined) {
+      throw new SmithersError(
+        "DEP_NOT_SATISFIED",
+        `Task "${taskId}" dependency "${key}" (resolved from node "${nodeId}") is not satisfied. ` +
+          `The upstream task must complete and produce output before this task can run.`,
+        { taskId, depKey: key, resolvedNodeId: nodeId },
+      );
+    }
+  }
+}
+
 export function Task<Row, Output extends OutputTarget = OutputTarget, D extends DepsSpec = {}>(
   props: TaskProps<Row, Output, D>,
 ) {
   const { children, agent, fallbackAgent, deps, ...rest } = props as any;
   const taskContext = (props as any).smithersContext ?? SmithersContext;
   const ctx = React.useContext(taskContext);
+  const aspectCtx = React.useContext(AspectContext);
   const depNodeIds = deriveDepNodeIds(deps, rest.needs);
   if (deps && !ctx) {
     throw new SmithersError(
@@ -177,10 +205,16 @@ export function Task<Row, Output extends OutputTarget = OutputTarget, D extends 
       "Task deps require a workflow context. Build the workflow with createSmithers().",
     );
   }
-  const resolvedDeps = deps ? resolveDeps(ctx, deps, rest.needs) : undefined;
+  const resolvedDeps = deps ? resolveDeps(ctx, deps, rest.needs, rest.id) : undefined;
   if (deps && resolvedDeps == null) {
+    // Deps not yet available — component defers until upstream tasks complete.
+    // This is normal reactive behavior; the task will re-render once deps are ready.
     return null;
   }
+
+  // Build aspect metadata to attach to the task element so the engine can
+  // enforce budgets and tracking at execution time.
+  const aspectMeta = aspectCtx ? buildAspectMeta(aspectCtx) : undefined;
 
   const agentChain = Array.isArray(agent)
     ? fallbackAgent
@@ -208,7 +242,7 @@ export function Task<Row, Output extends OutputTarget = OutputTarget, D extends 
     const prompt = renderChildrenToText(childElement);
     return React.createElement(
       "smithers:task",
-      { ...rest, dependsOn: nextDependsOn, agent: agentChain, __smithersKind: "agent" },
+      { ...rest, dependsOn: nextDependsOn, agent: agentChain, __smithersKind: "agent", ...aspectMeta },
       prompt,
     );
   }
@@ -218,6 +252,7 @@ export function Task<Row, Output extends OutputTarget = OutputTarget, D extends 
       dependsOn: nextDependsOn,
       __smithersKind: "compute",
       __smithersComputeFn: children,
+      ...aspectMeta,
     } as any;
     return React.createElement("smithers:task", nextProps, null);
   }
@@ -227,6 +262,24 @@ export function Task<Row, Output extends OutputTarget = OutputTarget, D extends 
     __smithersKind: "static",
     __smithersPayload: childValue,
     __payload: childValue,
+    ...aspectMeta,
   } as any;
   return React.createElement("smithers:task", nextProps, null);
+}
+
+/**
+ * Build the __aspects metadata object from the current AspectContext.
+ * This is attached to the smithers:task element props so the engine
+ * can read budgets and tracking config at execution time.
+ */
+function buildAspectMeta(aspectCtx: AspectContextValue) {
+  return {
+    __aspects: {
+      tokenBudget: aspectCtx.tokenBudget,
+      latencySlo: aspectCtx.latencySlo,
+      costBudget: aspectCtx.costBudget,
+      tracking: aspectCtx.tracking,
+      accumulator: aspectCtx.accumulator,
+    },
+  };
 }

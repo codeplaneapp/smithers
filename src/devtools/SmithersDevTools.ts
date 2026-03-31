@@ -48,6 +48,10 @@ export type SmithersNodeType =
   | "loop"
   | "worktree"
   | "approval"
+  | "subflow"
+  | "wait-for-event"
+  | "saga"
+  | "try-catch"
   | "fragment"
   | "unknown";
 
@@ -67,7 +71,7 @@ export type DevToolsEventHandler = (
 export type TaskExecutionState = {
   nodeId: string;
   iteration: number;
-  status: "pending" | "started" | "finished" | "failed" | "cancelled" | "skipped" | "waiting-approval" | "retrying";
+  status: "pending" | "started" | "finished" | "failed" | "cancelled" | "skipped" | "waiting-approval" | "waiting-event" | "retrying";
   attempt: number;
   startedAt?: number;
   finishedAt?: number;
@@ -109,6 +113,10 @@ const HOST_TAG_MAP: Record<string, SmithersNodeType> = {
   "smithers:ralph": "loop",
   "smithers:worktree": "worktree",
   "smithers:approval": "approval",
+  "smithers:subflow": "subflow",
+  "smithers:wait-for-event": "wait-for-event",
+  "smithers:saga": "saga",
+  "smithers:try-catch-finally": "try-catch",
 };
 
 function resolveNodeType(fiber: Fiber): SmithersNodeType | null {
@@ -279,6 +287,10 @@ const ICONS: Record<SmithersNodeType, string> = {
   loop: "🔁",
   worktree: "🌳",
   approval: "✋",
+  subflow: "🔗",
+  "wait-for-event": "📡",
+  saga: "🔄",
+  "try-catch": "🛡️",
   fragment: "📦",
   unknown: "❓",
 };
@@ -573,6 +585,12 @@ export class SmithersDevTools {
         const task = this._ensureTask(run, event.nodeId, event.iteration);
         task.status = "waiting-approval";
         run.status = "waiting-approval";
+        break;
+      }
+
+      case "NodeWaitingEvent": {
+        const task = this._ensureTask(run, event.nodeId, event.iteration);
+        task.status = "waiting-event";
         break;
       }
 
