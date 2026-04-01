@@ -5,205 +5,110 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Smithers Graph Builder</title>
     <style>
-      :root {
-        --bg: #0b1020;
-        --panel: #11182b;
-        --panel-2: #17213a;
-        --border: #2b3653;
-        --text: #ebefff;
-        --muted: #9ca8cb;
-        --accent: #7c9cff;
-        --parallel: #5eead4;
-        --loop: #f59e0b;
-        --approval: #fb7185;
-        --shell: #67e8f9;
-        --agent: #c4b5fd;
-        --branch: #86efac;
-        --shadow: 0 12px 30px rgba(0,0,0,.28);
-      }
-      * { box-sizing: border-box; }
-      body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
-      .app { display: grid; grid-template-columns: 280px 1fr 460px; height: 100vh; transition: grid-template-columns .2s ease; }
-      .app.right-collapsed { grid-template-columns: 280px 1fr 0px; }
-      .app.right-collapsed .panel-right { overflow: hidden; border: 0; padding: 0; width: 0; min-width: 0; }
-      .reopen-right { display: none; width: auto; padding: 8px 14px; font-size: 12px; }
-      .app.right-collapsed .reopen-right { display: inline-block; }
-      .panel { border-right: 1px solid var(--border); background: rgba(17,24,43,.96); display: flex; flex-direction: column; overflow: hidden; }
-      .panel:last-child { border-right: 0; }
-      .panel-right { position: relative; overflow: auto; }
-      .panel-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; }
-      .sec { padding: 12px 14px; border-bottom: 1px solid var(--border); }
-      .sec-head { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
-      .sec-head h2 { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin: 0; }
-      .sec-head .arrow { font-size: 12px; color: var(--muted); transition: transform .15s; }
-      .sec-head .arrow.open { transform: rotate(90deg); }
-      .sec-body { display: none; margin-top: 10px; }
-      .sec-body.open { display: block; }
-      h1, p { margin: 0; }
-      h1 { font-size: 16px; }
-      p { color: var(--muted); font-size: 12px; line-height: 1.4; }
-      button, input, textarea, select { width: 100%; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
-      button { cursor: pointer; font-size: 12px; }
-      button:hover { border-color: var(--accent); }
-      .row { display: flex; gap: 6px; }
-      .row > * { flex: 1; }
-      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-      .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-      .chip { display: inline-block; padding: 3px 7px; border-radius: 999px; background: rgba(124,156,255,.15); color: #c8d5ff; font-size: 11px; }
-      .badge { display: inline-block; padding: 2px 7px; border-radius: 999px; background: rgba(255,255,255,.06); font-size: 11px; color: var(--muted); }
-      .status-inline { font-size: 11px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.03); margin-top: 8px; }
-      .status-inline.warn { border-color: rgba(245,158,11,.35); }
-      .recent-btn { font-size: 11px; padding: 5px 8px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      label { display: block; font-size: 11px; color: var(--muted); margin: 8px 0 4px; }
-      .hidden { display: none; }
-      .canvas-shell { display: flex; flex-direction: column; min-width: 0; }
-      .canvas-bar { display: flex; gap: 6px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-      .canvas-bar .spacer { flex: 1; }
-      .canvas-bar button, .canvas-bar select { width: auto; }
-      .canvas { position: relative; overflow: auto; flex: 1; background: linear-gradient(rgba(124,156,255,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(124,156,255,.06) 1px, transparent 1px); background-size: 28px 28px; }
-      .canvas-inner { position: relative; transform-origin: 0 0; }
-      svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-      .edge-label { font-size: 11px; fill: #d9e1ff; }
-      #edge-actions { position: absolute; inset: 0; pointer-events: none; }
-      .edge-action { position: absolute; width: auto; min-width: 24px; padding: 3px 7px; font-size: 10px; border-radius: 999px; pointer-events: auto; background: rgba(17,24,43,.98); }
-      .canvas-shell { position: relative; } /* positioning context for minimap */
-      .minimap { position: absolute; right: 12px; bottom: 12px; width: 200px; height: 120px; background: rgba(12,18,34,.92); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); z-index: 50; pointer-events: none; }
-      .minimap svg { width: 100%; height: 100%; display: block; }
-      .node { position: absolute; width: 200px; border: 1px solid var(--border); border-radius: 14px; background: rgba(23,33,58,.98); box-shadow: var(--shadow); padding: 10px; cursor: grab; user-select: none; }
-      .node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset, var(--shadow); }
-      .node.parallel { border-color: rgba(94,234,212,.4); }
-      .node.loop { border-color: rgba(245,158,11,.4); }
-      .node.agent { border-color: rgba(196,181,253,.4); }
-      .node.shell { border-color: rgba(103,232,249,.4); }
-      .node.approval { border-color: rgba(251,113,133,.4); }
-      .node.branch { border-color: rgba(134,239,172,.4); }
-      .node-head { display: flex; justify-content: space-between; gap: 6px; margin-bottom: 4px; }
-      .node-kind { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
-      .node-kind.parallel { color: var(--parallel); }
-      .node-kind.loop { color: var(--loop); }
-      .node-kind.agent { color: var(--agent); }
-      .node-kind.shell { color: var(--shell); }
-      .node-kind.approval { color: var(--approval); }
-      .node-kind.branch { color: var(--branch); }
-      .node-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
-      .node-body { font-size: 11px; color: var(--muted); max-height: 52px; overflow: hidden; white-space: pre-wrap; }
-      .handles { position: relative; height: 14px; margin-top: 6px; }
-      .handle { position: absolute; top: 2px; width: 8px; height: 8px; border-radius: 999px; background: #dce4ff; border: 2px solid #1c2745; }
-      .handle.in { left: -15px; }
-      .handle.out { right: -15px; }
-      .node-toolbar { display: flex; gap: 4px; margin-top: 6px; }
-      .node-toolbar button { padding: 4px 6px; font-size: 11px; }
-      .mini { font-size: 10px; color: var(--muted); }
-      .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
-      .tab { font-size: 12px; padding: 6px 10px; }
-      .tab.active { border-color: var(--accent); color: white; }
-      .split { display: grid; gap: 12px; }
-      pre { margin: 0; white-space: pre-wrap; word-break: break-word; padding: 10px; border-radius: 10px; background: #0b1222; border: 1px solid var(--border); font-size: 11px; }
-      .footer { font-size: 11px; color: var(--muted); margin-top: 8px; }
+      :root{--bg:#0b1020;--panel:#11182b;--panel-2:#17213a;--border:#2b3653;--text:#ebefff;--muted:#9ca8cb;--accent:#7c9cff;--parallel:#5eead4;--loop:#f59e0b;--approval:#fb7185;--shell:#67e8f9;--agent:#c4b5fd;--branch:#86efac;--shadow:0 12px 30px rgba(0,0,0,.28)}
+      *{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
+      .app{display:grid;grid-template-columns:280px 1fr 460px;height:100vh;transition:grid-template-columns .2s ease}
+      .app.right-collapsed{grid-template-columns:280px 1fr 0px}.app.right-collapsed .panel-right{overflow:hidden;border:0;padding:0;width:0;min-width:0}
+      .reopen-right{display:none;width:auto;padding:8px 14px;font-size:12px}.app.right-collapsed .reopen-right{display:inline-block}
+      .panel{border-right:1px solid var(--border);background:rgba(17,24,43,.96);display:flex;flex-direction:column;overflow:hidden}.panel:last-child{border-right:0}
+      .panel-right{position:relative;overflow:auto}.panel-scroll{flex:1;overflow-y:auto;overflow-x:hidden}
+      .sec{padding:12px 14px;border-bottom:1px solid var(--border)}.sec-head{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+      .sec-head h2{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:0}.sec-head .arrow{font-size:12px;color:var(--muted);transition:transform .15s}.sec-head .arrow.open{transform:rotate(90deg)}
+      .sec-body{display:none;margin-top:10px}.sec-body.open{display:block}
+      h1,p{margin:0}h1{font-size:16px}p{color:var(--muted);font-size:12px;line-height:1.4}
+      button,input,textarea,select{width:100%;border:1px solid var(--border);background:var(--panel-2);color:var(--text);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px}
+      button{cursor:pointer;font-size:12px}button:hover{border-color:var(--accent)}
+      .row{display:flex;gap:6px}.row>*{flex:1}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+      .chip{display:inline-block;padding:3px 7px;border-radius:999px;background:rgba(124,156,255,.15);color:#c8d5ff;font-size:11px}
+      .badge{display:inline-block;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.06);font-size:11px;color:var(--muted)}
+      .status-inline{font-size:11px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.03);margin-top:8px}
+      .status-inline.warn{border-color:rgba(245,158,11,.35)}
+      .recent-btn{font-size:11px;padding:5px 8px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      label{display:block;font-size:11px;color:var(--muted);margin:8px 0 4px}.hidden{display:none}
+      .canvas-shell{display:flex;flex-direction:column;min-width:0;position:relative}
+      .canvas-bar{display:flex;gap:6px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap}.canvas-bar .spacer{flex:1}.canvas-bar button,.canvas-bar select{width:auto}
+      .canvas{position:relative;overflow:auto;flex:1;background:linear-gradient(rgba(124,156,255,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(124,156,255,.06) 1px,transparent 1px);background-size:28px 28px}
+      .canvas-inner{position:relative;transform-origin:0 0}
+      svg.edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}.edge-label{font-size:11px;fill:#d9e1ff}
+      #edge-actions{position:absolute;inset:0;pointer-events:none}.edge-action{position:absolute;width:auto;min-width:24px;padding:3px 7px;font-size:10px;border-radius:999px;pointer-events:auto;background:rgba(17,24,43,.98)}
+      .minimap{position:absolute;right:12px;bottom:12px;width:200px;height:120px;background:rgba(12,18,34,.92);border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:var(--shadow);z-index:50;pointer-events:none}
+      .minimap svg{width:100%;height:100%;display:block}
+      .node{position:absolute;width:200px;border:1px solid var(--border);border-radius:14px;background:rgba(23,33,58,.98);box-shadow:var(--shadow);padding:10px;cursor:grab;user-select:none}
+      .node.selected{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset,var(--shadow)}
+      .node.parallel{border-color:rgba(94,234,212,.4)}.node.loop{border-color:rgba(245,158,11,.4)}.node.agent{border-color:rgba(196,181,253,.4)}.node.shell{border-color:rgba(103,232,249,.4)}.node.approval{border-color:rgba(251,113,133,.4)}.node.branch{border-color:rgba(134,239,172,.4)}
+      .node-head{display:flex;justify-content:space-between;gap:6px;margin-bottom:4px}
+      .node-kind{font-size:10px;text-transform:uppercase;letter-spacing:.08em}.node-kind.parallel{color:var(--parallel)}.node-kind.loop{color:var(--loop)}.node-kind.agent{color:var(--agent)}.node-kind.shell{color:var(--shell)}.node-kind.approval{color:var(--approval)}.node-kind.branch{color:var(--branch)}
+      .node-title{font-size:13px;font-weight:700;margin-bottom:4px}.node-body{font-size:11px;color:var(--muted);max-height:52px;overflow:hidden;white-space:pre-wrap}
+      .handles{position:relative;height:14px;margin-top:6px}.handle{position:absolute;top:2px;width:8px;height:8px;border-radius:999px;background:#dce4ff;border:2px solid #1c2745}.handle.in{left:-15px}.handle.out{right:-15px}
+      .node-toolbar{display:flex;gap:4px;margin-top:6px}.node-toolbar button{padding:4px 6px;font-size:11px}
+      .mini{font-size:10px;color:var(--muted)}.tabs{display:flex;gap:6px;margin-bottom:10px}.tab{font-size:12px;padding:6px 10px}.tab.active{border-color:var(--accent);color:white}
+      .split{display:grid;gap:12px}pre{margin:0;white-space:pre-wrap;word-break:break-word;padding:10px;border-radius:10px;background:#0b1222;border:1px solid var(--border);font-size:11px}
+      .footer{font-size:11px;color:var(--muted);margin-top:8px}
     </style>
   </head>
   <body>
     <div class="app" id="app">
       <aside class="panel">
-        <div class="sec" style="padding:14px">
-          <h1>Smithers Graph Builder</h1>
-        </div>
+        <div class="sec" style="padding:14px"><h1>Smithers Graph Builder</h1><p style="margin-top:4px">Fully in-browser. No server required.</p></div>
         <div class="panel-scroll">
-
           <div class="sec" id="sec-file">
             <div class="sec-head" onclick="toggleSec('file')"><h2>File</h2><span class="arrow open" id="arrow-file">›</span></div>
             <div class="sec-body open" id="body-file">
               <div class="row">
-                <input id="local-path" placeholder="path or pick file →" style="font-size:12px" />
-                <button id="pick-file" style="flex:0 0 auto; width:auto; padding:8px 12px" title="Pick file">📂</button>
+                <button id="pick-file">📂 Open file</button>
+                <button id="pick-graph">📂 Open graph JSON</button>
               </div>
-              <input id="pick-file-input" class="hidden" type="file" accept=".tsx,.ts,.json" />
-              <div id="recent-list" style="margin-top:6px"></div>
+              <input id="pick-file-input" class="hidden" type="file" accept=".tsx,.ts" />
+              <input id="pick-graph-input" class="hidden" type="file" accept=".json,.graph.json" />
               <div class="grid2" style="margin-top:6px">
-                <button id="load-local">Load</button>
-                <button id="reload-local">Reload</button>
-                <button id="save-local">Save</button>
-                <button id="validate-code">Validate</button>
+                <button id="export-json">💾 Save graph JSON</button>
+                <button id="export-code">💾 Save workflow.tsx</button>
               </div>
-              <label>Render input</label>
-              <textarea id="render-input" rows="2" style="font-size:11px">{}</textarea>
             </div>
           </div>
-
           <div class="sec" id="sec-add">
             <div class="sec-head" onclick="toggleSec('add')"><h2>Add node</h2><span class="arrow open" id="arrow-add">›</span></div>
             <div class="sec-body open" id="body-add">
               <div class="grid3">
-                <button data-add="agent">Agent</button>
-                <button data-add="shell">Shell</button>
-                <button data-add="approval">Approval</button>
-                <button data-add="parallel">Parallel</button>
-                <button data-add="loop">Loop</button>
-                <button data-add="branch">Branch</button>
+                <button data-add="agent">Agent</button><button data-add="shell">Shell</button><button data-add="approval">Approval</button>
+                <button data-add="parallel">Parallel</button><button data-add="loop">Loop</button><button data-add="branch">Branch</button>
               </div>
             </div>
           </div>
-
-          <div class="sec" id="sec-export">
-            <div class="sec-head" onclick="toggleSec('export')"><h2>Export</h2><span class="arrow" id="arrow-export">›</span></div>
-            <div class="sec-body" id="body-export">
-              <div class="grid2">
-                <button id="export-json">Graph JSON</button>
-                <button id="export-code">workflow.tsx</button>
-                <button id="upload-graph-btn">Upload JSON</button>
-                <button id="upload-tsx-btn">Upload TSX</button>
-              </div>
-              <input id="upload-graph-input" class="hidden" type="file" accept=".json,.graph.json" />
-              <input id="upload-tsx-input" class="hidden" type="file" accept=".tsx,.ts" />
-              <button id="load-example" style="margin-top:6px">Load starter template</button>
+          <div class="sec" id="sec-templates">
+            <div class="sec-head" onclick="toggleSec('templates')"><h2>Templates</h2><span class="arrow" id="arrow-templates">›</span></div>
+            <div class="sec-body" id="body-templates">
+              <button id="load-example">Load starter template</button>
             </div>
           </div>
-
           <div class="sec" id="sec-nodes">
             <div class="sec-head" onclick="toggleSec('nodes')"><h2>Nodes</h2><span class="arrow" id="arrow-nodes">›</span></div>
-            <div class="sec-body" id="body-nodes">
-              <div id="node-list" style="display:grid; gap:4px"></div>
-            </div>
+            <div class="sec-body" id="body-nodes"><div id="node-list" style="display:grid;gap:4px"></div></div>
           </div>
-
           <div id="status-area" style="padding:8px 14px"></div>
         </div>
       </aside>
-
       <main class="canvas-shell">
         <div class="canvas-bar">
-          <button id="zoom-out" style="width:32px">−</button>
-          <button id="zoom-in" style="width:32px">+</button>
-          <button id="fit-view">Fit</button>
-          <select id="orientation" style="width:auto">
-            <option value="horizontal">Horizontal</option>
-            <option value="vertical">Vertical</option>
-          </select>
+          <button id="zoom-out" style="width:32px">−</button><button id="zoom-in" style="width:32px">+</button><button id="fit-view">Fit</button>
+          <select id="orientation" style="width:auto"><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select>
           <span id="zoom-label" class="badge">100%</span>
           <div class="spacer"></div>
           <button id="reopen-right" class="reopen-right">‹ Inspector</button>
         </div>
         <div id="canvas" class="canvas">
-          <div id="canvas-inner" class="canvas-inner">
-            <svg id="edges" class="edges"></svg>
-            <div id="edge-actions"></div>
-            <div id="nodes"></div>
-          </div>
+          <div id="canvas-inner" class="canvas-inner"><svg id="edges" class="edges"></svg><div id="edge-actions"></div><div id="nodes"></div></div>
         </div>
         <div class="minimap"><svg id="minimap"></svg></div>
       </main>
-
       <aside class="panel panel-right">
-        <div class="sec" style="display:flex; align-items:center; gap:8px; padding:10px 14px">
-          <button id="toggle-right" title="Collapse" style="position:static; transform:none; flex:0 0 auto; width:28px; height:28px; display:flex; align-items:center; justify-content:center; padding:0; font-size:14px; border-radius:6px">›</button>
+        <div class="sec" style="display:flex;align-items:center;gap:8px;padding:10px 14px">
+          <button id="toggle-right" title="Collapse" style="position:static;transform:none;flex:0 0 auto;width:28px;height:28px;display:flex;align-items:center;justify-content:center;padding:0;font-size:14px;border-radius:6px">›</button>
           <span class="mini">Inspector</span>
         </div>
         <div class="sec">
           <div class="tabs">
-            <button class="tab active" data-tab="inspector">Inspector</button>
-            <button class="tab" data-tab="code">Code</button>
-            <button class="tab" data-tab="plan">Plan</button>
-            <button class="tab" data-tab="graph">Graph JSON</button>
+            <button class="tab active" data-tab="inspector">Inspector</button><button class="tab" data-tab="code">Code</button><button class="tab" data-tab="plan">Plan</button><button class="tab" data-tab="graph">Graph JSON</button>
           </div>
           <div id="tab-inspector" class="split"></div>
           <div id="tab-code" class="split" style="display:none"><pre id="code-output"></pre></div>
@@ -212,245 +117,375 @@
         </div>
       </aside>
     </div>
-
     <script>
-      const state = {
-        workflowName: 'visual-builder-demo',
-        positions: {},
-        zoom: 1,
-        orientation: 'horizontal',
-        localPath: '',
-        renderInputJson: '{}',
-        sourceInfo: null,
-        lastValidation: null,
-        statusMessages: [],
-        root: {
-          id: 'root-sequence', kind: 'sequence', title: 'Main sequence', children: [
-            { id: 'plan', kind: 'agent', title: 'Plan task', outputKey: 'plan', schema: 'z.object({ summary: z.string() })', prompt: 'Create an implementation plan for: ${ctx.input.request}' },
-            { id: 'decision', kind: 'branch', title: 'Scope decision', condition: 'ctx.input.isLargeChange === true', children: [
-              { id: 'decision-true', kind: 'sequence', title: 'If true', children: [ { id: 'deep-review', kind: 'agent', title: 'Deep review', outputKey: 'deepReview', schema: 'z.object({ summary: z.string() })', prompt: 'Review the large-scope plan before implementation.' } ]},
-              { id: 'decision-false', kind: 'sequence', title: 'If false', children: [ { id: 'fast-track', kind: 'shell', title: 'Fast-track check', outputKey: 'fastCheck', schema: 'z.object({ ok: z.boolean(), stdout: z.string() })', command: 'bun test' } ]},
-            ]},
-            { id: 'parallel-docs-tests', kind: 'parallel', title: 'Parallel updates', children: [
-              { id: 'update-docs', kind: 'agent', title: 'Update docs', outputKey: 'docsUpdate', schema: 'z.object({ summary: z.string() })', prompt: 'Update the docs for the requested change.' },
-              { id: 'run-tests', kind: 'shell', title: 'Run tests', outputKey: 'testResult', schema: 'z.object({ ok: z.boolean(), stdout: z.string() })', command: 'bun test' },
-            ]},
-            { id: 'review-loop', kind: 'loop', title: 'Review loop', loopId: 'review-loop', maxIterations: 3, children: [
-              { id: 'implement', kind: 'agent', title: 'Implement', outputKey: 'implementation', schema: 'z.object({ summary: z.string(), filesChanged: z.array(z.string()) })', prompt: 'Implement the plan and summarize the changes.' },
-              { id: 'review', kind: 'approval', title: 'Human review', outputKey: 'reviewDecision', schema: 'z.object({ approved: z.boolean(), note: z.string().nullable(), decidedBy: z.string().nullable(), decidedAt: z.string().nullable() })', message: 'Approve after checking the implementation.' },
-            ]},
-          ]
-        },
-        selectedId: 'plan',
-        tab: 'inspector',
-        drag: null,
-      };
-
-      const $ = (s) => document.getElementById(s);
-      const nodesEl = $('nodes'), edgeActionsEl = $('edge-actions'), listEl = $('node-list');
-      const inspectorEl = $('tab-inspector'), codeOutputEl = $('code-output'), planOutputEl = $('plan-output'), graphOutputEl = $('graph-output');
-      const edgesEl = $('edges'), canvasInnerEl = $('canvas-inner'), canvasEl = $('canvas'), zoomLabelEl = $('zoom-label'), minimapEl = $('minimap');
-      const statusAreaEl = $('status-area'), localPathEl = $('local-path'), renderInputEl = $('render-input'), orientationEl = $('orientation');
-      const uploadGraphInputEl = $('upload-graph-input'), uploadTsxInputEl = $('upload-tsx-input'), pickFileInputEl = $('pick-file-input');
-
-      window.toggleSec = function(id) {
-        const body = $('body-' + id), arrow = $('arrow-' + id);
-        body.classList.toggle('open');
-        arrow.classList.toggle('open');
+    // ── buildPlanTree inlined from smithers-orchestrator/graph ──────────────
+    // Pure function, zero dependencies. Ported from src/engine/scheduler.ts
+    const buildPlanTree = (() => {
+      function resolveStableId(explicitId, prefix, path) {
+        if (typeof explicitId === 'string' && explicitId.trim().length > 0) return explicitId;
+        return path.length === 0 ? `${prefix}:root` : `${prefix}:${path.join('.')}`;
       }
-
-      const esc = (v) => String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
-      const isContainer = (n) => n && ['sequence','parallel','loop','branch'].includes(n.kind);
-      const isTaskNode = (n) => n && ['agent','shell','approval'].includes(n.kind);
-      function normalizeTask(node) { return { id: String(node.id||'task'), kind: node.kind==='shell'||node.kind==='approval'?node.kind:'agent', title: String(node.title||node.id||'Task'), outputKey: String(node.outputKey||node.id||'output'), schema: String(node.schema||(node.kind==='approval'?'z.object({ approved: z.boolean(), note: z.string().nullable(), decidedBy: z.string().nullable(), decidedAt: z.string().nullable() })':'z.object({ result: z.string() })')), prompt: typeof node.prompt==='string'?node.prompt:undefined, command: typeof node.command==='string'?node.command:undefined, message: typeof node.message==='string'?node.message:undefined }; }
-      function normalizeNode(node) { if (isTaskNode(node)) return normalizeTask(node); const kind = node.kind==='parallel'||node.kind==='loop'||node.kind==='branch'?node.kind:'sequence'; const base = { id: String(node.id||`${kind}-1`), kind, title: String(node.title||kind), children: Array.isArray(node.children)?node.children.map(normalizeNode):[] }; if (kind==='loop') { base.loopId = typeof node.loopId==='string'?node.loopId:base.id; base.maxIterations = typeof node.maxIterations==='number'?node.maxIterations:3; } if (kind==='branch') { base.condition = typeof node.condition==='string'?node.condition:'true'; } return base; }
-      function applyDocument(doc) { const n = { workflowName: String(doc.workflowName||'workflow'), orientation: doc.orientation==='vertical'?'vertical':'horizontal', positions: typeof doc.positions==='object'&&doc.positions?doc.positions:{}, root: normalizeNode(doc.root||{id:'root-sequence',kind:'sequence',title:'Main',children:[]}) }; state.workflowName=n.workflowName; state.orientation=n.orientation; state.positions=n.positions; state.root=isContainer(n.root)?n.root:{id:'root-sequence',kind:'sequence',title:'Main',children:[n.root]}; state.selectedId=state.root.children[0]?.id||state.root.id; orientationEl.value=state.orientation; }
-      function documentModel() { return { version:1, workflowName:state.workflowName, orientation:state.orientation, positions:state.positions, root:state.root }; }
-      function walk(node,visitor,parent=null) { visitor(node,parent); for (const child of node.children??[]) walk(child,visitor,node); }
-      function findNode(id) { let found=null; walk(state.root,(node,parent)=>{ if(node.id===id) found={node,parent}; }); return found; }
-      const selectedEntry=()=>findNode(state.selectedId);
-      function selectedContainer() { const e=selectedEntry(); if(!e) return state.root; return isContainer(e.node)?e.node:(e.parent&&isContainer(e.parent)?e.parent:state.root); }
-      function depthOf(id) { let d=0; function h(node,c) { if(node.id===id){d=c;return true;} for(const child of node.children??[]) if(h(child,c+1)) return true; return false; } h(state.root,0); return d; }
-      function flattenNodes() { const rows=[]; walk(state.root,(node)=>{ if(node.id!==state.root.id) rows.push({id:node.id,kind:node.kind,depth:depthOf(node.id)}); }); return rows; }
-      function preview(node) { if(node.kind==='agent') return node.prompt||''; if(node.kind==='shell') return node.command||''; if(node.kind==='approval') return node.message||''; if(node.kind==='loop') return `Loop · maxIter=${node.maxIterations||3}`; if(node.kind==='branch') return `${node.condition||'true'}`; return `${node.children?.length??0} children`; }
-      function edgeKind(parent) { if(parent.kind==='parallel') return 'parallel'; if(parent.kind==='loop') return 'loop'; if(parent.kind==='branch') return 'branch'; return 'flow'; }
-      function entryLabel(parent,child,index) { if(parent.kind==='parallel') return 'parallel'; if(parent.kind==='loop') return 'step'; if(parent.kind==='branch') return index===0?'true':'false'; if(parent.kind==='sequence') return 'next'; return 'flow'; }
-
-      function buildVisualGraph() {
-        const nodes=[],edges=[],W=200,H=105,PRIMARY=160,SECONDARY=170; let edgeId=0;
-        function addNode(v) { const o=state.positions[v.id]; if(o){v.x=o.x;v.y=o.y;} nodes.push(v); }
-        function addEdge(from,to,label,kind) { edges.push({id:`e-${edgeId++}`,from,to,label,kind}); }
-        function layout(node,x,y) {
-          addNode({id:node.id,kind:node.kind,title:node.title||node.id,body:preview(node),x,y,w:W,h:H,raw:node});
-          if(!node.children?.length) return {width:W,height:H};
-          if(node.kind==='parallel'||node.kind==='branch') {
-            let maxP=x+W;
-            node.children.forEach((child,i)=>{
-              const cx=state.orientation==='horizontal'?x+W+PRIMARY:x+i*(W+PRIMARY);
-              const cy=state.orientation==='horizontal'?y+(i-(node.children.length-1)/2)*SECONDARY:y+H+PRIMARY;
-              const res=layout(child,cx,cy);
-              addEdge(node.id,child.id,entryLabel(node,child,i),edgeKind(node));
-              maxP=Math.max(maxP,state.orientation==='horizontal'?cx+res.width:cy+res.height);
-            });
-            return state.orientation==='horizontal'?{width:maxP-x,height:H+PRIMARY+SECONDARY*node.children.length}:{width:W+PRIMARY*node.children.length,height:H+PRIMARY+SECONDARY};
+      function parseBool(value) { return value === 'true' || value === '1'; }
+      function parseNum(value, fallback) { const n = value ? Number(value) : NaN; return !Number.isNaN(n) ? n : fallback; }
+      function buildLoopScope(loopStack) {
+        if (loopStack.length === 0) return '';
+        return '@@' + loopStack.map(l => `${l.ralphId}=${l.iteration}`).join(',');
+      }
+      return function buildPlanTree(xml, ralphState) {
+        if (!xml) return { plan: null, ralphs: [] };
+        const ralphs = [], seenRalph = new Set();
+        function walk(node, ctx) {
+          if (node.kind === 'text') return null;
+          const tag = node.tag;
+          if (ctx.parentIsRalph && tag === 'smithers:ralph') throw new Error('Nested <Ralph> is not supported.');
+          let loopStack = ctx.loopStack, scopedRalphId;
+          if (tag === 'smithers:ralph') {
+            const logicalId = resolveStableId(node.props.id, 'ralph', ctx.path);
+            const scope = buildLoopScope(loopStack);
+            scopedRalphId = logicalId + scope;
+            const currentIter = ralphState?.get?.(scopedRalphId)?.iteration ?? 0;
+            loopStack = [...loopStack, { ralphId: logicalId, iteration: currentIter }];
           }
-          let cursor=0,prev=null,maxP=state.orientation==='horizontal'?x+W:y+H;
-          node.children.forEach((child,i)=>{
-            const cx=state.orientation==='horizontal'?x+W+PRIMARY+cursor:x;
-            const cy=state.orientation==='horizontal'?y:y+H+PRIMARY+cursor;
-            const res=layout(child,cx,cy);
-            addEdge(prev??node.id,child.id,prev?'next':entryLabel(node,child,i),edgeKind(node));
-            prev=child.id;
-            cursor+=(state.orientation==='horizontal'?res.width:res.height)+60;
-            maxP=Math.max(maxP,state.orientation==='horizontal'?cx+res.width:cy+res.height);
-          });
-          if(node.kind==='loop'&&prev) addEdge(prev,node.id,'loop','loop');
-          return state.orientation==='horizontal'?{width:maxP-x,height:H}:{width:W,height:maxP-y};
+          const children = []; let elementIndex = 0; const isRalph = tag === 'smithers:ralph';
+          for (const child of node.children) {
+            const nextPath = child.kind === 'element' ? [...ctx.path, elementIndex++] : ctx.path;
+            const built = walk(child, { path: nextPath, parentIsRalph: isRalph, loopStack });
+            if (built) children.push(built);
+          }
+          if (tag === 'smithers:task') { const id = node.props.id; if (!id) return null; const ancestorScope = loopStack.length > 1 ? buildLoopScope(loopStack.slice(0, -1)) : ''; return { kind: 'task', nodeId: id + ancestorScope }; }
+          if (tag === 'smithers:workflow' || tag === 'smithers:sequence') return { kind: 'sequence', children };
+          if (tag === 'smithers:parallel' || tag === 'smithers:merge-queue') return { kind: 'parallel', children };
+          if (tag === 'smithers:worktree') return { kind: 'group', children };
+          if (tag === 'smithers:ralph') {
+            const id = scopedRalphId;
+            if (seenRalph.has(id)) throw new Error(`Duplicate Ralph id: ${id}`);
+            seenRalph.add(id);
+            const until = parseBool(node.props.until), maxIterations = parseNum(node.props.maxIterations, 5);
+            const onMaxReached = node.props.onMaxReached ?? 'return-last';
+            ralphs.push({ id, until, maxIterations, onMaxReached });
+            return { kind: 'ralph', id, children, until, maxIterations, onMaxReached };
+          }
+          return { kind: 'group', children };
         }
-        layout(state.root,60,200);
-        const maxX=Math.max(...nodes.map(n=>n.x+n.w))+100;
-        const maxY=Math.max(...nodes.map(n=>n.y+n.h))+100;
-        return {nodes,edges,width:Math.max(maxX,800),height:Math.max(maxY,600)};
+        return { plan: walk(xml, { path: [], parentIsRalph: false, loopStack: [] }), ralphs };
+      };
+    })();
+
+    // ── TSX text parser (client-side import of existing workflows) ──────────
+    function parseTsxToDocument(code, fileName) {
+      const warnings = [];
+      const schemaPattern = /createSmithers\s*\(\s*\{([\s\S]*?)\}\s*\)/;
+      const schemaMatch = code.match(schemaPattern);
+      const schemaKeys = [];
+      if (schemaMatch) { for (const m of schemaMatch[1].matchAll(/(\w+)\s*:/g)) schemaKeys.push(m[1]); }
+
+      // Extract workflow name
+      const nameMatch = code.match(/name\s*=\s*["']([^"']+)["']/);
+      const workflowName = nameMatch?.[1] || fileName?.replace(/\.(tsx|ts)$/, '') || 'workflow';
+
+      function extractChildren(block) {
+        const nodes = [];
+        // Match Task components
+        for (const m of block.matchAll(/<Task\s+([^>]*?)(?:\/>|>([\s\S]*?)<\/Task>)/g)) {
+          const props = m[1], body = m[2] || '';
+          const id = props.match(/id\s*=\s*["']([^"']+)["']/)?.[1] || props.match(/id\s*=\s*\{["']([^"']+)["']\}/)?.[1];
+          if (!id) continue;
+          const outputMatch = props.match(/output\s*=\s*\{outputs\.(\w+)\}/);
+          const outputKey = outputMatch?.[1] || id;
+          const schemaStr = schemaKeys.includes(outputKey) ? `(from createSmithers)` : 'z.object({ result: z.string() })';
+          const promptText = body.replace(/^\s*\{[`"']|[`"']\}\s*$/g, '').replace(/\\n/g, '\n').trim();
+          const isShell = /shell|command|run.*test|bun test|npm test/i.test(promptText) || /shell|command/i.test(id);
+          nodes.push({
+            id, kind: isShell ? 'shell' : 'agent', title: id,
+            outputKey, schema: schemaStr,
+            ...(isShell ? { command: promptText } : { prompt: promptText }),
+          });
+        }
+        // Match Approval
+        for (const m of block.matchAll(/<Approval\s+([^>]*?)\/>/g)) {
+          const props = m[1];
+          const id = props.match(/id\s*=\s*["']([^"']+)["']/)?.[1] || 'approval';
+          const outputMatch = props.match(/output\s*=\s*\{outputs\.(\w+)\}/);
+          const msgMatch = props.match(/summary:\s*["']([^"']*?)["']/);
+          nodes.push({
+            id, kind: 'approval', title: id,
+            outputKey: outputMatch?.[1] || id,
+            schema: 'z.object({ approved: z.boolean(), note: z.string().nullable(), decidedBy: z.string().nullable(), decidedAt: z.string().nullable() })',
+            message: msgMatch?.[1] || 'Approval required',
+          });
+        }
+        return nodes;
       }
 
-      function outputsAccess(key) { return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)?`outputs.${key}`:`outputs[${JSON.stringify(key)}]`; }
-      function quoteObjectKey(key) { return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)?key:JSON.stringify(key); }
-      function collectSchemas(node,rows) { if(isTaskNode(node)) rows.set(node.outputKey,node.schema); for(const child of node.children??[]) collectSchemas(child,rows); }
-      function subtreeCode(node,level) {
-        const pad='  '.repeat(level);
-        if(node.kind==='agent') return [`${pad}<Task id="${node.id}" output={${outputsAccess(node.outputKey)}} agent={sharedAgent}>`,`${pad}  {\`${node.prompt||''}\`}`,`${pad}</Task>`].join('\n');
-        if(node.kind==='shell') return [`${pad}<Task id="${node.id}" output={${outputsAccess(node.outputKey)}} agent={sharedAgent}>`,`${pad}  {\`Run this shell command and return JSON matching the schema.\\n\\n${node.command||''}\`}`,`${pad}</Task>`].join('\n');
-        if(node.kind==='approval') return `${pad}<Approval id="${node.id}" output={${outputsAccess(node.outputKey)}} request={{ title: ${JSON.stringify(node.title)}, summary: ${JSON.stringify(node.message||'')} }} />`;
-        if(node.kind==='sequence') return [`${pad}<Sequence>`,...node.children.map(c=>subtreeCode(c,level+1)),`${pad}</Sequence>`].join('\n');
-        if(node.kind==='parallel') return [`${pad}<Parallel>`,...node.children.map(c=>subtreeCode(c,level+1)),`${pad}</Parallel>`].join('\n');
-        if(node.kind==='loop') return [`${pad}<Ralph id="${node.loopId||node.id}" until={false} maxIterations={${Number(node.maxIterations||3)}}>`,...node.children.map(c=>subtreeCode(c,level+1)),`${pad}</Ralph>`].join('\n');
-        if(node.kind==='branch') { const t=node.children[0]?subtreeCode(node.children[0],level+2):`${'  '.repeat(level+2)}<Sequence />`; const f=node.children[1]?subtreeCode(node.children[1],level+2):`${'  '.repeat(level+2)}<Sequence />`; return [`${pad}<Branch`,`${pad}  if={${node.condition||'true'}}`,`${pad}  then={(`,t,`${pad}  )}`,`${pad}  else={(`,f,`${pad}  )}`,`${pad}/>`].join('\n'); }
-        return '';
-      }
-      function generateCode() { const schemas=new Map(); collectSchemas(state.root,schemas); const sl=[...schemas.entries()].map(([k,v])=>`  ${quoteObjectKey(k)}: ${v},`); return ['import { Approval, Branch, CodexAgent, Parallel, Ralph, Sequence, Task, Workflow, createSmithers } from "smithers-orchestrator";','import { z } from "zod";','','const sharedAgent = new CodexAgent({ model: "gpt-5.3-codex" });','','const { smithers, outputs } = createSmithers({', ...sl, '});','',`export default smithers((ctx) => (`,`  <Workflow name="${state.workflowName}">`,subtreeCode(state.root,2),'  </Workflow>','));'].join('\n'); }
+      function extractStructure(block) {
+        const children = [];
+        let pos = 0;
+        const tagPattern = /<(Sequence|Parallel|Ralph|Branch|Loop)(\s[^>]*)?>|<Task\s|<Approval\s/g;
+        let match;
+        // Simple: extract top-level Smithers components
+        while ((match = tagPattern.exec(block)) !== null) {
+          const tag = match[1];
+          if (!tag) {
+            // Task or Approval at this level — extract individually
+            const slice = block.slice(match.index);
+            const taskNodes = extractChildren(slice.slice(0, slice.indexOf('>') + (slice.includes('/>') ? 2 : slice.indexOf('</') + 20)));
+            children.push(...taskNodes);
+            continue;
+          }
+          // Find matching close tag
+          const openTag = tag;
+          let depth = 1, searchPos = match.index + match[0].length;
+          while (depth > 0 && searchPos < block.length) {
+            const nextOpen = block.indexOf(`<${openTag}`, searchPos);
+            const nextClose = block.indexOf(`</${openTag}>`, searchPos);
+            if (nextClose === -1) break;
+            if (nextOpen !== -1 && nextOpen < nextClose) { depth++; searchPos = nextOpen + openTag.length + 1; }
+            else { depth--; searchPos = nextClose + openTag.length + 3; }
+          }
+          const innerBlock = block.slice(match.index + match[0].length, searchPos - openTag.length - 3);
+          const propsStr = match[2] || '';
 
-      function buildXmlNode(node) { if(isTaskNode(node)) return {kind:'element',tag:'smithers:task',props:{id:node.id},children:[]}; if(node.kind==='sequence') return {kind:'element',tag:'smithers:sequence',props:{},children:node.children.map(buildXmlNode)}; if(node.kind==='parallel') return {kind:'element',tag:'smithers:parallel',props:{},children:node.children.map(buildXmlNode)}; if(node.kind==='loop') return {kind:'element',tag:'smithers:ralph',props:{id:node.loopId||node.id,maxIterations:String(node.maxIterations||3)},children:node.children.map(buildXmlNode)}; if(node.kind==='branch') return {kind:'element',tag:'smithers:branch',props:{if:'true'},children:node.children.map(buildXmlNode)}; return {kind:'element',tag:'smithers:sequence',props:{},children:[]}; }
-      const buildXml=()=>({kind:'element',tag:'smithers:workflow',props:{},children:[buildXmlNode(state.root)]});
-
-      function applyZoom() { canvasInnerEl.style.transform=`scale(${state.zoom})`; zoomLabelEl.textContent=`${Math.round(state.zoom*100)}%`; }
-      function fitView() { const g=buildVisualGraph(); const sx=(canvasEl.clientWidth-40)/g.width; const sy=(canvasEl.clientHeight-40)/g.height; state.zoom=Math.max(0.3,Math.min(1.5,Math.min(sx,sy))); applyZoom(); canvasEl.scrollLeft=0; canvasEl.scrollTop=0; renderMinimap(g); }
-      function renderMinimap(graph) {
-        const vW=canvasEl.clientWidth/state.zoom, vH=canvasEl.clientHeight/state.zoom, vX=canvasEl.scrollLeft/state.zoom, vY=canvasEl.scrollTop/state.zoom;
-        const nm=Object.fromEntries(graph.nodes.map(n=>[n.id,n]));
-        minimapEl.setAttribute('viewBox',`0 0 ${graph.width} ${graph.height}`);
-        minimapEl.innerHTML=`<rect x="0" y="0" width="${graph.width}" height="${graph.height}" fill="#0c1222"></rect>${graph.edges.map(e=>{const f=nm[e.from],t=nm[e.to]; return `<line x1="${f.x+f.w/2}" y1="${f.y+f.h/2}" x2="${t.x+t.w/2}" y2="${t.y+t.h/2}" stroke="${e.kind==='parallel'?'#5eead4':e.kind==='loop'?'#f59e0b':e.kind==='branch'?'#86efac':'#8fa3e8'}" stroke-width="6" opacity=".5"></line>`;}).join('')}${graph.nodes.map(n=>`<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="12" fill="#23304f" stroke="${n.id===state.selectedId?'#7c9cff':'#334269'}" stroke-width="6"></rect>`).join('')}<rect x="${vX}" y="${vY}" width="${vW}" height="${vH}" fill="none" stroke="#fff" stroke-width="8"></rect>`;
-      }
-
-      async function callApi(path,body) { const isGet=!body||Object.keys(body).length===0; const res=isGet?await fetch(path):await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); const json=await res.json(); if(!res.ok) throw new Error(json.error||json.validation?.error||'Request failed'); return json; }
-      function addStatus(type,title,detail) { state.statusMessages.unshift({type,title,detail}); state.statusMessages=state.statusMessages.slice(0,4); }
-      function renderStatus() {
-        let html='';
-        if(state.sourceInfo) { html+=`<div class="status-inline ${state.sourceInfo.roundTripSafe?'':'warn'}"><strong>${state.sourceInfo.roundTripSafe?'✓ Graph-first':'⚠ Best-effort import'}</strong> <span class="mini">${esc(state.sourceInfo.mode)}</span></div>`; }
-        if(state.lastValidation) { html+=`<div class="status-inline ${state.lastValidation.ok?'':'warn'}">${state.lastValidation.ok?'✓ Valid':'✗ Invalid'}</div>`; }
-        for(const m of state.statusMessages) html+=`<div class="status-inline ${m.type==='error'?'warn':''}">${esc(m.title)}</div>`;
-        statusAreaEl.innerHTML=html;
-      }
-
-      async function refreshPlan() { const json=await callApi('/api/plan',{xml:buildXml()}); planOutputEl.textContent=JSON.stringify(json,null,2); graphOutputEl.textContent=JSON.stringify(documentModel(),null,2); }
-      function renderNodeList() { listEl.innerHTML=flattenNodes().map(row=>`<button class="recent-btn" onclick="selectNode('${row.id}')" style="padding-left:${6+row.depth*14}px">${esc(row.id)} <span class="badge">${esc(row.kind)}</span></button>`).join(''); }
-
-      function pathBetween(a,b,kind) {
-        if(state.orientation==='vertical') { const sx=a.x+a.w/2,sy=a.y+a.h,tx=b.x+b.w/2,ty=b.y; const dy=Math.max(60,(ty-sy)/2); if(kind==='loop'){const lx=Math.min(sx,tx)-100; return `M ${sx} ${sy} C ${sx} ${sy+dy}, ${lx} ${ty-dy}, ${tx} ${ty}`;} return `M ${sx} ${sy} C ${sx} ${sy+dy}, ${tx} ${ty-dy}, ${tx} ${ty}`; }
-        const sx=a.x+a.w,sy=a.y+a.h/2,tx=b.x,ty=b.y+b.h/2; const dx=Math.max(60,(tx-sx)/2); if(kind==='loop'){const top=Math.min(sy,ty)-100,cx=Math.max(sx,tx)+80; return `M ${sx} ${sy} C ${cx} ${sy}, ${cx} ${top}, ${tx} ${ty}`;} return `M ${sx} ${sy} C ${sx+dx} ${sy}, ${tx-dx} ${ty}, ${tx} ${ty}`;
-      }
-      const edgeColor=k=>k==='parallel'?'#5eead4':k==='loop'?'#f59e0b':k==='branch'?'#86efac':'#8fa3e8';
-      const markerId=k=>k==='parallel'?'ap':k==='loop'?'al':k==='branch'?'ab':'af';
-
-      function renderGraphCanvas() {
-        const graph=buildVisualGraph();
-        canvasInnerEl.style.minWidth=graph.width+'px'; canvasInnerEl.style.minHeight=graph.height+'px';
-        nodesEl.innerHTML=graph.nodes.map(n=>`<div class="node ${n.kind} ${n.id===state.selectedId?'selected':''}" style="left:${n.x}px;top:${n.y}px" data-node-id="${n.id}"><div class="node-head"><div class="node-kind ${n.kind}">${esc(n.kind)}</div><div class="mini">${esc(n.id)}</div></div><div class="node-title">${esc(n.title)}</div><div class="node-body">${esc(n.body)}</div><div class="handles"><span class="handle in"></span><span class="handle out"></span></div><div class="node-toolbar"><button onclick="event.stopPropagation();moveNode('${n.id}',-1)">↑</button><button onclick="event.stopPropagation();moveNode('${n.id}',1)">↓</button>${n.id==='root-sequence'?'':`<button onclick="event.stopPropagation();removeNode('${n.id}')">Del</button>`}</div></div>`).join('');
-        const lookup=Object.fromEntries(graph.nodes.map(n=>[n.id,n]));
-        edgesEl.setAttribute('viewBox',`0 0 ${graph.width} ${graph.height}`);
-        edgesEl.innerHTML=`<defs><marker id="af" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#8fa3e8"/></marker><marker id="ap" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#5eead4"/></marker><marker id="al" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#f59e0b"/></marker><marker id="ab" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#86efac"/></marker></defs>${graph.edges.map(e=>{const f=lookup[e.from],t=lookup[e.to],path=pathBetween(f,t,e.kind),stroke=edgeColor(e.kind),marker=markerId(e.kind);const lx=state.orientation==='horizontal'?(f.x+f.w+t.x)/2:(f.x+t.x+t.w)/2;const ly=state.orientation==='horizontal'?(f.y+t.y)/2-(e.kind==='loop'?50:10):(f.y+f.h+t.y)/2-8;return `<path d="${path}" stroke="${stroke}" stroke-width="2.5" fill="none" marker-end="url(#${marker})" opacity="0.9"></path><text x="${lx}" y="${ly}" class="edge-label">${esc(e.label)}</text>`;}).join('')}`;
-        edgeActionsEl.innerHTML=graph.edges.map(e=>{const f=lookup[e.from],t=lookup[e.to];const x=state.orientation==='horizontal'?(f.x+f.w+t.x)/2-12:(f.x+t.x+t.w)/2-12;const y=state.orientation==='horizontal'?(f.y+t.y)/2+4:(f.y+f.h+t.y)/2+4;return `<button class="edge-action" style="left:${x}px;top:${y}px" onclick="event.stopPropagation();addNodeBetween('${e.id}','agent')">＋</button>`;}).join('');
-        document.querySelectorAll('[data-node-id]').forEach(el=>{
-          el.addEventListener('click',()=>{state.selectedId=el.getAttribute('data-node-id');renderInspector();renderMinimap(graph);});
-          el.addEventListener('pointerdown',ev=>{if(ev.target.tagName==='BUTTON')return;const id=el.getAttribute('data-node-id');state.selectedId=id;const rect=el.getBoundingClientRect();const cr=canvasInnerEl.getBoundingClientRect();state.drag={id,dx:(ev.clientX-rect.left)/state.zoom,dy:(ev.clientY-rect.top)/state.zoom,canvasLeft:cr.left,canvasTop:cr.top};el.setPointerCapture(ev.pointerId);renderInspector();});
-        });
-        applyZoom(); renderMinimap(graph);
+          if (tag === 'Sequence') {
+            const inner = extractStructure(innerBlock);
+            children.push({ id: `sequence-${children.length}`, kind: 'sequence', title: 'Sequence', children: inner.length ? inner : extractChildren(innerBlock) });
+          } else if (tag === 'Parallel') {
+            const inner = extractStructure(innerBlock);
+            children.push({ id: `parallel-${children.length}`, kind: 'parallel', title: 'Parallel', children: inner.length ? inner : extractChildren(innerBlock) });
+          } else if (tag === 'Ralph' || tag === 'Loop') {
+            const loopId = propsStr.match(/id\s*=\s*["']([^"']+)["']/)?.[1] || `loop-${children.length}`;
+            const maxIter = propsStr.match(/maxIterations\s*=\s*\{(\d+)\}/)?.[1];
+            const inner = extractStructure(innerBlock);
+            children.push({ id: loopId, kind: 'loop', title: tag, loopId, maxIterations: Number(maxIter || 3), children: inner.length ? inner : extractChildren(innerBlock) });
+          } else if (tag === 'Branch') {
+            const condition = propsStr.match(/if\s*=\s*\{([^}]+)\}/)?.[1] || 'true';
+            // Branch has then/else as props, not children
+            const thenMatch = block.slice(match.index).match(/then\s*=\s*\{?\s*\(([\s\S]*?)\)\s*\}?/);
+            const elseMatch = block.slice(match.index).match(/else\s*=\s*\{?\s*\(([\s\S]*?)\)\s*\}?/);
+            const thenChildren = thenMatch ? extractStructure(thenMatch[1]) : [];
+            const elseChildren = elseMatch ? extractStructure(elseMatch[1]) : [];
+            if (!thenChildren.length && thenMatch) thenChildren.push(...extractChildren(thenMatch[1]));
+            if (!elseChildren.length && elseMatch) elseChildren.push(...extractChildren(elseMatch[1]));
+            children.push({
+              id: `branch-${children.length}`, kind: 'branch', title: 'Branch', condition,
+              children: [
+                { id: `if-true-${children.length}`, kind: 'sequence', title: 'If true', children: thenChildren },
+                { id: `if-false-${children.length}`, kind: 'sequence', title: 'If false', children: elseChildren },
+              ],
+            });
+          }
+        }
+        if (children.length === 0) return extractChildren(block);
+        return children;
       }
 
-      function renderInspector() {
-        const entry=selectedEntry(),node=entry?.node||state.root;
-        const common=`<label>Workflow</label><input value="${esc(state.workflowName)}" oninput="updateWorkflowName(this.value)" /><label>Node id</label><input value="${esc(node.id)}" oninput="updateSelected('id',this.value)" ${node.id==='root-sequence'?'disabled':''} /><label>Title</label><input value="${esc(node.title||'')}" oninput="updateSelected('title',this.value)" /><div class="badge">${esc(node.kind)}</div>`;
-        let specific='';
-        if(node.kind==='agent') specific=`<label>Output key</label><input value="${esc(node.outputKey||'')}" oninput="updateSelected('outputKey',this.value)" /><label>Prompt</label><textarea rows="6" oninput="updateSelected('prompt',this.value)">${esc(node.prompt||'')}</textarea><label>Zod schema</label><textarea rows="3" oninput="updateSelected('schema',this.value)">${esc(node.schema||'')}</textarea>`;
-        else if(node.kind==='shell') specific=`<label>Output key</label><input value="${esc(node.outputKey||'')}" oninput="updateSelected('outputKey',this.value)" /><label>Command</label><textarea rows="4" oninput="updateSelected('command',this.value)">${esc(node.command||'')}</textarea><label>Zod schema</label><textarea rows="3" oninput="updateSelected('schema',this.value)">${esc(node.schema||'')}</textarea>`;
-        else if(node.kind==='approval') specific=`<label>Output key</label><input value="${esc(node.outputKey||'')}" oninput="updateSelected('outputKey',this.value)" /><label>Message</label><textarea rows="4" oninput="updateSelected('message',this.value)">${esc(node.message||'')}</textarea>`;
-        else if(node.kind==='loop') specific=`<label>Loop id</label><input value="${esc(node.loopId||'')}" oninput="updateSelected('loopId',this.value)" /><label>Max iterations</label><input type="number" min="1" value="${esc(node.maxIterations||3)}" oninput="updateSelected('maxIterations',Number(this.value||1))" />`;
-        else if(node.kind==='branch') specific=`<label>Condition</label><textarea rows="3" oninput="updateSelected('condition',this.value)">${esc(node.condition||'true')}</textarea>`;
-        else specific=`<p>Container node. Add children from the left palette.</p>`;
-        inspectorEl.innerHTML=common+specific;
+      // Find the workflow JSX body
+      const workflowMatch = code.match(/<Workflow[^>]*>([\s\S]*)<\/Workflow>/);
+      const body = workflowMatch?.[1] || code;
+      const structure = extractStructure(body);
+
+      if (structure.length === 0) {
+        warnings.push('Could not extract any nodes from the TSX. The file may use patterns the text parser does not recognize.');
       }
-      function renderCode() { codeOutputEl.textContent=generateCode(); }
-      async function render() { renderNodeList(); renderGraphCanvas(); renderInspector(); renderCode(); renderStatus(); await refreshPlan(); }
 
-      function uniqueId(prefix) { let i=1,id=`${prefix}-${i}`; while(findNode(id)){i++;id=`${prefix}-${i}`;} return id; }
-      function makeBranch() { return {id:uniqueId('branch'),kind:'branch',title:'Branch',condition:'true',children:[{id:uniqueId('if-true'),kind:'sequence',title:'If true',children:[makeNode('agent')]},{id:uniqueId('if-false'),kind:'sequence',title:'If false',children:[makeNode('shell')]}]}; }
-      function makeNode(kind) {
-        if(kind==='agent'){const id=uniqueId('task');return {id,kind,title:'Agent task',outputKey:id,schema:'z.object({ result: z.string() })',prompt:'Describe what this task should do.'};}
-        if(kind==='shell'){const id=uniqueId('shell');return {id,kind,title:'Shell step',outputKey:id,schema:'z.object({ ok: z.boolean(), stdout: z.string() })',command:'echo "hello"'};}
-        if(kind==='approval'){const id=uniqueId('approval');return {id,kind,title:'Approval',outputKey:id,schema:'z.object({ approved: z.boolean(), note: z.string().nullable(), decidedBy: z.string().nullable(), decidedAt: z.string().nullable() })',message:'Review before continuing.'};}
-        if(kind==='parallel') return {id:uniqueId('parallel'),kind,title:'Parallel',children:[makeNode('agent'),makeNode('shell')]};
-        if(kind==='loop') return {id:uniqueId('loop'),kind,title:'Loop',loopId:uniqueId('loop'),maxIterations:3,children:[makeNode('agent'),makeNode('approval')]};
-        if(kind==='branch') return makeBranch();
-        return {id:uniqueId('sequence'),kind:'sequence',title:'Sequence',children:[makeNode('agent')]};
-      }
-      function removeNodeFrom(parent,id) { parent.children=parent.children.filter(c=>c.id!==id); for(const child of parent.children) if(child.children) removeNodeFrom(child,id); }
-      function findParentOf(id) { let found=null; walk(state.root,node=>{ if((node.children||[]).some(c=>c.id===id)) found=node; }); return found; }
-      window.selectNode=function(id) { state.selectedId=id; render(); }
-      window.updateWorkflowName=function(v) { state.workflowName=v; render(); }
-      window.updateSelected=function(key,value) { const entry=selectedEntry(); if(!entry) return; entry.node[key]=value; if(key==='id') state.selectedId=value; render(); }
-      window.moveNode=function(id,direction) { const parent=findParentOf(id); if(!parent) return; const index=parent.children.findIndex(n=>n.id===id),next=index+direction; if(index<0||next<0||next>=parent.children.length) return; const [node]=parent.children.splice(index,1); parent.children.splice(next,0,node); render(); }
-      window.removeNode=function(id) { if(id===state.root.id) return; removeNodeFrom(state.root,id); delete state.positions[id]; state.selectedId=state.root.children[0]?.id||state.root.id; render(); }
-      window.addNodeBetween=function(edgeId,kind) { const graph=buildVisualGraph(),edge=graph.edges.find(e=>e.id===edgeId); if(!edge) return; const parent=findParentOf(edge.to)||findParentOf(edge.from)||state.root; const node=makeNode(kind); if(parent&&parent.children){const toIndex=parent.children.findIndex(n=>n.id===edge.to); if(toIndex>=0) parent.children.splice(toIndex,0,node); else parent.children.push(node); state.selectedId=node.id; render();} }
-      function addNode(kind) { const target=selectedContainer(); const node=makeNode(kind); target.children.push(node); state.selectedId=node.id; render(); }
+      const root = { id: 'root-sequence', kind: 'sequence', title: workflowName, children: structure };
+      return {
+        document: { version: 1, workflowName, orientation: 'horizontal', positions: {}, root },
+        warnings,
+      };
+    }
 
-      async function loadLocal() { state.localPath=localPathEl.value.trim(); state.renderInputJson=renderInputEl.value; const result=await callApi('/api/load-local',{path:state.localPath,inputJson:state.renderInputJson}); applyDocument(result.document); state.sourceInfo={mode:result.mode,roundTripSafe:result.roundTripSafe,warnings:result.warnings||[],paths:result.paths,stats:result.stats,diskChanged:false}; addStatus('info','Loaded',state.localPath); render(); }
-      async function saveLocal() { state.localPath=localPathEl.value.trim(); state.renderInputJson=renderInputEl.value; const code=generateCode(); const result=await callApi('/api/save-local',{path:state.localPath,document:documentModel(),code,inputJson:state.renderInputJson}); state.lastValidation=result.validation; state.sourceInfo={...(state.sourceInfo||{}),mode:state.sourceInfo?.mode||'graph',roundTripSafe:true,warnings:state.sourceInfo?.warnings||[],paths:result.saved,stats:result.saved.stats,diskChanged:false}; addStatus('info','Saved',result.saved.tsxPath); renderStatus(); }
-      async function validateCurrent() { state.renderInputJson=renderInputEl.value; state.lastValidation=await callApi('/api/validate',{code:generateCode(),inputJson:state.renderInputJson}); renderStatus(); }
-      async function importGraphContent(content,name) { const result=await callApi('/api/import-graph',{content}); applyDocument(result.document); state.sourceInfo={mode:'graph-upload',roundTripSafe:true,warnings:[],paths:{inputPath:name},stats:{},diskChanged:false}; addStatus('info','Imported graph',name||'graph.json'); render(); }
-      async function importTsxContent(content,name) { state.renderInputJson=renderInputEl.value; const result=await callApi('/api/import-tsx',{code:content,inputJson:state.renderInputJson}); applyDocument(result.document); state.sourceInfo={mode:result.mode,roundTripSafe:result.roundTripSafe,warnings:result.warnings||[],paths:{inputPath:name},stats:{},diskChanged:false}; addStatus('warn','Imported TSX draft',name||'workflow.tsx'); render(); }
-      async function checkDiskStatus() { if(!state.sourceInfo?.paths?.inputPath||!state.localPath) return; try { const result=await callApi('/api/stat-local',{path:state.localPath}); const prev=state.sourceInfo.stats||{}; const changed=(prev.graph?.mtimeMs&&result.stats?.graph?.mtimeMs&&prev.graph.mtimeMs!==result.stats.graph.mtimeMs)||(prev.tsx?.mtimeMs&&result.stats?.tsx?.mtimeMs&&prev.tsx.mtimeMs!==result.stats.tsx.mtimeMs); if(changed&&!state.sourceInfo.diskChanged){state.sourceInfo.diskChanged=true;addStatus('warn','Disk changed','Use Reload to resync.');renderStatus();} } catch{} }
+    // ── Application state ──────────────────────────────────────────────────
+    const state = {
+      workflowName: 'visual-builder-demo', positions: {}, zoom: 1, orientation: 'horizontal',
+      statusMessages: [],
+      root: {
+        id: 'root-sequence', kind: 'sequence', title: 'Main sequence', children: [
+          { id: 'plan', kind: 'agent', title: 'Plan task', outputKey: 'plan', schema: 'z.object({ summary: z.string() })', prompt: 'Create an implementation plan for: ${ctx.input.request}' },
+          { id: 'parallel-work', kind: 'parallel', title: 'Parallel updates', children: [
+            { id: 'update-docs', kind: 'agent', title: 'Update docs', outputKey: 'docsUpdate', schema: 'z.object({ summary: z.string() })', prompt: 'Update the docs for the requested change.' },
+            { id: 'run-tests', kind: 'shell', title: 'Run tests', outputKey: 'testResult', schema: 'z.object({ ok: z.boolean(), stdout: z.string() })', command: 'bun test' },
+          ]},
+          { id: 'review-loop', kind: 'loop', title: 'Review loop', loopId: 'review-loop', maxIterations: 3, children: [
+            { id: 'implement', kind: 'agent', title: 'Implement', outputKey: 'implementation', schema: 'z.object({ summary: z.string(), filesChanged: z.array(z.string()) })', prompt: 'Implement the plan and summarize the changes.' },
+            { id: 'review', kind: 'approval', title: 'Human review', outputKey: 'reviewDecision', schema: 'z.object({ approved: z.boolean(), note: z.string().nullable(), decidedBy: z.string().nullable(), decidedAt: z.string().nullable() })', message: 'Approve after checking the implementation.' },
+          ]},
+        ]
+      },
+      selectedId: 'plan', tab: 'inspector', drag: null,
+    };
 
-      const pickFileInputEl2=pickFileInputEl;
-      async function pickFile() { pickFileInputEl2.click(); }
-      pickFileInputEl2.addEventListener('change',async()=>{const file=pickFileInputEl2.files?.[0];if(!file)return;pickFileInputEl2.value='';const content=await file.text();const name=file.name;localPathEl.value=name;state.localPath=name;try{if(name.endsWith('.graph.json')||name.endsWith('.json')){await importGraphContent(content,name);}else{await importTsxContent(content,name);}fitView();}catch(err){addStatus('error','Import failed',err.message);renderStatus();}});
-      async function loadRecentWorkflows() { try{const result=await callApi('/api/recent-workflows'); const el=$('recent-list'); if(!result.workflows?.length){el.innerHTML='';return;} el.innerHTML=result.workflows.slice(0,4).map(w=>`<button class="recent-btn" onclick="quickLoad('${esc(w.path)}')">${esc(w.path.split('/').slice(-2).join('/'))} ${w.hasGraph?'<span class="badge">graph</span>':''}</button>`).join(''); }catch{} }
-      window.quickLoad=async function(path) { localPathEl.value=path; state.localPath=path; await loadLocal(); fitView(); }
+    // ── DOM refs ────────────────────────────────────────────────────────────
+    const $=s=>document.getElementById(s);
+    const nodesEl=$('nodes'),edgeActionsEl=$('edge-actions'),listEl=$('node-list');
+    const inspectorEl=$('tab-inspector'),codeOutputEl=$('code-output'),planOutputEl=$('plan-output'),graphOutputEl=$('graph-output');
+    const edgesEl=$('edges'),canvasInnerEl=$('canvas-inner'),canvasEl=$('canvas'),zoomLabelEl=$('zoom-label'),minimapEl=$('minimap');
+    const statusAreaEl=$('status-area'),orientationEl=$('orientation');
 
-      document.querySelectorAll('[data-add]').forEach(button=>button.addEventListener('click',()=>addNode(button.dataset.add)));
-      $('pick-file').addEventListener('click',()=>pickFile().catch(err=>{addStatus('error','Pick failed',err.message);renderStatus();}));
-      $('load-local').addEventListener('click',()=>loadLocal().catch(err=>{addStatus('error','Load failed',err.message);renderStatus();}));
-      $('reload-local').addEventListener('click',()=>loadLocal().catch(err=>{addStatus('error','Reload failed',err.message);renderStatus();}));
-      $('save-local').addEventListener('click',()=>saveLocal().catch(err=>{addStatus('error','Save failed',err.message);renderStatus();}));
-      $('validate-code').addEventListener('click',()=>validateCurrent().catch(err=>{addStatus('error','Validate failed',err.message);renderStatus();}));
-      $('upload-graph-btn').addEventListener('click',()=>uploadGraphInputEl.click());
-      $('upload-tsx-btn').addEventListener('click',()=>uploadTsxInputEl.click());
-      uploadGraphInputEl.addEventListener('change',async()=>{const file=uploadGraphInputEl.files?.[0];if(!file)return;await importGraphContent(await file.text(),file.name);uploadGraphInputEl.value='';});
-      uploadTsxInputEl.addEventListener('change',async()=>{const file=uploadTsxInputEl.files?.[0];if(!file)return;await importTsxContent(await file.text(),file.name);uploadTsxInputEl.value='';});
-      $('export-json').addEventListener('click',()=>{const blob=new Blob([JSON.stringify(documentModel(),null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='workflow.graph.json';a.click();URL.revokeObjectURL(url);});
-      $('export-code').addEventListener('click',()=>{const blob=new Blob([generateCode()],{type:'text/plain;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='workflow.tsx';a.click();URL.revokeObjectURL(url);});
-      $('load-example').addEventListener('click',()=>{state.positions={};state.workflowName='richer-starter';state.root={id:'root-sequence',kind:'sequence',title:'Main sequence',children:[{id:'research',kind:'agent',title:'Research',outputKey:'research',schema:'z.object({ summary: z.string(), keyPoints: z.array(z.string()) })',prompt:'Research the requested issue and summarize key findings.'},{id:'risk-branch',kind:'branch',title:'Risk branch',condition:'ctx.input.risk === "high"',children:[{id:'risk-true',kind:'sequence',title:'High risk',children:[{id:'deep-review',kind:'agent',title:'Deep review',outputKey:'deepReview',schema:'z.object({ summary: z.string() })',prompt:'In-depth review for the risky change.'}]},{id:'risk-false',kind:'sequence',title:'Normal',children:[{id:'fast-check',kind:'shell',title:'Fast check',outputKey:'fastCheck',schema:'z.object({ ok: z.boolean(), stdout: z.string() })',command:'bun test'}]}]},{id:'parallel-impl',kind:'parallel',title:'Implement + docs',children:[{id:'implement-change',kind:'agent',title:'Implement',outputKey:'implementation',schema:'z.object({ summary: z.string(), filesChanged: z.array(z.string()) })',prompt:'Implement the change.'},{id:'update-docs',kind:'agent',title:'Update docs',outputKey:'docsUpdate',schema:'z.object({ summary: z.string() })',prompt:'Update docs.'}]},{id:'validation-loop',kind:'loop',title:'Validate',loopId:'validation-loop',maxIterations:3,children:[{id:'run-tests',kind:'shell',title:'Tests',outputKey:'testResult',schema:'z.object({ ok: z.boolean(), stdout: z.string() })',command:'bun test'},{id:'approval-gate',kind:'approval',title:'Approval',outputKey:'approvalDecision',schema:'z.object({ approved: z.boolean(), note: z.string().nullable(), decidedBy: z.string().nullable(), decidedAt: z.string().nullable() })',message:'Approve after validation.'}]}]};state.sourceInfo=null;addStatus('info','Loaded starter','');render();fitView();});
-      $('zoom-in').addEventListener('click',()=>{state.zoom=Math.min(2,state.zoom+0.1);applyZoom();renderMinimap(buildVisualGraph());});
-      $('zoom-out').addEventListener('click',()=>{state.zoom=Math.max(0.3,state.zoom-0.1);applyZoom();renderMinimap(buildVisualGraph());});
-      $('fit-view').addEventListener('click',()=>fitView());
-      orientationEl.addEventListener('change',e=>{state.orientation=e.target.value;state.positions={};render();});
-      function toggleRightPanel(){const app=$('app');const btn=$('toggle-right');app.classList.toggle('right-collapsed');btn.textContent=app.classList.contains('right-collapsed')?'‹':'›';}
-      $('toggle-right').addEventListener('click',toggleRightPanel);
-      $('reopen-right').addEventListener('click',toggleRightPanel);
-      document.querySelectorAll('[data-tab]').forEach(button=>button.addEventListener('click',()=>{state.tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===button));$('tab-inspector').style.display=state.tab==='inspector'?'grid':'none';$('tab-code').style.display=state.tab==='code'?'grid':'none';$('tab-plan').style.display=state.tab==='plan'?'grid':'none';$('tab-graph').style.display=state.tab==='graph'?'grid':'none';}));
-      document.addEventListener('pointermove',ev=>{if(!state.drag)return;state.positions[state.drag.id]={x:(ev.clientX-state.drag.canvasLeft)/state.zoom-state.drag.dx,y:(ev.clientY-state.drag.canvasTop)/state.zoom-state.drag.dy};renderGraphCanvas();});
-      document.addEventListener('pointerup',()=>{if(!state.drag)return;const id=state.drag.id;state.drag=null;state.selectedId=id;render();});
-      canvasEl.addEventListener('scroll',()=>renderMinimap(buildVisualGraph()));
+    // ── Helpers ─────────────────────────────────────────────────────────────
+    window.toggleSec=function(id){$('body-'+id).classList.toggle('open');$('arrow-'+id).classList.toggle('open');}
+    const esc=v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+    const isContainer=n=>n&&['sequence','parallel','loop','branch'].includes(n.kind);
+    const isTaskNode=n=>n&&['agent','shell','approval'].includes(n.kind);
+    function walk(node,visitor,parent=null){visitor(node,parent);for(const child of node.children??[])walk(child,visitor,node);}
+    function findNode(id){let found=null;walk(state.root,(node,parent)=>{if(node.id===id)found={node,parent};});return found;}
+    const selectedEntry=()=>findNode(state.selectedId);
+    function selectedContainer(){const e=selectedEntry();if(!e)return state.root;return isContainer(e.node)?e.node:(e.parent&&isContainer(e.parent)?e.parent:state.root);}
+    function depthOf(id){let d=0;function h(node,c){if(node.id===id){d=c;return true;}for(const child of node.children??[])if(h(child,c+1))return true;return false;}h(state.root,0);return d;}
+    function flattenNodes(){const rows=[];walk(state.root,node=>{if(node.id!==state.root.id)rows.push({id:node.id,kind:node.kind,depth:depthOf(node.id)});});return rows;}
+    function preview(node){if(node.kind==='agent')return node.prompt||'';if(node.kind==='shell')return node.command||'';if(node.kind==='approval')return node.message||'';if(node.kind==='loop')return`Loop · maxIter=${node.maxIterations||3}`;if(node.kind==='branch')return`${node.condition||'true'}`;return`${node.children?.length??0} children`;}
+    function edgeKind(parent){if(parent.kind==='parallel')return'parallel';if(parent.kind==='loop')return'loop';if(parent.kind==='branch')return'branch';return'flow';}
+    function entryLabel(parent,child,index){if(parent.kind==='parallel')return'parallel';if(parent.kind==='loop')return'step';if(parent.kind==='branch')return index===0?'true':'false';if(parent.kind==='sequence')return'next';return'flow';}
+    function applyDocument(doc){state.workflowName=String(doc.workflowName||'workflow');state.orientation=doc.orientation==='vertical'?'vertical':'horizontal';state.positions=doc.positions||{};state.root=doc.root||{id:'root-sequence',kind:'sequence',title:'Main',children:[]};state.selectedId=state.root.children?.[0]?.id||state.root.id;orientationEl.value=state.orientation;}
+    function documentModel(){return{version:1,workflowName:state.workflowName,orientation:state.orientation,positions:state.positions,root:state.root};}
+    function addStatus(type,title){state.statusMessages.unshift({type,title});state.statusMessages=state.statusMessages.slice(0,3);}
 
-      render(); fitView(); loadRecentWorkflows(); setInterval(checkDiskStatus,4000);
+    // ── Visual graph layout ────────────────────────────────────────────────
+    function buildVisualGraph(){
+      const nodes=[],edges=[],W=200,H=105,PRIMARY=160,SECONDARY=170;let edgeId=0;
+      function addNode(v){const o=state.positions[v.id];if(o){v.x=o.x;v.y=o.y;}nodes.push(v);}
+      function addEdge(from,to,label,kind){edges.push({id:`e-${edgeId++}`,from,to,label,kind});}
+      function layout(node,x,y){
+        addNode({id:node.id,kind:node.kind,title:node.title||node.id,body:preview(node),x,y,w:W,h:H,raw:node});
+        if(!node.children?.length)return{width:W,height:H};
+        if(node.kind==='parallel'||node.kind==='branch'){
+          let maxP=x+W;node.children.forEach((child,i)=>{
+            const cx=state.orientation==='horizontal'?x+W+PRIMARY:x+i*(W+PRIMARY);
+            const cy=state.orientation==='horizontal'?y+(i-(node.children.length-1)/2)*SECONDARY:y+H+PRIMARY;
+            const res=layout(child,cx,cy);addEdge(node.id,child.id,entryLabel(node,child,i),edgeKind(node));
+            maxP=Math.max(maxP,state.orientation==='horizontal'?cx+res.width:cy+res.height);
+          });return state.orientation==='horizontal'?{width:maxP-x,height:H+PRIMARY+SECONDARY*node.children.length}:{width:W+PRIMARY*node.children.length,height:H+PRIMARY+SECONDARY};}
+        let cursor=0,prev=null,maxP=state.orientation==='horizontal'?x+W:y+H;
+        node.children.forEach((child,i)=>{
+          const cx=state.orientation==='horizontal'?x+W+PRIMARY+cursor:x;const cy=state.orientation==='horizontal'?y:y+H+PRIMARY+cursor;
+          const res=layout(child,cx,cy);addEdge(prev??node.id,child.id,prev?'next':entryLabel(node,child,i),edgeKind(node));prev=child.id;
+          cursor+=(state.orientation==='horizontal'?res.width:res.height)+60;maxP=Math.max(maxP,state.orientation==='horizontal'?cx+res.width:cy+res.height);});
+        if(node.kind==='loop'&&prev)addEdge(prev,node.id,'loop','loop');
+        return state.orientation==='horizontal'?{width:maxP-x,height:H}:{width:W,height:maxP-y};}
+      layout(state.root,60,200);
+      const maxX=Math.max(...nodes.map(n=>n.x+n.w))+100,maxY=Math.max(...nodes.map(n=>n.y+n.h))+100;
+      return{nodes,edges,width:Math.max(maxX,800),height:Math.max(maxY,600)};
+    }
+
+    // ── Code generation ────────────────────────────────────────────────────
+    function outputsAccess(key){return/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)?`outputs.${key}`:`outputs[${JSON.stringify(key)}]`;}
+    function quoteObjectKey(key){return/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)?key:JSON.stringify(key);}
+    function collectSchemas(node,rows){if(isTaskNode(node))rows.set(node.outputKey,node.schema);for(const child of node.children??[])collectSchemas(child,rows);}
+    function subtreeCode(node,level){
+      const pad='  '.repeat(level);
+      if(node.kind==='agent')return[`${pad}<Task id="${node.id}" output={${outputsAccess(node.outputKey)}} agent={sharedAgent}>`,`${pad}  {\`${node.prompt||''}\`}`,`${pad}</Task>`].join('\n');
+      if(node.kind==='shell')return[`${pad}<Task id="${node.id}" output={${outputsAccess(node.outputKey)}} agent={sharedAgent}>`,`${pad}  {\`Run this shell command and return JSON matching the schema.\\n\\n${node.command||''}\`}`,`${pad}</Task>`].join('\n');
+      if(node.kind==='approval')return`${pad}<Approval id="${node.id}" output={${outputsAccess(node.outputKey)}} request={{ title: ${JSON.stringify(node.title)}, summary: ${JSON.stringify(node.message||'')} }} />`;
+      if(node.kind==='sequence')return[`${pad}<Sequence>`,...node.children.map(c=>subtreeCode(c,level+1)),`${pad}</Sequence>`].join('\n');
+      if(node.kind==='parallel')return[`${pad}<Parallel>`,...node.children.map(c=>subtreeCode(c,level+1)),`${pad}</Parallel>`].join('\n');
+      if(node.kind==='loop')return[`${pad}<Ralph id="${node.loopId||node.id}" until={false} maxIterations={${Number(node.maxIterations||3)}}>`,...node.children.map(c=>subtreeCode(c,level+1)),`${pad}</Ralph>`].join('\n');
+      if(node.kind==='branch'){const t=node.children[0]?subtreeCode(node.children[0],level+2):`${'  '.repeat(level+2)}<Sequence />`;const f=node.children[1]?subtreeCode(node.children[1],level+2):`${'  '.repeat(level+2)}<Sequence />`;return[`${pad}<Branch`,`${pad}  if={${node.condition||'true'}}`,`${pad}  then={(`,t,`${pad}  )}`,`${pad}  else={(`,f,`${pad}  )}`,`${pad}/>`].join('\n');}return'';}
+    function generateCode(){const schemas=new Map();collectSchemas(state.root,schemas);const sl=[...schemas.entries()].map(([k,v])=>`  ${quoteObjectKey(k)}: ${v},`);return['import { Approval, Branch, CodexAgent, Parallel, Ralph, Sequence, Task, Workflow, createSmithers } from "smithers-orchestrator";','import { z } from "zod";','','const sharedAgent = new CodexAgent({ model: "gpt-5.3-codex" });','','const { smithers, outputs } = createSmithers({',...sl,'});','',`export default smithers((ctx) => (`,`  <Workflow name="${state.workflowName}">`,subtreeCode(state.root,2),'  </Workflow>','));'].join('\n');}
+
+    // ── XML + Plan (all client-side) ───────────────────────────────────────
+    function buildXmlNode(node){if(isTaskNode(node))return{kind:'element',tag:'smithers:task',props:{id:node.id},children:[]};if(node.kind==='sequence')return{kind:'element',tag:'smithers:sequence',props:{},children:node.children.map(buildXmlNode)};if(node.kind==='parallel')return{kind:'element',tag:'smithers:parallel',props:{},children:node.children.map(buildXmlNode)};if(node.kind==='loop')return{kind:'element',tag:'smithers:ralph',props:{id:node.loopId||node.id,maxIterations:String(node.maxIterations||3)},children:node.children.map(buildXmlNode)};if(node.kind==='branch')return{kind:'element',tag:'smithers:branch',props:{if:'true'},children:node.children.map(buildXmlNode)};return{kind:'element',tag:'smithers:sequence',props:{},children:[]};}
+    const buildXml=()=>({kind:'element',tag:'smithers:workflow',props:{},children:[buildXmlNode(state.root)]});
+    function refreshPlan(){try{const result=buildPlanTree(buildXml());planOutputEl.textContent=JSON.stringify(result,null,2);}catch(e){planOutputEl.textContent='Error: '+e.message;}graphOutputEl.textContent=JSON.stringify(documentModel(),null,2);}
+
+    // ── Rendering ──────────────────────────────────────────────────────────
+    function applyZoom(){canvasInnerEl.style.transform=`scale(${state.zoom})`;zoomLabelEl.textContent=`${Math.round(state.zoom*100)}%`;}
+    function fitView(){const g=buildVisualGraph();const sx=(canvasEl.clientWidth-40)/g.width,sy=(canvasEl.clientHeight-40)/g.height;state.zoom=Math.max(0.3,Math.min(1.5,Math.min(sx,sy)));applyZoom();canvasEl.scrollLeft=0;canvasEl.scrollTop=0;renderMinimap(g);}
+    function renderMinimap(graph){const vW=canvasEl.clientWidth/state.zoom,vH=canvasEl.clientHeight/state.zoom,vX=canvasEl.scrollLeft/state.zoom,vY=canvasEl.scrollTop/state.zoom;const nm=Object.fromEntries(graph.nodes.map(n=>[n.id,n]));minimapEl.setAttribute('viewBox',`0 0 ${graph.width} ${graph.height}`);minimapEl.innerHTML=`<rect x="0" y="0" width="${graph.width}" height="${graph.height}" fill="#0c1222"></rect>${graph.edges.map(e=>{const f=nm[e.from],t=nm[e.to];return`<line x1="${f.x+f.w/2}" y1="${f.y+f.h/2}" x2="${t.x+t.w/2}" y2="${t.y+t.h/2}" stroke="${e.kind==='parallel'?'#5eead4':e.kind==='loop'?'#f59e0b':e.kind==='branch'?'#86efac':'#8fa3e8'}" stroke-width="6" opacity=".5"></line>`;}).join('')}${graph.nodes.map(n=>`<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="12" fill="#23304f" stroke="${n.id===state.selectedId?'#7c9cff':'#334269'}" stroke-width="6"></rect>`).join('')}<rect x="${vX}" y="${vY}" width="${vW}" height="${vH}" fill="none" stroke="#fff" stroke-width="8"></rect>`;}
+    function renderNodeList(){listEl.innerHTML=flattenNodes().map(row=>`<button class="recent-btn" onclick="selectNode('${row.id}')" style="padding-left:${6+row.depth*14}px">${esc(row.id)} <span class="badge">${esc(row.kind)}</span></button>`).join('');}
+    function pathBetween(a,b,kind){if(state.orientation==='vertical'){const sx=a.x+a.w/2,sy=a.y+a.h,tx=b.x+b.w/2,ty=b.y;const dy=Math.max(60,(ty-sy)/2);if(kind==='loop'){const lx=Math.min(sx,tx)-100;return`M ${sx} ${sy} C ${sx} ${sy+dy}, ${lx} ${ty-dy}, ${tx} ${ty}`;}return`M ${sx} ${sy} C ${sx} ${sy+dy}, ${tx} ${ty-dy}, ${tx} ${ty}`;}const sx=a.x+a.w,sy=a.y+a.h/2,tx=b.x,ty=b.y+b.h/2;const dx=Math.max(60,(tx-sx)/2);if(kind==='loop'){const top=Math.min(sy,ty)-100,cx=Math.max(sx,tx)+80;return`M ${sx} ${sy} C ${cx} ${sy}, ${cx} ${top}, ${tx} ${ty}`;}return`M ${sx} ${sy} C ${sx+dx} ${sy}, ${tx-dx} ${ty}, ${tx} ${ty}`;}
+    const edgeColor=k=>k==='parallel'?'#5eead4':k==='loop'?'#f59e0b':k==='branch'?'#86efac':'#8fa3e8';
+    const markerId=k=>k==='parallel'?'ap':k==='loop'?'al':k==='branch'?'ab':'af';
+    function renderGraphCanvas(){
+      const graph=buildVisualGraph();canvasInnerEl.style.minWidth=graph.width+'px';canvasInnerEl.style.minHeight=graph.height+'px';
+      nodesEl.innerHTML=graph.nodes.map(n=>`<div class="node ${n.kind} ${n.id===state.selectedId?'selected':''}" style="left:${n.x}px;top:${n.y}px" data-node-id="${n.id}"><div class="node-head"><div class="node-kind ${n.kind}">${esc(n.kind)}</div><div class="mini">${esc(n.id)}</div></div><div class="node-title">${esc(n.title)}</div><div class="node-body">${esc(n.body)}</div><div class="handles"><span class="handle in"></span><span class="handle out"></span></div><div class="node-toolbar"><button onclick="event.stopPropagation();moveNode('${n.id}',-1)">↑</button><button onclick="event.stopPropagation();moveNode('${n.id}',1)">↓</button>${n.id==='root-sequence'?'':`<button onclick="event.stopPropagation();removeNode('${n.id}')">Del</button>`}</div></div>`).join('');
+      const lookup=Object.fromEntries(graph.nodes.map(n=>[n.id,n]));
+      edgesEl.setAttribute('viewBox',`0 0 ${graph.width} ${graph.height}`);
+      edgesEl.innerHTML=`<defs><marker id="af" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#8fa3e8"/></marker><marker id="ap" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#5eead4"/></marker><marker id="al" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#f59e0b"/></marker><marker id="ab" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#86efac"/></marker></defs>${graph.edges.map(e=>{const f=lookup[e.from],t=lookup[e.to],path=pathBetween(f,t,e.kind),stroke=edgeColor(e.kind),marker=markerId(e.kind);const lx=state.orientation==='horizontal'?(f.x+f.w+t.x)/2:(f.x+t.x+t.w)/2;const ly=state.orientation==='horizontal'?(f.y+t.y)/2-(e.kind==='loop'?50:10):(f.y+f.h+t.y)/2-8;return`<path d="${path}" stroke="${stroke}" stroke-width="2.5" fill="none" marker-end="url(#${marker})" opacity="0.9"></path><text x="${lx}" y="${ly}" class="edge-label">${esc(e.label)}</text>`;}).join('')}`;
+      edgeActionsEl.innerHTML=graph.edges.map(e=>{const f=lookup[e.from],t=lookup[e.to];const x=state.orientation==='horizontal'?(f.x+f.w+t.x)/2-12:(f.x+t.x+t.w)/2-12;const y=state.orientation==='horizontal'?(f.y+t.y)/2+4:(f.y+f.h+t.y)/2+4;return`<button class="edge-action" style="left:${x}px;top:${y}px" onclick="event.stopPropagation();addNodeBetween('${e.id}','agent')">＋</button>`;}).join('');
+      document.querySelectorAll('[data-node-id]').forEach(el=>{
+        el.addEventListener('click',()=>{state.selectedId=el.getAttribute('data-node-id');renderInspector();renderMinimap(graph);});
+        el.addEventListener('pointerdown',ev=>{if(ev.target.tagName==='BUTTON')return;const id=el.getAttribute('data-node-id');state.selectedId=id;const rect=el.getBoundingClientRect();const cr=canvasInnerEl.getBoundingClientRect();state.drag={id,dx:(ev.clientX-rect.left)/state.zoom,dy:(ev.clientY-rect.top)/state.zoom,canvasLeft:cr.left,canvasTop:cr.top};el.setPointerCapture(ev.pointerId);renderInspector();});
+      });applyZoom();renderMinimap(graph);}
+    function renderInspector(){const entry=selectedEntry(),node=entry?.node||state.root;const common=`<label>Workflow</label><input value="${esc(state.workflowName)}" oninput="updateWorkflowName(this.value)" /><label>Node id</label><input value="${esc(node.id)}" oninput="updateSelected('id',this.value)" ${node.id==='root-sequence'?'disabled':''} /><label>Title</label><input value="${esc(node.title||'')}" oninput="updateSelected('title',this.value)" /><div class="badge">${esc(node.kind)}</div>`;let specific='';if(node.kind==='agent')specific=`<label>Output key</label><input value="${esc(node.outputKey||'')}" oninput="updateSelected('outputKey',this.value)" /><label>Prompt</label><textarea rows="6" oninput="updateSelected('prompt',this.value)">${esc(node.prompt||'')}</textarea><label>Zod schema</label><textarea rows="3" oninput="updateSelected('schema',this.value)">${esc(node.schema||'')}</textarea>`;else if(node.kind==='shell')specific=`<label>Output key</label><input value="${esc(node.outputKey||'')}" oninput="updateSelected('outputKey',this.value)" /><label>Command</label><textarea rows="4" oninput="updateSelected('command',this.value)">${esc(node.command||'')}</textarea><label>Zod schema</label><textarea rows="3" oninput="updateSelected('schema',this.value)">${esc(node.schema||'')}</textarea>`;else if(node.kind==='approval')specific=`<label>Output key</label><input value="${esc(node.outputKey||'')}" oninput="updateSelected('outputKey',this.value)" /><label>Message</label><textarea rows="4" oninput="updateSelected('message',this.value)">${esc(node.message||'')}</textarea>`;else if(node.kind==='loop')specific=`<label>Loop id</label><input value="${esc(node.loopId||'')}" oninput="updateSelected('loopId',this.value)" /><label>Max iterations</label><input type="number" min="1" value="${esc(node.maxIterations||3)}" oninput="updateSelected('maxIterations',Number(this.value||1))" />`;else if(node.kind==='branch')specific=`<label>Condition</label><textarea rows="3" oninput="updateSelected('condition',this.value)">${esc(node.condition||'true')}</textarea>`;else specific=`<p>Container node. Add children from the left palette.</p>`;inspectorEl.innerHTML=common+specific;}
+    function renderCode(){codeOutputEl.textContent=generateCode();}
+    function renderStatus(){let html='';for(const m of state.statusMessages)html+=`<div class="status-inline ${m.type==='error'||m.type==='warn'?'warn':''}">${esc(m.title)}</div>`;statusAreaEl.innerHTML=html;}
+    function render(){renderNodeList();renderGraphCanvas();renderInspector();renderCode();renderStatus();refreshPlan();}
+
+    // ── Node CRUD ──────────────────────────────────────────────────────────
+    function uniqueId(prefix){let i=1,id=`${prefix}-${i}`;while(findNode(id)){i++;id=`${prefix}-${i}`;}return id;}
+    function makeBranch(){return{id:uniqueId('branch'),kind:'branch',title:'Branch',condition:'true',children:[{id:uniqueId('if-true'),kind:'sequence',title:'If true',children:[makeNode('agent')]},{id:uniqueId('if-false'),kind:'sequence',title:'If false',children:[makeNode('shell')]}]};}
+    function makeNode(kind){
+      if(kind==='agent'){const id=uniqueId('task');return{id,kind,title:'Agent task',outputKey:id,schema:'z.object({ result: z.string() })',prompt:'Describe what this task should do.'};}
+      if(kind==='shell'){const id=uniqueId('shell');return{id,kind,title:'Shell step',outputKey:id,schema:'z.object({ ok: z.boolean(), stdout: z.string() })',command:'echo "hello"'};}
+      if(kind==='approval'){const id=uniqueId('approval');return{id,kind,title:'Approval',outputKey:id,schema:'z.object({ approved: z.boolean(), note: z.string().nullable(), decidedBy: z.string().nullable(), decidedAt: z.string().nullable() })',message:'Review before continuing.'};}
+      if(kind==='parallel')return{id:uniqueId('parallel'),kind,title:'Parallel',children:[makeNode('agent'),makeNode('shell')]};
+      if(kind==='loop')return{id:uniqueId('loop'),kind,title:'Loop',loopId:uniqueId('loop'),maxIterations:3,children:[makeNode('agent'),makeNode('approval')]};
+      if(kind==='branch')return makeBranch();
+      return{id:uniqueId('sequence'),kind:'sequence',title:'Sequence',children:[makeNode('agent')]};}
+    function removeNodeFrom(parent,id){parent.children=parent.children.filter(c=>c.id!==id);for(const child of parent.children)if(child.children)removeNodeFrom(child,id);}
+    function findParentOf(id){let found=null;walk(state.root,node=>{if((node.children||[]).some(c=>c.id===id))found=node;});return found;}
+    window.selectNode=function(id){state.selectedId=id;render();}
+    window.updateWorkflowName=function(v){state.workflowName=v;render();}
+    window.updateSelected=function(key,value){const entry=selectedEntry();if(!entry)return;entry.node[key]=value;if(key==='id')state.selectedId=value;render();}
+    window.moveNode=function(id,direction){const parent=findParentOf(id);if(!parent)return;const index=parent.children.findIndex(n=>n.id===id),next=index+direction;if(index<0||next<0||next>=parent.children.length)return;const[node]=parent.children.splice(index,1);parent.children.splice(next,0,node);render();}
+    window.removeNode=function(id){if(id===state.root.id)return;removeNodeFrom(state.root,id);delete state.positions[id];state.selectedId=state.root.children[0]?.id||state.root.id;render();}
+    window.addNodeBetween=function(edgeId,kind){const graph=buildVisualGraph(),edge=graph.edges.find(e=>e.id===edgeId);if(!edge)return;const parent=findParentOf(edge.to)||findParentOf(edge.from)||state.root;const node=makeNode(kind);if(parent&&parent.children){const toIndex=parent.children.findIndex(n=>n.id===edge.to);if(toIndex>=0)parent.children.splice(toIndex,0,node);else parent.children.push(node);state.selectedId=node.id;render();}}
+    function addNode(kind){const target=selectedContainer();const node=makeNode(kind);target.children.push(node);state.selectedId=node.id;render();}
+
+    // ── File I/O (browser-only) ────────────────────────────────────────────
+    function downloadFile(name,content,type='text/plain'){const blob=new Blob([content],{type});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);}
+    function readFile(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsText(file);});}
+
+    // ── Event wiring ───────────────────────────────────────────────────────
+    document.querySelectorAll('[data-add]').forEach(button=>button.addEventListener('click',()=>addNode(button.dataset.add)));
+
+    // File picker — open TSX
+    $('pick-file').addEventListener('click',()=>$('pick-file-input').click());
+    $('pick-file-input').addEventListener('change',async()=>{
+      const file=$('pick-file-input').files?.[0];if(!file)return;$('pick-file-input').value='';
+      const content=await readFile(file);
+      const result=parseTsxToDocument(content,file.name);
+      applyDocument(result.document);
+      if(result.warnings.length)addStatus('warn','TSX import: '+result.warnings[0]);
+      else addStatus('info','Imported '+file.name);
+      render();fitView();
+    });
+
+    // File picker — open graph JSON
+    $('pick-graph').addEventListener('click',()=>$('pick-graph-input').click());
+    $('pick-graph-input').addEventListener('change',async()=>{
+      const file=$('pick-graph-input').files?.[0];if(!file)return;$('pick-graph-input').value='';
+      try{const content=await readFile(file);const doc=JSON.parse(content);applyDocument(doc);addStatus('info','Loaded '+file.name);render();fitView();}
+      catch(err){addStatus('error','Invalid JSON: '+err.message);renderStatus();}
+    });
+
+    // Export
+    $('export-json').addEventListener('click',()=>downloadFile('workflow.graph.json',JSON.stringify(documentModel(),null,2),'application/json'));
+    $('export-code').addEventListener('click',()=>downloadFile('workflow.tsx',generateCode()));
+
+    // Template
+    $('load-example').addEventListener('click',()=>{state.positions={};state.workflowName='richer-starter';state.root={id:'root-sequence',kind:'sequence',title:'Main sequence',children:[{id:'research',kind:'agent',title:'Research',outputKey:'research',schema:'z.object({ summary: z.string(), keyPoints: z.array(z.string()) })',prompt:'Research the requested issue and summarize key findings.'},{id:'risk-branch',kind:'branch',title:'Risk branch',condition:'ctx.input.risk === "high"',children:[{id:'risk-true',kind:'sequence',title:'High risk',children:[{id:'deep-review',kind:'agent',title:'Deep review',outputKey:'deepReview',schema:'z.object({ summary: z.string() })',prompt:'In-depth review for the risky change.'}]},{id:'risk-false',kind:'sequence',title:'Normal',children:[{id:'fast-check',kind:'shell',title:'Fast check',outputKey:'fastCheck',schema:'z.object({ ok: z.boolean(), stdout: z.string() })',command:'bun test'}]}]},{id:'parallel-impl',kind:'parallel',title:'Implement + docs',children:[{id:'implement-change',kind:'agent',title:'Implement',outputKey:'implementation',schema:'z.object({ summary: z.string(), filesChanged: z.array(z.string()) })',prompt:'Implement the change.'},{id:'update-docs',kind:'agent',title:'Update docs',outputKey:'docsUpdate',schema:'z.object({ summary: z.string() })',prompt:'Update docs.'}]},{id:'validation-loop',kind:'loop',title:'Validate',loopId:'validation-loop',maxIterations:3,children:[{id:'run-tests',kind:'shell',title:'Tests',outputKey:'testResult',schema:'z.object({ ok: z.boolean(), stdout: z.string() })',command:'bun test'},{id:'approval-gate',kind:'approval',title:'Approval',outputKey:'approvalDecision',schema:'z.object({ approved: z.boolean(), note: z.string().nullable(), decidedBy: z.string().nullable(), decidedAt: z.string().nullable() })',message:'Approve after validation.'}]}]};addStatus('info','Loaded starter template');render();fitView();});
+
+    // Zoom / orientation
+    $('zoom-in').addEventListener('click',()=>{state.zoom=Math.min(2,state.zoom+0.1);applyZoom();renderMinimap(buildVisualGraph());});
+    $('zoom-out').addEventListener('click',()=>{state.zoom=Math.max(0.3,state.zoom-0.1);applyZoom();renderMinimap(buildVisualGraph());});
+    $('fit-view').addEventListener('click',()=>fitView());
+    orientationEl.addEventListener('change',e=>{state.orientation=e.target.value;state.positions={};render();});
+
+    // Inspector panel toggle
+    function toggleRightPanel(){const app=$('app'),btn=$('toggle-right');app.classList.toggle('right-collapsed');btn.textContent=app.classList.contains('right-collapsed')?'‹':'›';}
+    $('toggle-right').addEventListener('click',toggleRightPanel);
+    $('reopen-right').addEventListener('click',toggleRightPanel);
+
+    // Tabs
+    document.querySelectorAll('[data-tab]').forEach(button=>button.addEventListener('click',()=>{state.tab=button.dataset.tab;document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===button));$('tab-inspector').style.display=state.tab==='inspector'?'grid':'none';$('tab-code').style.display=state.tab==='code'?'grid':'none';$('tab-plan').style.display=state.tab==='plan'?'grid':'none';$('tab-graph').style.display=state.tab==='graph'?'grid':'none';}));
+
+    // Drag
+    document.addEventListener('pointermove',ev=>{if(!state.drag)return;state.positions[state.drag.id]={x:(ev.clientX-state.drag.canvasLeft)/state.zoom-state.drag.dx,y:(ev.clientY-state.drag.canvasTop)/state.zoom-state.drag.dy};renderGraphCanvas();});
+    document.addEventListener('pointerup',()=>{if(!state.drag)return;const id=state.drag.id;state.drag=null;state.selectedId=id;render();});
+    canvasEl.addEventListener('scroll',()=>renderMinimap(buildVisualGraph()));
+
+    // Boot
+    render();fitView();
     </script>
   </body>
 </html>

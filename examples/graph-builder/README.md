@@ -1,15 +1,8 @@
-# Smithers Graph Builder Sample
+# Smithers Graph Builder
 
-A minimal visual workflow editor sample built on top of:
+A fully in-browser visual workflow editor for Smithers. No server required.
 
-- `renderFrame()` for workflow rendering
-- `smithers-orchestrator/graph` for XML → plan conversion
-
-## Why this exists
-
-This sample is intentionally small and self-contained.
-
-It demonstrates a low-surface-area approach to a node-based Smithers builder without adding new runtime/editor APIs to Smithers core or embedding the feature into Burns.
+One self-contained HTML file. Open it directly or host it anywhere.
 
 ## What it does
 
@@ -51,19 +44,32 @@ That split keeps editing stable and explicit while still letting the builder lev
 
 ## Run
 
+Open `index.html` in any browser. That's it.
+
+```bash
+open examples/graph-builder/index.html
+```
+
+Or host it on any static file server, CDN, or paste it into a gist.
+
+## How it works
+
+Everything runs in the browser:
+
+- `buildPlanTree` from `smithers-orchestrator/graph` is inlined as a pure function
+- TSX import uses a client-side text parser that extracts Smithers component structure
+- graph editing, code generation, plan preview — all client-side JS
+- no fetch calls, no API, no server, no dependencies
+
+## Server mode (optional)
+
+The `server.ts` file is still available for local development with richer features:
+- Smithers-rendered TSX import via `renderFrame()`
+- local filesystem load/save with validation
+- nearby workflow discovery
+
+Run it with:
 ```bash
 cd examples/graph-builder
 bun run server.ts
 ```
-
-Then open:
-
-```txt
-http://localhost:8787
-```
-
-## Notes
-
-- The canvas is intentionally sequence-first to stay minimal.
-- The generated code is a starting point, not a full round-trip authoring system.
-- This sample is meant to validate the product direction with the least new surface area possible.
