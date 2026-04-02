@@ -15,8 +15,8 @@ import { renderFrame } from "smithers-orchestrator";
 ## What `/graph` exports
 
 ```ts
-export { buildPlanTree } from "smithers-orchestrator/graph";
-export type { PlanNode, RalphMeta } from "smithers-orchestrator/graph";
+import { buildPlanTree } from "smithers-orchestrator/graph";
+import type { PlanNode, RalphMeta } from "smithers-orchestrator/graph";
 ```
 
 `buildPlanTree(xml)` converts the rendered `XmlNode` tree into the plan tree the engine schedules.
