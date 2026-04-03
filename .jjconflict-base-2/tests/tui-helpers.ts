@@ -47,9 +47,11 @@ class BunSpawnBackend implements TUITestInstance {
     const buffer = this.getBufferText();
     if (buffer.includes(expected)) return true;
 
-    // OpenTUI occasionally reflows or collapses spaces in the captured buffer.
-    const compact = (value: string) => value.replace(/\s+/g, "");
-    return compact(buffer).includes(compact(expected));
+    // OpenTUI renders text inside bordered boxes using box-drawing characters
+    // (e.g. ─ │ ┌ ┐ └ ┘) in place of spaces, so normalize them for matching.
+    const normalize = (value: string) =>
+      value.replace(/[\u2500-\u257F]/g, " ").replace(/\s+/g, "");
+    return normalize(buffer).includes(normalize(expected));
   }
 
   async waitForText(text: string, timeoutMs = DEFAULT_WAIT_TIMEOUT_MS): Promise<void> {

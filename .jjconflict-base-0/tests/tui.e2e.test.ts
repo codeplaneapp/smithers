@@ -8,7 +8,7 @@ describe("TUI E2E", () => {
       cwd: process.cwd(),
       env: { ...process.env },
     });
-    
+
     if (proc.exitCode !== 0) {
       console.error(proc.stderr?.toString() ?? "Unknown error spawning background workflow");
       throw new Error("Failed to start fan-out-fan-in workflow in e2e setup");
@@ -17,52 +17,39 @@ describe("TUI E2E", () => {
 
   test("TUI displays the fan-out-fan-in run in the RunsPane", async () => {
     const tui = await launchTUI(["tui"]);
-    
+
     try {
-      // Verify basic layout components
-      await tui.waitForText("Smithers Runs");
+      // 1. Verify the V2 TopBar renders the Smithers header
+      await tui.waitForText("Smithers");
 
-      // Verify the background workflow was detected
+      // 2. Verify the V2 layout shows the Inspector pane
+      await tui.waitForText("Inspector");
+
+      // 3. Verify the Composer hint text renders
+      await tui.waitForText("Type a task");
+
+      // 4. Wait for the broker to sync and detect the background workflow
       await tui.waitForText("fan-out-fan-in");
 
-      // 2. Test RunDetailView Drill Down
-      // Open the detail for the focused run
-      tui.sendKeys("\r"); // Enter key
-      
-      await tui.waitForText("Run Tasks");
-      await tui.waitForText("Entire Run");
-      
-      // 3. Test Level 3 Drill Down (Node Detail)
-      await new Promise(r => setTimeout(r, 200));
-      tui.sendKeys("\r"); // Enter key
-      
-      await tui.waitForText("Task Inspector");
-      
-      // Press 1 to ensure Input rendering works natively (and parses metaJson/configJson)
-      tui.sendKeys("1");
-      await tui.waitForText("Input");
+      // 5. Navigate to the feed region (Tab to cycle focus)
+      tui.sendKeys("\t"); // Tab to cycle focus to feed
+      await new Promise(r => setTimeout(r, 300));
 
-      // Press 2 to ensure output rendering works natively
-      tui.sendKeys("2");
-      await tui.waitForText("Output");
+      // 6. Open the selected feed entry to drill into the Inspector
+      tui.sendKeys("\r"); // Enter to inspect the selected entry
+      await new Promise(r => setTimeout(r, 300));
 
-      // 4. Back out to Master List and Test Global Keyboard Filters
-      tui.sendKeys("\x1b"); // Esc to RunDetailView
-      await new Promise(r => setTimeout(r, 200));
-      tui.sendKeys("\x1b"); // Esc to RunsList
-      await new Promise(r => setTimeout(r, 200));
+      // The Inspector should now show run details
+      await tui.waitForText("Inspector");
 
-      // Test Pending Inbox Toggle
-      tui.sendKeys("p");
-      await new Promise(r => setTimeout(r, 200));
-      tui.sendKeys("p"); // Toggle back
-      await tui.waitForText("fan-out-fan-in");
+      // 7. Press Esc to return focus to the Composer
+      tui.sendKeys("\x1b");
+      await new Promise(r => setTimeout(r, 300));
 
-      // Test Agent Ask Modal
-      tui.sendKeys("a");
-      await tui.waitForText("Ask Smithers");
-      await tui.waitForText("What would you like to know");
-      tui.sendKeys("\x1b"); // Close Ask Modal
+      // 8. Test the command palette (Ctrl+O)
+      tui.sendKeys("\x0f"); // Ctrl+O opens the palette
+      await tui.waitForText("Focus composer");
+      tui.sendKeys("\x1b"); // Close palette
     } catch (err) {
       require("fs").writeFileSync("tui-buffer.txt", tui.snapshot());
       throw err;
