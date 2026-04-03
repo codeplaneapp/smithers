@@ -1,0 +1,17 @@
+node_modules
+bun.lock
+.DS_Store
+.env
+.env.local
+*.log
+dist
+apps/desktop/build
+apps/desktop/artifacts
+coverage
+.data/
+apps/daemon/.data/
+.sqlite
+.sqlite-shm
+.sqlite-wal
+.vscode
+.tmp/

@@ -1,0 +1,27 @@
+{
+  "name": "burns",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "bun@1.2.19",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "cd apps/web && bun run dev",
+    "dev:daemon": "cd apps/daemon && bun run dev",
+    "desktop:dev": "cd apps/desktop && bun run dev",
+    "desktop:build:canary": "cd apps/desktop && bun run build:canary",
+    "desktop:build:stable": "cd apps/desktop && bun run build",
+    "cli:start": "cd apps/cli && bun run src/bin.ts start",
+    "cli:daemon": "cd apps/cli && bun run src/bin.ts daemon",
+    "cli:web": "cd apps/cli && bun run src/bin.ts web",
+    "desktop:build:artifact": "bash scripts/release/build-desktop-artifact.sh --channel ${CHANNEL:-canary} --version ${RELEASE_VERSION:-local} --output-dir dist/desktop",
+    "cli:build:artifact": "bash scripts/release/build-cli-artifact.sh --channel ${CHANNEL:-canary} --version ${RELEASE_VERSION:-local} --output-dir dist/cli",
+    "build:web": "cd apps/web && bun run build",
+    "smoke:desktop-runtime": "bun run scripts/smoke/desktop-runtime-smoke.ts",
+    "smoke:cli-runtime": "bun run scripts/smoke/cli-runtime-smoke.ts",
+    "smoke:release": "bun run smoke:desktop-runtime && bun run smoke:cli-runtime",
+    "typecheck": "bunx tsc -p packages/shared/tsconfig.json --noEmit && bunx tsc -p packages/client/tsconfig.json --noEmit && cd apps/web && bun run typecheck && cd ../daemon && bun run typecheck && cd ../cli && bun run typecheck && cd ../desktop && bun run typecheck"
+  }
+}
