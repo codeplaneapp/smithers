@@ -251,11 +251,18 @@ export function generateAgentsTs(env: NodeJS.ProcessEnv = process.env) {
     ...activeVariants.map((v) => v.variantId),
   ]);
 
+  // Fallback: all base provider IDs sorted by score (for tiers with no preferred match)
+  const fallbackIds = orderedProviders.map((p) => p.id);
+
   // Tier lines
   const tierLines = Object.entries(TIER_PREFERENCES).map(([tier, { order, maxSize }]) => {
-    const resolved = order
+    let resolved = order
       .filter((id) => allProviderIds.has(id))
       .slice(0, maxSize);
+    // Fallback to any available base providers if no preferred agents matched
+    if (resolved.length === 0) {
+      resolved = fallbackIds.slice(0, maxSize);
+    }
     return `  ${tier}: [${resolved.map((id) => `providers.${id}`).join(", ")}],`;
   });
 
