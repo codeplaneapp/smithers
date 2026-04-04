@@ -8,6 +8,8 @@ export type SmithersTaskRuntime = {
   iteration: number;
   signal: AbortSignal;
   db: any;
+  heartbeat: (data?: unknown) => void;
+  lastHeartbeat: unknown | null;
 };
 
 const storage = new AsyncLocalStorage<SmithersTaskRuntime>();

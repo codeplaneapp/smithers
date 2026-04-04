@@ -285,6 +285,15 @@ function buildMirrorOnProgress(
         case "RunStatusChanged":
           yield* adapter.updateRunEffect(runId, { status: event.status });
           break;
+        case "RunContinuedAsNew":
+          yield* adapter.updateRunEffect(runId, {
+            status: "continued",
+            finishedAtMs: event.timestampMs,
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            cancelRequestedAtMs: null,
+          });
+          break;
         case "RunFinished":
           yield* adapter.updateRunEffect(runId, {
             status: "finished",
@@ -331,6 +340,18 @@ function buildMirrorOnProgress(
             nodeId: event.nodeId,
             iteration: event.iteration,
             state: "waiting-approval",
+            lastAttempt: null,
+            updatedAtMs: event.timestampMs,
+            outputTable: "",
+            label: null,
+          });
+          break;
+        case "NodeWaitingTimer":
+          yield* adapter.insertNodeEffect({
+            runId: event.runId,
+            nodeId: event.nodeId,
+            iteration: event.iteration,
+            state: "waiting-timer",
             lastAttempt: null,
             updatedAtMs: event.timestampMs,
             outputTable: "",
@@ -586,7 +607,10 @@ function startServerInternal(opts: ServerOptions = {}) {
         })
           .then((result) => {
             const id = result.runId;
-            if (serverDb || result.status !== "waiting-approval") {
+            if (
+              serverDb ||
+              (result.status !== "waiting-approval" && result.status !== "waiting-timer")
+            ) {
               runs.delete(id);
             }
           })
@@ -683,7 +707,10 @@ function startServerInternal(opts: ServerOptions = {}) {
           onProgress: mirrorOnProgress,
         })
           .then((result) => {
-            if (serverDb || result.status !== "waiting-approval") {
+            if (
+              serverDb ||
+              (result.status !== "waiting-approval" && result.status !== "waiting-timer")
+            ) {
               runs.delete(runId);
             }
           })
@@ -716,14 +743,53 @@ function startServerInternal(opts: ServerOptions = {}) {
             error: { code: "NOT_FOUND", message: "Run not found" },
           });
         }
-        if (run.status === "waiting-approval") {
+        if (run.status === "waiting-approval" || run.status === "waiting-timer") {
           const cancelledAtMs = nowMs();
           const cancelEvent = {
             type: "RunCancelled" as const,
             runId,
             timestampMs: cancelledAtMs,
           };
-          logInfo("cancelling waiting-approval run", {
+          if (run.status === "waiting-timer") {
+            const nodes = await adapter.listNodes(runId);
+            for (const node of (nodes as any[]).filter((entry) => entry.state === "waiting-timer")) {
+              const attempts = await adapter.listAttempts(runId, node.nodeId, node.iteration ?? 0);
+              const waitingAttempt = (attempts as any[]).find((attempt) => attempt.state === "waiting-timer");
+              if (waitingAttempt) {
+                await adapter.updateAttempt(
+                  runId,
+                  node.nodeId,
+                  node.iteration ?? 0,
+                  waitingAttempt.attempt,
+                  { state: "cancelled", finishedAtMs: cancelledAtMs },
+                );
+                await adapter.insertNode({
+                  runId,
+                  nodeId: node.nodeId,
+                  iteration: node.iteration ?? 0,
+                  state: "cancelled",
+                  lastAttempt: waitingAttempt.attempt,
+                  updatedAtMs: cancelledAtMs,
+                  outputTable: node.outputTable ?? "",
+                  label: node.label ?? null,
+                });
+                const timerCancelledEvent = {
+                  type: "TimerCancelled" as const,
+                  runId,
+                  timerId: node.nodeId,
+                  timestampMs: cancelledAtMs,
+                };
+                await adapter.insertEventWithNextSeq({
+                  runId,
+                  timestampMs: cancelledAtMs,
+                  type: "TimerCancelled",
+                  payloadJson: JSON.stringify(timerCancelledEvent),
+                });
+                await runPromise(trackEvent(timerCancelledEvent));
+              }
+            }
+          }
+          logInfo("cancelling paused run", {
             runId,
             status: run.status,
           }, "server:cancel");
@@ -814,7 +880,7 @@ function startServerInternal(opts: ServerOptions = {}) {
           const runRow = await adapter.getRun(runId);
           if (
             runRow &&
-            ["finished", "failed", "cancelled"].includes(runRow.status) &&
+            ["finished", "failed", "cancelled", "continued"].includes(runRow.status) &&
             events.length === 0
           ) {
             closed = true;
@@ -951,6 +1017,58 @@ function startServerInternal(opts: ServerOptions = {}) {
           body.decidedBy,
         );
         return sendJson(res, 200, { runId });
+      }
+
+      if (
+        method === "GET" &&
+        (
+          url.pathname === "/v1/approval/list" ||
+          url.pathname === "/v1/approvals" ||
+          url.pathname === "/approval/list" ||
+          url.pathname === "/approvals"
+        )
+      ) {
+        if (!serverAdapter) {
+          return sendJson(res, 400, {
+            error: {
+              code: "DB_NOT_CONFIGURED",
+              message: "Server DB not configured",
+            },
+          });
+        }
+
+        const approvals = await runPromise(
+          Effect.gen(function* () {
+            const rows = yield* serverAdapter.listAllPendingApprovalsEffect();
+            const now = nowMs();
+            const mapped = rows.map((row: any) => {
+              const requestedAtMs = row.requestedAtMs ?? null;
+              return {
+                runId: row.runId,
+                nodeId: row.nodeId,
+                iteration: row.iteration ?? 0,
+                workflowName: row.workflowName ?? "workflow",
+                runStatus: row.runStatus ?? null,
+                label: row.nodeLabel ?? row.nodeId,
+                requestTitle: row.nodeLabel ?? row.nodeId,
+                requestSummary: row.note ?? null,
+                requestedAtMs,
+                waitingMs:
+                  typeof requestedAtMs === "number" && Number.isFinite(requestedAtMs)
+                    ? Math.max(0, now - requestedAtMs)
+                    : 0,
+                note: row.note ?? null,
+                decidedBy: row.decidedBy ?? null,
+              };
+            });
+            yield* Effect.logDebug("listed pending approvals").pipe(
+              Effect.annotateLogs({ pendingCount: mapped.length }),
+            );
+            return mapped;
+          }).pipe(Effect.withLogSpan("api:approvals:list")),
+        );
+
+        return sendJson(res, 200, { approvals });
       }
 
       if (method === "GET" && url.pathname === "/v1/runs") {

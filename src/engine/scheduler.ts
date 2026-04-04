@@ -15,6 +15,11 @@ export type PlanNode =
       until: boolean;
       maxIterations: number;
       onMaxReached: "fail" | "return-last";
+      continueAsNewEvery?: number;
+    }
+  | {
+      kind: "continue-as-new";
+      stateJson?: string;
     }
   | { kind: "group"; children: PlanNode[] }
   | {
@@ -35,6 +40,7 @@ export type TaskState =
   | "pending"
   | "waiting-approval"
   | "waiting-event"
+  | "waiting-timer"
   | "in-progress"
   | "finished"
   | "failed"
@@ -48,7 +54,9 @@ export type ScheduleResult = {
   pendingExists: boolean;
   waitingApprovalExists: boolean;
   waitingEventExists: boolean;
+  waitingTimerExists: boolean;
   readyRalphs: RalphMeta[];
+  continuation?: ContinuationRequest;
   nextRetryAtMs?: number;
 };
 
@@ -57,6 +65,11 @@ export type RalphMeta = {
   until: boolean;
   maxIterations: number;
   onMaxReached: "fail" | "return-last";
+  continueAsNewEvery?: number;
+};
+
+export type ContinuationRequest = {
+  stateJson?: string;
 };
 
 export type RalphState = {
@@ -179,6 +192,16 @@ export function buildPlanTree(
       const nodeId = logicalId + ancestorScope;
       return { kind: "task", nodeId };
     }
+    if (tag === "smithers:sandbox") {
+      const logicalId = node.props.id;
+      if (!logicalId) return null;
+      const ancestorScope =
+        loopStack.length > 1
+          ? buildLoopScope(loopStack.slice(0, -1))
+          : "";
+      const nodeId = logicalId + ancestorScope;
+      return { kind: "task", nodeId };
+    }
     if (tag === "smithers:wait-for-event") {
       const logicalId = node.props.id;
       if (!logicalId) return null;
@@ -188,6 +211,22 @@ export function buildPlanTree(
           : "";
       const nodeId = logicalId + ancestorScope;
       return { kind: "task", nodeId };
+    }
+    if (tag === "smithers:timer") {
+      const logicalId = node.props.id;
+      if (!logicalId) return null;
+      const ancestorScope =
+        loopStack.length > 1
+          ? buildLoopScope(loopStack.slice(0, -1))
+          : "";
+      const nodeId = logicalId + ancestorScope;
+      return { kind: "task", nodeId };
+    }
+    if (tag === "smithers:continue-as-new") {
+      return {
+        kind: "continue-as-new",
+        stateJson: node.props.stateJson,
+      };
     }
     if (tag === "smithers:ralph") {
       const id = scopedRalphId!;
@@ -200,7 +239,21 @@ export function buildPlanTree(
       const onMaxReached =
         (node.props.onMaxReached as "fail" | "return-last") ??
         "return-last";
-      const meta: RalphMeta = { id, until, maxIterations, onMaxReached };
+      const parsedContinueAsNewEvery = Math.floor(
+        parseNum(node.props.continueAsNewEvery, 0),
+      );
+      const continueAsNewEvery =
+        Number.isFinite(parsedContinueAsNewEvery) &&
+        parsedContinueAsNewEvery > 0
+          ? parsedContinueAsNewEvery
+          : undefined;
+      const meta: RalphMeta = {
+        id,
+        until,
+        maxIterations,
+        onMaxReached,
+        continueAsNewEvery,
+      };
       ralphs.push(meta);
       return {
         kind: "ralph",
@@ -209,6 +262,7 @@ export function buildPlanTree(
         until,
         maxIterations,
         onMaxReached,
+        continueAsNewEvery,
       };
     }
     if (tag === "smithers:saga") {
@@ -278,7 +332,9 @@ export function scheduleTasks(
   let pendingExists = false;
   let waitingApprovalExists = false;
   let waitingEventExists = false;
+  let waitingTimerExists = false;
   const readyRalphs: RalphMeta[] = [];
+  let continuation: ContinuationRequest | undefined;
   let nextRetryAtMs: number | undefined;
 
   // Track current usage per parallel/merge-queue group based on in-progress tasks.
@@ -307,6 +363,7 @@ export function scheduleTasks(
         const state = states.get(key(desc.nodeId, desc.iteration)) ?? "pending";
         if (state === "waiting-approval") waitingApprovalExists = true;
         if (state === "waiting-event") waitingEventExists = true;
+        if (state === "waiting-timer") waitingTimerExists = true;
         if (state === "pending" || state === "cancelled") pendingExists = true;
         const terminal = isTerminal(state, desc);
         if (!terminal && (state === "pending" || state === "cancelled")) {
@@ -366,8 +423,15 @@ export function scheduleTasks(
             until: node.until,
             maxIterations: node.maxIterations,
             onMaxReached: node.onMaxReached,
+            continueAsNewEvery: node.continueAsNewEvery,
           });
         }
+        return { terminal: false };
+      }
+      case "continue-as-new": {
+        continuation = {
+          stateJson: node.stateJson,
+        };
         return { terminal: false };
       }
       case "saga": {
@@ -424,7 +488,9 @@ export function scheduleTasks(
     pendingExists,
     waitingApprovalExists,
     waitingEventExists,
+    waitingTimerExists,
     readyRalphs,
+    continuation,
     nextRetryAtMs,
   };
 }

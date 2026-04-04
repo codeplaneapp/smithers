@@ -83,10 +83,12 @@ export function summarizeNode(node: RunNodeSummary): string {
       : node.state === "failed"
         ? "×"
         : node.state === "in-progress"
-          ? "◐"
-          : node.state === "waiting-approval"
-            ? "!"
-            : "○";
+        ? "◐"
+        : node.state === "waiting-approval"
+          ? "!"
+          : node.state === "waiting-timer"
+            ? "⏱"
+          : "○";
   return `${icon} ${node.label ?? node.nodeId}`;
 }
 

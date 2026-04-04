@@ -22,6 +22,7 @@ export function ensureSmithersTablesEffect(
         client.exec(`
         CREATE TABLE IF NOT EXISTS _smithers_runs (
           run_id TEXT PRIMARY KEY,
+          parent_run_id TEXT,
           workflow_name TEXT NOT NULL,
           workflow_path TEXT,
           workflow_hash TEXT,
@@ -41,6 +42,8 @@ export function ensureSmithersTablesEffect(
           config_json TEXT
         );
 
+        CREATE INDEX IF NOT EXISTS _smithers_runs_status_heartbeat_idx
+          ON _smithers_runs (status, heartbeat_at_ms);
         CREATE TABLE IF NOT EXISTS _smithers_nodes (
           run_id TEXT NOT NULL,
           node_id TEXT NOT NULL,
@@ -61,6 +64,8 @@ export function ensureSmithersTablesEffect(
           state TEXT NOT NULL,
           started_at_ms INTEGER NOT NULL,
           finished_at_ms INTEGER,
+          heartbeat_at_ms INTEGER,
+          heartbeat_data_json TEXT,
           error_json TEXT,
           jj_pointer TEXT,
           response_text TEXT,
@@ -76,6 +81,7 @@ export function ensureSmithersTablesEffect(
           created_at_ms INTEGER NOT NULL,
           xml_json TEXT NOT NULL,
           xml_hash TEXT NOT NULL,
+          encoding TEXT NOT NULL DEFAULT 'full',
           mounted_task_ids_json TEXT,
           task_index_json TEXT,
           note TEXT,
@@ -105,6 +111,21 @@ export function ensureSmithersTablesEffect(
           tools_sig TEXT,
           jj_pointer TEXT,
           payload_json TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS _smithers_sandboxes (
+          run_id TEXT NOT NULL,
+          sandbox_id TEXT NOT NULL,
+          runtime TEXT NOT NULL DEFAULT 'bubblewrap',
+          remote_run_id TEXT,
+          workspace_id TEXT,
+          container_id TEXT,
+          config_json TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          shipped_at_ms INTEGER,
+          completed_at_ms INTEGER,
+          bundle_path TEXT,
+          PRIMARY KEY (run_id, sandbox_id)
         );
 
         CREATE TABLE IF NOT EXISTS _smithers_tool_calls (
@@ -254,6 +275,8 @@ export function ensureSmithersTablesEffect(
     const migrations = [
       `ALTER TABLE _smithers_attempts ADD COLUMN response_text TEXT`,
       `ALTER TABLE _smithers_attempts ADD COLUMN jj_cwd TEXT`,
+      `ALTER TABLE _smithers_attempts ADD COLUMN heartbeat_at_ms INTEGER`,
+      `ALTER TABLE _smithers_attempts ADD COLUMN heartbeat_data_json TEXT`,
       `ALTER TABLE _smithers_runs ADD COLUMN workflow_hash TEXT`,
       `ALTER TABLE _smithers_runs ADD COLUMN heartbeat_at_ms INTEGER`,
       `ALTER TABLE _smithers_runs ADD COLUMN runtime_owner_id TEXT`,
@@ -263,6 +286,8 @@ export function ensureSmithersTablesEffect(
       `ALTER TABLE _smithers_runs ADD COLUMN vcs_type TEXT`,
       `ALTER TABLE _smithers_runs ADD COLUMN vcs_root TEXT`,
       `ALTER TABLE _smithers_runs ADD COLUMN vcs_revision TEXT`,
+      `ALTER TABLE _smithers_runs ADD COLUMN parent_run_id TEXT`,
+      `CREATE INDEX IF NOT EXISTS _smithers_runs_parent_idx ON _smithers_runs (parent_run_id)`,
     ];
     for (const statement of migrations) {
       yield* Effect.either(
@@ -270,6 +295,29 @@ export function ensureSmithersTablesEffect(
           code: "DB_WRITE_FAILED",
           details: { statement },
         }),
+      );
+    }
+
+    // Gracefully migrate old DBs that predate frame encoding.
+    const frameColumns = yield* fromSync(
+      "inspect _smithers_frames columns",
+      () =>
+        client
+          .query(`PRAGMA table_info("_smithers_frames")`)
+          .all() as { name: string }[],
+      { code: "DB_QUERY_FAILED" },
+    );
+    const hasEncodingColumn = frameColumns.some((col) => col.name === "encoding");
+    if (!hasEncodingColumn) {
+      yield* Effect.either(
+        fromSync(
+          "add frame encoding column",
+          () =>
+            client.run(
+              `ALTER TABLE _smithers_frames ADD COLUMN encoding TEXT NOT NULL DEFAULT 'full'`,
+            ),
+          { code: "DB_WRITE_FAILED" },
+        ),
       );
     }
   }).pipe(Effect.withLogSpan("db:ensure-smithers-tables"));

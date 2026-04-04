@@ -97,6 +97,7 @@ function mapRunSummary(run: any, nodes: any[], approvalPending: boolean): RunSum
   const currentNode =
     nodes.find((node) => node.state === "in-progress") ??
     nodes.find((node) => node.state === "waiting-approval") ??
+    nodes.find((node) => node.state === "waiting-timer") ??
     nodes[nodes.length - 1];
 
   return {
@@ -164,7 +165,7 @@ function attentionForWorkspace(
     .map((runId) => runSummaries[runId])
     .filter((item): item is RunSummary => Boolean(item));
   if (runs.some((run) => run.status === "failed")) return "failed";
-  if (runs.some((run) => run.status === "running" || run.status === "waiting-approval")) {
+  if (runs.some((run) => run.status === "running" || run.status === "waiting-approval" || run.status === "waiting-timer")) {
     return "running";
   }
   if (runs.some((run) => run.status === "finished")) return "complete";

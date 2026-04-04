@@ -26,7 +26,7 @@ describe("approveNode", () => {
       runId: "run-1",
       workflowName: "test-wf",
       workflowHash: "h",
-      status: "running",
+      status: "waiting-approval",
       createdAtMs: Date.now(),
     });
     await adapter.insertNode({
@@ -36,8 +36,8 @@ describe("approveNode", () => {
       state: "waiting_approval",
       lastAttempt: null,
       updatedAtMs: Date.now(),
-      outputTable: "",
-      label: null,
+      outputTable: "approval_output",
+      label: "Approval Gate",
     });
 
     // Request approval first so the approval record exists
@@ -55,9 +55,15 @@ describe("approveNode", () => {
     await approveNode(adapter, "run-1", "node-1", 0, "looks good", "alice");
 
     const approval = await adapter.getApproval("run-1", "node-1", 0);
+    const node = await adapter.getNode("run-1", "node-1", 0);
+    const run = await adapter.getRun("run-1");
     expect(approval?.status).toBe("approved");
     expect(approval?.note).toBe("looks good");
     expect(approval?.decidedBy).toBe("alice");
+    expect(node?.state).toBe("pending");
+    expect(node?.outputTable).toBe("approval_output");
+    expect(node?.label).toBe("Approval Gate");
+    expect(run?.status).toBe("waiting-event");
   });
 
   test("approveNode without note/decidedBy defaults to null", async () => {
@@ -98,7 +104,7 @@ describe("denyNode", () => {
       runId: "run-3",
       workflowName: "test-wf",
       workflowHash: "h",
-      status: "running",
+      status: "waiting-approval",
       createdAtMs: Date.now(),
     });
     await adapter.insertNode({
@@ -108,8 +114,8 @@ describe("denyNode", () => {
       state: "waiting_approval",
       lastAttempt: null,
       updatedAtMs: Date.now(),
-      outputTable: "",
-      label: null,
+      outputTable: "approval_output",
+      label: "Approval Gate",
     });
 
     await adapter.insertOrUpdateApproval({
@@ -126,9 +132,15 @@ describe("denyNode", () => {
     await denyNode(adapter, "run-3", "node-1", 0, "not ready", "bob");
 
     const approval = await adapter.getApproval("run-3", "node-1", 0);
+    const node = await adapter.getNode("run-3", "node-1", 0);
+    const run = await adapter.getRun("run-3");
     expect(approval?.status).toBe("denied");
     expect(approval?.note).toBe("not ready");
     expect(approval?.decidedBy).toBe("bob");
+    expect(node?.state).toBe("failed");
+    expect(node?.outputTable).toBe("approval_output");
+    expect(node?.label).toBe("Approval Gate");
+    expect(run?.status).toBe("waiting-event");
   });
 
   test("denyNode without note/decidedBy defaults to null", async () => {

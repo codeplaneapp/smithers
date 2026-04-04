@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  colorizeEventText,
   formatAge,
   formatElapsedCompact,
   formatTimestamp,
+  formatRelativeOffset,
   formatEventLine,
 } from "../src/cli/format";
 
@@ -83,6 +85,36 @@ describe("formatTimestamp", () => {
 
   test("handles large elapsed", () => {
     expect(formatTimestamp(0, 100 * 3600 * 1000)).toBe("100:00:00");
+  });
+});
+
+describe("formatRelativeOffset", () => {
+  test("formats minute/second offsets with millis", () => {
+    expect(formatRelativeOffset(1_000, 3_341)).toBe("+00:02.341");
+  });
+
+  test("formats hour offsets with millis", () => {
+    expect(formatRelativeOffset(0, 3_723_004)).toBe("+01:02:03.004");
+  });
+});
+
+describe("colorizeEventText", () => {
+  test("applies ANSI color codes for terminal output", () => {
+    const prevNoColor = process.env.NO_COLOR;
+    delete process.env.NO_COLOR;
+    try {
+      const finished = colorizeEventText("RunFinished", "RunFinished");
+      const failed = colorizeEventText("NodeFailed", "NodeFailed");
+      expect(finished).toContain("\u001b[");
+      expect(failed).toContain("\u001b[");
+      expect(finished).not.toBe(failed);
+    } finally {
+      if (prevNoColor === undefined) {
+        delete process.env.NO_COLOR;
+      } else {
+        process.env.NO_COLOR = prevNoColor;
+      }
+    }
   });
 });
 
@@ -211,6 +243,19 @@ describe("formatEventLine", () => {
       base,
     );
     expect(line).toContain("CustomEvent");
+  });
+
+  test("truncates large payloads for unknown event types", () => {
+    const line = formatEventLine(
+      {
+        timestampMs: 2000,
+        type: "CustomEvent",
+        payloadJson: JSON.stringify({ text: "x".repeat(400) }),
+      },
+      base,
+      { truncatePayloadAt: 80 },
+    );
+    expect(line).toContain("...");
   });
 
   test("handles invalid JSON in payload", () => {

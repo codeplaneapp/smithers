@@ -18,6 +18,8 @@ describe("task runtime", () => {
       iteration: 0,
       signal: new AbortController().signal,
       db: null,
+      heartbeat: () => {},
+      lastHeartbeat: null,
     };
     const result = withTaskRuntime(runtime, () => {
       const rt = getTaskRuntime();
@@ -34,6 +36,8 @@ describe("task runtime", () => {
       iteration: 0,
       signal: new AbortController().signal,
       db: null,
+      heartbeat: () => {},
+      lastHeartbeat: null,
     };
     withTaskRuntime(runtime, () => {
       const rt = requireTaskRuntime();
@@ -50,6 +54,8 @@ describe("task runtime", () => {
       iteration: 0,
       signal: new AbortController().signal,
       db: null,
+      heartbeat: () => {},
+      lastHeartbeat: null,
     };
     const rt2 = {
       runId: "run-b",
@@ -58,6 +64,8 @@ describe("task runtime", () => {
       iteration: 0,
       signal: new AbortController().signal,
       db: null,
+      heartbeat: () => {},
+      lastHeartbeat: null,
     };
     withTaskRuntime(rt1, () => {
       expect(requireTaskRuntime().runId).toBe("run-a");
@@ -75,6 +83,8 @@ describe("task runtime", () => {
       iteration: 0,
       signal: new AbortController().signal,
       db: null,
+      heartbeat: () => {},
+      lastHeartbeat: null,
     };
     withTaskRuntime(runtime, () => {
       expect(getTaskRuntime()).toBeDefined();
@@ -90,6 +100,8 @@ describe("task runtime", () => {
       iteration: 0,
       signal: new AbortController().signal,
       db: null,
+      heartbeat: () => {},
+      lastHeartbeat: null,
     };
     const inner = {
       runId: "inner",
@@ -98,6 +110,8 @@ describe("task runtime", () => {
       iteration: 0,
       signal: new AbortController().signal,
       db: null,
+      heartbeat: () => {},
+      lastHeartbeat: null,
     };
     withTaskRuntime(outer, () => {
       expect(requireTaskRuntime().runId).toBe("outer");

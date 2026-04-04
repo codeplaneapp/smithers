@@ -10,6 +10,47 @@ function runTrack(event: any) {
 }
 
 describe("trackEvent", () => {
+  test("handles SupervisorStarted event", async () => {
+    await runTrack({
+      type: "SupervisorStarted",
+      runId: "__supervisor__",
+      pollIntervalMs: 10_000,
+      staleThresholdMs: 30_000,
+      timestampMs: Date.now(),
+    });
+  });
+
+  test("handles SupervisorPollCompleted event", async () => {
+    await runTrack({
+      type: "SupervisorPollCompleted",
+      runId: "__supervisor__",
+      staleCount: 2,
+      resumedCount: 1,
+      skippedCount: 1,
+      durationMs: 17,
+      timestampMs: Date.now(),
+    });
+  });
+
+  test("handles RunAutoResumed event", async () => {
+    await runTrack({
+      type: "RunAutoResumed",
+      runId: "run-1",
+      lastHeartbeatAtMs: Date.now() - 45_000,
+      staleDurationMs: 45_000,
+      timestampMs: Date.now(),
+    });
+  });
+
+  test("handles RunAutoResumeSkipped event", async () => {
+    await runTrack({
+      type: "RunAutoResumeSkipped",
+      runId: "run-1",
+      reason: "pid-alive",
+      timestampMs: Date.now(),
+    });
+  });
+
   test("handles RunStarted event", async () => {
     await runTrack({
       type: "RunStarted",
@@ -49,7 +90,36 @@ describe("trackEvent", () => {
       runId: "run-1",
       nodeId: "node-1",
       iteration: 0,
+      attempt: 1,
       timestampMs: Date.now(),
+    });
+  });
+
+  test("handles TaskHeartbeat event", async () => {
+    await runTrack({
+      type: "TaskHeartbeat",
+      runId: "run-1",
+      nodeId: "node-1",
+      iteration: 0,
+      attempt: 1,
+      hasData: true,
+      dataSizeBytes: 128,
+      intervalMs: 500,
+      timestampMs: Date.now(),
+    });
+  });
+
+  test("handles TaskHeartbeatTimeout event", async () => {
+    const now = Date.now();
+    await runTrack({
+      type: "TaskHeartbeatTimeout",
+      runId: "run-1",
+      nodeId: "node-1",
+      iteration: 0,
+      attempt: 1,
+      lastHeartbeatAtMs: now - 1_000,
+      timeoutMs: 500,
+      timestampMs: now,
     });
   });
 
@@ -59,6 +129,7 @@ describe("trackEvent", () => {
       runId: "run-1",
       nodeId: "node-1",
       iteration: 0,
+      attempt: 1,
       timestampMs: Date.now(),
     });
   });
@@ -69,6 +140,7 @@ describe("trackEvent", () => {
       runId: "run-1",
       nodeId: "node-1",
       iteration: 0,
+      attempt: 1,
       timestampMs: Date.now(),
       error: "fail",
     });
@@ -90,7 +162,10 @@ describe("trackEvent", () => {
       type: "ToolCallStarted",
       runId: "run-1",
       nodeId: "node-1",
+      iteration: 0,
+      attempt: 1,
       toolName: "bash",
+      seq: 1,
       timestampMs: Date.now(),
     });
   });
@@ -100,7 +175,10 @@ describe("trackEvent", () => {
       type: "ToolCallFinished",
       runId: "run-1",
       nodeId: "node-1",
+      iteration: 0,
+      attempt: 1,
       toolName: "bash",
+      seq: 1,
       status: "success",
       timestampMs: Date.now(),
     });
@@ -111,7 +189,10 @@ describe("trackEvent", () => {
       type: "ToolCallFinished",
       runId: "run-1",
       nodeId: "node-1",
+      iteration: 0,
+      attempt: 1,
       toolName: "bash",
+      seq: 1,
       status: "error",
       timestampMs: Date.now(),
     });
@@ -143,6 +224,39 @@ describe("trackEvent", () => {
       runId: "run-1",
       nodeId: "node-1",
       iteration: 0,
+      timestampMs: Date.now(),
+    });
+  });
+
+  test("handles TimerCreated event", async () => {
+    await runTrack({
+      type: "TimerCreated",
+      runId: "run-1",
+      timerId: "cooldown",
+      firesAtMs: Date.now() + 1_000,
+      timerType: "duration",
+      timestampMs: Date.now(),
+    });
+  });
+
+  test("handles TimerFired event", async () => {
+    const now = Date.now();
+    await runTrack({
+      type: "TimerFired",
+      runId: "run-1",
+      timerId: "cooldown",
+      firesAtMs: now - 100,
+      firedAtMs: now,
+      delayMs: 100,
+      timestampMs: now,
+    });
+  });
+
+  test("handles TimerCancelled event", async () => {
+    await runTrack({
+      type: "TimerCancelled",
+      runId: "run-1",
+      timerId: "cooldown",
       timestampMs: Date.now(),
     });
   });

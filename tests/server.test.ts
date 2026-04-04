@@ -6,6 +6,7 @@ import { startServer, type ServerOptions } from "../src/server/index";
 import { ensureSmithersTables } from "../src/db/ensure";
 import { createTestDb, sleep } from "./helpers";
 import { ddl, schema } from "./schema";
+import { SmithersDb } from "../src/db/adapter";
 
 import { resolve } from "node:path";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
@@ -599,6 +600,98 @@ const fakeAgent = {
 
       expect(status).toBe(200);
       expect(Array.isArray(data)).toBe(true);
+      cleanup();
+    });
+  });
+
+  describe("GET /v1/approval/list", () => {
+    test("returns 400 when server DB is not configured", async () => {
+      startTestServer();
+
+      const { status, data } = await request("/v1/approval/list");
+
+      expect(status).toBe(400);
+      expect(data.error.code).toBe("DB_NOT_CONFIGURED");
+    });
+
+    test("returns pending approvals sorted by wait time", async () => {
+      const { db, cleanup } = buildDb();
+      ensureSmithersTables(db as any);
+      const adapter = new SmithersDb(db as any);
+      await adapter.insertRun({
+        runId: "run-older",
+        workflowName: "release-flow",
+        status: "waiting-approval",
+        createdAtMs: Date.now() - 10_000,
+      });
+      await adapter.insertRun({
+        runId: "run-newer",
+        workflowName: "qa-flow",
+        status: "waiting-approval",
+        createdAtMs: Date.now() - 9_000,
+      });
+      await adapter.insertNode({
+        runId: "run-older",
+        nodeId: "deploy",
+        iteration: 0,
+        state: "waiting-approval",
+        lastAttempt: null,
+        updatedAtMs: Date.now(),
+        outputTable: "",
+        label: "Deploy gate",
+      });
+      await adapter.insertNode({
+        runId: "run-newer",
+        nodeId: "review",
+        iteration: 0,
+        state: "waiting-approval",
+        lastAttempt: null,
+        updatedAtMs: Date.now(),
+        outputTable: "",
+        label: "Review gate",
+      });
+      await adapter.insertOrUpdateApproval({
+        runId: "run-newer",
+        nodeId: "review",
+        iteration: 0,
+        status: "requested",
+        requestedAtMs: Date.now() - 2_000,
+      });
+      await adapter.insertOrUpdateApproval({
+        runId: "run-older",
+        nodeId: "deploy",
+        iteration: 0,
+        status: "requested",
+        requestedAtMs: Date.now() - 8_000,
+      });
+      await adapter.insertOrUpdateApproval({
+        runId: "run-older",
+        nodeId: "cleanup",
+        iteration: 0,
+        status: "approved",
+        decidedAtMs: Date.now(),
+      });
+
+      startTestServer({ db: db as any });
+
+      const { status, data } = await request("/v1/approval/list");
+
+      expect(status).toBe(200);
+      expect(Array.isArray(data.approvals)).toBe(true);
+      expect(data.approvals).toHaveLength(2);
+      expect(data.approvals[0]).toMatchObject({
+        runId: "run-older",
+        nodeId: "deploy",
+        workflowName: "release-flow",
+        label: "Deploy gate",
+      });
+      expect(data.approvals[1]).toMatchObject({
+        runId: "run-newer",
+        nodeId: "review",
+        workflowName: "qa-flow",
+        label: "Review gate",
+      });
+      expect(typeof data.approvals[0].waitingMs).toBe("number");
       cleanup();
     });
   });

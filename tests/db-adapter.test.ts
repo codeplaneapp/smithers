@@ -3,6 +3,7 @@ import { SmithersDb } from "../src/db/adapter";
 import { ensureSmithersTables } from "../src/db/ensure";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
+import { canonicalizeXml } from "../src/utils/xml";
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
@@ -45,6 +46,32 @@ function frameRow(runId: string, frameNo: number, extra: any = {}) {
     xmlJson: "{}",
     ...extra,
   };
+}
+
+function workflowFrameXml(taskState: string, includeReview = false): string {
+  return canonicalizeXml({
+    kind: "element",
+    tag: "smithers:workflow",
+    props: { name: "db-adapter-test" },
+    children: [
+      {
+        kind: "element",
+        tag: "smithers:task",
+        props: { id: "plan::0", state: taskState },
+        children: [],
+      },
+      ...(includeReview
+        ? [
+            {
+              kind: "element" as const,
+              tag: "smithers:task",
+              props: { id: "review::0", state: "pending" },
+              children: [],
+            },
+          ]
+        : []),
+    ],
+  });
 }
 
 function cacheRow(cacheKey: string, extra: any = {}) {
@@ -182,6 +209,29 @@ describe("SmithersDb adapter", () => {
     expect(attempt!.state).toBe("finished");
   });
 
+  test("heartbeatAttempt updates heartbeat columns for in-progress attempt", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertAttempt({
+      runId: "r1",
+      nodeId: "n1",
+      iteration: 0,
+      attempt: 1,
+      state: "in-progress",
+      startedAtMs: now,
+    });
+    await adapter.heartbeatAttempt(
+      "r1",
+      "n1",
+      0,
+      1,
+      now + 500,
+      JSON.stringify({ progress: 50 }),
+    );
+    const attempt = await adapter.getAttempt("r1", "n1", 0, 1);
+    expect(attempt?.heartbeatAtMs).toBe(now + 500);
+    expect(attempt?.heartbeatDataJson).toBe(JSON.stringify({ progress: 50 }));
+  });
+
   test("listAttempts returns attempts in descending order", async () => {
     const { adapter } = createTestDb();
     await adapter.insertAttempt({
@@ -237,6 +287,59 @@ describe("SmithersDb adapter", () => {
     expect(last!.frameNo).toBe(1);
   });
 
+  test("insertFrame delta-encodes frames and reconstructs on read", async () => {
+    const { adapter, sqlite } = createTestDb();
+
+    const frame0 = workflowFrameXml("pending");
+    const frame1 = workflowFrameXml("in-progress");
+    const frame2 = workflowFrameXml("in-progress", true);
+
+    await adapter.insertFrame(frameRow("r1", 0, { xmlJson: frame0, xmlHash: "h0" }));
+    await adapter.insertFrame(frameRow("r1", 1, { xmlJson: frame1, xmlHash: "h1" }));
+    await adapter.insertFrame(frameRow("r1", 2, { xmlJson: frame2, xmlHash: "h2" }));
+
+    const rawRows = sqlite
+      .query(
+        `SELECT frame_no AS frameNo, encoding, xml_json AS xmlJson
+         FROM _smithers_frames
+         WHERE run_id = 'r1'
+         ORDER BY frame_no ASC`,
+      )
+      .all() as { frameNo: number; encoding: string; xmlJson: string }[];
+
+    expect(rawRows.map((row) => row.encoding)).toEqual(["keyframe", "delta", "delta"]);
+    expect(rawRows[1]!.xmlJson.length).toBeLessThan(frame1.length);
+    expect(rawRows[2]!.xmlJson.length).toBeLessThan(frame2.length);
+
+    const frames = await adapter.listFrames("r1", 10);
+    const byNo = new Map(frames.map((frame) => [frame.frameNo, frame]));
+
+    expect(byNo.get(0)?.xmlJson).toBe(frame0);
+    expect(byNo.get(1)?.xmlJson).toBe(frame1);
+    expect(byNo.get(2)?.xmlJson).toBe(frame2);
+  });
+
+  test("insertFrame writes periodic keyframes", async () => {
+    const { adapter, sqlite } = createTestDb();
+
+    for (let i = 0; i <= 50; i += 1) {
+      await adapter.insertFrame(
+        frameRow("r1", i, {
+          xmlJson: workflowFrameXml(i % 2 === 0 ? "pending" : "finished"),
+          xmlHash: `h${i}`,
+        }),
+      );
+    }
+
+    const row = sqlite
+      .query(
+        `SELECT encoding FROM _smithers_frames WHERE run_id = 'r1' AND frame_no = 50`,
+      )
+      .get() as { encoding: string };
+
+    expect(row.encoding).toBe("keyframe");
+  });
+
   test("deleteFramesAfter removes later frames", async () => {
     const { adapter } = createTestDb();
     await adapter.insertFrame(frameRow("r1", 0));
@@ -279,6 +382,66 @@ describe("SmithersDb adapter", () => {
     });
     const approval = await adapter.getApproval("r1", "n1", 0);
     expect(approval!.status).toBe("approved");
+  });
+
+  test("listAllPendingApprovals returns joined run and node context", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun(
+      runRow("r1", "waiting-approval", {
+        workflowName: "workflow-a",
+        createdAtMs: now,
+      }),
+    );
+    await adapter.insertRun(
+      runRow("r2", "waiting-approval", {
+        workflowName: "workflow-b",
+        createdAtMs: now + 1,
+      }),
+    );
+    await adapter.insertNode(
+      nodeRow("r1", "deploy", "waiting-approval", {
+        label: "Deploy gate",
+      }),
+    );
+    await adapter.insertNode(
+      nodeRow("r2", "qa", "waiting-approval", {
+        label: "QA gate",
+      }),
+    );
+    await adapter.insertOrUpdateApproval({
+      runId: "r1",
+      nodeId: "deploy",
+      iteration: 0,
+      status: "requested",
+      requestedAtMs: now - 2000,
+      note: "needs operator review",
+    });
+    await adapter.insertOrUpdateApproval({
+      runId: "r2",
+      nodeId: "qa",
+      iteration: 0,
+      status: "requested",
+      requestedAtMs: now - 1000,
+    });
+    await adapter.insertOrUpdateApproval({
+      runId: "r2",
+      nodeId: "cleanup",
+      iteration: 0,
+      status: "approved",
+      decidedAtMs: now,
+    });
+
+    const approvals = await adapter.listAllPendingApprovals();
+    expect(approvals).toHaveLength(2);
+    expect(approvals.map((approval) => approval.runId)).toEqual(["r1", "r2"]);
+    expect(approvals[0]).toMatchObject({
+      runId: "r1",
+      nodeId: "deploy",
+      workflowName: "workflow-a",
+      nodeLabel: "Deploy gate",
+      status: "requested",
+      note: "needs operator review",
+    });
   });
 
   test("insertCache and getCache", async () => {
@@ -353,6 +516,97 @@ describe("SmithersDb adapter", () => {
     expect(events[0].seq).toBe(1);
   });
 
+  test("listEventHistory filters by node ID", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertEvent({
+      runId: "r1",
+      seq: 0,
+      timestampMs: now,
+      type: "NodeStarted",
+      payloadJson: JSON.stringify({ nodeId: "task-a", attempt: 1 }),
+    });
+    await adapter.insertEvent({
+      runId: "r1",
+      seq: 1,
+      timestampMs: now + 1_000,
+      type: "NodeStarted",
+      payloadJson: JSON.stringify({ nodeId: "task-b", attempt: 1 }),
+    });
+    const events = await adapter.listEventHistory("r1", {
+      nodeId: "task-a",
+      limit: 10,
+    });
+    expect(events.length).toBe(1);
+    expect(events[0].seq).toBe(0);
+  });
+
+  test("listEventHistory composes type and since filters", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertEvent({
+      runId: "r1",
+      seq: 0,
+      timestampMs: now - 10 * 60_000,
+      type: "ToolCallStarted",
+      payloadJson: JSON.stringify({ nodeId: "task-a", toolName: "web-search" }),
+    });
+    await adapter.insertEvent({
+      runId: "r1",
+      seq: 1,
+      timestampMs: now - 2 * 60_000,
+      type: "ToolCallFinished",
+      payloadJson: JSON.stringify({
+        nodeId: "task-a",
+        toolName: "web-search",
+        status: "success",
+      }),
+    });
+    await adapter.insertEvent({
+      runId: "r1",
+      seq: 2,
+      timestampMs: now - 2 * 60_000,
+      type: "NodeFinished",
+      payloadJson: JSON.stringify({ nodeId: "task-a" }),
+    });
+
+    const events = await adapter.listEventHistory("r1", {
+      types: ["ToolCallStarted", "ToolCallFinished"],
+      sinceTimestampMs: now - 5 * 60_000,
+      limit: 10,
+    });
+    expect(events.length).toBe(1);
+    expect(events[0].type).toBe("ToolCallFinished");
+  });
+
+  test("countEventHistory returns filtered count", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertEvent({
+      runId: "r1",
+      seq: 0,
+      timestampMs: now,
+      type: "ApprovalRequested",
+      payloadJson: JSON.stringify({ nodeId: "gate" }),
+    });
+    await adapter.insertEvent({
+      runId: "r1",
+      seq: 1,
+      timestampMs: now + 1_000,
+      type: "ApprovalGranted",
+      payloadJson: JSON.stringify({ nodeId: "gate" }),
+    });
+    await adapter.insertEvent({
+      runId: "r1",
+      seq: 2,
+      timestampMs: now + 2_000,
+      type: "NodeFinished",
+      payloadJson: JSON.stringify({ nodeId: "task" }),
+    });
+
+    const count = await adapter.countEventHistory("r1", {
+      types: ["ApprovalRequested", "ApprovalGranted"],
+    });
+    expect(count).toBe(2);
+  });
+
   test("getLastEventSeq returns latest seq", async () => {
     const { adapter } = createTestDb();
     await adapter.insertEvent({
@@ -394,6 +648,86 @@ describe("SmithersDb adapter", () => {
     expect(run!.heartbeatAtMs).toBe(now + 1000);
   });
 
+  test("listStaleRunningRuns returns only stale running runs", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun(
+      runRow("stale-running", "running", {
+        heartbeatAtMs: now - 60_000,
+      }),
+    );
+    await adapter.insertRun(
+      runRow("fresh-running", "running", {
+        heartbeatAtMs: now,
+      }),
+    );
+    await adapter.insertRun(
+      runRow("stale-finished", "finished", {
+        heartbeatAtMs: now - 60_000,
+      }),
+    );
+
+    const stale = await adapter.listStaleRunningRuns(now - 30_000);
+    const ids = stale.map((row) => row.runId);
+    expect(ids).toContain("stale-running");
+    expect(ids).not.toContain("fresh-running");
+    expect(ids).not.toContain("stale-finished");
+  });
+
+  test("claimRunForResume succeeds only once for the same stale snapshot", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun(
+      runRow("claim-once", "running", {
+        runtimeOwnerId: "pid:999:owner",
+        heartbeatAtMs: now - 60_000,
+      }),
+    );
+
+    const first = await adapter.claimRunForResume({
+      runId: "claim-once",
+      expectedRuntimeOwnerId: "pid:999:owner",
+      expectedHeartbeatAtMs: now - 60_000,
+      staleBeforeMs: now - 30_000,
+      claimOwnerId: "supervisor:a",
+      claimHeartbeatAtMs: now,
+    });
+    const second = await adapter.claimRunForResume({
+      runId: "claim-once",
+      expectedRuntimeOwnerId: "pid:999:owner",
+      expectedHeartbeatAtMs: now - 60_000,
+      staleBeforeMs: now - 30_000,
+      claimOwnerId: "supervisor:b",
+      claimHeartbeatAtMs: now + 1,
+    });
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+
+    const run = await adapter.getRun("claim-once");
+    expect(run?.runtimeOwnerId).toBe("supervisor:a");
+    expect(run?.heartbeatAtMs).toBe(now);
+  });
+
+  test("releaseRunResumeClaim restores runtime owner and heartbeat", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun(
+      runRow("claim-release", "running", {
+        runtimeOwnerId: "supervisor:a",
+        heartbeatAtMs: now,
+      }),
+    );
+
+    await adapter.releaseRunResumeClaim({
+      runId: "claim-release",
+      claimOwnerId: "supervisor:a",
+      restoreRuntimeOwnerId: "pid:123:owner",
+      restoreHeartbeatAtMs: now - 5000,
+    });
+
+    const run = await adapter.getRun("claim-release");
+    expect(run?.runtimeOwnerId).toBe("pid:123:owner");
+    expect(run?.heartbeatAtMs).toBe(now - 5000);
+  });
+
   test("requestRunCancel sets cancelRequestedAtMs", async () => {
     const { adapter } = createTestDb();
     await adapter.insertRun(runRow("r1"));
@@ -420,5 +754,56 @@ describe("SmithersDb adapter", () => {
   test("insertToolCall stores tool call", async () => {
     const { adapter } = createTestDb();
     await adapter.insertToolCall(toolCallRow());
+  });
+
+  test("listNodeIterations returns descending iterations for a node", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertNode(nodeRow("r1", "n1", "finished", { iteration: 1 }));
+    await adapter.insertNode(nodeRow("r1", "n1", "finished", { iteration: 3 }));
+    await adapter.insertNode(nodeRow("r1", "n1", "finished", { iteration: 2 }));
+    const iterations = await adapter.listNodeIterations("r1", "n1");
+    expect(iterations.map((row) => row.iteration)).toEqual([3, 2, 1]);
+  });
+
+  test("listToolCalls orders by attempt then seq", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertToolCall(toolCallRow({ attempt: 2, seq: 1 }));
+    await adapter.insertToolCall(toolCallRow({ attempt: 1, seq: 2 }));
+    await adapter.insertToolCall(toolCallRow({ attempt: 1, seq: 1 }));
+    const calls = await adapter.listToolCalls("r1", "n1", 0);
+    expect(calls.map((row) => `${row.attempt}:${row.seq}`)).toEqual([
+      "1:1",
+      "1:2",
+      "2:1",
+    ]);
+  });
+
+  test("listEventsByType filters events for a run", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertEvent({
+      runId: "r1",
+      seq: 0,
+      timestampMs: now,
+      type: "NodeStarted",
+      payloadJson: "{}",
+    });
+    await adapter.insertEvent({
+      runId: "r1",
+      seq: 1,
+      timestampMs: now,
+      type: "TokenUsageReported",
+      payloadJson: "{}",
+    });
+    await adapter.insertEvent({
+      runId: "r2",
+      seq: 0,
+      timestampMs: now,
+      type: "TokenUsageReported",
+      payloadJson: "{}",
+    });
+    const events = await adapter.listEventsByType("r1", "TokenUsageReported");
+    expect(events).toHaveLength(1);
+    expect(events[0]?.runId).toBe("r1");
+    expect(events[0]?.type).toBe("TokenUsageReported");
   });
 });

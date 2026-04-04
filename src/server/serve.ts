@@ -126,7 +126,7 @@ export function createServeApp(opts: ServeOptions) {
         const runRow = await adapter.getRun(runId);
         if (
           runRow &&
-          ["finished", "failed", "cancelled"].includes(runRow.status) &&
+          ["finished", "failed", "cancelled", "continued"].includes(runRow.status) &&
           (events as any[]).length === 0
         ) {
           break;
@@ -194,13 +194,51 @@ export function createServeApp(opts: ServeOptions) {
       throw new HttpError(404, "RUN_NOT_FOUND", "Run not found");
     }
 
-    if (run.status === "waiting-approval") {
+    if (run.status === "waiting-approval" || run.status === "waiting-timer") {
       const cancelledAtMs = nowMs();
       const cancelEvent = {
         type: "RunCancelled" as const,
         runId,
         timestampMs: cancelledAtMs,
       };
+      if (run.status === "waiting-timer") {
+        const nodes = await adapter.listNodes(runId);
+        for (const node of (nodes as any[]).filter((entry) => entry.state === "waiting-timer")) {
+          const attempts = await adapter.listAttempts(runId, node.nodeId, node.iteration ?? 0);
+          const waitingAttempt = (attempts as any[]).find((attempt) => attempt.state === "waiting-timer");
+          if (!waitingAttempt) continue;
+          await adapter.updateAttempt(
+            runId,
+            node.nodeId,
+            node.iteration ?? 0,
+            waitingAttempt.attempt,
+            { state: "cancelled", finishedAtMs: cancelledAtMs },
+          );
+          await adapter.insertNode({
+            runId,
+            nodeId: node.nodeId,
+            iteration: node.iteration ?? 0,
+            state: "cancelled",
+            lastAttempt: waitingAttempt.attempt,
+            updatedAtMs: cancelledAtMs,
+            outputTable: node.outputTable ?? "",
+            label: node.label ?? null,
+          });
+          const timerCancelledEvent = {
+            type: "TimerCancelled" as const,
+            runId,
+            timerId: node.nodeId,
+            timestampMs: cancelledAtMs,
+          };
+          await adapter.insertEventWithNextSeq({
+            runId,
+            timestampMs: cancelledAtMs,
+            type: "TimerCancelled",
+            payloadJson: JSON.stringify(timerCancelledEvent),
+          });
+          await runPromise(trackEvent(timerCancelledEvent));
+        }
+      }
       await adapter.updateRun(runId, {
         status: "cancelled",
         finishedAtMs: cancelledAtMs,

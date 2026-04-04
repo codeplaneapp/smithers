@@ -24,12 +24,19 @@ export const toolCallsTotal = Metric.counter("smithers.tool_calls.total");
 export const cacheHits = Metric.counter("smithers.cache.hits");
 export const cacheMisses = Metric.counter("smithers.cache.misses");
 export const dbRetries = Metric.counter("smithers.db.retries");
+export const dbTransactionRollbacks = Metric.counter("smithers.db.transaction_rollbacks");
+export const dbTransactionRetries = Metric.counter("smithers.db.transaction_retries");
 export const hotReloads = Metric.counter("smithers.hot.reloads");
 export const hotReloadFailures = Metric.counter("smithers.hot.reload_failures");
 export const httpRequests = Metric.counter("smithers.http.requests");
 export const approvalsRequested = Metric.counter("smithers.approvals.requested");
 export const approvalsGranted = Metric.counter("smithers.approvals.granted");
 export const approvalsDenied = Metric.counter("smithers.approvals.denied");
+export const timersCreated = Metric.counter("smithers.timers.created");
+export const timersFired = Metric.counter("smithers.timers.fired");
+export const timersCancelled = Metric.counter("smithers.timers.cancelled");
+export const sandboxCreatedTotal = Metric.counter("smithers.sandbox.created_total");
+export const sandboxCompletedTotal = Metric.counter("smithers.sandbox.completed_total");
 
 // ---------------------------------------------------------------------------
 // Counters — scorers (event-driven tracking, distinct from src/scorers/metrics)
@@ -57,6 +64,11 @@ export const runsFinishedTotal = Metric.counter("smithers.runs.finished_total");
 export const runsFailedTotal = Metric.counter("smithers.runs.failed_total");
 export const runsCancelledTotal = Metric.counter("smithers.runs.cancelled_total");
 export const runsResumedTotal = Metric.counter("smithers.runs.resumed_total");
+export const runsContinuedTotal = Metric.counter("smithers.runs.continued_total");
+export const supervisorPollsTotal = Metric.counter("smithers.supervisor.polls_total");
+export const supervisorStaleDetected = Metric.counter("smithers.supervisor.stale_detected");
+export const supervisorResumedTotal = Metric.counter("smithers.supervisor.resumed_total");
+export const supervisorSkippedTotal = Metric.counter("smithers.supervisor.skipped_total");
 
 // ---------------------------------------------------------------------------
 // Counters — errors & retries
@@ -79,6 +91,8 @@ export const voiceErrorsTotal = Metric.counter("smithers.voice.errors_total");
 // ---------------------------------------------------------------------------
 
 export const eventsEmittedTotal = Metric.counter("smithers.events.emitted_total");
+export const taskHeartbeatsTotal = Metric.counter("smithers.heartbeats.total");
+export const taskHeartbeatTimeoutTotal = Metric.counter("smithers.heartbeats.timeout_total");
 
 // ---------------------------------------------------------------------------
 // Gauges — existing
@@ -87,6 +101,7 @@ export const eventsEmittedTotal = Metric.counter("smithers.events.emitted_total"
 export const activeRuns = Metric.gauge("smithers.runs.active");
 export const activeNodes = Metric.gauge("smithers.nodes.active");
 export const schedulerQueueDepth = Metric.gauge("smithers.scheduler.queue_depth");
+export const sandboxActive = Metric.gauge("smithers.sandbox.active");
 
 // ---------------------------------------------------------------------------
 // Gauges — MCP
@@ -97,6 +112,7 @@ export const schedulerQueueDepth = Metric.gauge("smithers.scheduler.queue_depth"
 // ---------------------------------------------------------------------------
 
 export const approvalPending = Metric.gauge("smithers.approval.pending");
+export const timersPending = Metric.gauge("smithers.timers.pending");
 export const schedulerConcurrencyUtilization = Metric.gauge("smithers.scheduler.concurrency_utilization");
 export const processUptimeSeconds = Metric.gauge("smithers.process.uptime_seconds");
 export const processMemoryRssBytes = Metric.gauge("smithers.process.memory_rss_bytes");
@@ -136,6 +152,18 @@ const sizeBuckets = MetricBoundaries.exponential({
   count: 16,
 }); // ~100 bytes to ~3.2MB
 
+const carriedStateSizeBuckets = MetricBoundaries.exponential({
+  start: 256,
+  factor: 2,
+  count: 17,
+}); // ~256 bytes to ~16MB
+
+const ancestryDepthBuckets = MetricBoundaries.exponential({
+  start: 1,
+  factor: 2,
+  count: 12,
+}); // depth 1 to 2048
+
 // ---------------------------------------------------------------------------
 // Histograms — existing
 // ---------------------------------------------------------------------------
@@ -157,6 +185,11 @@ export const toolDuration = Metric.histogram(
 
 export const dbQueryDuration = Metric.histogram(
   "smithers.db.query_ms",
+  fastBuckets,
+);
+
+export const dbTransactionDuration = Metric.histogram(
+  "smithers.db.transaction_ms",
   fastBuckets,
 );
 
@@ -209,6 +242,11 @@ export const approvalWaitDuration = Metric.histogram(
   durationBuckets,
 );
 
+export const timerDelayDuration = Metric.histogram(
+  "smithers.timers.delay_ms",
+  durationBuckets,
+);
+
 export const voiceDuration = Metric.histogram(
   "smithers.voice.duration_ms",
   durationBuckets,
@@ -221,6 +259,56 @@ export const voiceDuration = Metric.histogram(
 export const schedulerWaitDuration = Metric.histogram(
   "smithers.scheduler.wait_duration_ms",
   durationBuckets,
+);
+
+export const supervisorPollDuration = Metric.histogram(
+  "smithers.supervisor.poll_duration_ms",
+  fastBuckets,
+);
+
+export const supervisorResumeLag = Metric.histogram(
+  "smithers.supervisor.resume_lag_ms",
+  durationBuckets,
+);
+
+export const runsAncestryDepth = Metric.histogram(
+  "smithers.runs.ancestry_depth",
+  ancestryDepthBuckets,
+);
+
+export const runsCarriedStateBytes = Metric.histogram(
+  "smithers.runs.carried_state_bytes",
+  carriedStateSizeBuckets,
+);
+
+export const sandboxDurationMs = Metric.histogram(
+  "smithers.sandbox.duration_ms",
+  durationBuckets,
+);
+
+export const sandboxBundleSizeBytes = Metric.histogram(
+  "smithers.sandbox.bundle_size_bytes",
+  sizeBuckets,
+);
+
+export const sandboxTransportDurationMs = Metric.histogram(
+  "smithers.sandbox.transport_duration_ms",
+  durationBuckets,
+);
+
+export const sandboxPatchCount = Metric.histogram(
+  "smithers.sandbox.patch_count",
+  tokenBuckets,
+);
+
+export const heartbeatDataSizeBytes = Metric.histogram(
+  "smithers.heartbeats.data_size_bytes",
+  sizeBuckets,
+);
+
+export const heartbeatIntervalMs = Metric.histogram(
+  "smithers.heartbeats.interval_ms",
+  fastBuckets,
 );
 
 // ---------------------------------------------------------------------------
@@ -248,11 +336,107 @@ export function trackEvent(event: SmithersEvent): Effect.Effect<void> {
   const countEvent = Metric.increment(eventsEmittedTotal);
 
   switch (event.type) {
+    case "SupervisorStarted":
+      return countEvent;
+
+    case "SupervisorPollCompleted":
+      return Effect.all([
+        countEvent,
+        Metric.increment(supervisorPollsTotal),
+        Metric.incrementBy(supervisorStaleDetected, event.staleCount),
+        Metric.update(supervisorPollDuration, event.durationMs),
+      ], { discard: true });
+
+    case "RunAutoResumed":
+      return Effect.all([
+        countEvent,
+        Metric.increment(supervisorResumedTotal),
+        Metric.update(supervisorResumeLag, event.staleDurationMs),
+      ], { discard: true });
+
+    case "RunAutoResumeSkipped":
+      return Effect.all([
+        countEvent,
+        Metric.increment(Metric.tagged(supervisorSkippedTotal, "reason", event.reason)),
+      ], { discard: true });
+
     case "RunStarted":
       return Effect.all([
         countEvent,
         Metric.increment(runsTotal),
         Metric.update(activeRuns, 1),
+      ], { discard: true });
+
+    case "SandboxCreated": {
+      const byRuntime =
+        event.runtime && event.runtime.length > 0
+          ? Metric.tagged(sandboxCreatedTotal, "runtime", event.runtime)
+          : sandboxCreatedTotal;
+      return Effect.all([
+        countEvent,
+        Metric.increment(byRuntime),
+        Metric.update(
+          event.runtime ? Metric.tagged(sandboxActive, "runtime", event.runtime) : sandboxActive,
+          1,
+        ),
+      ], { discard: true });
+    }
+
+    case "SandboxShipped":
+      return Effect.all([
+        countEvent,
+        Metric.update(sandboxBundleSizeBytes, event.bundleSizeBytes),
+      ], { discard: true });
+
+    case "SandboxBundleReceived":
+      return Effect.all([
+        countEvent,
+        Metric.update(sandboxBundleSizeBytes, event.bundleSizeBytes),
+        Metric.update(sandboxPatchCount, event.patchCount),
+      ], { discard: true });
+
+    case "SandboxCompleted": {
+      const byRuntime =
+        event.runtime && event.runtime.length > 0
+          ? Metric.tagged(
+              Metric.tagged(sandboxCompletedTotal, "runtime", event.runtime),
+              "status",
+              event.status,
+            )
+          : sandboxCompletedTotal;
+      return Effect.all([
+        countEvent,
+        Metric.increment(byRuntime),
+        Metric.update(
+          event.runtime ? Metric.tagged(sandboxActive, "runtime", event.runtime) : sandboxActive,
+          -1,
+        ),
+        Metric.update(sandboxDurationMs, event.durationMs),
+      ], { discard: true });
+    }
+
+    case "SandboxFailed":
+      return Effect.all([
+        countEvent,
+        Metric.increment(errorsTotal),
+      ], { discard: true });
+
+    case "SandboxDiffReviewRequested":
+      return Effect.all([
+        countEvent,
+        Metric.update(sandboxPatchCount, event.patchCount),
+      ], { discard: true });
+
+    case "SandboxDiffAccepted":
+      return Effect.all([
+        countEvent,
+        Metric.update(sandboxPatchCount, event.patchCount),
+      ], { discard: true });
+
+    case "SandboxDiffRejected":
+      return Effect.all([
+        countEvent,
+        Metric.increment(errorsTotal),
       ], { discard: true });
 
     case "RunFinished":
@@ -277,11 +461,38 @@ export function trackEvent(event: SmithersEvent): Effect.Effect<void> {
         Metric.increment(runsCancelledTotal),
       ], { discard: true });
 
+    case "RunContinuedAsNew":
+      return Effect.all([
+        countEvent,
+        Metric.update(activeRuns, -1),
+        Metric.increment(runsContinuedTotal),
+        Metric.update(runsCarriedStateBytes, event.carriedStateSize),
+        ...(typeof event.ancestryDepth === "number"
+          ? [Metric.update(runsAncestryDepth, event.ancestryDepth)]
+          : []),
+      ], { discard: true });
+
     case "NodeStarted":
       return Effect.all([
         countEvent,
         Metric.increment(nodesStarted),
         Metric.update(activeNodes, 1),
+      ], { discard: true });
+
+    case "TaskHeartbeat":
+      return Effect.all([
+        countEvent,
+        Metric.increment(taskHeartbeatsTotal),
+        Metric.update(heartbeatDataSizeBytes, event.dataSizeBytes),
+        ...(typeof event.intervalMs === "number"
+          ? [Metric.update(heartbeatIntervalMs, event.intervalMs)]
+          : []),
+      ], { discard: true });
+
+    case "TaskHeartbeatTimeout":
+      return Effect.all([
+        countEvent,
+        Metric.increment(taskHeartbeatTimeoutTotal),
       ], { discard: true });
 
     case "NodeFinished":
@@ -344,6 +555,28 @@ export function trackEvent(event: SmithersEvent): Effect.Effect<void> {
         countEvent,
         Metric.increment(approvalsDenied),
         Metric.update(approvalPending, -1),
+      ], { discard: true });
+
+    case "TimerCreated":
+      return Effect.all([
+        countEvent,
+        Metric.increment(timersCreated),
+        Metric.update(timersPending, 1),
+      ], { discard: true });
+
+    case "TimerFired":
+      return Effect.all([
+        countEvent,
+        Metric.increment(timersFired),
+        Metric.update(timersPending, -1),
+        Metric.update(timerDelayDuration, event.delayMs),
+      ], { discard: true });
+
+    case "TimerCancelled":
+      return Effect.all([
+        countEvent,
+        Metric.increment(timersCancelled),
+        Metric.update(timersPending, -1),
       ], { discard: true });
 
     case "TokenUsageReported": {

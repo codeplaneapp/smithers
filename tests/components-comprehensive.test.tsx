@@ -79,13 +79,14 @@ describe("Task component", () => {
     expect(chain.length).toBe(3);
   });
 
-  test("passes through retries, timeoutMs, continueOnFail", async () => {
+  test("passes through retries, timeoutMs, heartbeatTimeoutMs, continueOnFail", async () => {
     const result = await render(
       <Task
         id="t1"
         output="out"
         retries={3}
         timeoutMs={5000}
+        heartbeatTimeoutMs={2000}
         continueOnFail
       >
         {{ v: 1 }}
@@ -93,6 +94,7 @@ describe("Task component", () => {
     );
     expect(result.tasks[0].retries).toBe(3);
     expect(result.tasks[0].timeoutMs).toBe(5000);
+    expect(result.tasks[0].heartbeatTimeoutMs).toBe(2000);
     expect(result.tasks[0].continueOnFail).toBe(true);
   });
 });

@@ -17,9 +17,20 @@ import {
   Branch as BaseBranch,
   Loop as BaseLoop,
   Ralph as BaseRalph,
+  ContinueAsNew as BaseContinueAsNew,
+  continueAsNew as baseContinueAsNew,
   Worktree as BaseWorktree,
+  Sandbox as BaseSandbox,
+  Timer as BaseTimer,
 } from "./components";
-import type { ApprovalProps, WorkflowProps, TaskProps, DepsSpec } from "./components";
+import type {
+  ApprovalProps,
+  SandboxProps,
+  WorkflowProps,
+  TaskProps,
+  DepsSpec,
+  TimerProps,
+} from "./components";
 
 import { zodToTable } from "./zodToTable";
 import { zodToCreateTableSQL } from "./zodToCreateTableSQL";
@@ -62,7 +73,11 @@ export type CreateSmithersApi<Schema = any> = {
   Branch: typeof BaseBranch;
   Loop: typeof BaseLoop;
   Ralph: typeof BaseRalph;
+  ContinueAsNew: typeof BaseContinueAsNew;
+  continueAsNew: typeof baseContinueAsNew;
   Worktree: typeof BaseWorktree;
+  Sandbox: (props: SandboxProps) => React.ReactElement;
+  Timer: typeof BaseTimer;
   useCtx: () => SmithersCtx<Schema>;
   smithers: (
     build: (ctx: SmithersCtx<Schema>) => React.ReactElement,
@@ -213,6 +228,28 @@ export function createSmithers<
     } as any);
   }
 
+  function Sandbox(props: SandboxProps) {
+    const workflow =
+      props.workflow ??
+      ({
+        db,
+        build: () =>
+          React.createElement(
+            BaseWorkflow,
+            { name: `sandbox:${props.id}` },
+            props.children as any,
+          ),
+        opts: {},
+        schemaRegistry,
+        zodToKeyName,
+      } as any);
+    return React.createElement(BaseSandbox, {
+      ...props,
+      workflow,
+      smithersContext: RuntimeSmithersContext,
+    } as any);
+  }
+
   function boundSmithers(
     build: (ctx: SmithersCtx<Schemas>) => React.ReactElement,
     smithersOpts?: SmithersWorkflowOptions,
@@ -243,7 +280,11 @@ export function createSmithers<
     Branch: BaseBranch,
     Loop: BaseLoop,
     Ralph: BaseRalph,
+    ContinueAsNew: BaseContinueAsNew,
+    continueAsNew: baseContinueAsNew,
     Worktree: BaseWorktree,
+    Sandbox,
+    Timer: BaseTimer,
     useCtx,
     smithers: boundSmithers,
     db,

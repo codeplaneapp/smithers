@@ -2276,6 +2276,8 @@ describe("docs: SmithersEvent completeness", () => {
       "FrameCommitted",
       "NodePending",
       "NodeStarted",
+      "TaskHeartbeat",
+      "TaskHeartbeatTimeout",
       "NodeFinished",
       "NodeFailed",
       "NodeCancelled",
@@ -2305,7 +2307,7 @@ describe("docs: SmithersEvent completeness", () => {
     for (const type of allSourceEventTypes) {
       expect(typeof type).toBe("string");
     }
-    expect(allSourceEventTypes.length).toBe(33);
+    expect(allSourceEventTypes.length).toBe(35);
   });
 });
 

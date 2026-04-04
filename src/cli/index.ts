@@ -2,7 +2,7 @@
 import { resolve, dirname, basename } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFileSync, existsSync, openSync } from "node:fs";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { Cli, z } from "incur";
 import { runWorkflow, renderFrame, resolveSchema } from "../engine";
 import { mdxPlugin } from "../mdx-plugin";
@@ -12,9 +12,17 @@ import { ensureSmithersTables } from "../db/ensure";
 import { SmithersDb } from "../db/adapter";
 import { buildContext } from "../context";
 import { fromPromise } from "../effect/interop";
-import { runPromise } from "../effect/runtime";
+import { runFork, runPromise } from "../effect/runtime";
 import type { SmithersWorkflow } from "../SmithersWorkflow";
 import { trackEvent } from "../effect/metrics";
+import type { UiTarget as BurnsUiTarget } from "../../apps/cli/src/args";
+import { openInBrowser } from "../../apps/cli/src/open-browser";
+import {
+  buildUiUrl,
+  ensureUiHostRunning,
+  shouldSuppressAutoOpen,
+} from "../../apps/cli/src/ui";
+import { resolveDefaultWebBinding } from "../../apps/cli/src/web";
 
 import { revertToAttempt } from "../revert";
 import { runSync } from "../effect/runtime";
@@ -40,12 +48,42 @@ import {
   launchConversationHijackSession,
   persistConversationHijackHandoff,
 } from "./hijack-session";
-import { formatAge, formatElapsedCompact, formatEventLine } from "./format";
+import {
+  colorizeEventText,
+  formatAge,
+  formatElapsedCompact,
+  formatEventLine,
+  formatRelativeOffset,
+} from "./format";
+import {
+  EVENT_CATEGORY_VALUES,
+  eventTypesForCategory,
+  normalizeEventCategory,
+} from "./event-categories";
+import {
+  aggregateNodeDetailEffect,
+  renderNodeDetailHuman,
+} from "./node-detail";
+import {
+  diagnoseRunEffect,
+  diagnosisCtaCommands,
+  renderWhyDiagnosisHuman,
+} from "./why-diagnosis";
 import { detectAvailableAgents } from "./agent-detection";
 import { initWorkflowPack, getWorkflowFollowUpCtas } from "./workflow-pack";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile } from "./workflows";
 import { ask } from "./ask";
 import { runScheduler } from "./scheduler";
+import { resumeRunDetached } from "./resume-detached";
+import {
+  parseDurationMs,
+  supervisorLoopEffect,
+} from "./supervisor";
+import {
+  WATCH_MIN_INTERVAL_MS,
+  runWatchLoop,
+  watchIntervalSecondsToMs,
+} from "./watch";
 import pc from "picocolors";
 import crypto from "node:crypto";
 
@@ -109,9 +147,90 @@ function parseJsonInput(raw: string | undefined, label: string, fail: FailFn) {
 
 function formatStatusExitCode(status: string | undefined) {
   if (status === "finished") return 0;
-  if (status === "waiting-approval") return 3;
+  if (status === "waiting-approval" || status === "waiting-timer") return 3;
   if (status === "cancelled") return 2;
   return 1;
+}
+
+function parseUiTarget(
+  targetRaw: string | undefined,
+  valueRaw: string | undefined,
+): { ok: true; target: BurnsUiTarget } | { ok: false; error: string } {
+  const target = targetRaw?.trim().toLowerCase();
+  const value = valueRaw?.trim();
+
+  if (!target) {
+    if (value) {
+      return {
+        ok: false,
+        error: `Unexpected argument: ${value}`,
+      };
+    }
+
+    return {
+      ok: true,
+      target: { kind: "dashboard" },
+    };
+  }
+
+  if (target === "approvals") {
+    if (value) {
+      return {
+        ok: false,
+        error: `Unexpected argument for smithers ui approvals: ${value}`,
+      };
+    }
+
+    return {
+      ok: true,
+      target: { kind: "approvals" },
+    };
+  }
+
+  if (target === "run") {
+    if (!value) {
+      return {
+        ok: false,
+        error: "Missing run ID for smithers ui run <run-id>",
+      };
+    }
+
+    return {
+      ok: true,
+      target: { kind: "run", runId: value },
+    };
+  }
+
+  if (target === "node") {
+    if (!value) {
+      return {
+        ok: false,
+        error: "Missing run/node target for smithers ui node <run-id>/<node-id>",
+      };
+    }
+
+    const separatorIndex = value.indexOf("/");
+    if (separatorIndex <= 0 || separatorIndex >= value.length - 1) {
+      return {
+        ok: false,
+        error: "Invalid node target. Expected <run-id>/<node-id>",
+      };
+    }
+
+    return {
+      ok: true,
+      target: {
+        kind: "node",
+        runId: value.slice(0, separatorIndex),
+        nodeId: value.slice(separatorIndex + 1),
+      },
+    };
+  }
+
+  return {
+    ok: false,
+    error: `Unknown UI target: ${target}`,
+  };
 }
 
 function setupSqliteCleanup(workflow: SmithersWorkflow<any>) {
@@ -158,6 +277,21 @@ function buildProgressReporter() {
       case "NodeRetrying":
         process.stderr.write(`[${ts}] ↻ ${event.nodeId} retrying (attempt ${event.attempt ?? 1})\n`);
         break;
+      case "NodeWaitingTimer":
+        process.stderr.write(
+          `[${ts}] ⏱ ${event.nodeId} waiting for timer (fires ${new Date(event.firesAtMs).toISOString()})\n`,
+        );
+        break;
+      case "TimerCreated":
+        process.stderr.write(
+          `[${ts}] ⏱ Timer created: ${event.timerId} (fires ${new Date(event.firesAtMs).toISOString()})\n`,
+        );
+        break;
+      case "TimerFired":
+        process.stderr.write(
+          `[${ts}] 🔔 Timer fired: ${event.timerId} (delay ${event.delayMs}ms)\n`,
+        );
+        break;
       case "RunFinished":
         process.stderr.write(`[${ts}] ✓ Run finished\n`);
         break;
@@ -184,6 +318,72 @@ function buildProgressReporter() {
   };
 }
 
+type WaitingTimerInfo = {
+  nodeId: string;
+  iteration: number;
+  firesAtMs: number;
+  timerType: "duration" | "absolute";
+};
+
+function parseWaitingTimerInfo(metaJson?: string | null): WaitingTimerInfo | null {
+  if (!metaJson) return null;
+  try {
+    const parsed = JSON.parse(metaJson);
+    const timer = parsed?.timer;
+    if (!timer || typeof timer !== "object") return null;
+    const nodeId = typeof timer.timerId === "string" ? timer.timerId : null;
+    const firesAtMs = Number(timer.firesAtMs);
+    if (!nodeId || !Number.isFinite(firesAtMs)) return null;
+    return {
+      nodeId,
+      iteration: 0,
+      firesAtMs: Math.floor(firesAtMs),
+      timerType: timer.timerType === "absolute" ? "absolute" : "duration",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatRemainingTimer(ms: number): string {
+  if (ms <= 0) return "due now";
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+
+async function listWaitingTimers(adapter: SmithersDb, runId: string) {
+  const nodes = await adapter.listNodes(runId);
+  const waits: Array<WaitingTimerInfo & { iteration: number }> = [];
+
+  for (const node of nodes as any[]) {
+    if (node.state !== "waiting-timer") continue;
+    const attempts = await adapter.listAttempts(
+      runId,
+      node.nodeId,
+      node.iteration ?? 0,
+    );
+    const waitingAttempt =
+      (attempts as any[]).find((attempt) => attempt.state === "waiting-timer") ??
+      (attempts as any[])[0];
+    const parsed = parseWaitingTimerInfo(waitingAttempt?.metaJson);
+    if (!parsed) continue;
+    waits.push({
+      ...parsed,
+      nodeId: node.nodeId,
+      iteration: node.iteration ?? 0,
+    });
+  }
+
+  waits.sort((left, right) => left.firesAtMs - right.firesAtMs);
+  return waits;
+}
+
 function setupAbortSignal() {
   const abort = new AbortController();
   let signalHandled = false;
@@ -198,20 +398,55 @@ function setupAbortSignal() {
   return abort;
 }
 
-function resumeRunDetached(workflowPath: string, runId: string) {
-  const cliPath = new URL(import.meta.url).pathname;
-  const child = spawn(
-    "bun",
-    [cliPath, "up", workflowPath, "--resume", "--run-id", runId, "-d", "--force"],
-    {
-      cwd: dirname(resolve(workflowPath)),
-      stdio: "ignore",
-      env: process.env,
-      detached: true,
-    },
+function isRunStatusTerminal(status: string | null | undefined) {
+  return (
+    status !== "running" &&
+    status !== "waiting-approval" &&
+    status !== "waiting-timer" &&
+    status !== "waiting-event"
   );
-  child.unref();
-  return child.pid ?? null;
+}
+
+function writeWatchOutput(
+  format: string | undefined,
+  payload: unknown,
+  human?: string,
+) {
+  if (format === "jsonl") {
+    process.stdout.write(`${JSON.stringify(payload)}\n`);
+    return;
+  }
+  if (format === "json") {
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    return;
+  }
+  if (human !== undefined) {
+    process.stdout.write(`${human}\n`);
+    return;
+  }
+  process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+}
+
+function resolveWatchIntervalMsOrFail(
+  command: string,
+  intervalSeconds: number,
+  fail: FailFn,
+) {
+  try {
+    const intervalMs = watchIntervalSecondsToMs(intervalSeconds);
+    if (intervalMs !== intervalSeconds * 1_000) {
+      process.stderr.write(
+        `[smithers] --interval clamped to ${WATCH_MIN_INTERVAL_MS}ms for ${command} watch mode\n`,
+      );
+    }
+    return intervalMs;
+  } catch (error: any) {
+    return fail({
+      code: "INVALID_WATCH_INTERVAL",
+      message: error?.message ?? String(error),
+      exitCode: 4,
+    });
+  }
 }
 
 async function listAllEvents(adapter: SmithersDb, runId: string) {
@@ -225,6 +460,688 @@ async function listAllEvents(adapter: SmithersDb, runId: string) {
     if ((batch as any[]).length < 1000) break;
   }
   return events;
+}
+
+async function listAncestryRunIds(
+  adapter: SmithersDb,
+  runId: string,
+): Promise<string[]> {
+  const ancestry = await adapter.listRunAncestry(runId, 10_000);
+  if (!ancestry || ancestry.length === 0) return [runId];
+  // listRunAncestry returns [current, parent, grandparent, ...]
+  return (ancestry as any[]).map((row) => row.runId);
+}
+
+async function* streamRunEventsCommand(c: any) {
+  let adapter: SmithersDb | undefined;
+  let cleanup: (() => void) | undefined;
+  try {
+    const db = await findAndOpenDb();
+    adapter = db.adapter;
+    cleanup = db.cleanup;
+
+    const run = await adapter.getRun(c.args.runId);
+    if (!run) {
+      yield `Error: Run not found: ${c.args.runId}`;
+      return;
+    }
+
+    const includeAncestry = Boolean(c.options.followAncestry);
+    const lineageCurrentToRoot = includeAncestry
+      ? await listAncestryRunIds(adapter, c.args.runId)
+      : [c.args.runId];
+    const lineageRootToCurrent = [...lineageCurrentToRoot].reverse();
+    const runOrder = new Map(
+      lineageRootToCurrent.map((runId: string, index: number) => [runId, index]),
+    );
+
+    const lineageRuns = await Promise.all(
+      lineageRootToCurrent.map((lineageRunId: string) =>
+        adapter!.getRun(lineageRunId),
+      ),
+    );
+    const firstLineageRun = lineageRuns.find((entry) => Boolean(entry));
+    const baseMs =
+      (firstLineageRun as any)?.startedAtMs ??
+      (firstLineageRun as any)?.createdAtMs ??
+      (run as any).startedAtMs ??
+      (run as any).createdAtMs ??
+      Date.now();
+
+    const formatLine = (event: any) => {
+      const line = formatEventLine(event, baseMs);
+      if (!includeAncestry) return line;
+      const runPrefix = String(event.runId ?? "").slice(0, 12);
+      return `${runPrefix} ${line}`;
+    };
+
+    let lastSeq = c.options.since ?? -1;
+
+    if (!includeAncestry && c.options.since === undefined) {
+      const lastEventSeq = await adapter.getLastEventSeq(c.args.runId);
+      if (lastEventSeq !== undefined) {
+        lastSeq = Math.max(-1, lastEventSeq - c.options.tail);
+      }
+    }
+
+    let initialEvents: any[] = [];
+    if (includeAncestry) {
+      const merged: any[] = [];
+      for (const lineageRunId of lineageRootToCurrent) {
+        const events = await listAllEvents(adapter, lineageRunId);
+        for (const event of events as any[]) {
+          merged.push({ ...event, runId: lineageRunId });
+        }
+      }
+      merged.sort((left, right) => {
+        if (left.timestampMs !== right.timestampMs) {
+          return left.timestampMs - right.timestampMs;
+        }
+        const leftOrder = runOrder.get(left.runId) ?? 0;
+        const rightOrder = runOrder.get(right.runId) ?? 0;
+        if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+        return (left.seq ?? 0) - (right.seq ?? 0);
+      });
+      initialEvents =
+        c.options.since !== undefined
+          ? merged.filter((event) => (event.seq ?? -1) > c.options.since)
+          : merged.slice(-c.options.tail);
+      const lastCurrentEvent = [...initialEvents]
+        .reverse()
+        .find((event) => event.runId === c.args.runId);
+      lastSeq = lastCurrentEvent?.seq ?? -1;
+    } else {
+      initialEvents = await adapter.listEvents(c.args.runId, lastSeq, 1000);
+      for (const event of initialEvents as any[]) {
+        lastSeq = event.seq;
+      }
+    }
+
+    for (const event of initialEvents as any[]) {
+      yield formatLine(event);
+      if (!includeAncestry) {
+        lastSeq = event.seq;
+      } else if (event.runId === c.args.runId) {
+        lastSeq = event.seq;
+      }
+    }
+
+    const isActive =
+      (run as any).status === "running" ||
+      (run as any).status === "waiting-approval" ||
+      (run as any).status === "waiting-timer";
+    if (!c.options.follow || !isActive) {
+      return c.ok(undefined, {
+        cta: {
+          commands: [{ command: `inspect ${c.args.runId}`, description: "Inspect run state" }],
+        },
+      });
+    }
+
+    while (true) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const newEvents = await adapter.listEvents(c.args.runId, lastSeq, 200);
+      for (const event of newEvents as any[]) {
+        yield formatLine(event);
+        lastSeq = event.seq;
+      }
+
+      const currentRun = await adapter.getRun(c.args.runId);
+      const currentStatus = (currentRun as any)?.status;
+      if (
+        currentStatus !== "running" &&
+        currentStatus !== "waiting-approval" &&
+        currentStatus !== "waiting-timer"
+      ) {
+        const finalEvents = await adapter.listEvents(c.args.runId, lastSeq, 1000);
+        for (const event of finalEvents as any[]) {
+          yield formatLine(event);
+          lastSeq = event.seq;
+        }
+
+        const ctaCommands: any[] = [
+          { command: `inspect ${c.args.runId}`, description: "Inspect run state" },
+        ];
+        if (currentStatus === "waiting-approval") {
+          ctaCommands.push({ command: `approve ${c.args.runId}`, description: "Approve run" });
+        }
+        if (currentStatus === "waiting-timer") {
+          ctaCommands.push({ command: `why ${c.args.runId}`, description: "Explain timer wait" });
+        }
+        return c.ok(undefined, { cta: { commands: ctaCommands } });
+      }
+    }
+  } finally {
+    cleanup?.();
+  }
+}
+
+const DEFAULT_EVENTS_LIMIT = 1_000;
+const MAX_EVENTS_LIMIT = 100_000;
+const EVENTS_PAGE_SIZE = 1_000;
+
+type EventHistoryRow = {
+  runId: string;
+  seq: number;
+  timestampMs: number;
+  type: string;
+  payloadJson: string;
+};
+
+type EventGroupBy = "node" | "attempt";
+
+type NormalizedEventsQuery = {
+  nodeId?: string;
+  typeName?: string;
+  eventTypes?: readonly string[];
+  sinceTimestampMs?: number;
+  groupBy?: EventGroupBy;
+  json: boolean;
+  limit: number;
+  defaultLimitUsed: boolean;
+  limitCapped: boolean;
+};
+
+function parseEventPayload(payloadJson: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(payloadJson);
+    if (parsed && typeof parsed === "object") {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // ignore malformed payloads
+  }
+  return {};
+}
+
+function parseEventNumber(value: unknown): number | null {
+  const asNumber =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN;
+  if (!Number.isFinite(asNumber)) return null;
+  return Math.floor(asNumber);
+}
+
+function normalizeEventGroupBy(
+  groupByRaw: string | undefined,
+): EventGroupBy | undefined {
+  if (!groupByRaw) return undefined;
+  const normalized = groupByRaw.trim().toLowerCase();
+  if (normalized === "node" || normalized === "attempt") {
+    return normalized;
+  }
+  throw new SmithersError(
+    "INVALID_GROUP_BY",
+    `Invalid --group-by value "${groupByRaw}". Use "node" or "attempt".`,
+  );
+}
+
+function normalizeEventsLimit(limit: number | undefined): {
+  value: number;
+  defaultLimitUsed: boolean;
+  limitCapped: boolean;
+} {
+  if (limit === undefined) {
+    return {
+      value: DEFAULT_EVENTS_LIMIT,
+      defaultLimitUsed: true,
+      limitCapped: false,
+    };
+  }
+  if (limit > MAX_EVENTS_LIMIT) {
+    return {
+      value: MAX_EVENTS_LIMIT,
+      defaultLimitUsed: false,
+      limitCapped: true,
+    };
+  }
+  return {
+    value: limit,
+    defaultLimitUsed: false,
+    limitCapped: false,
+  };
+}
+
+function buildEventHistoryLine(event: EventHistoryRow, baseMs: number): string {
+  const seqLabel = `#${event.seq + 1}`;
+  const offset = formatRelativeOffset(baseMs, event.timestampMs);
+  const typeText = event.type.padEnd(20, " ");
+  const coloredType = colorizeEventText(event.type, typeText);
+  const summary = formatEventLine(event, baseMs, {
+    includeTimestamp: false,
+    truncatePayloadAt: 220,
+  });
+  return `${seqLabel}  ${offset}  ${coloredType}  ${summary}`;
+}
+
+function buildEventNdjsonLine(event: EventHistoryRow): string {
+  const payload = parseEventPayload(event.payloadJson);
+  return JSON.stringify({
+    runId: event.runId,
+    seq: event.seq,
+    timestampMs: event.timestampMs,
+    type: event.type,
+    payload,
+  });
+}
+
+function eventNodeGroupLabel(event: EventHistoryRow): string {
+  const payload = parseEventPayload(event.payloadJson);
+  const nodeId = payload.nodeId;
+  if (typeof nodeId === "string" && nodeId.length > 0) return nodeId;
+  return "(run)";
+}
+
+function eventAttemptGroupLabel(event: EventHistoryRow): {
+  nodeLabel: string;
+  attemptLabel: string;
+} {
+  const payload = parseEventPayload(event.payloadJson);
+  const nodeLabel = eventNodeGroupLabel(event);
+  const attempt = parseEventNumber(payload.attempt);
+  const iteration = parseEventNumber(payload.iteration);
+  if (attempt === null && iteration === null) {
+    return {
+      nodeLabel,
+      attemptLabel: "Attempt ?",
+    };
+  }
+  if (iteration === null) {
+    return {
+      nodeLabel,
+      attemptLabel: `Attempt ${attempt ?? "?"}`,
+    };
+  }
+  return {
+    nodeLabel,
+    attemptLabel: `Attempt ${attempt ?? "?"} (iteration ${iteration})`,
+  };
+}
+
+function renderGroupedEvents(
+  events: EventHistoryRow[],
+  baseMs: number,
+  groupBy: EventGroupBy,
+): string[] {
+  const lines: string[] = [];
+
+  if (groupBy === "node") {
+    const order: string[] = [];
+    const grouped = new Map<string, EventHistoryRow[]>();
+    for (const event of events) {
+      const key = eventNodeGroupLabel(event);
+      if (!grouped.has(key)) {
+        grouped.set(key, []);
+        order.push(key);
+      }
+      grouped.get(key)!.push(event);
+    }
+    for (const key of order) {
+      if (lines.length > 0) lines.push("");
+      lines.push(pc.bold(`node: ${key}`));
+      const bucket = grouped.get(key) ?? [];
+      for (const event of bucket) {
+        lines.push(`  ${buildEventHistoryLine(event, baseMs)}`);
+      }
+    }
+    return lines;
+  }
+
+  const nodeOrder: string[] = [];
+  const nodeBuckets = new Map<
+    string,
+    { attemptOrder: string[]; attempts: Map<string, EventHistoryRow[]> }
+  >();
+
+  for (const event of events) {
+    const { nodeLabel, attemptLabel } = eventAttemptGroupLabel(event);
+    if (!nodeBuckets.has(nodeLabel)) {
+      nodeBuckets.set(nodeLabel, { attemptOrder: [], attempts: new Map() });
+      nodeOrder.push(nodeLabel);
+    }
+    const entry = nodeBuckets.get(nodeLabel)!;
+    if (!entry.attempts.has(attemptLabel)) {
+      entry.attempts.set(attemptLabel, []);
+      entry.attemptOrder.push(attemptLabel);
+    }
+    entry.attempts.get(attemptLabel)!.push(event);
+  }
+
+  for (const nodeLabel of nodeOrder) {
+    const nodeEntry = nodeBuckets.get(nodeLabel);
+    if (!nodeEntry) continue;
+    if (lines.length > 0) lines.push("");
+    lines.push(pc.bold(`node: ${nodeLabel}`));
+    for (const attemptLabel of nodeEntry.attemptOrder) {
+      lines.push(pc.bold(`  ${attemptLabel}`));
+      const bucket = nodeEntry.attempts.get(attemptLabel) ?? [];
+      for (const event of bucket) {
+        lines.push(`    ${buildEventHistoryLine(event, baseMs)}`);
+      }
+    }
+  }
+
+  return lines;
+}
+
+async function queryEventHistoryPage(
+  adapter: SmithersDb,
+  runId: string,
+  query: {
+    afterSeq: number;
+    nodeId?: string;
+    eventTypes?: readonly string[];
+    sinceTimestampMs?: number;
+    limit: number;
+  },
+) {
+  return runPromise(
+    adapter.listEventHistoryEffect(runId, {
+      afterSeq: query.afterSeq,
+      nodeId: query.nodeId,
+      sinceTimestampMs: query.sinceTimestampMs,
+      types: query.eventTypes,
+      limit: query.limit,
+    }).pipe(
+      Effect.annotateLogs({
+        runId,
+        filters: {
+          nodeId: query.nodeId,
+          sinceTimestampMs: query.sinceTimestampMs,
+          eventTypes: query.eventTypes,
+          afterSeq: query.afterSeq,
+          limit: query.limit,
+        },
+      }),
+      Effect.withLogSpan("cli:events"),
+    ),
+  ) as Promise<EventHistoryRow[]>;
+}
+
+async function countEventHistory(
+  adapter: SmithersDb,
+  runId: string,
+  query: {
+    nodeId?: string;
+    eventTypes?: readonly string[];
+    sinceTimestampMs?: number;
+  },
+) {
+  return runPromise(
+    adapter.countEventHistoryEffect(runId, {
+      nodeId: query.nodeId,
+      sinceTimestampMs: query.sinceTimestampMs,
+      types: query.eventTypes,
+    }).pipe(
+      Effect.annotateLogs({
+        runId,
+        filters: {
+          nodeId: query.nodeId,
+          sinceTimestampMs: query.sinceTimestampMs,
+          eventTypes: query.eventTypes,
+        },
+      }),
+      Effect.withLogSpan("cli:events"),
+    ),
+  );
+}
+
+type PsRow = {
+  id: string;
+  workflow: string;
+  status: string;
+  step: string;
+  timer?: {
+    id: string;
+    iteration: number;
+    firesAt: string;
+    remaining: string;
+  };
+  started: string;
+};
+
+async function buildPsRows(
+  adapter: SmithersDb,
+  limit: number,
+  status: string | undefined,
+): Promise<PsRow[]> {
+  const runs = await adapter.listRuns(limit, status);
+  const rows: PsRow[] = [];
+
+  for (const run of runs as any[]) {
+    const nodes = await adapter.listNodes(run.runId);
+    const activeNode = (nodes as any[]).find((n: any) => n.state === "in-progress");
+    const waitingTimers =
+      run.status === "waiting-timer"
+        ? await listWaitingTimers(adapter, run.runId)
+        : [];
+    const nextTimer = waitingTimers[0];
+
+    rows.push({
+      id: run.runId,
+      workflow: run.workflowName ?? (run.workflowPath ? basename(run.workflowPath) : "—"),
+      status: run.status,
+      step:
+        nextTimer
+          ? `timer:${nextTimer.nodeId}`
+          : activeNode?.label ?? activeNode?.nodeId ?? "—",
+      ...(nextTimer
+        ? {
+            timer: {
+              id: nextTimer.nodeId,
+              iteration: nextTimer.iteration,
+              firesAt: new Date(nextTimer.firesAtMs).toISOString(),
+              remaining: formatRemainingTimer(nextTimer.firesAtMs - Date.now()),
+            },
+          }
+        : {}),
+      started: run.startedAtMs
+        ? formatAge(run.startedAtMs)
+        : run.createdAtMs
+          ? formatAge(run.createdAtMs)
+          : "—",
+    });
+  }
+
+  return rows;
+}
+
+function buildPsCtaCommands(rows: PsRow[]) {
+  const ctaCommands: any[] = [];
+  const firstActive = rows.find((r) => r.status === "running");
+  const firstWaitingApproval = rows.find((r) => r.status === "waiting-approval");
+  const firstWaitingTimer = rows.find((r) => r.status === "waiting-timer");
+  if (firstActive) {
+    ctaCommands.push({ command: `logs ${firstActive.id}`, description: "Tail active run" });
+    ctaCommands.push({ command: `chat ${firstActive.id} --follow`, description: "Watch agent chat" });
+  }
+  if (firstWaitingApproval) {
+    ctaCommands.push({ command: `approve ${firstWaitingApproval.id}`, description: "Approve waiting run" });
+  }
+  if (firstWaitingTimer) {
+    ctaCommands.push({ command: `why ${firstWaitingTimer.id}`, description: "Explain timer wait" });
+  }
+  if (rows.length > 0) {
+    ctaCommands.push({ command: `inspect ${rows[0].id}`, description: "Inspect most recent run" });
+  }
+  return ctaCommands;
+}
+
+type InspectSnapshot = {
+  result: Record<string, any>;
+  ctaCommands: any[];
+  status: string | undefined;
+};
+
+async function buildInspectSnapshot(
+  adapter: SmithersDb,
+  runId: string,
+): Promise<InspectSnapshot> {
+  const run = await adapter.getRun(runId);
+  if (!run) {
+    throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`);
+  }
+
+  const r = run as any;
+  const nodes = await adapter.listNodes(runId);
+  const approvals = await adapter.listPendingApprovals(runId);
+  const waitingTimers = await listWaitingTimers(adapter, runId);
+  const loops = await adapter.listRalph(runId);
+  const ancestry = await adapter.listRunAncestry(runId, 1_000);
+  const continuedFromRunIds = (ancestry as any[]).slice(1).map((row: any) => row.runId);
+  const lineagePageSize = 100;
+  const continuedFromVisible = continuedFromRunIds.slice(0, lineagePageSize);
+  const continuedFromRemaining =
+    continuedFromRunIds.length > lineagePageSize
+      ? continuedFromRunIds.length - lineagePageSize
+      : 0;
+
+  let activeDescendantRunId: string | undefined;
+  {
+    const seen = new Set<string>([runId]);
+    let cursor = runId;
+    while (true) {
+      const child = await adapter.getLatestChildRun(cursor);
+      if (!child || !child.runId || seen.has(child.runId)) break;
+      activeDescendantRunId = child.runId;
+      seen.add(child.runId);
+      cursor = child.runId;
+    }
+  }
+
+  const steps = (nodes as any[]).map((n: any) => ({
+    id: n.nodeId,
+    state: n.state,
+    attempt: n.lastAttempt ?? 0,
+    label: n.label ?? n.nodeId,
+  }));
+
+  const pendingApprovals = (approvals as any[]).map((a: any) => ({
+    nodeId: a.nodeId,
+    status: a.status,
+    requestedAt: a.requestedAtMs ? new Date(a.requestedAtMs).toISOString() : "—",
+  }));
+
+  const loopState = (loops as any[]).map((l: any) => ({
+    loopId: l.ralphId,
+    iteration: l.iteration,
+    maxIterations: l.maxIterations,
+  }));
+
+  let config: any = undefined;
+  if (r.configJson) {
+    try {
+      config = JSON.parse(r.configJson);
+    } catch {}
+  }
+
+  let error: any = undefined;
+  if (r.errorJson) {
+    try {
+      error = JSON.parse(r.errorJson);
+    } catch {}
+  }
+
+  const result: Record<string, any> = {
+    run: {
+      id: r.runId,
+      workflow: r.workflowName ?? (r.workflowPath ? basename(r.workflowPath) : "—"),
+      status: r.status,
+      ...(r.parentRunId ? { parentRunId: r.parentRunId } : {}),
+      started: r.startedAtMs ? new Date(r.startedAtMs).toISOString() : "—",
+      elapsed: r.startedAtMs ? formatElapsedCompact(r.startedAtMs, r.finishedAtMs ?? undefined) : "—",
+      ...(r.finishedAtMs ? { finished: new Date(r.finishedAtMs).toISOString() } : {}),
+      ...(activeDescendantRunId && activeDescendantRunId !== r.runId
+        ? { activeDescendantRunId }
+        : {}),
+      ...(error ? { error } : {}),
+    },
+    steps,
+  };
+
+  if (continuedFromVisible.length > 0) {
+    result.run.continuedFrom = continuedFromVisible;
+    result.run.continuedFromDisplay = [
+      ...continuedFromVisible,
+      ...(continuedFromRemaining > 0
+        ? [`... (${continuedFromRemaining} more)`]
+        : []),
+    ].join(" -> ");
+  }
+
+  if (pendingApprovals.length > 0) {
+    result.approvals = pendingApprovals;
+  }
+  if (waitingTimers.length > 0) {
+    result.timers = waitingTimers.map((timer) => ({
+      timerId: timer.nodeId,
+      iteration: timer.iteration,
+      firesAt: new Date(timer.firesAtMs).toISOString(),
+      remaining: formatRemainingTimer(timer.firesAtMs - Date.now()),
+    }));
+  }
+  if (loopState.length > 0) {
+    result.loops = loopState;
+  }
+  if (config) {
+    result.config = config;
+  }
+
+  const ctaCommands: any[] = [
+    { command: `logs ${runId}`, description: "Tail run logs" },
+    { command: `chat ${runId}`, description: "View agent chat" },
+  ];
+  if (
+    r.status === "running" ||
+    r.status === "waiting-approval" ||
+    r.status === "waiting-timer" ||
+    r.status === "waiting-event"
+  ) {
+    ctaCommands.push({ command: `cancel ${runId}`, description: "Cancel run" });
+  }
+  if (pendingApprovals.length > 0) {
+    ctaCommands.push({ command: `approve ${runId}`, description: "Approve pending gate" });
+  }
+  if (waitingTimers.length > 0) {
+    ctaCommands.push({ command: `why ${runId}`, description: "Explain timer wait" });
+  }
+
+  return {
+    result,
+    ctaCommands,
+    status: r.status,
+  };
+}
+
+type NodeSnapshot = {
+  detail: any;
+  status: string | undefined;
+};
+
+async function buildNodeSnapshot(
+  adapter: SmithersDb,
+  options: {
+    runId: string;
+    nodeId: string;
+    iteration: number | undefined;
+  },
+): Promise<NodeSnapshot> {
+  const detail = await runPromise(
+    aggregateNodeDetailEffect(adapter, {
+      runId: options.runId,
+      nodeId: options.nodeId,
+      iteration: options.iteration,
+    }),
+  );
+  const run = await adapter.getRun(options.runId);
+  return {
+    detail,
+    status: (run as any)?.status,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -250,22 +1167,48 @@ const upOptions = z.object({
   resume: z.boolean().default(false).describe("Resume a previous run instead of starting fresh"),
   force: z.boolean().default(false).describe("Resume even if still marked running"),
   serve: z.boolean().default(false).describe("Start an HTTP server alongside the workflow"),
+  supervise: z.boolean().default(false).describe("Run the stale-run supervisor loop (with --serve)"),
+  superviseDryRun: z.boolean().default(false).describe("With --supervise, detect stale runs without resuming"),
+  superviseInterval: z.string().default("10s").describe("With --supervise, poll interval (e.g. 10s, 30s)"),
+  superviseStaleThreshold: z.string().default("30s").describe("With --supervise, stale heartbeat threshold"),
+  superviseMaxConcurrent: z.number().int().min(1).default(3).describe("With --supervise, max runs resumed per poll"),
   port: z.number().int().min(1).default(7331).describe("HTTP server port (with --serve)"),
   host: z.string().default("127.0.0.1").describe("HTTP server bind address (with --serve)"),
   authToken: z.string().optional().describe("Bearer token for HTTP auth (or set SMITHERS_API_KEY)"),
   metrics: z.boolean().default(true).describe("Expose /metrics endpoint (with --serve)"),
 });
 
+const superviseOptions = z.object({
+  dryRun: z.boolean().default(false).describe("Show which stale runs would be resumed, without acting"),
+  interval: z.string().default("10s").describe("Poll interval (e.g. 10s, 30s, 1m)"),
+  staleThreshold: z.string().default("30s").describe("Heartbeat staleness threshold before resume"),
+  maxConcurrent: z.number().int().min(1).default(3).describe("Max runs resumed per poll"),
+});
+
 const psOptions = z.object({
-  status: z.string().optional().describe("Filter by status: running, finished, failed, cancelled, waiting-approval"),
+  status: z.string().optional().describe("Filter by status: running, waiting-approval, waiting-event, waiting-timer, continued, finished, failed, cancelled"),
   limit: z.number().int().min(1).default(20).describe("Maximum runs to return"),
   all: z.boolean().default(false).describe("Include all statuses"),
+  watch: z.boolean().default(false).describe("Watch mode: refresh output continuously"),
+  interval: z.number().positive().default(2).describe("Watch refresh interval in seconds"),
 });
 
 const logsOptions = z.object({
   follow: z.boolean().default(true).describe("Keep tailing (default true for active runs)"),
   since: z.number().int().optional().describe("Start from event sequence number"),
   tail: z.number().int().min(1).default(50).describe("Show last N events first"),
+  followAncestry: z.boolean().default(false).describe("Include events from ancestor runs (continuation lineage)"),
+});
+
+const eventsOptions = z.object({
+  node: z.string().optional().describe("Filter events by node ID"),
+  type: z.string().optional().describe(`Filter by event category (${[...EVENT_CATEGORY_VALUES].sort().join(", ")})`),
+  since: z.string().optional().describe("Filter to a recent duration window (e.g. 5m, 2h)"),
+  limit: z.number().int().min(1).optional().describe("Maximum events to display (default 1000, max 100000)"),
+  json: z.boolean().default(false).describe("Output NDJSON for piping"),
+  groupBy: z.string().optional().describe("Group output by \"node\" or \"attempt\""),
+  watch: z.boolean().default(false).describe("Watch mode: append new events as they arrive"),
+  interval: z.number().positive().default(2).describe("Watch poll interval in seconds"),
 });
 
 const chatArgs = z.object({
@@ -281,6 +1224,32 @@ const chatOptions = z.object({
 
 const inspectArgs = z.object({
   runId: z.string().describe("Run ID to inspect"),
+});
+
+const inspectOptions = z.object({
+  watch: z.boolean().default(false).describe("Watch mode: refresh output continuously"),
+  interval: z.number().positive().default(2).describe("Watch refresh interval in seconds"),
+});
+
+const nodeArgs = z.object({
+  nodeId: z.string().describe("Node ID to inspect"),
+});
+
+const nodeOptions = z.object({
+  runId: z.string().describe("Run ID containing the node"),
+  iteration: z.number().int().min(0).optional().describe("Loop iteration number (default: latest iteration)"),
+  attempts: z.boolean().default(false).describe("Expand all attempts in human output"),
+  tools: z.boolean().default(false).describe("Expand tool input/output payloads in human output"),
+  watch: z.boolean().default(false).describe("Watch mode: refresh output continuously"),
+  interval: z.number().positive().default(2).describe("Watch refresh interval in seconds"),
+});
+
+const whyArgs = z.object({
+  runId: z.string().describe("Run ID to explain"),
+});
+
+const whyOptions = z.object({
+  json: z.boolean().default(false).describe("Output structured JSON diagnosis"),
 });
 
 const approveArgs = z.object({
@@ -324,6 +1293,17 @@ const initOptions = z.object({
   force: z.boolean().default(false).describe("Overwrite existing scaffold files"),
 });
 
+const uiArgs = z.object({
+  target: z.string().optional().describe("Deep-link target: run, node, or approvals"),
+  value: z.string().optional().describe("run-id or run-id/node-id"),
+});
+
+const uiOptions = z.object({
+  open: z.boolean().default(true).describe("Open the browser automatically (default: true)"),
+  host: z.string().optional().describe("Override Smithers web host"),
+  port: z.number().int().min(1).optional().describe("Override Smithers web port"),
+});
+
 const workflowPathArgs = z.object({
   name: z.string().describe("Workflow ID"),
 });
@@ -338,6 +1318,15 @@ const workflowRunOptions = upOptions.extend({
 
 type UpCommandOptions = z.infer<typeof upOptions>;
 type WorkflowRunCommandOptions = z.infer<typeof workflowRunOptions>;
+type EventsCommandOptions = z.infer<typeof eventsOptions>;
+type InspectCommandOptions = z.infer<typeof inspectOptions>;
+
+type ResolvedSupervisorOptions = {
+  dryRun: boolean;
+  pollIntervalMs: number;
+  staleThresholdMs: number;
+  maxConcurrent: number;
+};
 
 function normalizeWorkflowRunOptions(
   options: WorkflowRunCommandOptions,
@@ -350,6 +1339,66 @@ function normalizeWorkflowRunOptions(
         ? JSON.stringify({ prompt: options.prompt })
         : undefined),
     root: options.root ?? ".",
+  };
+}
+
+function resolveSupervisorOptions(
+  intervalRaw: string,
+  staleThresholdRaw: string,
+  maxConcurrent: number,
+  dryRun: boolean,
+) {
+  const pollIntervalMs = parseDurationMs(intervalRaw, "interval");
+  const staleThresholdMs = parseDurationMs(
+    staleThresholdRaw,
+    "stale-threshold",
+  );
+  return {
+    dryRun,
+    pollIntervalMs,
+    staleThresholdMs,
+    maxConcurrent,
+  } satisfies ResolvedSupervisorOptions;
+}
+
+function normalizeEventsQuery(
+  options: EventsCommandOptions,
+): NormalizedEventsQuery {
+  const jsonRequested =
+    Boolean(options.json) || process.argv.includes("--json");
+  const groupBy = normalizeEventGroupBy(options.groupBy);
+
+  let typeName: string | undefined;
+  let eventTypes: readonly string[] | undefined;
+  if (options.type) {
+    const category = normalizeEventCategory(options.type);
+    if (!category) {
+      throw new SmithersError(
+        "INVALID_EVENT_TYPE_FILTER",
+        `Invalid --type value "${options.type}". Allowed categories: ${[...EVENT_CATEGORY_VALUES].sort().join(", ")}`,
+      );
+    }
+    typeName = category;
+    eventTypes = eventTypesForCategory(category);
+  }
+
+  let sinceTimestampMs: number | undefined;
+  if (options.since) {
+    const sinceDurationMs = parseDurationMs(options.since, "since");
+    sinceTimestampMs = Date.now() - sinceDurationMs;
+  }
+
+  const limitInfo = normalizeEventsLimit(options.limit);
+  return {
+    nodeId: options.node,
+    typeName,
+    eventTypes,
+    sinceTimestampMs,
+    groupBy,
+    json: jsonRequested,
+    limit: limitInfo.value,
+    defaultLimitUsed: limitInfo.defaultLimitUsed,
+    limitCapped: limitInfo.limitCapped,
   };
 }
 
@@ -382,6 +1431,11 @@ async function executeUpCommand(
       if (resume) childArgs.push("--resume");
       if (options.force) childArgs.push("--force");
       if (options.serve) childArgs.push("--serve");
+      if (options.supervise) childArgs.push("--supervise");
+      if (options.superviseDryRun) childArgs.push("--supervise-dry-run");
+      if (options.superviseInterval !== "10s") childArgs.push("--supervise-interval", options.superviseInterval);
+      if (options.superviseStaleThreshold !== "30s") childArgs.push("--supervise-stale-threshold", options.superviseStaleThreshold);
+      if (options.superviseMaxConcurrent !== 3) childArgs.push("--supervise-max-concurrent", String(options.superviseMaxConcurrent));
       if (options.serve && options.port !== 7331) childArgs.push("--port", String(options.port));
       if (options.serve && options.host !== "127.0.0.1") childArgs.push("--host", options.host);
       if (options.authToken) childArgs.push("--auth-token", options.authToken);
@@ -418,6 +1472,15 @@ async function executeUpCommand(
 
     if (options.hot) {
       process.env.SMITHERS_HOT = "1";
+    }
+
+    if (options.supervise && !options.serve) {
+      return fail({
+        code: "SUPERVISE_REQUIRES_SERVE",
+        message:
+          "--supervise on `smithers up` requires --serve. Use `smithers supervise` for standalone mode.",
+        exitCode: 4,
+      });
     }
 
     const workflow = await loadWorkflow(workflowPath);
@@ -459,6 +1522,27 @@ async function executeUpCommand(
     const abort = setupAbortSignal();
 
     if (options.serve) {
+      let hostedSupervisor: ResolvedSupervisorOptions | null = null;
+      if (options.supervise) {
+        try {
+          hostedSupervisor = resolveSupervisorOptions(
+            options.superviseInterval,
+            options.superviseStaleThreshold,
+            options.superviseMaxConcurrent,
+            options.superviseDryRun,
+          );
+        } catch (error: any) {
+          return fail({
+            code:
+              error instanceof SmithersError
+                ? error.code
+                : "INVALID_SUPERVISOR_OPTIONS",
+            message: error?.message ?? String(error),
+            exitCode: 4,
+          });
+        }
+      }
+
       const { createServeApp } = await import("../server/serve");
       const effectiveRunId = runId ?? `run-${Date.now()}`;
       const serveApp = createServeApp({
@@ -479,6 +1563,24 @@ async function executeUpCommand(
       process.stderr.write(
         `[smithers] HTTP server listening on http://${options.host}:${bunServer.port}\n`,
       );
+
+      const supervisorFiber = hostedSupervisor
+        ? runFork(
+            supervisorLoopEffect({
+              adapter,
+              dryRun: hostedSupervisor.dryRun,
+              pollIntervalMs: hostedSupervisor.pollIntervalMs,
+              staleThresholdMs: hostedSupervisor.staleThresholdMs,
+              maxConcurrent: hostedSupervisor.maxConcurrent,
+            }),
+          )
+        : null;
+
+      if (hostedSupervisor) {
+        process.stderr.write(
+          `[smithers] Supervisor enabled (interval=${hostedSupervisor.pollIntervalMs}ms, staleThreshold=${hostedSupervisor.staleThresholdMs}ms, maxConcurrent=${hostedSupervisor.maxConcurrent}, dryRun=${hostedSupervisor.dryRun})\n`,
+        );
+      }
 
       const workflowPromise = runWorkflow(workflow!, {
         input,
@@ -510,6 +1612,11 @@ async function executeUpCommand(
         const shutdown = async () => {
           abort.abort();
           bunServer.stop(true);
+          if (supervisorFiber) {
+            await runPromise(Fiber.interrupt(supervisorFiber)).catch(
+              () => undefined,
+            );
+          }
           try {
             const r = await workflowPromise;
             resolvePromise(r);
@@ -1065,6 +2172,72 @@ const cli = Cli.create({
   })
 
   // =========================================================================
+  // smithers supervise
+  // =========================================================================
+  .command("supervise", {
+    description: "Watch for stale running runs and auto-resume them.",
+    options: superviseOptions,
+    alias: { dryRun: "n", interval: "i", staleThreshold: "t", maxConcurrent: "c" },
+    async run(c) {
+      const fail: FailFn = (opts) => {
+        commandExitOverride = opts.exitCode ?? 1;
+        return c.error(opts);
+      };
+
+      let parsed: ResolvedSupervisorOptions;
+      try {
+        parsed = resolveSupervisorOptions(
+          c.options.interval,
+          c.options.staleThreshold,
+          c.options.maxConcurrent,
+          c.options.dryRun,
+        );
+      } catch (error: any) {
+        return fail({
+          code:
+            error instanceof SmithersError
+              ? error.code
+              : "INVALID_SUPERVISOR_OPTIONS",
+          message: error?.message ?? String(error),
+          exitCode: 4,
+        });
+      }
+
+      const { adapter, cleanup } = await findAndOpenDb();
+      const abort = setupAbortSignal();
+
+      process.stderr.write(
+        `[smithers] Supervisor started (interval=${parsed.pollIntervalMs}ms, staleThreshold=${parsed.staleThresholdMs}ms, maxConcurrent=${parsed.maxConcurrent}, dryRun=${parsed.dryRun})\n`,
+      );
+
+      try {
+        await runPromise(
+          supervisorLoopEffect({
+            adapter,
+            dryRun: parsed.dryRun,
+            pollIntervalMs: parsed.pollIntervalMs,
+            staleThresholdMs: parsed.staleThresholdMs,
+            maxConcurrent: parsed.maxConcurrent,
+          }),
+          { signal: abort.signal },
+        );
+        return c.ok({ status: "stopped" });
+      } catch (error: any) {
+        if (abort.signal.aborted) {
+          return c.ok({ status: "stopped" });
+        }
+        return fail({
+          code: "SUPERVISOR_FAILED",
+          message: error?.message ?? String(error),
+          exitCode: 1,
+        });
+      } finally {
+        cleanup();
+      }
+    },
+  })
+
+  // =========================================================================
   // smithers tui
   // =========================================================================
   .command("tui", {
@@ -1112,12 +2285,126 @@ const cli = Cli.create({
   })
 
   // =========================================================================
+  // smithers ui [run <id> | node <run>/<node> | approvals]
+  // =========================================================================
+  .command("ui", {
+    description: "Open Smithers web UI deep links for runs, nodes, or approvals.",
+    args: uiArgs,
+    options: uiOptions,
+    async run(c) {
+      const fail: FailFn = (opts) => {
+        commandExitOverride = opts.exitCode ?? 1;
+        return c.error(opts);
+      };
+
+      const parsedTarget = parseUiTarget(c.args.target, c.args.value);
+      if ("error" in parsedTarget) {
+        const targetError = parsedTarget.error;
+        return fail({
+          code: "UI_COMMAND_INVALID_ARGS",
+          message: targetError,
+          exitCode: 4,
+        });
+      }
+      const uiTarget = parsedTarget.target;
+
+      const defaults = resolveDefaultWebBinding();
+      const host = c.options.host?.trim() || defaults.host;
+      const port = c.options.port ?? defaults.port;
+      const allowDiscovery = !c.options.host && !c.options.port;
+
+      try {
+        await runPromise(
+          Effect.gen(function* () {
+            const ensureResult = yield* fromPromise(
+              "ensure ui host",
+              () =>
+                ensureUiHostRunning({
+                  host,
+                  port,
+                  allowDiscovery,
+                }),
+              {
+                code: "UI_COMMAND_FAILED",
+                details: { host, port, allowDiscovery },
+              },
+            );
+
+            const url = buildUiUrl(ensureResult.webBaseUrl, uiTarget);
+            yield* Effect.void.pipe(
+              Effect.annotateLogs({
+                target: uiTarget.kind,
+                url,
+                serverAutoStarted: ensureResult.ok
+                  ? ensureResult.serverAutoStarted
+                  : false,
+              }),
+            );
+
+            if ("error" in ensureResult) {
+              const ensureError = ensureResult.error;
+              return yield* Effect.fail(
+                new SmithersError("UI_COMMAND_FAILED", ensureError, {
+                  host,
+                  port,
+                }),
+              );
+            }
+
+            yield* Effect.sync(() => {
+              console.log(url);
+            });
+
+            if (!c.options.open || shouldSuppressAutoOpen()) {
+              return;
+            }
+
+            const openResult = yield* fromPromise(
+              "open smithers ui browser url",
+              () => openInBrowser(url),
+              {
+                code: "UI_COMMAND_FAILED",
+                details: { url },
+              },
+            );
+
+            if ("error" in openResult) {
+              const openError = openResult.error;
+              yield* Effect.logWarning(
+                "Could not open browser for Smithers UI.",
+              ).pipe(
+                Effect.annotateLogs({
+                  target: uiTarget.kind,
+                  url,
+                  reason: openError,
+                }),
+              );
+              yield* Effect.sync(() => {
+                console.error(`Failed to open browser: ${openError}`);
+                console.error(`Open this URL manually: ${url}`);
+              });
+            }
+          }).pipe(Effect.withLogSpan("cli:ui")),
+        );
+
+        return c.ok(undefined);
+      } catch (err: any) {
+        return fail({
+          code: "UI_COMMAND_FAILED",
+          message: err?.message ?? String(err),
+          exitCode: 1,
+        });
+      }
+    },
+  })
+
+  // =========================================================================
   // smithers ps
   // =========================================================================
   .command("ps", {
     description: "List active, paused, and recently completed runs.",
     options: psOptions,
-    alias: { status: "s", limit: "l", all: "a" },
+    alias: { status: "s", limit: "l", all: "a", watch: "w", interval: "i" },
     async run(c) {
       const fail: FailFn = (opts) => {
         commandExitOverride = opts.exitCode ?? 1;
@@ -1126,35 +2413,51 @@ const cli = Cli.create({
       try {
         const { adapter, cleanup } = await findAndOpenDb();
         try {
-          const runs = await adapter.listRuns(c.options.limit, c.options.status);
-          const rows: any[] = [];
-          for (const run of runs as any[]) {
-            const nodes = await adapter.listNodes(run.runId);
-            const activeNode = (nodes as any[]).find((n: any) => n.state === "in-progress");
-            rows.push({
-              id: run.runId,
-              workflow: run.workflowName ?? (run.workflowPath ? basename(run.workflowPath) : "—"),
-              status: run.status,
-              step: activeNode?.label ?? activeNode?.nodeId ?? "—",
-              started: run.startedAtMs ? formatAge(run.startedAtMs) : run.createdAtMs ? formatAge(run.createdAtMs) : "—",
-            });
+          if (c.options.watch) {
+            const intervalMs = resolveWatchIntervalMsOrFail(
+              "ps",
+              c.options.interval,
+              fail,
+            );
+            const watchResult = await runPromise(
+              Effect.tryPromise(() =>
+                runWatchLoop({
+                  intervalSeconds: c.options.interval,
+                  clearScreen: true,
+                  fetch: async () => ({
+                    runs: await buildPsRows(
+                      adapter,
+                      c.options.limit,
+                      c.options.status,
+                    ),
+                  }),
+                  render: async (snapshot) => {
+                    writeWatchOutput(c.format, snapshot);
+                  },
+                }),
+              ).pipe(
+                Effect.tap((result) =>
+                  Effect.logDebug("watch loop completed").pipe(
+                    Effect.annotateLogs({
+                      command: "ps",
+                      intervalMs,
+                      tickCount: result.tickCount,
+                      stoppedBySignal: result.stoppedBySignal,
+                    }),
+                  ),
+                ),
+                Effect.annotateLogs({ command: "ps", intervalMs }),
+                Effect.withLogSpan("cli:watch"),
+              ),
+            );
+            if (watchResult.stoppedBySignal) {
+              process.exitCode = 0;
+            }
+            return c.ok(undefined);
           }
 
-          // Build CTAs based on what's available
-          const ctaCommands: any[] = [];
-          const firstActive = rows.find((r) => r.status === "running");
-          const firstWaiting = rows.find((r) => r.status === "waiting-approval");
-          if (firstActive) {
-            ctaCommands.push({ command: `logs ${firstActive.id}`, description: "Tail active run" });
-            ctaCommands.push({ command: `chat ${firstActive.id} --follow`, description: "Watch agent chat" });
-          }
-          if (firstWaiting) {
-            ctaCommands.push({ command: `approve ${firstWaiting.id}`, description: "Approve waiting run" });
-          }
-          if (rows.length > 0) {
-            ctaCommands.push({ command: `inspect ${rows[0].id}`, description: "Inspect most recent run" });
-          }
-
+          const rows = await buildPsRows(adapter, c.options.limit, c.options.status);
+          const ctaCommands = buildPsCtaCommands(rows);
           return c.ok(
             { runs: rows },
             ctaCommands.length > 0 ? { cta: { commands: ctaCommands } } : undefined,
@@ -1177,79 +2480,246 @@ const cli = Cli.create({
     options: logsOptions,
     alias: { follow: "f", tail: "n" },
     async *run(c) {
-      let adapter: SmithersDb | undefined;
+      return yield* streamRunEventsCommand(c);
+    },
+  })
+
+  // =========================================================================
+  // smithers events <run_id>
+  // =========================================================================
+  .command("events", {
+    description: "Query run event history with filters, grouping, and NDJSON output.",
+    args: z.object({ runId: z.string().describe("Run ID to query") }),
+    options: eventsOptions,
+    alias: { node: "n", type: "t", since: "s", limit: "l", json: "j", watch: "w", interval: "i" },
+    async *run(c) {
+      const fail: FailFn = (opts) => {
+        commandExitOverride = opts.exitCode ?? 1;
+        return c.error(opts);
+      };
+
+      let query: NormalizedEventsQuery;
+      try {
+        query = normalizeEventsQuery(c.options);
+      } catch (error: any) {
+        return fail({
+          code:
+            error instanceof SmithersError ? error.code : "INVALID_EVENTS_OPTIONS",
+          message: error?.message ?? String(error),
+          exitCode: 4,
+        });
+      }
+
       let cleanup: (() => void) | undefined;
       try {
         const db = await findAndOpenDb();
-        adapter = db.adapter;
+        const adapter = db.adapter;
         cleanup = db.cleanup;
 
         const run = await adapter.getRun(c.args.runId);
         if (!run) {
-          yield `Error: Run not found: ${c.args.runId}`;
-          return;
-        }
-
-        const baseMs = (run as any).startedAtMs ?? (run as any).createdAtMs ?? Date.now();
-        let lastSeq = c.options.since ?? -1;
-
-        // If --since not specified, get recent events to show tail
-        if (c.options.since === undefined) {
-          const lastEventSeq = await adapter.getLastEventSeq(c.args.runId);
-          if (lastEventSeq !== undefined) {
-            lastSeq = Math.max(-1, lastEventSeq - c.options.tail);
-          }
-        }
-
-        // Dump existing events
-        const initialEvents = await adapter.listEvents(c.args.runId, lastSeq, 1000);
-        for (const event of initialEvents as any[]) {
-          yield formatEventLine(event, baseMs);
-          lastSeq = event.seq;
-        }
-
-        // If not following, or run already done, stop
-        const isActive = (run as any).status === "running" || (run as any).status === "waiting-approval";
-        if (!c.options.follow || !isActive) {
-          return c.ok(undefined, {
-            cta: {
-              commands: [
-                { command: `inspect ${c.args.runId}`, description: "Inspect run state" },
-              ],
-            },
+          return fail({
+            code: "RUN_NOT_FOUND",
+            message: `Run not found: ${c.args.runId}`,
+            exitCode: 4,
           });
         }
 
-        // Poll for new events
-        while (true) {
-          await new Promise((r) => setTimeout(r, 500));
+        if (query.limitCapped) {
+          process.stderr.write(
+            `[smithers] --limit capped at ${MAX_EVENTS_LIMIT} events\n`,
+          );
+        }
 
-          const newEvents = await adapter.listEvents(c.args.runId, lastSeq, 200);
-          for (const event of newEvents as any[]) {
-            yield formatEventLine(event, baseMs);
+        let groupBy = query.groupBy;
+        if (query.json && groupBy) {
+          process.stderr.write(
+            "[smithers] --group-by is ignored when --json is enabled\n",
+          );
+          groupBy = undefined;
+        }
+        if (c.options.watch && groupBy) {
+          process.stderr.write(
+            "[smithers] --group-by is ignored when --watch is enabled\n",
+          );
+          groupBy = undefined;
+        }
+
+        let watchIntervalMs: number | undefined;
+        if (c.options.watch) {
+          watchIntervalMs = resolveWatchIntervalMsOrFail(
+            "events",
+            c.options.interval,
+            fail,
+          );
+        }
+
+        const filters = {
+          nodeId: query.nodeId,
+          type: query.typeName,
+          sinceTimestampMs: query.sinceTimestampMs,
+          limit: query.limit,
+          json: query.json,
+          groupBy,
+          watch: c.options.watch,
+        };
+
+        const baseMs =
+          (run as any).startedAtMs ??
+          (run as any).createdAtMs ??
+          Date.now();
+
+        const totalCount =
+          query.defaultLimitUsed && !query.json
+            ? await countEventHistory(adapter, c.args.runId, {
+                nodeId: query.nodeId,
+                eventTypes: query.eventTypes,
+                sinceTimestampMs: query.sinceTimestampMs,
+              })
+            : undefined;
+
+        const groupedEvents: EventHistoryRow[] = [];
+        let emitted = 0;
+        let lastSeq = -1;
+
+        while (emitted < query.limit) {
+          const pageLimit = Math.min(EVENTS_PAGE_SIZE, query.limit - emitted);
+          const page = await queryEventHistoryPage(adapter, c.args.runId, {
+            afterSeq: lastSeq,
+            nodeId: query.nodeId,
+            eventTypes: query.eventTypes,
+            sinceTimestampMs: query.sinceTimestampMs,
+            limit: pageLimit,
+          });
+
+          if (page.length === 0) break;
+
+          for (const event of page) {
             lastSeq = event.seq;
+            emitted += 1;
+            if (groupBy) {
+              groupedEvents.push(event);
+            } else {
+              if (query.json) {
+                process.stdout.write(`${buildEventNdjsonLine(event)}\n`);
+              } else {
+                yield buildEventHistoryLine(event, baseMs);
+              }
+            }
+            if (emitted >= query.limit) break;
           }
 
-          // Check if run is still active
-          const currentRun = await adapter.getRun(c.args.runId);
-          const currentStatus = (currentRun as any)?.status;
-          if (currentStatus !== "running" && currentStatus !== "waiting-approval") {
-            // Drain remaining events
-            const finalEvents = await adapter.listEvents(c.args.runId, lastSeq, 1000);
-            for (const event of finalEvents as any[]) {
-              yield formatEventLine(event, baseMs);
-              lastSeq = event.seq;
-            }
+          if (page.length < pageLimit) break;
+        }
 
-            const ctaCommands: any[] = [
-              { command: `inspect ${c.args.runId}`, description: "Inspect run state" },
-            ];
-            if (currentStatus === "waiting-approval") {
-              ctaCommands.push({ command: `approve ${c.args.runId}`, description: "Approve run" });
-            }
-            return c.ok(undefined, { cta: { commands: ctaCommands } });
+        if (groupBy) {
+          const groupedLines = renderGroupedEvents(
+            groupedEvents,
+            baseMs,
+            groupBy,
+          );
+          for (const line of groupedLines) {
+            yield line;
           }
         }
+
+        if (
+          query.defaultLimitUsed &&
+          !query.json &&
+          typeof totalCount === "number" &&
+          totalCount > query.limit
+        ) {
+          yield `showing first ${query.limit} of ${totalCount} events, use --limit to see more`;
+        }
+
+        if (c.options.watch && !isRunStatusTerminal((run as any).status)) {
+          const renderEvents = (events: EventHistoryRow[]) => {
+            for (const event of events) {
+              lastSeq = Math.max(lastSeq, event.seq);
+              emitted += 1;
+              if (query.json) {
+                process.stdout.write(`${buildEventNdjsonLine(event)}\n`);
+              } else {
+                process.stdout.write(`${buildEventHistoryLine(event, baseMs)}\n`);
+              }
+            }
+          };
+
+          const watchResult = await runPromise(
+            Effect.tryPromise(() =>
+              runWatchLoop({
+                intervalSeconds: c.options.interval,
+                clearScreen: false,
+                fetch: async () => ({
+                  events: await queryEventHistoryPage(adapter, c.args.runId, {
+                    afterSeq: lastSeq,
+                    nodeId: query.nodeId,
+                    eventTypes: query.eventTypes,
+                    sinceTimestampMs: query.sinceTimestampMs,
+                    limit: EVENTS_PAGE_SIZE,
+                  }),
+                  status: (await adapter.getRun(c.args.runId) as any)?.status as
+                    | string
+                    | undefined,
+                }),
+                render: async (snapshot) => {
+                  renderEvents(snapshot.events);
+                },
+                isTerminal: (snapshot) => isRunStatusTerminal(snapshot.status),
+              }),
+            ).pipe(
+              Effect.tap((result) =>
+                Effect.logDebug("watch loop completed").pipe(
+                  Effect.annotateLogs({
+                    command: "events",
+                    intervalMs: watchIntervalMs,
+                    tickCount: result.tickCount,
+                    stoppedBySignal: result.stoppedBySignal,
+                  }),
+                ),
+              ),
+              Effect.annotateLogs({
+                command: "events",
+                runId: c.args.runId,
+                intervalMs: watchIntervalMs,
+              }),
+              Effect.withLogSpan("cli:watch"),
+            ),
+          );
+
+          if (watchResult.reachedTerminal) {
+            while (true) {
+              const finalPage = await queryEventHistoryPage(adapter, c.args.runId, {
+                afterSeq: lastSeq,
+                nodeId: query.nodeId,
+                eventTypes: query.eventTypes,
+                sinceTimestampMs: query.sinceTimestampMs,
+                limit: EVENTS_PAGE_SIZE,
+              });
+              if (finalPage.length === 0) break;
+              renderEvents(finalPage);
+              if (finalPage.length < EVENTS_PAGE_SIZE) break;
+            }
+          }
+
+          if (watchResult.stoppedBySignal) {
+            process.exitCode = 0;
+          }
+        }
+
+        await runPromise(
+          Effect.succeed(undefined).pipe(
+            Effect.annotateLogs({
+              runId: c.args.runId,
+              filters,
+              resultCount: emitted,
+            }),
+            Effect.withLogSpan("cli:events"),
+          ),
+        );
+
+        if (query.json) return;
+        return c.ok(undefined);
       } finally {
         cleanup?.();
       }
@@ -1499,7 +2969,11 @@ const cli = Cli.create({
 
           const currentRun = await adapter.getRun(runId);
           const currentStatus = (currentRun as any)?.status;
-          if (currentStatus !== "running" && currentStatus !== "waiting-approval") {
+          if (
+            currentStatus !== "running" &&
+            currentStatus !== "waiting-approval" &&
+            currentStatus !== "waiting-timer"
+          ) {
             const finalAttempts = await adapter.listAttemptsForRun(runId);
             syncAttempts(finalAttempts as any[]);
             const finalBlocks = (finalAttempts as any[])
@@ -1696,6 +3170,8 @@ const cli = Cli.create({
   .command("inspect", {
     description: "Output detailed state of a run: steps, agents, approvals, and outputs.",
     args: inspectArgs,
+    options: inspectOptions,
+    alias: { watch: "w", interval: "i" },
     async run(c) {
       const fail: FailFn = (opts) => {
         commandExitOverride = opts.exitCode ?? 1;
@@ -1704,85 +3180,241 @@ const cli = Cli.create({
       try {
         const { adapter, cleanup } = await findAndOpenDb();
         try {
-          const run = await adapter.getRun(c.args.runId);
-          if (!run) {
-            return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${c.args.runId}`, exitCode: 4 });
-          }
-
-          const r = run as any;
-          const nodes = await adapter.listNodes(c.args.runId);
-          const approvals = await adapter.listPendingApprovals(c.args.runId);
-          const loops = await adapter.listRalph(c.args.runId);
-
-          const steps = (nodes as any[]).map((n: any) => ({
-            id: n.nodeId,
-            state: n.state,
-            attempt: n.lastAttempt ?? 0,
-            label: n.label ?? n.nodeId,
-          }));
-
-          const pendingApprovals = (approvals as any[]).map((a: any) => ({
-            nodeId: a.nodeId,
-            status: a.status,
-            requestedAt: a.requestedAtMs ? new Date(a.requestedAtMs).toISOString() : "—",
-          }));
-
-          const loopState = (loops as any[]).map((l: any) => ({
-            loopId: l.ralphId,
-            iteration: l.iteration,
-            maxIterations: l.maxIterations,
-          }));
-
-          let config: any = undefined;
-          if (r.configJson) {
-            try { config = JSON.parse(r.configJson); } catch {}
-          }
-
-          let error: any = undefined;
-          if (r.errorJson) {
-            try { error = JSON.parse(r.errorJson); } catch {}
-          }
-
-          const result: Record<string, any> = {
-            run: {
-              id: r.runId,
-              workflow: r.workflowName ?? (r.workflowPath ? basename(r.workflowPath) : "—"),
-              status: r.status,
-              started: r.startedAtMs ? new Date(r.startedAtMs).toISOString() : "—",
-              elapsed: r.startedAtMs ? formatElapsedCompact(r.startedAtMs, r.finishedAtMs ?? undefined) : "—",
-              ...(r.finishedAtMs ? { finished: new Date(r.finishedAtMs).toISOString() } : {}),
-              ...(error ? { error } : {}),
-            },
-            steps,
+          const renderInspect = (snapshot: InspectSnapshot) => {
+            writeWatchOutput(c.format, snapshot.result);
           };
 
-          if (pendingApprovals.length > 0) {
-            result.approvals = pendingApprovals;
-          }
-          if (loopState.length > 0) {
-            result.loops = loopState;
-          }
-          if (config) {
-            result.config = config;
+          if (c.options.watch) {
+            const intervalMs = resolveWatchIntervalMsOrFail(
+              "inspect",
+              c.options.interval,
+              fail,
+            );
+            const watchResult = await runPromise(
+              Effect.tryPromise(() =>
+                runWatchLoop({
+                  intervalSeconds: c.options.interval,
+                  clearScreen: true,
+                  fetch: () => buildInspectSnapshot(adapter, c.args.runId),
+                  render: async (snapshot) => {
+                    renderInspect(snapshot);
+                  },
+                  isTerminal: (snapshot) => isRunStatusTerminal(snapshot.status),
+                }),
+              ).pipe(
+                Effect.tap((result) =>
+                  Effect.logDebug("watch loop completed").pipe(
+                    Effect.annotateLogs({
+                      command: "inspect",
+                      intervalMs,
+                      tickCount: result.tickCount,
+                      stoppedBySignal: result.stoppedBySignal,
+                    }),
+                  ),
+                ),
+                Effect.annotateLogs({ command: "inspect", intervalMs }),
+                Effect.withLogSpan("cli:watch"),
+              ),
+            );
+            if (watchResult.stoppedBySignal) {
+              process.exitCode = 0;
+            }
+            return c.ok(undefined);
           }
 
-          const ctaCommands: any[] = [
-            { command: `logs ${c.args.runId}`, description: "Tail run logs" },
-            { command: `chat ${c.args.runId}`, description: "View agent chat" },
-          ];
-          if (r.status === "running" || r.status === "waiting-approval") {
-            ctaCommands.push({ command: `cancel ${c.args.runId}`, description: "Cancel run" });
-          }
-          if (pendingApprovals.length > 0) {
-            ctaCommands.push({ command: `approve ${c.args.runId}`, description: "Approve pending gate" });
-          }
-
-          return c.ok(result, { cta: { commands: ctaCommands } });
+          const snapshot = await buildInspectSnapshot(adapter, c.args.runId);
+          return c.ok(snapshot.result, { cta: { commands: snapshot.ctaCommands } });
         } finally {
           cleanup();
         }
       } catch (err: any) {
+        if (err instanceof SmithersError && err.code === "RUN_NOT_FOUND") {
+          return fail({
+            code: "RUN_NOT_FOUND",
+            message: err.message,
+            exitCode: 4,
+          });
+        }
         return fail({ code: "INSPECT_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+      }
+    },
+  })
+
+  // =========================================================================
+  // smithers node <node_id> -r <run_id>
+  // =========================================================================
+  .command("node", {
+    description: "Show enriched node details for debugging retries, tool calls, and output.",
+    args: nodeArgs,
+    options: nodeOptions,
+    alias: { runId: "r", iteration: "i", watch: "w" },
+    async run(c) {
+      const fail: FailFn = (opts) => {
+        commandExitOverride = opts.exitCode ?? 1;
+        return c.error(opts);
+      };
+      try {
+        const { adapter, cleanup } = await findAndOpenDb();
+        try {
+          const renderNode = (detail: any) => {
+            const human =
+              c.format === "json" || c.format === "jsonl"
+                ? undefined
+                : renderNodeDetailHuman(detail, {
+                    expandAttempts: c.options.attempts,
+                    expandTools: c.options.tools,
+                  });
+            writeWatchOutput(c.format, detail, human);
+          };
+
+          if (c.options.watch) {
+            const intervalMs = resolveWatchIntervalMsOrFail(
+              "node",
+              c.options.interval,
+              fail,
+            );
+            const watchResult = await runPromise(
+              Effect.tryPromise(() =>
+                runWatchLoop({
+                  intervalSeconds: c.options.interval,
+                  clearScreen: true,
+                  fetch: () =>
+                    buildNodeSnapshot(adapter, {
+                      runId: c.options.runId,
+                      nodeId: c.args.nodeId,
+                      iteration: c.options.iteration,
+                    }),
+                  render: async (snapshot) => {
+                    renderNode(snapshot.detail);
+                  },
+                  isTerminal: (snapshot) => isRunStatusTerminal(snapshot.status),
+                }),
+              ).pipe(
+                Effect.tap((result) =>
+                  Effect.logDebug("watch loop completed").pipe(
+                    Effect.annotateLogs({
+                      command: "node",
+                      runId: c.options.runId,
+                      nodeId: c.args.nodeId,
+                      intervalMs,
+                      tickCount: result.tickCount,
+                      stoppedBySignal: result.stoppedBySignal,
+                    }),
+                  ),
+                ),
+                Effect.annotateLogs({
+                  command: "node",
+                  runId: c.options.runId,
+                  nodeId: c.args.nodeId,
+                  intervalMs,
+                }),
+                Effect.withLogSpan("cli:watch"),
+              ),
+            );
+            if (watchResult.stoppedBySignal) {
+              process.exitCode = 0;
+            }
+            return c.ok(undefined);
+          }
+
+          const detail = await runPromise(
+            aggregateNodeDetailEffect(adapter, {
+              runId: c.options.runId,
+              nodeId: c.args.nodeId,
+              iteration: c.options.iteration,
+            }),
+          );
+
+          if (c.format === "json") {
+            return c.ok(detail);
+          }
+
+          const rendered = renderNodeDetailHuman(detail, {
+            expandAttempts: c.options.attempts,
+            expandTools: c.options.tools,
+          });
+          return c.ok(rendered, {
+            cta: {
+              commands: [
+                {
+                  command: `inspect ${c.options.runId}`,
+                  description: "Inspect overall run state",
+                },
+                {
+                  command: `chat ${c.options.runId}`,
+                  description: "View agent chat for this run",
+                },
+                {
+                  command: `node ${c.args.nodeId} -r ${c.options.runId} --attempts`,
+                  description: "Expand every attempt",
+                },
+                {
+                  command: `node ${c.args.nodeId} -r ${c.options.runId} --tools`,
+                  description: "Expand tool payloads",
+                },
+              ],
+            },
+          });
+        } finally {
+          cleanup();
+        }
+      } catch (err: any) {
+        const isMissingNode =
+          err instanceof SmithersError && err.code === "NODE_NOT_FOUND";
+        return fail({
+          code: isMissingNode ? "NODE_NOT_FOUND" : "NODE_DETAIL_FAILED",
+          message:
+            err instanceof SmithersError
+              ? err.summary
+              : (err?.message ?? String(err)),
+          exitCode: isMissingNode ? 4 : 1,
+        });
+      }
+    },
+  })
+
+  // =========================================================================
+  // smithers why <run_id>
+  // =========================================================================
+  .command("why", {
+    description: "Explain why a run is currently blocked or paused.",
+    args: whyArgs,
+    options: whyOptions,
+    async run(c) {
+      const fail: FailFn = (opts) => {
+        commandExitOverride = opts.exitCode ?? 1;
+        return c.error(opts);
+      };
+      try {
+        const { adapter, cleanup } = await findAndOpenDb();
+        try {
+          const diagnosis = await runPromise(
+            diagnoseRunEffect(adapter, c.args.runId),
+          );
+
+          if (c.options.json) {
+            return c.ok(JSON.stringify(diagnosis, null, 2));
+          }
+          if (c.format === "json") {
+            return c.ok(diagnosis);
+          }
+          return c.ok(renderWhyDiagnosisHuman(diagnosis), {
+            cta: {
+              commands: diagnosisCtaCommands(diagnosis),
+            },
+          });
+        } finally {
+          cleanup();
+        }
+      } catch (err: any) {
+        if (err instanceof SmithersError && err.code === "RUN_NOT_FOUND") {
+          return fail({
+            code: "RUN_NOT_FOUND",
+            message: err.message,
+            exitCode: 4,
+          });
+        }
+        return fail({ code: "WHY_FAILED", message: err?.message ?? String(err), exitCode: 1 });
       }
     },
   })
@@ -1917,11 +3549,16 @@ const cli = Cli.create({
           if (!run) {
             return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${c.args.runId}`, exitCode: 4 });
           }
-          if ((run as any).status !== "running" && (run as any).status !== "waiting-approval") {
+          if (
+            (run as any).status !== "running" &&
+            (run as any).status !== "waiting-approval" &&
+            (run as any).status !== "waiting-timer"
+          ) {
             return fail({ code: "RUN_NOT_ACTIVE", message: `Run is not active (status: ${(run as any).status})`, exitCode: 4 });
           }
 
           const inProgress = await adapter.listInProgressAttempts(c.args.runId);
+          const allAttempts = await adapter.listAttemptsForRun(c.args.runId);
           const now = Date.now();
           for (const attempt of inProgress as any[]) {
             await adapter.updateAttempt(c.args.runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
@@ -1929,11 +3566,35 @@ const cli = Cli.create({
               finishedAtMs: now,
             });
           }
+          const waitingTimers = (allAttempts as any[]).filter((attempt) => attempt.state === "waiting-timer");
+          for (const attempt of waitingTimers) {
+            await adapter.updateAttempt(c.args.runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
+              state: "cancelled",
+              finishedAtMs: now,
+            });
+          }
+          const nodes = await adapter.listNodes(c.args.runId);
+          for (const node of (nodes as any[]).filter((n) => n.state === "waiting-timer")) {
+            await adapter.insertNode({
+              runId: c.args.runId,
+              nodeId: node.nodeId,
+              iteration: node.iteration ?? 0,
+              state: "cancelled",
+              lastAttempt: node.lastAttempt ?? null,
+              updatedAtMs: now,
+              outputTable: node.outputTable ?? "",
+              label: node.label ?? null,
+            });
+          }
           await adapter.updateRun(c.args.runId, { status: "cancelled", finishedAtMs: now });
 
           process.exitCode = 2;
           return c.ok(
-            { runId: c.args.runId, status: "cancelled", cancelledAttempts: (inProgress as any[]).length },
+            {
+              runId: c.args.runId,
+              status: "cancelled",
+              cancelledAttempts: (inProgress as any[]).length + waitingTimers.length,
+            },
             {
               cta: {
                 commands: [
@@ -1968,8 +3629,13 @@ const cli = Cli.create({
         const { adapter, cleanup } = await findAndOpenDb();
         try {
           const activeRuns = await adapter.listRuns(100, "running");
-          const waitingRuns = await adapter.listRuns(100, "waiting-approval");
-          const allActive = [...(activeRuns as any[]), ...(waitingRuns as any[])];
+          const waitingApprovalRuns = await adapter.listRuns(100, "waiting-approval");
+          const waitingTimerRuns = await adapter.listRuns(100, "waiting-timer");
+          const allActive = [
+            ...(activeRuns as any[]),
+            ...(waitingApprovalRuns as any[]),
+            ...(waitingTimerRuns as any[]),
+          ];
 
           if (allActive.length === 0) {
             return c.ok({ cancelled: 0, message: "No active runs to cancel." });
@@ -1980,7 +3646,14 @@ const cli = Cli.create({
 
           for (const run of allActive) {
             const inProgress = await adapter.listInProgressAttempts(run.runId);
+            const attempts = await adapter.listAttemptsForRun(run.runId);
             for (const attempt of inProgress as any[]) {
+              await adapter.updateAttempt(run.runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
+                state: "cancelled",
+                finishedAtMs: now,
+              });
+            }
+            for (const attempt of (attempts as any[]).filter((entry) => entry.state === "waiting-timer")) {
               await adapter.updateAttempt(run.runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
                 state: "cancelled",
                 finishedAtMs: now,
@@ -2464,7 +4137,7 @@ const cli = Cli.create({
 // ---------------------------------------------------------------------------
 
 const KNOWN_COMMANDS = new Set([
-  "init", "up", "down", "ps", "logs", "chat", "inspect", "approve", "deny",
+  "init", "up", "supervise", "down", "ps", "logs", "events", "chat", "inspect", "node", "why", "approve", "deny",
   "cancel", "graph", "revert", "scores", "observability", "workflow", "ask", "cron",
   "replay", "diff", "fork", "timeline", "rag", "memory", "openapi",
 ]);
@@ -2546,10 +4219,20 @@ function rewriteWorkflowCommandArgv(argv: string[]) {
   }
 }
 
+function rewriteEventsJsonFlagArgv(argv: string[]) {
+  const commandIndex = findFirstPositionalIndex(argv);
+  if (commandIndex < 0 || argv[commandIndex] !== "events") {
+    return argv;
+  }
+
+  return argv.map((arg) => (arg === "--json" ? "-j" : arg));
+}
+
 async function main() {
   const rawArgv = process.argv.slice(2);
   let argv = rawArgv.map((arg) => (arg === "-v" ? "--version" : arg));
   argv = rewriteWorkflowCommandArgv(argv);
+  argv = rewriteEventsJsonFlagArgv(argv);
 
   // Allow running workflow files directly: `smithers workflow.tsx` → `smithers up workflow.tsx`
   const firstPositionalIndex = findFirstPositionalIndex(argv);

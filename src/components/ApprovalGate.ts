@@ -21,6 +21,8 @@ export type ApprovalGateProps = {
   onDeny?: "fail" | "continue" | "skip";
   skipIf?: boolean;
   timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  heartbeatTimeout?: number;
   retries?: number;
   retryPolicy?: RetryPolicy;
   continueOnFail?: boolean;
@@ -43,6 +45,8 @@ export function ApprovalGate(props: ApprovalGateProps) {
       request: props.request,
       onDeny: props.onDeny,
       timeoutMs: props.timeoutMs,
+      heartbeatTimeoutMs: props.heartbeatTimeoutMs,
+      heartbeatTimeout: props.heartbeatTimeout,
       retries: props.retries,
       retryPolicy: props.retryPolicy,
       continueOnFail: props.continueOnFail,

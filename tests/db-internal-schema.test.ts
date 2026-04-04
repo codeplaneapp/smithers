@@ -7,6 +7,7 @@ import {
   smithersFrames,
   smithersApprovals,
   smithersCache,
+  smithersSandboxes,
   smithersToolCalls,
   smithersEvents,
   smithersRalph,
@@ -37,6 +38,10 @@ describe("internal schema table definitions", () => {
 
   test("smithersCache table name is _smithers_cache", () => {
     expect(getTableName(smithersCache)).toBe("_smithers_cache");
+  });
+
+  test("smithersSandboxes table name is _smithers_sandboxes", () => {
+    expect(getTableName(smithersSandboxes)).toBe("_smithers_sandboxes");
   });
 
   test("smithersToolCalls table name is _smithers_tool_calls", () => {
@@ -88,12 +93,15 @@ describe("internal schema table definitions", () => {
     const cols = Object.keys(smithersAttempts);
     expect(cols).toContain("jjPointer");
     expect(cols).toContain("jjCwd");
+    expect(cols).toContain("heartbeatAtMs");
+    expect(cols).toContain("heartbeatDataJson");
   });
 
   test("smithersFrames has xml and hash columns", () => {
     const cols = Object.keys(smithersFrames);
     expect(cols).toContain("xmlJson");
     expect(cols).toContain("xmlHash");
+    expect(cols).toContain("encoding");
     expect(cols).toContain("frameNo");
   });
 

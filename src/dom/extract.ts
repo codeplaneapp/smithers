@@ -9,6 +9,8 @@ import {
   WORKTREE_EMPTY_PATH_ERROR,
 } from "../constants";
 import { SmithersError } from "../utils/errors";
+import { executeChildWorkflow } from "../engine/child-workflow";
+import { executeSandbox } from "../sandbox/execute";
 
 export type HostNode = HostElement | HostText;
 
@@ -38,6 +40,9 @@ export type ExtractOptions = {
   baseRootDir?: string;
 };
 
+const DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS = 60_000;
+const DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS = 120_000;
+
 function isDrizzleTable(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   try {
@@ -50,6 +55,19 @@ function isDrizzleTable(value: unknown): boolean {
 
 function isZodObject(value: unknown): boolean {
   return Boolean(value && typeof value === "object" && "shape" in (value as any));
+}
+
+function parseHeartbeatTimeoutMs(raw: Record<string, any>): number | null {
+  const candidate =
+    typeof raw.heartbeatTimeoutMs === "number"
+      ? raw.heartbeatTimeoutMs
+      : typeof raw.heartbeatTimeout === "number"
+        ? raw.heartbeatTimeout
+        : null;
+  if (candidate == null || !Number.isFinite(candidate) || candidate <= 0) {
+    return null;
+  }
+  return Math.floor(candidate);
 }
 
 function toXmlNode(node: HostNode): XmlNode {
@@ -267,6 +285,7 @@ export function extractFromHost(
           : undefined;
       const timeoutMs =
         typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
+      const heartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
       const continueOnFail = Boolean(raw.continueOnFail);
       const cachePolicy =
         raw.cache && typeof raw.cache === "object" ? raw.cache : undefined;
@@ -283,6 +302,11 @@ export function extractFromHost(
           : undefined;
 
       const mode = raw.__smithersSubflowMode ?? raw.mode ?? "childRun";
+      if (mode === "inline") {
+        // Inline mode is represented structurally by the subtree itself.
+        // No standalone task descriptor is created for the subflow node.
+        // Children are visited in the generic child traversal below.
+      } else {
       const parallelGroup = nextParallelStack[nextParallelStack.length - 1];
       const topWorktree = nextWorktreeStack[nextWorktreeStack.length - 1];
 
@@ -306,12 +330,26 @@ export function extractFromHost(
         retries,
         retryPolicy,
         timeoutMs,
+        heartbeatTimeoutMs,
         continueOnFail,
         cachePolicy,
         agent: undefined,
         prompt: undefined,
         staticPayload: undefined,
-        computeFn: raw.__smithersSubflowWorkflow,
+        computeFn: async () => {
+          const result = await executeChildWorkflow(undefined, {
+            workflow: raw.__smithersSubflowWorkflow,
+            input: raw.__smithersSubflowInput,
+          });
+          if (result.status !== "finished") {
+            throw new SmithersError(
+              "TOON_EXECUTION_FAILED",
+              `Subflow ${nodeId} failed with status ${result.status}.`,
+              { nodeId, status: result.status },
+            );
+          }
+          return result.output;
+        },
         label: raw.label,
         meta: {
           ...(raw.meta ?? {}),
@@ -325,6 +363,157 @@ export function extractFromHost(
 
       tasks.push(descriptor);
       mountedTaskIds.push(`${nodeId}::${iteration}`);
+      }
+    }
+    if (node.tag === "smithers:sandbox") {
+      const raw = node.rawProps || {};
+      const logicalNodeId = raw.id;
+      if (!logicalNodeId || typeof logicalNodeId !== "string") {
+        throw new SmithersError(
+          "TASK_ID_REQUIRED",
+          "Sandbox id is required and must be a string.",
+        );
+      }
+      const ancestorScope =
+        loopStack.length > 1
+          ? buildLoopScope(loopStack.slice(0, -1))
+          : "";
+      const nodeId = logicalNodeId + ancestorScope;
+      if (seen.has(nodeId)) {
+        throw new SmithersError(
+          "DUPLICATE_ID",
+          `Duplicate Sandbox id detected: ${nodeId}`,
+          { kind: "sandbox", id: nodeId },
+        );
+      }
+      seen.add(nodeId);
+
+      const outputRaw = raw.output;
+      if (!outputRaw) {
+        throw new SmithersError(
+          "TASK_MISSING_OUTPUT",
+          `Sandbox ${nodeId} is missing output.`,
+          { nodeId },
+        );
+      }
+      const outputTable: any = isDrizzleTable(outputRaw) ? outputRaw : null;
+      const outputTableName = outputTable
+        ? getTableName(outputTable)
+        : typeof outputRaw === "string"
+          ? outputRaw
+          : "";
+      const outputRef = !outputTable && isZodObject(outputRaw) ? outputRaw : undefined;
+      const retries = typeof raw.retries === "number" ? raw.retries : 0;
+      const retryPolicy =
+        raw.retryPolicy && typeof raw.retryPolicy === "object"
+          ? raw.retryPolicy
+          : undefined;
+      const timeoutMs =
+        typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
+      const heartbeatTimeoutMs =
+        parseHeartbeatTimeoutMs(raw) ?? DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS;
+      const continueOnFail = Boolean(raw.continueOnFail);
+      const cachePolicy =
+        raw.cache && typeof raw.cache === "object" ? raw.cache : undefined;
+      const dependsOn = Array.isArray(raw.dependsOn)
+        ? raw.dependsOn.filter((v: unknown) => typeof v === "string")
+        : undefined;
+      const needs =
+        raw.needs && typeof raw.needs === "object" && !Array.isArray(raw.needs)
+          ? (Object.fromEntries(
+              Object.entries(raw.needs).filter(
+                ([, v]) => typeof v === "string",
+              ),
+            ) as Record<string, string>)
+          : undefined;
+
+      const parallelGroup = nextParallelStack[nextParallelStack.length - 1];
+      const topWorktree = nextWorktreeStack[nextWorktreeStack.length - 1];
+      const runtime =
+        raw.__smithersSandboxRuntime ?? raw.runtime ?? "bubblewrap";
+      const workflowDef =
+        raw.__smithersSandboxWorkflow ??
+        raw.workflow;
+
+      const descriptor: TaskDescriptor = {
+        nodeId,
+        ordinal: ordinal++,
+        iteration,
+        ralphId,
+        worktreeId: topWorktree?.id,
+        worktreePath: topWorktree?.path,
+        worktreeBranch: topWorktree?.branch,
+        worktreeBaseBranch: topWorktree?.baseBranch,
+        outputTable,
+        outputTableName,
+        outputRef,
+        outputSchema: undefined,
+        dependsOn,
+        needs,
+        needsApproval: false,
+        skipIf: Boolean(raw.skipIf),
+        retries,
+        retryPolicy,
+        timeoutMs,
+        heartbeatTimeoutMs,
+        continueOnFail,
+        cachePolicy,
+        agent: undefined,
+        prompt: undefined,
+        staticPayload: undefined,
+        computeFn: async () => {
+          if (!workflowDef) {
+            throw new SmithersError(
+              "INVALID_INPUT",
+              `Sandbox ${nodeId} is missing workflow definition.`,
+              { nodeId },
+            );
+          }
+          return executeSandbox({
+            parentWorkflow:
+              workflowDef && typeof workflowDef === "object" && "build" in workflowDef
+                ? (workflowDef as any)
+                : undefined,
+            sandboxId: nodeId,
+            runtime:
+              runtime === "docker" || runtime === "codeplane" || runtime === "bubblewrap"
+                ? runtime
+                : "bubblewrap",
+            workflow: workflowDef,
+            input: raw.__smithersSandboxInput ?? raw.input,
+            rootDir: topWorktree?.path ?? process.cwd(),
+            allowNetwork: Boolean(raw.allowNetwork),
+            maxOutputBytes: 200_000,
+            toolTimeoutMs: 60_000,
+            reviewDiffs: raw.reviewDiffs,
+            autoAcceptDiffs: raw.autoAcceptDiffs,
+            config: {
+              image: raw.image,
+              env: raw.env,
+              ports: raw.ports,
+              volumes: raw.volumes,
+              memoryLimit: raw.memoryLimit,
+              cpuLimit: raw.cpuLimit,
+              command: raw.command,
+              workspace: raw.workspace,
+            },
+          });
+        },
+        label: raw.label,
+        meta: {
+          ...(raw.meta ?? {}),
+          __sandbox: true,
+          __sandboxRuntime: runtime,
+          __sandboxInput: raw.__smithersSandboxInput ?? raw.input,
+        },
+        parallelGroupId: parallelGroup?.id,
+        parallelMaxConcurrency: parallelGroup?.max,
+      };
+
+      tasks.push(descriptor);
+      mountedTaskIds.push(`${nodeId}::${iteration}`);
+      // Isolated subtree: the children execute inside the sandbox child run.
+      return;
     }
     if (node.tag === "smithers:wait-for-event") {
       const raw = node.rawProps || {};
@@ -356,6 +545,7 @@ export function extractFromHost(
       const outputSchema = raw.outputSchema ?? outputRef;
       const timeoutMs =
         typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
+      const heartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
       const dependsOn = Array.isArray(raw.dependsOn)
         ? raw.dependsOn.filter((v: unknown) => typeof v === "string")
         : undefined;
@@ -391,6 +581,7 @@ export function extractFromHost(
         skipIf: Boolean(raw.skipIf),
         retries: 0,
         timeoutMs,
+        heartbeatTimeoutMs,
         continueOnFail: onTimeout === "continue" || onTimeout === "skip",
         agent: undefined,
         prompt: undefined,
@@ -408,6 +599,112 @@ export function extractFromHost(
         parallelMaxConcurrency: parallelGroup?.max,
       };
 
+      tasks.push(descriptor);
+      mountedTaskIds.push(`${nodeId}::${iteration}`);
+    }
+    if (node.tag === "smithers:timer") {
+      const raw = node.rawProps || {};
+      const logicalNodeId = raw.id;
+      if (!logicalNodeId || typeof logicalNodeId !== "string") {
+        throw new SmithersError("TASK_ID_REQUIRED", "Timer id is required and must be a string.");
+      }
+      if (logicalNodeId.length > 256) {
+        throw new SmithersError(
+          "INVALID_INPUT",
+          `Timer id must be 256 characters or fewer (received ${logicalNodeId.length}).`,
+          { nodeId: logicalNodeId, maxLength: 256 },
+        );
+      }
+      const ancestorScope =
+        loopStack.length > 1
+          ? buildLoopScope(loopStack.slice(0, -1))
+          : "";
+      const nodeId = logicalNodeId + ancestorScope;
+      if (seen.has(nodeId)) {
+        throw new SmithersError("DUPLICATE_ID", `Duplicate Timer id detected: ${nodeId}`, { kind: "timer", id: nodeId });
+      }
+      seen.add(nodeId);
+
+      const duration =
+        typeof (raw.__smithersTimerDuration ?? raw.duration) === "string"
+          ? String(raw.__smithersTimerDuration ?? raw.duration).trim()
+          : "";
+      const untilRaw = raw.__smithersTimerUntil ?? raw.until;
+      const until =
+        typeof untilRaw === "string"
+          ? untilRaw.trim()
+          : untilRaw instanceof Date
+            ? untilRaw.toISOString()
+            : "";
+
+      const hasDuration = duration.length > 0;
+      const hasUntil = until.length > 0;
+      if ((hasDuration ? 1 : 0) + (hasUntil ? 1 : 0) !== 1) {
+        throw new SmithersError(
+          "INVALID_INPUT",
+          `Timer ${nodeId} must define exactly one of duration or until.`,
+          { nodeId, duration: raw.duration, until: raw.until },
+        );
+      }
+      if (raw.every !== undefined) {
+        throw new SmithersError(
+          "INVALID_INPUT",
+          `Timer ${nodeId} uses every=, but recurring timers are not supported yet.`,
+          { nodeId, every: raw.every },
+        );
+      }
+
+      const dependsOn = Array.isArray(raw.dependsOn)
+        ? raw.dependsOn.filter((v: unknown) => typeof v === "string")
+        : undefined;
+      const needs =
+        raw.needs && typeof raw.needs === "object" && !Array.isArray(raw.needs)
+          ? (Object.fromEntries(
+              Object.entries(raw.needs).filter(
+                ([, v]) => typeof v === "string",
+              ),
+            ) as Record<string, string>)
+          : undefined;
+
+      const parallelGroup = nextParallelStack[nextParallelStack.length - 1];
+      const topWorktree = nextWorktreeStack[nextWorktreeStack.length - 1];
+      const descriptor: TaskDescriptor = {
+        nodeId,
+        ordinal: ordinal++,
+        iteration,
+        ralphId,
+        worktreeId: topWorktree?.id,
+        worktreePath: topWorktree?.path,
+        worktreeBranch: topWorktree?.branch,
+        worktreeBaseBranch: topWorktree?.baseBranch,
+        outputTable: null,
+        outputTableName: "",
+        outputRef: undefined,
+        outputSchema: undefined,
+        dependsOn,
+        needs,
+        needsApproval: false,
+        skipIf: Boolean(raw.skipIf),
+        retries: 0,
+        timeoutMs: null,
+        heartbeatTimeoutMs: null,
+        continueOnFail: false,
+        cachePolicy: undefined,
+        agent: undefined,
+        prompt: undefined,
+        staticPayload: undefined,
+        computeFn: undefined,
+        label: raw.label ?? `timer:${nodeId}`,
+        meta: {
+          ...(raw.meta ?? {}),
+          __timer: true,
+          __timerType: hasDuration ? "duration" : "absolute",
+          ...(hasDuration ? { __timerDuration: duration } : {}),
+          ...(hasUntil ? { __timerUntil: until } : {}),
+        },
+        parallelGroupId: parallelGroup?.id,
+        parallelMaxConcurrency: parallelGroup?.max,
+      };
       tasks.push(descriptor);
       mountedTaskIds.push(`${nodeId}::${iteration}`);
     }
@@ -475,6 +772,7 @@ export function extractFromHost(
           : undefined;
       const timeoutMs =
         typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
+      const parsedHeartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
       const continueOnFail = Boolean(raw.continueOnFail);
       const cachePolicy =
         raw.cache && typeof raw.cache === "object" ? raw.cache : undefined;
@@ -482,6 +780,9 @@ export function extractFromHost(
       const agent = raw.agent;
       const kind = raw.__smithersKind;
       const isAgent = kind === "agent" || Boolean(agent);
+      const heartbeatTimeoutMs =
+        parsedHeartbeatTimeoutMs ??
+        (isAgent ? DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS : null);
       const prompt = isAgent ? String(raw.children ?? "") : undefined;
       if (prompt === "[object Object]") {
         throw new SmithersError(
@@ -533,6 +834,7 @@ export function extractFromHost(
         retries,
         retryPolicy,
         timeoutMs,
+        heartbeatTimeoutMs,
         continueOnFail,
         cachePolicy,
         agent,

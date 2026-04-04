@@ -69,6 +69,21 @@ export const smithersErrorDefinitions = {
     when: "A task compute callback exceeds its configured timeout.",
     details: "{ nodeId, attempt, timeoutMs }",
   },
+  TASK_HEARTBEAT_TIMEOUT: {
+    category: "engine",
+    when: "A task heartbeat timeout is exceeded while the task is still in progress.",
+    details: "{ nodeId, iteration, attempt, timeoutMs, staleForMs }",
+  },
+  HEARTBEAT_PAYLOAD_TOO_LARGE: {
+    category: "engine",
+    when: "A task heartbeat payload exceeds the maximum persisted checkpoint size.",
+    details: "{ dataSizeBytes, maxBytes }",
+  },
+  HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE: {
+    category: "engine",
+    when: "A task heartbeat payload contains values that cannot be serialized to JSON.",
+    details: "{ path, valueType? }",
+  },
   TASK_ABORTED: {
     category: "engine",
     when: "A running task is aborted through an AbortSignal or shutdown path.",

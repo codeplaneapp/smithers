@@ -2,6 +2,35 @@ import type { RunStatus } from "./RunStatus";
 import type { AgentCliEvent } from "./agents/BaseCliAgent";
 
 export type SmithersEvent =
+  | {
+      type: "SupervisorStarted";
+      runId: string;
+      pollIntervalMs: number;
+      staleThresholdMs: number;
+      timestampMs: number;
+    }
+  | {
+      type: "SupervisorPollCompleted";
+      runId: string;
+      staleCount: number;
+      resumedCount: number;
+      skippedCount: number;
+      durationMs: number;
+      timestampMs: number;
+    }
+  | {
+      type: "RunAutoResumed";
+      runId: string;
+      lastHeartbeatAtMs: number | null;
+      staleDurationMs: number;
+      timestampMs: number;
+    }
+  | {
+      type: "RunAutoResumeSkipped";
+      runId: string;
+      reason: "pid-alive" | "missing-workflow" | "rate-limited";
+      timestampMs: number;
+    }
   | { type: "RunStarted"; runId: string; timestampMs: number }
   | {
       type: "RunStatusChanged";
@@ -12,6 +41,15 @@ export type SmithersEvent =
   | { type: "RunFinished"; runId: string; timestampMs: number }
   | { type: "RunFailed"; runId: string; error: unknown; timestampMs: number }
   | { type: "RunCancelled"; runId: string; timestampMs: number }
+  | {
+      type: "RunContinuedAsNew";
+      runId: string;
+      newRunId: string;
+      iteration: number;
+      carriedStateSize: number;
+      ancestryDepth?: number;
+      timestampMs: number;
+    }
   | {
       type: "RunHijackRequested";
       runId: string;
@@ -28,6 +66,79 @@ export type SmithersEvent =
       mode: "native-cli" | "conversation";
       resume?: string | null;
       cwd: string;
+      timestampMs: number;
+    }
+  | {
+      type: "SandboxCreated";
+      runId: string;
+      sandboxId: string;
+      runtime: "bubblewrap" | "docker" | "codeplane";
+      configJson: string;
+      timestampMs: number;
+    }
+  | {
+      type: "SandboxShipped";
+      runId: string;
+      sandboxId: string;
+      runtime: "bubblewrap" | "docker" | "codeplane";
+      bundleSizeBytes: number;
+      timestampMs: number;
+    }
+  | {
+      type: "SandboxHeartbeat";
+      runId: string;
+      sandboxId: string;
+      remoteRunId?: string;
+      progress?: number;
+      timestampMs: number;
+    }
+  | {
+      type: "SandboxBundleReceived";
+      runId: string;
+      sandboxId: string;
+      bundleSizeBytes: number;
+      patchCount: number;
+      hasOutputs: boolean;
+      timestampMs: number;
+    }
+  | {
+      type: "SandboxCompleted";
+      runId: string;
+      sandboxId: string;
+      remoteRunId?: string;
+      runtime: "bubblewrap" | "docker" | "codeplane";
+      status: "finished" | "failed" | "cancelled";
+      durationMs: number;
+      timestampMs: number;
+    }
+  | {
+      type: "SandboxFailed";
+      runId: string;
+      sandboxId: string;
+      runtime: "bubblewrap" | "docker" | "codeplane";
+      error: unknown;
+      timestampMs: number;
+    }
+  | {
+      type: "SandboxDiffReviewRequested";
+      runId: string;
+      sandboxId: string;
+      patchCount: number;
+      totalDiffLines: number;
+      timestampMs: number;
+    }
+  | {
+      type: "SandboxDiffAccepted";
+      runId: string;
+      sandboxId: string;
+      patchCount: number;
+      timestampMs: number;
+    }
+  | {
+      type: "SandboxDiffRejected";
+      runId: string;
+      sandboxId: string;
+      reason?: string;
       timestampMs: number;
     }
   | {
@@ -50,6 +161,27 @@ export type SmithersEvent =
       nodeId: string;
       iteration: number;
       attempt: number;
+      timestampMs: number;
+    }
+  | {
+      type: "TaskHeartbeat";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+      hasData: boolean;
+      dataSizeBytes: number;
+      intervalMs?: number;
+      timestampMs: number;
+    }
+  | {
+      type: "TaskHeartbeatTimeout";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+      lastHeartbeatAtMs: number;
+      timeoutMs: number;
       timestampMs: number;
     }
   | {
@@ -98,6 +230,14 @@ export type SmithersEvent =
       runId: string;
       nodeId: string;
       iteration: number;
+      timestampMs: number;
+    }
+  | {
+      type: "NodeWaitingTimer";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      firesAtMs: number;
       timestampMs: number;
     }
   | {
@@ -349,5 +489,28 @@ export type SmithersEvent =
       path: string;
       durationMs: number;
       status: "success" | "error";
+      timestampMs: number;
+    }
+  | {
+      type: "TimerCreated";
+      runId: string;
+      timerId: string;
+      firesAtMs: number;
+      timerType: "duration" | "absolute";
+      timestampMs: number;
+    }
+  | {
+      type: "TimerFired";
+      runId: string;
+      timerId: string;
+      firesAtMs: number;
+      firedAtMs: number;
+      delayMs: number;
+      timestampMs: number;
+    }
+  | {
+      type: "TimerCancelled";
+      runId: string;
+      timerId: string;
       timestampMs: number;
     };

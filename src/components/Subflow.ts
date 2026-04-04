@@ -17,6 +17,8 @@ export type SubflowProps = {
   output: OutputTarget;
   skipIf?: boolean;
   timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  heartbeatTimeout?: number;
   retries?: number;
   retryPolicy?: RetryPolicy;
   continueOnFail?: boolean;
@@ -42,6 +44,8 @@ export function Subflow(props: SubflowProps) {
     mode: props.mode ?? "childRun",
     output: props.output,
     timeoutMs: props.timeoutMs,
+    heartbeatTimeoutMs: props.heartbeatTimeoutMs,
+    heartbeatTimeout: props.heartbeatTimeout,
     retries: props.retries,
     retryPolicy: props.retryPolicy,
     continueOnFail: props.continueOnFail,

@@ -234,9 +234,11 @@ function statusIcon(status: string): string {
   switch (status) {
     case "running": return "▶";
     case "finished": return "✓";
+    case "continued": return "↻";
     case "failed": return "✗";
     case "cancelled": return "◼";
     case "waiting-approval": return "⏳";
+    case "waiting-timer": return "⏱";
     case "pending": return "○";
     case "in-progress": return "▶";
     case "skipped": return "⊘";
@@ -251,9 +253,11 @@ function statusColor(
     case "running":
     case "in-progress": return "accent";
     case "finished": return "success";
+    case "continued": return "dim";
     case "failed": return "error";
     case "cancelled": return "dim";
     case "waiting-approval": return "warning";
+    case "waiting-timer": return "warning";
     case "pending": return "dim";
     default: return "muted";
   }
@@ -400,6 +404,18 @@ function processEvent(run: RunState, event: { type: string; [k: string]: unknown
       run.finishedAtMs = ts;
       pushEvent(run, { type: event.type, message: "Run cancelled", timestampMs: ts });
       break;
+    case "RunContinuedAsNew":
+      run.status = "continued";
+      run.finishedAtMs = ts;
+      pushEvent(
+        run,
+        {
+          type: event.type,
+          message: `Run continued as ${(event.newRunId as string | undefined) ?? "new run"}`,
+          timestampMs: ts,
+        },
+      );
+      break;
     case "NodeStarted":
       if (nodeId) {
         const node = getOrCreateNode(run, nodeId);
@@ -455,6 +471,13 @@ function processEvent(run: RunState, event: { type: string; [k: string]: unknown
         const node = getOrCreateNode(run, nodeId);
         node.state = "waiting-approval";
         pushEvent(run, { type: event.type, nodeId, message: `${nodeId} waiting for approval`, timestampMs: ts });
+      }
+      break;
+    case "NodeWaitingTimer":
+      if (nodeId) {
+        const node = getOrCreateNode(run, nodeId);
+        node.state = "waiting-timer";
+        pushEvent(run, { type: event.type, nodeId, message: `${nodeId} waiting for timer`, timestampMs: ts });
       }
       break;
     case "ApprovalGranted":
@@ -521,7 +544,7 @@ function updateStatusBar(ctx: ExtensionContext) {
   if (!ctx.hasUI) return;
 
   const activeRuns = [...runs.values()].filter(
-    (r) => r.status === "running" || r.status === "waiting-approval",
+    (r) => r.status === "running" || r.status === "waiting-approval" || r.status === "waiting-timer",
   );
   const waitingApproval = [...runs.values()].filter(
     (r) => r.status === "waiting-approval",
@@ -701,7 +724,19 @@ class SmithersDashboard {
       lines.push("");
       for (const e of run.events.slice(-20)) {
         const ts = new Date(e.timestampMs).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
-        const color = statusColor(e.type.includes("Fail") ? "failed" : e.type.includes("Finish") ? "finished" : e.type.includes("Start") ? "running" : e.type.includes("Approval") ? "waiting-approval" : "pending");
+        const color = statusColor(
+          e.type.includes("Fail")
+            ? "failed"
+            : e.type.includes("Finish")
+              ? "finished"
+              : e.type.includes("Start")
+                ? "running"
+                : e.type.includes("Approval")
+                  ? "waiting-approval"
+                  : e.type.includes("Timer")
+                    ? "waiting-timer"
+                    : "pending",
+        );
         lines.push(truncateToWidth(`  ${th.fg("dim", ts)}  ${th.fg(color, e.message)}`, W));
       }
     } else if (run && this.tab === "errors") {
@@ -961,7 +996,7 @@ export default function (pi: ExtensionAPI) {
       sections.push(`Run: ${activeRun.runId} (${activeRun.workflowName})`);
       sections.push(`Status: ${activeRun.status}`);
 
-      const waitingNodes = [...activeRun.nodes.values()].filter((n) => n.state === "waiting-approval");
+      const waitingNodes = [...activeRun.nodes.values()].filter((n) => n.state === "waiting-approval" || n.state === "waiting-timer");
       if (waitingNodes.length > 0) {
         sections.push(`Nodes waiting approval: ${waitingNodes.map((n) => n.nodeId).join(", ")}`);
       }
@@ -981,7 +1016,7 @@ export default function (pi: ExtensionAPI) {
     const waiting: string[] = [];
     for (const run of runs.values()) {
       for (const node of run.nodes.values()) {
-        if (node.state === "waiting-approval") waiting.push(`${run.workflowName}/${node.nodeId}`);
+        if (node.state === "waiting-approval" || node.state === "waiting-timer") waiting.push(`${run.workflowName}/${node.nodeId}`);
       }
     }
     if (waiting.length > 0 && ctx.hasUI) {
@@ -1430,14 +1465,14 @@ export default function (pi: ExtensionAPI) {
     description: "Cancel a running workflow",
     getArgumentCompletions(prefix: string) {
       return [...runs.values()]
-        .filter((r) => r.status === "running" || r.status === "waiting-approval")
+        .filter((r) => r.status === "running" || r.status === "waiting-approval" || r.status === "waiting-timer")
         .filter((r) => r.runId.startsWith(prefix))
         .map((r) => ({ value: r.runId, label: `${r.workflowName} (${r.runId.slice(0, 8)})` }));
     },
     handler: async (args, ctx) => {
       let runId = args.trim();
       if (!runId) {
-        const active = [...runs.values()].filter((r) => r.status === "running" || r.status === "waiting-approval");
+        const active = [...runs.values()].filter((r) => r.status === "running" || r.status === "waiting-approval" || r.status === "waiting-timer");
         if (active.length === 0) { ctx.ui.notify("No active runs to cancel", "info"); return; }
         const options = active.map((r) => `${statusIcon(r.status)} ${r.workflowName} (${r.runId.slice(0, 8)})`);
         const selected = await ctx.ui.select("Cancel which run?", options);

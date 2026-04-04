@@ -10,7 +10,7 @@ export function TopBar() {
     workspaces.find((workspace) => workspace.id === activeWorkspaceId) ??
     workspaces[0];
   const activeRunCount = Object.values(runSummaries).filter((run) =>
-    ["running", "waiting-approval"].includes(run.status),
+    ["running", "waiting-approval", "waiting-timer"].includes(run.status),
   ).length;
   const approvalCount = Object.values(approvals).reduce(
     (count, next) => count + next.length,

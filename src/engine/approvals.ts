@@ -4,6 +4,19 @@ import { SmithersDb } from "../db/adapter";
 import { runPromise } from "../effect/runtime";
 import { approvalWaitDuration, trackEvent } from "../effect/metrics";
 
+function nextRunStatusForApproval(
+  currentStatus: string | null | undefined,
+  pendingApprovals: number,
+): "waiting-approval" | "waiting-event" | null {
+  if (
+    currentStatus !== "waiting-approval" &&
+    currentStatus !== "waiting-event"
+  ) {
+    return null;
+  }
+  return pendingApprovals > 0 ? "waiting-approval" : "waiting-event";
+}
+
 export function approveNodeEffect(
   adapter: SmithersDb,
   runId: string,
@@ -22,19 +35,44 @@ export function approveNodeEffect(
   };
   return Effect.gen(function* () {
     const existing = yield* adapter.getApprovalEffect(runId, nodeId, iteration);
+    yield* adapter.withTransactionEffect(
+      "approval",
+      Effect.gen(function* () {
+        const existingNode = yield* adapter.getNodeEffect(runId, nodeId, iteration);
+        yield* adapter.insertOrUpdateApprovalEffect({
+          runId,
+          nodeId,
+          iteration,
+          status: "approved",
+          requestedAtMs: null,
+          decidedAtMs: ts,
+          note: note ?? null,
+          decidedBy: decidedBy ?? null,
+        });
+        yield* adapter.insertNodeEffect({
+          runId,
+          nodeId,
+          iteration,
+          state: "pending",
+          lastAttempt: existingNode?.lastAttempt ?? null,
+          updatedAtMs: nowMs(),
+          outputTable: existingNode?.outputTable ?? "",
+          label: existingNode?.label ?? null,
+        });
+
+        const run = yield* adapter.getRunEffect(runId);
+        if (run) {
+          const pending = yield* adapter.listPendingApprovalsEffect(runId);
+          const nextStatus = nextRunStatusForApproval(run.status, pending.length);
+          if (nextStatus && run.status !== nextStatus) {
+            yield* adapter.updateRunEffect(runId, { status: nextStatus });
+          }
+        }
+      }),
+    );
     if (existing?.requestedAtMs) {
       yield* Metric.update(approvalWaitDuration, ts - existing.requestedAtMs);
     }
-    yield* adapter.insertOrUpdateApprovalEffect({
-      runId,
-      nodeId,
-      iteration,
-      status: "approved",
-      requestedAtMs: null,
-      decidedAtMs: ts,
-      note: note ?? null,
-      decidedBy: decidedBy ?? null,
-    });
     yield* adapter.insertEventWithNextSeqEffect({
       runId,
       timestampMs: ts,
@@ -42,16 +80,6 @@ export function approveNodeEffect(
       payloadJson: JSON.stringify(event),
     });
     yield* trackEvent(event);
-    yield* adapter.insertNodeEffect({
-      runId,
-      nodeId,
-      iteration,
-      state: "pending",
-      lastAttempt: null,
-      updatedAtMs: nowMs(),
-      outputTable: "",
-      label: null,
-    });
     yield* Effect.logInfo("approval granted");
   }).pipe(
     Effect.annotateLogs({
@@ -96,19 +124,44 @@ export function denyNodeEffect(
   };
   return Effect.gen(function* () {
     const existing = yield* adapter.getApprovalEffect(runId, nodeId, iteration);
+    yield* adapter.withTransactionEffect(
+      "approval",
+      Effect.gen(function* () {
+        const existingNode = yield* adapter.getNodeEffect(runId, nodeId, iteration);
+        yield* adapter.insertOrUpdateApprovalEffect({
+          runId,
+          nodeId,
+          iteration,
+          status: "denied",
+          requestedAtMs: null,
+          decidedAtMs: ts,
+          note: note ?? null,
+          decidedBy: decidedBy ?? null,
+        });
+        yield* adapter.insertNodeEffect({
+          runId,
+          nodeId,
+          iteration,
+          state: "failed",
+          lastAttempt: existingNode?.lastAttempt ?? null,
+          updatedAtMs: nowMs(),
+          outputTable: existingNode?.outputTable ?? "",
+          label: existingNode?.label ?? null,
+        });
+
+        const run = yield* adapter.getRunEffect(runId);
+        if (run) {
+          const pending = yield* adapter.listPendingApprovalsEffect(runId);
+          const nextStatus = nextRunStatusForApproval(run.status, pending.length);
+          if (nextStatus && run.status !== nextStatus) {
+            yield* adapter.updateRunEffect(runId, { status: nextStatus });
+          }
+        }
+      }),
+    );
     if (existing?.requestedAtMs) {
       yield* Metric.update(approvalWaitDuration, ts - existing.requestedAtMs);
     }
-    yield* adapter.insertOrUpdateApprovalEffect({
-      runId,
-      nodeId,
-      iteration,
-      status: "denied",
-      requestedAtMs: null,
-      decidedAtMs: ts,
-      note: note ?? null,
-      decidedBy: decidedBy ?? null,
-    });
     yield* adapter.insertEventWithNextSeqEffect({
       runId,
       timestampMs: ts,
@@ -116,16 +169,6 @@ export function denyNodeEffect(
       payloadJson: JSON.stringify(event),
     });
     yield* trackEvent(event);
-    yield* adapter.insertNodeEffect({
-      runId,
-      nodeId,
-      iteration,
-      state: "failed",
-      lastAttempt: null,
-      updatedAtMs: nowMs(),
-      outputTable: "",
-      label: null,
-    });
     yield* Effect.logInfo("approval denied");
   }).pipe(
     Effect.annotateLogs({

@@ -123,7 +123,7 @@ export function RunsList({
         Bun.spawn(["bun", "run", "src/cli/index.ts", "deny", runId], { stdout: "ignore", stderr: "ignore" }).unref();
         return;
       }
-      if (key.name === "c" && status === "running") {
+      if (key.name === "c" && (status === "running" || status === "waiting-timer")) {
         Bun.spawn(["bun", "run", "src/cli/index.ts", "cancel", runId], { stdout: "ignore", stderr: "ignore" }).unref();
         return;
       }
@@ -211,7 +211,7 @@ export function RunsList({
         <box style={{ width: "100%", height: 3, borderTop: true, borderColor: "gray", flexDirection: "column" }}>
             <text style={{ color: "#93c5fd" }}>{filterMode === "all" ? "[P] Filter: Show Pending Approvals Only" : "[P] Filter: Show All Workflows"}</text>
             {selectedRun?.status === "waiting-approval" && <text style={{ color: "green" }}>[Y] Approve  |  [D] Deny Human Task</text>}
-            {selectedRun?.status === "running" && <text style={{ color: "red" }}>[C] Safely Cancel/Halt Workflow  |  [K] Kill All Active Workflows</text>}
+            {(selectedRun?.status === "running" || selectedRun?.status === "waiting-timer") && <text style={{ color: "red" }}>[C] Safely Cancel/Halt Workflow  |  [K] Kill All Active Workflows</text>}
             {(selectedRun?.status === "failed" || selectedRun?.status === "cancelled") && <text style={{ color: "yellow" }}>[R] Resume from latest checkpoint</text>}
         </box>
       </box>

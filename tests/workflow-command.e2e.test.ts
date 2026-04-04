@@ -141,6 +141,22 @@ test("workflow run help exposes prompt and execution options", () => {
   expect(result.stdout).toContain("--serve <boolean>");
 });
 
+test("supervise help exposes polling controls", () => {
+  const repo = createTempRepo();
+
+  const result = runSmithers(["supervise", "--help"], {
+    cwd: repo.dir,
+    format: null,
+  });
+
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain("Usage: smithers supervise [options]");
+  expect(result.stdout).toContain("--interval, -i <string>");
+  expect(result.stdout).toContain("--stale-threshold, -t <string>");
+  expect(result.stdout).toContain("--max-concurrent, -c <number>");
+  expect(result.stdout).toContain("--dry-run, -n <boolean>");
+});
+
 test("workflow with no args lists discovered workflows", () => {
   const repo = createTempRepo();
   writeTestWorkflow(repo, ".smithers/workflows/implement.tsx");

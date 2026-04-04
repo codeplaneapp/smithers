@@ -15,6 +15,7 @@ export type HotReloadOptions = {
 
 export type RunOptions = {
   runId?: string;
+  parentRunId?: string | null;
   input: Record<string, unknown>;
   maxConcurrency?: number;
   onProgress?: (e: SmithersEvent) => void;

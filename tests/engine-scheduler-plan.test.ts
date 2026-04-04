@@ -87,6 +87,28 @@ describe("buildPlanTree", () => {
     expect(ralphs[0].onMaxReached).toBe("fail");
   });
 
+  test("ralph extracts continueAsNewEvery", () => {
+    const xml = makeXml("smithers:workflow", {}, [
+      makeXml(
+        "smithers:ralph",
+        { id: "loop-1", continueAsNewEvery: "7" },
+        [makeTask("a")],
+      ),
+    ]);
+    const { ralphs } = buildPlanTree(xml);
+    expect(ralphs[0].continueAsNewEvery).toBe(7);
+  });
+
+  test("builds continue-as-new node", () => {
+    const xml = makeXml("smithers:workflow", {}, [
+      makeXml("smithers:continue-as-new", { stateJson: "{\"cursor\":\"abc\"}" }),
+    ]);
+    const { plan } = buildPlanTree(xml);
+    const seq = plan as any;
+    expect(seq.children[0].kind).toBe("continue-as-new");
+    expect(seq.children[0].stateJson).toBe("{\"cursor\":\"abc\"}");
+  });
+
   test("throws on nested ralph", () => {
     const xml = makeXml("smithers:workflow", {}, [
       makeXml("smithers:ralph", { id: "outer" }, [
@@ -127,6 +149,17 @@ describe("buildPlanTree", () => {
     const { plan } = buildPlanTree(xml);
     const seq = plan as any;
     expect(seq.children[0].kind).toBe("group");
+  });
+
+  test("treats sandbox as a single task node", () => {
+    const xml = makeXml("smithers:workflow", {}, [
+      makeXml("smithers:sandbox", { id: "safe" }, [
+        makeTask("inside"),
+      ]),
+    ]);
+    const { plan } = buildPlanTree(xml);
+    const seq = plan as any;
+    expect(seq.children[0]).toEqual({ kind: "task", nodeId: "safe" });
   });
 
   test("skips tasks without id", () => {
@@ -249,6 +282,20 @@ describe("scheduleTasks", () => {
     expect(result.waitingApprovalExists).toBe(true);
   });
 
+  test("detects waiting-timer state", () => {
+    const plan: PlanNode = {
+      kind: "sequence",
+      children: [{ kind: "task", nodeId: "a" }],
+    };
+    const states: TaskStateMap = new Map([
+      [buildStateKey("a", 0), "waiting-timer"],
+    ]);
+    const descs = new Map([["a", makeDescriptor("a")]]);
+
+    const result = scheduleTasks(plan, states, descs, new Map(), new Map(), Date.now());
+    expect(result.waitingTimerExists).toBe(true);
+  });
+
   test("respects retry wait", () => {
     const now = 1000;
     const plan: PlanNode = {
@@ -321,6 +368,23 @@ describe("scheduleTasks", () => {
     const result = scheduleTasks(plan, states, descs, new Map(), new Map(), Date.now());
     expect(result.readyRalphs.length).toBe(1);
     expect(result.readyRalphs[0].id).toBe("loop-1");
+  });
+
+  test("returns continuation request when continue-as-new is reached", () => {
+    const plan: PlanNode = {
+      kind: "continue-as-new",
+      stateJson: "{\"cursor\":\"abc\"}",
+    };
+    const result = scheduleTasks(
+      plan,
+      new Map(),
+      new Map(),
+      new Map(),
+      new Map(),
+      Date.now(),
+    );
+    expect(result.continuation).toBeDefined();
+    expect(result.continuation?.stateJson).toBe("{\"cursor\":\"abc\"}");
   });
 
   test("ralph with until=true is terminal", () => {

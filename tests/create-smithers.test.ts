@@ -38,7 +38,11 @@ describe("createSmithers", () => {
     expect(api.Loop).toBeDefined();
     expect(api.Branch).toBeDefined();
     expect(api.Ralph).toBeDefined();
+    expect(api.ContinueAsNew).toBeDefined();
+    expect(api.continueAsNew).toBeFunction();
     expect(api.Worktree).toBeDefined();
+    expect(api.Sandbox).toBeFunction();
+    expect(api.Timer).toBeFunction();
     expect(api.MergeQueue).toBeDefined();
     expect(api.useCtx).toBeFunction();
     expect(api.smithers).toBeFunction();

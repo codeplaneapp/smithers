@@ -24,11 +24,13 @@ function makeSmithers(
 
 describe("createSmithers", () => {
   test("returns all expected API properties", () => {
-    const { Workflow, Task, Approval, useCtx, smithers, db, tables, outputs, cleanup } =
+    const { Workflow, Task, Approval, Sandbox, Timer, useCtx, smithers, db, tables, outputs, cleanup } =
       makeSmithers();
     expect(Workflow).toBeFunction();
     expect(Task).toBeFunction();
     expect(Approval).toBeFunction();
+    expect(Sandbox).toBeFunction();
+    expect(Timer).toBeFunction();
     expect(useCtx).toBeFunction();
     expect(smithers).toBeFunction();
     expect(db).toBeDefined();

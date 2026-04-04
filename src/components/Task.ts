@@ -54,6 +54,8 @@ export type TaskProps<
   skipIf?: boolean;
   needsApproval?: boolean;
   timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  heartbeatTimeout?: number;
   retries?: number;
   retryPolicy?: RetryPolicy;
   continueOnFail?: boolean;

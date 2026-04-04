@@ -35,6 +35,8 @@ export type ApprovalProps<Row = ApprovalDecision, Output extends OutputTarget = 
   needs?: Record<string, string>;
   skipIf?: boolean;
   timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  heartbeatTimeout?: number;
   retries?: number;
   retryPolicy?: import("../RetryPolicy").RetryPolicy;
   continueOnFail?: boolean;
@@ -90,6 +92,8 @@ export function Approval<Row = ApprovalDecision>(props: ApprovalProps<Row>) {
     approvalMode: "decision",
     approvalOnDeny: props.onDeny,
     timeoutMs: props.timeoutMs,
+    heartbeatTimeoutMs: props.heartbeatTimeoutMs,
+    heartbeatTimeout: props.heartbeatTimeout,
     retries: props.retries,
     retryPolicy: props.retryPolicy,
     continueOnFail: props.continueOnFail,

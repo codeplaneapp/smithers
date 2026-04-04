@@ -355,6 +355,24 @@ describe("scheduleTasks", () => {
     expect(result.runnable).toEqual([]);
   });
 
+  test("waiting-timer is tracked", () => {
+    const plan: PlanNode = { kind: "task", nodeId: "a" };
+    const states: TaskStateMap = new Map([
+      [buildStateKey("a", 0), "waiting-timer"],
+    ]);
+    const descs = makeDescMap(desc("a"));
+    const result = scheduleTasks(
+      plan,
+      states,
+      descs,
+      new Map(),
+      new Map(),
+      Date.now(),
+    );
+    expect(result.waitingTimerExists).toBe(true);
+    expect(result.runnable).toEqual([]);
+  });
+
   test("retryWait prevents scheduling until time elapsed", () => {
     const plan: PlanNode = { kind: "task", nodeId: "a" };
     const states: TaskStateMap = new Map();

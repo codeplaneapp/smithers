@@ -8,6 +8,7 @@ import {
 
 export const smithersRuns = sqliteTable("_smithers_runs", {
   runId: text("run_id").primaryKey(),
+  parentRunId: text("parent_run_id"),
   workflowName: text("workflow_name").notNull(),
   workflowPath: text("workflow_path"),
   workflowHash: text("workflow_hash"),
@@ -54,6 +55,8 @@ export const smithersAttempts = sqliteTable(
     state: text("state").notNull(),
     startedAtMs: integer("started_at_ms").notNull(),
     finishedAtMs: integer("finished_at_ms"),
+    heartbeatAtMs: integer("heartbeat_at_ms"),
+    heartbeatDataJson: text("heartbeat_data_json"),
     errorJson: text("error_json"),
     jjPointer: text("jj_pointer"),
     cached: integer("cached", { mode: "boolean" }).default(false),
@@ -74,6 +77,7 @@ export const smithersFrames = sqliteTable(
     createdAtMs: integer("created_at_ms").notNull(),
     xmlJson: text("xml_json").notNull(),
     xmlHash: text("xml_hash").notNull(),
+    encoding: text("encoding").notNull().default("full"),
     mountedTaskIdsJson: text("mounted_task_ids_json"),
     taskIndexJson: text("task_index_json"),
     note: text("note"),
@@ -112,6 +116,26 @@ export const smithersCache = sqliteTable("_smithers_cache", {
   jjPointer: text("jj_pointer"),
   payloadJson: text("payload_json").notNull(),
 });
+
+export const smithersSandboxes = sqliteTable(
+  "_smithers_sandboxes",
+  {
+    runId: text("run_id").notNull(),
+    sandboxId: text("sandbox_id").notNull(),
+    runtime: text("runtime").notNull().default("bubblewrap"),
+    remoteRunId: text("remote_run_id"),
+    workspaceId: text("workspace_id"),
+    containerId: text("container_id"),
+    configJson: text("config_json").notNull(),
+    status: text("status").notNull().default("pending"),
+    shippedAtMs: integer("shipped_at_ms"),
+    completedAtMs: integer("completed_at_ms"),
+    bundlePath: text("bundle_path"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.runId, t.sandboxId] }),
+  }),
+);
 
 export const smithersToolCalls = sqliteTable(
   "_smithers_tool_calls",

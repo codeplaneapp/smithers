@@ -13,7 +13,6 @@ import { ensureSmithersTables } from "../db/ensure";
 import { SmithersDb } from "../db/adapter";
 import {
   selectOutputRow,
-  upsertOutputRow,
   validateOutput,
   validateExistingOutput,
   getAgentOutputSchema,
@@ -37,7 +36,7 @@ import {
   type RalphStateMap,
 } from "./scheduler";
 import { runWithToolContext } from "../tools/context";
-import { captureSnapshot } from "../time-travel/snapshot";
+import { captureSnapshotEffect } from "../time-travel/snapshot";
 import { EventBus } from "../events";
 import { getJjPointer } from "../vcs/jj";
 import { findVcsRoot } from "../vcs/find-root";
@@ -57,6 +56,7 @@ import {
   schedulerConcurrencyUtilization,
   schedulerQueueDepth,
   schedulerWaitDuration,
+  trackEvent,
 } from "../effect/metrics";
 import { runScorersAsync } from "../scorers/run-scorers";
 import { dirname, resolve } from "node:path";
@@ -64,7 +64,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fromPromise } from "../effect/interop";
 import { logDebug, logError, logInfo, logWarning } from "../effect/logging";
-import { runPromise } from "../effect/runtime";
+import { runPromise, runSync } from "../effect/runtime";
 import { HotWorkflowController } from "../hot";
 import type { HotReloadOptions } from "../RunOptions";
 import { spawn as nodeSpawn } from "node:child_process";
@@ -139,6 +139,149 @@ function parseAttemptMetaJson(metaJson?: string | null): Record<string, unknown>
   }
 }
 
+type TimerType = "duration" | "absolute";
+
+type TimerSnapshot = {
+  timerId: string;
+  timerType: TimerType;
+  firesAtMs: number;
+  createdAtMs: number;
+  firedAtMs?: number;
+  duration?: string;
+  until?: string;
+};
+
+const timerDurationMultipliers: Record<string, number> = {
+  ms: 1,
+  s: 1_000,
+  m: 60_000,
+  h: 3_600_000,
+  d: 86_400_000,
+};
+
+function isTimerTask(desc: TaskDescriptor): boolean {
+  return Boolean(desc.meta && (desc.meta as any).__timer);
+}
+
+function parseTimerType(desc: TaskDescriptor): TimerType {
+  const raw = (desc.meta as any)?.__timerType;
+  return raw === "absolute" ? "absolute" : "duration";
+}
+
+function parseTimerDurationMs(raw: string, nodeId: string): number {
+  const input = raw.trim().toLowerCase();
+  const match = input.match(/^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/);
+  if (!match) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `Timer ${nodeId} has invalid duration "${raw}". Use formats like 500ms, 10s, 2m.`,
+      { nodeId, duration: raw },
+    );
+  }
+  const value = Number(match[1]);
+  const unit = match[2] ?? "ms";
+  const multiplier = timerDurationMultipliers[unit];
+  const ms = Math.floor(value * multiplier);
+  if (!Number.isFinite(ms) || ms < 0) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `Timer ${nodeId} duration "${raw}" is not valid.`,
+      { nodeId, duration: raw },
+    );
+  }
+  return ms;
+}
+
+function parseTimerUntilMs(raw: string, nodeId: string): number {
+  const parsed = Date.parse(raw);
+  if (!Number.isFinite(parsed)) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `Timer ${nodeId} has invalid "until" timestamp "${raw}".`,
+      { nodeId, until: raw },
+    );
+  }
+  return Math.floor(parsed);
+}
+
+function buildTimerSnapshot(desc: TaskDescriptor, createdAtMs: number): TimerSnapshot {
+  const timerType = parseTimerType(desc);
+  const timerId = desc.nodeId;
+  if (timerType === "duration") {
+    const duration = String((desc.meta as any)?.__timerDuration ?? "").trim();
+    if (!duration) {
+      throw new SmithersError(
+        "INVALID_INPUT",
+        `Timer ${timerId} is missing duration metadata.`,
+        { nodeId: timerId },
+      );
+    }
+    const delayMs = parseTimerDurationMs(duration, timerId);
+    return {
+      timerId,
+      timerType,
+      duration,
+      createdAtMs,
+      firesAtMs: createdAtMs + delayMs,
+    };
+  }
+
+  const until = String((desc.meta as any)?.__timerUntil ?? "").trim();
+  if (!until) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `Timer ${timerId} is missing until metadata.`,
+      { nodeId: timerId },
+    );
+  }
+  return {
+    timerId,
+    timerType,
+    until,
+    createdAtMs,
+    firesAtMs: parseTimerUntilMs(until, timerId),
+  };
+}
+
+function parseTimerSnapshot(metaJson?: string | null): TimerSnapshot | null {
+  const meta = parseAttemptMetaJson(metaJson);
+  const timer = meta.timer;
+  if (!timer || typeof timer !== "object" || Array.isArray(timer)) return null;
+  const timerId = typeof (timer as any).timerId === "string" ? (timer as any).timerId : null;
+  const timerType = (timer as any).timerType === "absolute" ? "absolute" : "duration";
+  const createdAtMs = Number((timer as any).createdAtMs);
+  const firesAtMs = Number((timer as any).firesAtMs);
+  if (!timerId || !Number.isFinite(createdAtMs) || !Number.isFinite(firesAtMs)) {
+    return null;
+  }
+  const firedAtRaw = (timer as any).firedAtMs;
+  const firedAtMs = Number.isFinite(Number(firedAtRaw)) ? Number(firedAtRaw) : undefined;
+  return {
+    timerId,
+    timerType,
+    createdAtMs,
+    firesAtMs,
+    firedAtMs,
+    duration: typeof (timer as any).duration === "string" ? (timer as any).duration : undefined,
+    until: typeof (timer as any).until === "string" ? (timer as any).until : undefined,
+  };
+}
+
+function buildTimerAttemptMeta(snapshot: TimerSnapshot): Record<string, unknown> {
+  return {
+    kind: "timer",
+    timer: {
+      timerId: snapshot.timerId,
+      timerType: snapshot.timerType,
+      duration: snapshot.duration ?? null,
+      until: snapshot.until ?? null,
+      createdAtMs: snapshot.createdAtMs,
+      firesAtMs: snapshot.firesAtMs,
+      firedAtMs: snapshot.firedAtMs ?? null,
+    },
+  };
+}
+
 function asConversationMessages(value: unknown): unknown[] | undefined {
   return Array.isArray(value) ? value : undefined;
 }
@@ -150,6 +293,146 @@ function cloneJsonValue<T>(value: T): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+function parseAttemptHeartbeatData(
+  heartbeatDataJson?: string | null,
+): unknown | null {
+  if (typeof heartbeatDataJson !== "string" || heartbeatDataJson.length === 0) {
+    return null;
+  }
+  try {
+    return JSON.parse(heartbeatDataJson);
+  } catch {
+    return null;
+  }
+}
+
+function validateHeartbeatValue(
+  value: unknown,
+  path: string,
+  seen: Set<unknown>,
+): void {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new SmithersError(
+        "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE",
+        `Heartbeat payload must contain only finite numbers (invalid at ${path}).`,
+        { path, value },
+      );
+    }
+    return;
+  }
+  if (value === undefined) {
+    throw new SmithersError(
+      "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE",
+      `Heartbeat payload cannot include undefined values (invalid at ${path}).`,
+      { path },
+    );
+  }
+  if (
+    typeof value === "bigint" ||
+    typeof value === "function" ||
+    typeof value === "symbol"
+  ) {
+    throw new SmithersError(
+      "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE",
+      `Heartbeat payload contains a non-JSON value (invalid at ${path}).`,
+      { path, valueType: typeof value },
+    );
+  }
+  if (typeof value !== "object") {
+    throw new SmithersError(
+      "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE",
+      `Heartbeat payload contains an unsupported value at ${path}.`,
+      { path },
+    );
+  }
+  if (seen.has(value)) {
+    throw new SmithersError(
+      "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE",
+      "Heartbeat payload cannot contain circular references.",
+      { path },
+    );
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      validateHeartbeatValue(value[i], `${path}[${i}]`, seen);
+    }
+    seen.delete(value);
+    return;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (
+    prototype !== Object.prototype &&
+    prototype !== null &&
+    !(value instanceof Date)
+  ) {
+    throw new SmithersError(
+      "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE",
+      "Heartbeat payload must contain plain JSON objects.",
+      { path },
+    );
+  }
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    validateHeartbeatValue(entry, `${path}.${key}`, seen);
+  }
+  seen.delete(value);
+}
+
+function serializeHeartbeatPayload(data: unknown): {
+  heartbeatDataJson: string;
+  dataSizeBytes: number;
+} {
+  validateHeartbeatValue(data, "$", new Set());
+  const heartbeatDataJson = JSON.stringify(data);
+  const dataSizeBytes = Buffer.byteLength(heartbeatDataJson, "utf8");
+  if (dataSizeBytes > TASK_HEARTBEAT_MAX_PAYLOAD_BYTES) {
+    throw new SmithersError(
+      "HEARTBEAT_PAYLOAD_TOO_LARGE",
+      `Heartbeat payload exceeds ${TASK_HEARTBEAT_MAX_PAYLOAD_BYTES} bytes.`,
+      {
+        dataSizeBytes,
+        maxBytes: TASK_HEARTBEAT_MAX_PAYLOAD_BYTES,
+      },
+    );
+  }
+  return { heartbeatDataJson, dataSizeBytes };
+}
+
+function heartbeatTimeoutReasonFromAbort(
+  signal: AbortSignal | undefined,
+  err: unknown,
+): SmithersError | null {
+  const reason = signal?.aborted ? (signal as any).reason : undefined;
+  const candidate = reason ?? err;
+  if (
+    candidate instanceof SmithersError &&
+    candidate.code === "TASK_HEARTBEAT_TIMEOUT"
+  ) {
+    return candidate;
+  }
+  if (
+    candidate &&
+    typeof candidate === "object" &&
+    (candidate as any).code === "TASK_HEARTBEAT_TIMEOUT"
+  ) {
+    return new SmithersError(
+      "TASK_HEARTBEAT_TIMEOUT",
+      String((candidate as any).message ?? "Task heartbeat timed out."),
+      (candidate as any).details as Record<string, unknown> | undefined,
+      { cause: candidate },
+    );
+  }
+  return null;
 }
 
 function extractHijackContinuation(
@@ -381,6 +664,33 @@ const DEFAULT_MAX_OUTPUT_BYTES = 200_000;
 const RUN_HEARTBEAT_MS = 1_000;
 const RUN_HEARTBEAT_STALE_MS = 5_000;
 const RUN_CANCEL_POLL_MS = 250;
+const TASK_HEARTBEAT_THROTTLE_MS = 500;
+const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
+const TASK_HEARTBEAT_TIMEOUT_CHECK_MS = 250;
+const MAX_CONTINUATION_STATE_BYTES = 10 * 1024 * 1024;
+
+type ContinueAsNewReason = "explicit" | "loop-threshold";
+
+type ContinueAsNewRequest = {
+  reason: ContinueAsNewReason;
+  iteration: number;
+  statePayload?: unknown;
+  loopId?: string;
+  continueAsNewEvery?: number;
+  nextRalphState?: RalphStateMap;
+};
+
+type ContinueAsNewTransition = {
+  newRunId: string;
+  ancestryDepth: number;
+  carriedStateBytes: number;
+};
+
+type RunBodyResult = RunResult | (RunResult & { status: "continued"; nextRunId: string });
+
+function buildRuntimeOwnerId() {
+  return `pid:${process.pid}:${randomUUID()}`;
+}
 
 type RunDurabilityMetadata = {
   workflowHash: string | null;
@@ -505,6 +815,422 @@ function normalizeOutputRow(row: any): unknown {
     return (row as any).payload ?? null;
   }
   return stripAutoColumns(row);
+}
+
+function quoteSqlIdent(identifier: string): string {
+  return `"${identifier.replaceAll(`"`, `""`)}"`;
+}
+
+function toSqlValue(value: unknown): unknown {
+  if (value === undefined) return null;
+  if (value === null) return null;
+  if (
+    typeof value === "object" &&
+    !(value instanceof Uint8Array) &&
+    !(value instanceof ArrayBuffer) &&
+    !(value instanceof Date)
+  ) {
+    return JSON.stringify(value);
+  }
+  return value;
+}
+
+function getTableColumnEntries(
+  table: any,
+): Array<{ key: string; sqlName: string }> {
+  const cols = getTableColumns(table as any) as Record<string, any>;
+  return Object.entries(cols).map(([key, col]) => ({
+    key,
+    sqlName: String((col as any)?.name ?? key),
+  }));
+}
+
+function insertRowWithClient(
+  client: any,
+  tableName: string,
+  row: Record<string, unknown>,
+  columnEntries: Array<{ key: string; sqlName: string }>,
+) {
+  const columns = columnEntries.filter((entry) =>
+    Object.prototype.hasOwnProperty.call(row, entry.key),
+  );
+  if (columns.length === 0) return;
+  const sql = `INSERT INTO ${quoteSqlIdent(tableName)} (${columns
+    .map((entry) => quoteSqlIdent(entry.sqlName))
+    .join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`;
+  const values = columns.map((entry) => toSqlValue(row[entry.key]));
+  client.query(sql).run(...values);
+}
+
+function copyRunScopedRowsWithClient(
+  client: any,
+  table: any,
+  sourceRunId: string,
+  targetRunId: string,
+) {
+  const tableName = getTableName(table as any);
+  const columnEntries = getTableColumnEntries(table);
+  const runIdColumn = columnEntries.find((entry) => entry.key === "runId");
+  if (!runIdColumn) return;
+
+  const insertColumnsSql = columnEntries
+    .map((entry) => quoteSqlIdent(entry.sqlName))
+    .join(", ");
+  const selectColumnsSql = columnEntries
+    .map((entry) =>
+      entry.key === "runId" ? "?" : quoteSqlIdent(entry.sqlName),
+    )
+    .join(", ");
+  const sql = `INSERT INTO ${quoteSqlIdent(tableName)} (${insertColumnsSql}) SELECT ${selectColumnsSql} FROM ${quoteSqlIdent(tableName)} WHERE ${quoteSqlIdent(runIdColumn.sqlName)} = ?`;
+  client.query(sql).run(targetRunId, sourceRunId);
+}
+
+function ralphStateToObject(ralphState: RalphStateMap): Record<string, { iteration: number; done: boolean }> {
+  const out: Record<string, { iteration: number; done: boolean }> = {};
+  const entries = [...ralphState.entries()].sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  for (const [ralphId, state] of entries) {
+    out[ralphId] = {
+      iteration: state.iteration,
+      done: state.done,
+    };
+  }
+  return out;
+}
+
+function cloneRalphStateMap(ralphState: RalphStateMap): RalphStateMap {
+  const next: RalphStateMap = new Map();
+  for (const [ralphId, state] of ralphState.entries()) {
+    next.set(ralphId, { iteration: state.iteration, done: state.done });
+  }
+  return next;
+}
+
+function buildCarriedInputRow(
+  inputTable: any,
+  newRunId: string,
+  sourceInputRow: Record<string, unknown>,
+  continuationEnvelope: Record<string, unknown>,
+): Record<string, unknown> {
+  const columns = getTableColumns(inputTable as any) as Record<string, any>;
+  if (!columns.runId) {
+    throw new SmithersError(
+      "DB_MISSING_COLUMNS",
+      "schema.input must include runId column",
+    );
+  }
+
+  const row: Record<string, unknown> = {};
+  for (const key of Object.keys(columns)) {
+    if (key === "runId") {
+      row[key] = newRunId;
+      continue;
+    }
+    if (key === "payload") {
+      const sourcePayload = sourceInputRow.payload;
+      const payloadBase: Record<string, unknown> =
+        sourcePayload && typeof sourcePayload === "object" && !Array.isArray(sourcePayload)
+          ? { ...(sourcePayload as Record<string, unknown>) }
+          : { value: sourcePayload ?? null };
+      payloadBase.__smithersContinuation = continuationEnvelope;
+      row[key] = payloadBase;
+      continue;
+    }
+    row[key] = sourceInputRow[key] ?? null;
+  }
+
+  return row;
+}
+
+async function continueRunAsNew(
+  params: {
+    db: any;
+    adapter: SmithersDb;
+    schema: Record<string, any>;
+    inputTable: any;
+    runId: string;
+    workflowPath: string | null;
+    runMetadata: RunDurabilityMetadata;
+    currentFrameNo: number;
+    continuation: ContinueAsNewRequest;
+    ralphState: RalphStateMap;
+  },
+): Promise<ContinueAsNewTransition> {
+  const {
+    db,
+    adapter,
+    schema,
+    inputTable,
+    runId,
+    workflowPath,
+    runMetadata,
+    currentFrameNo,
+    continuation,
+    ralphState,
+  } = params;
+
+  const sourceRun = await adapter.getRun(runId);
+  if (!sourceRun) {
+    throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`, { runId });
+  }
+  if (sourceRun.cancelRequestedAtMs) {
+    throw new SmithersError(
+      "RUN_CANCELLED",
+      `Run ${runId} was cancelled before continue-as-new handoff`,
+      { runId },
+    );
+  }
+
+  const sourceInputRow = await loadInput(db, inputTable, runId);
+  if (!sourceInputRow) {
+    throw new SmithersError(
+      "MISSING_INPUT",
+      `Cannot continue run ${runId} because no input row exists`,
+      { runId },
+    );
+  }
+
+  const ancestry = await adapter.listRunAncestry(runId, 10_000);
+  const ancestryDepth = ancestry.length;
+  const targetRunId = newRunId();
+  const ts = nowMs();
+  const carriedRalphState = continuation.nextRalphState
+    ? cloneRalphStateMap(continuation.nextRalphState)
+    : cloneRalphStateMap(ralphState);
+  const continuationEnvelope = {
+    parentRunId: runId,
+    reason: continuation.reason,
+    iteration: continuation.iteration,
+    loopId: continuation.loopId ?? null,
+    continueAsNewEvery: continuation.continueAsNewEvery ?? null,
+    payload: continuation.statePayload ?? null,
+    ralph: ralphStateToObject(carriedRalphState),
+    timestampMs: ts,
+  };
+  const carriedStateJson = JSON.stringify(continuationEnvelope);
+  const carriedStateBytes = Buffer.byteLength(carriedStateJson, "utf8");
+  if (carriedStateBytes > MAX_CONTINUATION_STATE_BYTES) {
+    throw new SmithersError(
+      "CONTINUATION_STATE_TOO_LARGE",
+      `Carried continuation state is ${carriedStateBytes} bytes (max ${MAX_CONTINUATION_STATE_BYTES}). Reduce continuation payload size or use external storage.`,
+      {
+        carriedStateBytes,
+        maxBytes: MAX_CONTINUATION_STATE_BYTES,
+      },
+    );
+  }
+
+  const outputTables = Object.entries(schema)
+    .filter(([key, table]) => key !== "input" && table && typeof table === "object")
+    .map(([, table]) => table as any);
+  const inputTableName = getTableName(inputTable as any);
+  const inputRow = buildCarriedInputRow(
+    inputTable,
+    targetRunId,
+    sourceInputRow as Record<string, unknown>,
+    continuationEnvelope,
+  );
+  const inputColumnEntries = getTableColumnEntries(inputTable);
+  const runConfigBase =
+    sourceRun.configJson && sourceRun.configJson.trim().length > 0
+      ? (() => {
+          try {
+            const parsed = JSON.parse(sourceRun.configJson);
+            return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+              ? parsed
+              : {};
+          } catch {
+            return {};
+          }
+        })()
+      : {};
+  const nextConfigJson = JSON.stringify({
+    ...runConfigBase,
+    continuation: {
+      ...continuationEnvelope,
+      carriedStateBytes,
+      ancestryDepth: ancestryDepth + 1,
+    },
+  });
+
+  const continuationEvent = {
+    type: "RunContinuedAsNew" as const,
+    runId,
+    newRunId: targetRunId,
+    iteration: continuation.iteration,
+    carriedStateSize: carriedStateBytes,
+    ancestryDepth: ancestryDepth + 1,
+    timestampMs: ts,
+  };
+
+  await withSqliteWriteRetry(
+    async () => {
+      const client: any = (db as any).$client;
+      if (!client || typeof client.run !== "function" || typeof client.query !== "function") {
+        throw new SmithersError(
+          "DB_REQUIRES_BUN_SQLITE",
+          "Continue-as-new requires Bun SQLite client transaction primitives.",
+        );
+      }
+      client.run("BEGIN IMMEDIATE");
+      try {
+        const cancelState = client
+          .query("SELECT cancel_requested_at_ms AS cancelRequestedAtMs FROM _smithers_runs WHERE run_id = ? LIMIT 1")
+          .get(runId) as { cancelRequestedAtMs?: number | null } | undefined;
+        if (cancelState?.cancelRequestedAtMs) {
+          throw new SmithersError(
+            "RUN_CANCELLED",
+            `Run ${runId} was cancelled before continue-as-new handoff`,
+            { runId },
+          );
+        }
+
+        client
+          .query(
+            `INSERT INTO _smithers_runs (
+              run_id,
+              parent_run_id,
+              workflow_name,
+              workflow_path,
+              workflow_hash,
+              status,
+              created_at_ms,
+              started_at_ms,
+              finished_at_ms,
+              heartbeat_at_ms,
+              runtime_owner_id,
+              cancel_requested_at_ms,
+              hijack_requested_at_ms,
+              hijack_target,
+              vcs_type,
+              vcs_root,
+              vcs_revision,
+              error_json,
+              config_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            targetRunId,
+            runId,
+            sourceRun.workflowName ?? "workflow",
+            workflowPath ?? sourceRun.workflowPath ?? null,
+            runMetadata.workflowHash ?? sourceRun.workflowHash ?? null,
+            "running",
+            ts,
+            ts,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            runMetadata.vcsType ?? sourceRun.vcsType ?? null,
+            runMetadata.vcsRoot ?? sourceRun.vcsRoot ?? null,
+            runMetadata.vcsRevision ?? sourceRun.vcsRevision ?? null,
+            null,
+            nextConfigJson,
+          );
+
+        insertRowWithClient(client, inputTableName, inputRow, inputColumnEntries);
+
+        for (const table of outputTables) {
+          copyRunScopedRowsWithClient(client, table, runId, targetRunId);
+        }
+
+        for (const [ralphId, state] of carriedRalphState.entries()) {
+          client
+            .query(
+              `INSERT INTO _smithers_ralph (run_id, ralph_id, iteration, done, updated_at_ms)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(run_id, ralph_id)
+               DO UPDATE SET iteration = excluded.iteration, done = excluded.done, updated_at_ms = excluded.updated_at_ms`,
+            )
+            .run(
+              targetRunId,
+              ralphId,
+              state.iteration,
+              state.done ? 1 : 0,
+              ts,
+            );
+        }
+
+        client
+          .query(
+            `INSERT INTO _smithers_branches (
+              run_id,
+              parent_run_id,
+              parent_frame_no,
+              branch_label,
+              fork_description,
+              created_at_ms
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id)
+            DO UPDATE SET
+              parent_run_id = excluded.parent_run_id,
+              parent_frame_no = excluded.parent_frame_no,
+              branch_label = excluded.branch_label,
+              fork_description = excluded.fork_description,
+              created_at_ms = excluded.created_at_ms`,
+          )
+          .run(
+            targetRunId,
+            runId,
+            currentFrameNo,
+            "continue-as-new",
+            `continue-as-new:${continuation.reason}`,
+            ts,
+          );
+
+        client
+          .query(
+            `UPDATE _smithers_runs
+             SET status = ?, finished_at_ms = ?, heartbeat_at_ms = NULL, runtime_owner_id = NULL,
+                 cancel_requested_at_ms = NULL, hijack_requested_at_ms = NULL, hijack_target = NULL
+             WHERE run_id = ?`,
+          )
+          .run("continued", ts, runId);
+
+        const nextEventSeq = Number(
+          (
+            client
+              .query(
+                "SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_events WHERE run_id = ?",
+              )
+              .get(runId) as { seq?: number } | undefined
+          )?.seq ?? 0,
+        );
+        client
+          .query(
+            `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
+             VALUES (?, ?, ?, ?, ?)`,
+          )
+          .run(
+            runId,
+            nextEventSeq,
+            ts,
+            continuationEvent.type,
+            JSON.stringify(continuationEvent),
+          );
+
+        client.run("COMMIT");
+      } catch (error) {
+        try {
+          client.run("ROLLBACK");
+        } catch {
+          // ignore rollback failures
+        }
+        throw error;
+      }
+    },
+    { label: "continue-as-new handoff" },
+  );
+
+  return {
+    newRunId: targetRunId,
+    ancestryDepth: ancestryDepth + 1,
+    carriedStateBytes,
+  };
 }
 
 async function buildCacheContext(
@@ -822,6 +1548,10 @@ export function resolveSchema(db: any): Record<string, any> {
  */
 function resolveTaskOutputs(tasks: TaskDescriptor[], workflow: SmithersWorkflow<any>) {
   for (const task of tasks) {
+    if (isTimerTask(task)) {
+      continue;
+    }
+
     // Already resolved (has a table)
     if (task.outputTable) {
       if (!task.outputSchema && task.outputTableName && workflow.schemaRegistry) {
@@ -1064,6 +1794,217 @@ async function computeTaskStates(
       continue;
     }
 
+    if (isTimerTask(desc)) {
+      const now = nowMs();
+      const attempts = await adapter.listAttempts(
+        runId,
+        desc.nodeId,
+        desc.iteration,
+      );
+      const latest = attempts[0];
+      const latestTimerSnapshot = parseTimerSnapshot(latest?.metaJson);
+
+      if (!latest) {
+        const snapshot = buildTimerSnapshot(desc, now);
+        const attemptNo = 1;
+        const immediateFire = snapshot.firesAtMs <= now;
+        const initialState = immediateFire ? "finished" : "waiting-timer";
+        const firedAtMs = immediateFire ? now : undefined;
+        const metaJson = JSON.stringify(
+          buildTimerAttemptMeta({
+            ...snapshot,
+            firedAtMs,
+          }),
+        );
+        const nodeState = immediateFire ? "finished" : "waiting-timer";
+
+        await adapter.withTransaction(
+          "timer-start",
+          Effect.gen(function* () {
+            yield* adapter.insertAttemptEffect({
+              runId,
+              nodeId: desc.nodeId,
+              iteration: desc.iteration,
+              attempt: attemptNo,
+              state: initialState,
+              startedAtMs: now,
+              finishedAtMs: immediateFire ? now : null,
+              errorJson: null,
+              jjPointer: null,
+              jjCwd: null,
+              cached: false,
+              metaJson,
+              responseText: null,
+            });
+            yield* adapter.insertNodeEffect({
+              runId,
+              nodeId: desc.nodeId,
+              iteration: desc.iteration,
+              state: nodeState,
+              lastAttempt: attemptNo,
+              updatedAtMs: now,
+              outputTable: desc.outputTableName,
+              label: desc.label ?? null,
+            });
+          }),
+        );
+        stateMap.set(key, nodeState as TaskState);
+
+        await eventBus.emitEventWithPersist({
+          type: "TimerCreated",
+          runId,
+          timerId: desc.nodeId,
+          firesAtMs: snapshot.firesAtMs,
+          timerType: snapshot.timerType,
+          timestampMs: now,
+        });
+
+        if (immediateFire) {
+          await eventBus.emitEventWithPersist({
+            type: "TimerFired",
+            runId,
+            timerId: desc.nodeId,
+            firesAtMs: snapshot.firesAtMs,
+            firedAtMs: now,
+            delayMs: Math.max(0, now - snapshot.firesAtMs),
+            timestampMs: now,
+          });
+          await eventBus.emitEventWithPersist({
+            type: "NodeFinished",
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            attempt: attemptNo,
+            timestampMs: now,
+          });
+        } else {
+          await eventBus.emitEventWithPersist({
+            type: "NodeWaitingTimer",
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            firesAtMs: snapshot.firesAtMs,
+            timestampMs: now,
+          });
+        }
+        continue;
+      }
+
+      if (latest.state === "waiting-timer") {
+        const snapshot = latestTimerSnapshot ?? buildTimerSnapshot(desc, now);
+        if (snapshot.firesAtMs > now) {
+          stateMap.set(key, "waiting-timer");
+          await adapter.insertNode({
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            state: "waiting-timer",
+            lastAttempt: latest.attempt,
+            updatedAtMs: now,
+            outputTable: desc.outputTableName,
+            label: desc.label ?? null,
+          });
+          continue;
+        }
+
+        const firedAtMs = now;
+        const firedSnapshot: TimerSnapshot = {
+          ...snapshot,
+          firedAtMs,
+        };
+        await adapter.withTransaction(
+          "timer-fire",
+          Effect.gen(function* () {
+            yield* adapter.updateAttemptEffect(
+              runId,
+              desc.nodeId,
+              desc.iteration,
+              latest.attempt,
+              {
+                state: "finished",
+                finishedAtMs: firedAtMs,
+                metaJson: JSON.stringify(buildTimerAttemptMeta(firedSnapshot)),
+              },
+            );
+            yield* adapter.insertNodeEffect({
+              runId,
+              nodeId: desc.nodeId,
+              iteration: desc.iteration,
+              state: "finished",
+              lastAttempt: latest.attempt,
+              updatedAtMs: firedAtMs,
+              outputTable: desc.outputTableName,
+              label: desc.label ?? null,
+            });
+          }),
+        );
+        stateMap.set(key, "finished");
+        await eventBus.emitEventWithPersist({
+          type: "TimerFired",
+          runId,
+          timerId: desc.nodeId,
+          firesAtMs: snapshot.firesAtMs,
+          firedAtMs,
+          delayMs: Math.max(0, firedAtMs - snapshot.firesAtMs),
+          timestampMs: firedAtMs,
+        });
+        await eventBus.emitEventWithPersist({
+          type: "NodeFinished",
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          attempt: latest.attempt,
+          timestampMs: firedAtMs,
+        });
+        continue;
+      }
+
+      if (latest.state === "finished") {
+        stateMap.set(key, "finished");
+        await adapter.insertNode({
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          state: "finished",
+          lastAttempt: latest.attempt,
+          updatedAtMs: now,
+          outputTable: desc.outputTableName,
+          label: desc.label ?? null,
+        });
+        continue;
+      }
+
+      if (latest.state === "cancelled") {
+        stateMap.set(key, "skipped");
+        await adapter.insertNode({
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          state: "skipped",
+          lastAttempt: latest.attempt,
+          updatedAtMs: now,
+          outputTable: desc.outputTableName,
+          label: desc.label ?? null,
+        });
+        continue;
+      }
+
+      if (latest.state === "failed") {
+        stateMap.set(key, "failed");
+        await adapter.insertNode({
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          state: "failed",
+          lastAttempt: latest.attempt,
+          updatedAtMs: now,
+          outputTable: desc.outputTableName,
+          label: desc.label ?? null,
+        });
+        continue;
+      }
+    }
+
     if (desc.needsApproval) {
       const approval = await adapter.getApproval(
         runId,
@@ -1199,27 +2140,29 @@ async function computeTaskStates(
     // written.  By checking the output first we let the Sequence
     // fast-forward through already-completed children in the same render
     // cycle instead of waiting for a completion event that will never fire.
-    const outputRow = await selectOutputRow<any>(db, desc.outputTable as any, {
-      runId,
-      nodeId: desc.nodeId,
-      iteration: desc.iteration,
-    });
+    if (desc.outputTable) {
+      const outputRow = await selectOutputRow<any>(db, desc.outputTable as any, {
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+      });
 
-    if (outputRow) {
-      const valid = validateExistingOutput(desc.outputTable as any, outputRow);
-      if (valid.ok) {
-        stateMap.set(key, "finished");
-        await adapter.insertNode({
-          runId,
-          nodeId: desc.nodeId,
-          iteration: desc.iteration,
-          state: "finished",
-          lastAttempt: attempts[0]?.attempt ?? null,
-          updatedAtMs: nowMs(),
-          outputTable: desc.outputTableName,
-          label: desc.label ?? null,
-        });
-        continue;
+      if (outputRow) {
+        const valid = validateExistingOutput(desc.outputTable as any, outputRow);
+        if (valid.ok) {
+          stateMap.set(key, "finished");
+          await adapter.insertNode({
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            state: "finished",
+            lastAttempt: attempts[0]?.attempt ?? null,
+            updatedAtMs: nowMs(),
+            outputTable: desc.outputTableName,
+            label: desc.label ?? null,
+          });
+          continue;
+        }
       }
     }
 
@@ -1347,26 +2290,37 @@ async function cancelInProgress(
 ) {
   const inProgress = await adapter.listInProgressAttempts(runId);
   for (const attempt of inProgress) {
-    await adapter.updateAttempt(
+    const existingNode = await adapter.getNode(
       runId,
       attempt.nodeId,
       attempt.iteration,
-      attempt.attempt,
-      {
-        state: "cancelled",
-        finishedAtMs: nowMs(),
-      },
     );
-    await adapter.insertNode({
-      runId,
-      nodeId: attempt.nodeId,
-      iteration: attempt.iteration,
-      state: "cancelled",
-      lastAttempt: attempt.attempt,
-      updatedAtMs: nowMs(),
-      outputTable: "",
-      label: null,
-    });
+    const cancelledAtMs = nowMs();
+    await adapter.withTransaction(
+      "cancel-in-progress",
+      Effect.gen(function* () {
+        yield* adapter.updateAttemptEffect(
+          runId,
+          attempt.nodeId,
+          attempt.iteration,
+          attempt.attempt,
+          {
+            state: "cancelled",
+            finishedAtMs: cancelledAtMs,
+          },
+        );
+        yield* adapter.insertNodeEffect({
+          runId,
+          nodeId: attempt.nodeId,
+          iteration: attempt.iteration,
+          state: "cancelled",
+          lastAttempt: attempt.attempt,
+          updatedAtMs: cancelledAtMs,
+          outputTable: existingNode?.outputTable ?? "",
+          label: existingNode?.label ?? null,
+        });
+      }),
+    );
     await eventBus.emitEventWithPersist({
       type: "NodeCancelled",
       runId,
@@ -1379,31 +2333,102 @@ async function cancelInProgress(
   }
 }
 
+async function cancelPendingTimers(
+  adapter: SmithersDb,
+  runId: string,
+  eventBus: EventBus,
+  reason: string,
+) {
+  const nodes = await adapter.listNodes(runId);
+  for (const node of nodes) {
+    if (node.state !== "waiting-timer") continue;
+    const attempts = await adapter.listAttempts(
+      runId,
+      node.nodeId,
+      node.iteration ?? 0,
+    );
+    const waiting = attempts.find((attempt: any) => attempt.state === "waiting-timer");
+    if (!waiting) continue;
+
+    const cancelledAtMs = nowMs();
+    await adapter.withTransaction(
+      "cancel-pending-timer",
+      Effect.gen(function* () {
+        yield* adapter.updateAttemptEffect(
+          runId,
+          node.nodeId,
+          node.iteration ?? 0,
+          waiting.attempt,
+          {
+            state: "cancelled",
+            finishedAtMs: cancelledAtMs,
+          },
+        );
+        yield* adapter.insertNodeEffect({
+          runId,
+          nodeId: node.nodeId,
+          iteration: node.iteration ?? 0,
+          state: "cancelled",
+          lastAttempt: waiting.attempt,
+          updatedAtMs: cancelledAtMs,
+          outputTable: node.outputTable ?? "",
+          label: node.label ?? null,
+        });
+      }),
+    );
+    await eventBus.emitEventWithPersist({
+      type: "TimerCancelled",
+      runId,
+      timerId: node.nodeId,
+      timestampMs: cancelledAtMs,
+    });
+    await eventBus.emitEventWithPersist({
+      type: "NodeCancelled",
+      runId,
+      nodeId: node.nodeId,
+      iteration: node.iteration ?? 0,
+      attempt: waiting.attempt,
+      reason,
+      timestampMs: cancelledAtMs,
+    });
+  }
+}
+
 async function cancelStaleAttempts(adapter: SmithersDb, runId: string) {
   const inProgress = await adapter.listInProgressAttempts(runId);
   const now = nowMs();
   for (const attempt of inProgress) {
     if (attempt.startedAtMs && now - attempt.startedAtMs > STALE_ATTEMPT_MS) {
-      await adapter.updateAttempt(
+      const existingNode = await adapter.getNode(
         runId,
         attempt.nodeId,
         attempt.iteration,
-        attempt.attempt,
-        {
-          state: "cancelled",
-          finishedAtMs: now,
-        },
       );
-      await adapter.insertNode({
-        runId,
-        nodeId: attempt.nodeId,
-        iteration: attempt.iteration,
-        state: "pending",
-        lastAttempt: attempt.attempt,
-        updatedAtMs: now,
-        outputTable: "",
-        label: null,
-      });
+      await adapter.withTransaction(
+        "cancel-stale-attempt",
+        Effect.gen(function* () {
+          yield* adapter.updateAttemptEffect(
+            runId,
+            attempt.nodeId,
+            attempt.iteration,
+            attempt.attempt,
+            {
+              state: "cancelled",
+              finishedAtMs: now,
+            },
+          );
+          yield* adapter.insertNodeEffect({
+            runId,
+            nodeId: attempt.nodeId,
+            iteration: attempt.iteration,
+            state: "pending",
+            lastAttempt: attempt.attempt,
+            updatedAtMs: now,
+            outputTable: existingNode?.outputTable ?? "",
+            label: existingNode?.label ?? null,
+          });
+        }),
+      );
     }
   }
 }
@@ -1435,7 +2460,211 @@ async function executeTask(
     desc.nodeId,
     desc.iteration,
   );
+  const previousHeartbeat = (() => {
+    for (const attempt of attempts) {
+      const parsed = parseAttemptHeartbeatData(attempt.heartbeatDataJson);
+      if (parsed !== null) return parsed;
+    }
+    return null;
+  })();
   const attemptNo = (attempts[0]?.attempt ?? 0) + 1;
+  const taskAbortController = new AbortController();
+  const removeAbortForwarder = wireAbortSignal(taskAbortController, signal);
+  const taskSignal = taskAbortController.signal;
+  const startedAtMs = nowMs();
+  let taskCompleted = false;
+  let taskExecutionReturned = false;
+  let heartbeatClosed = false;
+  let heartbeatWriteInFlight = false;
+  let heartbeatPendingDataJson: string | null = null;
+  let heartbeatPendingDataSizeBytes = 0;
+  let heartbeatPendingAtMs = startedAtMs;
+  let heartbeatHasPendingWrite = false;
+  let heartbeatLastPersistedWriteAtMs = 0;
+  let heartbeatLastReceivedAtMs: number | null = null;
+  let heartbeatWriteTimer: ReturnType<typeof setTimeout> | undefined;
+  let heartbeatTimeoutTimer: ReturnType<typeof setInterval> | undefined;
+  let heartbeatTimeoutTriggered = false;
+
+  const flushHeartbeat = async (force = false): Promise<void> => {
+    if (heartbeatClosed || !heartbeatHasPendingWrite || heartbeatWriteInFlight) {
+      return;
+    }
+    const now = nowMs();
+    const minNextWriteAt = heartbeatLastPersistedWriteAtMs + TASK_HEARTBEAT_THROTTLE_MS;
+    if (!force && now < minNextWriteAt) {
+      const waitMs = Math.max(0, minNextWriteAt - now);
+      if (!heartbeatWriteTimer) {
+        heartbeatWriteTimer = setTimeout(() => {
+          heartbeatWriteTimer = undefined;
+          void flushHeartbeat();
+        }, waitMs);
+      }
+      return;
+    }
+
+    heartbeatHasPendingWrite = false;
+    heartbeatWriteInFlight = true;
+    const heartbeatAtMs = heartbeatPendingAtMs;
+    const heartbeatDataJson = heartbeatPendingDataJson;
+    const dataSizeBytes = heartbeatPendingDataSizeBytes;
+    const intervalMs =
+      heartbeatLastReceivedAtMs == null
+        ? null
+        : Math.max(0, heartbeatAtMs - heartbeatLastReceivedAtMs);
+    heartbeatLastReceivedAtMs = heartbeatAtMs;
+
+    try {
+      await adapter.heartbeatAttempt(
+        runId,
+        desc.nodeId,
+        desc.iteration,
+        attemptNo,
+        heartbeatAtMs,
+        heartbeatDataJson,
+      );
+      heartbeatLastPersistedWriteAtMs = nowMs();
+      logDebug("task heartbeat recorded", {
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        attempt: attemptNo,
+        dataSizeBytes,
+      }, "heartbeat:record");
+      await eventBus.emitEventQueued({
+        type: "TaskHeartbeat",
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        attempt: attemptNo,
+        hasData: heartbeatDataJson !== null,
+        dataSizeBytes,
+        intervalMs: intervalMs ?? undefined,
+        timestampMs: heartbeatAtMs,
+      });
+    } catch (error) {
+      logWarning("failed to persist task heartbeat", {
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        attempt: attemptNo,
+        error: error instanceof Error ? error.message : String(error),
+      }, "heartbeat:record");
+    } finally {
+      heartbeatWriteInFlight = false;
+      if (heartbeatHasPendingWrite && !heartbeatClosed) {
+        if (heartbeatWriteTimer) {
+          clearTimeout(heartbeatWriteTimer);
+          heartbeatWriteTimer = undefined;
+        }
+        void flushHeartbeat();
+      }
+    }
+  };
+
+  const queueHeartbeat = (
+    data: unknown,
+    opts?: { internal?: boolean },
+  ) => {
+    if (
+      taskCompleted ||
+      heartbeatClosed ||
+      (!opts?.internal && taskExecutionReturned)
+    ) {
+      return;
+    }
+    const heartbeatAtMs = nowMs();
+    let heartbeatDataJson: string | null = null;
+    let dataSizeBytes = 0;
+    try {
+      if (data !== undefined) {
+        const serialized = serializeHeartbeatPayload(data);
+        heartbeatDataJson = serialized.heartbeatDataJson;
+        dataSizeBytes = serialized.dataSizeBytes;
+      }
+    } catch (error) {
+      if (!opts?.internal) {
+        throw error;
+      }
+      logWarning("internal heartbeat payload rejected", {
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        attempt: attemptNo,
+        error: error instanceof Error ? error.message : String(error),
+      }, "heartbeat:record");
+      return;
+    }
+    heartbeatPendingAtMs = heartbeatAtMs;
+    heartbeatPendingDataJson = heartbeatDataJson;
+    heartbeatPendingDataSizeBytes = dataSizeBytes;
+    heartbeatHasPendingWrite = true;
+    if (!heartbeatWriteTimer) {
+      void flushHeartbeat();
+    }
+  };
+
+  const recordInternalHeartbeat = (data?: unknown) => {
+    queueHeartbeat(data, { internal: true });
+  };
+
+  const waitForHeartbeatWriteDrain = async () => {
+    while (heartbeatWriteInFlight) {
+      await Bun.sleep(5);
+    }
+  };
+
+  if (desc.heartbeatTimeoutMs) {
+    heartbeatTimeoutTimer = setInterval(() => {
+      if (
+        heartbeatClosed ||
+        taskCompleted ||
+        heartbeatTimeoutTriggered ||
+        taskSignal.aborted
+      ) {
+        return;
+      }
+      const lastHeartbeatAtMs = Math.max(startedAtMs, heartbeatPendingAtMs);
+      const staleForMs = nowMs() - lastHeartbeatAtMs;
+      if (staleForMs <= desc.heartbeatTimeoutMs!) {
+        return;
+      }
+      heartbeatTimeoutTriggered = true;
+      const timeoutError = new SmithersError(
+        "TASK_HEARTBEAT_TIMEOUT",
+        `Task ${desc.nodeId} has not heartbeated in ${staleForMs}ms (timeout: ${desc.heartbeatTimeoutMs}ms).`,
+        {
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          attempt: attemptNo,
+          timeoutMs: desc.heartbeatTimeoutMs,
+          staleForMs,
+          lastHeartbeatAtMs,
+        },
+      );
+      logWarning("task heartbeat timed out", {
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        attempt: attemptNo,
+        timeoutMs: desc.heartbeatTimeoutMs,
+        staleForMs,
+        lastHeartbeatAtMs,
+      }, "heartbeat:timeout");
+      void eventBus.emitEventQueued({
+        type: "TaskHeartbeatTimeout",
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        attempt: attemptNo,
+        lastHeartbeatAtMs,
+        timeoutMs: desc.heartbeatTimeoutMs,
+        timestampMs: nowMs(),
+      });
+      taskAbortController.abort(timeoutError);
+    }, TASK_HEARTBEAT_TIMEOUT_CHECK_MS);
+  }
+
   const attemptMeta: Record<string, unknown> = {
     kind: desc.agent ? "agent" : desc.computeFn ? "compute" : "static",
     prompt: desc.prompt ?? null,
@@ -1445,6 +2674,8 @@ async function executeTask(
     needsApproval: desc.needsApproval,
     retries: desc.retries,
     timeoutMs: desc.timeoutMs,
+    heartbeatTimeoutMs: desc.heartbeatTimeoutMs,
+    lastHeartbeat: previousHeartbeat,
     agentId: null,
     agentModel: null,
     agentEngine: null,
@@ -1455,30 +2686,37 @@ async function executeTask(
     hijackHandoff: null,
   };
 
-  await adapter.insertAttempt({
-    runId,
-    nodeId: desc.nodeId,
-    iteration: desc.iteration,
-    attempt: attemptNo,
-    state: "in-progress",
-    startedAtMs: nowMs(),
-    finishedAtMs: null,
-    errorJson: null,
-    jjPointer: null,
-    jjCwd: desc.worktreePath ?? toolConfig.rootDir,
-    cached: false,
-    metaJson: JSON.stringify(attemptMeta),
-  });
-  await adapter.insertNode({
-    runId,
-    nodeId: desc.nodeId,
-    iteration: desc.iteration,
-    state: "in-progress",
-    lastAttempt: attemptNo,
-    updatedAtMs: nowMs(),
-    outputTable: desc.outputTableName,
-    label: desc.label ?? null,
-  });
+  await adapter.withTransaction(
+    "task-start",
+    Effect.gen(function* () {
+      yield* adapter.insertAttemptEffect({
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        attempt: attemptNo,
+        state: "in-progress",
+        startedAtMs,
+        finishedAtMs: null,
+        heartbeatAtMs: null,
+        heartbeatDataJson: null,
+        errorJson: null,
+        jjPointer: null,
+        jjCwd: desc.worktreePath ?? toolConfig.rootDir,
+        cached: false,
+        metaJson: JSON.stringify(attemptMeta),
+      });
+      yield* adapter.insertNodeEffect({
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        state: "in-progress",
+        lastAttempt: attemptNo,
+        updatedAtMs: nowMs(),
+        outputTable: desc.outputTableName,
+        label: desc.label ?? null,
+      });
+    }),
+  );
 
   await eventBus.emitEventWithPersist({
     type: "NodeStarted",
@@ -1506,7 +2744,7 @@ async function executeTask(
   const cacheAgent = Array.isArray(desc.agent) ? desc.agent[0] : desc.agent;
 
   try {
-    if (signal?.aborted) {
+    if (taskSignal.aborted) {
       throw makeAbortError();
     }
     logDebug("task execution starting", {
@@ -1636,6 +2874,7 @@ async function executeTask(
         ? agents[Math.min(attemptNo - 1, agents.length - 1)]
         : allAgents[Math.min(attemptNo - 1, allAgents.length - 1)]; // fallback to disabled agent if all disabled
       const emitOutput = (text: string, stream: "stdout" | "stderr") => {
+        recordInternalHeartbeat();
         void eventBus.emitEventQueued({
           type: "NodeOutput",
           runId,
@@ -1668,6 +2907,29 @@ async function executeTask(
                   ? (effectiveAgent as any).constructor.name
                   : null);
         attemptMeta.agentEngine = currentAgentEngine;
+        const heartbeatCheckpoint =
+          previousHeartbeat &&
+          typeof previousHeartbeat === "object" &&
+          !Array.isArray(previousHeartbeat)
+            ? (previousHeartbeat as Record<string, unknown>)
+            : null;
+        const heartbeatCheckpointEngine =
+          typeof heartbeatCheckpoint?.agentEngine === "string"
+            ? heartbeatCheckpoint.agentEngine
+            : null;
+        const heartbeatCheckpointUsable =
+          !currentAgentEngine ||
+          !heartbeatCheckpointEngine ||
+          heartbeatCheckpointEngine === currentAgentEngine;
+        const checkpointResumeSession =
+          heartbeatCheckpointUsable &&
+          typeof heartbeatCheckpoint?.agentResume === "string"
+            ? heartbeatCheckpoint.agentResume
+            : undefined;
+        const checkpointResumeMessages =
+          heartbeatCheckpointUsable
+            ? asConversationMessages(heartbeatCheckpoint?.agentConversation)
+            : undefined;
         const priorContinuation =
           currentAgentEngine
             ? findHijackContinuation(attempts as any[], currentAgentEngine)
@@ -1675,11 +2937,12 @@ async function executeTask(
         const resumeSession =
           priorContinuation?.mode === "native-cli"
             ? priorContinuation.resume
-            : undefined;
+            : checkpointResumeSession;
         const resumeMessages =
           priorContinuation?.mode === "conversation"
             ? (cloneJsonValue(priorContinuation.messages) ?? priorContinuation.messages)
-            : undefined;
+            : (cloneJsonValue(checkpointResumeMessages) ??
+              checkpointResumeMessages);
         if (resumeSession) {
           attemptMeta.resumedFromSession = resumeSession;
         }
@@ -1701,6 +2964,13 @@ async function executeTask(
           }
           conversationMessages = cloned;
           attemptMeta.agentConversation = cloned;
+          recordInternalHeartbeat({
+            agentEngine:
+              typeof attemptMeta.agentEngine === "string"
+                ? attemptMeta.agentEngine
+                : null,
+            agentConversation: cloned,
+          });
           maybeCompleteHijack();
         };
 
@@ -1789,6 +3059,12 @@ async function executeTask(
           attemptMeta.agentEngine = event.engine ?? attemptMeta.agentEngine;
           if ("resume" in event && typeof event.resume === "string") {
             attemptMeta.agentResume = event.resume;
+            recordInternalHeartbeat({
+              agentEngine: event.engine,
+              agentResume: event.resume,
+            });
+          } else {
+            recordInternalHeartbeat();
           }
           if (event.type === "completed" && !responseText && event.answer) {
             responseText = event.answer;
@@ -1817,6 +3093,7 @@ async function executeTask(
         };
 
         const handleSdkStepFinish = (stepResult: any) => {
+          recordInternalHeartbeat();
           if (!conversationMessages) {
             conversationMessages = [
               { role: "user", content: effectivePrompt },
@@ -1874,12 +3151,19 @@ async function executeTask(
                   };
               return (effectiveAgent as any).generate({
                 options: undefined as any,
-                abortSignal: signal,
+                abortSignal: taskSignal,
                 ...agentCall,
                 resumeSession,
+                lastHeartbeat: previousHeartbeat,
                 timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
-                onStdout: (text: string) => emitOutput(text, "stdout"),
-                onStderr: (text: string) => emitOutput(text, "stderr"),
+                onStdout: (text: string) => {
+                  recordInternalHeartbeat();
+                  emitOutput(text, "stdout");
+                },
+                onStderr: (text: string) => {
+                  recordInternalHeartbeat();
+                  emitOutput(text, "stderr");
+                },
                 onEvent: handleAgentEvent,
                 onStepFinish: handleSdkStepFinish,
                 outputSchema: desc.outputSchema,
@@ -2121,11 +3405,17 @@ async function executeTask(
             ].join("\n");
             const retryResult = await (effectiveAgent as any).generate({
               options: undefined as any,
-              abortSignal: signal,
+              abortSignal: taskSignal,
               prompt: jsonPrompt,
               timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
-              onStdout: (text: string) => emitOutput(text, "stdout"),
-              onStderr: (text: string) => emitOutput(text, "stderr"),
+              onStdout: (text: string) => {
+                recordInternalHeartbeat();
+                emitOutput(text, "stdout");
+              },
+              onStderr: (text: string) => {
+                recordInternalHeartbeat();
+                emitOutput(text, "stderr");
+              },
             });
             const retryText = (retryResult as any).text ?? "";
             responseText = retryText || responseText;
@@ -2202,8 +3492,12 @@ async function executeTask(
               stepId: desc.nodeId,
               attempt: attemptNo,
               iteration: desc.iteration,
-              signal: signal ?? new AbortController().signal,
+              signal: taskSignal,
               db,
+              heartbeat: (data?: unknown) => {
+                queueHeartbeat(data);
+              },
+              lastHeartbeat: previousHeartbeat,
             },
             () => desc.computeFn!(),
           ),
@@ -2230,7 +3524,7 @@ async function executeTask(
             ),
           );
         }
-        const abort = abortPromise(signal);
+        const abort = abortPromise(taskSignal);
         if (abort) races.push(abort);
         payload = await Promise.race(races);
       } else {
@@ -2328,11 +3622,17 @@ async function executeTask(
 
         const schemaRetryResult = await (effectiveAgent as any).generate({
           options: undefined as any,
-          abortSignal: signal,
+          abortSignal: taskSignal,
           messages: retryMessages,
           timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
-          onStdout: (text: string) => emitOutput(text, "stdout"),
-          onStderr: (text: string) => emitOutput(text, "stderr"),
+          onStdout: (text: string) => {
+            recordInternalHeartbeat();
+            emitOutput(text, "stdout");
+          },
+          onStderr: (text: string) => {
+            recordInternalHeartbeat();
+            emitOutput(text, "stderr");
+          },
         });
         const retryText = ((schemaRetryResult as any).text ?? "").trim();
         responseText = retryText || responseText;
@@ -2435,53 +3735,70 @@ async function executeTask(
       payload = validation.data;
     }
 
+    taskExecutionReturned = true;
     await eventBus.flush();
-    await upsertOutputRow(
-      db,
-      desc.outputTable as any,
-      { runId, nodeId: desc.nodeId, iteration: desc.iteration },
-      payload,
-    );
-    if (stepCacheEnabled && cacheKey && !cached) {
-      await adapter.insertCache({
-        cacheKey,
-        createdAtMs: nowMs(),
-        workflowName,
-        nodeId: desc.nodeId,
-        outputTable: desc.outputTableName,
-        schemaSig: schemaSignature(desc.outputTable as any),
-        outputSchemaSig: desc.outputSchema
-          ? sha256Hex(describeSchemaShape(desc.outputTable as any, desc.outputSchema))
-          : null,
-        agentSig: cacheAgent?.id ?? "agent",
-        toolsSig: cacheAgent?.tools
-          ? Object.keys(cacheAgent.tools).sort().join(",")
-          : null,
-        jjPointer: cacheJjBase,
-        payloadJson: JSON.stringify(payload),
-      });
-    }
     // Reuse the resolved taskRoot for JJ pointer capture to avoid recomputing.
     const jjPointer = await getJjPointer(taskRoot);
 
-    await adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
-      state: "finished",
-      finishedAtMs: nowMs(),
-      jjPointer,
-      cached,
-      metaJson: JSON.stringify(attemptMeta),
-      responseText,
-    });
-    await adapter.insertNode({
-      runId,
-      nodeId: desc.nodeId,
-      iteration: desc.iteration,
-      state: "finished",
-      lastAttempt: attemptNo,
-      updatedAtMs: nowMs(),
-      outputTable: desc.outputTableName,
-      label: desc.label ?? null,
-    });
+    await waitForHeartbeatWriteDrain();
+    await flushHeartbeat(true);
+    taskCompleted = true;
+    const completedAtMs = nowMs();
+    await adapter.withTransaction(
+      "task-completion",
+      Effect.gen(function* () {
+        yield* adapter.upsertOutputRowEffect(
+          desc.outputTable as any,
+          { runId, nodeId: desc.nodeId, iteration: desc.iteration },
+          payload,
+        );
+        if (stepCacheEnabled && cacheKey && !cached) {
+          yield* adapter.insertCacheEffect({
+            cacheKey,
+            createdAtMs: completedAtMs,
+            workflowName,
+            nodeId: desc.nodeId,
+            outputTable: desc.outputTableName,
+            schemaSig: schemaSignature(desc.outputTable as any),
+            outputSchemaSig: desc.outputSchema
+              ? sha256Hex(
+                  describeSchemaShape(desc.outputTable as any, desc.outputSchema),
+                )
+              : null,
+            agentSig: cacheAgent?.id ?? "agent",
+            toolsSig: cacheAgent?.tools
+              ? Object.keys(cacheAgent.tools).sort().join(",")
+              : null,
+            jjPointer: cacheJjBase,
+            payloadJson: JSON.stringify(payload),
+          });
+        }
+        yield* adapter.updateAttemptEffect(
+          runId,
+          desc.nodeId,
+          desc.iteration,
+          attemptNo,
+          {
+            state: "finished",
+            finishedAtMs: completedAtMs,
+            jjPointer,
+            cached,
+            metaJson: JSON.stringify(attemptMeta),
+            responseText,
+          },
+        );
+        yield* adapter.insertNodeEffect({
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          state: "finished",
+          lastAttempt: attemptNo,
+          updatedAtMs: completedAtMs,
+          outputTable: desc.outputTableName,
+          label: desc.label ?? null,
+        });
+      }),
+    );
 
     await eventBus.emitEventWithPersist({
       type: "NodeFinished",
@@ -2540,24 +3857,44 @@ async function executeTask(
             : String(flushError),
       }, "engine:task-events");
     }
-    if (signal?.aborted || isAbortError(err)) {
-      await adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
-        state: "cancelled",
-        finishedAtMs: nowMs(),
-        errorJson: JSON.stringify(errorToJson(err)),
-        metaJson: JSON.stringify(attemptMeta),
-        responseText,
-      });
-      await adapter.insertNode({
-        runId,
-        nodeId: desc.nodeId,
-        iteration: desc.iteration,
-        state: "cancelled",
-        lastAttempt: attemptNo,
-        updatedAtMs: nowMs(),
-        outputTable: desc.outputTableName,
-        label: desc.label ?? null,
-      });
+    const heartbeatTimeoutError = heartbeatTimeoutReasonFromAbort(
+      taskSignal,
+      err,
+    );
+    const effectiveError = heartbeatTimeoutError ?? err;
+    if (!heartbeatTimeoutError && (taskSignal.aborted || isAbortError(err))) {
+      await waitForHeartbeatWriteDrain();
+      await flushHeartbeat(true);
+      taskCompleted = true;
+      const cancelledAtMs = nowMs();
+      await adapter.withTransaction(
+        "task-cancel",
+        Effect.gen(function* () {
+          yield* adapter.updateAttemptEffect(
+            runId,
+            desc.nodeId,
+            desc.iteration,
+            attemptNo,
+            {
+              state: "cancelled",
+              finishedAtMs: cancelledAtMs,
+              errorJson: JSON.stringify(errorToJson(effectiveError)),
+              metaJson: JSON.stringify(attemptMeta),
+              responseText,
+            },
+          );
+          yield* adapter.insertNodeEffect({
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            state: "cancelled",
+            lastAttempt: attemptNo,
+            updatedAtMs: cancelledAtMs,
+            outputTable: desc.outputTableName,
+            label: desc.label ?? null,
+          });
+        }),
+      );
       await eventBus.emitEventWithPersist({
         type: "NodeCancelled",
         runId,
@@ -2572,39 +3909,65 @@ async function executeTask(
         nodeId: desc.nodeId,
         iteration: desc.iteration,
         attempt: attemptNo,
-        error: err instanceof Error ? err.message : String(err),
+        error:
+          effectiveError instanceof Error
+            ? effectiveError.message
+            : String(effectiveError),
       }, "engine:task");
       return;
     }
+    await waitForHeartbeatWriteDrain();
+    await flushHeartbeat(true);
+    taskCompleted = true;
     logError("task execution failed", {
       runId,
       nodeId: desc.nodeId,
       iteration: desc.iteration,
       attempt: attemptNo,
       maxAttempts: desc.retries + 1,
-      error: err instanceof Error ? err.message : String(err),
+      error:
+        effectiveError instanceof Error
+          ? effectiveError.message
+          : String(effectiveError),
     }, "engine:task");
-    await adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
-      state: "failed",
-      finishedAtMs: nowMs(),
-      errorJson: JSON.stringify(errorToJson(err)),
-      metaJson: JSON.stringify(attemptMeta),
-      responseText,
-    });
-    await adapter.insertNode({
-      runId,
-      nodeId: desc.nodeId,
-      iteration: desc.iteration,
-      state: "failed",
-      lastAttempt: attemptNo,
-      updatedAtMs: nowMs(),
-      outputTable: desc.outputTableName,
-      label: desc.label ?? null,
-    });
+    const failedAtMs = nowMs();
+    await adapter.withTransaction(
+      "task-fail",
+      Effect.gen(function* () {
+        yield* adapter.updateAttemptEffect(
+          runId,
+          desc.nodeId,
+          desc.iteration,
+          attemptNo,
+          {
+            state: "failed",
+            finishedAtMs: failedAtMs,
+            errorJson: JSON.stringify(errorToJson(effectiveError)),
+            metaJson: JSON.stringify(attemptMeta),
+            responseText,
+          },
+        );
+        yield* adapter.insertNodeEffect({
+          runId,
+          nodeId: desc.nodeId,
+          iteration: desc.iteration,
+          state: "failed",
+          lastAttempt: attemptNo,
+          updatedAtMs: failedAtMs,
+          outputTable: desc.outputTableName,
+          label: desc.label ?? null,
+        });
+      }),
+    );
 
     // Circuit-breaker: disable agents that fail with auth errors
     if (disabledAgents && effectiveAgent) {
-      const errStr = String((err as any)?.message ?? err ?? "") + (responseText ?? "");
+      const errStr =
+        String(
+          (effectiveError as any)?.message ??
+            effectiveError ??
+            "",
+        ) + (responseText ?? "");
       const isAuthError = /invalid_authentication|401|api.key.*invalid|expired.*credentials|authentication.*failed/i.test(errStr);
       if (isAuthError) {
         disabledAgents.add(effectiveAgent);
@@ -2625,7 +3988,7 @@ async function executeTask(
       nodeId: desc.nodeId,
       iteration: desc.iteration,
       attempt: attemptNo,
-      error: errorToJson(err),
+      error: errorToJson(effectiveError),
       timestampMs: nowMs(),
     });
 
@@ -2653,6 +4016,18 @@ async function executeTask(
         nextAttempt: attemptNo + 1,
       }, "engine:task");
     }
+  } finally {
+    taskCompleted = true;
+    heartbeatClosed = true;
+    if (heartbeatWriteTimer) {
+      clearTimeout(heartbeatWriteTimer);
+      heartbeatWriteTimer = undefined;
+    }
+    if (heartbeatTimeoutTimer) {
+      clearInterval(heartbeatTimeoutTimer);
+      heartbeatTimeoutTimer = undefined;
+    }
+    removeAbortForwarder();
   }
 }
 
@@ -2700,13 +4075,24 @@ async function runWorkflowAsync<Schema>(
   workflow: SmithersWorkflow<Schema>,
   opts: RunOptions,
 ): Promise<RunResult> {
-  return await runWorkflowBody(workflow, opts);
+  let nextOpts = { ...opts };
+  while (true) {
+    const result = await runWorkflowBody(workflow, nextOpts);
+    if (result.status !== "continued" || !(result as any).nextRunId) {
+      return result;
+    }
+    nextOpts = {
+      ...nextOpts,
+      runId: (result as any).nextRunId,
+      resume: true,
+    };
+  }
 }
 
 async function runWorkflowBody<Schema>(
   workflow: SmithersWorkflow<Schema>,
   opts: RunOptions,
-): Promise<RunResult> {
+): Promise<RunBodyResult> {
   const db = workflow.db as any;
   ensureSmithersTables(db);
   const adapter = new SmithersDb(db);
@@ -2738,7 +4124,7 @@ async function runWorkflowBody<Schema>(
     DEFAULT_TOOL_TIMEOUT_MS,
   );
   const allowNetwork = Boolean(opts.allowNetwork);
-  const runtimeOwnerId = randomUUID();
+  const runtimeOwnerId = buildRuntimeOwnerId();
   const runAbortController = new AbortController();
   const hijackState: HijackState = {
     request: null,
@@ -2824,6 +4210,7 @@ async function runWorkflowBody<Schema>(
     if (!existingRun) {
       await adapter.insertRun({
         runId,
+        parentRunId: opts.parentRunId ?? null,
         workflowName: "workflow",
         workflowPath: resolvedWorkflowPath ?? opts.workflowPath ?? null,
         workflowHash: runMetadata.workflowHash,
@@ -2901,26 +4288,36 @@ async function runWorkflowBody<Schema>(
       const staleInProgress = await adapter.listInProgressAttempts(runId);
       const now = nowMs();
       for (const attempt of staleInProgress) {
-        await adapter.updateAttempt(
+        const existingNode = await adapter.getNode(
           runId,
           attempt.nodeId,
           attempt.iteration,
-          attempt.attempt,
-          {
-            state: "cancelled",
-            finishedAtMs: now,
-          },
         );
-        await adapter.insertNode({
-          runId,
-          nodeId: attempt.nodeId,
-          iteration: attempt.iteration,
-          state: "pending",
-          lastAttempt: attempt.attempt,
-          updatedAtMs: now,
-          outputTable: "",
-          label: null,
-        });
+        await adapter.withTransaction(
+          "resume-cancel-stale-attempt",
+          Effect.gen(function* () {
+            yield* adapter.updateAttemptEffect(
+              runId,
+              attempt.nodeId,
+              attempt.iteration,
+              attempt.attempt,
+              {
+                state: "cancelled",
+                finishedAtMs: now,
+              },
+            );
+            yield* adapter.insertNodeEffect({
+              runId,
+              nodeId: attempt.nodeId,
+              iteration: attempt.iteration,
+              state: "pending",
+              lastAttempt: attempt.attempt,
+              updatedAtMs: now,
+              outputTable: existingNode?.outputTable ?? "",
+              label: existingNode?.label ?? null,
+            });
+          }),
+        );
       }
     }
 
@@ -2946,6 +4343,13 @@ async function runWorkflowBody<Schema>(
     const ralphState: RalphStateMap = buildRalphStateMap(
       await adapter.listRalph(runId),
     );
+    if (opts.resume && ralphState.size > 0) {
+      const maxRalphIteration = [...ralphState.values()].reduce(
+        (max, state) => Math.max(max, state.iteration),
+        0,
+      );
+      defaultIteration = Math.max(defaultIteration, maxRalphIteration);
+    }
 
     if (hotOpts.enabled && (resolvedWorkflowPath ?? opts.workflowPath)) {
       process.env.SMITHERS_HOT = "1";
@@ -2968,6 +4372,7 @@ async function runWorkflowBody<Schema>(
                 ...hijackState.completion,
               }
             : null;
+        await cancelPendingTimers(adapter, runId, eventBus, "run-cancelled");
         await adapter.updateRun(runId, {
           status: "cancelled",
           finishedAtMs: nowMs(),
@@ -3160,10 +4565,11 @@ async function runWorkflowBody<Schema>(
       await adapter.updateRun(runId, { workflowName });
 
       frameNo += 1;
-      await adapter.insertFrame({
+      const frameCreatedAtMs = nowMs();
+      const frameRow = {
         runId,
         frameNo,
-        createdAtMs: nowMs(),
+        createdAtMs: frameCreatedAtMs,
         xmlJson,
         xmlHash,
         mountedTaskIdsJson: JSON.stringify(mountedTaskIds),
@@ -3175,49 +4581,64 @@ async function runWorkflowBody<Schema>(
           })),
         ),
         note: null,
-      });
-      await eventBus.emitEventWithPersist({
-        type: "FrameCommitted",
-        runId,
-        frameNo,
-        xmlHash,
-        timestampMs: nowMs(),
-      });
+      };
 
-      // --- Time Travel: capture snapshot after frame commit ---
+      const snapNodes = await adapter.listNodes(runId);
+      const snapRalph = await adapter.listRalph(runId);
+      const snapInputRow = await loadInput(db, inputTable, runId);
+      const snapOutputs = await loadOutputs(db, schema, runId);
+      const snapshotData = {
+        nodes: (snapNodes as any[]).map((n: any) => ({
+          nodeId: n.nodeId,
+          iteration: n.iteration ?? 0,
+          state: n.state,
+          lastAttempt: n.lastAttempt ?? null,
+          outputTable: n.outputTable ?? "",
+          label: n.label ?? null,
+        })),
+        outputs: snapOutputs,
+        ralph: (snapRalph as any[]).map((r: any) => ({
+          ralphId: r.ralphId,
+          iteration: r.iteration ?? 0,
+          done: Boolean(r.done),
+        })),
+        input: snapInputRow ?? {},
+        vcsPointer: runMetadata?.vcsRevision ?? null,
+        workflowHash: workflowRef.opts.workflowHash ?? null,
+      };
+
+      // --- Time Travel: atomically commit frame + snapshot ---
       try {
-        const snapNodes = await adapter.listNodes(runId);
-        const snapRalph = await adapter.listRalph(runId);
-        const snapInputRow = await loadInput(db, inputTable, runId);
-        const snapOutputs = await loadOutputs(db, schema, runId);
-        const snap = await captureSnapshot(adapter, runId, frameNo, {
-          nodes: (snapNodes as any[]).map((n: any) => ({
-            nodeId: n.nodeId,
-            iteration: n.iteration ?? 0,
-            state: n.state,
-            lastAttempt: n.lastAttempt ?? null,
-            outputTable: n.outputTable ?? "",
-            label: n.label ?? null,
-          })),
-          outputs: snapOutputs,
-          ralph: (snapRalph as any[]).map((r: any) => ({
-            ralphId: r.ralphId,
-            iteration: r.iteration ?? 0,
-            done: Boolean(r.done),
-          })),
-          input: snapInputRow ?? {},
-          vcsPointer: runMetadata?.vcsRevision ?? null,
-          workflowHash: workflowRef.opts.workflowHash ?? null,
+        const snap = await adapter.withTransaction(
+          "frame-commit",
+          Effect.gen(function* () {
+            yield* adapter.insertFrameEffect(frameRow);
+            return yield* captureSnapshotEffect(
+              adapter,
+              runId,
+              frameNo,
+              snapshotData,
+            );
+          }),
+        );
+        const frameCommittedAtMs = nowMs();
+        await eventBus.emitEventWithPersist({
+          type: "FrameCommitted",
+          runId,
+          frameNo,
+          xmlHash,
+          timestampMs: frameCommittedAtMs,
         });
         await eventBus.emitEventWithPersist({
           type: "SnapshotCaptured",
           runId,
           frameNo,
           contentHash: snap.contentHash,
-          timestampMs: nowMs(),
+          timestampMs: frameCommittedAtMs,
         });
       } catch (snapErr) {
-        // Snapshot capture is best-effort — don't fail the run
+        // Snapshot capture is best-effort — don't fail the run.
+        // Frame + snapshot are committed atomically, so on failure both are rolled back.
         logWarning("snapshot capture failed", {
           runId,
           frameNo,
@@ -3319,24 +4740,35 @@ async function runWorkflowBody<Schema>(
           const now = nowMs();
           for (const task of orphanedInProgress) {
             const attempts = await adapter.listAttempts(runId, task.nodeId, task.iteration);
-            for (const attempt of attempts) {
-              if (attempt.state === "in-progress") {
-                await adapter.updateAttempt(runId, task.nodeId, task.iteration, attempt.attempt, {
-                  state: "cancelled",
-                  finishedAtMs: now,
+            await adapter.withTransaction(
+              "recover-orphaned-task",
+              Effect.gen(function* () {
+                for (const attempt of attempts) {
+                  if (attempt.state === "in-progress") {
+                    yield* adapter.updateAttemptEffect(
+                      runId,
+                      task.nodeId,
+                      task.iteration,
+                      attempt.attempt,
+                      {
+                        state: "cancelled",
+                        finishedAtMs: now,
+                      },
+                    );
+                  }
+                }
+                yield* adapter.insertNodeEffect({
+                  runId,
+                  nodeId: task.nodeId,
+                  iteration: task.iteration,
+                  state: "pending",
+                  lastAttempt: null,
+                  updatedAtMs: now,
+                  outputTable: task.outputTableName,
+                  label: task.label ?? null,
                 });
-              }
-            }
-            await adapter.insertNode({
-              runId,
-              nodeId: task.nodeId,
-              iteration: task.iteration,
-              state: "pending",
-              lastAttempt: null,
-              updatedAtMs: now,
-              outputTable: task.outputTableName,
-              label: task.label ?? null,
-            });
+              }),
+            );
             logWarning("recovered orphaned in-progress task", {
               runId,
               nodeId: task.nodeId,
@@ -3382,6 +4814,24 @@ async function runWorkflowBody<Schema>(
           return { runId, status: "waiting-event" };
         }
 
+        if (schedule.waitingTimerExists) {
+          await adapter.updateRun(runId, {
+            status: "waiting-timer",
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            cancelRequestedAtMs: null,
+            hijackRequestedAtMs: null,
+            hijackTarget: null,
+          });
+          await eventBus.emitEventWithPersist({
+            type: "RunStatusChanged",
+            runId,
+            status: "waiting-timer",
+            timestampMs: nowMs(),
+          });
+          return { runId, status: "waiting-timer" };
+        }
+
         const failedTasks = tasks.filter((t) => {
           const state = stateMap.get(buildStateKey(t.nodeId, t.iteration));
           return state === "failed" && !t.continueOnFail;
@@ -3394,6 +4844,7 @@ async function runWorkflowBody<Schema>(
             runId,
             failedTaskIds: failedIds.join(","),
           }, "engine:run");
+          await cancelPendingTimers(adapter, runId, eventBus, "run-failed");
           await adapter.updateRun(runId, {
             status: "failed",
             finishedAtMs: nowMs(),
@@ -3410,6 +4861,107 @@ async function runWorkflowBody<Schema>(
             timestampMs: nowMs(),
           });
           return { runId, status: "failed", error: errorMsg };
+        }
+
+        if (schedule.continuation) {
+          let statePayload: unknown = undefined;
+          if (schedule.continuation.stateJson) {
+            try {
+              statePayload = JSON.parse(schedule.continuation.stateJson);
+            } catch (error) {
+              throw new SmithersError(
+                "INVALID_CONTINUATION_STATE",
+                "Invalid JSON passed to continue-as-new state",
+                {
+                  stateJson: schedule.continuation.stateJson,
+                  error: error instanceof Error ? error.message : String(error),
+                },
+              );
+            }
+          }
+
+          if (runAbortController.signal.aborted) {
+            continue;
+          }
+          const latestRun = await adapter.getRun(runId);
+          if (latestRun?.cancelRequestedAtMs) {
+            runAbortController.abort();
+            continue;
+          }
+
+          const continuationIteration = defaultIteration;
+          let transition: ContinueAsNewTransition;
+          try {
+            transition = await runPromise(
+              fromPromise(
+                "continue-as-new explicit transition",
+                () =>
+                  continueRunAsNew({
+                    db,
+                    adapter,
+                    schema,
+                    inputTable,
+                    runId,
+                    workflowPath:
+                      resolvedWorkflowPath ??
+                      opts.workflowPath ??
+                      latestRun?.workflowPath ??
+                      null,
+                    runMetadata,
+                    currentFrameNo: frameNo,
+                    continuation: {
+                      reason: "explicit",
+                      iteration: continuationIteration,
+                      statePayload,
+                    },
+                    ralphState,
+                  }),
+              ).pipe(
+                Effect.annotateLogs({
+                  runId,
+                  iteration: continuationIteration,
+                }),
+                Effect.withLogSpan("engine:continue-as-new"),
+              ),
+            );
+          } catch (error: any) {
+            if (error?.code === "RUN_CANCELLED") {
+              runAbortController.abort();
+              continue;
+            }
+            throw error;
+          }
+
+          const continuationEvent: SmithersEvent = {
+            type: "RunContinuedAsNew",
+            runId,
+            newRunId: transition.newRunId,
+            iteration: continuationIteration,
+            carriedStateSize: transition.carriedStateBytes,
+            ancestryDepth: transition.ancestryDepth,
+            timestampMs: nowMs(),
+          };
+          eventBus.emit("event", continuationEvent);
+          runSync(trackEvent(continuationEvent));
+          logInfo(
+            `Continuing run ${runId} as ${transition.newRunId} at iteration ${continuationIteration}`,
+            {
+              runId,
+              newRunId: transition.newRunId,
+              iteration: continuationIteration,
+              carriedStateBytes: transition.carriedStateBytes,
+            },
+            "engine:continue-as-new",
+          );
+          void runPromise(
+            Metric.update(runDuration, performance.now() - runStartPerformanceMs),
+          );
+
+          return {
+            runId,
+            status: "continued",
+            nextRunId: transition.newRunId,
+          };
         }
 
         if (schedule.pendingExists) {
@@ -3478,6 +5030,118 @@ async function runWorkflowBody<Schema>(
                 });
               }
               continue;
+            }
+            const continueAsNewEvery = ralph.continueAsNewEvery;
+            const nextIteration = state.iteration + 1;
+            const shouldContinueAsNew =
+              typeof continueAsNewEvery === "number" &&
+              continueAsNewEvery > 0 &&
+              nextIteration % continueAsNewEvery === 0;
+            if (shouldContinueAsNew) {
+              if (continueAsNewEvery === 1) {
+                logWarning("continue-as-new threshold is 1; this can create high handoff overhead", {
+                  runId,
+                  ralphId: ralph.id,
+                  continueAsNewEvery,
+                  iteration: state.iteration,
+                }, "engine:continue-as-new");
+              }
+              if (runAbortController.signal.aborted) {
+                continue;
+              }
+              const latestRun = await adapter.getRun(runId);
+              if (latestRun?.cancelRequestedAtMs) {
+                runAbortController.abort();
+                continue;
+              }
+
+              const nextRalphState = cloneRalphStateMap(ralphState);
+              nextRalphState.set(ralph.id, {
+                iteration: nextIteration,
+                done: false,
+              });
+              const continuationIteration = state.iteration;
+              let transition: ContinueAsNewTransition;
+              try {
+                transition = await runPromise(
+                  fromPromise(
+                    "continue-as-new loop transition",
+                    () =>
+                      continueRunAsNew({
+                        db,
+                        adapter,
+                        schema,
+                        inputTable,
+                        runId,
+                        workflowPath:
+                          resolvedWorkflowPath ??
+                          opts.workflowPath ??
+                          latestRun?.workflowPath ??
+                          null,
+                        runMetadata,
+                        currentFrameNo: frameNo,
+                        continuation: {
+                          reason: "loop-threshold",
+                          iteration: continuationIteration,
+                          loopId: ralph.id,
+                          continueAsNewEvery,
+                          statePayload: {
+                            loopId: ralph.id,
+                            continueAsNewEvery,
+                            nextIteration,
+                          },
+                          nextRalphState,
+                        },
+                        ralphState,
+                      }),
+                  ).pipe(
+                    Effect.annotateLogs({
+                      runId,
+                      ralphId: ralph.id,
+                      iteration: continuationIteration,
+                      continueAsNewEvery,
+                    }),
+                    Effect.withLogSpan("engine:continue-as-new"),
+                  ),
+                );
+              } catch (error: any) {
+                if (error?.code === "RUN_CANCELLED") {
+                  runAbortController.abort();
+                  continue;
+                }
+                throw error;
+              }
+
+              const continuationEvent: SmithersEvent = {
+                type: "RunContinuedAsNew",
+                runId,
+                newRunId: transition.newRunId,
+                iteration: continuationIteration,
+                carriedStateSize: transition.carriedStateBytes,
+                ancestryDepth: transition.ancestryDepth,
+                timestampMs: nowMs(),
+              };
+              eventBus.emit("event", continuationEvent);
+              runSync(trackEvent(continuationEvent));
+              logInfo(
+                `Continuing run ${runId} as ${transition.newRunId} at iteration ${continuationIteration}`,
+                {
+                  runId,
+                  newRunId: transition.newRunId,
+                  iteration: continuationIteration,
+                  carriedStateBytes: transition.carriedStateBytes,
+                },
+                "engine:continue-as-new",
+              );
+              void runPromise(
+                Metric.update(runDuration, performance.now() - runStartPerformanceMs),
+              );
+
+              return {
+                runId,
+                status: "continued",
+                nextRunId: transition.newRunId,
+              };
             }
             if (state.iteration + 1 < ralph.maxIterations) {
               state.iteration += 1;
@@ -3654,6 +5318,7 @@ async function runWorkflowBody<Schema>(
               ...hijackState.completion,
             }
           : errorToJson(err);
+      await cancelPendingTimers(adapter, runId, eventBus, "run-cancelled");
       await adapter.updateRun(runId, {
         status: "cancelled",
         finishedAtMs: nowMs(),
@@ -3676,6 +5341,7 @@ async function runWorkflowBody<Schema>(
       error: err instanceof Error ? err.message : String(err),
     }, "engine:run");
     const errorInfo = errorToJson(err);
+    await cancelPendingTimers(adapter, runId, eventBus, "run-failed");
     await adapter.updateRun(runId, {
       status: "failed",
       finishedAtMs: nowMs(),

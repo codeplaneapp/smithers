@@ -48,6 +48,7 @@ export type SmithersNodeType =
   | "loop"
   | "worktree"
   | "approval"
+  | "timer"
   | "subflow"
   | "wait-for-event"
   | "saga"
@@ -71,7 +72,7 @@ export type DevToolsEventHandler = (
 export type TaskExecutionState = {
   nodeId: string;
   iteration: number;
-  status: "pending" | "started" | "finished" | "failed" | "cancelled" | "skipped" | "waiting-approval" | "waiting-event" | "retrying";
+  status: "pending" | "started" | "finished" | "failed" | "cancelled" | "skipped" | "waiting-approval" | "waiting-event" | "waiting-timer" | "retrying";
   attempt: number;
   startedAt?: number;
   finishedAt?: number;
@@ -82,7 +83,7 @@ export type TaskExecutionState = {
 /** Execution state for a run, aggregated from SmithersEvent stream */
 export type RunExecutionState = {
   runId: string;
-  status: "running" | "finished" | "failed" | "cancelled" | "waiting-approval";
+  status: "running" | "finished" | "failed" | "cancelled" | "waiting-approval" | "waiting-timer";
   frameNo: number;
   tasks: Map<string, TaskExecutionState>;
   events: Array<{ type: string; timestampMs: number; [key: string]: unknown }>;
@@ -113,6 +114,7 @@ const HOST_TAG_MAP: Record<string, SmithersNodeType> = {
   "smithers:ralph": "loop",
   "smithers:worktree": "worktree",
   "smithers:approval": "approval",
+  "smithers:timer": "timer",
   "smithers:subflow": "subflow",
   "smithers:wait-for-event": "wait-for-event",
   "smithers:saga": "saga",
@@ -287,6 +289,7 @@ const ICONS: Record<SmithersNodeType, string> = {
   loop: "🔁",
   worktree: "🌳",
   approval: "✋",
+  timer: "⏱️",
   subflow: "🔗",
   "wait-for-event": "📡",
   saga: "🔄",
@@ -591,6 +594,13 @@ export class SmithersDevTools {
       case "NodeWaitingEvent": {
         const task = this._ensureTask(run, event.nodeId, event.iteration);
         task.status = "waiting-event";
+        break;
+      }
+
+      case "NodeWaitingTimer": {
+        const task = this._ensureTask(run, event.nodeId, event.iteration);
+        task.status = "waiting-timer";
+        run.status = "waiting-timer";
         break;
       }
 

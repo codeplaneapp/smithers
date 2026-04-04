@@ -248,6 +248,54 @@ describe("extractFromHost", () => {
     expect(result.tasks[0].parallelMaxConcurrency).toBeUndefined();
   });
 
+  test("extracts sandbox as an isolated task", () => {
+    const root = hostEl("smithers:workflow", {}, [
+      hostEl(
+        "smithers:sandbox",
+        {
+          id: "safe",
+          output: "sandbox_out",
+          runtime: "docker",
+          __smithersSandboxWorkflow: { build: () => null },
+        },
+        [
+          hostEl("smithers:task", { id: "inside", output: "inner_out" }),
+        ],
+      ),
+    ]);
+
+    const result = extractFromHost(root);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].nodeId).toBe("safe");
+    expect(result.tasks[0].outputTableName).toBe("sandbox_out");
+    expect(result.tasks[0].meta?.__sandbox).toBe(true);
+    expect(result.tasks[0].meta?.__sandboxRuntime).toBe("docker");
+  });
+
+  test("sandbox missing output throws", () => {
+    const root = hostEl("smithers:sandbox", { id: "safe" });
+    expect(() => extractFromHost(root)).toThrow("Sandbox safe is missing output");
+  });
+
+  test("subflow inline mode does not create standalone descriptor", () => {
+    const root = hostEl("smithers:workflow", {}, [
+      hostEl(
+        "smithers:subflow",
+        {
+          id: "sf",
+          mode: "inline",
+          output: "subflow_out",
+        },
+        [hostEl("smithers:task", { id: "inner", output: "inner_out" })],
+      ),
+    ]);
+
+    const result = extractFromHost(root);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].nodeId).toBe("inner");
+    expect(result.mountedTaskIds).toEqual(["inner::0"]);
+  });
+
   test("worktree assigns worktreeId and path to tasks", () => {
     const root = hostEl(
       "smithers:worktree",

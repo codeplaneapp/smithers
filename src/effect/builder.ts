@@ -58,6 +58,8 @@ type BuilderStepContext = Record<string, unknown> & {
   attempt: number;
   signal: AbortSignal;
   iteration: number;
+  heartbeat: (data?: unknown) => void;
+  lastHeartbeat: unknown | null;
 };
 
 type StepOptions = {
@@ -479,6 +481,8 @@ function buildUserContext(
     attempt: runtime?.attempt ?? 1,
     signal: runtime?.signal ?? new AbortController().signal,
     iteration: runtime?.iteration ?? resolveHandleIteration(handle, ctx),
+    heartbeat: runtime?.heartbeat ?? (() => {}),
+    lastHeartbeat: runtime?.lastHeartbeat ?? null,
   };
 }
 
@@ -505,6 +509,8 @@ function buildNeedsContext(
     attempt: runtime?.attempt ?? 1,
     signal: runtime?.signal ?? new AbortController().signal,
     iteration,
+    heartbeat: runtime?.heartbeat ?? (() => {}),
+    lastHeartbeat: runtime?.lastHeartbeat ?? null,
     loop: { iteration: iteration + 1 },
   };
 }
@@ -976,7 +982,10 @@ function createWorkflow(options: { name: string; input: AnySchema }) {
                   if (result.status === "finished") {
                     return await extractResult(root, runtime.db, result.runId, decodedInput);
                   }
-                  if (result.status === "waiting-approval") {
+                  if (
+                    result.status === "waiting-approval" ||
+                    result.status === "waiting-timer"
+                  ) {
                     return result;
                   }
                   throw normalizeExecutionError(result);

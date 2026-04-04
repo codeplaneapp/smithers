@@ -29,6 +29,8 @@ export type { BranchProps } from "./Branch";
 
 export { Loop, Ralph } from "./Ralph";
 export type { LoopProps, RalphProps } from "./Ralph";
+export { ContinueAsNew, continueAsNew } from "./ContinueAsNew";
+export type { ContinueAsNewProps } from "./ContinueAsNew";
 
 export { Worktree } from "./Worktree";
 export type { WorktreeProps } from "./Worktree";
@@ -94,8 +96,19 @@ export type { RunbookProps, RunbookStep } from "./Runbook";
 export { Subflow } from "./Subflow";
 export type { SubflowProps } from "./Subflow";
 
+export { Sandbox } from "./Sandbox";
+export type {
+  SandboxProps,
+  SandboxRuntime,
+  SandboxVolumeMount,
+  SandboxWorkspaceSpec,
+} from "./Sandbox";
+
 export { WaitForEvent } from "./WaitForEvent";
 export type { WaitForEventProps } from "./WaitForEvent";
+
+export { Timer } from "./Timer";
+export type { TimerProps } from "./Timer";
 
 export { HumanTask } from "./HumanTask";
 export type { HumanTaskProps } from "./HumanTask";

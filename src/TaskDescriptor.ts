@@ -30,6 +30,7 @@ export type TaskDescriptor = {
   retries: number;
   retryPolicy?: RetryPolicy;
   timeoutMs: number | null;
+  heartbeatTimeoutMs: number | null;
   continueOnFail: boolean;
   cachePolicy?: CachePolicy;
   /** Agent or array of agents [primary, fallback1, fallback2, ...]. Tries in order until one succeeds. */
