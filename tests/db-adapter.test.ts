@@ -150,6 +150,47 @@ describe("SmithersDb adapter", () => {
     expect(runs[0].runId).toBe("r2");
   });
 
+  test("listRuns reclassifies stale running runs as continued", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun(
+      runRow("stale", "running", {
+        createdAtMs: now,
+        heartbeatAtMs: now - 60_000,
+      }),
+    );
+
+    const runs = await adapter.listRuns();
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBe("continued");
+  });
+
+  test("getRun reclassifies stale running runs as continued", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun(
+      runRow("stale-one", "running", {
+        createdAtMs: now,
+        heartbeatAtMs: now - 60_000,
+      }),
+    );
+
+    const run = await adapter.getRun("stale-one");
+    expect(run?.status).toBe("continued");
+  });
+
+  test("listRuns keeps fresh running runs as running", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun(
+      runRow("fresh", "running", {
+        createdAtMs: now,
+        heartbeatAtMs: now - 1_000,
+      }),
+    );
+
+    const runs = await adapter.listRuns();
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBe("running");
+  });
+
   test("listRuns respects limit", async () => {
     const { adapter } = createTestDb();
     for (let i = 0; i < 5; i++) {

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import { validateInput } from "../src/db/input";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { zodToTable } from "../src/zodToTable";
 
 describe("validateInput", () => {
   const inputTable = sqliteTable("input", {
@@ -30,5 +32,34 @@ describe("validateInput", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toBeDefined();
+  });
+
+  test("structured input table from zodToTable({ isInput }) validates without nodeId", () => {
+    const structuredInput = zodToTable(
+      "input",
+      z.object({ description: z.string(), count: z.number() }),
+      { isInput: true },
+    );
+    const result = validateInput(structuredInput, {
+      runId: "r1",
+      description: "hello",
+      count: 5,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.data).toBeDefined();
+  });
+
+  test("structured input table does not require nodeId or iteration", () => {
+    const structuredInput = zodToTable(
+      "input",
+      z.object({ title: z.string() }),
+      { isInput: true },
+    );
+    // Should pass without nodeId/iteration — they are not columns on input tables
+    const result = validateInput(structuredInput, {
+      runId: "r1",
+      title: "test",
+    });
+    expect(result.ok).toBe(true);
   });
 });

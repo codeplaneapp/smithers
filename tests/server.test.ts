@@ -602,6 +602,29 @@ const fakeAgent = {
       expect(Array.isArray(data)).toBe(true);
       cleanup();
     });
+
+    test("reclassifies stale running runs in the runs API", async () => {
+      const { db, cleanup } = buildDb();
+      ensureSmithersTables(db as any);
+      const adapter = new SmithersDb(db as any);
+      await adapter.insertRun({
+        runId: "stale-running",
+        workflowName: "stale-flow",
+        status: "running",
+        createdAtMs: Date.now() - 60_000,
+        startedAtMs: Date.now() - 60_000,
+        heartbeatAtMs: Date.now() - 60_000,
+      });
+      startTestServer({ db: db as any });
+
+      const { status, data } = await request("/v1/runs?limit=10");
+
+      expect(status).toBe(200);
+      expect(Array.isArray(data)).toBe(true);
+      expect(data[0]?.runId).toBe("stale-running");
+      expect(data[0]?.status).toBe("continued");
+      cleanup();
+    });
   });
 
   describe("GET /v1/approval/list", () => {
