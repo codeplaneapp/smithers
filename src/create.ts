@@ -139,6 +139,7 @@ export function createSmithers<
       });
 
   for (const [name, zodSchema] of Object.entries(schemas)) {
+    if (name === "input") continue;
     const tableName = camelToSnake(name);
     tables[name] = zodToTable(tableName, zodSchema);
   }
@@ -183,6 +184,7 @@ export function createSmithers<
   }
 
   for (const [name, zodSchema] of Object.entries(schemas)) {
+    if (name === "input") continue;
     const tableName = camelToSnake(name);
     const ddl = zodToCreateTableSQL(tableName, zodSchema);
     sqlite.run(ddl);
@@ -198,12 +200,14 @@ export function createSmithers<
   // 5. Build schema registry for engine resolution of string output keys
   const schemaRegistry = new Map<string, SchemaRegistryEntry>();
   for (const [name, zodSchema] of Object.entries(schemas)) {
+    if (name === "input") continue;
     schemaRegistry.set(name, { table: tables[name], zodSchema });
   }
 
   // 6. Build reverse lookup: ZodObject reference → schema key name
   const zodToKeyName = new Map<z.ZodObject<any>, string>();
   for (const [name, zodSchema] of Object.entries(schemas)) {
+    if (name === "input") continue;
     zodToKeyName.set(zodSchema, name);
   }
 
@@ -219,7 +223,10 @@ export function createSmithers<
   }
 
   function Approval<Row>(props: ApprovalProps<Row>) {
-    return React.createElement(BaseApproval, props as any);
+    return React.createElement(BaseApproval, {
+      ...props,
+      smithersContext: RuntimeSmithersContext,
+    } as any);
   }
 
   /**
