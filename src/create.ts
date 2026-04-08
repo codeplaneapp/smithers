@@ -131,10 +131,12 @@ export function createSmithers<
 
   // 1. Generate Drizzle tables from Zod schemas
   const tables: Record<string, any> = {};
-  const inputTable = sqliteTable("input", {
-    runId: text("run_id").primaryKey(),
-    payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>(),
-  });
+  const inputTable = schemas.input
+    ? zodToTable("input", schemas.input, { isInput: true })
+    : sqliteTable("input", {
+        runId: text("run_id").primaryKey(),
+        payload: text("payload", { mode: "json" }).$type<Record<string, unknown>>(),
+      });
 
   for (const [name, zodSchema] of Object.entries(schemas)) {
     const tableName = camelToSnake(name);
@@ -160,19 +162,24 @@ export function createSmithers<
   process.on("exit", closeDb);
 
   // 3. Auto-create tables using CREATE TABLE IF NOT EXISTS
-  sqlite.exec(
-    `CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`,
-  );
-  try {
-    const cols = sqlite.query(`PRAGMA table_info("input")`).all() as Array<{
-      name?: string;
-    }>;
-    const hasPayload = cols.some((col) => col?.name === "payload");
-    if (!hasPayload) {
-      sqlite.run(`ALTER TABLE "input" ADD COLUMN payload TEXT`);
+  if (schemas.input) {
+    const inputDdl = zodToCreateTableSQL("input", schemas.input, { isInput: true });
+    sqlite.run(inputDdl);
+  } else {
+    sqlite.exec(
+      `CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`,
+    );
+    try {
+      const cols = sqlite.query(`PRAGMA table_info("input")`).all() as Array<{
+        name?: string;
+      }>;
+      const hasPayload = cols.some((col) => col?.name === "payload");
+      if (!hasPayload) {
+        sqlite.run(`ALTER TABLE "input" ADD COLUMN payload TEXT`);
+      }
+    } catch {
+      // ignore - older SQLite or permission issues; input payload remains best-effort
     }
-  } catch {
-    // ignore - older SQLite or permission issues; input payload remains best-effort
   }
 
   for (const [name, zodSchema] of Object.entries(schemas)) {

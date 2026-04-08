@@ -41,12 +41,14 @@ function getZodBaseTypeName(zodType: any): string {
  * All tables include standard smithers key columns:
  * runId, nodeId, iteration with a composite primary key.
  */
-export function zodToTable(tableName: string, schema: z.ZodObject<any>): any {
-  const columns: Record<string, any> = {
-    runId: text("run_id").notNull(),
-    nodeId: text("node_id").notNull(),
-    iteration: integer("iteration").notNull().default(0),
-  };
+export function zodToTable(tableName: string, schema: z.ZodObject<any>, opts?: { isInput?: boolean }): any {
+  const columns: Record<string, any> = opts?.isInput
+    ? { runId: text("run_id").primaryKey() }
+    : {
+        runId: text("run_id").notNull(),
+        nodeId: text("node_id").notNull(),
+        iteration: integer("iteration").notNull().default(0),
+      };
 
   const shape = schema.shape;
   for (const [key, zodType] of Object.entries(shape)) {
@@ -74,6 +76,9 @@ export function zodToTable(tableName: string, schema: z.ZodObject<any>): any {
     }
   }
 
+  if (opts?.isInput) {
+    return sqliteTable(tableName, columns);
+  }
   return sqliteTable(tableName, columns, (t: any) => [
     primaryKey({ columns: [t.runId, t.nodeId, t.iteration] }),
   ]);

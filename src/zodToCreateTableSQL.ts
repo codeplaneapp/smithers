@@ -30,12 +30,15 @@ function getZodBaseTypeName(zodType: any): string {
 export function zodToCreateTableSQL(
   tableName: string,
   schema: z.ZodObject<any>,
+  opts?: { isInput?: boolean },
 ): string {
-  const colDefs: string[] = [
-    `run_id TEXT NOT NULL`,
-    `node_id TEXT NOT NULL`,
-    `iteration INTEGER NOT NULL DEFAULT 0`,
-  ];
+  const colDefs: string[] = opts?.isInput
+    ? [`run_id TEXT NOT NULL PRIMARY KEY`]
+    : [
+        `run_id TEXT NOT NULL`,
+        `node_id TEXT NOT NULL`,
+        `iteration INTEGER NOT NULL DEFAULT 0`,
+      ];
 
   const shape = schema.shape;
   for (const [key] of Object.entries(shape)) {
@@ -55,6 +58,8 @@ export function zodToCreateTableSQL(
     }
   }
 
-  colDefs.push(`PRIMARY KEY (run_id, node_id, iteration)`);
+  if (!opts?.isInput) {
+    colDefs.push(`PRIMARY KEY (run_id, node_id, iteration)`);
+  }
   return `CREATE TABLE IF NOT EXISTS "${tableName}" (${colDefs.join(", ")})`;
 }
