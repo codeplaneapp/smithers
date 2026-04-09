@@ -1,6 +1,7 @@
 import * as BunContext from "@effect/platform-bun/BunContext";
 import * as FetchHttpClient from "@effect/platform/FetchHttpClient";
 import * as Otlp from "@effect/opentelemetry/Otlp";
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   Context,
   Effect,
@@ -11,6 +12,7 @@ import {
   MetricState,
   Option,
 } from "effect";
+import type * as Tracer from "effect/Tracer";
 import {
   activeNodes,
   activeRuns,
@@ -117,7 +119,7 @@ export type SmithersObservabilityService = {
     name: string,
     effect: Effect.Effect<A, E, R>,
     attributes?: Readonly<Record<string, unknown>>,
-  ) => Effect.Effect<A, E, R>;
+  ) => Effect.Effect<A, E, Exclude<R, Tracer.ParentSpan>>;
 };
 
 export class SmithersObservability extends Context.Tag("SmithersObservability")<
@@ -128,7 +130,158 @@ export class SmithersObservability extends Context.Tag("SmithersObservability")<
 export const prometheusContentType =
   "text/plain; version=0.0.4; charset=utf-8";
 
+export const smithersSpanNames = {
+  run: "smithers.run",
+  task: "smithers.task",
+  agent: "smithers.agent",
+  tool: "smithers.tool",
+} as const;
+
+type SmithersSpanAttributesInput = Readonly<Record<string, unknown>>;
+
 type PrometheusMetricType = "counter" | "gauge" | "histogram" | "summary";
+
+const smithersTraceSpanStorage = new AsyncLocalStorage<Tracer.AnySpan>();
+
+const smithersSpanAttributeAliases: Record<string, string> = {
+  runId: "smithers.run_id",
+  run_id: "smithers.run_id",
+  workflowName: "smithers.workflow_name",
+  workflow_name: "smithers.workflow_name",
+  nodeId: "smithers.node_id",
+  node_id: "smithers.node_id",
+  iteration: "smithers.iteration",
+  attempt: "smithers.attempt",
+  nodeLabel: "smithers.node_label",
+  node_label: "smithers.node_label",
+  toolName: "smithers.tool_name",
+  tool_name: "smithers.tool_name",
+  agent: "smithers.agent",
+  model: "smithers.model",
+  status: "smithers.status",
+  waitReason: "smithers.wait_reason",
+  wait_reason: "smithers.wait_reason",
+};
+
+function hasAttributes(
+  attributes?: SmithersSpanAttributesInput,
+): attributes is SmithersSpanAttributesInput {
+  return Boolean(attributes && Object.keys(attributes).length > 0);
+}
+
+export function getCurrentSmithersTraceSpan(): Tracer.AnySpan | undefined {
+  return smithersTraceSpanStorage.getStore();
+}
+
+export function getCurrentSmithersTraceAnnotations():
+  | Readonly<Record<string, string>>
+  | undefined {
+  const span = getCurrentSmithersTraceSpan();
+  if (!span) {
+    return undefined;
+  }
+  return {
+    traceId: span.traceId,
+    spanId: span.spanId,
+  };
+}
+
+export function makeSmithersSpanAttributes(
+  attributes: SmithersSpanAttributesInput = {},
+): Record<string, unknown> {
+  const spanAttributes: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(attributes)) {
+    if (value === undefined) {
+      continue;
+    }
+    const nextKey =
+      key.startsWith("smithers.") ? key : (smithersSpanAttributeAliases[key] ?? key);
+    spanAttributes[nextKey] = value;
+  }
+  return spanAttributes;
+}
+
+function inferSmithersSpanName(
+  name: string,
+  attributes?: SmithersSpanAttributesInput,
+): string {
+  if (name.startsWith("smithers.")) {
+    return name;
+  }
+  if (
+    name.startsWith("tool:") ||
+    "toolName" in (attributes ?? {}) ||
+    "tool_name" in (attributes ?? {})
+  ) {
+    return smithersSpanNames.tool;
+  }
+  if (
+    name.startsWith("agent:") ||
+    name.startsWith("agent.") ||
+    "agent" in (attributes ?? {})
+  ) {
+    return smithersSpanNames.agent;
+  }
+  if ("nodeId" in (attributes ?? {}) || "node_id" in (attributes ?? {})) {
+    return smithersSpanNames.task;
+  }
+  if ("runId" in (attributes ?? {}) || "run_id" in (attributes ?? {})) {
+    return smithersSpanNames.run;
+  }
+  return name;
+}
+
+function inferSmithersSpanKind(_name: string): Tracer.SpanKind {
+  return "internal";
+}
+
+export function annotateSmithersTrace(
+  attributes: SmithersSpanAttributesInput = {},
+): Effect.Effect<void> {
+  const spanAttributes = makeSmithersSpanAttributes(attributes);
+  let program = Effect.void;
+  if (Object.keys(spanAttributes).length > 0) {
+    program = program.pipe(
+      Effect.tap(() =>
+        Effect.annotateCurrentSpan(spanAttributes).pipe(
+          Effect.catchAll(() => Effect.void),
+        ),
+      ),
+    );
+  }
+  if (hasAttributes(attributes)) {
+    program = program.pipe(Effect.annotateLogs(attributes));
+  }
+  return program;
+}
+
+export function withSmithersSpan<A, E, R>(
+  name: string,
+  effect: Effect.Effect<A, E, R>,
+  attributes?: SmithersSpanAttributesInput,
+  options?: Omit<Tracer.SpanOptions, "attributes" | "kind"> & {
+    readonly kind?: Tracer.SpanKind;
+  },
+): Effect.Effect<A, E, Exclude<R, Tracer.ParentSpan>> {
+  const spanAttributes = makeSmithersSpanAttributes(attributes);
+  const spanName = inferSmithersSpanName(name, attributes);
+  let program = effect;
+  if (Object.keys(spanAttributes).length > 0) {
+    program = program.pipe(Effect.annotateSpans(spanAttributes));
+  }
+  if (hasAttributes(attributes)) {
+    program = program.pipe(Effect.annotateLogs(attributes));
+  }
+  return program.pipe(
+    Effect.withSpan(spanName, {
+      ...options,
+      kind: options?.kind ?? inferSmithersSpanKind(spanName),
+      attributes:
+        Object.keys(spanAttributes).length > 0 ? spanAttributes : undefined,
+    }),
+    Effect.withLogSpan(name),
+  );
+}
 
 function sanitizePrometheusName(name: string): string {
   const next = name.replace(/[^a-zA-Z0-9_:]/g, "_");
@@ -396,12 +549,9 @@ function makeService(
 ): SmithersObservabilityService {
   return {
     options,
-    annotate: (attributes) => Effect.void.pipe(Effect.annotateLogs(attributes)),
+    annotate: (attributes) => annotateSmithersTrace(attributes),
     withSpan: (name, effect, attributes) =>
-      (attributes && Object.keys(attributes).length > 0
-        ? effect.pipe(Effect.annotateLogs(attributes))
-        : effect
-      ).pipe(Effect.withLogSpan(name)),
+      withSmithersSpan(name, effect, attributes),
   };
 }
 
@@ -435,6 +585,7 @@ export function createSmithersOtelLayer(
   return Otlp.layerJson({
     baseUrl: resolved.endpoint,
     resource: { serviceName: resolved.serviceName },
+    tracerContext: (execute, span) => smithersTraceSpanStorage.run(span, execute),
   }).pipe(Layer.provide(FetchHttpClient.layer));
 }
 
