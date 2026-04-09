@@ -6,7 +6,7 @@
  * from context automatically.
  */
 
-import { Context, Effect } from "effect";
+import { Context, Effect, Layer, Scope } from "effect";
 import type {
   VoiceProvider,
   SpeakOptions,
@@ -23,6 +23,76 @@ export class VoiceService extends Context.Tag("VoiceService")<
   VoiceService,
   VoiceProvider
 >() {}
+
+type ManagedVoiceProvider = VoiceProvider & {
+  connectEffect?: (
+    options?: Record<string, unknown>,
+  ) => Effect.Effect<void, Error, Scope.Scope>;
+};
+
+function closeProviderEffect(
+  provider: VoiceProvider,
+): Effect.Effect<void, never> {
+  if (!provider.close) {
+    return Effect.void;
+  }
+
+  return Effect.promise(() => Promise.resolve(provider.close!())).pipe(
+    Effect.catchAll(() => Effect.void),
+  );
+}
+
+function connectProviderEffect(
+  provider: VoiceProvider,
+  options?: Record<string, unknown>,
+): Effect.Effect<VoiceProvider, SmithersError, Scope.Scope> {
+  const managedProvider = provider as ManagedVoiceProvider;
+
+  if (managedProvider.connectEffect) {
+    return managedProvider.connectEffect(options).pipe(
+      Effect.mapError(
+        (cause) =>
+          new SmithersError(
+            "VOICE_CONNECT_FAILED",
+            `connect() failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+          ),
+      ),
+      Effect.as(provider),
+    );
+  }
+
+  if (!provider.connect) {
+    return Effect.succeed(provider);
+  }
+
+  return Effect.acquireRelease(
+    Effect.tryPromise({
+      try: () => provider.connect!(options),
+      catch: (cause) =>
+        new SmithersError(
+          "VOICE_CONNECT_FAILED",
+          `connect() failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+        ),
+    }).pipe(Effect.as(provider)),
+    () => closeProviderEffect(provider),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Layer factory
+// ---------------------------------------------------------------------------
+
+export function createVoiceServiceLayer(
+  provider: VoiceProvider,
+  options?: Record<string, unknown>,
+) {
+  return Layer.scoped(
+    VoiceService,
+    connectProviderEffect(provider, options).pipe(
+      Effect.map((voice) => VoiceService.of(voice)),
+    ),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Effect functions

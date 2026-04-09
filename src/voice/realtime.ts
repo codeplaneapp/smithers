@@ -10,6 +10,7 @@
 
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
+import { Effect, Exit, Scope } from "effect";
 import type {
   VoiceProvider,
   SpeakOptions,
@@ -65,6 +66,18 @@ type StreamWithId = PassThrough & { id: string };
 
 type EventMap = Record<string, VoiceEventCallback[]>;
 
+type ManagedRealtimeVoiceProvider = VoiceProvider & {
+  connectEffect?: (
+    options?: Record<string, unknown>,
+  ) => Effect.Effect<void, Error, Scope.Scope>;
+};
+
+type ConnectionResource = {
+  socket: import("ws").WebSocket;
+  teardown: () => void;
+  closed: boolean;
+};
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -73,10 +86,14 @@ export function createOpenAIRealtimeVoice(
   config: OpenAIRealtimeVoiceConfig = {},
 ): VoiceProvider {
   let ws: import("ws").WebSocket | undefined;
-  let state: "open" | "close" = "close";
+  let state: "connecting" | "open" | "close" = "close";
+  let activeConnection: ConnectionResource | undefined;
+  let connectionScope: Scope.CloseableScope | undefined;
+  let connectPromise: Promise<void> | undefined;
   const client = new EventEmitter();
   const events: EventMap = {};
   const queue: unknown[] = [];
+  const speakerStreams = new Map<string, StreamWithId>();
   const speaker = config.speaker ?? DEFAULT_VOICE;
   const transcriber = config.transcriber ?? "whisper-1";
   const debug = config.debug ?? false;
@@ -141,23 +158,115 @@ export function createOpenAIRealtimeVoice(
     return btoa(binary);
   }
 
-  function setupEventListeners(): void {
-    const speakerStreams = new Map<string, StreamWithId>();
+  function cleanupSpeakerStream(responseId: string, error?: Error): void {
+    const stream = speakerStreams.get(responseId);
+    if (!stream) return;
 
-    if (!ws) throw new Error("WebSocket not initialized");
+    speakerStreams.delete(responseId);
 
-    function cleanupSpeakerStreams(error?: Error): void {
-      for (const stream of speakerStreams.values()) {
-        if (error) {
-          stream.destroy(error);
-        } else {
-          stream.end();
-        }
-      }
-      speakerStreams.clear();
+    if (error) {
+      stream.destroy(error);
+      return;
     }
 
-    ws.on("message", (message: Buffer | string) => {
+    if (!stream.destroyed) {
+      stream.end();
+    }
+  }
+
+  function cleanupSpeakerStreams(error?: Error): void {
+    for (const responseId of [...speakerStreams.keys()]) {
+      cleanupSpeakerStream(responseId, error);
+    }
+  }
+
+  function clearConnectionState(socket?: import("ws").WebSocket): void {
+    if (!socket || ws === socket) {
+      ws = undefined;
+    }
+    if (!socket || activeConnection?.socket === socket) {
+      activeConnection = undefined;
+    }
+    state = "close";
+  }
+
+  async function closeSocket(
+    socket: import("ws").WebSocket,
+  ): Promise<void> {
+    if (socket.readyState === socket.CLOSED) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      let timeout: NodeJS.Timeout | undefined;
+
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        socket.off("close", finish);
+        socket.off("error", finish);
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = undefined;
+        }
+        resolve();
+      };
+
+      socket.once("close", finish);
+      socket.once("error", finish);
+
+      timeout = setTimeout(finish, 1_000);
+      timeout.unref?.();
+
+      try {
+        socket.close();
+      } catch {
+        finish();
+      }
+    });
+  }
+
+  async function releaseConnection(
+    connection: ConnectionResource,
+    error?: Error,
+  ): Promise<void> {
+    if (connection.closed) {
+      return;
+    }
+
+    connection.closed = true;
+    clearConnectionState(connection.socket);
+    queue.length = 0;
+    cleanupSpeakerStreams(error);
+    connection.teardown();
+    await closeSocket(connection.socket);
+  }
+
+  async function closeStoredScope(): Promise<void> {
+    if (!connectionScope) {
+      return;
+    }
+
+    const scope = connectionScope;
+    connectionScope = undefined;
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  }
+
+  async function releaseActiveConnection(error?: Error): Promise<void> {
+    if (!activeConnection) {
+      return;
+    }
+
+    const connection = activeConnection;
+    activeConnection = undefined;
+    await releaseConnection(connection, error);
+  }
+
+  function setupEventListeners(
+    socket: import("ws").WebSocket,
+  ): () => void {
+    const onMessage = (message: Buffer | string) => {
       let data: any;
       try {
         data = JSON.parse(message.toString());
@@ -174,97 +283,246 @@ export function createOpenAIRealtimeVoice(
         const { delta, ...fields } = data;
         console.info(data.type, fields, delta?.length < 100 ? delta : "");
       }
-    });
+    };
 
-    ws.on("close", () => {
-      state = "close";
+    const onClose = () => {
+      clearConnectionState(socket);
       cleanupSpeakerStreams();
-    });
+    };
 
-    ws.on("error", (error: Error) => {
-      state = "close";
+    const onSocketError = (error: Error) => {
+      clearConnectionState(socket);
       cleanupSpeakerStreams(error);
       client.emit("error", error);
-    });
+    };
 
-    client.on("session.created", (ev: any) => {
+    const onSessionCreated = (ev: any) => {
       emit("session.created", ev);
       const queued = queue.splice(0, queue.length);
       for (const item of queued) {
-        ws?.send(JSON.stringify(item));
+        socket.send(JSON.stringify(item));
       }
-    });
+    };
 
-    client.on("session.updated", (ev: any) => {
+    const onSessionUpdated = (ev: any) => {
       emit("session.updated", ev);
-    });
+    };
 
-    client.on("response.created", (ev: any) => {
+    const onResponseCreated = (ev: any) => {
       emit("response.created", ev);
       const stream = new PassThrough() as StreamWithId;
       stream.id = ev.response.id;
+
+      const removeStream = () => {
+        speakerStreams.delete(stream.id);
+      };
+
+      stream.once("close", removeStream);
+      stream.once("end", removeStream);
+      stream.once("error", removeStream);
+
       speakerStreams.set(ev.response.id, stream);
       emit("speaker", stream);
-    });
+    };
 
-    client.on("response.audio.delta", (ev: any) => {
+    const onResponseAudioDelta = (ev: any) => {
       const audio = Buffer.from(ev.delta, "base64");
       emit("speaking", { audio, response_id: ev.response_id });
       const stream = speakerStreams.get(ev.response_id);
       stream?.write(audio);
-    });
+    };
 
-    client.on("response.audio.done", (ev: any) => {
+    const onResponseAudioDone = (ev: any) => {
       emit("speaking.done", { response_id: ev.response_id });
-      const stream = speakerStreams.get(ev.response_id);
-      stream?.end();
-    });
+      cleanupSpeakerStream(ev.response_id);
+    };
 
-    client.on("response.audio_transcript.delta", (ev: any) => {
+    const onAudioTranscriptDelta = (ev: any) => {
       emit("writing", {
         text: ev.delta,
         response_id: ev.response_id,
         role: "assistant",
       });
-    });
+    };
 
-    client.on("response.audio_transcript.done", (ev: any) => {
+    const onAudioTranscriptDone = (ev: any) => {
       emit("writing", {
         text: "\n",
         response_id: ev.response_id,
         role: "assistant",
       });
-    });
+    };
 
-    client.on("response.text.delta", (ev: any) => {
+    const onResponseTextDelta = (ev: any) => {
       emit("writing", {
         text: ev.delta,
         response_id: ev.response_id,
         role: "assistant",
       });
-    });
+    };
 
-    client.on("response.text.done", (ev: any) => {
+    const onResponseTextDone = (ev: any) => {
       emit("writing", {
         text: "\n",
         response_id: ev.response_id,
         role: "assistant",
       });
-    });
+    };
 
-    client.on("response.done", (ev: any) => {
+    const onResponseDone = (ev: any) => {
       emit("response.done", ev);
-      speakerStreams.delete(ev.response?.id);
+      if (typeof ev.response?.id === "string") {
+        cleanupSpeakerStream(ev.response.id);
+      }
+    };
+
+    const onClientError = (ev: any) => {
+      emit("error", ev);
+    };
+
+    socket.on("message", onMessage);
+    socket.on("close", onClose);
+    socket.on("error", onSocketError);
+    client.on("session.created", onSessionCreated);
+    client.on("session.updated", onSessionUpdated);
+    client.on("response.created", onResponseCreated);
+    client.on("response.audio.delta", onResponseAudioDelta);
+    client.on("response.audio.done", onResponseAudioDone);
+    client.on("response.audio_transcript.delta", onAudioTranscriptDelta);
+    client.on("response.audio_transcript.done", onAudioTranscriptDone);
+    client.on("response.text.delta", onResponseTextDelta);
+    client.on("response.text.done", onResponseTextDone);
+    client.on("response.done", onResponseDone);
+    client.on("error", onClientError);
+
+    return () => {
+      socket.off("message", onMessage);
+      socket.off("close", onClose);
+      socket.off("error", onSocketError);
+      client.off("session.created", onSessionCreated);
+      client.off("session.updated", onSessionUpdated);
+      client.off("response.created", onResponseCreated);
+      client.off("response.audio.delta", onResponseAudioDelta);
+      client.off("response.audio.done", onResponseAudioDone);
+      client.off("response.audio_transcript.delta", onAudioTranscriptDelta);
+      client.off("response.audio_transcript.done", onAudioTranscriptDone);
+      client.off("response.text.delta", onResponseTextDelta);
+      client.off("response.text.done", onResponseTextDone);
+      client.off("response.done", onResponseDone);
+      client.off("error", onClientError);
+    };
+  }
+
+  async function openConnection(
+    _options?: Record<string, unknown>,
+  ): Promise<ConnectionResource> {
+    await closeStoredScope();
+    await releaseActiveConnection();
+
+    state = "connecting";
+
+    // Dynamic import ws to avoid hard dependency for users who don't need realtime
+    const { WebSocket } = await import("ws");
+
+    const url = `${config.url ?? DEFAULT_URL}?model=${config.model ?? DEFAULT_MODEL}`;
+    const apiKey = config.apiKey ?? process.env.OPENAI_API_KEY;
+
+    if (!apiKey) {
+      throw new Error("Missing OPENAI_API_KEY for OpenAI realtime voice");
+    }
+
+    const socket = new WebSocket(url, undefined, {
+      headers: {
+        Authorization: "Bearer " + apiKey,
+        "OpenAI-Beta": "realtime=v1",
+      },
     });
 
-    client.on("error", (ev: any) => {
-      emit("error", ev);
+    ws = socket;
+
+    const connection: ConnectionResource = {
+      socket,
+      teardown: setupEventListeners(socket),
+      closed: false,
+    };
+
+    const connectionReady = new Promise<void>((resolve, reject) => {
+      let isOpen = false;
+      let isSessionCreated = false;
+
+      const cleanup = () => {
+        socket.off("open", onOpen);
+        socket.off("error", onError);
+        client.off("session.created", onSessionCreated);
+      };
+
+      const maybeResolve = () => {
+        if (!isOpen || !isSessionCreated) {
+          return;
+        }
+        cleanup();
+        resolve();
+      };
+
+      const onOpen = () => {
+        isOpen = true;
+        maybeResolve();
+      };
+
+      const onSessionCreated = () => {
+        isSessionCreated = true;
+        maybeResolve();
+      };
+
+      const onError = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+
+      socket.on("open", onOpen);
+      socket.on("error", onError);
+      client.on("session.created", onSessionCreated);
     });
+
+    try {
+      await connectionReady;
+
+      sendEvent("session.update", {
+        session: {
+          input_audio_transcription: { model: transcriber },
+          voice: speaker,
+        },
+      });
+
+      state = "open";
+      activeConnection = connection;
+      return connection;
+    } catch (error) {
+      await releaseConnection(
+        connection,
+        toError(error, "Failed to initialize OpenAI realtime connection"),
+      );
+      throw error;
+    }
+  }
+
+  function connectEffect(options?: Record<string, unknown>) {
+    return Effect.acquireRelease(
+      Effect.tryPromise({
+        try: () => openConnection(options),
+        catch: (cause) =>
+          toError(cause, "Failed to connect to OpenAI realtime voice"),
+      }),
+      (connection) =>
+        Effect.promise(() => releaseConnection(connection)).pipe(
+          Effect.catchAll(() => Effect.void),
+        ),
+    ).pipe(Effect.asVoid);
   }
 
   // -- provider --
 
-  const provider: VoiceProvider = {
+  const provider: ManagedRealtimeVoiceProvider = {
     name: "openai-realtime",
 
     async speak(
@@ -465,77 +723,47 @@ export function createOpenAIRealtimeVoice(
       }
     },
 
-    async connect(_options?: Record<string, unknown>): Promise<void> {
-      // Dynamic import ws to avoid hard dependency for users who don't need realtime
-      const { WebSocket } = await import("ws");
+    async connect(options?: Record<string, unknown>): Promise<void> {
+      if (state === "open") {
+        return;
+      }
+      if (connectPromise) {
+        return connectPromise;
+      }
 
-      const url = `${config.url ?? DEFAULT_URL}?model=${config.model ?? DEFAULT_MODEL}`;
-      const apiKey = config.apiKey ?? process.env.OPENAI_API_KEY;
+      connectPromise = (async () => {
+        const scope = await Effect.runPromise(Scope.make());
 
-      ws = new WebSocket(url, undefined, {
-        headers: {
-          Authorization: "Bearer " + apiKey,
-          "OpenAI-Beta": "realtime=v1",
-        },
-      });
-      const socket = ws;
+        try {
+          await Effect.runPromise(
+            connectEffect(options).pipe(
+              Effect.provideService(Scope.Scope, scope as any),
+            ),
+          );
+          connectionScope = scope;
+        } catch (error) {
+          await Effect.runPromise(Scope.close(scope, Exit.void));
+          throw error;
+        } finally {
+          connectPromise = undefined;
+        }
+      })();
 
-      const connectionReady = new Promise<void>((resolve, reject) => {
-        let isOpen = false;
-        let isSessionCreated = false;
-
-        const cleanup = () => {
-          socket.off("open", onOpen);
-          socket.off("error", onError);
-          client.off("session.created", onSessionCreated);
-        };
-
-        const maybeResolve = () => {
-          if (!isOpen || !isSessionCreated) {
-            return;
-          }
-          cleanup();
-          resolve();
-        };
-
-        const onOpen = () => {
-          isOpen = true;
-          maybeResolve();
-        };
-
-        const onSessionCreated = () => {
-          isSessionCreated = true;
-          maybeResolve();
-        };
-
-        const onError = (error: Error) => {
-          cleanup();
-          reject(error);
-        };
-
-        socket.on("open", onOpen);
-        socket.on("error", onError);
-        client.on("session.created", onSessionCreated);
-      });
-
-      setupEventListeners();
-
-      await connectionReady;
-
-      sendEvent("session.update", {
-        session: {
-          input_audio_transcription: { model: transcriber },
-          voice: speaker,
-        },
-      });
-
-      state = "open";
+      return connectPromise;
     },
 
     close(): void {
-      if (!ws) return;
-      ws.close();
-      state = "close";
+      const scope = connectionScope;
+      connectionScope = undefined;
+
+      if (scope) {
+        void Effect.runPromise(Scope.close(scope, Exit.void)).catch(() => {});
+        return;
+      }
+
+      if (activeConnection) {
+        void releaseConnection(activeConnection).catch(() => {});
+      }
     },
 
     async answer(options?: Record<string, unknown>): Promise<void> {
@@ -562,6 +790,8 @@ export function createOpenAIRealtimeVoice(
     updateConfig(sessionConfig: Record<string, unknown>): void {
       sendEvent("session.update", { session: sessionConfig });
     },
+
+    connectEffect,
   };
 
   return provider;
