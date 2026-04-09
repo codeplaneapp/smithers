@@ -37,6 +37,12 @@ export {
   runWorkflowWithMakeBridge,
   withWorkflowMakeBridgeRuntime,
 } from "./workflow-make-bridge";
+export {
+  SqlMessageStorage,
+  ensureSqlMessageStorage,
+  ensureSqlMessageStorageEffect,
+  getSqlMessageStorage,
+} from "./sql-message-storage";
 
 type BridgeManagedTaskKind = "compute" | "static" | null;
 
