@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
 import type { TaskDescriptor } from "../TaskDescriptor";
 import type { SmithersDb } from "../db/adapter";
 import {
@@ -8,6 +8,12 @@ import {
   validateExistingOutput,
   validateOutput,
 } from "../db/output";
+import {
+  awaitApprovalDurableDeferred,
+  awaitWaitForEventDurableDeferred,
+  bridgeApprovalResolve,
+  bridgeWaitForEventResolve,
+} from "./durable-deferred-bridge";
 import { EventBus } from "../events";
 import { errorToJson, SmithersError } from "../utils/errors";
 import { nowMs } from "../utils/time";
@@ -828,6 +834,59 @@ async function resolveWaitForEventTimeoutBridge(
   );
 }
 
+async function syncWaitForEventDurableDeferredFromDb(
+  adapter: SmithersDb,
+  runId: string,
+  desc: TaskDescriptor,
+  snapshot: WaitForEventSnapshot,
+  startedAtMs?: number,
+) {
+  const [signal] = await adapter.listSignals(runId, {
+    signalName: snapshot.signalName,
+    correlationId: snapshot.correlationId ?? null,
+    receivedAfterMs:
+      typeof startedAtMs === "number" ? startedAtMs : undefined,
+    limit: 1,
+  });
+
+  if (!signal) {
+    return;
+  }
+
+  await bridgeWaitForEventResolve(
+    adapter,
+    runId,
+    desc.nodeId,
+    desc.iteration,
+    {
+      signalName: signal.signalName,
+      correlationId: signal.correlationId ?? null,
+      payloadJson: signal.payloadJson,
+      seq: signal.seq,
+      receivedAtMs: signal.receivedAtMs,
+    },
+  );
+}
+
+async function syncApprovalDurableDeferredFromDb(
+  adapter: SmithersDb,
+  runId: string,
+  desc: TaskDescriptor,
+  approval: any,
+) {
+  if (approval?.status !== "approved" && approval?.status !== "denied") {
+    return;
+  }
+
+  await bridgeApprovalResolve(adapter, runId, desc.nodeId, desc.iteration, {
+    approved: approval.status === "approved",
+    note: approval.note ?? null,
+    decidedBy: approval.decidedBy ?? null,
+    decisionJson: approval.decisionJson ?? null,
+    autoApproved: approval.autoApproved ?? false,
+  });
+}
+
 async function resolveWaitForEventTaskStateBridge(
   adapter: SmithersDb,
   db: any,
@@ -917,15 +976,23 @@ async function resolveWaitForEventTaskStateBridge(
 
   if (latest.state === "waiting-event") {
     const snapshot = latestSnapshot ?? buildWaitForEventSnapshot(desc, latest.startedAtMs ?? now);
-    const [signal] = await adapter.listSignals(runId, {
-      signalName: snapshot.signalName,
-      correlationId: snapshot.correlationId ?? null,
-      receivedAfterMs:
-        typeof latest.startedAtMs === "number" ? latest.startedAtMs : undefined,
-      limit: 1,
-    });
+    await syncWaitForEventDurableDeferredFromDb(
+      adapter,
+      runId,
+      desc,
+      snapshot,
+      latest.startedAtMs,
+    );
 
-    if (signal) {
+    const awaited = await awaitWaitForEventDurableDeferred(
+      adapter,
+      runId,
+      desc.nodeId,
+      desc.iteration,
+    );
+
+    if (awaited._tag === "Complete" && Exit.isSuccess(awaited.exit)) {
+      const signal = awaited.exit.value;
       const resolvedSnapshot: WaitForEventSnapshot = {
         ...snapshot,
         resolvedSignalSeq: signal.seq,
@@ -1059,7 +1126,98 @@ async function resolveApprovalTaskStateBridge(
     return { handled: false };
   }
 
-  const approval = await adapter.getApproval(runId, desc.nodeId, desc.iteration);
+  let approval = await adapter.getApproval(runId, desc.nodeId, desc.iteration);
+
+  if (!approval) {
+    const requestedAtMs = nowMs();
+    const requestJson = buildApprovalRequestJson(desc);
+    if (await shouldAutoApprove(adapter, runId, desc)) {
+      const decisionJson = JSON.stringify(defaultAutoApprovalDecision(desc));
+      approval = {
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        status: "approved",
+        requestedAtMs: desc.approvalAutoApprove?.audit ? requestedAtMs : null,
+        decidedAtMs: requestedAtMs,
+        note: "Auto-approved",
+        decidedBy: "smithers:auto",
+        requestJson,
+        decisionJson,
+        autoApproved: true,
+      };
+      await adapter.insertOrUpdateApproval(approval);
+      await bridgeApprovalResolve(adapter, runId, desc.nodeId, desc.iteration, {
+        approved: true,
+        note: approval.note,
+        decidedBy: approval.decidedBy,
+        decisionJson,
+        autoApproved: true,
+      });
+      await eventBus.emitEventWithPersist({
+        type: "ApprovalAutoApproved",
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        timestampMs: requestedAtMs,
+      });
+    } else {
+      approval = {
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        status: "requested",
+        requestedAtMs,
+        decidedAtMs: null,
+        note: null,
+        decidedBy: null,
+        requestJson,
+        decisionJson: null,
+        autoApproved: false,
+      };
+      await adapter.insertOrUpdateApproval(approval);
+      await eventBus.emitEventWithPersist({
+        type: "ApprovalRequested",
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        timestampMs: requestedAtMs,
+      });
+      await eventBus.emitEventWithPersist({
+        type: "NodeWaitingApproval",
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        timestampMs: requestedAtMs,
+      });
+    }
+  }
+
+  await syncApprovalDurableDeferredFromDb(adapter, runId, desc, approval);
+
+  const awaited = await awaitApprovalDurableDeferred(
+    adapter,
+    runId,
+    desc.nodeId,
+    desc.iteration,
+  );
+
+  if (awaited._tag !== "Complete" || !Exit.isSuccess(awaited.exit)) {
+    await adapter.insertNode({
+      runId,
+      nodeId: desc.nodeId,
+      iteration: desc.iteration,
+      state: "waiting-approval",
+      lastAttempt: null,
+      updatedAtMs: nowMs(),
+      outputTable: desc.outputTableName,
+      label: desc.label ?? null,
+    });
+    return { handled: true, state: "waiting-approval" };
+  }
+
+  approval = (await adapter.getApproval(runId, desc.nodeId, desc.iteration)) ?? approval;
+
   if (approval?.status === "denied") {
     if (desc.approvalMode !== "gate" && desc.approvalOnDeny !== "fail") {
       const outputRow = await selectOutputRow<any>(db, desc.outputTable as any, {
@@ -1117,62 +1275,6 @@ async function resolveApprovalTaskStateBridge(
 
   if (approval?.status === "approved") {
     return { handled: false };
-  }
-
-  if (!approval) {
-    const requestedAtMs = nowMs();
-    const requestJson = buildApprovalRequestJson(desc);
-    if (await shouldAutoApprove(adapter, runId, desc)) {
-      await adapter.insertOrUpdateApproval({
-        runId,
-        nodeId: desc.nodeId,
-        iteration: desc.iteration,
-        status: "approved",
-        requestedAtMs: desc.approvalAutoApprove?.audit ? requestedAtMs : null,
-        decidedAtMs: requestedAtMs,
-        note: "Auto-approved",
-        decidedBy: "smithers:auto",
-        requestJson,
-        decisionJson: JSON.stringify(defaultAutoApprovalDecision(desc)),
-        autoApproved: true,
-      });
-      await eventBus.emitEventWithPersist({
-        type: "ApprovalAutoApproved",
-        runId,
-        nodeId: desc.nodeId,
-        iteration: desc.iteration,
-        timestampMs: requestedAtMs,
-      });
-      return { handled: false };
-    }
-
-    await adapter.insertOrUpdateApproval({
-      runId,
-      nodeId: desc.nodeId,
-      iteration: desc.iteration,
-      status: "requested",
-      requestedAtMs,
-      decidedAtMs: null,
-      note: null,
-      decidedBy: null,
-      requestJson,
-      decisionJson: null,
-      autoApproved: false,
-    });
-    await eventBus.emitEventWithPersist({
-      type: "ApprovalRequested",
-      runId,
-      nodeId: desc.nodeId,
-      iteration: desc.iteration,
-      timestampMs: requestedAtMs,
-    });
-    await eventBus.emitEventWithPersist({
-      type: "NodeWaitingApproval",
-      runId,
-      nodeId: desc.nodeId,
-      iteration: desc.iteration,
-      timestampMs: requestedAtMs,
-    });
   }
 
   await adapter.insertNode({

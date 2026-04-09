@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { SmithersDb } from "../db/adapter";
+import { bridgeSignalResolve } from "../effect/durable-deferred-bridge";
 import { runPromise } from "../effect/runtime";
 import { SmithersError } from "../utils/errors";
 import { nowMs } from "../utils/time";
@@ -90,5 +91,16 @@ export async function signalRun(
   payload: unknown,
   options: SignalRunOptions = {},
 ) {
-  return runPromise(signalRunEffect(adapter, runId, signalName, payload, options));
+  const payloadJson = serializeSignalPayload(payload);
+  const delivered = await runPromise(
+    signalRunEffect(adapter, runId, signalName, payload, options),
+  );
+  await bridgeSignalResolve(adapter, runId, {
+    signalName: delivered.signalName,
+    correlationId: delivered.correlationId ?? null,
+    payloadJson,
+    seq: delivered.seq,
+    receivedAtMs: delivered.receivedAtMs,
+  });
+  return delivered;
 }

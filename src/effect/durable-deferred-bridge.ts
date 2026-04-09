@@ -1,0 +1,294 @@
+import * as DurableDeferred from "@effect/workflow/DurableDeferred";
+import * as Workflow from "@effect/workflow/Workflow";
+import * as WorkflowEngine from "@effect/workflow/WorkflowEngine";
+import { resolve as resolvePath } from "node:path";
+import { Effect, Exit, Layer, Schema, Scope } from "effect";
+import type { SmithersDb } from "../db/adapter";
+
+export const DurableDeferredBridgeWorkflow = Workflow.make({
+  name: "SmithersDurableDeferredBridge",
+  payload: { executionId: Schema.String },
+  success: Schema.Unknown,
+  idempotencyKey: ({ executionId }) => executionId,
+});
+
+const adapterNamespaces = new WeakMap<object, string>();
+let nextAdapterNamespace = 0;
+
+let durableDeferredEngineScope: Scope.CloseableScope | undefined;
+let durableDeferredEngineContextPromise: Promise<any> | undefined;
+
+const buildDurableDeferredEngineContext = async () => {
+  durableDeferredEngineScope = await Effect.runPromise(Scope.make());
+  return Effect.runPromise(
+    Layer.buildWithScope(WorkflowEngine.layerMemory, durableDeferredEngineScope),
+  );
+};
+
+const getDurableDeferredEngineContext = async () => {
+  if (!durableDeferredEngineContextPromise) {
+    durableDeferredEngineContextPromise = buildDurableDeferredEngineContext().catch(
+      (error) => {
+        durableDeferredEngineContextPromise = undefined;
+        durableDeferredEngineScope = undefined;
+        throw error;
+      },
+    );
+  }
+  return durableDeferredEngineContextPromise;
+};
+
+const getAdapterNamespace = (adapter: SmithersDb): string => {
+  const filename = (adapter as any)?.db?.$client?.filename;
+  if (typeof filename === "string" && filename.length > 0 && filename !== ":memory:") {
+    return `sqlite:${resolvePath(filename)}`;
+  }
+
+  const existing = adapterNamespaces.get(adapter);
+  if (existing) {
+    return existing;
+  }
+  const created = `adapter-${++nextAdapterNamespace}`;
+  adapterNamespaces.set(adapter, created);
+  return created;
+};
+
+export const approvalDurableDeferredSuccessSchema = Schema.Struct({
+  approved: Schema.Boolean,
+  note: Schema.NullOr(Schema.String),
+  decidedBy: Schema.NullOr(Schema.String),
+  decisionJson: Schema.NullOr(Schema.String),
+  autoApproved: Schema.Boolean,
+});
+
+export type ApprovalDurableDeferredResolution = Schema.Schema.Type<
+  typeof approvalDurableDeferredSuccessSchema
+>;
+
+export const waitForEventDurableDeferredSuccessSchema = Schema.Struct({
+  signalName: Schema.String,
+  correlationId: Schema.NullOr(Schema.String),
+  payloadJson: Schema.String,
+  seq: Schema.Number,
+  receivedAtMs: Schema.Number,
+});
+
+export type WaitForEventDurableDeferredResolution = Schema.Schema.Type<
+  typeof waitForEventDurableDeferredSuccessSchema
+>;
+
+type WaitForEventSignalInput = {
+  signalName: string;
+  correlationId: string | null;
+  payloadJson: string;
+  seq: number;
+  receivedAtMs: number;
+};
+
+type WaitForEventAttemptSnapshot = {
+  signalName: string;
+  correlationId: string | null;
+};
+
+function normalizeCorrelationId(value: string | null | undefined): string | null {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized.length > 0 ? normalized : null;
+}
+
+function parseWaitForEventAttemptSnapshot(
+  metaJson?: string | null,
+): WaitForEventAttemptSnapshot | null {
+  if (!metaJson) return null;
+  try {
+    const parsed = JSON.parse(metaJson);
+    const waitForEvent = parsed?.waitForEvent;
+    if (!waitForEvent || typeof waitForEvent !== "object" || Array.isArray(waitForEvent)) {
+      return null;
+    }
+    const signalName =
+      typeof (waitForEvent as any).signalName === "string"
+        ? (waitForEvent as any).signalName.trim()
+        : "";
+    if (!signalName) {
+      return null;
+    }
+    return {
+      signalName,
+      correlationId: normalizeCorrelationId((waitForEvent as any).correlationId),
+    };
+  } catch {
+    return null;
+  }
+}
+
+const makeWorkflowInstance = (executionId: string) =>
+  WorkflowEngine.WorkflowInstance.initial(
+    DurableDeferredBridgeWorkflow,
+    executionId,
+  );
+
+const awaitBridgeDeferred = async <
+  Success extends Schema.Schema.Any,
+  Error extends Schema.Schema.All,
+>(
+  executionId: string,
+  deferred: DurableDeferred.DurableDeferred<Success, Error>,
+) => {
+  const engineContext = await getDurableDeferredEngineContext();
+  return Effect.runPromise(
+    DurableDeferred.await(deferred).pipe(
+      Workflow.intoResult,
+      Effect.provideService(
+        WorkflowEngine.WorkflowInstance,
+        makeWorkflowInstance(executionId),
+      ),
+      Effect.provide(engineContext),
+    ) as any,
+  );
+};
+
+const resolveBridgeDeferred = async <
+  Success extends Schema.Schema.Any,
+  Error extends Schema.Schema.All,
+>(
+  executionId: string,
+  deferred: DurableDeferred.DurableDeferred<Success, Error>,
+  exit: Exit.Exit<Success["Type"], Error["Type"]>,
+) => {
+  const engineContext = await getDurableDeferredEngineContext();
+  const token = DurableDeferred.tokenFromExecutionId(deferred, {
+    workflow: DurableDeferredBridgeWorkflow,
+    executionId,
+  });
+
+  await Effect.runPromise(
+    DurableDeferred.done(deferred, {
+      token,
+      exit,
+    }).pipe(Effect.provide(engineContext)) as any,
+  );
+};
+
+export const makeDurableDeferredBridgeExecutionId = (
+  adapter: SmithersDb,
+  runId: string,
+  nodeId: string,
+  iteration: number,
+): string =>
+  [
+    "smithers-durable-deferred-bridge",
+    getAdapterNamespace(adapter),
+    runId,
+    nodeId,
+    String(iteration),
+  ].join(":");
+
+export const makeApprovalDurableDeferred = (nodeId: string) =>
+  DurableDeferred.make(`approval:${nodeId}`, {
+    success: approvalDurableDeferredSuccessSchema,
+  });
+
+export const makeWaitForEventDurableDeferred = (nodeId: string) =>
+  DurableDeferred.make(`wait-for-event:${nodeId}`, {
+    success: waitForEventDurableDeferredSuccessSchema,
+  });
+
+export const awaitApprovalDurableDeferred = (
+  adapter: SmithersDb,
+  runId: string,
+  nodeId: string,
+  iteration: number,
+) =>
+  awaitBridgeDeferred(
+    makeDurableDeferredBridgeExecutionId(adapter, runId, nodeId, iteration),
+    makeApprovalDurableDeferred(nodeId),
+  );
+
+export const awaitWaitForEventDurableDeferred = (
+  adapter: SmithersDb,
+  runId: string,
+  nodeId: string,
+  iteration: number,
+) =>
+  awaitBridgeDeferred(
+    makeDurableDeferredBridgeExecutionId(adapter, runId, nodeId, iteration),
+    makeWaitForEventDurableDeferred(nodeId),
+  );
+
+export const bridgeApprovalResolve = async (
+  adapter: SmithersDb,
+  runId: string,
+  nodeId: string,
+  iteration: number,
+  resolution: {
+    approved: boolean;
+    note?: string | null;
+    decidedBy?: string | null;
+    decisionJson?: string | null;
+    autoApproved?: boolean;
+  },
+) => {
+  await resolveBridgeDeferred(
+    makeDurableDeferredBridgeExecutionId(adapter, runId, nodeId, iteration),
+    makeApprovalDurableDeferred(nodeId),
+    Exit.succeed({
+      approved: resolution.approved,
+      note: resolution.note ?? null,
+      decidedBy: resolution.decidedBy ?? null,
+      decisionJson: resolution.decisionJson ?? null,
+      autoApproved: resolution.autoApproved ?? false,
+    }),
+  );
+};
+
+export const bridgeWaitForEventResolve = async (
+  adapter: SmithersDb,
+  runId: string,
+  nodeId: string,
+  iteration: number,
+  signal: WaitForEventSignalInput,
+) => {
+  await resolveBridgeDeferred(
+    makeDurableDeferredBridgeExecutionId(adapter, runId, nodeId, iteration),
+    makeWaitForEventDurableDeferred(nodeId),
+    Exit.succeed({
+      signalName: signal.signalName,
+      correlationId: normalizeCorrelationId(signal.correlationId),
+      payloadJson: signal.payloadJson,
+      seq: signal.seq,
+      receivedAtMs: signal.receivedAtMs,
+    }),
+  );
+};
+
+export const bridgeSignalResolve = async (
+  adapter: SmithersDb,
+  runId: string,
+  signal: WaitForEventSignalInput,
+) => {
+  const nodes = await adapter.listNodes(runId);
+  const normalizedCorrelationId = normalizeCorrelationId(signal.correlationId);
+
+  for (const node of nodes as any[]) {
+    if (node.state !== "waiting-event") continue;
+    const iteration = node.iteration ?? 0;
+    const attempts = await adapter.listAttempts(runId, node.nodeId, iteration);
+    const waitingAttempt =
+      (attempts as any[]).find((attempt) => attempt.state === "waiting-event") ??
+      attempts[0];
+    if (!waitingAttempt) continue;
+
+    const snapshot = parseWaitForEventAttemptSnapshot(waitingAttempt.metaJson);
+    if (!snapshot) continue;
+    if (snapshot.signalName !== signal.signalName) continue;
+    if (snapshot.correlationId !== normalizedCorrelationId) continue;
+
+    await bridgeWaitForEventResolve(
+      adapter,
+      runId,
+      node.nodeId,
+      iteration,
+      signal,
+    );
+  }
+};

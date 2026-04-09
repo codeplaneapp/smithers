@@ -3,7 +3,7 @@ import { nowMs } from "../utils/time";
 import { SmithersDb } from "../db/adapter";
 import { runPromise } from "../effect/runtime";
 import { approvalWaitDuration, trackEvent } from "../effect/metrics";
-import { bridgeApprovalResolve } from "../effect/deferred-bridge";
+import { bridgeApprovalResolve } from "../effect/durable-deferred-bridge";
 
 function nextRunStatusForApproval(
   currentStatus: string | null | undefined,
@@ -115,7 +115,12 @@ export async function approveNode(
   await runPromise(
     approveNodeEffect(adapter, runId, nodeId, iteration, note, decidedBy, decision),
   );
-  bridgeApprovalResolve(runId, nodeId, iteration, { approved: true });
+  await bridgeApprovalResolve(adapter, runId, nodeId, iteration, {
+    approved: true,
+    note: note ?? null,
+    decidedBy: decidedBy ?? null,
+    decisionJson: serializeDecision(decision),
+  });
 }
 
 export function denyNodeEffect(
@@ -210,7 +215,12 @@ export async function denyNode(
   await runPromise(
     denyNodeEffect(adapter, runId, nodeId, iteration, note, decidedBy, decision),
   );
-  bridgeApprovalResolve(runId, nodeId, iteration, { approved: false });
+  await bridgeApprovalResolve(adapter, runId, nodeId, iteration, {
+    approved: false,
+    note: note ?? null,
+    decidedBy: decidedBy ?? null,
+    decisionJson: serializeDecision(decision),
+  });
 }
 
 export async function autoApproveNode(
@@ -236,5 +246,11 @@ export async function autoApproveNode(
       true,
     ),
   );
-  bridgeApprovalResolve(runId, nodeId, iteration, { approved: true });
+  await bridgeApprovalResolve(adapter, runId, nodeId, iteration, {
+    approved: true,
+    note: options?.note ?? null,
+    decidedBy: options?.decidedBy ?? "smithers:auto",
+    decisionJson: serializeDecision(options?.decision),
+    autoApproved: true,
+  });
 }

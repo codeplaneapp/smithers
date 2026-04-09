@@ -17,12 +17,14 @@ import {
 } from "./static-task-bridge";
 export {
   bridgeApprovalResolve,
-  bridgeTimerResolve,
-  getDeferredResolution,
-  makeApprovalDeferred,
-  makeDeferredBridgeKey,
-  makeTimerDeferred,
-} from "./deferred-bridge";
+  bridgeSignalResolve,
+  bridgeWaitForEventResolve,
+  awaitApprovalDurableDeferred,
+  awaitWaitForEventDurableDeferred,
+  makeApprovalDurableDeferred,
+  makeDurableDeferredBridgeExecutionId,
+  makeWaitForEventDurableDeferred,
+} from "./durable-deferred-bridge";
 export {
   cancelPendingTimersBridge,
   isBridgeManagedTimerTask,
