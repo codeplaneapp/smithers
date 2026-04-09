@@ -1,7 +1,6 @@
 import { cosineSimilarity } from "ai";
 import { Effect, Metric } from "effect";
-import { fromSync } from "../effect/interop";
-import { runPromise } from "../effect/runtime";
+import { fromPromise } from "../effect/interop";
 import { nowMs } from "../utils/time";
 import { ragRetrieveDuration } from "./metrics";
 import type {
@@ -11,6 +10,13 @@ import type {
   VectorQueryOptions,
   VectorStore,
 } from "./types";
+
+declare module "./types" {
+  interface VectorStore {
+    cleanup?(): Promise<void> | void;
+    dispose?(): Promise<void> | void;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // SQLite vector store
@@ -154,7 +160,36 @@ export function createSqliteVectorStore(
         .get(ns) as { cnt: number };
       return row?.cnt ?? 0;
     },
+
+    async cleanup(): Promise<void> {
+      // The SQLite handle is caller-owned, so scoped store cleanup is a no-op.
+    },
+
+    async dispose(): Promise<void> {
+      await this.cleanup?.();
+    },
   };
+}
+
+function cleanupVectorStoreEffect(
+  store: VectorStore,
+): Effect.Effect<void, never> {
+  const cleanup = store.dispose ?? store.cleanup;
+
+  if (!cleanup) {
+    return Effect.void;
+  }
+
+  return Effect.promise(() => Promise.resolve(cleanup.call(store))).pipe(
+    Effect.catchAll(() => Effect.void),
+  );
+}
+
+export function acquireVectorStore(store: VectorStore) {
+  return Effect.acquireRelease(
+    Effect.succeed(store),
+    cleanupVectorStoreEffect,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +201,7 @@ export function upsertEffect(
   chunks: EmbeddedChunk[],
   namespace?: string,
 ) {
-  return fromSync("rag vector upsert", () =>
+  return fromPromise("rag vector upsert", () =>
     store.upsert(chunks, namespace),
   ).pipe(
     Effect.annotateLogs({ operation: "vectorUpsert", count: chunks.length }),
@@ -181,7 +216,7 @@ export function queryEffect(
 ) {
   return Effect.gen(function* () {
     const start = performance.now();
-    const results = yield* fromSync("rag vector query", () =>
+    const results = yield* fromPromise("rag vector query", () =>
       store.query(embedding, options),
     );
     yield* Metric.update(ragRetrieveDuration, performance.now() - start);
