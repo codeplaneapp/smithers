@@ -3,6 +3,10 @@ import type { HijackState } from "../engine/index";
 import { SmithersDb } from "../db/adapter";
 import { EventBus } from "../events";
 import {
+  makeWorkerTask,
+  type WorkerDispatchKind,
+} from "./entity-worker";
+import {
   makeTaskBridgeKey,
   RetriableTaskFailure,
   type TaskActivityContext,
@@ -15,6 +19,9 @@ import {
   canExecuteBridgeManagedStaticTask,
   executeStaticTaskBridge,
 } from "./static-task-bridge";
+import {
+  dispatchWorkerTask,
+} from "./single-runner";
 export {
   bridgeApprovalResolve,
   bridgeSignalResolve,
@@ -43,8 +50,36 @@ export {
   ensureSqlMessageStorageEffect,
   getSqlMessageStorage,
 } from "./sql-message-storage";
+export {
+  SandboxEntity,
+  SandboxEntityExecutor,
+  makeSandboxEntityId,
+  makeSandboxTransportServiceEffect,
+} from "./sandbox-entity";
+export {
+  CodeplaneSandboxExecutorLive,
+  DockerSandboxExecutorLive,
+  SandboxHttpRunner,
+} from "./http-runner";
+export {
+  BubblewrapSandboxExecutorLive,
+  SandboxSocketRunner,
+} from "./socket-runner";
+export {
+  isTaskResultFailure,
+  makeWorkerTask,
+  TaskResult,
+  WorkerDispatchKind,
+  WorkerTask,
+  WorkerTaskKind,
+  TaskWorkerEntity,
+} from "./entity-worker";
+export {
+  dispatchWorkerTask,
+  subscribeTaskWorkerDispatches,
+} from "./single-runner";
 
-type BridgeManagedTaskKind = "compute" | "static" | null;
+type BridgeManagedTaskKind = WorkerDispatchKind;
 
 /**
  * Phase 0 Seam Adapter
@@ -190,36 +225,41 @@ const runTaskBridgeExecution = async (
   hijackState?: HijackState,
   legacyExecuteTaskFn?: LegacyExecuteTaskFn,
 ) => {
-  try {
-    await executeBridgeAttempt(
-      adapter,
-      db,
-      runId,
-      desc,
-      descriptorMap,
-      inputTable,
-      eventBus,
-      toolConfig,
-      workflowName,
-      cacheEnabled,
-      bridgeManagedExecution,
-      {
-        attempt: 1,
-        idempotencyKey: bridgeKey,
-      },
-      signal,
-      disabledAgents,
-      runAbortController,
-      hijackState,
-      legacyExecuteTaskFn,
-    );
-    return { terminal: true as const };
-  } catch (error) {
-    if (error instanceof RetriableTaskFailure) {
-      return { terminal: false as const };
-    }
-    throw error;
-  }
+  return dispatchWorkerTask(
+    makeWorkerTask(bridgeKey, workflowName, runId, desc, bridgeManagedExecution),
+    async () => {
+      try {
+        await executeBridgeAttempt(
+          adapter,
+          db,
+          runId,
+          desc,
+          descriptorMap,
+          inputTable,
+          eventBus,
+          toolConfig,
+          workflowName,
+          cacheEnabled,
+          bridgeManagedExecution,
+          {
+            attempt: 1,
+            idempotencyKey: bridgeKey,
+          },
+          signal,
+          disabledAgents,
+          runAbortController,
+          hijackState,
+          legacyExecuteTaskFn,
+        );
+        return { terminal: true as const };
+      } catch (error) {
+        if (error instanceof RetriableTaskFailure) {
+          return { terminal: false as const };
+        }
+        throw error;
+      }
+    },
+  );
 };
 
 export const executeTaskBridge = (
@@ -244,9 +284,9 @@ export const executeTaskBridge = (
       ? "compute"
       : canExecuteBridgeManagedStaticTask(desc, cacheEnabled)
         ? "static"
-        : null;
+        : "legacy";
 
-  if (bridgeManagedExecution === null && typeof legacyExecuteTaskFn !== "function") {
+  if (bridgeManagedExecution === "legacy" && typeof legacyExecuteTaskFn !== "function") {
     return Promise.reject(new TypeError("legacyExecuteTaskFn must be provided"));
   }
 

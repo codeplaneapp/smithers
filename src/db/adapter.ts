@@ -5,6 +5,10 @@ import { isRunHeartbeatFresh } from "../engine";
 import { fromPromise, fromSync } from "../effect/interop";
 import { runPromise } from "../effect/runtime";
 import { getSqlMessageStorage, type SqlMessageStorage } from "../effect/sql-message-storage";
+import type {
+  HumanRequestKind,
+  HumanRequestStatus,
+} from "../human-requests";
 import {
   dbQueryDuration,
   dbTransactionDuration,
@@ -72,6 +76,29 @@ export type SignalQuery = {
   correlationId?: string | null;
   receivedAfterMs?: number;
   limit?: number;
+};
+
+export type HumanRequestRow = {
+  requestId: string;
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  kind: HumanRequestKind;
+  status: HumanRequestStatus;
+  prompt: string;
+  schemaJson: string | null;
+  optionsJson: string | null;
+  responseJson: string | null;
+  requestedAtMs: number;
+  answeredAtMs: number | null;
+  answeredBy: string | null;
+  timeoutAtMs: number | null;
+};
+
+export type PendingHumanRequestRow = HumanRequestRow & {
+  workflowName: string | null;
+  runStatus: string | null;
+  nodeLabel: string | null;
 };
 
 const FRAME_XML_CACHE_MAX = 512;
@@ -1281,6 +1308,124 @@ export class SmithersDb {
 
   getApproval(runId: string, nodeId: string, iteration: number) {
     return runPromise(this.getApprovalEffect(runId, nodeId, iteration));
+  }
+
+  insertHumanRequestEffect(row: HumanRequestRow) {
+    return this.writeEffect(`insert human request ${row.requestId}`, () =>
+      this.internalStorage.insertIgnore("_smithers_human_requests", row),
+    );
+  }
+
+  insertHumanRequest(row: HumanRequestRow) {
+    return runPromise(this.insertHumanRequestEffect(row));
+  }
+
+  getHumanRequestEffect(requestId: string) {
+    return this.readEffect(`get human request ${requestId}`, () =>
+      this.internalStorage.queryOne<HumanRequestRow>(
+        `SELECT *
+         FROM _smithers_human_requests
+         WHERE request_id = ?
+         LIMIT 1`,
+        [requestId],
+      ),
+    );
+  }
+
+  getHumanRequest(requestId: string) {
+    return runPromise(this.getHumanRequestEffect(requestId));
+  }
+
+  listPendingHumanRequestsEffect() {
+    return this.readEffect("list pending human requests", () =>
+      this.internalStorage.queryAll<PendingHumanRequestRow>(
+        `SELECT
+           h.request_id,
+           h.run_id,
+           h.node_id,
+           h.iteration,
+           h.kind,
+           h.status,
+           h.prompt,
+           h.schema_json,
+           h.options_json,
+           h.response_json,
+           h.requested_at_ms,
+           h.answered_at_ms,
+           h.answered_by,
+           h.timeout_at_ms,
+           r.workflow_name,
+           r.status AS run_status,
+           n.label AS node_label
+         FROM _smithers_human_requests h
+         LEFT JOIN _smithers_runs r ON h.run_id = r.run_id
+         LEFT JOIN _smithers_nodes n
+           ON h.run_id = n.run_id
+          AND h.node_id = n.node_id
+          AND h.iteration = n.iteration
+         WHERE h.status = ?
+         ORDER BY h.requested_at_ms ASC, h.run_id, h.node_id, h.iteration`,
+        ["pending"],
+      ),
+    );
+  }
+
+  listPendingHumanRequests() {
+    return runPromise(this.listPendingHumanRequestsEffect());
+  }
+
+  answerHumanRequestEffect(
+    requestId: string,
+    responseJson: string,
+    answeredAtMs: number,
+    answeredBy?: string | null,
+  ) {
+    return this.writeEffect(`answer human request ${requestId}`, () =>
+      this.internalStorage.updateWhere(
+        "_smithers_human_requests",
+        {
+          status: "answered",
+          responseJson,
+          answeredAtMs,
+          answeredBy: answeredBy ?? null,
+        },
+        "request_id = ? AND status = ?",
+        [requestId, "pending"],
+      ),
+    );
+  }
+
+  answerHumanRequest(
+    requestId: string,
+    responseJson: string,
+    answeredAtMs: number,
+    answeredBy?: string | null,
+  ) {
+    return runPromise(
+      this.answerHumanRequestEffect(
+        requestId,
+        responseJson,
+        answeredAtMs,
+        answeredBy,
+      ),
+    );
+  }
+
+  cancelHumanRequestEffect(requestId: string) {
+    return this.writeEffect(`cancel human request ${requestId}`, () =>
+      this.internalStorage.updateWhere(
+        "_smithers_human_requests",
+        {
+          status: "cancelled",
+        },
+        "request_id = ? AND status = ?",
+        [requestId, "pending"],
+      ),
+    );
+  }
+
+  cancelHumanRequest(requestId: string) {
+    return runPromise(this.cancelHumanRequestEffect(requestId));
   }
 
   insertSignalWithNextSeqEffect(row: {
