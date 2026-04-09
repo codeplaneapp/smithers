@@ -84,15 +84,24 @@ import type { HotReloadOptions } from "../RunOptions";
 import { spawn as nodeSpawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { platform } from "node:os";
+import {
+  annotateSmithersTrace,
+  smithersSpanNames,
+  withSmithersSpan,
+} from "../observability";
 import { withTaskRuntime } from "../effect/task-runtime";
 import { hashCapabilityRegistry } from "../agents/capability-registry";
 import {
   cancelPendingTimersBridge,
+  executeTaskBridge,
   executeTaskBridgeEffect,
   isBridgeManagedTimerTask as isTimerTask,
   resolveDeferredTaskStateBridge,
 } from "../effect/workflow-bridge";
-import { runWorkflowWithMakeBridge } from "../effect/workflow-make-bridge";
+import {
+  createSchedulerWakeQueue,
+  runWorkflowWithMakeBridge,
+} from "../effect/workflow-make-bridge";
 import {
   createWorkflowVersioningRuntime,
   getWorkflowPatchDecisions,
@@ -2465,6 +2474,23 @@ export async function legacyExecuteTask(
   })();
   const attemptNo = (attempts[0]?.attempt ?? 0) + 1;
   updateCurrentCorrelationContext({ attempt: attemptNo });
+  const taskSpanContext = {
+    runId,
+    workflowName,
+    nodeId: desc.nodeId,
+    iteration: desc.iteration,
+    attempt: attemptNo,
+    nodeLabel: desc.label ?? null,
+  } as const;
+  const annotateTaskSpan = (
+    attributes: Readonly<Record<string, unknown>>,
+  ) =>
+    runPromise(
+      annotateSmithersTrace({
+        ...taskSpanContext,
+        ...attributes,
+      }),
+    );
   const taskAbortController = new AbortController();
   const removeAbortForwarder = wireAbortSignal(taskAbortController, signal);
   const taskSignal = taskAbortController.signal;
@@ -2698,6 +2724,7 @@ export async function legacyExecuteTask(
       hasAgent: Boolean(desc.agent),
       cacheEnabled: stepCacheEnabled,
     }, "engine:task");
+    await annotateTaskSpan({ status: "running" });
     if (desc.heartbeatTimeoutMs) {
       heartbeatWatchdogFiber = runFork(
         Effect.repeat(
@@ -3144,48 +3171,65 @@ export async function legacyExecuteTask(
         // Use fallback agent on retry attempts when available
         let result: any;
         try {
-          result = await runWithToolContext(
-            {
-              db: adapter,
-              runId,
-              nodeId: desc.nodeId,
-              iteration: desc.iteration,
-              attempt: attemptNo,
-              rootDir: taskRoot,
-              allowNetwork: toolConfig.allowNetwork,
-              maxOutputBytes: toolConfig.maxOutputBytes,
-              timeoutMs: desc.timeoutMs ?? toolConfig.toolTimeoutMs,
-              seq: 0,
-              emitEvent: (event) => eventBus.emitEventQueued(event),
-            },
-            async () => {
-              const agentCall = guidedResumeMessages?.length
-                ? {
-                    messages: guidedResumeMessages,
-                  }
-                : {
-                    prompt: effectivePrompt,
-                  };
-              return (effectiveAgent as any).generate({
-                options: undefined as any,
-                abortSignal: taskSignal,
-                ...agentCall,
-                resumeSession,
-                lastHeartbeat: previousHeartbeat,
-                timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
-                onStdout: (text: string) => {
-                  recordInternalHeartbeat();
-                  emitOutput(text, "stdout");
-                },
-                onStderr: (text: string) => {
-                  recordInternalHeartbeat();
-                  emitOutput(text, "stderr");
-                },
-                onEvent: handleAgentEvent,
-                onStepFinish: handleSdkStepFinish,
-                outputSchema: desc.outputSchema,
-              });
-            },
+          result = await runPromise(
+            withSmithersSpan(
+              smithersSpanNames.agent,
+              Effect.promise(() =>
+                runWithToolContext(
+                  {
+                    db: adapter,
+                    runId,
+                    nodeId: desc.nodeId,
+                    iteration: desc.iteration,
+                    attempt: attemptNo,
+                    rootDir: taskRoot,
+                    allowNetwork: toolConfig.allowNetwork,
+                    maxOutputBytes: toolConfig.maxOutputBytes,
+                    timeoutMs: desc.timeoutMs ?? toolConfig.toolTimeoutMs,
+                    seq: 0,
+                    emitEvent: (event) => eventBus.emitEventQueued(event),
+                  },
+                  async () => {
+                    const agentCall = guidedResumeMessages?.length
+                      ? {
+                          messages: guidedResumeMessages,
+                        }
+                      : {
+                          prompt: effectivePrompt,
+                        };
+                    return (effectiveAgent as any).generate({
+                      options: undefined as any,
+                      abortSignal: taskSignal,
+                      ...agentCall,
+                      resumeSession,
+                      lastHeartbeat: previousHeartbeat,
+                      timeout: desc.timeoutMs
+                        ? { totalMs: desc.timeoutMs }
+                        : undefined,
+                      onStdout: (text: string) => {
+                        recordInternalHeartbeat();
+                        emitOutput(text, "stdout");
+                      },
+                      onStderr: (text: string) => {
+                        recordInternalHeartbeat();
+                        emitOutput(text, "stderr");
+                      },
+                      onEvent: handleAgentEvent,
+                      onStepFinish: handleSdkStepFinish,
+                      outputSchema: desc.outputSchema,
+                    });
+                  },
+                ),
+              ),
+              {
+                ...taskSpanContext,
+                agent:
+                  attemptMeta.agentId ??
+                  attemptMeta.agentEngine ??
+                  "unknown",
+                model: attemptMeta.agentModel,
+              },
+            ),
           );
         } finally {
           if (hijackPollingInterval) {
@@ -3822,6 +3866,9 @@ export async function legacyExecuteTask(
       Metric.update(nodeDuration, taskElapsedMs),
       Metric.update(attemptDuration, taskElapsedMs),
     ], { discard: true }));
+    await annotateTaskSpan({
+      status: "finished",
+    });
 
     // Fire async scorers if the task has any attached
     if (desc.scorers && Object.keys(desc.scorers).length > 0) {
@@ -3913,6 +3960,9 @@ export async function legacyExecuteTask(
         reason: "aborted",
         timestampMs: nowMs(),
       });
+      await annotateTaskSpan({
+        status: "cancelled",
+      });
       logInfo("task execution cancelled", {
         runId,
         nodeId: desc.nodeId,
@@ -3999,6 +4049,9 @@ export async function legacyExecuteTask(
       attempt: attemptNo,
       error: errorToJson(effectiveError),
       timestampMs: nowMs(),
+    });
+    await annotateTaskSpan({
+      status: "failed",
     });
 
     const attempts = await adapter.listAttempts(
@@ -4350,9 +4403,23 @@ async function runWorkflowBody<Schema>(
   let onAbortWake = () => {};
   let armHotReloadWakeup = () => {};
   let runOwnedByCurrentProcess = false;
+  const annotateRunSpan = (
+    attributes: Readonly<Record<string, unknown>>,
+  ) =>
+    runPromise(
+      annotateSmithersTrace({
+        runId,
+        ...attributes,
+      }),
+    );
 
   const wakeLock = acquireCaffeinate();
   try {
+    const existingRun = await adapter.getRun(runId);
+    updateCurrentCorrelationContext({
+      parentRunId: opts.parentRunId ?? existingRun?.parentRunId ?? undefined,
+      workflowName: existingRun?.workflowName ?? "workflow",
+    });
     logInfo("starting workflow run", {
       runId,
       workflowPath: resolvedWorkflowPath ?? null,
@@ -4362,10 +4429,9 @@ async function runWorkflowBody<Schema>(
       hotReload: hotOpts.enabled,
       resume: Boolean(opts.resume),
     }, "engine:run");
-    const existingRun = await adapter.getRun(runId);
-    updateCurrentCorrelationContext({
-      parentRunId: opts.parentRunId ?? existingRun?.parentRunId ?? undefined,
-      workflowName: existingRun?.workflowName ?? "workflow",
+    await annotateRunSpan({
+      status: "running",
+      workflowPath: resolvedWorkflowPath ?? null,
     });
     const existingConfig = parseRunConfigJson(existingRun?.configJson);
     const runAuth = opts.auth ?? parseRunAuthContext(existingConfig.auth);
@@ -4592,17 +4658,178 @@ async function runWorkflowBody<Schema>(
     const renderer = new SmithersRenderer();
     let frameNo = (await adapter.getLastFrame(runId))?.frameNo ?? 0;
     let defaultIteration = 0;
-    // Track in-flight task promises across loop iterations so we
-    // wait for them before declaring the run finished.
-    const inflight = new Set<Promise<void>>();
-    // Track mounted task IDs from the previous frame to detect newly
-    // mounted tasks. When a conditional child mounts new tasks after
-    // outputs change, we must re-render instead of finishing.
     let prevMountedTaskIds: Set<string> = new Set();
-    const schedulerWakeQueue = createSchedulerWakeQueue();
-    const notifyScheduler = () => schedulerWakeQueue.notify();
+
+    type ScheduleTrigger =
+      | { type: "initial" }
+      | { type: "task-completed"; nodeId: string; iteration: number }
+      | {
+          type: "external-event";
+          source: "abort" | "approval" | "hot-reload" | "retry" | "signal";
+        };
+    type SchedulerIterationAction =
+      | { type: "await-trigger" }
+      | { type: "continue" }
+      | {
+          type: "dispatch";
+          runnable: TaskDescriptor[];
+          descriptorMap: Map<string, TaskDescriptor>;
+          workflowName: string;
+          cacheEnabled: boolean;
+        }
+      | { type: "schedule-retry"; waitMs: number }
+      | { type: "return"; result: RunBodyResult };
+
+    const triggerQueue = await Effect.runPromise(Queue.unbounded<ScheduleTrigger>());
+    const schedulerTaskKeys = new Set<string>();
+    let schedulerTaskError: unknown = null;
     let hotWaitInFlight = false;
-    onAbortWake = () => notifyScheduler();
+    let scheduledRetryAtMs: number | null = null;
+    let retryWakeFiber: Fiber.RuntimeFiber<void, never> | null = null;
+    const toolConfig = {
+      rootDir,
+      allowNetwork,
+      maxOutputBytes,
+      toolTimeoutMs,
+    };
+    const schedulerExecutionConcurrency = Math.max(1, maxConcurrency);
+    const offerSchedulerTrigger = (trigger: ScheduleTrigger) => {
+      triggerQueue.unsafeOffer(trigger);
+    };
+    const makeSchedulerTaskKey = (
+      task: Pick<TaskDescriptor, "nodeId" | "iteration">,
+    ) => buildStateKey(task.nodeId, task.iteration);
+    const readExternalSchedulerState = async () => {
+      const pendingApprovals = await adapter.listPendingApprovals(runId);
+      const [latestSignal] = await adapter.listSignals(runId, { limit: 1 });
+      return {
+        latestSignalSeq: latestSignal?.seq ?? 0,
+        pendingApprovalFingerprint: pendingApprovals
+          .map(
+            (approval: any) =>
+              `${approval.nodeId ?? ""}:${approval.iteration ?? 0}:${approval.requestedAtMs ?? 0}`,
+          )
+          .sort()
+          .join("|"),
+      };
+    };
+    const takeSchedulerTriggerBatchEffect = Effect.gen(function* () {
+      const waitStart = performance.now();
+      const first = yield* triggerQueue.take;
+      const rest = yield* triggerQueue.takeAll;
+      yield* Metric.update(schedulerWaitDuration, performance.now() - waitStart);
+      return [first, ...Chunk.toArray(rest)];
+    });
+    const clearRetryWakeEffect = Effect.gen(function* () {
+      if (!retryWakeFiber) {
+        scheduledRetryAtMs = null;
+        return;
+      }
+      const fiber = retryWakeFiber;
+      retryWakeFiber = null;
+      scheduledRetryAtMs = null;
+      yield* Fiber.interrupt(fiber);
+    });
+    const scheduleRetryWakeEffect = (waitMs: number) =>
+      Effect.gen(function* () {
+        if (waitMs <= 0) {
+          offerSchedulerTrigger({
+            type: "external-event",
+            source: "retry",
+          });
+          return;
+        }
+
+        const retryAtMs = nowMs() + waitMs;
+        if (retryWakeFiber && scheduledRetryAtMs === retryAtMs) {
+          return;
+        }
+
+        yield* clearRetryWakeEffect();
+        scheduledRetryAtMs = retryAtMs;
+        retryWakeFiber = yield* Effect.forkScoped(
+          Effect.sleep(Duration.millis(waitMs)).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                if (scheduledRetryAtMs === retryAtMs) {
+                  scheduledRetryAtMs = null;
+                  retryWakeFiber = null;
+                }
+                offerSchedulerTrigger({
+                  type: "external-event",
+                  source: "retry",
+                });
+              }),
+            ),
+            Effect.asVoid,
+          ),
+        );
+      });
+    const watchExternalSchedulerEventsEffect = Effect.gen(function* () {
+      const initialState = yield* Effect.either(
+        fromPromise(
+          "read scheduler external event state",
+          readExternalSchedulerState,
+        ),
+      );
+      let previous =
+        initialState._tag === "Right"
+          ? initialState.right
+          : {
+              latestSignalSeq: 0,
+              pendingApprovalFingerprint: "",
+            };
+      if (initialState._tag === "Left") {
+        yield* Effect.sync(() => {
+          logWarning("failed to initialize external scheduler watcher", {
+            runId,
+            error: initialState.left.message,
+          }, "engine:run");
+        });
+      }
+
+      while (true) {
+        yield* Effect.sleep(Duration.millis(SCHEDULER_EXTERNAL_EVENT_POLL_MS));
+        const nextState = yield* Effect.either(
+          fromPromise(
+            "poll scheduler external event state",
+            readExternalSchedulerState,
+          ),
+        );
+        if (nextState._tag === "Left") {
+          yield* Effect.sync(() => {
+            logWarning("scheduler external event poll failed", {
+              runId,
+              error: nextState.left.message,
+            }, "engine:run");
+          });
+          continue;
+        }
+
+        if (nextState.right.latestSignalSeq !== previous.latestSignalSeq) {
+          offerSchedulerTrigger({
+            type: "external-event",
+            source: "signal",
+          });
+        }
+        if (
+          nextState.right.pendingApprovalFingerprint !==
+          previous.pendingApprovalFingerprint
+        ) {
+          offerSchedulerTrigger({
+            type: "external-event",
+            source: "approval",
+          });
+        }
+        previous = nextState.right;
+      }
+    }).pipe(Effect.interruptible);
+
+    onAbortWake = () =>
+      offerSchedulerTrigger({
+        type: "external-event",
+        source: "abort",
+      });
     runAbortController.signal.addEventListener("abort", onAbortWake);
     armHotReloadWakeup = () => {
       if (!hotController || hotWaitInFlight) {
@@ -4613,7 +4840,10 @@ async function runWorkflowBody<Schema>(
         .wait()
         .then((files) => {
           hotPendingFiles = files;
-          notifyScheduler();
+          offerSchedulerTrigger({
+            type: "external-event",
+            source: "hot-reload",
+          });
         })
         .catch(() => undefined)
         .finally(() => {
@@ -4649,7 +4879,7 @@ async function runWorkflowBody<Schema>(
       armHotReloadWakeup();
     }
 
-    while (true) {
+    const runSchedulerIteration = async (): Promise<SchedulerIterationAction> => {
       if (runAbortController.signal.aborted) {
         logInfo("run abort observed in scheduler loop", {
           runId,
