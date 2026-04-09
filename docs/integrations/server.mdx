@@ -54,6 +54,19 @@ type ServerOptions = {
 
 Returns an `http.Server` instance, already listening.
 
+### Effect API
+
+`startServerEffect` returns an `Effect` wrapping the server startup for use inside Effect-based applications.
+
+```ts
+import { startServerEffect } from "smithers-orchestrator";
+import { Effect } from "effect";
+
+const program = startServerEffect({ port: 7331, db, rootDir: process.cwd() }).pipe(
+  Effect.tap((server) => Effect.logInfo(`Server listening on port ${server.address()}`)),
+);
+```
+
 ---
 
 ## Authentication
@@ -271,6 +284,66 @@ List all runs. Requires server-level `db`.
 
 Returns 400 `DB_NOT_CONFIGURED` if no database was provided.
 
+### GET /v1/approvals
+
+List all pending approvals across runs. Requires server-level `db`.
+
+```json
+{
+  "approvals": [
+    {
+      "runId": "smi_abc123",
+      "nodeId": "deploy",
+      "iteration": 0,
+      "workflowName": "bugfix",
+      "runStatus": "waiting-approval",
+      "label": "deploy",
+      "requestTitle": "deploy",
+      "requestSummary": null,
+      "requestedAtMs": 1707500100000,
+      "waitingMs": 45000,
+      "note": null,
+      "decidedBy": null
+    }
+  ]
+}
+```
+
+Results are sorted by `requestedAtMs` ascending (oldest first). Returns 400 `DB_NOT_CONFIGURED` if no database was provided.
+
+Also accessible at legacy paths: `GET /v1/approval/list`, `GET /approval/list`, `GET /approvals`.
+
+### POST /v1/runs/:runId/signals/:signalName
+
+Deliver a named signal to a running workflow.
+
+```ts
+{
+  data?: Record<string, any>;    // Signal payload (default: {})
+  correlationId?: string;        // Optional correlation ID
+  receivedBy?: string;           // Optional actor name
+}
+```
+
+Response: `{ "delivered": true }` (or `false` if the run has no listener for that signal name).
+
+| Status | Code | Condition |
+|---|---|---|
+| 404 | `NOT_FOUND` | Run not found |
+
+Also accessible at legacy path: `POST /signal/:runId/:signalName`.
+
+### GET /health
+
+Liveness probe. Returns `200 OK` with a JSON body when the server is up.
+
+```bash
+curl http://localhost:7331/health
+# {"ok":true}
+```
+
+No authentication is required for this endpoint — it is exempt from `authToken` checks.
+
 ---
 
 ## Error Response Format
@@ -286,6 +359,26 @@ Returns 400 `DB_NOT_CONFIGURED` if no database was provided.
 ```
 
 Unhandled errors return 500 with code `SERVER_ERROR`.
+
+---
+
+## Hot Reload
+
+Each `POST /v1/runs` and `POST /v1/runs/:runId/resume` request performs a fresh load of the workflow file. The server hashes the source, writes a content-addressed shadow copy, and imports it via a unique URL. This means the running file on disk can be updated between requests without restarting the server — each new run picks up the latest version automatically.
+
+The shadow file is named `.${workflowName}.smithers-${sha1hash}.tsx` and lives next to the original. It is safe to delete these files after runs complete.
+
+## Run Heartbeat Tracking
+
+Active runs write a heartbeat timestamp to `_smithers_runs.heartbeat_at_ms` every 5 seconds. The server uses this to distinguish truly running workflows from stale rows left by a previous process crash.
+
+`isRunHeartbeatFresh` returns `false` if the heartbeat is more than 5 seconds old. In that case:
+
+- `POST /v1/runs` with `resume: true` will resume rather than reject the run as already active.
+- `POST /v1/runs/:runId/resume` will resume rather than return `200 { status: "running" }`.
+- `POST /v1/runs/:runId/cancel` returns `409 RUN_NOT_ACTIVE` for stale runs instead of aborting.
+
+On server shutdown, the `close` event fires the abort signal for all active run `AbortController`s, giving workflows a chance to checkpoint before exit.
 
 ---
 

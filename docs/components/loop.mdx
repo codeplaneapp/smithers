@@ -15,6 +15,7 @@ import { Loop } from "smithers-orchestrator";
 | `until` | `boolean` | **(required)** | Stop condition. Re-evaluated each iteration. Loop exits when `true`. |
 | `maxIterations` | `number` | `5` | Maximum iterations. Loop stops regardless of `until`. |
 | `onMaxReached` | `"fail" \| "return-last"` | `"return-last"` | Behavior at limit. `"fail"`: workflow fails. `"return-last"`: keep final output and continue. |
+| `continueAsNewEvery` | `number` | `undefined` | Number of iterations after which the loop triggers a continue-as-new to prevent unbounded workflow history growth. The workflow state is checkpointed and execution resumes in a fresh run with a clean history. |
 | `skipIf` | `boolean` | `false` | Skip the loop entirely. Returns `null`. |
 | `children` | `ReactNode` | `undefined` | Tasks and control-flow components to execute each iteration. |
 

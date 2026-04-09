@@ -1,47 +1,69 @@
 ---
 title: Introduction
-description: Build Smithers workflows with JSX components on top of a durable runtime.
+description: Understand what Smithers is, how the CLI and JSX API fit together, and when the workflow runtime is worth using.
 ---
 
-Smithers is a JSX-first framework for deterministic, resumable AI workflows. Define the workflow as a TypeScript component tree; Smithers handles execution ordering, persistence, approvals, retries, and observability.
+Think of Smithers as a runtime for durable agent work.
 
-## Start Here
+If React turns state into UI, Smithers turns state into executable work. Each render answers one question: given what has already completed, what can run now?
 
-```bash
-bunx smithers-orchestrator init
-```
+That matters because real agent jobs do not stay single-step for long. A useful task becomes:
 
-This creates `.smithers/` with pre-built workflows, shared components, prompt templates, and configuration. Run a seeded workflow:
+- analyze a codebase
+- propose a fix
+- apply the fix
+- run validation
+- ask for approval
+- resume later if the process crashes
 
-```bash
-bunx smithers workflow implement --prompt "Add input validation to the signup form"
-```
+You can script all of that by hand. Most teams do at first. Then the retries, persistence, audit trail, and branching logic start taking over the project. Smithers exists to make that coordination the default instead of the afterthought.
 
-- [Quickstart](/api/quickstart) -- Build a custom workflow from scratch.
-- [Workflows Overview](/concepts/workflows-overview) -- Core principles and execution model.
+## The Three Surfaces
 
-## Concepts
+### CLI
 
-1. [Workflows Overview](/concepts/workflows-overview) -- What workflows are and how execution works.
-2. [Reactivity](/concepts/reactivity) -- How the component model enables plans that evolve.
-3. [Control Flow](/concepts/control-flow) -- Sequential, parallel, conditional, iterative.
-4. [Workflow State](/concepts/workflow-state) -- Data flow between tasks via the context API.
-5. [Agents and Tools](/concepts/agents-and-tools) -- AI agents and built-in tools.
-6. [Suspend and Resume](/concepts/suspend-and-resume) -- Durability, crash recovery, resumability.
-7. [Human-in-the-Loop](/concepts/human-in-the-loop) -- Approval gates and denial policies.
+The CLI is the operations surface. You use it to scaffold workflow packs, launch runs, inspect state, read logs, answer approvals, send signals, and recover from failure.
 
-## Runtime
+Start with [CLI Quickstart](/cli/quickstart) if that is your immediate job.
 
-All workflows share:
+### JSX API
 
-- Durable execution and resumability
-- Retries, timeouts, approval gates
-- SQLite persistence
-- Parallel execution and loops
-- Structured events, metrics, observability
+The JSX API is the authoring surface. You describe the workflow as a tree of `<Workflow>`, `<Task>`, and control-flow components, and Smithers repeatedly renders that tree as outputs become available.
 
-## Next Steps
+Start with [JSX API](/jsx/overview) if you are building workflows.
 
-- [JSX API](/api/overview) -- Component model and authoring layer.
-- [CLI Reference](/cli/overview) -- Run, resume, inspect workflows.
-- [Implement-Review Loop](/guides/review-loop) -- Recommended production pattern.
+### Runtime
+
+The runtime is the durable engine beneath both surfaces. It validates structured output, persists it to SQLite, emits events, and resumes safely after interruption.
+
+Start with [Workflows Overview](/concepts/workflows-overview) if you want the model before the mechanics.
+
+## What Happens During a Run
+
+1. Smithers renders your workflow tree with the current `ctx`.
+2. It finds the tasks that are ready to execute.
+3. It runs those tasks and validates their outputs.
+4. It persists the outputs and runtime metadata to SQLite.
+5. It renders again with the updated state.
+
+That loop continues until the workflow finishes, fails, pauses for human input, or is cancelled.
+
+## When Smithers Is the Right Tool
+
+Use Smithers when:
+
+- order matters across multiple AI or compute steps
+- you need resumability or crash recovery
+- humans must approve or answer questions mid-run
+- different tasks need different models, tools, or policies
+- you want the workflow itself to stay readable and testable
+
+If you only need one prompt and one response, a workflow is probably overkill.
+
+## Read Next
+
+- [Installation](/installation) to get the workflow pack into your project.
+- [Quickstart](/quickstart) for the fastest first run.
+- [CLI Quickstart](/cli/quickstart) to learn the operational flow.
+- [JSX Quickstart](/jsx/quickstart) to build a workflow from scratch.
+- [Workflows Overview](/concepts/workflows-overview) for the mental model.

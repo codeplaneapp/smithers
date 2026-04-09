@@ -74,8 +74,8 @@ export default smithers((ctx) => (
 ## Common Docs
 
 - [Introduction](https://smithers.sh/introduction)
-- [API Overview](https://smithers.sh/api/overview)
-- [API Quickstart](https://smithers.sh/api/quickstart)
+- [JSX API](https://smithers.sh/jsx/overview)
+- [JSX Quickstart](https://smithers.sh/jsx/quickstart)
 - [Execution Model](https://smithers.sh/concepts/execution-model)
 - [Data Model](https://smithers.sh/concepts/data-model)
 - [Workflow Component](https://smithers.sh/components/workflow)

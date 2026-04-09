@@ -1,0 +1,121 @@
+---
+title: CLI Quickstart
+description: "Learn the core Smithers terminal workflow: launch a run, inspect it, read logs, answer approvals, and resume safely."
+---
+
+This page is about using Smithers, not authoring it.
+
+If JSX defines the workflow graph, the CLI is how you actually operate that graph in day-to-day work.
+
+## Before You Start
+
+You need:
+
+- a project with `.smithers/` installed via `bunx smithers-orchestrator init`
+- provider or agent credentials configured for the workflow you want to run
+- a workflow file or a discovered workflow under `.smithers/workflows`
+
+## 1. Start a Run
+
+Run a discovered workflow from the local workflow pack:
+
+```bash
+bunx smithers workflow implement --prompt "Add pagination to the activity feed"
+```
+
+Or run an explicit workflow file:
+
+```bash
+bunx smithers up workflow.tsx --input '{"task":"Add pagination to the activity feed"}'
+```
+
+## 2. Find the Run You Care About
+
+```bash
+bunx smithers ps
+```
+
+This shows recent and active runs. Once you have the run ID, everything else becomes precise.
+
+## 3. Inspect the Run
+
+```bash
+bunx smithers inspect <run-id>
+```
+
+Use `inspect` when you need the structured view: status, current steps, approvals, outputs, retries, and loop state.
+
+## 4. Read the Live Trail
+
+Use logs for lifecycle events:
+
+```bash
+bunx smithers logs <run-id>
+```
+
+Use chat for agent prompts, model replies, and stderr:
+
+```bash
+bunx smithers chat <run-id>
+```
+
+Use `node` when you need one node's details instead of the whole run:
+
+```bash
+bunx smithers node <run-id> <node-id>
+```
+
+## 5. Handle Pauses
+
+If a workflow pauses for approval:
+
+```bash
+bunx smithers approve <run-id>
+# or
+bunx smithers deny <run-id>
+```
+
+If a workflow is waiting on a signal:
+
+```bash
+bunx smithers signal <run-id> --node wait-for-input --value '{"choice":"ship-it"}'
+```
+
+If you are not sure why the run is blocked:
+
+```bash
+bunx smithers why <run-id>
+```
+
+## 6. Resume Safely
+
+If the process exits or your machine restarts, resume the same run ID:
+
+```bash
+bunx smithers up workflow.tsx --run-id <run-id> --resume true
+```
+
+That is the durability story in one command. Completed tasks are not re-run.
+
+## 7. Know When to Switch to JSX
+
+Stay in the CLI when your job is:
+
+- launching workflows
+- inspecting state
+- debugging and recovery
+- approvals, signals, and operations
+
+Switch to JSX when your job is:
+
+- defining tasks and schemas
+- changing workflow structure
+- adding branching, loops, approvals, or subflows
+- building reusable workflow components
+
+## Next Steps
+
+- [CLI Reference](/cli/overview) for the full command surface.
+- [JSX API](/jsx/overview) if you want to build or modify workflows.
+- [Debugging](/guides/debugging) for failure analysis.
+- [Resumability](/guides/resumability) for the crash-recovery model.

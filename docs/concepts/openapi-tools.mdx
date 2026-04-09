@@ -108,6 +108,107 @@ Every OpenAPI tool call emits an `OpenApiToolCalled` event and updates two metri
 
 These integrate with the standard Smithers observability pipeline, so they appear in your logs, Prometheus exports, and OpenTelemetry traces alongside all other tool metrics.
 
+## Synchronous Loading
+
+Two variants exist. The async `createOpenApiTools` and `createOpenApiTool` work with any input -- objects, local files, or remote URLs (fetched via `fetch`). The sync variants `createOpenApiToolsSync` and `createOpenApiToolSync` skip the network fetch step, so they only work with spec objects or local file paths:
+
+```ts
+import { createOpenApiToolsSync } from "smithers-orchestrator";
+
+// Works: spec object already in memory
+const tools = createOpenApiToolsSync(specObject, options);
+
+// Works: local file read synchronously
+const tools = createOpenApiToolsSync("/path/to/openapi.json", options);
+
+// Does not work: sync cannot fetch URLs
+// const tools = createOpenApiToolsSync("https://api.example.com/openapi.json");
+```
+
+Use the sync variant when you are initializing tools at module load time and cannot await.
+
+## Loading a Spec via the Effect Layer
+
+For Effect-native code, `loadSpecEffect` returns an `Effect.Effect<OpenApiSpec>` so you can compose spec loading with your existing Effect pipeline:
+
+```ts
+import { loadSpecEffect } from "smithers-orchestrator/openapi";
+import { Effect } from "effect";
+
+const program = Effect.gen(function* () {
+  const spec = yield* loadSpecEffect("https://api.example.com/openapi.json");
+  // spec is a fully parsed OpenApiSpec object
+});
+```
+
+`loadSpecEffect` resolves URLs via `fetch`, reads local files synchronously, and parses both JSON and YAML. Pass a spec object and it returns immediately.
+
+## Request Body Handling
+
+When an operation has a `requestBody` with `application/json` content, Smithers adds a `body` parameter to the generated Zod schema. The agent fills `body` as a plain object; the execute function serializes it with `JSON.stringify` and sends it with `Content-Type: application/json`.
+
+Required request bodies become required `body` parameters; optional request bodies become optional.
+
+```ts
+// Agent input for a POST /pets operation
+{
+  body: { name: "Fido", species: "dog" }
+}
+// → POST /pets with Content-Type: application/json and body {"name":"Fido","species":"dog"}
+```
+
+Parameters with `in: cookie` are silently skipped -- cookies are not exposed to agents.
+
+## Non-JSON Response Handling
+
+If the API returns a response with a non-JSON content type (anything that does not include `application/json`), the execute function returns the raw response text as a string. The agent receives that string as the tool result and can parse or summarize it as needed.
+
+```ts
+// JSON response → parsed JavaScript object returned to agent
+// text/plain, text/html, etc. → raw string returned to agent
+```
+
+## Error Result Wrapping
+
+When an HTTP call fails (network error, timeout, unexpected exception), the tool does not throw. Instead it returns a structured error object:
+
+```ts
+{
+  error: true,
+  message: "fetch failed: connection refused",
+  status: "failed",
+}
+```
+
+The agent sees this object as the tool result and can decide whether to retry, report the error, or continue with other tools. HTTP 4xx and 5xx responses are not automatically treated as errors -- the agent receives the parsed response body and can inspect the status itself.
+
+## Schema Composition: allOf, anyOf, oneOf
+
+Smithers converts OpenAPI composition keywords to Zod:
+
+| Keyword | Zod equivalent |
+|---------|---------------|
+| `allOf` with one entry | the single entry schema |
+| `allOf` with multiple entries | `z.intersection(schemaA, schemaB)` chained |
+| `oneOf` | `z.union([...variants])` |
+| `anyOf` | `z.union([...variants])` |
+
+Circular `$ref` references are detected and replaced with `z.any()` annotated with the circular reference path.
+
+## Nullable and Default Values
+
+Two OpenAPI schema properties affect the generated Zod schema:
+
+- **`nullable: true`** — wraps the schema with `.nullable()` so the agent can provide `null`
+- **`default: <value>`** — adds `.default(<value>)` so missing inputs fall back to the spec default
+
+These are applied after the base type, before the description:
+
+```ts
+// OpenAPI schema: { type: "string", nullable: true, default: "unknown" }
+// Generated Zod:  z.string().default("unknown").nullable()
+```
+
 ## When to Use OpenAPI Tools
 
 Use them when you have an existing REST API with an OpenAPI spec and you want agents to interact with it. They are particularly good for:

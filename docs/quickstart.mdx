@@ -1,27 +1,44 @@
 ---
 title: Quickstart
-description: Start with the JSX quickstart for Smithers workflows.
+description: "Get Smithers running end to end: scaffold the workflow pack, launch a workflow, inspect the run, and choose your next path."
 ---
 
-## 1. Initialize
+By the end of this page you will have done the four things that matter for a real first run:
+
+1. installed the workflow pack
+2. launched a workflow
+3. inspected the resulting run
+4. chosen whether to go deeper on CLI operations or JSX authoring
+
+## 1. Scaffold the Workflow Pack
 
 ```bash
 bunx smithers-orchestrator init
 ```
 
-Scaffolds `.smithers/` with ready-to-use workflows.
+That creates a local `.smithers/` directory with seeded workflows, shared prompts, reusable components, and agent configuration.
 
-## 2. Run a Workflow
+## 2. Launch a Seeded Workflow
 
 ```bash
 bunx smithers workflow implement --prompt "Add rate limiting to the API"
 ```
 
-## 3. Build Your Own
+This is the fastest way to see Smithers behave like a workflow runtime instead of a library on a shelf.
 
-- [JSX Quickstart](/api/quickstart) -- Build a TSX workflow with `<Task>` components and typed `deps`.
+## 3. Inspect the Run
 
-## Runtime
+Once the workflow starts, use the CLI to see what happened:
+
+```bash
+bunx smithers ps
+bunx smithers inspect <run-id>
+bunx smithers logs <run-id> --tail 20 --follow false
+```
+
+Use `ps` to find the run ID if you do not already have it.
+
+## 4. Understand What You Just Used
 
 Every workflow gets:
 
@@ -30,8 +47,14 @@ Every workflow gets:
 - Retries, approvals, loops
 - Observability and CLI tooling
 
+You just used both Smithers surfaces together:
+
+- the workflow pack gave you runnable workflows
+- the CLI launched, inspected, and reported on the run
+
 ## Next Steps
 
-- [JSX Quickstart](/api/quickstart) -- Build a render-driven TSX workflow from scratch.
-- [Hello World Example](/examples/hello-world) -- Smallest complete workflow.
-- [Review Loop Guide](/guides/review-loop) -- From linear flow to iterative refinement.
+- [CLI Quickstart](/cli/quickstart) to learn the terminal workflow in a more systematic way.
+- [JSX Quickstart](/jsx/quickstart) to build a workflow from scratch.
+- [Hello World Example](/examples/hello-world) to see the smallest complete example.
+- [Review Loop Guide](/guides/review-loop) to move from straight-line flow to iterative refinement.

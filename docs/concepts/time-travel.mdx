@@ -149,6 +149,62 @@ Time travel adds three tables:
 
 The `_smithers_runs` table also gains three columns: `parent_run_id`, `parent_frame_no`, and `branch_label`, making fork relationships queryable directly from the runs table.
 
+## Selecting a Specific Attempt
+
+When you time-travel to a node, by default Smithers picks the most recent attempt. Pass an explicit `attempt` number to target a different one:
+
+```bash
+# Travel back to attempt 2 of the "implement" node
+smithers travel workflow.tsx --run-id abc123 --node implement --attempt 2
+```
+
+In code, this is the `attempt` field on `TimeTravelOptions`. If the specified attempt does not exist, the operation fails with `success: false` and no changes are made.
+
+## Run Reset
+
+The `smithers reset` command resets an entire run back to its starting state without creating a fork. Unlike `smithers travel` (which targets a specific node), a run reset re-queues every node and clears all outputs:
+
+```bash
+# Reset a stalled or failed run to re-execute from scratch
+smithers reset workflow.tsx --run-id abc123
+```
+
+This is a destructive operation on the run itself -- no child run is created. Use `smithers replay` when you want to preserve the original run history alongside the re-execution.
+
+## Metrics
+
+Time travel operations export three metrics:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `smithers.snapshots.captured` | counter | Total snapshots written to the database |
+| `smithers.snapshot.duration_ms` | histogram | Time to serialize and write a single snapshot |
+| `smithers.forks.created` | counter | Total fork operations completed |
+| `smithers.replays.started` | counter | Total replay operations initiated |
+
+These appear in Prometheus exports and OpenTelemetry traces alongside all other Smithers metrics.
+
+## Reset Dependents Toggle
+
+By default, when you time-travel to a specific node, every downstream node that ran after the target attempt is also reset. You can disable cascade reset with `--no-deps`:
+
+```bash
+# Reset only the "analyze" node, leave its dependents as-is
+smithers travel workflow.tsx --run-id abc123 --node analyze --no-deps
+```
+
+In code, set `resetDependents: false` on `TimeTravelOptions`. This is useful when you want to re-run a single task without disturbing work that is downstream but was not actually affected by the target node's output.
+
+When `resetDependents` is `true` (the default), Smithers identifies all nodes whose attempts started at or after the target attempt's start timestamp and resets them too.
+
+## Frame History Truncation on Revert
+
+When a time-travel operation completes, Smithers truncates the frame log to match. All frames with a `created_at_ms` after the target attempt's start timestamp are deleted from `_smithers_frames`. This keeps the frame history consistent with the reset node states -- if you render the workflow after time travel, the frame log reflects the point in time you reverted to.
+
+## Snapshot Restoration on Resume
+
+When a suspended run resumes (for example, after a `<WaitForEvent>` unblocks), the engine calls `restoreDurableStateFromSnapshot` before re-entering the render loop. It loads the most recent snapshot for the run, re-inserts the input row, and rebuilds node state from the snapshot data. This means a resumed run does not need to replay the entire event log -- it picks up from the last committed snapshot.
+
 ## Events
 
 Three new event types track time travel operations:

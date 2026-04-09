@@ -125,6 +125,96 @@ const pipeline = createRagPipeline({
 
 Different namespaces share the same SQLite table but queries only search within their namespace.
 
+## Document Format Detection
+
+When you call `createDocument(content)`, Smithers auto-detects the format so the chunker can split intelligently:
+
+| Detection rule | Assigned format |
+|---------------|-----------------|
+| Content starts with `{` or `[` and is valid JSON | `json` |
+| Content starts with `<!` or `<html` | `html` |
+| Content has a line starting with one to six `#` characters | `markdown` |
+| Everything else | `text` |
+
+You can override auto-detection by passing `format` explicitly:
+
+```ts
+const doc = createDocument(content, { format: "markdown" });
+```
+
+`loadDocument(path)` uses the file extension (`.md`, `.mdx`, `.html`, `.htm`, `.json`) as a hint before inspecting the content, so the chunker uses heading-aware splitting for Markdown files even if the heading markers are uncommon.
+
+## Deleting Vectors
+
+Remove specific chunks from the vector store by ID:
+
+```ts
+await store.delete(["chunk-id-1", "chunk-id-2"]);
+```
+
+Passing an empty array is a no-op. Use this to keep the store current when source documents are updated or removed.
+
+## Counting Vectors
+
+Check how many chunks are stored in a namespace:
+
+```ts
+const total = await store.count();            // default namespace
+const apiDocs = await store.count("api-docs"); // specific namespace
+```
+
+Useful for verifying that ingestion completed and for monitoring store growth over time.
+
+## Query Filters
+
+`VectorQueryOptions` accepts an optional `filter` map that is passed through to the store implementation. The SQLite store does not apply metadata filters during the SQL query (it scores all rows and sorts), but custom store implementations can use `filter` to pre-select rows:
+
+```ts
+const results = await store.query(queryVector, {
+  topK: 5,
+  namespace: "api-docs",
+  filter: { source: "architecture.md" },
+});
+```
+
+When using the default SQLite store, include relevant metadata fields in the document itself and filter the returned results in application code.
+
+## Effect Service Layer
+
+For Effect-native workflows, a `RagService` Effect layer wraps the pipeline:
+
+```ts
+import { RagService, createRagServiceLayer, retrieve, ingest } from "smithers-orchestrator/rag";
+import { Effect } from "effect";
+
+const layer = createRagServiceLayer({
+  vectorStore: store,
+  embeddingModel: model,
+  chunkOptions: { strategy: "markdown" },
+});
+
+const program = Effect.gen(function* () {
+  yield* ingest([doc]);
+  const results = yield* retrieve("How does auth work?", 5);
+  return results;
+}).pipe(Effect.provide(layer));
+```
+
+`ingest` and `retrieve` are convenience functions that pull `RagService` from Effect context automatically.
+
+## Observability Metrics
+
+RAG operations export four metrics:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `smithers.rag.ingest_total` | counter | Total documents ingested (incremented per `ingest` call by document count) |
+| `smithers.rag.retrieve_total` | counter | Total retrieval queries executed |
+| `smithers.rag.retrieve_duration_ms` | histogram | End-to-end retrieval latency (embed + query) |
+| `smithers.rag.embed_duration_ms` | histogram | Time to embed a batch of chunks |
+
+These integrate with the standard Smithers observability pipeline and appear in Prometheus exports and OpenTelemetry traces.
+
 ## CLI
 
 Ingest files and query from the command line:

@@ -15,6 +15,7 @@ export interface DocsConfig {
     global?: {
       anchors?: unknown[];
     };
+    groups?: unknown[];
     tabs?: unknown[];
   };
 }
@@ -31,6 +32,11 @@ export interface DocsPage {
 export interface DocsTabLink {
   label: string;
   slug: string;
+}
+
+export interface DocsNavSection {
+  label: string;
+  slugs: string[];
 }
 
 export function collectPageSlugs(node: unknown, pages = new Set<string>()) {
@@ -51,6 +57,9 @@ export function collectPageSlugs(node: unknown, pages = new Set<string>()) {
   }
 
   const record = node as Record<string, unknown>;
+  if (typeof record.root === "string") {
+    pages.add(record.root);
+  }
   collectPageSlugs(record.pages, pages);
   collectPageSlugs(record.groups, pages);
   collectPageSlugs(record.tabs, pages);
@@ -79,6 +88,7 @@ export function firstPageInNode(node: unknown): string | undefined {
 
   const record = node as Record<string, unknown>;
   return (
+    (typeof record.root === "string" ? record.root : undefined) ??
     firstPageInNode(record.pages) ??
     firstPageInNode(record.groups) ??
     firstPageInNode(record.tabs) ??
@@ -133,9 +143,51 @@ export function getDocsPageSlugs(rootDir = process.cwd()) {
   return Array.from(
     collectPageSlugs([
       config.navigation?.global?.anchors ?? [],
+      config.navigation?.groups ?? [],
       config.navigation?.tabs ?? [],
     ]),
   );
+}
+
+export function getDocsNavigationSections(rootDir = process.cwd()): DocsNavSection[] {
+  const config = loadDocsConfig(rootDir);
+  const sections: DocsNavSection[] = [];
+
+  const anchors = Array.from(
+    collectPageSlugs(config.navigation?.global?.anchors ?? []),
+  );
+  if (anchors.length > 0) {
+    sections.push({ label: "Start Here", slugs: anchors });
+  }
+
+  const groups = Array.isArray(config.navigation?.groups)
+    ? config.navigation?.groups
+    : [];
+  for (const entry of groups) {
+    const record = entry as Record<string, unknown>;
+    const label = typeof record.group === "string" ? record.group : "";
+    const slugs = Array.from(collectPageSlugs(record.pages));
+    if (!label || slugs.length === 0) {
+      continue;
+    }
+    sections.push({ label, slugs });
+  }
+
+  if (sections.length > 0) {
+    return sections;
+  }
+
+  const tabs = Array.isArray(config.navigation?.tabs)
+    ? config.navigation?.tabs
+    : [];
+  return tabs
+    .map((entry) => {
+      const record = entry as Record<string, unknown>;
+      const label = typeof record.tab === "string" ? record.tab : "";
+      const slugs = Array.from(collectPageSlugs(record.groups));
+      return label && slugs.length > 0 ? { label, slugs } : null;
+    })
+    .filter((entry): entry is DocsNavSection => entry !== null);
 }
 
 export function loadDocPage(slug: string, rootDir = process.cwd()): DocsPage {

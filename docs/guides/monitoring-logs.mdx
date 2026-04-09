@@ -83,17 +83,27 @@ import { smithersMetrics } from "smithers-orchestrator/observability";
 
 | Category | Metrics |
 |---|---|
-| Runs | `runsTotal`, `activeRuns`, `runsResumedTotal`, `runsFinishedTotal`, `runsFailedTotal`, `runsCancelledTotal` |
+| Runs | `runsTotal`, `activeRuns`, `runsResumedTotal`, `runsFinishedTotal`, `runsFailedTotal`, `runsCancelledTotal`, `runsContinuedTotal` |
 | Nodes | `nodesStarted`, `nodesFinished`, `nodesFailed`, `activeNodes`, `nodeRetriesTotal` |
 | Duration | `nodeDuration`, `attemptDuration`, `runDuration` |
 | Tools | `toolCallsTotal`, `toolDuration`, `toolCallErrorsTotal`, `toolOutputTruncatedTotal` |
 | Cache | `cacheHits`, `cacheMisses` |
 | Database | `dbQueryDuration`, `dbRetries` |
+| Database transactions | `dbTransactionDuration`, `dbTransactionRetries`, `dbTransactionRollbacks` |
 | Scheduler | `schedulerQueueDepth`, `schedulerConcurrencyUtilization`, `schedulerWaitDuration` |
 | Approvals | `approvalsRequested`, `approvalsGranted`, `approvalsDenied`, `approvalPending`, `approvalWaitDuration` |
-| Tokens | `tokensInputTotal`, `tokensOutputTotal`, `tokensCacheReadTotal`, `tokensCacheWriteTotal`, `tokensReasoningTotal` |
+| Async / external wait | `externalWaitAsyncPending` |
+| Timers | `timersCreated`, `timersFired`, `timersCancelled`, `timersPending`, `timerDelayDuration` |
+| Tokens | `tokensInputTotal`, `tokensOutputTotal`, `tokensCacheReadTotal`, `tokensCacheWriteTotal`, `tokensReasoningTotal`, `tokensInputPerCall`, `tokensOutputPerCall` |
 | HTTP | `httpRequests`, `httpRequestDuration` |
 | Hot reload | `hotReloads`, `hotReloadFailures`, `hotReloadDuration` |
+| Sandbox | `sandboxCreatedTotal`, `sandboxCompletedTotal`, `sandboxActive`, `sandboxDurationMs` |
+| Sandbox transport | `sandboxTransportDurationMs`, `sandboxBundleSizeBytes`, `sandboxPatchCount` |
+| Prompt size | `promptSizeBytes` |
+| Response size | `responseSizeBytes` |
+| Run ancestry depth | `runsAncestryDepth` |
+| Continue-as-new state | `runsCarriedStateBytes` |
+| Scorer events | `scorerEventsStarted`, `scorerEventsFinished`, `scorerEventsFailed` |
 | VCS | `vcsDuration` |
 | Process | `processUptimeSeconds`, `processMemoryRssBytes`, `processHeapUsedBytes` |
 | Errors | `errorsTotal`, `eventsEmittedTotal` |

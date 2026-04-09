@@ -108,6 +108,32 @@ When the human provides invalid JSON (wrong shape, missing fields, wrong types),
 
 If the human cannot provide valid input within `maxAttempts`, the task fails.
 
+## Prompt fallback
+
+When the task meta is read back from the database (for example by a UI or the CLI), the display prompt is resolved with a fallback chain:
+
+1. The `prompt` prop value rendered to plain text at component creation time is stored in `meta.prompt`.
+2. At display time, `getHumanTaskPrompt(meta, fallback)` returns `meta.prompt` if it is a non-empty string, otherwise it returns the provided `fallback` string.
+3. If `prompt` is a React element (e.g. an MDX component), it is rendered to markdown before storage via `renderPromptToText`. The result is what humans see; no JSX or HTML tags reach the UI.
+
+This means a `<HumanTask>` always has a stable text representation of its prompt regardless of whether the original JSX tree is still in scope.
+
+## Request ID generation
+
+Each `<HumanTask>` creates a human request record identified by a deterministic ID:
+
+```
+human:<runId>:<nodeId>:<iteration>
+```
+
+The ID is built by `buildHumanRequestId(runId, nodeId, iteration)` and is stable across retries within the same iteration. It is also used to link the human request record to the corresponding approval record: when a human submits input via `smithers approve`, the compute function looks up both records by this ID, prefers `humanRequest.responseJson` if present, and falls back to `approval.note` for backwards compatibility with approval-only submissions.
+
+## Durable deferred resolution
+
+`<HumanTask>` uses the same durable deferred mechanism as `<Approval>`. When the node enters `waiting-approval` state, an `@effect/workflow DurableDeferred` is created and awaited by the executing task fiber. The deferred is keyed to the run, node, and iteration, so it survives process restarts: if the worker crashes while waiting, the next worker that picks up the task will re-await the same deferred and receive the resolution as soon as a human submits input.
+
+When `smithers approve` is called, `bridgeApprovalResolve` resolves the deferred, which unblocks the awaiting fiber and lets the compute function proceed to read and validate the human input. No polling is needed.
+
 ## Behavior
 
 - Internally creates a `smithers:task` host element with `needsApproval: true` and a compute function that reads human input from the database.

@@ -105,17 +105,80 @@ This is an escape hatch, not the default path. If `createSmithers(...)` can expr
 
 Open your database and you will see tables prefixed with `_smithers_`. Do not be alarmed. These are Smithers' own operational tables:
 
-- runs
-- node state
-- task attempts
-- render frames
-- approvals
-- cache entries
-- tool-call logs
-- event journal
-- loop state
+| Table | Purpose |
+|-------|---------|
+| `_smithers_runs` | One row per workflow run. Tracks status, heartbeat, VCS revision, and error. |
+| `_smithers_nodes` | Current state of each task node within a run (pending, running, finished, failed). |
+| `_smithers_attempts` | Every execution attempt for every node, including start/finish timestamps and error detail. |
+| `_smithers_frames` | The rendered JSX tree at each commit boundary, stored as serialized XML. |
+| `_smithers_approvals` | Approval requests and decisions for tasks gated by `<Approval>`. |
+| `_smithers_human_requests` | Human-in-the-loop requests (form fills, confirmations) and their responses. |
+| `_smithers_cache` | Cached task outputs keyed by workflow, node, schema signature, and agent signature. |
+| `_smithers_sandboxes` | Sandbox session metadata for bubblewrap and container-based execution. |
+| `_smithers_tool_calls` | Per-call log of every tool invocation: input, output, latency, and status. |
+| `_smithers_events` | Sequential event journal for a run. Source of truth for all observable events. |
+| `_smithers_ralph` | Loop (`<Loop>`) iteration counters and completion flags. |
+| `_smithers_cron` | Cron schedule definitions, last-run and next-run timestamps. |
+| `_smithers_scorers` | Scorer results for each task attempt: score, reason, and latency. |
+| `_smithers_vectors` | RAG vector store: chunk text, embeddings (as BLOBs), and metadata. |
+| `_smithers_signals` | Inbound signals received by waiting runs. |
 
 This is the machinery that lets Smithers resume a crashed run, retry a failed task, or tell you exactly what happened at 3 a.m. It exists so your output tables never have to carry orchestration concerns.
+
+## Table Schema Ensurance and Auto-Migration
+
+Smithers calls `ensureSmithersTables()` at startup, which runs `CREATE TABLE IF NOT EXISTS` for every internal table. You never need to run migrations by hand for `_smithers_*` tables.
+
+For your own output tables defined via `createSmithers(...)`, Smithers also auto-migrates columns. When the Drizzle schema defines a column that is missing from the SQLite table on disk, Smithers issues an `ALTER TABLE ... ADD COLUMN` statement to add it. Columns that exist in the database but are absent from the schema are left in place -- Smithers does not remove data.
+
+This forward-only migration means you can add fields to an output schema and existing runs will continue to work. Removing a field or changing a column type requires a manual migration or a fresh database.
+
+## Schema Signature Verification
+
+Before persisting a cached task result, Smithers computes a schema signature for the output table. The signature is a SHA-256 hash of the table name and every column's name, type, nullability, and primary key flag, all sorted alphabetically:
+
+```
+sha256("tableName|colA:text:1:0|colB:integer:0:0|...")
+```
+
+This hash is stored as `schema_sig` in `_smithers_cache`. When a cached result is retrieved, Smithers checks that the current table's signature still matches. If the schema changed since caching, the cached entry is ignored and the task runs fresh. You never get silently stale cache hits after a schema migration.
+
+## Transaction Model
+
+`SmithersDb` uses a single-writer transaction model with a serial promise queue. Every write operation (including those outside an explicit transaction) acquires a turn in a `transactionTail` promise chain before proceeding. This serializes all writes even when multiple Effect fibers run concurrently.
+
+Explicit transactions use `BEGIN IMMEDIATE` so SQLite acquires a write lock immediately, preventing lock contention with concurrent readers:
+
+```ts
+await adapter.withTransaction("my-write-group", effect);
+```
+
+Nested transactions from the same fiber are detected and rejected -- SQLite does not support true savepoints through this interface. The transaction depth counter and owner-thread tracking ensure the same fiber can perform multiple writes within a single transaction without re-acquiring the queue turn.
+
+## Write Retry and Exponential Backoff
+
+All write paths wrap the underlying operation with `withSqliteWriteRetryEffect`. When a write fails with `SQLITE_BUSY`, `SQLITE_IOERR`, "database is locked", or "disk i/o error", Smithers retries up to six times with exponential backoff:
+
+- Base delay: 50 ms
+- Maximum delay: 2,000 ms
+- Jitter: ±25% of the computed delay
+- Each retry increments the `smithers.db.retries` counter
+
+After the maximum number of retries, the error propagates as a `DB_WRITE_FAILED` SmithersError. This makes Smithers resilient to transient WAL-mode lock contention without requiring any configuration.
+
+## Frame Codec
+
+Render frames in `_smithers_frames` are stored in one of three encodings:
+
+| Encoding | When used | Description |
+|----------|-----------|-------------|
+| `full` | Frame 0 and any keyframe | Complete serialized XML of the render tree |
+| `delta` | Frames between keyframes | JSON patch (set, insert, remove ops) relative to the previous frame |
+| `keyframe` | Every 50th frame | Same as `full`; resets the delta chain |
+
+The keyframe interval is 50 frames (`FRAME_KEYFRAME_INTERVAL = 50`). Reading an arbitrary frame requires loading the nearest preceding keyframe and applying all deltas up to the target frame number. An in-memory LRU cache (up to 512 entries) stores reconstructed frame XML so repeated reads of hot frames are free.
+
+Delta encoding uses a structural diff algorithm that walks the XML JSON tree, emitting `set`, `insert`, and `remove` operations. It is node-ID-aware: when comparing adjacent objects in the tree, it uses the `id` prop of element nodes as a stable identity anchor, so reordered elements produce insert/remove pairs rather than spurious updates.
 
 ## Why the Separation Matters
 

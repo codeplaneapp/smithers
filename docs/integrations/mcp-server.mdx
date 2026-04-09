@@ -1,0 +1,709 @@
+---
+title: MCP Server
+description: Expose Smithers as a Model Context Protocol stdio server so any MCP client — Claude Code, Cursor, Codex, or your own agent — can list, run, inspect, and control workflows without shell scripting.
+---
+
+Smithers ships a built-in MCP stdio server. When you pass `--mcp` to the CLI it speaks the Model Context Protocol over stdin/stdout instead of acting as an interactive CLI. Any MCP-aware client can connect, discover your workflows, start runs, watch progress, resolve approvals, and revert bad attempts — all through structured, machine-readable tool calls.
+
+Use the MCP server when you want an AI agent to drive Smithers autonomously. Use the [HTTP Server](/integrations/server) when you need REST endpoints for human-written code or webhooks.
+
+---
+
+## Setup
+
+### Start the server
+
+```bash
+smithers --mcp
+```
+
+By default this starts the semantic surface — a stable, structured set of tools designed for AI agent consumption. The semantic surface is what this page documents.
+
+Two additional surfaces are available via `--surface`:
+
+```bash
+# Semantic tools only (default)
+smithers --mcp --surface semantic
+
+# Raw CLI-mirroring tools only
+smithers --mcp --surface raw
+
+# Both surfaces registered on the same server
+smithers --mcp --surface both
+```
+
+Use `--surface raw` only when you need direct CLI parity. The semantic surface is strongly preferred for new integrations: every tool returns a consistent `{ ok, data, error }` envelope and uses validated Zod schemas for both input and output.
+
+### Register with Claude Code
+
+```bash
+smithers mcp add
+```
+
+`smithers mcp add` writes the server entry to the appropriate MCP config file for the detected agent. Pass `--agent` to target a specific client, `--no-global` to install project-locally, or `--command` to override the launch command:
+
+```bash
+smithers mcp add --agent claude-code
+smithers mcp add --no-global
+smithers mcp add --command "pnpm smithers --mcp"
+```
+
+### Register manually
+
+For clients that read a JSON config directly, add an entry like this:
+
+```json
+{
+  "mcpServers": {
+    "smithers": {
+      "command": "smithers",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+For project-scoped installs (e.g. a monorepo where Smithers is a dev dependency):
+
+```json
+{
+  "mcpServers": {
+    "smithers": {
+      "command": "pnpm",
+      "args": ["smithers", "--mcp"]
+    }
+  }
+}
+```
+
+---
+
+## Tool Registration
+
+When the server starts it calls `registerSemanticTools`, which loops over the tool definitions produced by `createSemanticToolDefinitions` and registers each one via `server.registerTool`. Every tool carries:
+
+- **`inputSchema`** — a Zod object schema describing accepted parameters.
+- **`outputSchema`** — a Zod schema for the structured response envelope.
+- **`annotations`** — MCP annotation metadata (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`).
+
+### Structured tool envelope
+
+Every tool returns the same top-level shape:
+
+```ts
+{
+  ok: boolean;
+  data?: { ... };     // present on success
+  error?: {           // present on failure
+    code: string;
+    message: string;
+    details?: Record<string, unknown> | null;
+    docsUrl?: string | null;
+  };
+}
+```
+
+The response is also echoed as a `text` content block so clients that do not parse `structuredContent` still receive the JSON payload.
+
+### Tool annotations
+
+| Annotation | Tools | Meaning |
+|---|---|---|
+| `readOnlyHint: true` | Most query tools | Tool does not modify state |
+| `readOnlyHint: false, openWorldHint: true` | `run_workflow` | Launches external processes |
+| `readOnlyHint: false, destructiveHint: true, idempotentHint: false` | `resolve_approval`, `revert_attempt` | Mutates persisted state irreversibly |
+
+---
+
+## Tool Reference
+
+### list_workflows
+
+List all Smithers workflows discovered in the working directory.
+
+**Input:** none
+
+**Output:**
+
+```ts
+{
+  workflows: Array<{
+    id: string;
+    displayName: string;
+    entryFile: string;
+    sourceType: "seeded" | "user" | "generated";
+  }>;
+}
+```
+
+Use the returned `id` values as the `workflowId` parameter for `run_workflow`.
+
+---
+
+### run_workflow
+
+Start or resume a discovered workflow.
+
+**Input:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `workflowId` | `string` | required | Workflow ID from `list_workflows` |
+| `input` | `Record<string, unknown>` | `{}` | Workflow input object |
+| `prompt` | `string` | — | Shorthand: sets `input.prompt` when `input` is not provided |
+| `runId` | `string` | auto | Custom run ID |
+| `resume` | `boolean` | `false` | Resume an existing run; requires `runId` |
+| `force` | `boolean` | `false` | Force-start even if a run with this ID already exists |
+| `waitForTerminal` | `boolean` | `false` | Block until the run reaches a terminal state |
+| `waitForStartMs` | `number` | `1000` | For background launches, how long to wait for the run row to appear in the database |
+| `maxConcurrency` | `number` | — | Max concurrent nodes |
+| `rootDir` | `string` | — | Root directory for tool sandboxing and path resolution |
+| `logDir` | `string` | — | Directory for log files |
+| `allowNetwork` | `boolean` | `false` | Allow network access in `bash` tool |
+| `maxOutputBytes` | `number` | — | Cap on node output size |
+| `toolTimeoutMs` | `number` | — | Per-tool call timeout |
+| `hot` | `boolean` | `false` | Enable hot-reloading of the workflow file |
+
+**Output:**
+
+```ts
+{
+  workflow: { id, displayName, entryFile, sourceType };
+  runId: string;
+  launchMode: "background" | "waited";
+  requestedResume: boolean;
+  status: string;
+  observedRun: RunSummary | null;
+  result: { runId, status, output?, error? } | null;
+}
+```
+
+**Background vs. waited launch**
+
+By default (`waitForTerminal: false`) the tool fires the workflow and returns immediately with `launchMode: "background"`. The `observedRun` field reflects the run state polled during `waitForStartMs`. Use `watch_run` to track progress after launch.
+
+Set `waitForTerminal: true` to block until the workflow finishes. The `result` field is populated and `launchMode` is `"waited"`.
+
+**Run option forwarding**
+
+`rootDir`, `logDir`, `allowNetwork`, `maxOutputBytes`, `toolTimeoutMs`, and `hot` are forwarded verbatim to the engine's `runWorkflow` call. They override any values baked into the workflow file.
+
+---
+
+### list_runs
+
+List recent runs with summary data.
+
+**Input:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `limit` | `number` (1–200) | `20` | Max runs to return |
+| `status` | `string` | — | Filter by status (`running`, `finished`, `failed`, etc.) |
+
+**Output:**
+
+```ts
+{
+  runs: RunSummary[];
+}
+```
+
+`RunSummary` fields: `runId`, `workflowName`, `workflowPath`, `parentRunId`, `status`, `createdAtMs`, `startedAtMs`, `finishedAtMs`, `heartbeatAtMs`, `activeNodeId`, `activeNodeLabel`, `pendingApprovalCount`, `waitingTimers`, `countsByState`.
+
+---
+
+### get_run
+
+Get the full detail record for a specific run, including steps, approvals, timers, loop state, lineage, config, and error.
+
+**Input:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `runId` | `string` | Run ID |
+
+**Output:**
+
+```ts
+{
+  run: RunSummary & {
+    steps: Array<{ nodeId, iteration, state, lastAttempt, updatedAtMs, outputTable, label }>;
+    approvals: PendingApproval[];
+    loops: Array<{ loopId, iteration, maxIterations }>;
+    continuedFromRunIds: string[];
+    activeDescendantRunId: string | null;
+    config: unknown | null;
+    error: unknown | null;
+  };
+}
+```
+
+---
+
+### watch_run
+
+Poll a run at a fixed interval until it reaches a terminal state or a timeout expires.
+
+**Input:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `runId` | `string` | required | Run to watch |
+| `intervalMs` | `number` | `1000` | Poll interval (minimum enforced by runtime) |
+| `timeoutMs` | `number` | `30000` | Wall-clock budget before giving up |
+
+**Output:**
+
+```ts
+{
+  runId: string;
+  intervalMs: number;
+  pollCount: number;
+  reachedTerminal: boolean;
+  timedOut: boolean;
+  finalRun: RunSummary;
+  snapshots: Array<{ observedAtMs: number; run: RunSummary }>;
+}
+```
+
+When `timedOut` is `true` the run is still active; call `watch_run` again or increase `timeoutMs`. Terminal statuses are `finished`, `failed`, and `cancelled`.
+
+---
+
+### explain_run
+
+Return a structured diagnosis explaining why a run is blocked, waiting, or stale.
+
+**Input:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `runId` | `string` | Run ID |
+
+**Output:**
+
+```ts
+{
+  diagnosis: {
+    runId: string;
+    status: string;
+    summary: string;
+    generatedAtMs: number;
+    blockers: Array<{
+      kind: string;
+      nodeId: string;
+      iteration: number | null;
+      reason: string;
+      waitingSince: number;
+      unblocker: string;
+      context?: string;
+      signalName?: string | null;
+      dependencyNodeId?: string | null;
+      firesAtMs?: number | null;
+      remainingMs?: number | null;
+      attempt?: number | null;
+      maxAttempts?: number | null;
+    }>;
+    currentNodeId: string | null;
+  };
+}
+```
+
+The `summary` field is a human-readable sentence. `blockers` lists every node currently preventing progress, with `unblocker` describing what action or event would unblock it.
+
+---
+
+### list_pending_approvals
+
+List approvals that are waiting for a human decision, optionally filtered by run, workflow, or node.
+
+**Input:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `runId` | `string` | Filter by run ID |
+| `workflowName` | `string` | Filter by workflow name |
+| `nodeId` | `string` | Filter by node ID |
+
+All parameters are optional. Omit all to list every pending approval across all runs.
+
+**Output:**
+
+```ts
+{
+  approvals: Array<{
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    status: string;
+    requestedAtMs: number | null;
+    decidedAtMs: number | null;
+    note: string | null;
+    decidedBy: string | null;
+    request: unknown;
+    decision: unknown;
+    autoApproved?: boolean;
+    workflowName: string | null;
+    runStatus: string | null;
+    nodeLabel: string | null;
+  }>;
+}
+```
+
+---
+
+### resolve_approval
+
+Approve or deny a pending approval. This tool is destructive and non-idempotent.
+
+**Input:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `action` | `"approve" \| "deny"` | required — decision to record |
+| `runId` | `string` | Filter to a specific run |
+| `workflowName` | `string` | Filter by workflow name |
+| `nodeId` | `string` | Filter by node ID |
+| `iteration` | `number` | Filter by loop iteration |
+| `note` | `string` | Optional note to record with the decision |
+| `decidedBy` | `string` | Identity of the decision-maker |
+| `decision` | `unknown` | Structured decision payload passed back to the workflow |
+
+**Ambiguity guard**
+
+If the filters match zero approvals the tool errors with `INVALID_INPUT`. If the filters match more than one approval the tool errors with `INVALID_INPUT` and returns the list of matches in `details.matches` — add `runId`, `nodeId`, or `iteration` to narrow the selection. The tool never guesses when multiple approvals match.
+
+**Output:**
+
+```ts
+{
+  action: "approve" | "deny";
+  approval: PendingApproval;   // with updated status, decidedAtMs, note, decidedBy
+  run: RunSummary | null;
+}
+```
+
+---
+
+### get_node_detail
+
+Get enriched detail for a single node, including all attempts, tool calls, token usage, scorer results, and validated output.
+
+**Input:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `runId` | `string` | required |
+| `nodeId` | `string` | required |
+| `iteration` | `number` | Loop iteration (default: latest) |
+
+**Output:**
+
+```ts
+{
+  detail: {
+    node: { runId, nodeId, iteration, state, lastAttempt, updatedAtMs, outputTable, label };
+    status: string;
+    durationMs: number | null;
+    attemptsSummary: { total, failed, cancelled, succeeded, waiting };
+    attempts: unknown[];
+    toolCalls: unknown[];
+    tokenUsage: unknown;
+    scorers: unknown[];
+    output: {
+      validated: unknown | null;
+      raw: unknown | null;
+      source: "cache" | "output-table" | "none";
+      cacheKey: string | null;
+    };
+    limits: {
+      toolPayloadBytesHuman: number;
+      validatedOutputBytesHuman: number;
+    };
+  };
+}
+```
+
+---
+
+### revert_attempt
+
+Revert the workspace and frame history back to the state captured at a specific attempt. This is destructive and non-idempotent.
+
+**Input:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `runId` | `string` | required | Run containing the node |
+| `nodeId` | `string` | required | Node to revert |
+| `iteration` | `number` | `0` | Loop iteration |
+| `attempt` | `number` | required | Attempt number to revert to (must be ≥ 1) |
+
+**Output:**
+
+```ts
+{
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  attempt: number;
+  success: boolean;
+  error?: string;
+  jjPointer?: string;
+  run: RunSummary | null;
+}
+```
+
+---
+
+### list_artifacts
+
+List structured output artifacts produced by nodes in a run.
+
+**Input:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `runId` | `string` | required | Run ID |
+| `nodeId` | `string` | — | Limit to a specific node |
+| `includeRaw` | `boolean` | `false` | Include raw (pre-validation) output values |
+
+**Output:**
+
+```ts
+{
+  artifacts: Array<{
+    artifactId: string;   // "<runId>:<nodeId>:<iteration>"
+    kind: "node-output";
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    label: string | null;
+    state: string;
+    outputTable: string | null;
+    source: "cache" | "output-table" | "none";
+    cacheKey: string | null;
+    value: unknown | null;
+    rawValue?: unknown | null;   // only when includeRaw=true
+  }>;
+}
+```
+
+Only nodes that have an `outputTable` and a non-`none` output source are included.
+
+---
+
+### get_chat_transcript
+
+Return the structured agent chat transcript for a run, grouped by attempts.
+
+**Input:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `runId` | `string` | required | Run ID |
+| `all` | `boolean` | `false` | Include all attempts, not just those with known output events |
+| `includeStderr` | `boolean` | `true` | Include stderr messages |
+| `tail` | `number` | — | Return only the last N messages |
+
+**Output:**
+
+```ts
+{
+  runId: string;
+  attempts: Array<{
+    attemptKey: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    state: string;
+    startedAtMs: number;
+    finishedAtMs: number | null;
+    cached: boolean;
+    meta: unknown | null;
+  }>;
+  messages: Array<{
+    id: string;
+    attemptKey: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    role: "user" | "assistant" | "stderr";
+    stream: "stdout" | "stderr" | null;
+    timestampMs: number;
+    text: string;
+    source: "prompt" | "event" | "responseText";
+  }>;
+}
+```
+
+Messages are sorted by `timestampMs`. Use `tail` to limit context window usage when transcripts are long.
+
+---
+
+### get_run_events
+
+Return the raw structured event history for a run with optional filtering.
+
+**Input:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `runId` | `string` | required | Run ID |
+| `afterSeq` | `number` | — | Only events with `seq` greater than this value |
+| `limit` | `number` (1–10000) | `200` | Max events to return |
+| `nodeId` | `string` | — | Filter to events for a specific node |
+| `types` | `string[]` | — | Filter to specific event types (e.g. `["NodeFinished", "NodeFailed"]`) |
+| `sinceTimestampMs` | `number` | — | Only events at or after this timestamp |
+
+**Output:**
+
+```ts
+{
+  runId: string;
+  events: Array<{
+    runId: string;
+    seq: number;
+    timestampMs: number;
+    type: string;
+    payload: unknown | null;
+  }>;
+}
+```
+
+Paginate using `afterSeq`: pass the `seq` of the last received event to fetch the next page.
+
+---
+
+## Usage Examples
+
+### List workflows and start a run
+
+```
+> list_workflows {}
+
+{
+  "ok": true,
+  "data": {
+    "workflows": [
+      { "id": "bugfix", "displayName": "bugfix", "entryFile": "./workflows/bugfix.tsx", "sourceType": "user" }
+    ]
+  }
+}
+
+> run_workflow { "workflowId": "bugfix", "prompt": "Fix the auth token expiry bug" }
+
+{
+  "ok": true,
+  "data": {
+    "runId": "smi_abc123",
+    "launchMode": "background",
+    "status": "running",
+    ...
+  }
+}
+```
+
+### Watch until complete
+
+```
+> watch_run { "runId": "smi_abc123", "timeoutMs": 120000 }
+
+{
+  "ok": true,
+  "data": {
+    "reachedTerminal": true,
+    "timedOut": false,
+    "finalRun": { "status": "waiting-approval", ... }
+  }
+}
+```
+
+### Resolve a pending approval
+
+```
+> list_pending_approvals { "runId": "smi_abc123" }
+
+{
+  "ok": true,
+  "data": {
+    "approvals": [
+      { "nodeId": "deploy", "iteration": 0, "nodeLabel": "Deploy to production", ... }
+    ]
+  }
+}
+
+> resolve_approval { "action": "approve", "runId": "smi_abc123", "nodeId": "deploy", "decidedBy": "alice", "note": "Looks good" }
+
+{
+  "ok": true,
+  "data": {
+    "action": "approve",
+    "approval": { "status": "approved", "decidedAtMs": 1707500100000, ... },
+    "run": { "status": "running", ... }
+  }
+}
+```
+
+### Debug a blocked run
+
+```
+> explain_run { "runId": "smi_abc123" }
+
+{
+  "ok": true,
+  "data": {
+    "diagnosis": {
+      "summary": "Run is waiting for a human approval on node 'deploy'.",
+      "blockers": [
+        {
+          "kind": "approval",
+          "nodeId": "deploy",
+          "reason": "Node requires human approval before proceeding.",
+          "unblocker": "Call resolve_approval with action=approve or action=deny."
+        }
+      ]
+    }
+  }
+}
+```
+
+### Revert a failed attempt
+
+```
+> get_node_detail { "runId": "smi_abc123", "nodeId": "analyze" }
+
+{
+  "ok": true,
+  "data": {
+    "detail": {
+      "attemptsSummary": { "total": 3, "failed": 2, "succeeded": 1 },
+      ...
+    }
+  }
+}
+
+> revert_attempt { "runId": "smi_abc123", "nodeId": "analyze", "attempt": 1 }
+
+{
+  "ok": true,
+  "data": {
+    "success": true,
+    "run": { "status": "running", ... }
+  }
+}
+```
+
+---
+
+## Error Codes
+
+All errors follow the structured envelope. Common codes:
+
+| Code | Meaning |
+|---|---|
+| `RUN_NOT_FOUND` | No run exists with the given ID |
+| `INVALID_INPUT` | Missing required field, failed validation, or ambiguous approval filter |
+| `WORKFLOW_MISSING_DEFAULT` | Workflow file has no default export |
+| `WORKFLOW_NOT_FOUND` | No workflow matches the given ID |

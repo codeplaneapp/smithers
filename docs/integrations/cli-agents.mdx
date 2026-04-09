@@ -201,8 +201,22 @@ type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
 | `maxBudgetUsd` | Spending cap in USD |
 | `mcpConfig` | MCP server configuration files |
 | `addDir` | Additional context directories |
+| `fromPr` | Pull request URL or number to use as additional context |
 
 When `yolo` is `true` (default), the agent passes `--allow-dangerously-skip-permissions`, `--dangerously-skip-permissions`, and `--permission-mode bypassPermissions` unless `permissionMode` is explicitly set.
+
+### PR Context
+
+The `fromPr` option passes `--from-pr <value>` to the Claude CLI, loading the diff and metadata of the specified pull request into the conversation context. Accepts a PR URL or number:
+
+```ts
+const claude = new ClaudeCodeAgent({
+  model: "claude-sonnet-4-20250514",
+  fromPr: "https://github.com/org/repo/pull/42",
+});
+```
+
+Smithers does not fetch the PR itself; the Claude CLI resolves and loads it.
 
 ---
 
@@ -302,6 +316,19 @@ type GeminiAgentOptions = BaseCliAgentOptions & {
 When `yolo` is `true` and `approvalMode` is not set, passes `--yolo`.
 
 Prompt is passed via `--prompt`.
+
+### gcloud Authentication
+
+When neither `GOOGLE_API_KEY` nor `GEMINI_API_KEY` is set, Gemini CLI uses `gcloud` application-default credentials. The diagnostics `api_key_valid` check falls back to running `gcloud auth print-access-token` to confirm that gcloud auth is configured. No extra options are required — the Gemini CLI picks up the credentials automatically from the environment:
+
+```bash
+gcloud auth application-default login
+```
+
+```ts
+// No API key needed when gcloud auth is configured
+const gemini = new GeminiAgent({ model: "gemini-2.5-pro" });
+```
 
 ---
 
@@ -437,6 +464,19 @@ When `yolo` is `true` (default), passes `--print` which implicitly adds `--yolo`
 
 Prompt is passed via `--prompt`.
 
+### Isolated Share Directory
+
+Kimi stores per-session metadata in `~/.kimi/` (or `$KIMI_SHARE_DIR`). When running parallel tasks, concurrent writes to this directory can corrupt `kimi.json`. `KimiAgent` automatically creates an isolated temporary directory per invocation, copies `config.toml`, `credentials`, `device_id`, and `latest_version.txt` from the default share dir, and sets `KIMI_SHARE_DIR` to the temporary copy. The directory is removed via the cleanup hook when the run completes.
+
+To opt out of isolation and use a specific directory, set `KIMI_SHARE_DIR` in `env`:
+
+```ts
+const kimi = new KimiAgent({
+  model: "kimi-latest",
+  env: { KIMI_SHARE_DIR: "/path/to/shared-kimi" },
+});
+```
+
 ---
 
 ## ForgeAgent
@@ -525,6 +565,280 @@ type AmpAgentOptions = BaseCliAgentOptions & {
 When `yolo` is `true` (default) or `dangerouslyAllowAll` is `true`, passes `--dangerously-allow-all`.
 
 Prompt is passed via `--execute`. Automatically passes `--no-ide`, `--no-jetbrains`, `--no-color`, and `--archive` for headless execution.
+
+---
+
+## Diagnostics
+
+Before each run, Smithers launches a diagnostic probe concurrently with the agent process. If the agent fails, the probe's findings are attached to the error and printed as a warning.
+
+```ts
+// Diagnostics run automatically — no configuration required.
+// On failure, err.details.diagnostics contains the full DiagnosticReport.
+try {
+  await claude.generate({ prompt: "..." });
+} catch (err) {
+  // err.details.diagnostics.checks contains the individual check results
+}
+```
+
+Each `DiagnosticReport` contains:
+
+```ts
+type DiagnosticReport = {
+  agentId: string;        // e.g. "claude-code"
+  command: string;        // e.g. "claude"
+  timestamp: string;      // ISO 8601
+  checks: DiagnosticCheck[];
+  durationMs: number;
+};
+
+type DiagnosticCheck = {
+  id: "cli_installed" | "api_key_valid" | "rate_limit_status";
+  status: "pass" | "fail" | "skip" | "error";
+  message: string;
+  detail?: Record<string, unknown>;
+  durationMs: number;
+};
+```
+
+### CLI Installed Check
+
+The `cli_installed` check runs `which <command>` to confirm the binary is on `PATH`.
+
+- **pass** — binary found; `detail.binaryPath` contains the resolved path.
+- **fail** — binary not found; install the CLI listed in Prerequisites.
+
+### API Key Check
+
+The `api_key_valid` check verifies the API credential for each provider.
+
+| Agent | Env var checked | Method |
+|---|---|---|
+| `ClaudeCodeAgent` | `ANTHROPIC_API_KEY` | Format check (`sk-ant-*`); absent = subscription mode (pass) |
+| `CodexAgent` | `OPENAI_API_KEY` | `GET /v1/models` |
+| `GeminiAgent` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | `GET /v1beta/models`; falls back to `gcloud auth` |
+| `AmpAgent` | — | Skipped (Amp manages its own auth) |
+
+### Rate Limit Check
+
+The `rate_limit_status` check probes the provider's API for current quota headroom.
+
+- Reads standard rate-limit headers (`anthropic-ratelimit-*`, `x-ratelimit-*`).
+- Status is `skip` when using gcloud auth or subscription mode.
+- If the check passed before the run but the error text contains rate-limit patterns (e.g. `429`, `too many requests`, `quota exceeded`), the check is upgraded to `fail` post-hoc and attached to the error.
+
+---
+
+## Capability Registry
+
+Every CLI agent exposes a `capabilities` property that describes its tool surface. Smithers uses this at runtime to normalize tool names and verify that the agent configuration is self-consistent.
+
+```ts
+console.log(claude.capabilities);
+// {
+//   version: 1,
+//   engine: "claude-code",
+//   runtimeTools: {},
+//   mcp: { bootstrap: "project-config", supportsProjectScope: true, supportsUserScope: true },
+//   skills: { supportsSkills: true, installMode: "plugin", smithersSkillIds: [] },
+//   humanInteraction: { supportsUiRequests: false, methods: [] },
+//   builtIns: ["default", "slash-commands"]
+// }
+```
+
+### Normalization
+
+`normalizeCapabilityRegistry` canonicalizes a registry before comparison or hashing: string lists are deduplicated and sorted, tool descriptor fields are trimmed, and empty optional values are removed.
+
+```ts
+import { normalizeCapabilityRegistry } from "smithers-orchestrator";
+
+const canonical = normalizeCapabilityRegistry(agent.capabilities);
+```
+
+`normalizeCapabilityStringList` applies the same rules to any standalone string array:
+
+```ts
+import { normalizeCapabilityStringList } from "smithers-orchestrator";
+
+normalizeCapabilityStringList(["!bash", "default", "default", " web_search "])
+// ["!bash", "default", "web_search"]
+```
+
+### Hashing
+
+`hashCapabilityRegistry` produces a stable SHA-256 hex fingerprint of the normalized registry. Use it to detect configuration drift between agent invocations or CI runs.
+
+```ts
+import { hashCapabilityRegistry } from "smithers-orchestrator";
+
+const fingerprint = hashCapabilityRegistry(agent.capabilities);
+// "a3f1c9..."
+```
+
+The hash is also returned in `getCliAgentCapabilityReport()` as `entry.fingerprint`.
+
+### Capability Doctor
+
+`getCliAgentCapabilityDoctorReport()` validates every built-in CLI agent's registry against consistency rules and returns a report with per-agent issues:
+
+```ts
+import { getCliAgentCapabilityDoctorReport } from "smithers-orchestrator";
+
+const report = getCliAgentCapabilityDoctorReport();
+if (!report.ok) {
+  console.error(formatCliAgentCapabilityDoctorReport(report));
+}
+```
+
+---
+
+## Agent Contract
+
+The agent contract describes the Smithers MCP tool surface that is injected into an agent's context. It is separate from the capability registry — the registry describes what the agent *can* do, while the contract describes what Smithers *exposes* to the agent.
+
+### Raw vs. Semantic Tool Surface
+
+`SmithersToolSurface` is `"raw"` or `"semantic"`. The semantic surface groups and renames tools to reduce noise for general-purpose agents. The raw surface exposes every tool name as-is.
+
+```ts
+import { buildSmithersMcpConfigFile } from "smithers-orchestrator";
+
+const { path, cleanup } = buildSmithersMcpConfigFile("semantic");
+// Writes a temporary mcp.json pointing at the Smithers MCP server
+```
+
+### Live MCP Tool Probe
+
+`listLiveSmithersMcpTools` starts the Smithers MCP server in a subprocess and calls `tools/list` to retrieve the live tool set. Use this to build a contract from the actual running server rather than a static snapshot.
+
+```ts
+import { listLiveSmithersMcpTools } from "smithers-orchestrator";
+
+const tools = await listLiveSmithersMcpTools({ toolSurface: "semantic" });
+```
+
+`probeSmithersAgentContract` wraps the probe and returns a full `SmithersAgentContract`:
+
+```ts
+import { probeSmithersAgentContract } from "smithers-orchestrator";
+
+const contract = await probeSmithersAgentContract({ toolSurface: "semantic" });
+```
+
+### Prompt Guidance
+
+`contract.promptGuidance` is a compact, instruction-friendly string listing available tools grouped by category. Inject it into an agent's system prompt:
+
+```ts
+const claude = new ClaudeCodeAgent({
+  systemPrompt: contract.promptGuidance,
+});
+```
+
+Example output:
+
+```
+You have access to the live Smithers semantic MCP surface on server "smithers".
+Only rely on the tool names listed here.
+For workflow discovery and launch, use `list_workflows`, `run_workflow`.
+For run inspection and control, use `cancel`, `get_run`, `list_runs`.
+Potentially destructive tools: `cancel`, `run_workflow`. Confirm intent before using them.
+```
+
+### Docs Guidance
+
+`contract.docsGuidance` is a Markdown table listing every tool with its category, destructive flag, and description. Suitable for injecting into documentation or longer context windows:
+
+```ts
+console.log(contract.docsGuidance);
+// ## Smithers semantic Tool Surface
+// | Tool | Category | Destructive | Description |
+// | --- | --- | --- | --- |
+// | `list_workflows` | workflows | no | List available workflows. |
+// ...
+```
+
+---
+
+## Token and Usage Tracking
+
+Smithers extracts token usage from raw CLI output and populates the `usage` field of the returned `GenerateTextResult`. This works across all built-in agents without additional configuration.
+
+```ts
+const result = await claude.generate({ prompt: "..." });
+console.log(result.usage);
+// {
+//   inputTokens: 1024,
+//   outputTokens: 512,
+//   inputTokenDetails: { cacheReadTokens: 128, cacheWriteTokens: 64 },
+//   outputTokenDetails: { reasoningTokens: 0 },
+//   totalTokens: 1536
+// }
+```
+
+### Usage Extraction
+
+`extractUsageFromOutput` parses the raw CLI stdout to find token counts. The extraction strategy is format-specific:
+
+| Agent / Format | Source |
+|---|---|
+| `ClaudeCodeAgent` `stream-json` | `message_start.message.usage` (input) + `message_delta.usage` (output) |
+| `CodexAgent` `--json` | `turn.completed.usage` |
+| `GeminiAgent` `json` | `stats.models[*].tokens` |
+| Generic NDJSON | Any line with a `usage` object containing `input_tokens` / `output_tokens` |
+
+Cache read tokens (`cache_read_input_tokens`, `cached_input_tokens`), cache write tokens (`cache_creation_input_tokens`), and reasoning tokens (`reasoning_tokens`) are accumulated when present.
+
+---
+
+## BaseCliAgent Internals
+
+### Cleanup Hook
+
+`CliCommandSpec.cleanup` is an optional `async () => void` returned by `buildCommand`. It runs after the agent process exits, whether the run succeeds or fails. Use it to remove temporary files:
+
+```ts
+// KimiAgent uses this pattern internally:
+return {
+  command: "kimi",
+  args,
+  env: { KIMI_SHARE_DIR: isolatedDir },
+  cleanup: async () => {
+    rmSync(isolatedDir, { recursive: true, force: true });
+  },
+};
+```
+
+The cleanup runs under `Effect.ensuring`, so it is guaranteed to execute even when the command throws.
+
+### Stdout Error Detection
+
+Some CLIs exit with code 0 but print an error message to stdout. The `stdoutErrorPatterns` field on `CliCommandSpec` accepts an array of `RegExp` patterns. If any pattern matches the cleaned stdout text (after banner stripping), the agent throws `AGENT_CLI_ERROR` with the matched content as the message:
+
+```ts
+return {
+  command: "mycli",
+  args,
+  stdoutErrorPatterns: [/^Error:/m, /authentication failed/i],
+};
+```
+
+Detection is skipped when stdout starts with `{` or `[` (i.e., JSON output).
+
+### Banner Stripping
+
+CLI tools occasionally print version banners, update notices, or telemetry lines to stdout before the model response. The `stdoutBannerPatterns` field on `CliCommandSpec` accepts an array of `RegExp` patterns that are stripped from stdout before text extraction:
+
+```ts
+return {
+  command: "mycli",
+  args,
+  stdoutBannerPatterns: [/^mycli v\d+\.\d+\.\d+.*\n/m],
+  errorOnBannerOnly: true, // throw if only a banner was printed (no model response)
+};
+```
 
 ---
 

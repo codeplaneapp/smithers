@@ -147,6 +147,6 @@ smithers ps --status waiting-approval
 
 ## How It Works
 
-- `<Approval>` persists a decision object (`approved`, `note`, `decidedBy`, `decidedAt`) when the workflow resumes.
+- `<Approval>` persists a decision object (`approved`, `note`, `decidedBy`, `decidedAt`) when the workflow resumes. The audit timestamp itself lives in Smithers' approval records and event log, so `decidedAt` remains deterministic in durable outputs.
 - Re-running after approval replays completed tasks from the database and continues from the approval point.
 - Denial is permanent for that run. To retry, start a new run.

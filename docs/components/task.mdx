@@ -43,6 +43,8 @@ When `needsApproval` and `async` are both set, sequence traversal can continue p
 | `label` | `string` | `undefined` | Human-readable label for UI and metadata. |
 | `meta` | `Record<string, unknown>` | `undefined` | Arbitrary metadata on the task descriptor. |
 | `scorers` | `ScorersMap` | `undefined` | Map of scorer configs to evaluate task output after execution. See [Evals & Scorers](/concepts/evals). |
+| `memory` | `TaskMemoryConfig` | `undefined` | Per-task memory integration. `{ recall?: { namespace?, query?, topK? }, remember?: { namespace?, key? }, threadId? }`. `recall` injects relevant memory fragments into the prompt before execution; `remember` persists the task output back to memory after success. |
+| `heartbeatTimeoutMs` | `number` | `undefined` | Heartbeat monitoring timeout in ms. If the executing task does not emit a heartbeat within this window the task is considered stale and fails. Useful for long-running agent tasks to detect hangs. |
 | `children` | `string \| Row \| (() => Row \| Promise<Row>) \| ReactNode \| ((deps) => Row \| ReactNode)` | **(required)** | Agent mode: prompt text or JSX rendered to markdown. Compute mode: callback. Static mode: output value. With `deps`, a render function receiving typed upstream outputs. |
 
 ## Agent mode

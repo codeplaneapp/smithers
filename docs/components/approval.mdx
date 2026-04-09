@@ -14,6 +14,8 @@ type ApprovalDecision = {
 };
 ```
 
+`decidedAt` is reserved for compatibility, but Smithers keeps the actual approval timestamp in internal approval records and the event log instead of the durable task output.
+
 ## Import
 
 ```tsx
@@ -168,6 +170,26 @@ import {
 - `allowedScopes` and `allowedUsers` are enforced by `Gateway`.
 - `autoApprove={{ after: N }}` auto-approves after `N` consecutive manual approvals for the same workflow node.
 - `audit: true` preserves an approval record and emits `ApprovalAutoApproved`.
+
+The full `ApprovalAutoApprove` type:
+
+```ts
+type ApprovalAutoApprove = {
+  after?: number;
+  condition?: (ctx: WorkflowContext) => boolean;
+  audit?: boolean;
+  revertOn?: (ctx: WorkflowContext) => boolean;
+};
+```
+
+| Field | Description |
+| --- | --- |
+| `after` | Auto-approve after this many consecutive manual approvals for the same node. |
+| `condition` | Predicate evaluated at render time. When it returns `true`, the node is auto-approved immediately without waiting for human input. |
+| `audit` | When `true`, an approval record is written and `ApprovalAutoApproved` is emitted even for auto-approvals. Defaults to `true`. |
+| `revertOn` | Predicate evaluated at render time. When it returns `true`, a previously triggered auto-approval is reverted and the node goes back to waiting for human input. |
+
+`condition` and `revertOn` are re-evaluated each render, so they can react to upstream task output or workflow state.
 
 ## Behavior
 

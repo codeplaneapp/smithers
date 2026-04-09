@@ -22,7 +22,7 @@ That is it. Edit any file in your workflow's directory tree, save, and the engin
 
 ## How It Works
 
-Smithers is built on React. Your workflow's `build(ctx)` function is a React component tree that the engine re-renders every loop iteration using a [custom React reconciler](/concepts/renderer-internals). All run state lives in SQLite, not in the React fiber tree.
+Smithers is built on React. Your workflow's `build(ctx)` function is a React component tree that the engine re-renders every loop iteration using a [custom React reconciler](/concepts/planner-internals). All run state lives in SQLite, not in the React fiber tree.
 
 Hot reload leverages that architecture in five steps:
 

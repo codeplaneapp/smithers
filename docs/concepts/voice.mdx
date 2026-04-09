@@ -95,6 +95,70 @@ const program = Effect.gen(function* () {
 
 The `VoiceService` tag lets you inject a voice provider into any Effect pipeline. The `speak()` and `listen()` functions pull it from context automatically.
 
+## Listing Available Speakers
+
+Every voice provider exposes `getSpeakers()`, which returns the list of voices that provider supports:
+
+```ts
+const speakers = await voice.getSpeakers();
+// [{ voiceId: "alloy" }, { voiceId: "echo" }, ...]
+```
+
+For the OpenAI Realtime provider, this returns the eight built-in voices: `alloy`, `ash`, `ballad`, `coral`, `echo`, `sage`, `shimmer`, and `verse`.
+
+For composite voice, `getSpeakers()` delegates to the realtime provider if one is set, otherwise to the output (TTS) provider. If neither is configured, it returns an empty array.
+
+## Updating Voice Config at Runtime
+
+You can update voice session parameters after initialization without reconnecting. Call `updateConfig` with any session-level settings the provider understands:
+
+```ts
+voice.updateConfig({
+  voice: "shimmer",
+  turn_detection: { type: "server_vad" },
+});
+```
+
+For the OpenAI Realtime provider, `updateConfig` sends a `session.update` event over the existing WebSocket. Changes take effect for subsequent interactions in the same session. For composite voice, `updateConfig` delegates to the realtime provider.
+
+## Manually Triggering a Realtime Response
+
+In realtime (speech-to-speech) mode, OpenAI's server can detect speech automatically. But you can also trigger a response explicitly with `answer()`:
+
+```ts
+await voice.answer({
+  modalities: ["audio"],
+  instructions: "Summarize what was just said",
+});
+```
+
+`answer()` sends a `response.create` event to the WebSocket. Any options you pass are forwarded as response properties. Call it when you want the model to respond immediately without waiting for voice activity detection.
+
+## Overriding the WebSocket URL
+
+The default WebSocket endpoint for OpenAI Realtime is `wss://api.openai.com/v1/realtime`. Override it with the `url` config option:
+
+```ts
+const voice = createOpenAIRealtimeVoice({
+  url: "wss://my-proxy.example.com/realtime",
+  model: "gpt-4o-mini-realtime-preview-2024-12-17",
+});
+```
+
+The model name is appended as a query parameter (`?model=...`), so the full connection URL becomes `wss://my-proxy.example.com/realtime?model=gpt-4o-mini-realtime-preview-2024-12-17`. Use this for proxies, local development stubs, or alternative endpoints.
+
+## Configuring the Transcription Model
+
+By default, the OpenAI Realtime provider transcribes incoming audio with `whisper-1`. Change the transcription model with the `transcriber` config option:
+
+```ts
+const voice = createOpenAIRealtimeVoice({
+  transcriber: "gpt-4o-transcribe",
+});
+```
+
+The transcriber is sent to the server as part of the `session.update` call immediately after connection. It controls how the realtime API transcribes user audio for the `input_audio_transcription` session property.
+
 ## Events and Observability
 
 Voice operations emit structured events:

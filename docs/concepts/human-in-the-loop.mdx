@@ -89,6 +89,8 @@ type ApprovalDecision = {
 
 Four fields. The boolean is the verdict. The rest is audit trail. Every approval becomes a first-class piece of data in your workflow — queryable, branchable, persistent.
 
+Smithers keeps the authoritative decision timestamp in its approval records and event history so durable outputs stay deterministic across resume and replay.
+
 ## Denial Policies
 
 So a human said "no." Now what? The `onDeny` prop answers that question, and the right answer depends entirely on what you're protecting.

@@ -1,15 +1,17 @@
 ---
 title: Installation
-description: Install Smithers for JSX-based workflow authoring.
+description: Install Smithers the fast way with the workflow pack, or manually for standalone JSX workflow projects.
 ---
 
-## Recommended
+Most teams should start with the workflow pack. It gives you a working `.smithers/` directory, seeded workflows, prompts, and agent configuration instead of asking you to assemble the project structure by hand.
+
+## Recommended: Install the Workflow Pack
 
 ```bash
 bunx smithers-orchestrator init
 ```
 
-Scaffolds `.smithers/` with:
+That scaffolds `.smithers/` with:
 
 | Directory / File | Contents |
 |---|---|
@@ -25,9 +27,11 @@ To overwrite an existing scaffold:
 bunx smithers-orchestrator init --force
 ```
 
-## Manual Installation
+## When to Use Manual Installation
 
-See [JSX Installation](/api/installation) for manual package setup and TypeScript configuration.
+Use manual installation when you are embedding Smithers into an existing TypeScript codebase and want to author a standalone workflow project from scratch.
+
+See [JSX Installation](/jsx/installation) for the package list, TypeScript configuration, and optional MDX prompt setup.
 
 ## Requirements
 
@@ -35,8 +39,11 @@ See [JSX Installation](/api/installation) for manual package setup and TypeScrip
 - TypeScript >= 5
 - Model or provider credentials (e.g. `ANTHROPIC_API_KEY`)
 
-## Next Steps
+## After Installation
 
-- [JSX Installation](/api/installation) -- Manual setup with TSX and optional MDX prompts.
-- [CLI Reference](/cli/overview) -- Run, resume, inspect workflows.
-- [Tools Integration](/integrations/tools) -- Built-in tool sandbox.
+Choose the next page based on what you need:
+
+- [Quickstart](/quickstart) to run a seeded workflow immediately.
+- [CLI Quickstart](/cli/quickstart) to learn the operational workflow.
+- [JSX Installation](/jsx/installation) to set up manual TSX authoring.
+- [Tools Integration](/integrations/tools) to understand the built-in tool sandbox.

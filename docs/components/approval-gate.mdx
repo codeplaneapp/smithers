@@ -93,12 +93,13 @@ When `dryRun` is `true`, `when` is `false` and the gate emits `{ approved: true,
 `<ApprovalGate>` renders a `<Branch>`:
 
 - **`when` is `true`** -- mounts an `<Approval>` node that pauses for human review.
-- **`when` is `false`** -- mounts a static `<Task>` that resolves immediately with `{ approved: true, note: "auto-approved", decidedBy: null, decidedAt: "<iso>" }`.
+- **`when` is `false`** -- mounts a static `<Task>` that resolves immediately with `{ approved: true, note: "auto-approved", decidedBy: null, decidedAt: null }`.
 
 Both paths write to the same `output`, so downstream nodes can branch on `decision.approved` without caring which path was taken.
 
 ## Notes
 
 - The auto-approve path produces a valid `ApprovalDecision` shape, so downstream logic remains uniform.
+- Auto-approve timing lives in Smithers' internal approval/event records, not in the durable task output.
 - `onDeny` only applies to the human-approval path. The auto-approve path always succeeds.
 - Combine with `skipIf` to disable the gate entirely during development.
