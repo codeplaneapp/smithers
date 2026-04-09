@@ -7,6 +7,10 @@ import {
   pushList,
 } from "./BaseCliAgent";
 import type { BaseCliAgentOptions } from "./BaseCliAgent";
+import {
+  normalizeCapabilityStringList,
+  type AgentCapabilityRegistry,
+} from "./capability-registry";
 
 type GeminiAgentOptions = BaseCliAgentOptions & {
   debug?: boolean;
@@ -27,13 +31,45 @@ type GeminiAgentOptions = BaseCliAgentOptions & {
   outputFormat?: "text" | "json" | "stream-json";
 };
 
+function resolveGeminiBuiltIns(opts: GeminiAgentOptions) {
+  return opts.allowedTools?.length
+    ? normalizeCapabilityStringList(opts.allowedTools)
+    : ["default"];
+}
+
+export function createGeminiCapabilityRegistry(
+  opts: GeminiAgentOptions = {},
+): AgentCapabilityRegistry {
+  return {
+    version: 1,
+    engine: "gemini",
+    runtimeTools: {},
+    mcp: {
+      bootstrap: "allow-list",
+      supportsProjectScope: false,
+      supportsUserScope: true,
+    },
+    skills: {
+      supportsSkills: false,
+      smithersSkillIds: [],
+    },
+    humanInteraction: {
+      supportsUiRequests: false,
+      methods: [],
+    },
+    builtIns: resolveGeminiBuiltIns(opts),
+  };
+}
+
 export class GeminiAgent extends BaseCliAgent {
   private readonly opts: GeminiAgentOptions;
+  readonly capabilities: AgentCapabilityRegistry;
   readonly cliEngine = "gemini";
 
   constructor(opts: GeminiAgentOptions = {}) {
     super(opts);
     this.opts = opts;
+    this.capabilities = createGeminiCapabilityRegistry(opts);
   }
 
   protected createOutputInterpreter(): CliOutputInterpreter {

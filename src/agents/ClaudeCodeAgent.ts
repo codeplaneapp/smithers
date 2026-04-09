@@ -8,6 +8,10 @@ import {
   type RunCommandResult,
 } from "./BaseCliAgent";
 import type { BaseCliAgentOptions } from "./BaseCliAgent";
+import {
+  normalizeCapabilityStringList,
+  type AgentCapabilityRegistry,
+} from "./capability-registry";
 
 type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
   addDir?: string[];
@@ -57,6 +61,56 @@ type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
   tools?: string[] | "default" | "";
   verbose?: boolean;
 };
+
+function resolveClaudeBuiltIns(opts: ClaudeCodeAgentOptions) {
+  if (opts.tools === "") {
+    return [];
+  }
+
+  const allowed =
+    opts.allowedTools?.length
+      ? opts.allowedTools
+      : Array.isArray(opts.tools) && opts.tools.length
+      ? opts.tools
+      : opts.tools === "default" || opts.tools === undefined
+      ? ["default"]
+      : [];
+
+  const denied = (opts.disallowedTools ?? []).map((tool) => `!${tool}`);
+  const slashCommands = opts.disableSlashCommands ? [] : ["slash-commands"];
+  return normalizeCapabilityStringList([
+    ...allowed,
+    ...denied,
+    ...slashCommands,
+  ]);
+}
+
+export function createClaudeCodeCapabilityRegistry(
+  opts: ClaudeCodeAgentOptions = {},
+): AgentCapabilityRegistry {
+  return {
+    version: 1,
+    engine: "claude-code",
+    runtimeTools: {},
+    mcp: {
+      bootstrap: "project-config",
+      supportsProjectScope: true,
+      supportsUserScope: true,
+    },
+    skills: {
+      supportsSkills: true,
+      installMode: "plugin",
+      smithersSkillIds: normalizeCapabilityStringList(
+        (opts.pluginDir ?? []).map((entry) => `plugin:${entry}`),
+      ),
+    },
+    humanInteraction: {
+      supportsUiRequests: false,
+      methods: [],
+    },
+    builtIns: resolveClaudeBuiltIns(opts),
+  };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -163,6 +217,7 @@ function toolKindForClaude(name: string | undefined): AgentCliActionKind {
 
 export class ClaudeCodeAgent extends BaseCliAgent {
   private readonly opts: ClaudeCodeAgentOptions;
+  readonly capabilities: AgentCapabilityRegistry;
   readonly cliEngine = "claude-code";
 
   constructor(opts: ClaudeCodeAgentOptions = {}) {
@@ -185,6 +240,7 @@ export class ClaudeCodeAgent extends BaseCliAgent {
     }
     super(opts);
     this.opts = opts;
+    this.capabilities = createClaudeCodeCapabilityRegistry(opts);
   }
 
   protected createOutputInterpreter(): CliOutputInterpreter {

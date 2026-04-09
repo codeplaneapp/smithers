@@ -11,6 +11,10 @@ import {
   pushList,
 } from "./BaseCliAgent";
 import type { BaseCliAgentOptions } from "./BaseCliAgent";
+import {
+  normalizeCapabilityStringList,
+  type AgentCapabilityRegistry,
+} from "./capability-registry";
 
 type KimiAgentOptions = BaseCliAgentOptions & {
   workDir?: string;
@@ -32,14 +36,47 @@ type KimiAgentOptions = BaseCliAgentOptions & {
   debug?: boolean;
 };
 
+function resolveKimiBuiltIns() {
+  return ["default"];
+}
+
+export function createKimiCapabilityRegistry(
+  opts: KimiAgentOptions = {},
+): AgentCapabilityRegistry {
+  return {
+    version: 1,
+    engine: "kimi",
+    runtimeTools: {},
+    mcp: {
+      bootstrap: "project-config",
+      supportsProjectScope: true,
+      supportsUserScope: true,
+    },
+    skills: {
+      supportsSkills: true,
+      installMode: "dir",
+      smithersSkillIds: normalizeCapabilityStringList(
+        opts.skillsDir ? [`dir:${opts.skillsDir}`] : [],
+      ),
+    },
+    humanInteraction: {
+      supportsUiRequests: false,
+      methods: [],
+    },
+    builtIns: resolveKimiBuiltIns(),
+  };
+}
+
 export class KimiAgent extends BaseCliAgent {
   private readonly opts: KimiAgentOptions;
+  readonly capabilities: AgentCapabilityRegistry;
   readonly cliEngine = "kimi";
   private issuedSessionId?: string;
 
   constructor(opts: KimiAgentOptions = {}) {
     super(opts);
     this.opts = opts;
+    this.capabilities = createKimiCapabilityRegistry(opts);
   }
 
   protected createOutputInterpreter(): CliOutputInterpreter {

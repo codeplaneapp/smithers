@@ -22,6 +22,10 @@ import type {
   PiExtensionUiRequest,
   PiExtensionUiResponse,
 } from "./BaseCliAgent";
+import {
+  normalizeCapabilityStringList,
+  type AgentCapabilityRegistry,
+} from "./capability-registry";
 import { fromPromise } from "../effect/interop";
 import { runPromise } from "../effect/runtime";
 import { getToolContext } from "../tools/context";
@@ -65,17 +69,53 @@ export type PiAgentOptions = BaseCliAgentOptions & {
     | null;
 };
 
+function resolvePiBuiltIns(opts: PiAgentOptions) {
+  if (opts.noTools) {
+    return [];
+  }
+  return opts.tools?.length
+    ? normalizeCapabilityStringList(opts.tools)
+    : ["default"];
+}
+
+export function createPiCapabilityRegistry(
+  opts: PiAgentOptions = {},
+): AgentCapabilityRegistry {
+  return {
+    version: 1,
+    engine: "pi",
+    runtimeTools: {},
+    mcp: {
+      bootstrap: "unsupported",
+      supportsProjectScope: false,
+      supportsUserScope: false,
+    },
+    skills: {
+      supportsSkills: true,
+      installMode: "files",
+      smithersSkillIds: normalizeCapabilityStringList(opts.skill),
+    },
+    humanInteraction: {
+      supportsUiRequests: true,
+      methods: ["extension_ui_request"],
+    },
+    builtIns: resolvePiBuiltIns(opts),
+  };
+}
+
 type PiMode = "text" | "json" | "rpc";
 type PiNonRpcMode = Exclude<PiMode, "rpc">;
 
 export class PiAgent extends BaseCliAgent {
   private readonly opts: PiAgentOptions;
+  readonly capabilities: AgentCapabilityRegistry;
   readonly cliEngine = "pi";
   private issuedSessionRef?: string;
 
   constructor(opts: PiAgentOptions = {}) {
     super(opts);
     this.opts = opts;
+    this.capabilities = createPiCapabilityRegistry(opts);
   }
 
   private resolveMode(options: any): PiMode {

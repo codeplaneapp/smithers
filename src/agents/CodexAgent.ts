@@ -12,6 +12,10 @@ import {
   pushList,
 } from "./BaseCliAgent";
 import type { BaseCliAgentOptions, CodexConfigOverrides } from "./BaseCliAgent";
+import {
+  normalizeCapabilityStringList,
+  type AgentCapabilityRegistry,
+} from "./capability-registry";
 import { sanitizeForOpenAI } from "./schema";
 
 type CodexAgentOptions = BaseCliAgentOptions & {
@@ -34,6 +38,40 @@ type CodexAgentOptions = BaseCliAgentOptions & {
   json?: boolean;
   outputLastMessage?: string;
 };
+
+function resolveCodexBuiltIns(opts: CodexAgentOptions) {
+  if (opts.enable?.length || opts.disable?.length) {
+    return normalizeCapabilityStringList([
+      ...(opts.enable ?? []).map((feature) => `enable:${feature}`),
+      ...(opts.disable ?? []).map((feature) => `disable:${feature}`),
+    ]);
+  }
+  return ["default"];
+}
+
+export function createCodexCapabilityRegistry(
+  opts: CodexAgentOptions = {},
+): AgentCapabilityRegistry {
+  return {
+    version: 1,
+    engine: "codex",
+    runtimeTools: {},
+    mcp: {
+      bootstrap: "inline-config",
+      supportsProjectScope: true,
+      supportsUserScope: false,
+    },
+    skills: {
+      supportsSkills: false,
+      smithersSkillIds: [],
+    },
+    humanInteraction: {
+      supportsUiRequests: false,
+      methods: [],
+    },
+    builtIns: resolveCodexBuiltIns(opts),
+  };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -97,11 +135,13 @@ function shouldSurfaceUnparsedStdout(line: string) {
 
 export class CodexAgent extends BaseCliAgent {
   private readonly opts: CodexAgentOptions;
+  readonly capabilities: AgentCapabilityRegistry;
   readonly cliEngine = "codex";
 
   constructor(opts: CodexAgentOptions = {}) {
     super(opts);
     this.opts = opts;
+    this.capabilities = createCodexCapabilityRegistry(opts);
   }
 
   protected createOutputInterpreter(): CliOutputInterpreter {
