@@ -186,17 +186,17 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
   expect(repo.exists(".smithers/workflows/plan.tsx")).toBe(true);
   expect(repo.exists(".smithers/workflows/research.tsx")).toBe(true);
   expect(repo.exists(".smithers/workflows/ticket-create.tsx")).toBe(true);
-  expect(repo.exists(".smithers/workflows/ticket-implement.tsx")).toBe(true);
+  expect(repo.exists(".smithers/workflows/research-plan-implement.tsx")).toBe(true);
   expect(repo.exists(".smithers/workflows/tickets-create.tsx")).toBe(true);
   expect(repo.exists(".smithers/workflows/ralph.tsx")).toBe(true);
   expect(repo.exists(".smithers/workflows/improve-test-coverage.tsx")).toBe(true);
-  expect(repo.exists(".smithers/workflows/test-first.tsx")).toBe(true);
+  expect(repo.exists(".smithers/workflows/test-first.tsx")).toBe(false);
   expect(repo.exists(".smithers/workflows/debug.tsx")).toBe(true);
   expect(repo.exists(".smithers/workflows/grill-me.tsx")).toBe(true);
   expect(repo.exists(".smithers/workflows/write-a-prd.tsx")).toBe(true);
   expect(repo.exists(".smithers/workflows/feature-enum.tsx")).toBe(true);
   expect(repo.exists(".smithers/workflows/audit.tsx")).toBe(true);
-  expect(repo.exists(".smithers/workflows/ticket-kanban.tsx")).toBe(true);
+  expect(repo.exists(".smithers/workflows/kanban.tsx")).toBe(true);
   expect(repo.exists(".smithers/prompts/ask-user-instructions.mdx")).toBe(true);
   expect(repo.exists(".smithers/components/GrillMe.tsx")).toBe(true);
   expect(repo.exists(".smithers/components/CommandProbe.tsx")).toBe(true);
@@ -272,16 +272,16 @@ test("seeded workflows reuse the shared review substrate", () => {
   expect(initResult.exitCode).toBe(0);
 
   const implementSource = repo.read(".smithers/workflows/implement.tsx");
-  const ticketImplementSource = repo.read(".smithers/workflows/ticket-implement.tsx");
+  const researchPlanImplementSource = repo.read(".smithers/workflows/research-plan-implement.tsx");
   const coverageSource = repo.read(".smithers/workflows/improve-test-coverage.tsx");
 
   expect(implementSource).toContain('../components/Review');
-  expect(ticketImplementSource).toContain('../components/ValidationLoop');
+  expect(researchPlanImplementSource).toContain('../components/ValidationLoop');
   expect(coverageSource).toContain('../components/ValidationLoop');
 
   for (const [workflowName, reviewPrefix] of [
-    ["implement", "review"],
-    ["ticket-implement", "ticket:review"],
+    ["implement", "impl:review"],
+    ["research-plan-implement", "impl:review"],
     ["improve-test-coverage", "improve-test-coverage:review"],
   ] as const) {
     const graph = runSmithers(
