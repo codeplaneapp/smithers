@@ -6,11 +6,11 @@ import { z } from "zod/v4";
 import { agents } from "../agents";
 import TicketPrompt from "../prompts/ticket.mdx";
 
-const ticketCreateOutputSchema = z.object({
+const ticketCreateOutputSchema = z.looseObject({
   title: z.string(),
   description: z.string(),
   acceptanceCriteria: z.array(z.string()).default([]),
-}).passthrough();
+});
 
 const inputSchema = z.object({
   prompt: z.string().default("Create a ticket for the requested work."),

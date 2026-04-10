@@ -6,10 +6,10 @@ import { z } from "zod/v4";
 import { agents } from "../agents";
 import PlanPrompt from "../prompts/plan.mdx";
 
-const planOutputSchema = z.object({
+const planOutputSchema = z.looseObject({
   summary: z.string(),
   steps: z.array(z.string()).default([]),
-}).passthrough();
+});
 
 const inputSchema = z.object({
   prompt: z.string().default("Create an implementation plan."),

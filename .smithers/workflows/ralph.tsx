@@ -5,9 +5,9 @@ import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 
-const ralphOutputSchema = z.object({
+const ralphOutputSchema = z.looseObject({
   summary: z.string(),
-}).passthrough();
+});
 
 const inputSchema = z.object({
   prompt: z.string().default("Continue working on the current task."),

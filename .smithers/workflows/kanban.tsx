@@ -1,4 +1,4 @@
-// smithers-display-name: Ticket Kanban
+// smithers-display-name: Kanban
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, Sequence, Parallel, Worktree } from "smithers-orchestrator";
 import { readdirSync, readFileSync } from "node:fs";
@@ -7,6 +7,7 @@ import { z } from "zod/v4";
 import { agents } from "../agents";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
 import { reviewOutputSchema } from "../components/Review";
+import MergeTicketsPrompt from "../prompts/merge-tickets.mdx";
 
 const ticketResultSchema = z.object({
   ticketId: z.string(),
@@ -95,7 +96,7 @@ export default smithers((ctx) => {
   const ticketResults = ctx.outputs.ticketResult ?? [];
 
   return (
-    <Workflow name="ticket-kanban">
+    <Workflow name="kanban">
       <Sequence>
         {/* Implement each ticket in its own worktree branch, in parallel */}
         <Parallel maxConcurrency={maxConcurrency}>
@@ -138,20 +139,9 @@ export default smithers((ctx) => {
 
         {/* Agent merges completed branches back into main */}
         <Task id="merge" output={outputs.merge} agent={agents.smart}>
-          {`Merge the completed ticket branches back into the main branch.
-
-The following tickets were implemented in worktree branches:
-
-${ticketResults
-  .map((r) => `- ${r.ticketId}: branch "${r.branch}" — ${r.status} (${r.summary})`)
-  .join("\n")}
-
-For each branch with status "success":
-1. git merge the branch into the current branch (main)
-2. If there are merge conflicts, resolve them sensibly
-3. If a branch cannot be cleanly merged, skip it and note it as conflicted
-
-Report which branches were merged and which had conflicts.`}
+          <MergeTicketsPrompt ticketSummary={ticketResults
+            .map((r) => `- ${r.ticketId}: branch "${r.branch}" — ${r.status} (${r.summary})`)
+            .join("\n")} />
         </Task>
       </Sequence>
     </Workflow>

@@ -5,12 +5,12 @@ import { z } from "zod/v4";
 import FeatureEnumScanPrompt from "../prompts/feature-enum-scan.mdx";
 import FeatureEnumRefinePrompt from "../prompts/feature-enum-refine.mdx";
 
-export const featureEnumOutputSchema = z.object({
+export const featureEnumOutputSchema = z.looseObject({
   featureGroups: z.record(z.string(), z.array(z.string())).default({}),
   totalFeatures: z.number().int().default(0),
   lastCommitHash: z.string().nullable().optional(),
   markdownBody: z.string(),
-}).passthrough();
+});
 
 type FeatureEnumProps = {
   idPrefix: string;

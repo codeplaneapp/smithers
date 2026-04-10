@@ -16,7 +16,7 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
     maxIterations: z.number().int().default(10),
   }),
   grill: grillOutputSchema,
-  prd: z.object({
+  prd: z.looseObject({
     title: z.string(),
     problemStatement: z.string(),
     solution: z.string(),
@@ -39,7 +39,7 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
     outOfScope: z.array(z.string()).default([]),
     furtherNotes: z.string().nullable().default(null),
     markdownBody: z.string(),
-  }).passthrough(),
+  }),
 });
 
 export default smithers((ctx) => {

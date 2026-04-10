@@ -204,6 +204,12 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
   expect(repo.exists(".smithers/components/FeatureEnum.tsx")).toBe(true);
   expect(repo.exists(".smithers/components/WriteAPrd.tsx")).toBe(true);
   expect(repo.exists(".smithers/tickets/.gitkeep")).toBe(true);
+  expect(repo.read(".smithers/workflows/feature-enum.tsx")).toContain(
+    "existingFeatures: z.record(z.string(), z.array(z.string())).nullable().default(null)",
+  );
+  expect(repo.read(".smithers/workflows/audit.tsx")).toContain(
+    "features: z.record(z.string(), z.array(z.string())).default({})",
+  );
   runWorkflowPackTypecheck(repo);
 }, 20_000);
 

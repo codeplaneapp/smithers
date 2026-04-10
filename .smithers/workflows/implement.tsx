@@ -6,54 +6,18 @@ import { z } from "zod/v4";
 import { agents } from "../agents";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
 import { reviewOutputSchema } from "../components/Review";
-import ResearchPrompt from "../prompts/research.mdx";
-import PlanPrompt from "../prompts/plan.mdx";
 
-const researchOutputSchema = z.object({
-  summary: z.string(),
-  keyFindings: z.array(z.string()).default([]),
-}).passthrough();
-
-const planOutputSchema = z.object({
-  summary: z.string(),
-  steps: z.array(z.string()).default([]),
-}).passthrough();
-
-const inputSchema = z.object({
-  prompt: z.string().default("Implement the requested change."),
-});
-
-const { Workflow, Task, Sequence, smithers } = createSmithers({
-  input: inputSchema,
-  research: researchOutputSchema,
-  plan: planOutputSchema,
+const { Workflow, smithers } = createSmithers({
   implement: implementOutputSchema,
   validate: validateOutputSchema,
   review: reviewOutputSchema,
 });
 
 export default smithers((ctx) => {
-  const prompt = ctx.input.prompt;
-
-  const research = ctx.outputMaybe("research", { nodeId: "research" });
-  const plan = ctx.outputMaybe("plan", { nodeId: "plan" });
-
-  // Enrich plan prompt with research findings
-  const planPrompt = research
-    ? `${prompt}\n\n---\nRESEARCH FINDINGS:\n${research.summary}\n\nKey findings:\n${research.keyFindings.map((f: string) => `- ${f}`).join("\n")}`
-    : prompt;
-
-  // Enrich implement prompt with both research and plan
-  const implementPrompt = [
-    prompt,
-    research ? `RESEARCH FINDINGS:\n${research.summary}\n\nKey findings:\n${research.keyFindings.map((f: string) => `- ${f}`).join("\n")}` : null,
-    plan ? `IMPLEMENTATION PLAN:\n${plan.summary}\n\nSteps:\n${plan.steps.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}` : null,
-  ].filter(Boolean).join("\n\n---\n");
-
-  // Validation loop feedback
   const validate = ctx.outputMaybe("validate", { nodeId: "impl:validate" });
   const reviews = ctx.outputs.review ?? [];
 
+  // done = false until validate has actually run AND passed, AND at least one reviewer approved
   const hasValidated = validate !== undefined;
   const validationPassed = hasValidated && validate.allPassed !== false;
   const anyApproved = reviews.length > 0 && reviews.some((r: any) => r.approved === true);
@@ -77,24 +41,16 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="implement">
-      <Sequence>
-        <Task id="research" output={researchOutputSchema} agent={agents.smartTool}>
-          <ResearchPrompt prompt={prompt} />
-        </Task>
-        <Task id="plan" output={planOutputSchema} agent={agents.smart}>
-          <PlanPrompt prompt={planPrompt} />
-        </Task>
-        <ValidationLoop
-          idPrefix="impl"
-          prompt={implementPrompt}
-          implementAgents={agents.smart}
-          validateAgents={agents.cheapFast}
-          reviewAgents={agents.smart}
-          feedback={feedback}
-          done={done}
-          maxIterations={3}
-        />
-      </Sequence>
+      <ValidationLoop
+        idPrefix="impl"
+        prompt={ctx.input.prompt}
+        implementAgents={agents.smart}
+        validateAgents={agents.cheapFast}
+        reviewAgents={agents.smart}
+        feedback={feedback}
+        done={done}
+        maxIterations={3}
+      />
     </Workflow>
   );
 });

@@ -3,10 +3,10 @@
 import { Task } from "smithers-orchestrator";
 import { z } from "zod/v4";
 
-export const commandProbeOutputSchema = z.object({
+export const commandProbeOutputSchema = z.looseObject({
   command: z.string(),
   available: z.boolean(),
-}).passthrough();
+});
 
 export function CommandProbe({ id, command }: { id: string; command: string }) {
   return (

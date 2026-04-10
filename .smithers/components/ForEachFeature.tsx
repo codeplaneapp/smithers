@@ -2,26 +2,27 @@
 /** @jsxImportSource smithers-orchestrator */
 import { Parallel, Sequence, Task, type AgentLike } from "smithers-orchestrator";
 import { z } from "zod/v4";
+import FeatureTaskPrompt from "~/prompts/feature-task.mdx";
 
-export const forEachFeatureResultSchema = z.object({
+export const forEachFeatureResultSchema = z.looseObject({
   groupName: z.string(),
   result: z.string(),
   featuresCovered: z.array(z.string()).default([]),
   score: z.number().min(0).max(100).optional(),
-}).passthrough();
+});
 
-export const forEachFeatureMergeSchema = z.object({
+export const forEachFeatureMergeSchema = z.looseObject({
   totalGroups: z.number().int(),
   summary: z.string(),
   mergedResult: z.string(),
   markdownBody: z.string(),
-}).passthrough();
+});
 
 type ForEachFeatureProps = {
   idPrefix: string;
   agent: AgentLike | AgentLike[];
   features: Record<string, string[]>;
-  prompt: string;
+  prompt: React.ReactNode;
   maxConcurrency?: number;
   mergeAgent?: AgentLike | AgentLike[];
   granularity?: "group" | "feature";
@@ -98,18 +99,12 @@ export function ForEachFeature({
             agent={agent}
             continueOnFail
           >
-            {[
-              `# ${granularity === "feature" ? "Feature" : "Feature Group"} Task`,
-              "",
-              `Group: ${item.groupName}`,
-              `Granularity: ${granularity}`,
-              "",
-              "Features:",
-              ...item.features.map((feature) => `- ${feature}`),
-              "",
-              "REQUEST:",
-              prompt,
-            ].join("\n")}
+            <FeatureTaskPrompt
+              granularity={granularity}
+              groupName={item.groupName}
+              features={item.features}
+              prompt={prompt}
+            />
           </Task>
         ))}
       </Parallel>

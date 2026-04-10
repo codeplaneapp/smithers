@@ -18,7 +18,7 @@ const moduleSketchSchema = z.object({
   needsTests: z.boolean().default(false),
 });
 
-export const prdOutputSchema = z.object({
+export const prdOutputSchema = z.looseObject({
   title: z.string(),
   problemStatement: z.string(),
   solution: z.string(),
@@ -29,7 +29,7 @@ export const prdOutputSchema = z.object({
   outOfScope: z.array(z.string()).default([]),
   furtherNotes: z.string().nullable().default(null),
   markdownBody: z.string(),
-}).passthrough();
+});
 
 type WriteAPrdProps = {
   idPrefix: string;

@@ -6,10 +6,10 @@ import { z } from "zod/v4";
 import { agents } from "../agents";
 import ResearchPrompt from "../prompts/research.mdx";
 
-const researchOutputSchema = z.object({
+const researchOutputSchema = z.looseObject({
   summary: z.string(),
   keyFindings: z.array(z.string()).default([]),
-}).passthrough();
+});
 
 const inputSchema = z.object({
   prompt: z.string().default("Research the given topic."),

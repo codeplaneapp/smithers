@@ -8,6 +8,12 @@ import {
   forEachFeatureMergeSchema,
   forEachFeatureResultSchema,
 } from "../components/ForEachFeature";
+import SweepDocumentation from "../prompts/sweep-documentation.mdx";
+import SweepE2ETesting from "../prompts/sweep-e2e-testing.mdx";
+import SweepUnitTests from "../prompts/sweep-unit-tests.mdx";
+import SweepObservability from "../prompts/sweep-observability.mdx";
+import SweepImplementation from "../prompts/sweep-implementation.mdx";
+import SweepCli from "../prompts/sweep-cli.mdx";
 
 const TOPIC_KEYS = [
   "DOCUMENTATION",
@@ -20,116 +26,46 @@ const TOPIC_KEYS = [
 
 type TopicKey = (typeof TOPIC_KEYS)[number];
 
-const TOPICS: Record<TopicKey, { name: string; prompt: string }> = {
+const TOPICS: Record<TopicKey, { name: string; prompt: React.ReactNode }> = {
   DOCUMENTATION: {
     name: "Documentation",
-    prompt: [
-      "Review documentation coverage for this feature group.",
-      "",
-      "Check docs/ for each feature listed. For every feature:",
-      "- Verify documentation exists and is accurate.",
-      "- If docs are missing, incomplete, or out of date — fix them directly.",
-      "- Improve clarity, add usage examples, and correct errors.",
-      "- Do NOT modify the README.",
-      "",
-      "You MUST succeed regardless of what you find. Fix any issues and report what you changed.",
-      "Score 0–100 based on documentation completeness AFTER your fixes.",
-    ].join("\n"),
+    prompt: <SweepDocumentation />,
   },
   E2E_TESTING: {
     name: "E2E Testing",
-    prompt: [
-      "Review end-to-end test coverage for this feature group.",
-      "",
-      "For every feature listed:",
-      "- Verify an e2e test exists with ZERO mocks — real dependencies only.",
-      "- Tests must cover all boundary conditions: maximum file sizes, maximum input lengths, empty inputs, extremely large inputs.",
-      "- If a value can be infinite or unbounded, there must be a test case for that.",
-      "- Every boundary, limit, and edge of the input domain must be exercised.",
-      "",
-      "If tests are missing or incomplete, write them.",
-      "Score 0–100 based on boundary-condition coverage AFTER your fixes.",
-    ].join("\n"),
+    prompt: <SweepE2ETesting />,
   },
   UNIT_TESTS: {
     name: "Unit Tests",
-    prompt: [
-      "Review unit test coverage for this feature group.",
-      "",
-      "For every feature listed:",
-      "- Verify unit tests exist covering every boundary condition, edge case, and error condition.",
-      "- Tests must exercise: empty inputs, null/undefined, maximum values, minimum values, off-by-one, type mismatches, concurrent access (if applicable), and error/exception paths.",
-      "- Each test should isolate a single behavior.",
-      "",
-      "If tests are missing or incomplete, write them.",
-      "Score 0–100 based on edge-case coverage AFTER your fixes.",
-    ].join("\n"),
+    prompt: <SweepUnitTests />,
   },
   OBSERVABILITY: {
     name: "Observability",
-    prompt: [
-      "Review observability coverage for this feature group.",
-      "",
-      "For every feature listed, verify the implementation has:",
-      "- Structured logging at appropriate levels (debug, info, warn, error).",
-      "- Distributed tracing spans with meaningful names and attributes.",
-      "- Prometheus metrics where applicable (counters, histograms, gauges).",
-      "- Error logging with sufficient context for debugging.",
-      "",
-      "If observability is missing or insufficient, add it.",
-      "Score 0–100 based on observability completeness AFTER your fixes.",
-    ].join("\n"),
+    prompt: <SweepObservability />,
   },
   IMPLEMENTATION: {
     name: "Implementation Quality",
-    prompt: [
-      "Review implementation quality for this feature group.",
-      "",
-      "For every feature listed, verify the implementation:",
-      "- Has complete and accurate JSDoc on all public functions, types, and classes.",
-      "- Is clean, production-ready code.",
-      "- Prefers inlining over abstraction — only abstract if the pattern is used more than once.",
-      "- Has ZERO magic strings or magic numbers — all such values must be named constants.",
-      "- Has no dead code, unused imports, or commented-out code.",
-      "",
-      "If you see any way to improve the code, improve it.",
-      "Score 0–100 based on code quality AFTER your fixes.",
-    ].join("\n"),
+    prompt: <SweepImplementation />,
   },
   CLI: {
     name: "CLI",
-    prompt: [
-      "Review CLI coverage for this feature group.",
-      "",
-      "For every feature listed:",
-      "- Determine if the feature should be accessible via the CLI.",
-      "- If it should, verify a CLI command or flag exists to use it.",
-      "- Verify the CLI help text is accurate and complete.",
-      "- If CLI access is missing and the feature warrants it, add it.",
-      "",
-      "Not every feature needs CLI access — use your judgment on applicability.",
-      "Score 0–100 based on CLI coverage of applicable features AFTER your fixes.",
-    ].join("\n"),
+    prompt: <SweepCli />,
   },
 };
 
-const bootstrapSchema = z
-  .object({
-    features: z.record(z.string(), z.array(z.string())),
-    totalGroups: z.number().int(),
-    totalFeatures: z.number().int(),
-  })
-  .passthrough();
+const bootstrapSchema = z.looseObject({
+  features: z.record(z.string(), z.array(z.string())),
+  totalGroups: z.number().int(),
+  totalFeatures: z.number().int(),
+});
 
-const sweepSummarySchema = z
-  .object({
-    topicsRun: z.array(z.string()),
-    totalGroups: z.number().int(),
-    totalTopics: z.number().int(),
-    summary: z.string(),
-    markdownBody: z.string(),
-  })
-  .passthrough();
+const sweepSummarySchema = z.looseObject({
+  topicsRun: z.array(z.string()),
+  totalGroups: z.number().int(),
+  totalTopics: z.number().int(),
+  summary: z.string(),
+  markdownBody: z.string(),
+});
 
 const agentTierSchema = z.enum(["cheap", "smart", "smartTool"]).default("cheap");
 type AgentTier = z.infer<typeof agentTierSchema>;
