@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { sleep } from "./helpers";
-import { createServeApp, type ServeOptions } from "../src/server/serve";
+import { createServeApp } from "../src/server/serve";
 import { SmithersDb } from "../src/db/adapter";
 import { ensureSmithersTables } from "../src/db/ensure";
 import { runWorkflow } from "../src/engine";
@@ -98,7 +98,6 @@ describe("Hono Serve Mode", () => {
   let port: number;
   let request: ReturnType<typeof makeRequest>;
   let abort: AbortController;
-  let runPromiseHandle: Promise<any> | null = null;
 
   beforeEach(() => {
     testDir = resolve(
@@ -108,7 +107,6 @@ describe("Hono Serve Mode", () => {
     );
     mkdirSync(testDir, { recursive: true });
     abort = new AbortController();
-    runPromiseHandle = null;
   });
 
   afterEach(async () => {
@@ -117,9 +115,6 @@ describe("Hono Serve Mode", () => {
       server.stop(true);
       server = null;
     }
-    // Don't await runPromiseHandle — slow agents may take too long to cancel.
-    // Just let them fail in the background after abort.
-    runPromiseHandle = null;
     await sleep(50);
     try {
       rmSync(testDir, { recursive: true, force: true });
@@ -195,7 +190,7 @@ export default smithers((ctx) => (
 
     const startRun = opts.startRun !== false;
     if (startRun) {
-      runPromiseHandle = runWorkflow(workflow, {
+      void runWorkflow(workflow, {
         runId,
         input: {},
         workflowPath: resolve(process.cwd(), workflowPath),
