@@ -672,6 +672,8 @@ const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 200_000;
 const RUN_HEARTBEAT_MS = 1_000;
 const RUN_HEARTBEAT_STALE_MS = 30_000;
+const RUN_ABORT_SETTLE_POLL_MS = 10;
+const RUN_ABORT_SETTLE_TIMEOUT_MS = 5_000;
 const RUN_CANCEL_POLL_MS = 250;
 const TASK_HEARTBEAT_THROTTLE_MS = 500;
 const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
@@ -1819,6 +1821,7 @@ const RESUMABLE_RUN_STATUSES = new Set([
   "waiting-approval",
   "waiting-event",
   "waiting-timer",
+  "cancelled",
   "finished",
   "failed",
 ]);
@@ -4703,6 +4706,24 @@ async function runWorkflowBody<Schema>(
     const makeSchedulerTaskKey = (
       task: Pick<TaskDescriptor, "nodeId" | "iteration">,
     ) => buildStateKey(task.nodeId, task.iteration);
+    const waitForAbortedTasksToSettle = async () => {
+      const deadlineAt = nowMs() + RUN_ABORT_SETTLE_TIMEOUT_MS;
+      while (true) {
+        const inProgress = await adapter.listInProgressAttempts(runId);
+        if (schedulerTaskKeys.size === 0 && inProgress.length === 0) {
+          return;
+        }
+        if (nowMs() >= deadlineAt) {
+          logWarning("timed out waiting for aborted tasks to settle", {
+            runId,
+            activeTaskCount: schedulerTaskKeys.size,
+            inProgressAttemptCount: inProgress.length,
+          }, "engine:run");
+          return;
+        }
+        await Bun.sleep(RUN_ABORT_SETTLE_POLL_MS);
+      }
+    };
     const readExternalSchedulerState = async () => {
       const pendingApprovals = await adapter.listPendingApprovals(runId);
       const [latestSignal] = await adapter.listSignals(runId, { limit: 1 });
@@ -4895,6 +4916,7 @@ async function runWorkflowBody<Schema>(
                 ...hijackState.completion,
               }
             : null;
+        await waitForAbortedTasksToSettle();
         await cancelPendingTimers(adapter, runId, eventBus, "run-cancelled");
         await adapter.updateRun(runId, {
           status: "cancelled",
@@ -6039,9 +6061,7 @@ async function runWorkflowBody<Schema>(
       }).pipe(Effect.interruptible),
     );
 
-    return await runPromise(schedulerLoopEffect, {
-      signal: runAbortController.signal,
-    });
+    return await runPromise(schedulerLoopEffect);
   } catch (err) {
     if (runAbortController.signal.aborted || isAbortError(err)) {
       logInfo("workflow run cancelled while handling error", {
@@ -6055,6 +6075,7 @@ async function runWorkflowBody<Schema>(
               ...hijackState.completion,
             }
           : errorToJson(err);
+      await waitForAbortedTasksToSettle();
       await cancelPendingTimers(adapter, runId, eventBus, "run-cancelled");
       await adapter.updateRun(runId, {
         status: "cancelled",
