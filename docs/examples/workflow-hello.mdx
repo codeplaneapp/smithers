@@ -12,6 +12,7 @@ description: "Example from workflows/hello.tsx — A minimal hello-world workflo
 ## Source
 
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
 // workflows/hello.tsx
 import { createSmithers, Workflow, Task } from "smithers-orchestrator";
 import { z } from "zod";
@@ -28,7 +29,7 @@ export default smithers((ctx) => (
     <Task id="hello" output={outputs.output}>
       {{
         message: `Hello, ${ctx.input.name}!`,
-        length: String(ctx.input.name).length,
+        length: ctx.input.name.length,
       }}
     </Task>
   </Workflow>
@@ -38,7 +39,7 @@ export default smithers((ctx) => (
 ## Running
 
 ```bash
-smithers up workflows/hello.tsx --input '{"name": "World"}'
+bunx smithers-orchestrator up workflows/hello.tsx --input '{"name": "World"}'
 ```
 
 ```

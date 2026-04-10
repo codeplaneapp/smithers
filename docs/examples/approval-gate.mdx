@@ -10,6 +10,7 @@ description: A workflow with a human-in-the-loop approval step that pauses execu
 ## Workflow Definition
 
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
 // approval-gate.tsx
 import {
   Approval,
@@ -88,14 +89,14 @@ export default smithers((ctx) => {
 ## Running
 
 ```bash
-smithers up approval-gate.tsx --input '{}'
+bunx smithers-orchestrator up approval-gate.tsx --input '{}'
 ```
 
 ```
 [approval-gate] Starting run mno345
 [write-draft] Done -> { title: "Why Resumability Matters", content: "In production AI systems..." }
 [approve-publish] Waiting for approval...
-[approval-gate] Paused — run `smithers approve` or `smithers deny` to continue.
+[approval-gate] Paused — run `bunx smithers-orchestrator approve` or `bunx smithers-orchestrator deny` to continue.
 ```
 
 ## Approving or Denying
@@ -103,8 +104,8 @@ smithers up approval-gate.tsx --input '{}'
 Approve and resume:
 
 ```bash
-smithers approve mno345 --node approve-publish
-smithers up approval-gate.tsx --run-id mno345 --resume true
+bunx smithers-orchestrator approve mno345 --node approve-publish
+bunx smithers-orchestrator up approval-gate.tsx --run-id mno345 --resume true
 ```
 
 ```
@@ -117,7 +118,7 @@ smithers up approval-gate.tsx --run-id mno345 --resume true
 Deny and halt:
 
 ```bash
-smithers deny mno345 --node approve-publish
+bunx smithers-orchestrator deny mno345 --node approve-publish
 ```
 
 ```
@@ -128,7 +129,7 @@ smithers deny mno345 --node approve-publish
 ## Listing Pending Approvals
 
 ```bash
-smithers ps --status waiting-approval
+bunx smithers-orchestrator ps --status waiting-approval
 ```
 
 ```json

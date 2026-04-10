@@ -1,60 +1,55 @@
 ---
-title: "Ghost: workflows/quickstart.tsx"
-description: "Example from workflows/quickstart.tsx — A two-agent sequential workflow where a planner agent feeds a briefing agent, with Zod schemas and structured output."
+title: "Workflow Quickstart"
+description: "A two-agent sequential smithers-orchestrator workflow where a planner task feeds a briefing task through persisted structured output."
 ---
 
-# workflows/quickstart.tsx
+# Workflow Quickstart
 
 <Note>
-**Ghost doc** -- Real script from `workflows/quickstart.tsx`. Two-agent sequential pipeline with cross-task data flow.
+Standalone `smithers-orchestrator` quickstart example. A planner task feeds a briefing task through persisted workflow output.
 </Note>
 
 ## Source
 
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
 // workflows/quickstart.tsx
-import { createSmithers, Sequence, Task, Workflow } from "smithers-orchestrator";
+import { createSmithers } from "smithers-orchestrator";
 import { ToolLoopAgent as Agent, Output } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 
-const { smithers, outputs } = createSmithers({
-  plan: z.object({
-    summary: z.string(),
-    steps: z.array(z.string()),
-  }),
-  brief: z.object({
-    brief: z.string(),
-    stepCount: z.number(),
-  }),
+const planSchema = z.object({
+  summary: z.string(),
+  steps: z.array(z.string()).min(3).max(8),
+});
+
+const briefSchema = z.object({
+  brief: z.string(),
+  stepCount: z.number().int().min(1),
+});
+
+const { Workflow, Sequence, Task, smithers, outputs } = createSmithers({
+  plan: planSchema,
+  brief: briefSchema,
 });
 
 const planAgent = new Agent({
   model: anthropic("claude-sonnet-4-5-20250929"),
-  output: Output.object({
-    schema: z.object({
-      summary: z.string(),
-      steps: z.array(z.string()).min(3).max(8),
-    }),
-  }),
+  output: Output.object({ schema: planSchema }),
   instructions:
     "You are a planning assistant. Return a concise summary and 3-8 actionable steps.",
 });
 
 const briefAgent = new Agent({
   model: anthropic("claude-sonnet-4-5-20250929"),
-  output: Output.object({
-    schema: z.object({
-      brief: z.string(),
-      stepCount: z.number().int().min(1),
-    }),
-  }),
+  output: Output.object({ schema: briefSchema }),
   instructions:
     "You are a concise technical writer. Produce a 5-8 sentence brief.",
 });
 
 export default smithers((ctx) => {
-  const planOutput = ctx.outputMaybe("plan", { nodeId: "plan" });
+  const planOutput = ctx.outputMaybe(outputs.plan, { nodeId: "plan" });
 
   return (
     <Workflow name="quickstart">
@@ -78,7 +73,7 @@ Write a brief based on the plan. The "stepCount" must equal the number of steps.
 ## Running
 
 ```bash
-smithers up workflows/quickstart.tsx --input '{"goal": "Build a CLI tool for managing dotfiles"}'
+bunx smithers-orchestrator up workflows/quickstart.tsx --input '{"goal": "Build a CLI tool for managing dotfiles"}'
 ```
 
 ```
@@ -90,6 +85,6 @@ smithers up workflows/quickstart.tsx --input '{"goal": "Build a CLI tool for man
 
 ## Notes
 
-- **Cross-task data flow** -- `ctx.outputMaybe("plan", { nodeId: "plan" })` reads the planner's persisted output. First argument is the schema key from `createSmithers`, not a table name.
-- **Zod structured output** -- Both agents use `Output.object({ schema })` with validation constraints.
-- **Vercel AI SDK** -- Uses `ToolLoopAgent` with Anthropic provider.
+- **Cross-task data flow** -- `ctx.outputMaybe(outputs.plan, { nodeId: "plan" })` reads the planner's persisted output. `ctx.outputMaybe` accepts either a schema key string like `"plan"` or the schema object from `outputs`.
+- **Shared schemas** -- The same Zod schemas are reused by `createSmithers(...)` and `Output.object({ schema })`, so task persistence and agent output stay aligned.
+- **Vercel AI SDK** -- `ToolLoopAgent` and `Output` are exported from `ai`, and the agent constructor accepts `{ model, output, instructions }`.

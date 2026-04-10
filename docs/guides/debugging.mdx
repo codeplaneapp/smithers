@@ -5,12 +5,14 @@ description: Inspect runs, diagnose failures, and query internal state using the
 
 Three levels of inspection: CLI commands, NDJSON log files, and direct SQLite queries.
 
+All CLI examples on this page use `bunx smithers-orchestrator ...`. The published package is `smithers-orchestrator`, not `smithers`.
+
 ## CLI Inspection
 
 ### inspect
 
 ```bash
-bunx smithers inspect <id>
+bunx smithers-orchestrator inspect <id>
 ```
 
 Shows run metadata, node statuses, approvals, and loop state.
@@ -18,24 +20,48 @@ Shows run metadata, node statuses, approvals, and loop state.
 ### logs
 
 ```bash
-bunx smithers logs <id> --tail 10 --follow false
+bunx smithers-orchestrator logs <id> --tail 10
 ```
 
-Shows persisted lifecycle events. For raw render frames, query `_smithers_frames` or use [renderFrame](/runtime/render-frame).
+Shows persisted lifecycle events. Add `--follow` to keep tailing live events. For raw render frames, query `_smithers_frames` or use [renderFrame](/runtime/render-frame).
+
+### chat
+
+```bash
+bunx smithers-orchestrator chat <id> --tail 5
+```
+
+Shows the most recent agent chat blocks for a run. Omit `<id>` to inspect the latest run.
+
+### why
+
+```bash
+bunx smithers-orchestrator why <id>
+```
+
+Explains why a run is currently blocked or paused.
+
+### node
+
+```bash
+bunx smithers-orchestrator node <node-id> --run-id <id>
+```
+
+Shows enriched node details for retries, tool calls, and latest output for a specific task.
 
 ### ps
 
 ```bash
-bunx smithers ps --limit 20
-bunx smithers ps --status running
-bunx smithers ps --status failed
+bunx smithers-orchestrator ps --limit 20
+bunx smithers-orchestrator ps --status running
+bunx smithers-orchestrator ps --status failed
 ```
 
 ### graph
 
 ```bash
-bunx smithers graph workflow.tsx --run-id <id>
-bunx smithers graph workflow.tsx --input '{"description": "Fix bugs"}'
+bunx smithers-orchestrator graph workflow.tsx --run-id <id>
+bunx smithers-orchestrator graph workflow.tsx --input '{"description": "Fix bugs"}'
 ```
 
 Shows task dependency structure. The second form previews the graph without running.
@@ -70,8 +96,8 @@ cat .smithers/executions/<runId>/logs/stream.ndjson | jq 'select(.type == "NodeF
 Custom log location or disable:
 
 ```bash
-bunx smithers up workflow.tsx --log-dir ./my-logs
-bunx smithers up workflow.tsx --log false
+bunx smithers-orchestrator up workflow.tsx --log-dir ./my-logs
+bunx smithers-orchestrator up workflow.tsx --log false
 ```
 
 ## SQLite Inspection
@@ -124,10 +150,11 @@ sqlite3 smithers.db "SELECT * FROM report WHERE run_id = '<id>';"
 ### Stuck at "waiting-approval"
 
 ```bash
-bunx smithers inspect <id>
-bunx smithers approve <id> --node <node-id>
-# or: bunx smithers deny <id> --node <node-id>
-bunx smithers up workflow.tsx --run-id <id> --resume true
+bunx smithers-orchestrator why <id>
+bunx smithers-orchestrator inspect <id>
+bunx smithers-orchestrator approve <id> --node <node-id>
+# or: bunx smithers-orchestrator deny <id> --node <node-id>
+bunx smithers-orchestrator up workflow.tsx --run-id <id> --resume
 ```
 
 ### Duplicate task IDs
@@ -154,6 +181,7 @@ if (result) {
 Check for schema validation errors, timeouts, or tool failures:
 
 ```bash
+bunx smithers-orchestrator node <node-id> --run-id <id> --attempts --tools
 grep "NodeRetrying" .smithers/executions/<runId>/logs/stream.ndjson | jq .
 sqlite3 smithers.db "SELECT node_id, attempt, error_message FROM _smithers_attempts WHERE run_id = '<id>' AND status = 'failed';"
 ```
@@ -163,7 +191,7 @@ sqlite3 smithers.db "SELECT node_id, attempt, error_message FROM _smithers_attem
 Tasks in-progress for over 15 minutes are auto-cancelled and retried on resume:
 
 ```bash
-bunx smithers up workflow.tsx --run-id <id> --resume true
+bunx smithers-orchestrator up workflow.tsx --run-id <id> --resume
 ```
 
 ## Next Steps

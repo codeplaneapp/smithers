@@ -1565,7 +1565,7 @@ describe("docs: example patterns", () => {
     };
 
     const workflow = smithers((ctx) => {
-      const planOutput = ctx.outputMaybe("plan", { nodeId: "plan" });
+      const planOutput = ctx.outputMaybe(outputs.plan, { nodeId: "plan" });
       return (
         <Workflow name="quickstart">
           <Sequence>

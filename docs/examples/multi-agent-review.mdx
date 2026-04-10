@@ -10,6 +10,7 @@ Two reviewers run concurrently via `<Parallel>`, then an aggregator produces a f
 ## Workflow Definition
 
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
 // multi-agent-review.tsx
 import { createSmithers, Task, Sequence, Parallel } from "smithers-orchestrator";
 import { ToolLoopAgent as Agent } from "ai";
@@ -83,7 +84,7 @@ export default smithers((ctx) => {
 ## Running
 
 ```bash
-smithers up multi-agent-review.tsx --input '{}'
+bunx smithers-orchestrator up multi-agent-review.tsx --input '{}'
 ```
 
 ```
@@ -106,6 +107,7 @@ smithers up multi-agent-review.tsx --input '{}'
 Retrieve each result with `ctx.outputMaybe(schemaKey, { nodeId })`:
 
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
 const secReview = ctx.outputMaybe("review", { nodeId: "security-review" });
 const qualReview = ctx.outputMaybe("review", { nodeId: "quality-review" });
 ```

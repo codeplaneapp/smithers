@@ -21,19 +21,20 @@ That creates a local `.smithers/` directory with seeded workflows, shared prompt
 ## 2. Launch a Seeded Workflow
 
 ```bash
-bunx smithers workflow implement --prompt "Add rate limiting to the API"
+bunx smithers-orchestrator workflow run implement --prompt "Add rate limiting to the API"
 ```
 
-This is the fastest way to see Smithers behave like a workflow runtime instead of a library on a shelf.
+This runs the seeded `implement` workflow that `init` installs into `.smithers/workflows/`.
+It is the fastest way to see Smithers behave like a workflow runtime instead of a library on a shelf.
 
 ## 3. Inspect the Run
 
 Once the workflow starts, use the CLI to see what happened:
 
 ```bash
-bunx smithers ps
-bunx smithers inspect <run-id>
-bunx smithers logs <run-id> --tail 20 --follow false
+bunx smithers-orchestrator ps
+bunx smithers-orchestrator inspect <run-id>
+bunx smithers-orchestrator logs <run-id> --tail 20 --follow false
 ```
 
 Use `ps` to find the run ID if you do not already have it.

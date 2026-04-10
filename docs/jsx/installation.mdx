@@ -18,11 +18,13 @@ Install the core JSX dependencies:
 bun add smithers-orchestrator ai @ai-sdk/anthropic zod
 ```
 
-Add the TypeScript and JSX type packages:
+Add TypeScript and the extra type packages the current `smithers-orchestrator` exports need for `tsc --noEmit`:
 
 ```bash
-bun add -d typescript @types/react @types/react-dom
+bun add -d typescript @types/bun @types/ws @types/diff
 ```
+
+You do not need to add `@types/react` or `@types/react-dom` separately just to use the Smithers JSX runtime.
 
 ## TypeScript Configuration
 
@@ -33,6 +35,7 @@ Create a `tsconfig.json` like this:
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "jsxImportSource": "smithers-orchestrator",
@@ -43,7 +46,7 @@ Create a `tsconfig.json` like this:
 }
 ```
 
-`jsxImportSource` is the key setting. It tells TypeScript to use Smithers' JSX runtime instead of a browser UI runtime.
+`jsxImportSource` is the key setting. TypeScript resolves it through the exported `smithers-orchestrator/jsx-runtime` and `smithers-orchestrator/jsx-dev-runtime` entry points.
 
 ## Project Shape
 
@@ -63,7 +66,7 @@ If you want prompt templates in `.mdx` files, register the MDX preload plugin:
 
 ```ts
 // preload.ts
-import { mdxPlugin } from "smithers-orchestrator/mdx-plugin";
+import { mdxPlugin } from "smithers-orchestrator";
 
 mdxPlugin();
 ```
@@ -85,13 +88,19 @@ bun add -d @types/mdx
 Once TypeScript and JSX are configured, run the typecheck to validate your setup:
 
 ```bash
-npx tsc --noEmit
+bunx tsc --noEmit
 ```
 
 Then run the sample workflow:
 
 ```bash
 bun run main.ts
+```
+
+If you want to verify the CLI entrypoint too:
+
+```bash
+bunx smithers-orchestrator --help
 ```
 
 ## Next Steps

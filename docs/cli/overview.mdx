@@ -1,10 +1,10 @@
 ---
 title: CLI Reference
-description: "Complete reference for the current smithers command-line interface: scaffold workflow packs, run workflows, inspect runs, manage approvals, hijack sessions, and operate local tooling."
+description: "Complete reference for the current smithers-orchestrator command-line interface: scaffold workflow packs, run workflows, inspect runs, manage approvals, hijack sessions, and operate local tooling."
 ---
 
 ```bash
-smithers <command> [options]
+bunx smithers-orchestrator <command> [options]
 ```
 
 The CLI is the operational surface for Smithers. JSX defines the workflow. The CLI is how you launch it, inspect it, answer approvals, recover from interruption, and understand why it is blocked.
@@ -13,15 +13,15 @@ The CLI is the operational surface for Smithers. JSX defines the workflow. The C
 
 | Goal | Command |
 |---|---|
-| Install the local workflow pack | `smithers init` |
-| Launch a workflow file | `smithers up workflow.tsx --input '{"task":"..."}'` |
-| Launch a discovered pack workflow | `smithers workflow implement --prompt "..."` |
-| List recent and active runs | `smithers ps` |
-| Inspect one run deeply | `smithers inspect <runId>` |
-| Read event logs | `smithers logs <runId>` |
-| Read agent prompts and replies | `smithers chat <runId>` |
-| Approve or deny a pause | `smithers approve <runId>` / `smithers deny <runId>` |
-| Resume after interruption | `smithers up workflow.tsx --run-id <runId> --resume true` |
+| Install the local workflow pack | `bunx smithers-orchestrator init` |
+| Launch a workflow file | `bunx smithers-orchestrator up workflow.tsx --input '{"task":"..."}'` |
+| Launch a discovered pack workflow | `bunx smithers-orchestrator workflow implement --prompt "..."` |
+| List recent and active runs | `bunx smithers-orchestrator ps` |
+| Inspect one run deeply | `bunx smithers-orchestrator inspect <runId>` |
+| Read event logs | `bunx smithers-orchestrator logs <runId>` |
+| Read agent prompts and replies | `bunx smithers-orchestrator chat <runId>` |
+| Approve or deny a pause | `bunx smithers-orchestrator approve <runId>` / `bunx smithers-orchestrator deny <runId>` |
+| Resume after interruption | `bunx smithers-orchestrator up workflow.tsx --run-id <runId> --resume true` |
 
 ## How the CLI Fits With JSX
 
@@ -37,8 +37,8 @@ If you are new to Smithers, read [CLI Quickstart](/cli/quickstart) before using 
 |---|---|
 | `init` | Install a local `.smithers/` workflow pack. |
 | `up` | Start or resume a workflow execution. |
-| `tui` | Open the chat-first terminal control plane. |
-| `ps` | List recent and active runs. |
+| `tui` | Open the interactive Smithers observability dashboard. |
+| `ps` | List active, paused, and recently completed runs. |
 | `logs` | Stream lifecycle events for a run. |
 | `chat` | Show agent prompts, responses, and stderr. |
 | `inspect` | Print structured run state, steps, approvals, and loop info. |
@@ -50,6 +50,7 @@ If you are new to Smithers, read [CLI Quickstart](/cli/quickstart) before using 
 | `supervise` | Watch for stale runs and auto-resume them. |
 | `cancel` / `down` | Stop one run or all active runs. |
 | `hijack` | Hand off an agent session or conversation. |
+| `alerts` | List, acknowledge, resolve, or silence durable alerts. |
 | `graph` | Render a workflow tree without executing. |
 | `revert` | Restore workspace to a previous task attempt snapshot. |
 | `retry-task` | Retry a specific task within a run, then resume. |
@@ -68,6 +69,9 @@ If you are new to Smithers, read [CLI Quickstart](/cli/quickstart) before using 
 | `openapi` | Preview AI SDK tools generated from an OpenAPI spec. |
 | `workflow` | Discover, create, resolve, and run flat workflows in `.smithers/workflows`. |
 | `cron` | Register and run background schedule triggers. |
+| `completions` | Generate shell completion scripts. |
+| `mcp add` | Register Smithers as an MCP server for an agent integration. |
+| `skills` | Sync skill files to agent integrations. |
 
 ## Resolution Rules
 
@@ -76,25 +80,25 @@ If you are new to Smithers, read [CLI Quickstart](/cli/quickstart) before using 
 `up`, `graph`, and `revert` take explicit workflow file paths:
 
 ```bash
-smithers up workflow.tsx --input '{"topic":"Zig"}'
-smithers graph workflow.tsx
-smithers revert workflow.tsx --run-id run-123 --node-id analyze
+bunx smithers-orchestrator up workflow.tsx --input '{"topic":"Zig"}'
+bunx smithers-orchestrator graph workflow.tsx
+bunx smithers-orchestrator revert workflow.tsx --run-id run-123 --node-id analyze
 ```
 
 A workflow file can be invoked directly without `up`:
 
 ```bash
-smithers workflow.tsx --input '{"topic":"Zig"}'
+bunx smithers-orchestrator workflow.tsx --input '{"topic":"Zig"}'
 ```
 
 The `workflow` command family resolves IDs under `.smithers/workflows/*.tsx`:
 
 ```bash
-smithers workflow implement --prompt "Add input validation"
-smithers workflow run implement --prompt "Add input validation"
+bunx smithers-orchestrator workflow implement --prompt "Add input validation"
+bunx smithers-orchestrator workflow run implement --prompt "Add input validation"
 ```
 
-`smithers workflow run <name>` is a real subcommand. `smithers workflow <name>` is a shorthand that rewrites to it.
+`bunx smithers-orchestrator workflow run <name>` is a real subcommand. `bunx smithers-orchestrator workflow <name>` is a shorthand that rewrites to it.
 
 ### Finding persisted state
 
@@ -106,14 +110,14 @@ No database found: exit with error.
 
 ### Boolean options
 
-Booleans are modeled explicitly. Disable a default-on option by passing `false`:
+Boolean flags accept either bare form or explicit `true` / `false`. Use `false` to disable a default-on option:
 
 ```bash
-smithers logs run-123 --follow false
-smithers chat run-123 --stderr false
-smithers hijack run-123 --launch false
-smithers up workflow.tsx --log false
-smithers observability --down true
+bunx smithers-orchestrator logs run-123 --follow false
+bunx smithers-orchestrator chat run-123 --stderr false
+bunx smithers-orchestrator hijack run-123 --launch false
+bunx smithers-orchestrator up workflow.tsx --log false
+bunx smithers-orchestrator observability --down true
 ```
 
 ## Commands
@@ -123,12 +127,12 @@ smithers observability --down true
 Install the local workflow pack into `.smithers/`.
 
 ```bash
-smithers init [--force true]
+bunx smithers-orchestrator init [options]
 ```
 
 | Option | Description |
 |---|---|
-| `--force <boolean>` | Overwrite existing scaffold files. Default: `false`. |
+| `--force <boolean>` | Overwrite existing scaffold files. Default: `false`. The help output shows this as a bare boolean flag. |
 
 Generated pack contents:
 
@@ -139,8 +143,8 @@ Generated pack contents:
 - `.smithers/preload.ts`, `.smithers/bunfig.toml`, `package.json`, `tsconfig.json`
 
 ```bash
-smithers init
-smithers workflow implement --prompt "Commit the new .smithers pack"
+bunx smithers-orchestrator init
+bunx smithers-orchestrator workflow implement --prompt "Commit the new .smithers pack"
 ```
 
 ### up
@@ -148,14 +152,14 @@ smithers workflow implement --prompt "Commit the new .smithers pack"
 Start or resume a workflow execution.
 
 ```bash
-smithers up <workflow> [options]
+bunx smithers-orchestrator up <workflow> [options]
 ```
 
 | Option | Description |
 |---|---|
 | `--detach`, `-d <boolean>` | Background mode; print `runId`/`pid`/`logFile` and exit. Default: `false`. |
 | `--run-id`, `-r <string>` | Explicit run ID. |
-| `--max-concurrency`, `-c <number>` | Maximum parallel tasks. |
+| `--max-concurrency`, `-c <number>` | Maximum parallel tasks. Default: `4`. |
 | `--root <string>` | Tool sandbox root. Default: workflow file's parent directory. |
 | `--log <boolean>` | NDJSON event log output. Default: `true`. |
 | `--log-dir <string>` | NDJSON log directory. |
@@ -166,6 +170,10 @@ smithers up <workflow> [options]
 | `--input`, `-i <string>` | Input JSON string. |
 | `--resume <boolean>` | Resume existing run. Default: `false`. |
 | `--force <boolean>` | Resume even if run is marked `running`. Default: `false`. |
+| `--resume-claim-owner <string>` | Internal durable resume claim owner. |
+| `--resume-claim-heartbeat <number>` | Internal durable resume claim heartbeat. |
+| `--resume-restore-owner <string>` | Internal durable resume restore owner. |
+| `--resume-restore-heartbeat <number>` | Internal durable resume restore heartbeat. |
 | `--serve <boolean>` | Start an HTTP server alongside the workflow. Default: `false`. |
 | `--port <number>` | HTTP server port when `--serve true`. Default: `7331`. |
 | `--host <string>` | HTTP bind address when `--serve true`. Default: `127.0.0.1`. |
@@ -178,12 +186,12 @@ smithers up <workflow> [options]
 | `--supervise-max-concurrent <number>` | With `--supervise`, max runs resumed per poll. Default: `3`. |
 
 ```bash
-smithers up workflow.tsx --input '{"description":"Fix auth bug"}'
-smithers up workflow.tsx --run-id run-123 --resume true
-smithers up workflow.tsx --run-id run-123 --resume true --force true
-smithers up workflow.tsx --detach true --input '{"description":"Deploy v2"}'
-smithers up workflow.tsx --serve true --port 8080 --auth-token secret
-smithers workflow.tsx --input '{"description":"Direct file shorthand"}'
+bunx smithers-orchestrator up workflow.tsx --input '{"description":"Fix auth bug"}'
+bunx smithers-orchestrator up workflow.tsx --run-id run-123 --resume true
+bunx smithers-orchestrator up workflow.tsx --run-id run-123 --resume true --force true
+bunx smithers-orchestrator up workflow.tsx --detach --input '{"description":"Deploy v2"}'
+bunx smithers-orchestrator up workflow.tsx --serve --port 8080 --auth-token secret
+bunx smithers-orchestrator workflow.tsx --input '{"description":"Direct file shorthand"}'
 ```
 
 - Detached mode redirects stdout/stderr to a log file regardless of NDJSON logging settings.
@@ -192,43 +200,35 @@ smithers workflow.tsx --input '{"description":"Direct file shorthand"}'
 
 ### tui
 
-Open the chat-first terminal control plane. Connects to the nearest `smithers.db` and provides a unified workspace for orchestrating, monitoring, and steering workflows.
+Open the interactive Smithers observability dashboard for the nearest `smithers.db`.
 
 ```bash
-smithers tui [options]
+bunx smithers-orchestrator tui
 ```
 
-| Option | Description |
-|---|---|
-| `--attach` | Attach to an existing broker instead of starting a new one. |
-| `--broker-only` | Start the broker daemon without attaching the UI client. For debugging. |
-
-```bash
-smithers tui
-smithers tui --attach
-smithers tui --broker-only
-```
-
-See the [TUI guide](/guides/tui) for the full keyboard model, workspace system, and feature reference.
+There are no command-specific flags in the current help output. See the [TUI guide](/guides/tui) for the current keyboard model and feature reference.
 
 ### ps
 
 List active, paused, and recent runs.
 
 ```bash
-smithers ps [options]
+bunx smithers-orchestrator ps [options]
 ```
 
 | Option | Description |
 |---|---|
-| `--status`, `-s <string>` | Filter: `running`, `finished`, `failed`, `cancelled`, `waiting-approval`. |
+| `--status`, `-s <string>` | Filter: `running`, `waiting-approval`, `waiting-event`, `waiting-timer`, `continued`, `finished`, `failed`, `cancelled`. |
 | `--limit`, `-l <number>` | Max rows. Default: `20`. |
-| `--all`, `-a <boolean>` | Parity flag. Unset `--status` already returns mixed statuses. |
+| `--all`, `-a <boolean>` | Include all statuses. |
+| `--watch`, `-w <boolean>` | Watch mode: refresh output continuously. Default: `false`. |
+| `--interval`, `-i <number>` | Watch refresh interval in seconds. Default: `2`. |
 
 ```bash
-smithers ps
-smithers ps --status waiting-approval
-smithers ps --limit 50
+bunx smithers-orchestrator ps
+bunx smithers-orchestrator ps --status waiting-approval
+bunx smithers-orchestrator ps --limit 50
+bunx smithers-orchestrator ps --watch --interval 5
 ```
 
 ### logs
@@ -236,7 +236,7 @@ smithers ps --limit 50
 Tail lifecycle events for a run.
 
 ```bash
-smithers logs <runId> [options]
+bunx smithers-orchestrator logs <runId> [options]
 ```
 
 | Option | Description |
@@ -247,11 +247,11 @@ smithers logs <runId> [options]
 | `--tail`, `-n <number>` | Last `N` events. Default: `50`. |
 
 ```bash
-smithers logs run-123
-smithers logs run-123 --follow false
-smithers logs run-123 --since 400
-smithers logs run-123 --tail 10
-smithers logs run-123 --follow-ancestry true
+bunx smithers-orchestrator logs run-123
+bunx smithers-orchestrator logs run-123 --follow false
+bunx smithers-orchestrator logs run-123 --since 400
+bunx smithers-orchestrator logs run-123 --tail 10
+bunx smithers-orchestrator logs run-123 --follow-ancestry true
 ```
 
 When `--follow-ancestry` is enabled, events from the full parent chain are merged into a single stream with each line prefixed by the originating run ID.
@@ -263,13 +263,13 @@ Reads from the database, not detached-process stdout. See [Events](/runtime/even
 Query run event history with filters, grouping, and NDJSON output.
 
 ```bash
-smithers events <runId> [options]
+bunx smithers-orchestrator events <runId> [options]
 ```
 
 | Option | Description |
 |---|---|
 | `--node`, `-n <string>` | Filter events by node ID. |
-| `--type`, `-t <string>` | Filter by event category. |
+| `--type`, `-t <string>` | Filter by event category: `agent`, `approval`, `frame`, `memory`, `node`, `openapi`, `output`, `rag`, `revert`, `run`, `sandbox`, `scorer`, `snapshot`, `supervisor`, `timer`, `token`, `tool-call`, `voice`, `workflow`. |
 | `--since`, `-s <string>` | Filter to a recent duration window (e.g. `5m`, `2h`). |
 | `--limit`, `-l <number>` | Maximum events to display. Default: `1000`. Max: `100000`. |
 | `--json`, `-j <boolean>` | Output NDJSON for piping. Default: `false`. |
@@ -278,12 +278,12 @@ smithers events <runId> [options]
 | `--interval`, `-i <number>` | Watch poll interval in seconds. Default: `2`. |
 
 ```bash
-smithers events run-123
-smithers events run-123 --node analyze --type tool
-smithers events run-123 --since 5m --limit 500
-smithers events run-123 --json true
-smithers events run-123 --watch true --interval 5
-smithers events run-123 --group-by node
+bunx smithers-orchestrator events run-123
+bunx smithers-orchestrator events run-123 --node analyze --type tool-call
+bunx smithers-orchestrator events run-123 --since 5m --limit 500
+bunx smithers-orchestrator events run-123 --json
+bunx smithers-orchestrator events run-123 --watch --interval 5
+bunx smithers-orchestrator events run-123 --group-by node
 ```
 
 ### chat
@@ -291,7 +291,7 @@ smithers events run-123 --group-by node
 Show agent transcripts for the latest or a specified run. Reconstructs chat from attempt metadata, `NodeOutput` events, and fallback `responseText`.
 
 ```bash
-smithers chat [runId] [options]
+bunx smithers-orchestrator chat [runId] [options]
 ```
 
 | Option | Description |
@@ -302,11 +302,11 @@ smithers chat [runId] [options]
 | `--stderr <boolean>` | Include agent stderr. Default: `true`. |
 
 ```bash
-smithers chat
-smithers chat run-123
-smithers chat run-123 --all true
-smithers chat run-123 --tail 20
-smithers chat run-123 --follow true --stderr false
+bunx smithers-orchestrator chat
+bunx smithers-orchestrator chat run-123
+bunx smithers-orchestrator chat run-123 --all true
+bunx smithers-orchestrator chat run-123 --tail 20
+bunx smithers-orchestrator chat run-123 --follow true --stderr false
 ```
 
 ### inspect
@@ -314,13 +314,19 @@ smithers chat run-123 --follow true --stderr false
 Print structured run state.
 
 ```bash
-smithers inspect <runId>
+bunx smithers-orchestrator inspect <runId> [options]
 ```
+
+| Option | Description |
+|---|---|
+| `--watch`, `-w <boolean>` | Watch mode: refresh output continuously. Default: `false`. |
+| `--interval`, `-i <number>` | Watch refresh interval in seconds. Default: `2`. |
 
 Output includes: run metadata, step states, pending approvals, loop state, parsed runtime config, and error details.
 
 ```bash
-smithers inspect run-123
+bunx smithers-orchestrator inspect run-123
+bunx smithers-orchestrator inspect run-123 --watch --interval 5
 ```
 
 ### node
@@ -328,7 +334,7 @@ smithers inspect run-123
 Show enriched node details for debugging retries, tool calls, and output.
 
 ```bash
-smithers node <nodeId> [options]
+bunx smithers-orchestrator node <nodeId> [options]
 ```
 
 | Option | Description |
@@ -341,11 +347,11 @@ smithers node <nodeId> [options]
 | `--interval <number>` | Watch refresh interval in seconds. Default: `2`. |
 
 ```bash
-smithers node analyze -r run-123
-smithers node analyze -r run-123 --attempts
-smithers node analyze -r run-123 --tools
-smithers node analyze -r run-123 --watch true --interval 5
-smithers node analyze -r run-123 --iteration 2
+bunx smithers-orchestrator node analyze -r run-123
+bunx smithers-orchestrator node analyze -r run-123 --attempts
+bunx smithers-orchestrator node analyze -r run-123 --tools
+bunx smithers-orchestrator node analyze -r run-123 --watch --interval 5
+bunx smithers-orchestrator node analyze -r run-123 --iteration 2
 ```
 
 ### why
@@ -353,7 +359,7 @@ smithers node analyze -r run-123 --iteration 2
 Explain why a run is currently blocked or paused.
 
 ```bash
-smithers why <runId> [options]
+bunx smithers-orchestrator why <runId> [options]
 ```
 
 | Option | Description |
@@ -361,8 +367,8 @@ smithers why <runId> [options]
 | `--json <boolean>` | Output structured JSON diagnosis. Default: `false`. |
 
 ```bash
-smithers why run-123
-smithers why run-123 --json true
+bunx smithers-orchestrator why run-123
+bunx smithers-orchestrator why run-123 --json
 ```
 
 ### scores
@@ -370,7 +376,7 @@ smithers why run-123 --json true
 View scorer results for a specific run.
 
 ```bash
-smithers scores <runId> [options]
+bunx smithers-orchestrator scores <runId> [options]
 ```
 
 | Option | Description |
@@ -378,8 +384,8 @@ smithers scores <runId> [options]
 | `--node <string>` | Filter scores to a specific node ID. |
 
 ```bash
-smithers scores run-123
-smithers scores run-123 --node review
+bunx smithers-orchestrator scores run-123
+bunx smithers-orchestrator scores run-123 --node review
 ```
 
 ### approve
@@ -387,7 +393,7 @@ smithers scores run-123 --node review
 Approve a pending approval gate.
 
 ```bash
-smithers approve <runId> [options]
+bunx smithers-orchestrator approve <runId> [options]
 ```
 
 | Option | Description |
@@ -398,13 +404,13 @@ smithers approve <runId> [options]
 | `--by <string>` | Approver identifier. |
 
 ```bash
-smithers approve run-123 --node deploy --note "Looks good" --by alice
+bunx smithers-orchestrator approve run-123 --node deploy --note "Looks good" --by alice
 ```
 
 Recording approval does not resume execution. Resume with:
 
 ```bash
-smithers up workflow.tsx --run-id run-123 --resume true
+bunx smithers-orchestrator up workflow.tsx --run-id run-123 --resume true
 ```
 
 ### deny
@@ -412,11 +418,11 @@ smithers up workflow.tsx --run-id run-123 --resume true
 Deny a pending approval gate. Same options as `approve`.
 
 ```bash
-smithers deny <runId> [options]
+bunx smithers-orchestrator deny <runId> [options]
 ```
 
 ```bash
-smithers deny run-123 --node deploy --note "Rollback plan missing" --by bob
+bunx smithers-orchestrator deny run-123 --node deploy --note "Rollback plan missing" --by bob
 ```
 
 ### signal
@@ -424,7 +430,7 @@ smithers deny run-123 --node deploy --note "Rollback plan missing" --by bob
 Deliver a durable signal to a run waiting on `<WaitForEvent>`.
 
 ```bash
-smithers signal <runId> <signalName> [options]
+bunx smithers-orchestrator signal <runId> <signalName> [options]
 ```
 
 | Option | Description |
@@ -434,8 +440,8 @@ smithers signal <runId> <signalName> [options]
 | `--by <string>` | Name or identifier of the signal sender. |
 
 ```bash
-smithers signal run-123 payment-received --data '{"amount":100}'
-smithers signal run-123 approval --correlation txn-456 --by alice
+bunx smithers-orchestrator signal run-123 payment-received --data '{"amount":100}'
+bunx smithers-orchestrator signal run-123 approval --correlation txn-456 --by alice
 ```
 
 ### supervise
@@ -443,7 +449,7 @@ smithers signal run-123 approval --correlation txn-456 --by alice
 Watch for stale running runs and auto-resume them.
 
 ```bash
-smithers supervise [options]
+bunx smithers-orchestrator supervise [options]
 ```
 
 | Option | Description |
@@ -454,9 +460,9 @@ smithers supervise [options]
 | `--max-concurrent`, `-c <number>` | Max runs resumed per poll. Default: `3`. |
 
 ```bash
-smithers supervise
-smithers supervise --dry-run true
-smithers supervise --interval 30s --stale-threshold 1m --max-concurrent 5
+bunx smithers-orchestrator supervise
+bunx smithers-orchestrator supervise --dry-run
+bunx smithers-orchestrator supervise --interval 30s --stale-threshold 1m --max-concurrent 5
 ```
 
 #### Supervisor behavior
@@ -477,11 +483,11 @@ Each poll cycle the supervisor:
 Halt one active run. Marks in-progress attempts as cancelled.
 
 ```bash
-smithers cancel <runId>
+bunx smithers-orchestrator cancel <runId>
 ```
 
 ```bash
-smithers cancel run-123
+bunx smithers-orchestrator cancel run-123
 ```
 
 Exits with code `2` on success.
@@ -491,7 +497,7 @@ Exits with code `2` on success.
 Cancel all active runs in the nearest `smithers.db`.
 
 ```bash
-smithers down [options]
+bunx smithers-orchestrator down [options]
 ```
 
 | Option | Description |
@@ -499,7 +505,7 @@ smithers down [options]
 | `--force <boolean>` | Cancel stale runs too. Default: `false`. |
 
 ```bash
-smithers down
+bunx smithers-orchestrator down
 ```
 
 ### hijack
@@ -507,26 +513,26 @@ smithers down
 Hand off the latest resumable agent session or conversation.
 
 ```bash
-smithers hijack <runId> [options]
+bunx smithers-orchestrator hijack <runId> [options]
 ```
 
 | Option | Description |
 |---|---|
-| `--target <string>` | Expected engine: `claude-code`, `codex`, `gemini`, `pi`, `kimi`, `forge`, `amp`. |
+| `--target <string>` | Expected engine: `claude-code` or `codex`. |
 | `--timeout-ms <number>` | Wait time for live handoff. Default: `30000`. |
 | `--launch <boolean>` | Open session immediately. Default: `true`. |
 
 Two hijack styles: native session hijack (CLI agents with resumable session IDs) and conversation hijack (agents resuming from durable message history).
 
 ```bash
-smithers hijack run-123
-smithers hijack run-123 --target codex
-smithers hijack run-123 --launch false
+bunx smithers-orchestrator hijack run-123
+bunx smithers-orchestrator hijack run-123 --target codex
+bunx smithers-orchestrator hijack run-123 --launch false
 ```
 
 - Cross-engine hijack is not supported.
 - If a live hijack succeeds and the run has a workflow path, Smithers auto-resumes in detached mode.
-- If auto-resume fails, prints the equivalent `smithers up ... --resume true --run-id ...` command.
+- If auto-resume fails, prints the equivalent `bunx smithers-orchestrator up ... --resume true --run-id ...` command.
 - Conversation hijack reconstructs agents from the original `.tsx` source.
 
 ### graph
@@ -534,7 +540,7 @@ smithers hijack run-123 --launch false
 Render a workflow tree without executing. Uses [renderFrame](/runtime/render-frame) internally.
 
 ```bash
-smithers graph <workflow> [options]
+bunx smithers-orchestrator graph <workflow> [options]
 ```
 
 | Option | Description |
@@ -543,8 +549,8 @@ smithers graph <workflow> [options]
 | `--input <string>` | Input JSON. Overrides persisted input. |
 
 ```bash
-smithers graph workflow.tsx --input '{"description":"Preview"}'
-smithers graph workflow.tsx --run-id run-123
+bunx smithers-orchestrator graph workflow.tsx --input '{"description":"Preview"}'
+bunx smithers-orchestrator graph workflow.tsx --run-id run-123
 ```
 
 ### revert
@@ -552,7 +558,7 @@ smithers graph workflow.tsx --run-id run-123
 Restore workspace to a previous task attempt snapshot. See [Revert](/runtime/revert).
 
 ```bash
-smithers revert <workflow> [options]
+bunx smithers-orchestrator revert <workflow> [options]
 ```
 
 | Option | Description |
@@ -563,7 +569,7 @@ smithers revert <workflow> [options]
 | `--iteration <number>` | Loop iteration. Default: `0`. |
 
 ```bash
-smithers revert workflow.tsx --run-id run-123 --node-id analyze --attempt 2
+bunx smithers-orchestrator revert workflow.tsx --run-id run-123 --node-id analyze --attempt 2
 ```
 
 ### retry-task
@@ -571,7 +577,7 @@ smithers revert workflow.tsx --run-id run-123 --node-id analyze --attempt 2
 Retry a specific task within a run. Resets the target node (and optionally its dependents) to `pending`, clears their output rows, then resumes the workflow. Only the reset tasks re-execute; completed tasks use cached results.
 
 ```bash
-smithers retry-task <workflow> [options]
+bunx smithers-orchestrator retry-task <workflow> [options]
 ```
 
 | Option | Description |
@@ -583,9 +589,9 @@ smithers retry-task <workflow> [options]
 | `--force <boolean>` | Allow retry even if run is still marked `running`. Default: `false`. |
 
 ```bash
-smithers retry-task workflow.tsx -r run-123 -n implement
-smithers retry-task workflow.tsx -r run-123 -n analyze --no-deps true
-smithers retry-task workflow.tsx -r run-123 -n stuck-task --force true
+bunx smithers-orchestrator retry-task workflow.tsx -r run-123 -n implement
+bunx smithers-orchestrator retry-task workflow.tsx -r run-123 -n analyze --no-deps true
+bunx smithers-orchestrator retry-task workflow.tsx -r run-123 -n stuck-task --force true
 ```
 
 - Resets the target node and all downstream dependents to `pending` by default.
@@ -598,7 +604,7 @@ smithers retry-task workflow.tsx -r run-123 -n stuck-task --force true
 Time-travel to a previous task state: revert the filesystem via jj to an attempt's snapshot, reset the DB state, and optionally resume. Combines `revert` + node reset into one atomic operation.
 
 ```bash
-smithers timetravel <workflow> [options]
+bunx smithers-orchestrator timetravel <workflow> [options]
 ```
 
 | Option | Description |
@@ -613,9 +619,9 @@ smithers timetravel <workflow> [options]
 | `--force <boolean>` | Force even if run is still marked `running`. Default: `false`. |
 
 ```bash
-smithers timetravel workflow.tsx -r run-123 -n implement --resume true
-smithers timetravel workflow.tsx -r run-123 -n analyze -a 1 --no-vcs true
-smithers timetravel workflow.tsx -r run-123 -n step-3 --no-deps true --resume true
+bunx smithers-orchestrator timetravel workflow.tsx -r run-123 -n implement --resume true
+bunx smithers-orchestrator timetravel workflow.tsx -r run-123 -n analyze -a 1 --no-vcs true
+bunx smithers-orchestrator timetravel workflow.tsx -r run-123 -n step-3 --no-deps true --resume true
 ```
 
 - Restores the filesystem to the attempt's `jjPointer` snapshot (unless `--no-vcs`).
@@ -628,7 +634,7 @@ smithers timetravel workflow.tsx -r run-123 -n step-3 --no-deps true --resume tr
 Fork from a checkpoint and resume execution (time travel). Creates a new run branched from a specific frame of an existing run, optionally resetting a node and overriding input, then immediately resumes execution.
 
 ```bash
-smithers replay <workflow> [options]
+bunx smithers-orchestrator replay <workflow> [options]
 ```
 
 | Option | Description |
@@ -641,9 +647,9 @@ smithers replay <workflow> [options]
 | `--restore-vcs <boolean>` | Restore jj filesystem state to the source frame's revision. Default: `false`. |
 
 ```bash
-smithers replay workflow.tsx --run-id run-123 --frame 5
-smithers replay workflow.tsx -r run-123 -f 5 -n analyze --input '{"topic":"Rust"}'
-smithers replay workflow.tsx -r run-123 -f 5 --label experiment-1 --restore-vcs true
+bunx smithers-orchestrator replay workflow.tsx --run-id run-123 --frame 5
+bunx smithers-orchestrator replay workflow.tsx -r run-123 -f 5 -n analyze --input '{"topic":"Rust"}'
+bunx smithers-orchestrator replay workflow.tsx -r run-123 -f 5 --label experiment-1 --restore-vcs true
 ```
 
 ### diff
@@ -651,7 +657,7 @@ smithers replay workflow.tsx -r run-123 -f 5 --label experiment-1 --restore-vcs 
 Compare two time-travel snapshots.
 
 ```bash
-smithers diff <a> <b> [options]
+bunx smithers-orchestrator diff <a> <b> [options]
 ```
 
 Arguments are snapshot refs in the format `run_id:frame_no` or `run_id` (uses latest frame).
@@ -661,9 +667,9 @@ Arguments are snapshot refs in the format `run_id:frame_no` or `run_id` (uses la
 | `--json <boolean>` | Output as JSON. Default: `false`. |
 
 ```bash
-smithers diff run-123:5 run-123:10
-smithers diff run-123 run-456
-smithers diff run-123:5 run-456:3 --json true
+bunx smithers-orchestrator diff run-123:5 run-123:10
+bunx smithers-orchestrator diff run-123 run-456
+bunx smithers-orchestrator diff run-123:5 run-456:3 --json
 ```
 
 ### fork
@@ -671,7 +677,7 @@ smithers diff run-123:5 run-456:3 --json true
 Create a branched run from a snapshot checkpoint (time travel). Unlike `replay`, `fork` does not automatically resume execution unless `--run true` is passed.
 
 ```bash
-smithers fork <workflow> [options]
+bunx smithers-orchestrator fork <workflow> [options]
 ```
 
 | Option | Description |
@@ -684,9 +690,9 @@ smithers fork <workflow> [options]
 | `--run <boolean>` | Immediately start the forked run. Default: `false`. |
 
 ```bash
-smithers fork workflow.tsx --run-id run-123 --frame 5
-smithers fork workflow.tsx -r run-123 -f 5 -n analyze --label fix-branch
-smithers fork workflow.tsx -r run-123 -f 5 --run true
+bunx smithers-orchestrator fork workflow.tsx --run-id run-123 --frame 5
+bunx smithers-orchestrator fork workflow.tsx -r run-123 -f 5 -n analyze --label fix-branch
+bunx smithers-orchestrator fork workflow.tsx -r run-123 -f 5 --run true
 ```
 
 ### timeline
@@ -694,7 +700,7 @@ smithers fork workflow.tsx -r run-123 -f 5 --run true
 View execution timeline for a run and its forks (time travel).
 
 ```bash
-smithers timeline <runId> [options]
+bunx smithers-orchestrator timeline <runId> [options]
 ```
 
 | Option | Description |
@@ -703,9 +709,9 @@ smithers timeline <runId> [options]
 | `--json <boolean>` | Output as JSON. Default: `false`. |
 
 ```bash
-smithers timeline run-123
-smithers timeline run-123 --tree true
-smithers timeline run-123 --json true
+bunx smithers-orchestrator timeline run-123
+bunx smithers-orchestrator timeline run-123 --tree
+bunx smithers-orchestrator timeline run-123 --json
 ```
 
 ### observability
@@ -713,7 +719,7 @@ smithers timeline run-123 --json true
 Start or stop the local observability stack (Docker Compose).
 
 ```bash
-smithers observability [options]
+bunx smithers-orchestrator observability [options]
 ```
 
 | Option | Description |
@@ -722,9 +728,9 @@ smithers observability [options]
 | `--down <boolean>` | Stop and remove stack. Default: `false`. |
 
 ```bash
-smithers observability
-smithers observability --detach true
-smithers observability --down true
+bunx smithers-orchestrator observability
+bunx smithers-orchestrator observability --detach
+bunx smithers-orchestrator observability --down
 ```
 
 Prints Grafana, Prometheus, and Tempo endpoints on success. See [Monitoring & Logs](/guides/monitoring-logs).
@@ -734,14 +740,15 @@ Prints Grafana, Prometheus, and Tempo endpoints on success. See [Monitoring & Lo
 Query via the best available installed agent CLI.
 
 ```bash
-smithers ask "How do I resume an approval-gated run?"
+bunx smithers-orchestrator ask "How do I resume an approval-gated run?"
 ```
 
-Supported agents: Claude Code, Kimi, Gemini, Codex. Bootstraps a temporary MCP config, exposes Smithers as a local MCP server (`smithers --mcp`), and delegates the question. Exits with error if no supported agent is installed.
+Supported agents: Claude, Codex, Gemini, Kimi, and PI. The command bootstraps a temporary MCP config, exposes Smithers as a local MCP server (`bunx smithers-orchestrator --mcp`), and delegates the question. Exits with error if no supported agent is installed.
 
 | Option | Description |
 |---|---|
-| `--agent <string>` | Force a specific agent (`claude-code`, `kimi`, `gemini`, `codex`). Default: auto-select best available. |
+| `--agent <string>` | Force a specific agent: `claude`, `codex`, `gemini`, `kimi`, or `pi`. Default: auto-select best available. |
+| `--tool-surface <string>` | MCP tool surface to expose: `semantic` or `raw`. Default: `semantic`. |
 | `--no-mcp <boolean>` | Disable MCP bootstrap; pass the question as a plain prompt. Default: `false`. |
 | `--print-bootstrap <boolean>` | Print the bootstrap configuration (agent, mode, tool surface) instead of running. Default: `false`. |
 | `--dump-prompt <boolean>` | Print the full system prompt that would be sent to the agent. Default: `false`. |
@@ -750,11 +757,12 @@ Supported agents: Claude Code, Kimi, Gemini, Codex. Bootstraps a temporary MCP c
 MCP bootstrap mode is selected automatically per agent: `mcp-config-file` for Claude Code and Kimi, `mcp-config-inline` for Codex, `mcp-allow-list` for Gemini, and `prompt-only` for PI. Use `--no-mcp` to disable MCP entirely.
 
 ```bash
-smithers ask "How do I resume an approval-gated run?"
-smithers ask --agent codex "Explain the workflow graph"
-smithers ask --list-agents
-smithers ask --print-bootstrap "test query"
-smithers ask --dump-prompt "test query"
+bunx smithers-orchestrator ask "How do I resume an approval-gated run?"
+bunx smithers-orchestrator ask --agent codex "Explain the workflow graph"
+bunx smithers-orchestrator ask --tool-surface raw "List the raw Smithers MCP tools"
+bunx smithers-orchestrator ask --list-agents
+bunx smithers-orchestrator ask --print-bootstrap "test query"
+bunx smithers-orchestrator ask --dump-prompt "test query"
 ```
 
 ### agents
@@ -762,7 +770,7 @@ smithers ask --dump-prompt "test query"
 Inspect Smithers' built-in CLI agent capability registries.
 
 ```bash
-smithers agents <subcommand> [options]
+bunx smithers-orchestrator agents <subcommand> [options]
 ```
 
 | Subcommand | Purpose |
@@ -775,7 +783,7 @@ smithers agents <subcommand> [options]
 Print a JSON report of all built-in CLI agent capability registries. Use this to understand which CLI-backed agents Smithers knows about and what features each one advertises.
 
 ```bash
-smithers agents capabilities
+bunx smithers-orchestrator agents capabilities
 ```
 
 Output is always JSON.
@@ -785,7 +793,7 @@ Output is always JSON.
 Validate the built-in CLI agent capability registries for drift or contradictions. Exits with code `0` when the registry is internally consistent, `1` when problems are detected.
 
 ```bash
-smithers agents doctor [options]
+bunx smithers-orchestrator agents doctor [options]
 ```
 
 | Option | Description |
@@ -793,8 +801,8 @@ smithers agents doctor [options]
 | `--json <boolean>` | Print the doctor report as JSON instead of human-readable output. Default: `false`. |
 
 ```bash
-smithers agents doctor
-smithers agents doctor --json true
+bunx smithers-orchestrator agents doctor
+bunx smithers-orchestrator agents doctor --json
 ```
 
 Use `agents doctor` in CI to catch registry drift before deployment.
@@ -804,7 +812,7 @@ Use `agents doctor` in CI to catch registry drift before deployment.
 List and resolve durable human requests generated by `<HumanTask>` nodes.
 
 ```bash
-smithers human <action> [requestId] [options]
+bunx smithers-orchestrator human <action> [requestId] [options]
 ```
 
 | Subcommand | Purpose |
@@ -818,7 +826,7 @@ smithers human <action> [requestId] [options]
 #### human inbox
 
 ```bash
-smithers human inbox
+bunx smithers-orchestrator human inbox
 ```
 
 Lists all pending human requests. Output includes: `requestId`, `runId`, `workflowName`, `nodeId`, `kind`, `prompt`, `status`, `requestedAt`, `age`, and `timeoutAtMs`.
@@ -826,7 +834,7 @@ Lists all pending human requests. Output includes: `requestId`, `runId`, `workfl
 Pass `--format json` for structured output:
 
 ```bash
-smithers human inbox --format json
+bunx smithers-orchestrator human inbox --format json
 ```
 
 #### human answer
@@ -834,7 +842,7 @@ smithers human inbox --format json
 Submit a response to a pending human request. The workflow resumes after the answer is recorded.
 
 ```bash
-smithers human answer <requestId> [options]
+bunx smithers-orchestrator human answer <requestId> [options]
 ```
 
 | Option | Description |
@@ -843,11 +851,11 @@ smithers human answer <requestId> [options]
 | `--by <string>` | Name or identifier of the operator answering. |
 
 ```bash
-smithers human answer req-abc123 --value '{"approved":true}' --by "alice"
-smithers human answer req-abc123 --value '{"choice":"option-a","notes":"Looks good"}' --by "alice"
+bunx smithers-orchestrator human answer req-abc123 --value '{"approved":true}' --by "alice"
+bunx smithers-orchestrator human answer req-abc123 --value '{"choice":"option-a","notes":"Looks good"}' --by "alice"
 ```
 
-If the `<HumanTask>` node has a corresponding approval gate, `answer` automatically bridges the approval as well — no separate `smithers approve` call is needed.
+If the `<HumanTask>` node has a corresponding approval gate, `answer` automatically bridges the approval as well — no separate `bunx smithers-orchestrator approve` call is needed.
 
 Exits with code `4` if the request is not found, not pending, or has already expired.
 
@@ -856,7 +864,7 @@ Exits with code `4` if the request is not found, not pending, or has already exp
 Cancel a pending human request without providing an answer.
 
 ```bash
-smithers human cancel <requestId> [options]
+bunx smithers-orchestrator human cancel <requestId> [options]
 ```
 
 | Option | Description |
@@ -864,17 +872,41 @@ smithers human cancel <requestId> [options]
 | `--by <string>` | Name or identifier of the operator cancelling. |
 
 ```bash
-smithers human cancel req-abc123 --by "alice"
+bunx smithers-orchestrator human cancel req-abc123 --by "alice"
 ```
 
 If a corresponding approval gate exists, it is automatically denied with the cancellation reason. The workflow will resume and handle the cancelled state according to its error handling logic.
+
+### alerts
+
+List, acknowledge, resolve, or silence durable alert instances.
+
+```bash
+bunx smithers-orchestrator alerts <action> [alertId] [options]
+```
+
+| Action | Purpose |
+|---|---|
+| `alerts list` | List active alerts from the nearest `smithers.db`. |
+| `alerts ack <alertId>` | Mark an alert as acknowledged. |
+| `alerts resolve <alertId>` | Mark an alert as resolved. |
+| `alerts silence <alertId>` | Silence an alert without resolving it. |
+
+The current help output exposes no alert-specific flags. `ack`, `resolve`, and `silence` require an alert ID.
+
+```bash
+bunx smithers-orchestrator alerts list
+bunx smithers-orchestrator alerts ack alert-123
+bunx smithers-orchestrator alerts resolve alert-123
+bunx smithers-orchestrator alerts silence alert-123
+```
 
 ### memory
 
 Inspect cross-run memory facts and perform semantic recall.
 
 ```bash
-smithers memory <subcommand> [options]
+bunx smithers-orchestrator memory <subcommand> [options]
 ```
 
 | Subcommand | Purpose |
@@ -889,7 +921,7 @@ Both subcommands require `--workflow` to locate the `smithers.db` for the target
 List all facts stored in a namespace.
 
 ```bash
-smithers memory list <namespace> [options]
+bunx smithers-orchestrator memory list <namespace> [options]
 ```
 
 Arguments:
@@ -901,8 +933,8 @@ Arguments:
 | `--workflow`, `-w <string>` | Path to a `.tsx` workflow file. Required to locate the database. |
 
 ```bash
-smithers memory list workflow:implement -w .smithers/workflows/implement.tsx
-smithers memory list global:default -w .smithers/workflows/implement.tsx
+bunx smithers-orchestrator memory list workflow:implement -w .smithers/workflows/implement.tsx
+bunx smithers-orchestrator memory list global:default -w .smithers/workflows/implement.tsx
 ```
 
 #### memory recall
@@ -910,7 +942,7 @@ smithers memory list global:default -w .smithers/workflows/implement.tsx
 Search stored facts by semantic similarity using vector embeddings.
 
 ```bash
-smithers memory recall <query> [options]
+bunx smithers-orchestrator memory recall <query> [options]
 ```
 
 Arguments:
@@ -924,8 +956,8 @@ Arguments:
 | `--top-k`, `-k <number>` | Number of results to return. Default: `5`. |
 
 ```bash
-smithers memory recall "auth bug fixes" -w .smithers/workflows/implement.tsx
-smithers memory recall "database migrations" -w .smithers/workflows/implement.tsx --namespace workflow:implement --top-k 10
+bunx smithers-orchestrator memory recall "auth bug fixes" -w .smithers/workflows/implement.tsx
+bunx smithers-orchestrator memory recall "database migrations" -w .smithers/workflows/implement.tsx --namespace workflow:implement --top-k 10
 ```
 
 See [Cross-Run Memory](/concepts/memory) and [Memory Quickstart](/guides/memory-quickstart) for the runtime model.
@@ -935,7 +967,7 @@ See [Cross-Run Memory](/concepts/memory) and [Memory Quickstart](/guides/memory-
 Preview the AI SDK tools that Smithers would generate from an OpenAPI spec.
 
 ```bash
-smithers openapi <subcommand>
+bunx smithers-orchestrator openapi <subcommand>
 ```
 
 | Subcommand | Purpose |
@@ -947,7 +979,7 @@ smithers openapi <subcommand>
 Parse an OpenAPI spec and print the tool names and summaries that Smithers would generate from it.
 
 ```bash
-smithers openapi list <specPath>
+bunx smithers-orchestrator openapi list <specPath>
 ```
 
 Arguments:
@@ -955,8 +987,8 @@ Arguments:
 - `specPath`: File path or URL to an OpenAPI spec (JSON or YAML).
 
 ```bash
-smithers openapi list ./api/openapi.yaml
-smithers openapi list https://petstore3.swagger.io/api/v3/openapi.json
+bunx smithers-orchestrator openapi list ./api/openapi.yaml
+bunx smithers-orchestrator openapi list https://petstore3.swagger.io/api/v3/openapi.json
 ```
 
 Output lists one tool per operation: `operationId — summary (or method + path)`. The count of tools is printed at the end.
@@ -970,7 +1002,7 @@ See [OpenAPI Tools](/concepts/openapi-tools) and [OpenAPI Tools Quickstart](/gui
 Ingest documents into the RAG store or query it for relevant chunks.
 
 ```bash
-smithers rag <subcommand> [options]
+bunx smithers-orchestrator rag <subcommand> [options]
 ```
 
 | Subcommand | Purpose |
@@ -985,7 +1017,7 @@ Both subcommands require `--workflow` to locate the `smithers.db` for the target
 Chunk and embed a document into the SQLite vector store.
 
 ```bash
-smithers rag ingest <file> [options]
+bunx smithers-orchestrator rag ingest <file> [options]
 ```
 
 Arguments:
@@ -1001,9 +1033,9 @@ Arguments:
 | `--overlap <number>` | Chunk overlap. Default: `200`. |
 
 ```bash
-smithers rag ingest ./docs/api-reference.md -w .smithers/workflows/implement.tsx
-smithers rag ingest ./data/knowledge-base.txt -w .smithers/workflows/implement.tsx --namespace kb --strategy markdown
-smithers rag ingest ./src/README.md -w .smithers/workflows/implement.tsx --size 500 --overlap 100
+bunx smithers-orchestrator rag ingest ./docs/api-reference.md -w .smithers/workflows/implement.tsx
+bunx smithers-orchestrator rag ingest ./data/knowledge-base.txt -w .smithers/workflows/implement.tsx --namespace kb --strategy markdown
+bunx smithers-orchestrator rag ingest ./src/README.md -w .smithers/workflows/implement.tsx --size 500 --overlap 100
 ```
 
 #### rag query
@@ -1011,7 +1043,7 @@ smithers rag ingest ./src/README.md -w .smithers/workflows/implement.tsx --size 
 Search the vector store for chunks most relevant to a query.
 
 ```bash
-smithers rag query <query> [options]
+bunx smithers-orchestrator rag query <query> [options]
 ```
 
 Arguments:
@@ -1025,8 +1057,8 @@ Arguments:
 | `--top-k`, `-k <number>` | Number of results to return. Default: `5`. |
 
 ```bash
-smithers rag query "how does authentication work" -w .smithers/workflows/implement.tsx
-smithers rag query "database connection pooling" -w .smithers/workflows/implement.tsx --namespace kb --top-k 10
+bunx smithers-orchestrator rag query "how does authentication work" -w .smithers/workflows/implement.tsx
+bunx smithers-orchestrator rag query "database connection pooling" -w .smithers/workflows/implement.tsx --namespace kb --top-k 10
 ```
 
 See [RAG](/concepts/rag) and [RAG Quickstart](/guides/rag-quickstart) for the retrieval model.
@@ -1036,7 +1068,7 @@ See [RAG](/concepts/rag) and [RAG Quickstart](/guides/rag-quickstart) for the re
 Manage flat workflows in `.smithers/workflows/*.tsx`.
 
 ```bash
-smithers workflow <command>
+bunx smithers-orchestrator workflow <command>
 ```
 
 | Command | Purpose |
@@ -1051,26 +1083,26 @@ smithers workflow <command>
 Run shorthands:
 
 ```bash
-smithers workflow implement --prompt "Add input validation"
-smithers workflow run implement --prompt "Add input validation"
+bunx smithers-orchestrator workflow implement --prompt "Add input validation"
+bunx smithers-orchestrator workflow run implement --prompt "Add input validation"
 ```
 
 Shorthand resolution:
 1. Resolve name from `.smithers/workflows/<name>.tsx`
-2. Rewrite to `smithers workflow run <name>`
+2. Rewrite to `bunx smithers-orchestrator workflow run <name>`
 
 ```bash
-smithers workflow
-smithers workflow list
-smithers workflow run implement --prompt "Investigate flaky tests"
-smithers workflow path implement
-smithers workflow doctor implement
-smithers workflow create foo
-smithers workflow foo --prompt "Investigate flaky tests"
+bunx smithers-orchestrator workflow
+bunx smithers-orchestrator workflow list
+bunx smithers-orchestrator workflow run implement --prompt "Investigate flaky tests"
+bunx smithers-orchestrator workflow path implement
+bunx smithers-orchestrator workflow doctor implement
+bunx smithers-orchestrator workflow create foo
+bunx smithers-orchestrator workflow foo --prompt "Investigate flaky tests"
 ```
 
 - Names: lowercase letters, numbers, hyphens only.
-- `workflow create` writes only the workflow file. Run `smithers init` first for `.smithers/agents.ts` and `.smithers/components/`.
+- `workflow create` writes only the workflow file. Run `bunx smithers-orchestrator init` first for `.smithers/agents.ts` and `.smithers/components/`.
 
 #### Workflow metadata comments
 
@@ -1093,13 +1125,13 @@ Discovery extracts optional metadata from `//` comments in the first six lines o
 List all discovered workflows under `.smithers/workflows/`. Output includes each workflow's ID, entry file path, and source type.
 
 ```bash
-smithers workflow list
+bunx smithers-orchestrator workflow list
 ```
 
 ```bash
-smithers workflow list
-# implement  .smithers/workflows/implement.tsx  local
-# sweep      .smithers/workflows/sweep.tsx      local
+bunx smithers-orchestrator workflow list
+# implement  .smithers/workflows/implement.tsx  user
+# sweep      .smithers/workflows/sweep.tsx      generated
 ```
 
 #### workflow run
@@ -1107,7 +1139,7 @@ smithers workflow list
 Run a discovered workflow by ID.
 
 ```bash
-smithers workflow run <name> [options]
+bunx smithers-orchestrator workflow run <name> [options]
 ```
 
 Arguments:
@@ -1131,7 +1163,7 @@ Workflow-specific behavior:
 Resolve a workflow ID to its entry file path. Prints the absolute path, ID, and source type.
 
 ```bash
-smithers workflow path <name>
+bunx smithers-orchestrator workflow path <name>
 ```
 
 Arguments:
@@ -1139,7 +1171,7 @@ Arguments:
 - `name`: Workflow ID to resolve.
 
 ```bash
-smithers workflow path implement
+bunx smithers-orchestrator workflow path implement
 # /home/user/project/.smithers/workflows/implement.tsx
 ```
 
@@ -1148,7 +1180,7 @@ smithers workflow path implement
 Create a new workflow scaffold file in `.smithers/workflows/`. The name must contain only lowercase letters, numbers, and hyphens. Exits with code `4` if the name is invalid or the file already exists.
 
 ```bash
-smithers workflow create <name>
+bunx smithers-orchestrator workflow create <name>
 ```
 
 Arguments:
@@ -1156,18 +1188,18 @@ Arguments:
 - `name`: ID for the new workflow.
 
 ```bash
-smithers workflow create my-new-flow
+bunx smithers-orchestrator workflow create my-new-flow
 # Created .smithers/workflows/my-new-flow.tsx
 ```
 
-Run `smithers init` first to ensure `.smithers/agents.ts` and `.smithers/components/` exist.
+Run `bunx smithers-orchestrator init` first to ensure `.smithers/agents.ts` and `.smithers/components/` exist.
 
 #### workflow doctor
 
 Inspect workflow discovery health. Reports the workflow root, discovered workflows, preload file status, bunfig status, and detected CLI agents. When `name` is provided, scopes the report to that single workflow.
 
 ```bash
-smithers workflow doctor [name]
+bunx smithers-orchestrator workflow doctor [name]
 ```
 
 Arguments:
@@ -1175,8 +1207,8 @@ Arguments:
 - `name` (optional): Workflow ID to inspect. Omit to inspect all discovered workflows.
 
 ```bash
-smithers workflow doctor
-smithers workflow doctor implement
+bunx smithers-orchestrator workflow doctor
+bunx smithers-orchestrator workflow doctor implement
 ```
 
 ### cron
@@ -1184,7 +1216,7 @@ smithers workflow doctor implement
 Background schedule triggers stored in the nearest `smithers.db`.
 
 ```bash
-smithers cron <command>
+bunx smithers-orchestrator cron <command>
 ```
 
 | Command | Purpose |
@@ -1195,22 +1227,22 @@ smithers cron <command>
 | `cron rm <cronId>` | Delete an entry. |
 
 ```bash
-smithers cron add "0 * * * *" .smithers/workflows/implement.tsx
-smithers cron list
-smithers cron start
-smithers cron rm 0d3a8b0f-6f1c-4e2b-9f4d-0a7b7b95c2e1
+bunx smithers-orchestrator cron add "0 * * * *" .smithers/workflows/implement.tsx
+bunx smithers-orchestrator cron list
+bunx smithers-orchestrator cron start
+bunx smithers-orchestrator cron rm 0d3a8b0f-6f1c-4e2b-9f4d-0a7b7b95c2e1
 ```
 
 - Polls every 15 seconds.
-- Due jobs launch as detached `smithers up ... -d` processes.
-- `workflowPath` is replayed through `smithers up`; use an explicit file path.
+- Due jobs launch as detached `bunx smithers-orchestrator up ... -d` processes.
+- `workflowPath` is replayed through `bunx smithers-orchestrator up`; use an explicit file path.
 
 #### cron start
 
-Start the background scheduler loop in the current terminal. The loop polls every 15 seconds and launches due jobs as detached `smithers up ... -d` processes. Runs until interrupted.
+Start the background scheduler loop in the current terminal. The loop polls every 15 seconds and launches due jobs as detached `bunx smithers-orchestrator up ... -d` processes. Runs until interrupted.
 
 ```bash
-smithers cron start
+bunx smithers-orchestrator cron start
 ```
 
 #### cron add
@@ -1218,7 +1250,7 @@ smithers cron start
 Register a new workflow cron schedule. Returns the generated `cronId`.
 
 ```bash
-smithers cron add <pattern> <workflowPath>
+bunx smithers-orchestrator cron add <pattern> <workflowPath>
 ```
 
 Arguments:
@@ -1227,8 +1259,8 @@ Arguments:
 - `workflowPath`: Path or ID of the workflow to schedule.
 
 ```bash
-smithers cron add "0 9 * * *" .smithers/workflows/sweep.tsx
-smithers cron add "*/30 * * * *" .smithers/workflows/implement.tsx
+bunx smithers-orchestrator cron add "0 9 * * *" .smithers/workflows/sweep.tsx
+bunx smithers-orchestrator cron add "*/30 * * * *" .smithers/workflows/implement.tsx
 ```
 
 #### cron list
@@ -1236,7 +1268,7 @@ smithers cron add "*/30 * * * *" .smithers/workflows/implement.tsx
 List all registered background cron schedules from `smithers.db`. Output includes `cronId`, pattern, workflow path, enabled state, and last/next run timestamps.
 
 ```bash
-smithers cron list
+bunx smithers-orchestrator cron list
 ```
 
 #### cron rm
@@ -1244,7 +1276,7 @@ smithers cron list
 Delete an existing cron schedule by its ID.
 
 ```bash
-smithers cron rm <cronId>
+bunx smithers-orchestrator cron rm <cronId>
 ```
 
 Arguments:
@@ -1252,7 +1284,7 @@ Arguments:
 - `cronId`: UUID of the cron entry to remove (from `cron list` output).
 
 ```bash
-smithers cron rm 0d3a8b0f-6f1c-4e2b-9f4d-0a7b7b95c2e1
+bunx smithers-orchestrator cron rm 0d3a8b0f-6f1c-4e2b-9f4d-0a7b7b95c2e1
 ```
 
 ## Framework-Provided Built-Ins
@@ -1260,25 +1292,25 @@ smithers cron rm 0d3a8b0f-6f1c-4e2b-9f4d-0a7b7b95c2e1
 ### completions
 
 ```bash
-smithers completions bash
-smithers completions zsh
-smithers completions fish
-smithers completions nushell
+bunx smithers-orchestrator completions bash
+bunx smithers-orchestrator completions zsh
+bunx smithers-orchestrator completions fish
+bunx smithers-orchestrator completions nushell
 ```
 
 | Shell | Setup |
 |---|---|
-| `bash` | `eval "$(smithers completions bash)"` |
-| `zsh` | `eval "$(smithers completions zsh)"` |
-| `fish` | `smithers completions fish \| source` |
-| `nushell` | Add output of `smithers completions nushell` to `config.nu` |
+| `bash` | `eval "$(bunx smithers-orchestrator completions bash)"` |
+| `zsh` | `eval "$(bunx smithers-orchestrator completions zsh)"` |
+| `fish` | `bunx smithers-orchestrator completions fish \| source` |
+| `nushell` | Add output of `bunx smithers-orchestrator completions nushell` to `config.nu` |
 
 ### mcp add
 
 Register Smithers as an MCP server for an agent integration.
 
 ```bash
-smithers mcp add [options]
+bunx smithers-orchestrator mcp add [options]
 ```
 
 | Option | Description |
@@ -1288,17 +1320,30 @@ smithers mcp add [options]
 | `--agent <agent>` | Target agent (`claude-code`, `cursor`, etc.). |
 
 ```bash
-smithers mcp add
-smithers mcp add --agent claude-code
-smithers mcp add --command "pnpm smithers --mcp"
+bunx smithers-orchestrator mcp add
+bunx smithers-orchestrator mcp add --agent claude-code
+bunx smithers-orchestrator mcp add --command "bunx smithers-orchestrator --mcp"
 ```
 
-### skills add
+### skills
 
 Sync skill files to agent integrations.
 
 ```bash
-smithers skills add [options]
+bunx smithers-orchestrator skills <command>
+```
+
+| Command | Description |
+|---|---|
+| `skills add [options]` | Sync skill files to agents. |
+| `skills list` | List available skills. |
+
+`skills` also has the alias `skill`.
+
+#### skills add
+
+```bash
+bunx smithers-orchestrator skills add [options]
 ```
 
 | Option | Description |
@@ -1307,16 +1352,22 @@ smithers skills add [options]
 | `--no-global` | Project-local install. |
 
 ```bash
-smithers skills add
-smithers skills add --depth 2
-smithers skills add --no-global
+bunx smithers-orchestrator skills add
+bunx smithers-orchestrator skills add --depth 2
+bunx smithers-orchestrator skills add --no-global
+```
+
+#### skills list
+
+```bash
+bunx smithers-orchestrator skills list
 ```
 
 ## Global Options
 
 | Option | Description |
 |---|---|
-| `--format <json\|yaml\|md\|jsonl>` | Output format. |
+| `--format <toon\|json\|yaml\|md\|jsonl>` | Output format. |
 | `--verbose` | Full output envelope. |
 | `--filter-output <keys>` | Filter JSON by key path (e.g. `runs[0].id`). |
 | `--schema` | Print JSON schema for the command. |
@@ -1324,9 +1375,9 @@ smithers skills add --no-global
 | `--token-count` | Print token count instead of output. |
 | `--token-limit <n>` | Limit output to `n` tokens. |
 | `--token-offset <n>` | Skip first `n` output tokens. |
-| `--help`, `-h` | Command help. |
-| `--version`, `-v` | CLI version. |
-| `--mcp` | Start as MCP stdio server. Used by `smithers ask` and external tooling. |
+| `--help` | Command help. |
+| `--version` | CLI version. |
+| `--mcp` | Start as MCP stdio server. Used by `bunx smithers-orchestrator ask` and external tooling. |
 
 ## Operational Behavior
 

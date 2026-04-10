@@ -13,26 +13,28 @@ You need:
 
 - a project with `.smithers/` installed via `bunx smithers-orchestrator init`
 - provider or agent credentials configured for the workflow you want to run
-- a workflow file or a discovered workflow under `.smithers/workflows`
+- a discovered workflow under `.smithers/workflows` or an explicit `.tsx` workflow file
 
 ## 1. Start a Run
 
 Run a discovered workflow from the local workflow pack:
 
 ```bash
-bunx smithers workflow implement --prompt "Add pagination to the activity feed"
+bunx smithers-orchestrator workflow run implement --prompt "Add pagination to the activity feed"
 ```
+
+`workflow run <name>` resolves `.smithers/workflows/<name>.tsx`. The `--prompt` flag maps the string to `input.prompt`.
 
 Or run an explicit workflow file:
 
 ```bash
-bunx smithers up workflow.tsx --input '{"task":"Add pagination to the activity feed"}'
+bunx smithers-orchestrator up workflow.tsx --input '{"task":"Add pagination to the activity feed"}'
 ```
 
 ## 2. Find the Run You Care About
 
 ```bash
-bunx smithers ps
+bunx smithers-orchestrator ps
 ```
 
 This shows recent and active runs. Once you have the run ID, everything else becomes precise.
@@ -40,29 +42,29 @@ This shows recent and active runs. Once you have the run ID, everything else bec
 ## 3. Inspect the Run
 
 ```bash
-bunx smithers inspect <run-id>
+bunx smithers-orchestrator inspect <run-id>
 ```
 
 Use `inspect` when you need the structured view: status, current steps, approvals, outputs, retries, and loop state.
 
 ## 4. Read the Live Trail
 
-Use logs for lifecycle events:
+Use logs for lifecycle events. `--tail` shows recent events first and `--follow` keeps tailing:
 
 ```bash
-bunx smithers logs <run-id>
+bunx smithers-orchestrator logs <run-id> --tail 50 --follow
 ```
 
-Use chat for agent prompts, model replies, and stderr:
+Use chat for agent prompts, model replies, and stderr. `--tail` limits chat blocks and `--follow` watches for new output:
 
 ```bash
-bunx smithers chat <run-id>
+bunx smithers-orchestrator chat <run-id> --tail 20 --follow
 ```
 
-Use `node` when you need one node's details instead of the whole run:
+Use `node` when you need one node's details instead of the whole run. Pass the node ID directly and add `--run-id` when you want to scope it to a specific run:
 
 ```bash
-bunx smithers node <run-id> <node-id>
+bunx smithers-orchestrator node <node-id> --run-id <run-id>
 ```
 
 ## 5. Handle Pauses
@@ -70,29 +72,31 @@ bunx smithers node <run-id> <node-id>
 If a workflow pauses for approval:
 
 ```bash
-bunx smithers approve <run-id>
+bunx smithers-orchestrator approve <run-id>
 # or
-bunx smithers deny <run-id>
+bunx smithers-orchestrator deny <run-id>
 ```
 
 If a workflow is waiting on a signal:
 
 ```bash
-bunx smithers signal <run-id> wait-for-input --data '{"choice":"ship-it"}'
+bunx smithers-orchestrator signal <run-id> wait-for-input --data '{"choice":"ship-it"}'
 ```
 
 If you are not sure why the run is blocked:
 
 ```bash
-bunx smithers why <run-id>
+bunx smithers-orchestrator why <run-id>
 ```
 
 ## 6. Resume Safely
 
-If the process exits or your machine restarts, resume the same run ID:
+If the process exits or your machine restarts, resume the same run ID with the same entrypoint you started with:
 
 ```bash
-bunx smithers up workflow.tsx --run-id <run-id> --resume true
+bunx smithers-orchestrator workflow run implement --run-id <run-id> --resume
+# or, if you launched a file directly:
+bunx smithers-orchestrator up workflow.tsx --run-id <run-id> --resume
 ```
 
 That is the durability story in one command. Completed tasks are not re-run.

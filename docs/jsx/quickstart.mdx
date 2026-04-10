@@ -21,7 +21,7 @@ const { Workflow, smithers, outputs } = createSmithers({
     summary: z.string(),
     keyPoints: z.array(z.string()),
   }),
-  report: z.object({
+  output: z.object({
     title: z.string(),
     body: z.string(),
   }),
@@ -48,7 +48,7 @@ export default smithers((ctx) => {
         </Task>
 
         {research ? (
-          <Task id="report" output={outputs.report} agent={writer}>
+          <Task id="report" output={outputs.output} agent={writer}>
             {`Write a concise report.\n\nSummary: ${research.summary}\nKey points: ${research.keyPoints.join(", ")}`}
           </Task>
         ) : null}
@@ -60,7 +60,7 @@ export default smithers((ctx) => {
 
 Two JSX-specific details matter here:
 
-- `ctx.outputMaybe(...)` is how the second render discovers that `research` has finished.
+- `ctx.outputMaybe(outputs.research, { nodeId: "research" })` is how the second render discovers that `research` has finished.
 - the `report` task only mounts once the `research` output exists.
 
 ## Step 2: Run It
@@ -76,13 +76,21 @@ const result = await runWorkflow(workflow, {
 });
 
 console.log(result.status);
-console.log(JSON.stringify(result.output, null, 2));
+if (result.status === "finished") {
+  console.log(JSON.stringify(result.output, null, 2));
+}
 ```
 
 Run it:
 
 ```bash
 bun run main.ts
+```
+
+Or run the workflow directly with the CLI:
+
+```bash
+bunx smithers-orchestrator up workflow.tsx --input '{"topic":"The history of the Zig programming language"}'
 ```
 
 ## What Happened

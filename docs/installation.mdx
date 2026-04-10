@@ -1,9 +1,11 @@
 ---
 title: Installation
-description: Install Smithers the fast way with the workflow pack, or manually for standalone JSX workflow projects.
+description: Install smithers-orchestrator with the workflow pack, or manually for standalone JSX workflow projects.
 ---
 
 Most teams should start with the workflow pack. It gives you a working `.smithers/` directory, seeded workflows, prompts, and agent configuration instead of asking you to assemble the project structure by hand.
+
+All commands on this page use `bunx smithers-orchestrator ...`. The published npm package is `smithers-orchestrator`, so do not use bare `smithers` or `bunx smithers` for these install commands.
 
 ## Recommended: Install the Workflow Pack
 
@@ -11,15 +13,22 @@ Most teams should start with the workflow pack. It gives you a working `.smither
 bunx smithers-orchestrator init
 ```
 
-That scaffolds `.smithers/` with:
+That scaffolds `.smithers/` with files such as:
 
 | Directory / File | Contents |
 |---|---|
 | `.smithers/workflows/` | Pre-built workflows (`implement`, `review`, `plan`, `ralph`, `debug`, ...) |
 | `.smithers/prompts/` | Shared MDX prompt templates |
 | `.smithers/components/` | Reusable TSX components (`Review`, `ValidationLoop`, ...) |
+| `.smithers/package.json` | Local workflow project manifest with `smithers-orchestrator` dependency |
+| `.smithers/tsconfig.json` | TypeScript config for JSX workflow authoring |
+| `.smithers/bunfig.toml` | Bun preload config for MDX workflow prompts |
+| `.smithers/preload.ts` | Registers the MDX preload plugin |
 | `.smithers/agents.ts` | Auto-detected agent configuration |
 | `.smithers/smithers.config.ts` | Repo-level config (lint, test, coverage commands) |
+| `.smithers/tickets/` | Ticket workspace used by ticket-oriented workflows |
+| `.smithers/executions/` | Execution artifacts directory preserved across re-inits |
+| `.smithers/.gitignore` | Ignore rules for generated workflow state |
 
 To overwrite an existing scaffold:
 

@@ -44,6 +44,7 @@ code-review/
 Each Zod schema passed to `createSmithers` becomes a named, auto-created SQLite output table.
 
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
 // workflow.tsx
 import { createSmithers, Task, Sequence } from "smithers-orchestrator";
 import { z } from "zod";
@@ -77,6 +78,7 @@ const { Workflow, smithers, outputs } = createSmithers({
 ## 3. Configure Agents
 
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
 // workflow.tsx (continued)
 import { ToolLoopAgent as Agent } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
@@ -100,6 +102,7 @@ const reporter = new Agent({
 ## 4. Build the Workflow
 
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
 // workflow.tsx (continued)
 export default smithers((ctx) => {
   const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
@@ -181,9 +184,11 @@ console.log("Status:", result.status);
 console.log("Run ID:", result.runId);
 
 if (result.status === "finished") {
-  console.log("Report:", JSON.stringify(result.output, null, 2));
+  console.log("Run finished. Inspect the persisted report row in Step 7.");
 }
 ```
+
+Because the final schema key here is `report` rather than `output`, `result.output` stays `undefined`. Rename that schema key to `output` if you want `runWorkflow()` to return it directly.
 
 ## 6. Run It
 
@@ -194,22 +199,23 @@ bun run main.ts
 Or via CLI (no `main.ts` needed):
 
 ```bash
-bunx smithers up workflow.tsx --input '{"repo": "/path/to/my-project", "focusArea": "authentication"}'
+bunx smithers-orchestrator up workflow.tsx --input '{"repo": "/path/to/my-project", "focusArea": "authentication"}'
 ```
 
 ## 7. Inspect Results
 
 ```bash
-bunx smithers inspect smth_a1b2c3d4
-bunx smithers graph workflow.tsx --run-id smth_a1b2c3d4
-bunx smithers logs smth_a1b2c3d4 --tail 5 --follow false
+RUN_ID="your-run-id"
+bunx smithers-orchestrator inspect "$RUN_ID"
+bunx smithers-orchestrator graph workflow.tsx --run-id "$RUN_ID"
+bunx smithers-orchestrator logs "$RUN_ID" --tail 5 --follow false
 ```
 
 Query SQLite directly:
 
 ```bash
-sqlite3 smithers.db "SELECT * FROM analysis WHERE run_id = 'smth_a1b2c3d4';"
-sqlite3 smithers.db "SELECT * FROM report WHERE run_id = 'smth_a1b2c3d4';"
+sqlite3 smithers.db "SELECT * FROM analysis WHERE run_id = '$RUN_ID';"
+sqlite3 smithers.db "SELECT * FROM report WHERE run_id = '$RUN_ID';"
 ```
 
 ## Execution Model
@@ -224,12 +230,13 @@ The engine renders the JSX tree repeatedly:
 On crash, resume skips completed tasks:
 
 ```bash
-bunx smithers up workflow.tsx --run-id smth_a1b2c3d4 --resume true
+bunx smithers-orchestrator up workflow.tsx --run-id "$RUN_ID" --resume true
 ```
 
 ## Adding Tools
 
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
 import { read, grep, bash } from "smithers-orchestrator";
 
 const analyst = new Agent({

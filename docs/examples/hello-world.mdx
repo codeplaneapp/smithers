@@ -6,6 +6,7 @@ description: A minimal workflow with a single agent task that generates a greeti
 # Hello World
 
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
 // hello-world.tsx
 import { createSmithers, Task, Sequence } from "smithers-orchestrator";
 import { ToolLoopAgent as Agent } from "ai";
@@ -35,7 +36,7 @@ export default smithers((ctx) => (
 ```
 
 ```bash
-smithers up hello-world.tsx --input '{}'
+bunx smithers-orchestrator up hello-world.tsx --input '{}'
 ```
 
 ```

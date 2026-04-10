@@ -10,6 +10,7 @@ description: An iterative review loop where an agent writes code and a reviewer 
 ## Workflow Definition
 
 ```tsx
+/** @jsxImportSource smithers-orchestrator */
 // review-loop.tsx
 import { createSmithers, Task, Sequence, Loop } from "smithers-orchestrator";
 import { ToolLoopAgent as Agent } from "ai";
@@ -88,7 +89,7 @@ export default smithers((ctx) => {
 ## Running
 
 ```bash
-smithers up review-loop.tsx --input '{}'
+bunx smithers-orchestrator up review-loop.tsx --input '{}'
 ```
 
 ```
