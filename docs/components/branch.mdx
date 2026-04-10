@@ -55,7 +55,7 @@ import { Branch } from "smithers-orchestrator";
 
 ## Complex sub-graphs
 
-Each branch accepts any workflow element. Wrap multiple elements in `<Sequence>` or `<Parallel>`:
+Each branch accepts any workflow element. Wrap multiple elements in [`<Sequence>`](/components/sequence) or [`<Parallel>`](/components/parallel):
 
 ```tsx
 <Branch
@@ -90,7 +90,7 @@ Each branch accepts any workflow element. Wrap multiple elements in `<Sequence>`
 
 ## Condition evaluation
 
-The `if` prop is evaluated at render time. Smithers re-renders the tree each frame, so conditions can depend on outputs of completed tasks:
+The `if` prop is evaluated at render time. Smithers [re-renders the tree each frame](/concepts/reactivity), so conditions can depend on outputs of completed tasks:
 
 ```tsx
 const check = ctx.outputMaybe(outputs.check, { nodeId: "check" });
@@ -118,5 +118,5 @@ Use `ctx.outputMaybe()` when the upstream task may not have completed yet.
 ## Notes
 
 - Only one branch executes per render frame.
-- `then` and `else` each accept a single `ReactElement`. Wrap multiple elements in `<Sequence>` or `<Parallel>`.
-- Conditions are re-evaluated each render frame, enabling data-dependent control flow.
+- `then` and `else` each accept a single `ReactElement`. Wrap multiple elements in [`<Sequence>`](/components/sequence) or [`<Parallel>`](/components/parallel).
+- Conditions are re-evaluated each render frame, enabling data-dependent [control flow](/concepts/control-flow).

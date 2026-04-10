@@ -9,7 +9,7 @@ These practices address that hard part.
 
 ## Give Agents Big, Coherent Tasks
 
-Every task boundary is a context boundary. When one task ends and another begins, the agent forgets everything from the previous task. It starts fresh with only the prompt you give it and the structured output you pass in.
+Every [task](/components/task) boundary is a context boundary. When one task ends and another begins, the agent forgets everything from the previous task. It starts fresh with only the prompt you give it and the [structured output](/guides/structured-output) you pass in.
 
 So do not split one logical operation into four tiny tasks. You are not decomposing work -- you are destroying context.
 
@@ -31,11 +31,11 @@ fix them, and write the corrected files. Return a summary of changes.`}
 </Task>
 ```
 
-The second version gives the agent the full picture and lets it use tools (`read`, `edit`, `bash`) to accomplish everything in one pass. Only split into multiple tasks when the context genuinely changes, you need an explicit checkpoint, or a later task depends on the structured output of an earlier one.
+The second version gives the agent the full picture and lets it use [tools](/integrations/tools) (`read`, `edit`, `bash`) to accomplish everything in one pass. Only split into multiple tasks when the context genuinely changes, you need an explicit checkpoint, or a later task depends on the structured output of an earlier one.
 
 ## Use Measurable Stop Conditions for Loops
 
-A `<Loop>` should stop based on a concrete, measurable signal -- not a subjective judgment. Ask yourself: can a machine evaluate this condition without interpretation?
+A [Loop](/components/loop) should stop based on a concrete, measurable signal -- not a subjective judgment. Ask yourself: can a machine evaluate this condition without interpretation?
 
 Good stop conditions:
 
@@ -101,7 +101,7 @@ The second prompt leaves nothing to chance. The agent knows *what* to verify, *h
 
 ## Request Structured Reports
 
-Design your output schemas to capture the data you need for downstream tasks and human inspection. Every field should be something you can act on programmatically:
+Design your [structured output](/guides/structured-output) schemas to capture the data you need for downstream tasks and human inspection. Every field should be something you can act on programmatically:
 
 ```tsx
 const { Workflow, smithers, outputs } = createSmithers({
@@ -125,10 +125,10 @@ With this schema you can conditionally branch based on `criticalIssues > 0`, gen
 
 ## Use outputSchema for Type Safety
 
-The `outputSchema` prop validates the agent's response against your Zod schema. It does three things:
+The `outputSchema` prop validates the agent's response against your [Zod](https://zod.dev) schema. It does three things:
 
 1. **Validation** -- Responses are validated against the schema, with auto-retry on failure.
-2. **Auto-injection** -- When children are JSX/MDX elements, `props.schema` is auto-injected with a JSON example.
+2. **Auto-injection** -- When children are JSX/[MDX](/guides/mdx-prompts) elements, `props.schema` is auto-injected with a JSON example.
 3. **Cache key** -- The schema shape is part of the cache key, so schema changes invalidate stale caches.
 
 ```tsx
@@ -148,7 +148,7 @@ If the agent returns `{ approved: "yes" }` instead of `{ approved: true }`, sche
 
 ## Mark Side-Effect Tools
 
-This is the single most important thing to get right with custom tools. If your tool mutates external state — calling an API, writing to a database, sending an email, creating a PR — you **must** set `sideEffect: true` on the tool definition. If the mutation is not safe to repeat, also set `idempotent: false`.
+This is the single most important thing to get right with custom [tools](/integrations/tools). If your tool mutates external state — calling an API, writing to a database, sending an email, creating a PR — you **must** set `sideEffect: true` on the tool definition. If the mutation is not safe to repeat, also set `idempotent: false`.
 
 Why this matters: Smithers retries failed tasks. Without `sideEffect: true`, Smithers treats your tool as a pure read and replays it without warning. That means duplicate orders, duplicate emails, double charges. The `sideEffect` flag is how Smithers knows to warn the agent on retry and provide an idempotency key for deduplication.
 
@@ -188,13 +188,13 @@ For the full reference on `sideEffect`, `idempotent`, and `ctx.idempotencyKey`, 
 
 ## Design for Resumability
 
-Every long-running workflow will eventually crash. A network blip, a rate limit, a deploy that kills the process. If your workflow cannot resume from where it stopped, you are starting over from scratch every time.
+Every long-running workflow will eventually crash. A network blip, a rate limit, a deploy that kills the process. If your workflow cannot [resume](/guides/resumability) from where it stopped, you are starting over from scratch every time.
 
 Three rules:
 
 - **Use deterministic task IDs.** No timestamps, no random strings, no array indices. If the ID changes between renders, Smithers treats it as a different task.
 - **Make tasks idempotent where possible.** If a task writes files, design it so re-running produces the same result. For custom tools that call external APIs, [mark them as side effects](#mark-side-effect-tools) so Smithers handles retries safely.
-- **Use `deps` for direct task handoff and `ctx.outputMaybe()` for orchestration decisions.** This keeps prompt wiring terse while preserving explicit control-flow logic.
+- **Use `deps` for direct task handoff and `ctx.outputMaybe()` for orchestration decisions.** This keeps prompt wiring terse while preserving explicit [control-flow logic](/concepts/control-flow).
 
 ```tsx
 // Good: deterministic, conditional, resumable
@@ -222,7 +222,7 @@ As your workflow grows, you will want to iterate on prompts without touching orc
 
 - **`schemas.ts`** -- All Zod schemas in one file.
 - **`agents.ts`** -- Agent configuration (model, system prompt, tools).
-- **`prompts/`** -- MDX prompt templates.
+- **`prompts/`** -- [MDX prompt templates](/guides/mdx-prompts).
 - **`workflow.tsx`** -- Composition only (how tasks connect, branch, and hand typed deps into steps).
 
 When a prompt change requires editing `workflow.tsx`, something is wrong with your factoring.
@@ -265,7 +265,7 @@ Disable caching in production if you need fresh results on every run.
 
 ## Example: Complete Review Loop
 
-Here is a full example combining these practices -- a review loop with structured output, measurable stop conditions, explicit validation instructions, and reasonable error handling:
+Here is a full example combining these practices -- a [review loop](/guides/review-loop) with structured output, measurable stop conditions, explicit validation instructions, and reasonable error handling:
 
 ```tsx
 import { createSmithers, Task, Sequence, Loop } from "smithers-orchestrator";
@@ -373,6 +373,8 @@ Return JSON with approved (boolean), feedback (string), score (1-10).`}
 
 ## Next Steps
 
+- [Review Loop](/guides/review-loop) -- Production pattern for implement, validate, and review cycles.
 - [Patterns](/guides/patterns) -- Project structure and naming conventions.
 - [Structured Output](/guides/structured-output) -- Schema validation details.
+- [Resumability](/guides/resumability) -- Deterministic IDs, safe retries, and resume behavior.
 - [Error Handling](/guides/error-handling) -- Retries, timeouts, and fallback paths.

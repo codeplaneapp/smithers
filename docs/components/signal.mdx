@@ -59,7 +59,7 @@ export default smithers(() => (
 
 ## Behavior
 
-- `<Signal>` renders a `<WaitForEvent>` internally with `event={id}` and `output={schema}`.
-- Without `children`, it behaves like a plain typed wait.
+- `<Signal>` renders a [`<WaitForEvent>`](/components/wait-for-event) internally with `event={id}` and `output={schema}`.
+- Without `children`, it behaves like a plain typed [`<WaitForEvent>`](/components/wait-for-event).
 - With `children`, the callback runs only after the payload has been received and validated.
 - Async signal waits contribute to `smithers_external_wait_async_pending{kind="event"}` while unresolved.

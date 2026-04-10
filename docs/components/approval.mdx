@@ -3,7 +3,7 @@ title: <Approval>
 description: A first-class JSX approval node that pauses durably and resolves to an approval decision, selection, or ranking value.
 ---
 
-Pauses the workflow until a human approves or denies. `mode="approve"` writes an `ApprovalDecision` to the configured output:
+Pauses the [workflow](/components/workflow) until a human approves or denies. `mode="approve"` writes an `ApprovalDecision` to the configured output:
 
 ```ts
 type ApprovalDecision = {
@@ -167,7 +167,7 @@ import {
 />
 ```
 
-- `allowedScopes` and `allowedUsers` are enforced by `Gateway`.
+- `allowedScopes` and `allowedUsers` are enforced by [`Gateway`](/integrations/gateway).
 - `autoApprove={{ after: N }}` auto-approves after `N` consecutive manual approvals for the same workflow node.
 - `audit: true` preserves an approval record and emits `ApprovalAutoApproved`.
 
@@ -193,10 +193,10 @@ type ApprovalAutoApprove = {
 
 ## Behavior
 
-- Workflow enters `waiting-approval` when this node is reached.
+- Workflow enters [`waiting-approval`](/concepts/approvals) when this node is reached.
 - With `async`, the run can keep traversing unrelated later nodes while this approval is pending.
 - `smithers approve` / `smithers deny` updates the record durably.
-- On resume, the node resolves to a decision object; downstream JSX branches on the value.
+- On [resume](/concepts/suspend-and-resume), the node resolves to a decision object; downstream JSX branches on the value.
 - `onDeny="fail"` -- hard gate.
 - `onDeny="continue"` -- branch on `decision.approved`.
 - Use `ctx.outputMaybe(...)` when branching on an async approval's output, since the decision may not exist yet during earlier renders.
@@ -216,4 +216,4 @@ When `smithers approve` or `smithers deny` is called, `bridgeApprovalResolve` re
 | Use | When |
 | --- | --- |
 | `<Approval>` | Decision must be persisted as data and consumed by downstream nodes. |
-| `needsApproval` on `<Task>` | Simple pause before a task; no separate decision value needed. |
+| `needsApproval` on [`<Task>`](/components/task) | Simple pause before a task; no separate decision value needed. |

@@ -48,7 +48,7 @@ my-workflow/
     helpers.ts
 ```
 
-The key insight: `workflow.tsx` should contain only orchestration -- how tasks connect, branch, and loop. The *what* lives in components and prompts. The *shape of data* lives in schemas. The *who does the work* lives in agents.
+The key insight: `workflow.tsx` should contain only [control flow](/concepts/control-flow) -- how tasks connect, branch, and loop. The *what* lives in components and prompts. The *shape of data* lives in schemas. The *who does the work* lives in agents.
 
 ### Single-File Pattern
 
@@ -90,7 +90,7 @@ Sixty lines. Two tasks. You can read the entire workflow without scrolling. That
 
 ## Schema Organization
 
-Keep all schemas in a centralized `schemas.ts` file. When someone new looks at your project, this is the first file they should read -- it is the complete data model at a glance:
+Keep all [Zod](https://zod.dev) schemas in a centralized `schemas.ts` file. When someone new looks at your project, this is the first file they should read -- it is the complete [data model](/concepts/data-model) at a glance:
 
 ```ts
 // schemas.ts
@@ -140,7 +140,7 @@ One import, one call, done. All the data-shape decisions live in one place.
 
 ## Task ID Naming Conventions
 
-Task IDs must be unique within a workflow and deterministic across renders. If an ID changes between renders, Smithers treats it as a different task -- and that breaks resumability.
+Task IDs must be unique within a workflow and deterministic across renders. If an ID changes between renders, Smithers treats it as a different task -- and that breaks [resumability](/guides/resumability).
 
 **Simple tasks**: use a short, descriptive name.
 
@@ -159,7 +159,7 @@ Task IDs must be unique within a workflow and deterministic across renders. If a
 ))}
 ```
 
-**Iteration-aware tasks** (inside Loop): the task ID stays the same across iterations. Smithers differentiates them by the `iteration` column.
+**Iteration-aware tasks** (inside [Loop](/components/loop)): the task ID stays the same across iterations. Smithers differentiates them by the `iteration` column.
 
 ```tsx
 {/* assuming outputs from createSmithers */}
@@ -183,7 +183,7 @@ Why the colon? It gives you a visual namespace. You can scan a list of node IDs 
 
 ## Agent Configuration
 
-Centralize agent setup in `agents.ts`. This file answers one question: who does what?
+Centralize agent setup in `agents.ts`. This file answers one question: who does what? This example uses the [Vercel AI SDK](https://ai-sdk.dev) with [Anthropic Claude](https://docs.anthropic.com) models.
 
 ```ts
 // agents.ts
@@ -215,7 +215,7 @@ Three agents, clearly named, with distinct tool sets. The analyst does not get `
 
 ## MDX Prompt Templates
 
-For prompts longer than a couple of lines, use MDX files. This keeps your JSX clean and lets you compose prompts with variables:
+For prompts longer than a couple of lines, use [MDX prompts](/guides/mdx-prompts). This keeps your JSX clean and lets you compose prompts with variables:
 
 ```mdx
 {/* prompts/review.mdx */}
@@ -298,7 +298,7 @@ export default smithers((ctx) => (
 ));
 ```
 
-Use `ctx.outputMaybe()` when the *orchestration itself* depends on the answer -- "should this task even exist?":
+Use `ctx.outputMaybe()` when the *[control flow](/concepts/control-flow) itself* depends on the answer -- "should this task even exist?":
 
 ```tsx
 const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
@@ -308,11 +308,11 @@ return analysis?.risk === "high" ? (
 ) : null;
 ```
 
-The distinction matters. `deps` is about data flow inside a prompt. `ctx.outputMaybe()` is about control flow in your JSX tree.
+The distinction matters. `deps` is about data flow inside a prompt. `ctx.outputMaybe()` is about [control flow](/concepts/control-flow) in your JSX tree.
 
 ## Environment-Based Configuration
 
-Use environment variables for settings that change between development and production:
+Use environment variables for settings that change between development and production, especially [model selection](/guides/model-selection) and [CLI agents](/integrations/cli-agents):
 
 ```ts
 // agents.ts
@@ -331,5 +331,6 @@ CLAUDE_MODEL=claude-opus-4-6 bun run workflow.tsx
 ## Next Steps
 
 - [Tutorial](/guides/tutorial-workflow) -- End-to-end tutorial using these patterns.
+- [Project Structure](/guides/project-structure) -- Compare with the dedicated repository layout guide.
+- [MDX Prompts](/guides/mdx-prompts) -- Move long prompts into reusable templates.
 - [Best Practices](/guides/best-practices) -- Higher-level guidelines for effective workflows.
-- [Components](/components/workflow) -- Reference for all JSX components.

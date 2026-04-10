@@ -3,7 +3,7 @@ title: SDK Agents
 description: Provider-backed AI SDK agent wrappers for Anthropic and OpenAI that work like first-class Smithers agents.
 ---
 
-`AnthropicAgent` and `OpenAIAgent` are thin wrappers around the AI SDK `ToolLoopAgent` with class-style ergonomics matching the CLI agents.
+`AnthropicAgent` and `OpenAIAgent` are thin wrappers around the [AI SDK](https://ai-sdk.dev) `ToolLoopAgent` with class-style ergonomics matching the [CLI agents](/integrations/cli-agents).
 
 ## Import
 
@@ -79,7 +79,7 @@ Limits:
 | | CLI Agents | SDK Agents |
 |---|---|---|
 | Billing | Provider subscription / local CLI | API billing |
-| Tools | Provider CLI tool ecosystem | Smithers `tools` sandbox |
+| Tools | Provider CLI tool ecosystem | Smithers [tools](/integrations/tools) [sandbox](/components/sandbox) |
 | Flexibility | Native CLI flags | AI SDK `providerOptions` |
 
 Pass a raw `ToolLoopAgent` directly if you prefer. The wrappers are convenience, not a separate runtime.
@@ -102,4 +102,8 @@ export const claude = useCli
     });
 ```
 
-See [Model Selection](/guides/model-selection) for a broader comparison.
+## Next Steps
+
+- [CLI Agents](/integrations/cli-agents)
+- [Built-in Tools](/integrations/tools)
+- [Agents and Tools](/concepts/agents-and-tools)

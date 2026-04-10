@@ -12,12 +12,12 @@ import { Workflow } from "smithers-orchestrator";
 | Prop | Type | Default | Description |
 | --- | --- | --- | --- |
 | `name` | `string` | **(required)** | Unique workflow name. Used in logs, CLI, and run metadata. |
-| `cache` | `boolean` | `false` | Enable per-node output caching. Completed tasks are skipped on resume. |
-| `children` | `ReactNode` | `undefined` | Tasks and control-flow components that make up the workflow. |
+| `cache` | `boolean` | `false` | Enable per-node output caching. Completed tasks are skipped on [resume](/concepts/suspend-and-resume). |
+| `children` | `ReactNode` | `undefined` | [`<Task>`](/components/task) and [control-flow components](/concepts/control-flow) that make up the workflow. |
 
 ## Implicit sequencing
 
-Direct children execute sequentially, top to bottom. A bare `<Workflow>` behaves identically to wrapping children in `<Sequence>`:
+Direct children execute sequentially, top to bottom. A bare `<Workflow>` behaves identically to wrapping children in [`<Sequence>`](/components/sequence):
 
 ```tsx
 // These two are equivalent:
@@ -35,11 +35,11 @@ Direct children execute sequentially, top to bottom. A bare `<Workflow>` behaves
 </Workflow>
 ```
 
-An explicit `<Sequence>` is only needed when nesting sequential groups inside `<Parallel>` or other control-flow components.
+An explicit [`<Sequence>`](/components/sequence) is only needed when nesting sequential groups inside [`<Parallel>`](/components/parallel) or other [control-flow components](/concepts/control-flow).
 
 ## Caching
 
-When `cache` is enabled, the runtime checks whether a task's output row exists before executing it. If present, the task is skipped and stored output is reused. This makes workflows resumable after partial failures.
+When `cache` is enabled, the runtime checks whether a task's output row exists before executing it. If present, the task is skipped and stored output is reused. This makes workflows [resumable](/concepts/suspend-and-resume) after partial failures.
 
 ```tsx
 <Workflow name="pipeline" cache>
@@ -84,10 +84,10 @@ export default smithers((ctx) => (
 
 ## Rendering
 
-`<Workflow>` renders as a `<smithers:workflow>` host element. The runtime traverses this tree to extract `TaskDescriptor` objects and build the execution plan.
+`<Workflow>` renders as a `<smithers:workflow>` host element. The runtime traverses this tree to extract [`TaskDescriptor`](/reference/types) objects and build the execution plan.
 
 ## Notes
 
 - Every workflow must have exactly one `<Workflow>` at the root.
 - `name` is for identification in logs, CLI, and event streams; it need not be globally unique across files.
-- Custom Drizzle tables must include `runId` and `nodeId` columns. Tasks inside `<Loop>` additionally need `iteration`. `createSmithers(...)` adds these columns automatically for schema-driven tables.
+- Custom Drizzle tables must include `runId` and `nodeId` columns. Tasks inside [`<Loop>`](/components/loop) additionally need `iteration`. `createSmithers(...)` adds these columns automatically for schema-driven tables.

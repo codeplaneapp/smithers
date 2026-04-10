@@ -3,7 +3,9 @@ title: JSX Quickstart
 description: Build and run your first Smithers workflow with the JSX API.
 ---
 
-This guide builds a two-step workflow that researches a topic and then writes a report once the research output exists.
+This guide builds a two-step [workflow](/concepts/workflows-overview) that researches a topic and then writes a report once the research output exists.
+
+It uses the [AI SDK](https://ai-sdk.dev) with [Anthropic](https://docs.anthropic.com) and validates task outputs with [Zod](https://zod.dev).
 
 ## Step 1: Create the Workflow
 
@@ -60,8 +62,8 @@ export default smithers((ctx) => {
 
 Two JSX-specific details matter here:
 
-- `ctx.outputMaybe(outputs.research, { nodeId: "research" })` is how the second render discovers that `research` has finished.
-- the `report` task only mounts once the `research` output exists.
+- `ctx.outputMaybe(outputs.research, { nodeId: "research" })` is how the second render discovers that `research` has finished; see [Workflow State](/concepts/workflow-state) for the persisted lookup model.
+- the `report` [`<Task>`](/components/task) only mounts once the `research` output exists.
 
 ## Step 2: Run It
 
@@ -87,7 +89,7 @@ Run it:
 bun run main.ts
 ```
 
-Or run the workflow directly with the CLI:
+Or run the workflow directly with the [CLI](/cli/quickstart):
 
 ```bash
 bunx smithers-orchestrator up workflow.tsx --input '{"topic":"The history of the Zig programming language"}'
@@ -95,13 +97,15 @@ bunx smithers-orchestrator up workflow.tsx --input '{"topic":"The history of the
 
 ## What Happened
 
-1. Smithers rendered the JSX tree. Only `research` was mounted.
+1. Smithers rendered the JSX tree. Only `research` was mounted; see [Render Frame](/runtime/render-frame) for the render step in detail.
 2. The `research` task ran, validated its output against the Zod schema, and persisted it.
-3. Smithers rendered again with that stored output available through `ctx.outputMaybe(...)`.
+3. Smithers rendered again with that stored output available through `ctx.outputMaybe(...)`; see [Reactivity](/concepts/reactivity) for how new tasks mount on later renders.
 4. The `report` task mounted on the second render and used the `research` output in its prompt.
 
 ## Next Steps
 
+- [JSX Overview](/jsx/overview) — See how JSX rendering, branching, and composition work.
 - [Workflow](/components/workflow) — Learn the root workflow component.
 - [Task](/components/task) — See agent, compute, and static task modes.
+- [runWorkflow](/runtime/run-workflow) — Learn the programmatic runtime entry point used in `main.ts`.
 - [Tutorial: Build a Workflow](/guides/tutorial-workflow) — Build a larger production-style JSX workflow.

@@ -12,11 +12,11 @@ That makes it a good fit for ClaudeBot/OpenClaw-style systems where Smithers is 
 ## What The Gateway Does
 
 - Registers multiple named workflows behind one server
-- Exposes a WebSocket RPC protocol with event streaming
+- Exposes a [WebSocket](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket) RPC protocol with event streaming
 - Exposes `POST /rpc` for stateless HTTP callers
 - Enforces auth and scopes before a client can call methods
-- Surfaces pending approvals with rich metadata
-- Delivers external signals into waiting workflows
+- Surfaces pending [approvals](/concepts/approvals) with rich metadata
+- Delivers external [signals](/runtime/events) into waiting workflows
 - Persists and triggers cron schedules
 - Propagates gateway auth context into `ctx.auth`
 
@@ -28,7 +28,7 @@ import { Gateway } from "smithers-orchestrator";
 
 ## Quick Start
 
-This example registers a workflow, exposes approvals remotely, and starts the gateway on port `7331`.
+This example registers a [workflow](/components/workflow), exposes [approvals](/concepts/approvals) remotely, and starts the gateway on port `7331`.
 
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
@@ -133,7 +133,7 @@ type GatewayOptions = {
 | `features` | `["streaming", "runs"]` | Feature list returned to clients in `hello` |
 | `heartbeatMs` | `15000` | Interval for `tick` events and scheduler polling cap |
 | `auth` | `undefined` | Auth mode and scope mapping |
-| `defaults.cliAgentTools` | `undefined` | Default tool policy for CLI agents started through the gateway |
+| `defaults.cliAgentTools` | `undefined` | Default tool policy for [CLI agents](/integrations/cli-agents) started through the gateway |
 | `maxBodyBytes` | `1048576` | Max JSON body size for `POST /rpc` |
 
 ### `ctx.auth` Inside Workflows
@@ -149,7 +149,7 @@ Runs started through the gateway receive auth metadata in `ctx.auth`:
 }
 ```
 
-That lets you build workflows that behave differently for operators, bots, cron, or external services:
+That lets you build [workflows](/concepts/workflows-overview) that behave differently for operators, bots, cron, or external services:
 
 ```tsx
 <Task id="audit" output={outputs.audit}>
@@ -397,7 +397,7 @@ After a successful `connect`, the gateway emits `tick` events every `heartbeatMs
 
 ### Streamed Event Names
 
-The gateway maps Smithers runtime events into a stable external stream:
+The gateway maps Smithers [runtime events](/runtime/events) into a stable external stream:
 
 | Event | Payload highlights |
 | --- | --- |
@@ -602,7 +602,7 @@ After recording the decision, the gateway attempts to resume the run if it was p
 | --- | --- | --- | --- |
 | `signals.send` | `execute` | `runId`, `signalName`, `data?`, `correlationId?` | Delivery metadata including `seq` and `receivedAtMs` |
 
-Use `signals.send` to wake workflows blocked on `<Signal>` or `<WaitForEvent>`.
+Use `signals.send` to wake workflows blocked on [`<Signal>` or `<WaitForEvent>`](/runtime/events).
 
 ```json
 {
@@ -818,7 +818,7 @@ For interactive Slack flows, a common pattern is:
 ## Next Steps
 
 - [GitHub Bot](/integrations/github-bot)
-- [Built-in Tools](/integrations/tools)
-- [OpenAPI Tools](/concepts/openapi-tools)
-- [Serve Mode](/integrations/serve)
 - [HTTP Server](/integrations/server)
+- [Serve Mode](/integrations/serve)
+- [Runtime Events](/runtime/events)
+- [External Workflows](/integrations/external-workflows)

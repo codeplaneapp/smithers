@@ -7,11 +7,11 @@ Smithers does not ship a turnkey GitHub bot server.
 
 What it does give you is the orchestration layer you actually want behind one:
 
-- durable workflows
-- approvals
-- resumable signals
-- gateway RPC
-- built-in tools and custom tools
+- durable [workflows](/concepts/workflows-overview)
+- [approvals](/concepts/approvals)
+- resumable [signals](/runtime/events)
+- [gateway RPC](/integrations/gateway)
+- [built-in tools](/integrations/tools) and custom tools
 
 The usual shape is:
 
@@ -21,6 +21,8 @@ The usual shape is:
 4. workflows do the actual work
 
 ## Architecture
+
+Typical wiring is a [gateway](/integrations/gateway) client over [WebSocket](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket) or `POST /rpc`, with workflows calling the [GitHub API](https://docs.github.com/en/rest).
 
 ```txt
 GitHub App
@@ -32,7 +34,7 @@ GitHub App
 
 Use `runs.create` when the webhook should start fresh work.
 
-Use `signals.send` when the workflow is already running and is waiting for a follow-up event such as:
+Use `signals.send` when the [workflow](/concepts/workflows-overview) is already running and is waiting for a follow-up event such as:
 
 - a maintainer comment
 - a label change
@@ -71,7 +73,7 @@ Common webhook subscriptions:
 
 ## 2. Start The Gateway
 
-The gateway is the remote control surface your bot talks to.
+The [gateway](/integrations/gateway) is the remote control surface your bot talks to.
 
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
@@ -182,7 +184,7 @@ app.post("/github/webhooks", async (c) => {
 
 That pattern is enough for "start a workflow when a PR opens."
 
-For richer bots, keep the run alive and resume it with signals instead of starting over.
+For richer bots, keep the run alive and resume it with [signals](/runtime/events) instead of starting over.
 
 ## 4. Map GitHub Events To Workflow Actions
 
@@ -346,8 +348,8 @@ Checks are a good place to surface machine-readable state while comments carry t
 
 This example keeps the workflow simple:
 
-- fetch PR data through tools
-- ask an agent to review it
+- fetch PR data through [tools](/integrations/tools)
+- ask an [agent](/concepts/agents-and-tools) to review it
 - optionally publish a comment
 
 ```tsx
@@ -423,12 +425,12 @@ Use the available GitHub tools to inspect the diff and return:
 
 ## 8. Long-Lived PR Workflows
 
-The gateway gets especially useful when your bot needs to pause and resume rather than fire one request and exit.
+The [gateway](/integrations/gateway) gets especially useful when your bot needs to pause and resume rather than fire one request and exit.
 
 Typical pattern:
 
 1. Start a run on `pull_request.opened`
-2. Wait on `<Signal>` or `<WaitForEvent>` for later comments, CI updates, or labels
+2. Wait on [`<Signal>` or `<WaitForEvent>`](/runtime/events) for later comments, CI updates, or labels
 3. Deliver those events with `signals.send`
 4. Keep the run's context and outputs intact between events
 
@@ -438,5 +440,6 @@ That gives you a real conversation and state machine around the PR without writi
 
 - [Gateway](/integrations/gateway)
 - [Common External Tools](/integrations/common-tools)
-- [OpenAPI Tools](/concepts/openapi-tools)
+- [Runtime Events](/runtime/events)
+- [Approvals](/concepts/approvals)
 - [Built-in Tools](/integrations/tools)

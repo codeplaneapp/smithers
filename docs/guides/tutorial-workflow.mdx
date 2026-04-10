@@ -41,7 +41,7 @@ code-review/
 
 ## 2. Define Schemas
 
-Each Zod schema passed to `createSmithers` becomes a named, auto-created SQLite output table.
+Each [Zod](https://zod.dev) schema passed to `createSmithers` becomes a named, auto-created SQLite output table.
 
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
@@ -76,6 +76,8 @@ const { Workflow, smithers, outputs } = createSmithers({
 `outputs` provides typed references (`outputs.analysis` instead of the string `"analysis"`). Typos become compile errors. `runId`, `nodeId`, and `iteration` columns are auto-added.
 
 ## 3. Configure Agents
+
+This example uses the [Vercel AI SDK](https://ai-sdk.dev) with [Anthropic Claude](https://docs.anthropic.com) models.
 
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
@@ -157,9 +159,9 @@ Return JSON with:
 });
 ```
 
-- `ctx.outputMaybe()` returns `undefined` until the task completes. Safe for conditional rendering.
-- `{analysis ? <Task .../> : null}` gates downstream tasks on upstream completion.
-- `ctx.input` is the runtime input object (here: `{ repo: string, focusArea?: string }`).
+- `ctx.outputMaybe()` returns `undefined` until the task completes. Safe for [reactive control flow](/concepts/reactivity).
+- `{analysis ? <Task .../> : null}` gates downstream [tasks](/components/task) on upstream completion inside a [Sequence](/components/sequence).
+- `ctx.input` is the runtime input object (here: `{ repo: string, focusArea?: string }`). See the [data model](/concepts/data-model).
 
 ## 5. Create the Runner
 
@@ -188,7 +190,7 @@ if (result.status === "finished") {
 }
 ```
 
-Because the final schema key here is `report` rather than `output`, `result.output` stays `undefined`. Rename that schema key to `output` if you want `runWorkflow()` to return it directly.
+Because the final schema key here is `report` rather than `output`, `result.output` stays `undefined`. Rename that schema key to `output` if you want [`runWorkflow()`](/runtime/run-workflow) to return it directly.
 
 ## 6. Run It
 
@@ -196,7 +198,7 @@ Because the final schema key here is `report` rather than `output`, `result.outp
 bun run main.ts
 ```
 
-Or via CLI (no `main.ts` needed):
+Or via the [CLI](/cli/quickstart) (no `main.ts` needed):
 
 ```bash
 bunx smithers-orchestrator up workflow.tsx --input '{"repo": "/path/to/my-project", "focusArea": "authentication"}'
@@ -220,14 +222,14 @@ sqlite3 smithers.db "SELECT * FROM report WHERE run_id = '$RUN_ID';"
 
 ## Execution Model
 
-The engine renders the JSX tree repeatedly:
+The engine renders the JSX tree repeatedly, following the [execution model](/concepts/execution-model):
 
 1. **Render 1** -- Only `analyze` is mounted. Engine executes it.
 2. **Render 2** -- `ctx.outputMaybe(outputs.analysis)` returns data. `fix` mounts and executes.
 3. **Render 3** -- Both outputs available. `report` mounts and executes.
 4. **Render 4** -- All tasks finished. Run completes.
 
-On crash, resume skips completed tasks:
+On crash, [resume](/guides/resumability) skips completed tasks:
 
 ```bash
 bunx smithers-orchestrator up workflow.tsx --run-id "$RUN_ID" --resume true
@@ -250,8 +252,9 @@ Tools are sandboxed to the workflow root by default. See [Built-in Tools](/integ
 
 ## Next Steps
 
+- [Run Workflow](/runtime/run-workflow) -- Runner API options and result handling.
+- [CLI Quickstart](/cli/quickstart) -- Run, inspect, and resume workflows from the CLI.
 - [Structured Output](/guides/structured-output) -- Schema validation in depth.
 - [Error Handling](/guides/error-handling) -- Retries, timeouts, fallback paths.
 - [Resumability](/guides/resumability) -- Crash recovery and deterministic replay.
 - [Patterns](/guides/patterns) -- Project structure for larger workflows.
-- [Components](/components/workflow) -- JSX component reference.

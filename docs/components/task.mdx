@@ -22,9 +22,9 @@ When `needsApproval` and `async` are both set, sequence traversal can continue p
 | Prop | Type | Default | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | **(required)** | Stable node identity. Must be unique within the workflow. |
-| `output` | `z.ZodObject \| Table \| string` | **(required)** | Output destination. Zod schema from `outputs` (recommended), Drizzle table, or string key. |
-| `outputSchema` | `z.ZodObject` | `undefined` | Expected agent output structure. Inferred when `output` is a Zod schema. When provided with a React element child, a `schema` prop containing a JSON example is auto-injected. |
-| `agent` | `AgentLike \| AgentLike[]` | `undefined` | AI SDK agent or ordered array `[primary, fallback1, ...]`. Agents are tried in order on retries. |
+| `output` | `z.ZodObject \| Table \| string` | **(required)** | Output destination. [Zod](https://zod.dev) schema from `outputs` (recommended), Drizzle table, or string key. |
+| `outputSchema` | `z.ZodObject` | `undefined` | Expected agent output structure. Inferred when `output` is a Zod schema. When provided with a [React JSX](https://react.dev/learn/writing-markup-with-jsx) element child, a `schema` prop containing a JSON example is auto-injected. |
+| `agent` | `AgentLike \| AgentLike[]` | `undefined` | [AI SDK](https://ai-sdk.dev) agent or ordered array `[primary, fallback1, ...]`. Agents are tried in order on retries. |
 | `fallbackAgent` | `AgentLike` | `undefined` | Single retry fallback agent. Appended to the `agent` chain. |
 | `dependsOn` | `string[]` | `undefined` | Explicit dependency on other task IDs. Task waits until all complete. |
 | `needs` | `Record<string, string>` | `undefined` | Named dependencies. Keys become context keys, values are task IDs. |
@@ -114,7 +114,7 @@ When the upstream task id differs from the dep key, pair `deps` with `needs`:
 </Task>
 ```
 
-### Structured output with outputSchema
+### [Structured output](/guides/structured-output) with outputSchema
 
 When `outputSchema` is provided and children are a React element, a `schema` prop containing a JSON example is auto-injected. The MDX template can reference `{props.schema}`.
 
@@ -298,7 +298,7 @@ const auditSchema = z.object({
 
 Custom Drizzle tables must be created and migrated separately. Define the workflow with `createSmithers(...)` as usual.
 
-## Error handling
+## [Error handling](/guides/error-handling)
 
 | Scenario | Behavior |
 | --- | --- |
@@ -333,6 +333,6 @@ When a task is retried (via `retries` or manual `retryTask()`), the engine check
 
 ## Notes
 
-- Custom Drizzle tables must include `runId` and `nodeId` columns. Tasks inside `<Loop>` additionally need `iteration`. `createSmithers(...)` adds these automatically.
+- Custom Drizzle tables must include `runId` and `nodeId` columns. Tasks inside [`<Loop>`](/components/loop) additionally need `iteration`. `createSmithers(...)` adds these automatically.
 - `id` is the `nodeId` in the task descriptor; uniqueness is enforced at render time.
 - In agent mode, JSX/MDX children are rendered to markdown (not HTML) before being sent to the agent.

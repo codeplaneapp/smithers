@@ -14,7 +14,7 @@ import { Parallel } from "smithers-orchestrator";
 | `id` | `string` | `undefined` | Optional stable id for tracking and deduping. |
 | `maxConcurrency` | `number` | `Infinity` | Max simultaneous children. Remaining tasks queue until a slot opens. |
 | `skipIf` | `boolean` | `false` | Skip the entire group. Returns `null`; no children are mounted. |
-| `children` | `ReactNode` | `undefined` | Tasks and control-flow components to execute concurrently. |
+| `children` | `ReactNode` | `undefined` | [`<Task>`](/components/task) and [control-flow components](/concepts/control-flow) to execute concurrently. |
 
 ## Basic usage
 
@@ -55,7 +55,7 @@ import { Parallel } from "smithers-orchestrator";
 
 At most two agent calls run simultaneously. As each completes, the next queued task starts.
 
-## Combining with Sequence
+## Combining with [Sequence](/components/sequence)
 
 ```tsx
 <Workflow name="ci">
@@ -72,7 +72,7 @@ At most two agent calls run simultaneously. As each completes, the next queued t
 </Workflow>
 ```
 
-The two `<Sequence>` groups run in parallel. Within each, tasks run sequentially.
+The two [`<Sequence>`](/components/sequence) groups run in parallel. Within each, tasks run sequentially.
 
 ## Conditional skipping
 
@@ -91,5 +91,5 @@ The two `<Sequence>` groups run in parallel. Within each, tasks run sequentially
 
 - Omitting `maxConcurrency` (or setting `Infinity`) starts all children simultaneously.
 - The group completes when all children finish (or fail, if `continueOnFail` is set on individual tasks).
-- Nestable inside `<Sequence>`, `<Branch>`, `<Loop>`, or another `<Parallel>`.
+- Nestable inside [`<Sequence>`](/components/sequence), [`<Branch>`](/components/branch), [`<Loop>`](/components/loop), or another `<Parallel>`.
 - An empty `<Parallel>` is valid and completes immediately.

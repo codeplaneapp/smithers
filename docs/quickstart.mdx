@@ -5,10 +5,10 @@ description: "Get Smithers running end to end: scaffold the workflow pack, launc
 
 By the end of this page you will have done the four things that matter for a real first run:
 
-1. installed the workflow pack
+1. installed the [workflow pack](/installation)
 2. launched a workflow
 3. inspected the resulting run
-4. chosen whether to go deeper on CLI operations or JSX authoring
+4. chosen whether to go deeper on [CLI operations](/cli/quickstart) or [JSX authoring](/jsx/quickstart)
 
 ## 1. Scaffold the Workflow Pack
 
@@ -25,7 +25,7 @@ bunx smithers-orchestrator workflow run implement --prompt "Add rate limiting to
 ```
 
 This runs the seeded `implement` workflow that `init` installs into `.smithers/workflows/`.
-It is the fastest way to see Smithers behave like a workflow runtime instead of a library on a shelf.
+It is the fastest way to see Smithers behave like a [workflow runtime](/concepts/workflows-overview) instead of a library on a shelf.
 
 ## 3. Inspect the Run
 
@@ -43,19 +43,19 @@ Use `ps` to find the run ID if you do not already have it.
 
 Every workflow gets:
 
-- SQLite persistence
-- Resume after restarts
-- Retries, approvals, loops
-- Observability and CLI tooling
+- [SQLite](https://sqlite.org) persistence
+- [Resume after restarts](/concepts/suspend-and-resume)
+- Retries, [approvals](/concepts/approvals), [loops](/components/loop)
+- Observability and [CLI tooling](/cli/overview)
 
 You just used both Smithers surfaces together:
 
-- the workflow pack gave you runnable workflows
-- the CLI launched, inspected, and reported on the run
+- the [workflow pack](/installation) gave you runnable workflows
+- the [CLI](/cli/overview) launched, inspected, and reported on the run
 
 ## Next Steps
 
 - [CLI Quickstart](/cli/quickstart) to learn the terminal workflow in a more systematic way.
+- [CLI Overview](/cli/overview) for the full command surface, including logs, approvals, and signals.
 - [JSX Quickstart](/jsx/quickstart) to build a workflow from scratch.
-- [Hello World Example](/examples/hello-world) to see the smallest complete example.
-- [Review Loop Guide](/guides/review-loop) to move from straight-line flow to iterative refinement.
+- [Workflows Overview](/concepts/workflows-overview) to connect the run you just started to the runtime model.

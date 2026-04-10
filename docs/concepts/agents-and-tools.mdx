@@ -7,11 +7,11 @@ You have a workflow. Some of its tasks require judgment -- reading code, spottin
 
 ## Agents in Workflows
 
-An agent handles the thinking inside a task. Give a `<Task>` the `agent` prop and three things happen: the children become the prompt, the agent reasons and responds, and Smithers validates the response against the output schema. No ceremony required.
+An agent handles the thinking inside a task. Give a [`<Task>`](/components/task) the `agent` prop and three things happen: the children become the prompt, the agent reasons and responds, and Smithers validates the response against the output schema. No ceremony required.
 
 ### Using an Agent
 
-The simplest case first:
+The simplest case first, using the [AI SDK](https://ai-sdk.dev) with [Anthropic](https://docs.anthropic.com):
 
 ```tsx
 import { ToolLoopAgent as Agent } from "ai";
@@ -35,7 +35,7 @@ That is the whole pattern. The children render into a prompt string. The agent u
 
 Where does the AI actually run? Smithers gives you two options, and they are interchangeable.
 
-**SDK Agents** talk directly to a provider API. You pay per token, you get fine-grained control:
+**[SDK Agents](/integrations/sdk-agents)** talk directly to a provider API. You pay per token, you get fine-grained control:
 
 ```ts
 import { ToolLoopAgent as Agent } from "ai";
@@ -47,7 +47,7 @@ const claude = new Agent({
 });
 ```
 
-**CLI Agents** wrap external AI command-line tools. Same interface, different engine under the hood:
+**[CLI Agents](/integrations/cli-agents)** wrap external AI command-line tools. Same interface, different engine under the hood:
 
 ```ts
 import { ClaudeCodeAgent, CodexAgent, GeminiAgent } from "smithers-orchestrator";
@@ -70,7 +70,7 @@ Swap `claude` for `codex` and the task works the same way. The interface is the 
 
 ### Structured Output
 
-Agents do not return free-form text. They return data, validated against a Zod schema. This is the contract that makes agents composable -- downstream tasks can depend on the shape of what comes back.
+Agents do not return free-form text. They return data, validated against a [Zod](https://zod.dev) schema. This is the contract that makes agents composable -- downstream tasks can depend on the shape of what comes back.
 
 ```tsx
 const { outputs } = createSmithers({
@@ -144,7 +144,7 @@ Ask two agents the same question and compare answers. This is the "get a second 
 </Parallel>
 ```
 
-The `continueOnFail` prop is important here. If one reviewer times out or crashes, the other still completes. You get at least one review instead of zero.
+The [`continueOnFail`](/guides/error-handling) prop is important here. If one reviewer times out or crashes, the other still completes. You get at least one review instead of zero.
 
 ### Pipeline Handoff
 
@@ -167,7 +167,7 @@ Codex writes the code. Claude reviews it. You would not ask the same person to w
 
 An agent without tools is a brain in a jar. It can reason about what you tell it, but it cannot look at your files, run your tests, or check what is on disk. Tools fix that.
 
-Smithers provides five built-in tools, each doing one thing well:
+Smithers provides five [built-in tools](/integrations/tools), each doing one thing well:
 
 | Tool | Purpose | Input |
 | --- | --- | --- |
@@ -286,6 +286,8 @@ If yes, use an agent. If no, use compute or static mode. If you are unsure, star
 ## Next Steps
 
 - [Built-in Tools](/integrations/tools) -- Full API reference for all five tools.
+- [SDK Agents](/integrations/sdk-agents) -- Provider-backed agents and model configuration.
 - [CLI Agents](/integrations/cli-agents) -- Using Claude Code, Codex, Gemini, and other CLI agents.
-- [SDK Agents](/integrations/sdk-agents) -- Using API-billed provider agents.
+- [Structured Output](/guides/structured-output) -- How schema validation, retries, and repair prompts work.
+- [Approvals](/concepts/approvals) -- Gate tool-using tasks behind human approval when needed.
 - [Implement-Review Loop](/guides/review-loop) -- A production pattern using multi-agent review.

@@ -37,7 +37,7 @@ Here's where it gets interesting. What if a denial isn't an error — it's infor
 
 That's the aha moment: **an approval can be data, not just a gate**.
 
-When downstream tasks need to *read* the decision and branch on it, use `<Approval>`:
+When downstream tasks need to *read* the decision and branch on it, use [`<Approval>`](/components/approval):
 
 ```tsx
 import { Approval, approvalDecisionSchema, createSmithers } from "smithers-orchestrator";
@@ -74,7 +74,7 @@ export default smithers((ctx) => {
 });
 ```
 
-Look at the `onDeny="continue"` and the branching logic that follows. A denial doesn't kill the workflow — it flows through as a value. The downstream task reads `decision.approved` and acts accordingly.
+Look at the `onDeny="continue"` and the [branching logic](/concepts/control-flow) that follows. A denial doesn't kill the workflow — it flows through as a value. The downstream task reads `decision.approved` and acts accordingly.
 
 The `<Approval>` node produces an `ApprovalDecision`:
 
@@ -89,7 +89,7 @@ type ApprovalDecision = {
 
 Four fields. The boolean is the verdict. The rest is audit trail. Every approval becomes a first-class piece of data in your workflow — queryable, branchable, persistent.
 
-Smithers keeps the authoritative decision timestamp in its approval records and event history so durable outputs stay deterministic across resume and replay.
+Smithers keeps the authoritative decision timestamp in its approval records and event history so durable outputs stay deterministic across [resume](/concepts/suspend-and-resume) and [replay](/concepts/time-travel).
 
 ## Denial Policies
 
@@ -168,7 +168,7 @@ pending → requested → waiting-approval → approved | denied → completed
 
 1. Smithers reaches the approval node
 2. It persists an approval request record (title, summary, metadata)
-3. The workflow suspends in a durable waiting state
+3. The workflow [suspends in a durable waiting state](/concepts/suspend-and-resume)
 4. A human approves or denies via CLI, API, or UI
 5. The node resolves according to its denial policy
 6. Downstream tasks become eligible to run
@@ -254,7 +254,7 @@ Good approval context is the difference between "I guess?" and "Yes, ship it." I
 
 ## Structured Human Input: `<HumanTask>`
 
-Sometimes you don't need a yes/no — you need the human to *provide data*. A code review, a triage classification, a budget estimate. `<HumanTask>` is a task where the human is the agent: the workflow suspends until a human provides JSON matching the output schema, with validation and retries.
+Sometimes you don't need a yes/no — you need the human to *provide data*. A code review, a triage classification, a budget estimate. [`<HumanTask>`](/components/human-task) is a task where the human is the agent: the workflow suspends until a human provides JSON matching the output schema, with validation and retries.
 
 ```tsx
 <HumanTask
@@ -270,7 +270,7 @@ If the human provides invalid JSON, the task retries — up to `maxAttempts` (de
 
 ## Conditional Gates: `<ApprovalGate>`
 
-What if approval is only needed sometimes? Low-risk deploys sail through; high-risk deploys need a human. `<ApprovalGate>` wraps `<Branch>` + `<Approval>` into a single component:
+What if approval is only needed sometimes? Low-risk deploys sail through; high-risk deploys need a human. [`<ApprovalGate>`](/components/approval-gate) wraps [`<Branch>`](/concepts/control-flow) + [`<Approval>`](/components/approval) into a single component:
 
 ```tsx
 <ApprovalGate
@@ -286,7 +286,7 @@ When `when` is `false`, the gate auto-approves immediately. When `true`, it paus
 
 ## Escalation: `<EscalationChain>`
 
-When the question isn't "should a human decide?" but "which agent should handle this, and what happens when it can't?" — use `<EscalationChain>`. It runs agents in sequence, escalating to the next level when one fails or its `escalateIf` predicate returns `true`. Optionally, the final level is a human approval fallback:
+When the question isn't "should a human decide?" but "which agent should handle this, and what happens when it can't?" — use [`<EscalationChain>`](/components/escalation-chain). It runs [agents](/concepts/agents-and-tools) in sequence, escalating to the next level when one fails or its `escalateIf` predicate returns `true`. Optionally, the final level is a human approval fallback:
 
 ```tsx
 <EscalationChain
@@ -306,7 +306,7 @@ See the [EscalationChain component reference](/components/escalation-chain).
 
 ## Selection and Ranking
 
-Not every human decision is yes/no. `<Approval>` supports `mode="select"` and `mode="rank"` for choosing among options:
+Not every human decision is yes/no. [`<Approval>`](/components/approval) supports `mode="select"` and `mode="rank"` for choosing among options:
 
 ```tsx
 <Approval
@@ -341,9 +341,10 @@ For sensitive approvals, restrict who can decide with `allowedScopes` and `allow
 
 ## Next Steps
 
+- [Approvals](/concepts/approvals) — Approval nodes, denial policies, and decision values as workflow data.
 - [Approval Component](/components/approval) — Full API reference for `<Approval>`.
 - [ApprovalGate Component](/components/approval-gate) — Conditional approval gates.
 - [HumanTask Component](/components/human-task) — Structured human input with schema validation.
 - [EscalationChain Component](/components/escalation-chain) — Multi-level agent escalation with human fallback.
 - [Suspend and Resume](/concepts/suspend-and-resume) — The underlying durability model.
-- [CLI Reference](/cli/overview) — Commands for approving, denying, and resuming workflows.
+- [Workflow Approval Example](/examples/workflow-approval) — An end-to-end approval flow.

@@ -14,11 +14,11 @@ import { Worktree, Task, Parallel, MergeQueue } from "smithers-orchestrator";
 | Prop | Type | Default | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | auto-generated | Stable id for tracking/deduping. |
-| `path` | `string` | -- | Filesystem path for the JJ workspace root. Required; non-empty. |
+| `path` | `string` | -- | Filesystem path for the [JJ](https://martinvonz.github.io/jj) [worktree](https://git-scm.com/docs/git-worktree) root. Required; non-empty. |
 | `branch` | `string` | `undefined` | Branch to check out. Omit to use the current branch. |
 | `baseBranch` | `string` | `"main"` | Base branch/revision for sync or creation. |
 | `skipIf` | `boolean` | `false` | Skip the subtree. |
-| `children` | `ReactNode` | -- | Nested tasks and control-flow nodes. |
+| `children` | `ReactNode` | -- | Nested [tasks](/components/task) and [control-flow nodes](/concepts/control-flow). |
 
 ## Basics
 
@@ -37,7 +37,7 @@ import { Worktree, Task, Parallel, MergeQueue } from "smithers-orchestrator";
 </Worktree>
 ```
 
-Descendant tasks receive `worktreeId` and a normalized absolute `worktreePath` in their descriptors. The engine uses `worktreePath` as `cwd` for JJ operations and tool execution.
+Descendant [tasks](/components/task) receive `worktreeId` and a normalized absolute `worktreePath` in their descriptors. The engine uses `worktreePath` as `cwd` for JJ operations and tool execution.
 
 ## Path Resolution
 
@@ -60,7 +60,7 @@ Innermost `<Worktree>` in scope determines a task's effective `worktreeId`/`work
 </Worktree>
 ```
 
-## With Parallel and MergeQueue
+## With [`<Parallel>`](/components/parallel) and [`<MergeQueue>`](/components/merge-queue)
 
 ```tsx
 <Worktree path="/tmp/wt-queue">

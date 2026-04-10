@@ -11,7 +11,7 @@ import { Saga } from "smithers-orchestrator";
 
 | Prop | Type | Default | Description |
 | --- | --- | --- | --- |
-| `id` | `string` | auto-generated | ID prefix for the saga. |
+| `id` | `string` | auto-generated | ID prefix for the [saga](https://microservices.io/patterns/data/saga.html). |
 | `steps` | `SagaStepDef[]` | `undefined` | Array of step definitions with action and compensation elements. |
 | `onFailure` | `"compensate" \| "compensate-and-fail" \| "fail"` | `"compensate"` | What to do when a step fails. |
 | `skipIf` | `boolean` | `false` | Skip the entire saga. Returns `null`. |
@@ -126,7 +126,7 @@ Use `<Saga.Step>` children for a JSX-native API:
 The `onFailure` prop controls what happens when a step fails:
 
 - **`"compensate"`** (default) — Run compensation for all completed steps in reverse order. The saga resolves after compensation completes.
-- **`"compensate-and-fail"`** — Run compensation, then propagate the failure to the parent workflow.
+- **`"compensate-and-fail"`** — Run compensation, then propagate the failure to the parent [`<Workflow>`](/components/workflow).
 - **`"fail"`** — Skip compensation entirely and fail immediately.
 
 ```tsx

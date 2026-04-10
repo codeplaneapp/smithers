@@ -27,7 +27,7 @@ Instead of:
 needsApproval: true
 ```
 
-approvals are explicit workflow nodes.
+approvals are explicit [`<Approval>`](/components/approval) workflow nodes.
 
 **In JSX:**
 
@@ -79,7 +79,7 @@ Look at what you gain. The `Approval` node is right there in the graph, visible 
 This is better for three reasons:
 
 1. the approval is visible in the graph
-2. the execution can suspend on a first-class durable node
+2. the execution can [suspend on a first-class durable node](/concepts/suspend-and-resume)
 3. the decision can be reused or branched on explicitly
 
 ## What an Approval Produces
@@ -141,7 +141,7 @@ request: ({ build }) => ({
 
 That request is what Smithers persists, displays in UIs, and exposes through CLI or API tooling.
 
-Notice: the request doesn't reach out to external systems or compute new data. It takes what the workflow already knows and shapes it into something a human can act on. Pure function of upstream outputs. That's what makes it safe to persist and replay.
+Notice: the request doesn't reach out to external systems or compute new data. It takes what the workflow already knows and shapes it into something a human can act on. Pure function of upstream outputs. That's what makes it safe to persist and [replay](/concepts/time-travel).
 
 ## Denial Policies
 
@@ -157,7 +157,7 @@ This is appropriate for destructive or compliance-sensitive actions.
 
 ### `onDeny: "continue"`
 
-The gate resolves to a denial decision and the workflow continues. Downstream logic can branch on that value.
+The gate resolves to a denial decision and the workflow continues. Downstream logic can [branch](/concepts/control-flow) on that value.
 
 ### `onDeny: "skip"`
 
@@ -201,7 +201,7 @@ Read the `Branch`. If approved, publish. If denied, record the rejection. Both p
 
 ## Storage Model
 
-Approval state belongs to Smithers-managed workflow metadata, not to domain models.
+Approval state belongs to Smithers-managed [workflow state](/concepts/workflow-state), not to domain models.
 
 Smithers should persist at least:
 
@@ -285,6 +285,8 @@ When you look at a workflow graph and see an `Approval` node, you know immediate
 
 ## Next Steps
 
-- [Caching](/concepts/caching) -- See how reusable outputs and approval-gated work interact.
+- [Human-in-the-Loop](/concepts/human-in-the-loop) -- Patterns for gates, denials, and structured human input.
+- [Approval Component](/components/approval) -- Full API reference for approval nodes.
+- [Suspend and Resume](/concepts/suspend-and-resume) -- The durability model underneath approval waits.
 - [Execution Model](/concepts/execution-model) -- Understand how suspended approval nodes fit into durable execution.
-- [Runtime Events](/runtime/events) -- This page will need to describe approval events in the new model.
+- [Workflow Approval Example](/examples/workflow-approval) -- See an end-to-end approval flow in practice.

@@ -5,7 +5,7 @@ description: How Smithers turns a JSX workflow into a durable render-execute-per
 
 Here's what actually happens when you hit run.
 
-You hand Smithers a JSX tree. It doesn't execute anything yet. It _renders_ the tree into a frame -- a snapshot of what work exists right now. Then it finds the tasks that are ready, runs them, writes the results to SQLite, and renders again. That loop continues until there's nothing left to do.
+You hand Smithers a [JSX](/jsx/overview) tree. It doesn't execute anything yet. It _renders_ the tree into a [frame](/runtime/render-frame) -- a snapshot of what work exists right now. Then it finds the tasks that are ready, runs them, writes the results to [SQLite](https://sqlite.org), and renders again. That loop continues until there's nothing left to do.
 
 That's the whole model. Everything else is detail.
 
@@ -30,9 +30,9 @@ Every run follows the same five-phase cycle:
            -> render again until terminal
 ```
 
-`runWorkflow(...)` drives that loop until the run finishes, fails, is cancelled, or pauses for approval.
+[`runWorkflow(...)`](/runtime/run-workflow) drives that loop until the run finishes, fails, is cancelled, or pauses for [approval](/concepts/approvals).
 
-If you've ever watched a React app re-render after a state change, you already have the intuition. The difference is that Smithers' "state" lives in a database, and its "side effects" are agent calls and compute functions instead of DOM updates.
+If you've ever watched a [React app re-render after a state change](https://react.dev/learn/preserving-and-resetting-state), you already have the intuition. The difference is that Smithers' "state" lives in a database, and its "side effects" are agent calls and compute functions instead of DOM updates.
 
 ## Phase 1: Render a Frame
 
@@ -63,7 +63,7 @@ At render time Smithers does not execute tasks. It only builds a frame that refl
 - the current `ctx.input`
 - previously persisted outputs
 - current loop iteration state
-- mounted control-flow nodes such as `<Branch>`, `<Loop>`, and `<Approval>`
+- mounted control-flow nodes such as [`<Branch>`](/components/branch), [`<Loop>`](/components/loop), and [`<Approval>`](/components/approval)
 
 This is why normal JSX conditions work: each render sees the latest persisted state. No special conditional API, no "if-node." Just JavaScript.
 
@@ -81,8 +81,8 @@ Each descriptor includes things like:
 - retry and timeout policy
 - dependency metadata
 - loop iteration
-- concurrency-group metadata from `<Parallel>` or `<MergeQueue>`
-- worktree metadata from `<Worktree>`
+- concurrency-group metadata from [`<Parallel>`](/components/parallel) or [`<MergeQueue>`](/components/merge-queue)
+- worktree metadata from [`<Worktree>`](/components/worktree)
 
 Control-flow components don't execute anything themselves. They shape what gets extracted:
 
@@ -106,9 +106,9 @@ Typical task states are:
 | `in-progress` | Currently executing |
 | `finished` | Persisted successfully |
 | `failed` | Terminal failure after retries are exhausted |
-| `waiting-approval` | Blocked on a durable approval decision |
-| `waiting-event` | Blocked on an external signal or event |
-| `waiting-timer` | Suspended until a durable timer fires |
+| [`waiting-approval`](/concepts/approvals) | Blocked on a durable approval decision |
+| [`waiting-event`](/components/wait-for-event) | Blocked on an external signal or event |
+| [`waiting-timer`](/components/timer) | Suspended until a durable timer fires |
 | `cancelled` | Interrupted by an abort signal or explicit handoff |
 | `skipped` | Not mounted or intentionally bypassed |
 
@@ -142,9 +142,9 @@ Across all three modes, the runtime applies the same operational policies:
 - timeout handling
 - retries
 - `continueOnFail`
-- caching
-- approval waits
-- event emission
+- [caching](/concepts/caching)
+- [approval waits](/concepts/approvals)
+- [event emission](/runtime/events)
 
 The uniformity is deliberate. Whether a task shells out to GPT-4 or returns a hardcoded object, it goes through the same persist-and-resume machinery. You don't need to think about which kind of task you're writing when you think about durability.
 
@@ -170,7 +170,7 @@ For schema-driven outputs, the durable identity is effectively:
 (runId, nodeId, iteration)
 ```
 
-That triple is what makes everything else work. Resume, replay, crash recovery -- they all reduce to "read the rows keyed by `(runId, nodeId, iteration)` and render again." On the next render, `ctx.outputMaybe(...)` and `ctx.latest(...)` read from persisted rows, not from in-memory task objects.
+That triple is what makes everything else work. Resume, replay, crash recovery -- they all reduce to "read the rows keyed by `(runId, nodeId, iteration)` and render again." On the next render, [`ctx.outputMaybe(...)`](/concepts/workflow-state) and [`ctx.latest(...)`](/concepts/workflow-state) read from persisted rows, not from in-memory task objects.
 
 The database isn't a log you consult after the fact. It's the control plane.
 
@@ -185,7 +185,7 @@ This is what enables:
 - dynamic branching based on completed outputs
 - iterative loops that stop when a reviewer approves
 - conditional task visibility
-- hot reload for future work without restarting the run
+- [hot reload](/guides/hot-reload) for future work without restarting the run
 
 In other words, the rendered frame _is_ the current execution plan. There is no separate "plan" data structure that drifts out of sync with reality. The plan is regenerated from truth on every cycle.
 
@@ -226,7 +226,9 @@ Three sentences. That is the Smithers execution model: render, execute, persist,
 
 ## Next Steps
 
+- [Workflow State](/concepts/workflow-state) -- See how `ctx` exposes persisted outputs to each render.
+- [Render Frame](/runtime/render-frame) -- Inspect the frame structure Smithers builds from JSX.
 - [Data Model](/concepts/data-model) -- See how input, output tables, and internal metadata are stored.
+- [Suspend and Resume](/concepts/suspend-and-resume) -- Understand crash recovery and durable replay.
 - [runWorkflow](/runtime/run-workflow) -- Programmatic entry point for executing a workflow.
-- [Events](/runtime/events) -- Lifecycle events emitted while the loop runs.
 - [Planner Internals](/concepts/planner-internals) -- Lower-level details on extraction and scheduling.

@@ -46,7 +46,7 @@ Every invocation is logged to `_smithers_tool_calls`:
 
 ## defineTool
 
-Use `defineTool()` to wrap custom AI SDK tools with Smithers runtime context, deterministic idempotency keys, and durable tool-call logging.
+Use `defineTool()` to wrap custom [AI SDK](https://ai-sdk.dev) tools with Smithers runtime context, deterministic idempotency keys, and durable tool-call logging.
 
 ```ts
 import { defineTool } from "smithers-orchestrator";
@@ -76,7 +76,7 @@ const placeOrder = defineTool({
 
 ### Side Effects and Idempotency
 
-Every custom tool that modifies external state **must** declare `sideEffect: true`. This is how Smithers knows to protect your workflow during retries and resumes. Without it, Smithers treats the tool as a pure read and will replay it freely — potentially sending duplicate emails, double-charging payments, or creating duplicate records.
+Every custom tool that modifies external state **must** declare `sideEffect: true`. This is how Smithers knows to protect your [workflow](/concepts/workflows-overview) during retries and resumes. Without it, Smithers treats the tool as a pure read and will replay it freely — potentially sending duplicate emails, double-charging payments, or creating duplicate records.
 
 The two flags work together:
 
@@ -119,7 +119,7 @@ const sendEmail = defineTool({
 
 ### What counts as a side effect
 
-A side effect is any mutation of state **outside the sandbox**. If the tool talks to an external API, writes to a database, sends a message, or triggers a webhook, it has a side effect. Mark it.
+A side effect is any mutation of state **outside the [sandbox](/components/sandbox)**. If the tool talks to an external API, writes to a database, sends a message, or triggers a webhook, it has a side effect. Mark it.
 
 File system changes inside the sandbox — writing files, editing code, running `git commit` — are **not** side effects in this sense. The built-in `write`, `edit`, and `bash` tools modify the working directory, but those changes are local, sandboxed, and tracked by git. They are inherently reversible (`git checkout`, `git reset`) and inspectable (`git diff`, `git log`). Smithers does not need retry warnings or idempotency keys for them.
 
@@ -289,7 +289,7 @@ const devAgent = new Agent({
 
 ## Using Tools with Agents
 
-Pass tools to an AI SDK agent, assign the agent to a `<Task>`:
+Pass tools to an [AI SDK](https://ai-sdk.dev) agent, assign the agent to a [`<Task>`](/components/task):
 
 ```tsx
 import { ToolLoopAgent as Agent } from "ai";
@@ -346,3 +346,10 @@ const result = await runWorkflow(workflow, {
   toolTimeoutMs: 120_000,
 });
 ```
+
+## See Also
+
+- [Agents and Tools](/concepts/agents-and-tools)
+- [Sandbox](/components/sandbox)
+- [Common External Tools](/integrations/common-tools)
+- [Tools Agent Example](/examples/tools-agent)

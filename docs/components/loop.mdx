@@ -15,9 +15,9 @@ import { Loop } from "smithers-orchestrator";
 | `until` | `boolean` | **(required)** | Stop condition. Re-evaluated each iteration. Loop exits when `true`. |
 | `maxIterations` | `number` | `5` | Maximum iterations. Loop stops regardless of `until`. |
 | `onMaxReached` | `"fail" \| "return-last"` | `"return-last"` | Behavior at limit. `"fail"`: workflow fails. `"return-last"`: keep final output and continue. |
-| `continueAsNewEvery` | `number` | `undefined` | Number of iterations after which the loop triggers a continue-as-new to prevent unbounded workflow history growth. The workflow state is checkpointed and execution resumes in a fresh run with a clean history. |
+| `continueAsNewEvery` | `number` | `undefined` | Number of iterations after which the loop triggers a [continue-as-new](/components/continue-as-new) to prevent unbounded workflow history growth. The workflow state is checkpointed and execution resumes in a fresh run with a clean history. |
 | `skipIf` | `boolean` | `false` | Skip the loop entirely. Returns `null`. |
-| `children` | `ReactNode` | `undefined` | Tasks and control-flow components to execute each iteration. |
+| `children` | `ReactNode` | `undefined` | [`<Task>`](/components/task) and [control-flow components](/concepts/control-flow) to execute each iteration. |
 
 ## Basic usage
 
@@ -65,8 +65,8 @@ const reviewTable = sqliteTable(
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `table` | `ZodObject \| Table \| string` | Output target: schema from `outputs`, Drizzle table, or schema key (not SQLite table name). |
-| `nodeId` | `string` | The `id` prop of the target `<Task>`. |
+| `table` | `ZodObject \| Table \| string` | Output target: [Zod](https://zod.dev) schema from `outputs`, Drizzle table, or schema key (not SQLite table name). |
+| `nodeId` | `string` | The `id` prop of the target [`<Task>`](/components/task). |
 
 ```tsx
 const { Workflow, smithers, outputs } = createSmithers({
@@ -100,7 +100,7 @@ export default smithers((ctx) => {
 });
 ```
 
-The re-render cycle drives iteration: after tasks complete, the tree re-renders with new outputs in context, `until` is re-evaluated, and the next iteration starts if not satisfied.
+The [re-render cycle](/concepts/reactivity) drives iteration: after tasks complete, the tree re-renders with new outputs in context, `until` is re-evaluated, and the next iteration starts if not satisfied.
 
 <Tip>
 `ctx.latest()` returns the highest-iteration result. `ctx.output()` defaults to the current iteration, which may not have output yet at render time.
@@ -202,7 +202,7 @@ import { Loop } from "smithers-orchestrator";     // preferred
 import { Ralph } from "smithers-orchestrator";     // deprecated alias, same component
 ```
 
-Both names render the same `<smithers:ralph>` host element. Many composite components (Supervisor, ReviewLoop, Optimizer, Debate) use `Loop` internally for their iteration logic.
+Both names render the same `<smithers:ralph>` host element. Many composite components (Supervisor, [ReviewLoop](/guides/review-loop), Optimizer, Debate) use `Loop` internally for their iteration logic.
 
 ## Infinite loop pattern
 
@@ -228,7 +228,7 @@ The `continueAsNewEvery` prop checkpoints the workflow state every N iterations 
 
 ## Nested loops
 
-Direct nesting -- `<Loop>` as immediate child of `<Loop>` -- throws at render time. Wrap the inner loop in `<Sequence>`:
+Direct nesting -- `<Loop>` as immediate child of `<Loop>` -- throws at render time. Wrap the inner loop in [`<Sequence>`](/components/sequence):
 
 ```tsx
 <Workflow name="nested-loops">
@@ -246,7 +246,7 @@ Direct nesting -- `<Loop>` as immediate child of `<Loop>` -- throws at render ti
 
 ## Restrictions
 
-- **Direct nesting throws.** Wrap the inner `<Loop>` in `<Sequence>`.
+- **Direct nesting throws.** Wrap the inner `<Loop>` in [`<Sequence>`](/components/sequence).
 - **Duplicate ids throw.** Two loops cannot share the same `id`.
 
 ## Notes

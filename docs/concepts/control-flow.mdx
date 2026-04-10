@@ -5,13 +5,13 @@ description: How to sequence, parallelize, branch, and loop tasks in Smithers wo
 
 Four primitives. That's the whole toolkit.
 
-`<Sequence>`, `<Parallel>`, `<Branch>`, `<Loop>` -- these are the only control-flow components you need to wire together any workflow. They compose like building blocks: nest them, combine them, and the execution graph writes itself.
+[`<Sequence>`](/components/sequence), [`<Parallel>`](/components/parallel), [`<Branch>`](/components/branch), [`<Loop>`](/components/loop) -- these are the only control-flow components you need to wire together any workflow. They compose like building blocks: nest them, combine them, and the [execution graph](/concepts/execution-model) writes itself.
 
 Let's build up from the simplest case.
 
 ## Sequential Execution: `<Sequence>`
 
-You have three tasks. Each one needs the previous one's result. This is the most common pattern in programming, and `<Sequence>` does exactly what you'd expect: run children top to bottom, one at a time.
+You have three [tasks](/components/task). Each one needs the previous one's result. This is the most common pattern in programming, and `<Sequence>` does exactly what you'd expect: run children top to bottom, one at a time.
 
 ```tsx
 <Workflow name="pipeline">
@@ -32,7 +32,7 @@ You have three tasks. Each one needs the previous one's result. This is the most
 `fetch` runs first. Only after it completes does `transform` start. `store` runs last.
 
 <Tip>
-`<Workflow>` already sequences its direct children implicitly. You only need an explicit `<Sequence>` when nesting sequential groups inside `<Parallel>`, `<Branch>`, or `<Loop>`.
+[`<Workflow>`](/components/workflow) already sequences its direct children implicitly. You only need an explicit `<Sequence>` when nesting sequential groups inside [`<Parallel>`](/components/parallel), [`<Branch>`](/components/branch), or [`<Loop>`](/components/loop).
 </Tip>
 
 So if `<Workflow>` already sequences things, why does `<Sequence>` exist at all? Because you'll want to put ordered steps *inside* the other primitives. You'll see this in a moment.
@@ -142,7 +142,7 @@ Each branch can contain any workflow element -- not just a single task. A critic
 
 ### JSX Conditions
 
-Because Smithers re-renders the tree each frame, you can also branch with plain JSX conditions:
+Because Smithers re-renders the tree each [frame](/runtime/render-frame), you can also branch with plain [JSX](/jsx/overview) conditions:
 
 ```tsx
 {analysis?.hasIssues ? (
@@ -185,7 +185,7 @@ The loop stops when `until` returns `true` or when `maxIterations` is hit -- whi
 
 ### Accessing Previous Iteration Output
 
-The interesting question: how does iteration N+1 know what iteration N produced? Use `ctx.latest()` to feed the previous iteration's output back into the next:
+The interesting question: how does iteration N+1 know what iteration N produced? Use [`ctx.latest()`](/concepts/workflow-state) to feed the previous iteration's output back into the next:
 
 ```tsx
 const latestReview = ctx.latest("review", "review");
@@ -242,7 +242,7 @@ Use `<Parallel>` when you have a **fixed set of different operations** on the sa
 </Parallel>
 ```
 
-Use **dynamic JSX** when you have a **variable list of items** that need the same operation:
+Use **[dynamic JSX](/jsx/overview)** when you have a **variable list of items** that need the same operation:
 
 ```tsx
 // Process each ticket the same way
@@ -298,6 +298,9 @@ When `skipIf` is `true`, the component returns `null` and none of its children a
 
 ## Next Steps
 
-- [Workflow State](/concepts/workflow-state) -- How data flows between tasks and across iterations.
-- [Suspend and Resume](/concepts/suspend-and-resume) -- How workflows pause and recover.
+- [Sequence](/components/sequence) -- Component API for ordered execution.
+- [Parallel](/components/parallel) -- Component API for concurrency and `maxConcurrency`.
+- [Branch](/components/branch) -- Component API for conditional paths.
+- [Loop](/components/loop) -- Component API for iterative workflows.
+- [Workflow State](/concepts/workflow-state) -- How outputs and `ctx.latest()` drive control flow.
 - [Implement-Review Loop](/guides/review-loop) -- See these primitives in a production pattern.

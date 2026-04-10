@@ -15,21 +15,21 @@ Ask yourself: does this job need more than one step, and does the order matter?
 
 If you have a single prompt that needs one LLM call, a workflow is overkill. But the moment you need coordination — analyze, then fix, then validate, then report — you need answers to questions that ad hoc scripts dodge:
 
-- Which agent handles each step?
-- How does data flow between steps?
-- Which steps can run in parallel?
-- Where does a human need to approve something?
-- What happens when a step fails at 2 AM?
+- Which [agent](/concepts/agents-and-tools) handles each step?
+- How does [data](/concepts/workflow-state) flow between steps?
+- Which steps can run in [parallel](/components/parallel)?
+- Where does a human need to [approve](/concepts/approvals) something?
+- What happens when a step [fails](/guides/error-handling) at 2 AM?
 
-Workflows give you structure for all of this. And because every completed step is persisted to SQLite, you get durability for free.
+Workflows give you structure for all of this. And because every completed step is persisted to [SQLite](https://sqlite.org), you get durability for free.
 
 ## Core Principles
 
 Three ideas, in order:
 
-1. **Define tasks** as JSX components with typed input/output schemas
-2. **Compose tasks** using control-flow primitives (`<Sequence>`, `<Parallel>`, `<Branch>`, `<Loop>`)
-3. **Run workflows** with built-in persistence, resumability, approval gates, and streaming
+1. **Define [tasks](/components/task)** as [JSX components](/jsx/overview) with typed input/output schemas
+2. **Compose tasks** using control-flow primitives ([`<Sequence>`](/components/sequence), [`<Parallel>`](/components/parallel), [`<Branch>`](/components/branch), [`<Loop>`](/components/loop))
+3. **Run workflows** with built-in persistence, [resumability](/concepts/suspend-and-resume), [approval gates](/concepts/approvals), and streaming
 
 That's the whole framework. Everything else follows from these three.
 
@@ -37,7 +37,7 @@ That's the whole framework. Everything else follows from these three.
 
 ### Tasks
 
-A `<Task>` is the smallest unit of work. It has an `id`, an `output` schema, and one of three modes. The simplest way to see the difference is to look at all three:
+A [`<Task>`](/components/task) is the smallest unit of work. It has an `id`, an `output` schema, and one of three modes. The simplest way to see the difference is to look at all three:
 
 ```tsx
 // Agent mode — send a prompt to an AI agent
@@ -69,10 +69,10 @@ You could. But then you lose resumability, parallelism, and conditional branchin
 
 | Component | Purpose | Behavior |
 | --- | --- | --- |
-| `<Sequence>` | Run tasks one after another | Each child waits for the previous to complete |
-| `<Parallel>` | Run tasks concurrently | All children start together (respecting concurrency limits) |
-| `<Branch>` | Choose one path | Evaluates a condition and runs `then` or `else` |
-| `<Loop>` | Repeat until a condition | Re-executes children each iteration until `until` is true |
+| [`<Sequence>`](/components/sequence) | Run tasks one after another | Each child waits for the previous to complete |
+| [`<Parallel>`](/components/parallel) | Run tasks concurrently | All children start together (respecting concurrency limits) |
+| [`<Branch>`](/components/branch) | Choose one path | Evaluates a condition and runs `then` or `else` |
+| [`<Loop>`](/components/loop) | Repeat until a condition | Re-executes children each iteration until `until` is true |
 
 Four components. That's the entire control-flow vocabulary. See [Control Flow](/concepts/control-flow) for detailed guidance on each primitive.
 
@@ -80,7 +80,7 @@ Four components. That's the entire control-flow vocabulary. See [Control Flow](/
 
 You might be wondering: how does Smithers know if an agent returned useful output or nonsense?
 
-Every task declares what it produces using a Zod schema. Smithers validates the agent's output against that schema automatically. If validation fails, the agent is retried with the error as feedback — no manual wrangling required.
+Every task declares what it produces using a [Zod](https://zod.dev) schema. Smithers validates the agent's output against that schema automatically. If validation fails, the agent is retried with the error as feedback — no manual wrangling required.
 
 ```tsx
 const { Workflow, smithers, outputs } = createSmithers({
@@ -151,21 +151,21 @@ export default smithers((ctx) => {
 });
 ```
 
-Read the code before the explanation — most of it should be clear from the JSX alone.
+Read the code before the explanation — most of it should be clear from the [JSX](/jsx/overview) alone.
 
 A few things worth calling out:
 
 - **Typed schemas** define what each task produces. No ambiguity about shape.
-- **Sequential execution** via `<Sequence>` ensures `analyze` finishes before anything downstream runs.
-- **Typed handoff** via `deps={{ ... }}` gives downstream tasks direct access to upstream output — no prompt-plumbing boilerplate.
-- **Render-time branching** via `ctx.outputMaybe(...)` handles the case where the analysis hasn't run yet (first render) versus when it has (subsequent renders).
-- **Conditional logic** with `<Branch>` skips the fix step entirely when there are no issues.
+- **Sequential execution** via [`<Sequence>`](/components/sequence) ensures `analyze` finishes before anything downstream runs.
+- **[Typed handoff](/concepts/workflow-state)** via `deps={{ ... }}` gives downstream tasks direct access to upstream output — no prompt-plumbing boilerplate.
+- **Render-time branching** via [`ctx.outputMaybe(...)`](/concepts/workflow-state) handles the case where the analysis hasn't run yet (first render) versus when it has (subsequent renders).
+- **Conditional logic** with [`<Branch>`](/components/branch) skips the fix step entirely when there are no issues.
 
 That last point is the key insight: the JSX tree re-renders as tasks complete, and each render can produce a different tree based on what's known so far.
 
 ## How Execution Works
 
-The workflow runs in a loop — think of it like React's render cycle, but for task orchestration:
+The workflow runs in a loop — think of it like [React's render cycle](https://react.dev/learn/preserving-and-resetting-state), but for task orchestration:
 
 1. **Render** — Smithers renders the JSX tree with the current context
 2. **Extract** — It finds executable tasks from the rendered tree
@@ -231,6 +231,8 @@ A workflow run resolves to one of these statuses:
 
 ## Next Steps
 
+- [JSX Quickstart](/jsx/quickstart) — Build your first workflow hands-on.
 - [Control Flow](/concepts/control-flow) — Learn the four control-flow primitives and when to use each.
 - [Workflow State](/concepts/workflow-state) — Understand how data flows between tasks.
-- [JSX Quickstart](/jsx/quickstart) — Build your first workflow hands-on.
+- [Agents and Tools](/concepts/agents-and-tools) — Add agent reasoning and sandboxed tools to tasks.
+- [Execution Model](/concepts/execution-model) — See how render, execute, persist, and resume fit together.

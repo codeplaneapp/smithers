@@ -15,13 +15,13 @@ The rule fits in one sentence:
 
 Think of it like a save game. Every time a task finishes, Smithers writes the result to disk. If the power goes out, you do not replay the entire game from the title screen. You reload your last save and keep going.
 
-So that forty-minute, twelve-step workflow that crashed at step seven? You resume from step seven. Steps one through six are done. Their outputs are already in SQLite. You do not pay for them again.
+So that forty-minute, twelve-step workflow that crashed at step seven? You resume from step seven. Steps one through six are done. Their outputs are already in [SQLite](https://sqlite.org/wal.html). You do not pay for them again.
 
 ## How State Is Preserved
 
 Every task output is written to SQLite immediately on completion, keyed by `(runId, nodeId, iteration)`. When you resume a run, Smithers does five things:
 
-1. **Loads existing state** -- Reads run metadata, node states, and attempt history from SQLite
+1. **Loads existing [state](/concepts/workflow-state)** -- Reads run metadata, node states, and attempt history from SQLite
 2. **Validates the environment** -- Checks that the workflow file hash and VCS revision match the original run
 3. **Cleans up stale work** -- Cancels any in-progress attempts older than 15 minutes
 4. **Re-renders** -- Builds the JSX tree with persisted outputs already in context
@@ -52,7 +52,7 @@ smithers up workflow.tsx --run-id run-1 --resume true
 
 ### 2. Approval Gates
 
-Some steps should not proceed without a human saying yes. When a workflow reaches an `<Approval>` node or a `<Task needsApproval>`, it pauses durably until someone decides:
+Some steps should not proceed without a human saying yes. When a workflow reaches an [`<Approval>`](/components/approval) node or a `<Task needsApproval>`, it pauses durably until someone decides:
 
 ```tsx
 <Approval
@@ -79,7 +79,7 @@ Or deny it:
 smithers deny run-1 --node deploy-approval --note "Blocked by QA"
 ```
 
-See [Human-in-the-Loop](/concepts/human-in-the-loop) for the full pattern.
+See [Human-in-the-Loop](/concepts/human-in-the-loop) or [Approvals](/concepts/approvals) for the full pattern.
 
 ### 3. Manual Cancellation
 
@@ -114,7 +114,7 @@ The logic is straightforward: finished work stays finished, pending work gets sc
 
 ## Resuming Programmatically
 
-The CLI is fine for manual recovery. For automation, use the API directly:
+The CLI is fine for manual recovery. For automation, use the [`runWorkflow`](/runtime/run-workflow) API directly:
 
 ```ts
 import { runWorkflow } from "smithers-orchestrator";
@@ -204,6 +204,8 @@ It costs you the re-execution, but it guarantees consistency. That is a trade wo
 
 ## Next Steps
 
+- [Approvals](/concepts/approvals) -- Explicit approval nodes and denial policies.
 - [Human-in-the-Loop](/concepts/human-in-the-loop) -- Approval gates, denial policies, and multi-step approval patterns.
+- [Workflow State](/concepts/workflow-state) -- The durable state model resume loads back into memory.
 - [Resumability Guide](/guides/resumability) -- Practical tips for designing resumable workflows.
 - [Execution Model](/concepts/execution-model) -- The internal execution loop that drives suspend and resume.

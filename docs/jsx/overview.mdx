@@ -3,16 +3,16 @@ title: JSX API
 description: Build Smithers workflows as JSX trees with render-time branching, reusable components, and MDX prompts.
 ---
 
-The JSX API is Smithers' component-based authoring layer. You describe the workflow as a tree of `<Workflow>`, `<Task>`, and control-flow components, and Smithers renders that tree into an execution plan.
+The [JSX](https://react.dev/learn/writing-markup-with-jsx) API is Smithers' component-based authoring layer. You describe the workflow as a tree of [`<Workflow>`](/components/workflow), [`<Task>`](/components/task), and [control-flow](/concepts/control-flow) components, and Smithers renders that tree into an execution plan.
 
-You can mix normal `<Task>` nodes and MDX prompt components in the same JSX tree.
+You can mix normal [`<Task>`](/components/task) nodes and [MDX prompt](/guides/mdx-prompts) components in the same JSX tree.
 
 Use JSX when you want:
 
 - component composition and reusable workflow fragments
-- explicit control-flow nodes like `<Approval>`, `<Parallel>`, `<MergeQueue>`, and `<Worktree>`
-- render-time branching driven by `ctx.outputMaybe(...)`
-- MDX prompt templates
+- explicit control-flow nodes like [`<Approval>`](/components/approval), [`<Parallel>`](/components/parallel), `<MergeQueue>`, and [`<Worktree>`](/components/worktree)
+- [render-time branching](/concepts/reactivity) driven by `ctx.outputMaybe(...)`
+- [MDX prompt templates](/guides/mdx-prompts)
 - a TSX-first workflow authoring model
 
 ## What JSX Looks Like
@@ -41,11 +41,11 @@ export default smithers((ctx) => (
 ));
 ```
 
-The `outputs` object returned by `createSmithers` maps each schema key to its Zod schema. Passing `output={outputs.analysis}` instead of a magic string gives you compile-time type checking — a typo like `output={outputs.anaylsis}` is a type error, not a runtime surprise.
+The `outputs` object returned by `createSmithers` maps each schema key to its [Zod](https://zod.dev) schema. Passing `output={outputs.analysis}` instead of a magic string gives you compile-time type checking — a typo like `output={outputs.anaylsis}` is a type error, not a runtime surprise.
 
 ## How JSX Execution Works
 
-The JSX API is render-driven:
+The JSX API is [render-driven](/concepts/execution-model):
 
 1. Smithers renders the workflow tree with the current `ctx`.
 2. It extracts executable task descriptors from the rendered tree.
@@ -71,7 +71,7 @@ return (
 
 ### Schema-driven JSX
 
-Use `createSmithers(...)` with Zod schemas and the returned `outputs` object. This is the fastest JSX path and the best default for new workflows. The `output` prop is type-checked against the registered schemas.
+Use `createSmithers(...)` with [Zod](https://zod.dev) schemas and the returned `outputs` object. This is the fastest JSX path and the best default for new workflows. The `output` prop is type-checked against the registered schemas.
 
 ### Manual JSX
 
@@ -83,14 +83,14 @@ Both styles compile to the same JSX renderer and execution engine.
 
 - component composition keeps large workflows modular
 - normal JSX conditions make branching and gating easy to read
-- TypeScript and Zod keep workflow data explicit and type-checked
+- [TypeScript](https://www.typescriptlang.org) and [Zod](https://zod.dev) keep workflow data explicit and type-checked
 - MDX prompts fit naturally into the same authoring model
 
 ## Next Steps
 
-- [JSX Installation](/jsx/installation) — Set up TypeScript, TSX, and optional MDX prompts.
+- [JSX Installation](/jsx/installation) — Set up Bun, TypeScript, and optional MDX prompts.
 - [JSX Quickstart](/jsx/quickstart) — Build a two-step workflow.
-- [Approval](/components/approval) — Add a first-class approval node to the graph.
-- [Signal](/components/signal) — Wait for a typed external signal and optionally keep unrelated flow moving.
-- [MergeQueue](/components/merge-queue) — Serialize a subtree with a concurrency cap.
+- [Execution Model](/concepts/execution-model) — Understand the render and run loop behind JSX workflows.
+- [Workflow State](/concepts/workflow-state) — Learn how `ctx.outputMaybe(...)` reads persisted task outputs.
+- [Control Flow](/concepts/control-flow) — Choose between branching, approvals, loops, and parallel paths.
 - [Workflow](/components/workflow) — Start with the root component reference.

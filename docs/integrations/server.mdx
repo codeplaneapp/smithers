@@ -3,7 +3,7 @@ title: HTTP Server
 description: Expose Smithers workflows over HTTP with a built-in server supporting run management, SSE event streaming, and human-in-the-loop approvals.
 ---
 
-Multi-workflow HTTP server exposing workflows via REST. Supports run management, SSE event streaming, and human-in-the-loop approvals.
+Multi-workflow HTTP server exposing workflows via REST. Supports run management, SSE event streaming, and [human-in-the-loop approvals](/concepts/human-in-the-loop).
 
 For a lighter single-workflow server that runs alongside `smithers up`, see [Serve Mode](/integrations/serve).
 
@@ -50,7 +50,7 @@ type ServerOptions = {
 | `authToken` | `string` | `process.env.SMITHERS_API_KEY` | Bearer token. Falls back to env var. Disabled if neither is set. |
 | `maxBodyBytes` | `number` | `1048576` (1MB) | Max request body size. Returns 413 if exceeded. |
 | `rootDir` | `string` | `undefined` | Root for workflow path resolution and tool sandboxing |
-| `allowNetwork` | `boolean` | `false` | Allow network access in `bash` tool |
+| `allowNetwork` | `boolean` | `false` | Allow network access in [`bash`](/integrations/tools#bash) |
 
 Returns an `http.Server` instance, already listening.
 
@@ -234,7 +234,7 @@ event: smithers
 data: {"type":"NodeFinished","runId":"smi_abc123","nodeId":"analyze","iteration":0,"attempt":0,"timestampMs":1707500010000}
 ```
 
-- Events named `smithers` with JSON payloads matching `SmithersEvent`.
+- Events named `smithers` with JSON payloads matching [`SmithersEvent`](/runtime/events).
 - Polls database every 500ms.
 - Keep-alive comment every 10s.
 - Closes on terminal state (`finished`, `failed`, `cancelled`).
@@ -251,7 +251,7 @@ List render frames.
 
 ### POST /v1/runs/:runId/nodes/:nodeId/approve
 
-Approve a node waiting for human approval.
+Approve a node waiting for [human approval](/concepts/approvals).
 
 ```ts
 {
@@ -263,7 +263,7 @@ Approve a node waiting for human approval.
 
 ### POST /v1/runs/:runId/nodes/:nodeId/deny
 
-Deny a node waiting for human approval.
+Deny a node waiting for [human approval](/concepts/approvals).
 
 ```ts
 {
@@ -286,7 +286,7 @@ Returns 400 `DB_NOT_CONFIGURED` if no database was provided.
 
 ### GET /v1/approvals
 
-List all pending approvals across runs. Requires server-level `db`.
+List all pending [approvals](/concepts/approvals) across runs. Requires server-level `db`.
 
 ```json
 {
@@ -423,3 +423,10 @@ curl -X POST http://localhost:7331/v1/runs/smi_abc123/nodes/deploy/approve \
   -H "Content-Type: application/json" \
   -d '{"note": "Looks good", "decidedBy": "alice"}'
 ```
+
+## Next Steps
+
+- [Serve Mode](/integrations/serve)
+- [Gateway](/integrations/gateway)
+- [Runtime Events](/runtime/events)
+- [Human in the Loop](/concepts/human-in-the-loop)

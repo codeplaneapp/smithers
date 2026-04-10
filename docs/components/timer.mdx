@@ -3,7 +3,7 @@ title: <Timer>
 description: Durably suspend a workflow for a relative duration or until an absolute point in time.
 ---
 
-Think of `<Timer>` as a durable `sleep`. When the scheduler reaches this node, the workflow suspends — no polling, no busy-waiting. The Temporal runtime checkpoints the delay and resumes execution once the wall-clock condition is satisfied, even if the worker restarts in the meantime.
+Think of `<Timer>` as a durable `sleep`. When the scheduler reaches this node, the [workflow suspends](/concepts/suspend-and-resume) — no polling, no busy-waiting. The Temporal runtime checkpoints the delay and resumes execution once the wall-clock condition is satisfied, even if the worker restarts in the meantime.
 
 ## Import
 
@@ -87,7 +87,7 @@ export default smithers((ctx) => (
 
 `ctx.input.reminderAt` can be an ISO string (`"2026-06-01T09:00:00Z"`) or a `Date` object — both are accepted. If the timestamp is already in the past when the node is reached, the timer fires immediately.
 
-## Timer inside a loop
+## Timer inside a [`<Loop>`](/components/loop)
 
 Derive a duration from context at render time to implement a simple backoff:
 
@@ -121,11 +121,11 @@ export default smithers((ctx) => {
 - When the target time arrives, Temporal wakes the workflow and the node transitions to `completed`. Downstream nodes are then eligible to run.
 - If `skipIf` is `true`, the node resolves immediately without any delay.
 - Worker restarts or redeployments during the wait do not reset the timer — the checkpoint is stored in the Temporal event history.
-- Timers in separate parallel branches wait independently.
+- Timers in separate [parallel](/components/parallel) branches wait independently.
 
 ## Rendering
 
-`<Timer>` renders as a `smithers:timer` host element. The scheduler treats it as a leaf node that blocks the sequence until the timer fires.
+`<Timer>` renders as a `smithers:timer` host element. The scheduler treats it as a leaf node that blocks the [sequence](/components/sequence) until the timer fires.
 
 ## Notes
 

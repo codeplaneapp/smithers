@@ -13,22 +13,22 @@ Think about what happens without one. An agent writes code, declares victory, an
 
 Now think about what happens *with* one. The agent writes code, a separate agent runs the tests, two more agents review the result, and a fixer addresses every issue. Then the whole thing repeats until both reviewers sign off -- or you hit a safety cap.
 
-That is the implement-review loop. Four steps, one `<Loop>`, zero unsupervised merges.
+That is the implement-review loop. Four steps, one [Loop](/components/loop), zero unsupervised merges.
 
 ## The four steps
 
 Each iteration runs these in sequence:
 
-1. **Implement** -- An agent writes code (preferably Codex).
+1. **Implement** -- An agent writes code (preferably [Codex](https://platform.openai.com/docs)).
 2. **Validate** -- A separate agent runs tests to verify correctness.
-3. **Review** -- Two agents review in parallel (Claude + Codex).
+3. **Review** -- Two agents review in parallel ([Claude](https://docs.anthropic.com) + Codex).
 4. **ReviewFix** -- An agent addresses every review issue.
 
 The loop repeats until both reviewers approve or `maxIterations` is hit.
 
 ## Minimal Example
 
-Before wiring up the loop, you need schemas. One per step:
+Before wiring up the loop, you need [structured output](/guides/structured-output) schemas. One per step:
 
 ```tsx
 import { createSmithers, Task, Sequence, Parallel, Loop } from "smithers-orchestrator";
@@ -65,7 +65,7 @@ Four schemas, four steps. Each one captures exactly the data the next step needs
 
 ## The ValidationLoop Component
 
-Here is the core pattern. Read it top to bottom -- it is a `<Loop>` wrapping a `<Sequence>` of four components:
+Here is the core pattern. Read it top to bottom -- it is a [Loop](/components/loop) wrapping a [Sequence](/components/sequence) of four components:
 
 ```tsx
 // components/ValidationLoop.tsx
@@ -111,7 +111,7 @@ Notice the stop condition: `until={allApproved}`. That is a boolean derived from
 
 ## Parallel Multi-Agent Review
 
-Why two reviewers? Because they catch different things. Claude is strong on architecture and logic. Codex is strong on code correctness and edge cases. Running them in parallel costs wall-clock time equal to the slower one -- not the sum.
+Why two reviewers? Because they catch different things. Claude is strong on architecture and logic. Codex is strong on code correctness and edge cases. Running them in [parallel](/components/parallel) costs wall-clock time equal to the slower one -- not the sum.
 
 Use `continueOnFail` so one reviewer timing out does not block the other:
 
@@ -209,7 +209,7 @@ On the first iteration, `reviewIssues` is empty and `previousImplementation` is 
 
 ## ReviewFix with skipIf
 
-What if both reviewers approved? Then there is nothing to fix. The `skipIf` prop handles this cleanly:
+What if both reviewers approved? Then there is nothing to fix. The [Task](/components/task) `skipIf` prop handles this cleanly:
 
 ```tsx
 // components/ReviewFix.tsx
@@ -255,11 +255,13 @@ Five properties make this loop reliable in production:
 - **Parallel review** -- Two different models catch different kinds of issues. Claude is strong on architecture and logic; Codex is strong on code correctness and edge cases.
 - **Structured issues** -- Review output uses a typed `issues` array with severity, file, and description. This lets ReviewFix address each issue systematically instead of parsing free-text feedback.
 - **Bounded iterations** -- `maxIterations` prevents infinite loops. Use `onMaxReached: "return-last"` to accept the best effort after the cap.
-- **Resumable** -- Every step persists to SQLite. If the workflow crashes mid-loop, it resumes from the last incomplete task. Not from the beginning. From right where it stopped.
+- **Resumable** -- Every step persists to SQLite. If the workflow crashes mid-loop, it [resumes](/guides/resumability) from the last incomplete task. Not from the beginning. From right where it stopped.
 
 ## Next Steps
 
+- [ReviewLoop Component](/components/review-loop) -- Component reference for the packaged loop pattern.
 - [Loop Component](/components/loop) -- All Loop props and iteration semantics.
+- [Parallel Component](/components/parallel) -- Parallel reviewer execution semantics.
+- [Resumability](/guides/resumability) -- Recover mid-loop without rerunning completed steps.
 - [Dynamic Tickets](/guides/dynamic-tickets) -- Generate tickets dynamically instead of hardcoding.
 - [Model Selection](/guides/model-selection) -- Which models to use for each step.
-- [Patterns](/guides/patterns) -- Project structure and naming conventions.

@@ -3,7 +3,7 @@ title: CLI Agents
 description: Run external AI CLI tools (Claude Code, Codex, Gemini CLI, PI, Kimi, Forge, Amp) as drop-in Smithers agents that implement the AI SDK agent interface.
 ---
 
-CLI-backed agent classes wrap external AI command-line tools. Each implements the AI SDK `Agent` interface and works anywhere Smithers accepts an agent, including `<Task>`.
+CLI-backed agent classes wrap external AI command-line tools. Each implements the [AI SDK](https://ai-sdk.dev) `Agent` interface and works anywhere Smithers accepts an agent, including [`<Task>`](/components/task).
 
 The agent spawns the CLI, passes the prompt, captures output, and returns a `GenerateTextResult`.
 
@@ -30,9 +30,9 @@ import {
 
 | Agent | CLI Required | Install |
 |---|---|---|
-| `ClaudeCodeAgent` | `claude` | [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) |
+| `ClaudeCodeAgent` | `claude` | [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) |
 | `CodexAgent` | `codex` | [OpenAI Codex CLI](https://github.com/openai/codex) |
-| `GeminiAgent` | `gemini` | [Gemini CLI](https://github.com/google-gemini/gemini-cli) |
+| `GeminiAgent` | `gemini` | [Gemini CLI](https://ai.google.dev) |
 | `PiAgent` | `pi` | [PI Coding Agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) |
 | `KimiAgent` | `kimi` | [Kimi CLI](https://moonshotai.github.io/kimi-cli/) |
 | `ForgeAgent` | `forge` | [Forge CLI](https://github.com/antinomyhq/forge) |
@@ -86,7 +86,7 @@ Use `smithers hijack <runId> --launch=false` to inspect the resumable candidate 
 
 ### Non-Idempotent Tool Resume Warning
 
-When a task retries after a failure, previous attempts may have already executed side-effect tools (e.g., sending messages, creating PRs). Smithers detects non-idempotent tool calls from prior attempts and prepends a warning to the agent's prompt:
+When a [`<Task>`](/components/task) retries after a failure, previous attempts may have already executed side-effect tools (e.g., sending messages, creating PRs). Smithers detects non-idempotent tool calls from prior attempts and prepends a warning to the agent's prompt:
 
 > Previous attempts in this task already called non-idempotent side-effect tools. Those side effects may already have happened before the interruption or retry. Do not blindly call them again. Verify external state first or continue from the prior result.
 
@@ -207,7 +207,7 @@ type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
 | `disallowedTools` | Tool name blacklist |
 | `disableSlashCommands` | Disable all slash commands |
 | `maxBudgetUsd` | Spending cap in USD |
-| `mcpConfig` | MCP server configuration files |
+| `mcpConfig` | [Model Context Protocol](https://modelcontextprotocol.io) server configuration files |
 | `mcpDebug` | Enable MCP debug logging |
 | `addDir` | Additional context directories |
 | `file` | Files to inject into context |
@@ -281,7 +281,7 @@ type CodexAgentOptions = BaseCliAgentOptions & {
 |---|---|
 | `sandbox` | `"read-only"`, `"workspace-write"`, or `"danger-full-access"` |
 | `fullAuto` | Full auto mode (no confirmations) |
-| `dangerouslyBypassApprovalsAndSandbox` | Skip all approval prompts and sandbox restrictions |
+| `dangerouslyBypassApprovalsAndSandbox` | Skip all [approval](/concepts/approvals) prompts and [sandbox](/components/sandbox) restrictions |
 | `config` | Configuration overrides as key-value pairs or raw strings |
 | `oss` | Use open-source models |
 | `localProvider` | Local model provider URL |
@@ -330,7 +330,7 @@ type GeminiAgentOptions = BaseCliAgentOptions & {
 
 | Option | Description |
 |---|---|
-| `sandbox` | Run in sandbox mode |
+| `sandbox` | Run in [sandbox](/components/sandbox) mode |
 | `approvalMode` | `"default"`, `"auto_edit"`, `"yolo"`, or `"plan"` |
 | `allowedTools` | Tool name whitelist |
 | `allowedMcpServerNames` | MCP server name whitelist |
@@ -725,7 +725,7 @@ if (!report.ok) {
 
 ## Agent Contract
 
-The agent contract describes the Smithers MCP tool surface that is injected into an agent's context. It is separate from the capability registry — the registry describes what the agent *can* do, while the contract describes what Smithers *exposes* to the agent.
+The agent contract describes the Smithers [MCP server](/integrations/mcp-server) tool surface that is injected into an agent's context. It is separate from the capability registry — the registry describes what the agent *can* do, while the contract describes what Smithers *exposes* to the agent.
 
 ### Raw vs. Semantic Tool Surface
 
@@ -740,7 +740,7 @@ const { path, cleanup } = buildSmithersMcpConfigFile("semantic");
 
 ### Live MCP Tool Probe
 
-`listLiveSmithersMcpTools` starts the Smithers MCP server in a subprocess and calls `tools/list` to retrieve the live tool set. Use this to build a contract from the actual running server rather than a static snapshot.
+`listLiveSmithersMcpTools` starts the Smithers [MCP server](/integrations/mcp-server) in a subprocess and calls `tools/list` to retrieve the live tool set. Use this to build a contract from the actual running server rather than a static snapshot.
 
 ```ts
 import { listLiveSmithersMcpTools } from "smithers-orchestrator";
@@ -948,3 +948,10 @@ export default smithers((ctx) => (
   </Workflow>
 ));
 ```
+
+## Next Steps
+
+- [SDK Agents](/integrations/sdk-agents)
+- [MCP Server](/integrations/mcp-server)
+- [Agents and Tools](/concepts/agents-and-tools)
+- [Multi-Agent Review Example](/examples/multi-agent-review)
