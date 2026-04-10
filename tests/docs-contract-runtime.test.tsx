@@ -270,7 +270,7 @@ describe("docs: runWorkflow", () => {
 
     const workflow = smithers(() => (
       <Workflow name="allow-network">
-        <Task id="net" output={outputs.output} agent={agent}>
+        <Task id="net" output={outputs.output} agent={agent} noRetry>
           <TryNetworkPrompt />
         </Task>
       </Workflow>
@@ -337,7 +337,7 @@ describe("docs: runWorkflow", () => {
 
     const workflow = smithers(() => (
       <Workflow name="read-limit">
-        <Task id="read" output={outputs.output} agent={agent}>
+        <Task id="read" output={outputs.output} agent={agent} noRetry>
           <ReadFilePrompt />
         </Task>
       </Workflow>
@@ -370,7 +370,7 @@ describe("docs: runWorkflow", () => {
 
     const workflow = smithers(() => (
       <Workflow name="tool-timeout">
-        <Task id="slow" output={outputs.output} agent={agent}>
+        <Task id="slow" output={outputs.output} agent={agent} noRetry>
           <SlowToolPrompt />
         </Task>
       </Workflow>
