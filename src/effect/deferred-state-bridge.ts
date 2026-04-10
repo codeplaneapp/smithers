@@ -135,7 +135,11 @@ function renderHumanPromptToText(prompt: unknown): string {
         components: markdownComponents,
       });
     } else {
-      element = React.createElement(React.Fragment, null, prompt);
+      element = React.createElement(
+        React.Fragment,
+        null,
+        prompt as React.ReactNode,
+      );
     }
     return renderToStaticMarkup(element)
       .replace(/\n{3,}/g, "\n\n")

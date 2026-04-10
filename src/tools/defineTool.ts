@@ -65,7 +65,7 @@ export function defineTool<Schema extends z.ZodTypeAny, Result>(
 
   const wrapped: any = tool({
     description: options.description ?? options.name,
-    inputSchema: zodSchema(options.schema),
+    inputSchema: zodSchema(options.schema) as any,
     execute: async (args: z.infer<Schema>) => {
       const toolContext = getToolContext();
       const definedContext: DefinedToolContext = {
@@ -120,7 +120,7 @@ export function defineTool<Schema extends z.ZodTypeAny, Result>(
         throw error;
       }
     },
-  });
+  } as any);
 
   wrapped[smithersToolMetadata] = {
     name: options.name,

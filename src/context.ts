@@ -9,7 +9,7 @@ export type OutputSnapshot = {
   [tableName: string]: Array<any>;
 };
 
-type SmithersRuntimeConfig = {
+export type SmithersRuntimeConfig = {
   cliAgentToolsDefault?: "all" | "explicit-only";
 };
 

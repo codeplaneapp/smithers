@@ -1771,11 +1771,12 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
         ], { discard: true }),
       ),
       Effect.ensuring(Effect.sync(() => { stdoutEmitter?.flush(); })),
-      Effect.ensuring(
-        cleanup
-          ? fromPromise("agent cleanup", () => cleanup!()).pipe(Effect.ignore)
-          : Effect.void,
-      ),
+      Effect.ensuring(Effect.suspend(() => {
+        const cleanupFn = cleanup;
+        return cleanupFn
+          ? fromPromise("agent cleanup", () => cleanupFn()).pipe(Effect.ignore)
+          : Effect.void;
+      })),
       Effect.ensuring(recordDurationMetric()),
       Effect.annotateLogs(spanAnnotations),
       Effect.withLogSpan(span),

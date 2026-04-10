@@ -1537,7 +1537,12 @@ async function getRunDurabilityMetadata(
 function buildDurabilityConfig(
   config: Record<string, unknown>,
   metadata: RunDurabilityMetadata,
-) {
+): Record<string, unknown> & {
+  [DURABILITY_CONFIG_KEY]: {
+    version: number;
+    entryWorkflowHash: string | null;
+  };
+} {
   return {
     ...config,
     [DURABILITY_CONFIG_KEY]: {
@@ -1587,6 +1592,8 @@ function assertResumeDurabilityMetadata(
 ) {
   const mismatches: string[] = [];
   const storedDurability = getStoredDurabilityConfig(existingConfig);
+  const storedDurabilityVersion = storedDurability?.version ?? 0;
+  const storedEntryWorkflowHash = storedDurability?.entryWorkflowHash ?? null;
 
   if (
     existingRun.workflowPath &&
@@ -1605,7 +1612,7 @@ function assertResumeDurabilityMetadata(
   );
   if (
     shouldCheckWorkflowHashes &&
-    storedDurability?.version >= DURABILITY_METADATA_VERSION
+    storedDurabilityVersion >= DURABILITY_METADATA_VERSION
   ) {
     if (!existingRun.workflowHash || !current.workflowHash) {
       mismatches.push("workflow module graph unavailable");
@@ -1617,11 +1624,11 @@ function assertResumeDurabilityMetadata(
         mismatches,
       );
     }
-    if (!storedDurability.entryWorkflowHash || !current.entryWorkflowHash) {
+    if (!storedEntryWorkflowHash || !current.entryWorkflowHash) {
       mismatches.push("workflow entry hash unavailable");
     } else {
       compareNullableString(
-        storedDurability.entryWorkflowHash,
+        storedEntryWorkflowHash,
         current.entryWorkflowHash,
         "workflow entry file changed",
         mismatches,
@@ -4662,7 +4669,7 @@ async function runWorkflowBody<Schema>(
       | { type: "task-completed"; nodeId: string; iteration: number }
       | {
           type: "external-event";
-          source: "abort" | "approval" | "hot-reload" | "retry" | "signal";
+          source: "abort" | "approval" | "hot-reload" | "render" | "retry" | "signal";
         };
     type SchedulerIterationAction =
       | { type: "await-trigger" }
@@ -5819,6 +5826,10 @@ async function runWorkflowBody<Schema>(
               updatedAtMs: nowMs(),
             });
           }
+          offerSchedulerTrigger({
+            type: "external-event",
+            source: "render",
+          });
           return { type: "continue" };
         }
 
@@ -5837,6 +5848,10 @@ async function runWorkflowBody<Schema>(
           prevMountedTaskIds = currentMounted;
           if (!sameAsPrev) {
             // Mounted task set changed — re-render to pick up new tasks
+            offerSchedulerTrigger({
+              type: "external-event",
+              source: "render",
+            });
             return { type: "continue" };
           }
         }

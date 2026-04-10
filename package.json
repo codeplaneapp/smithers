@@ -63,7 +63,7 @@
     "lint": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore src tests apps/cli/src",
     "lint:fix": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore --fix src tests apps/cli/src",
     "cli": "bun run src/cli/index.ts",
-    "test": "bun test tests/*.test.ts tests/*.test.tsx",
+    "test": "bash ./scripts/run-all-tests.sh",
     "e2e": "playwright test",
     "docs": "cd docs && bunx mintlify dev"
   },

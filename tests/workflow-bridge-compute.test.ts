@@ -104,7 +104,7 @@ describe("workflow bridge compute-task contract", () => {
         iteration: 0,
         value: 42,
       });
-      expect(runtimeSnapshot).toEqual({
+      expect(runtimeSnapshot as unknown as Record<string, unknown>).toEqual({
         runId,
         stepId: desc.nodeId,
         attempt: 1,

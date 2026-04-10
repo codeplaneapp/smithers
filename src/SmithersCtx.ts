@@ -1,6 +1,7 @@
 import type { OutputKey } from "./OutputKey";
 import type { OutputAccessor, InferOutputEntry } from "./OutputAccessor";
 import type { RunAuthContext } from "./RunAuthContext";
+import type { SmithersRuntimeConfig } from "./context";
 import type { z } from "zod";
 
 /**
@@ -21,6 +22,7 @@ export interface SmithersCtx<Schema> {
   iterations?: Record<string, number>;
   input: Schema extends { input: infer T } ? T : any;
   auth: RunAuthContext | null;
+  __smithersRuntime?: SmithersRuntimeConfig | null;
   outputs: OutputAccessor<Schema>;
 
   output(table: FallbackTableName<Schema>, key: OutputKey): any;

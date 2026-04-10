@@ -102,6 +102,72 @@ export type HumanRequestRow = {
   timeoutAtMs: number | null;
 };
 
+export type NodeRow = {
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  state: string;
+  lastAttempt: number | null;
+  updatedAtMs: number;
+  outputTable: string;
+  label: string | null;
+};
+
+export type AttemptRow = {
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  attempt: number;
+  state: string;
+  startedAtMs: number;
+  finishedAtMs: number | null;
+  heartbeatAtMs: number | null;
+  heartbeatDataJson: string | null;
+  errorJson: string | null;
+  jjPointer: string | null;
+  responseText: string | null;
+  jjCwd: string | null;
+  cached: boolean;
+  metaJson: string | null;
+};
+
+export type ApprovalRow = {
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  status: string;
+  requestedAtMs: number | null;
+  decidedAtMs: number | null;
+  note: string | null;
+  decidedBy: string | null;
+  requestJson: string | null;
+  decisionJson: string | null;
+  autoApproved: boolean;
+};
+
+export type CacheRow = {
+  cacheKey: string;
+  createdAtMs: number;
+  workflowName: string;
+  nodeId: string;
+  outputTable: string;
+  schemaSig: string;
+  agentSig: string | null;
+  toolsSig: string | null;
+  jjPointer: string | null;
+  payloadJson: string;
+};
+
+export type SignalRow = {
+  runId: string;
+  seq: number;
+  signalName: string;
+  correlationId: string | null;
+  payloadJson: string;
+  receivedAtMs: number;
+  receivedBy: string | null;
+};
+
 export type PendingHumanRequestRow = HumanRequestRow & {
   workflowName: string | null;
   runStatus: string | null;
@@ -931,7 +997,7 @@ export class SmithersDb {
 
   getLatestChildRunEffect(parentRunId: string) {
     return this.readEffect(`get latest child run ${parentRunId}`, () =>
-      this.internalStorage.queryOne(
+      this.internalStorage.queryOne<RunRow>(
         `SELECT *
          FROM _smithers_runs
          WHERE parent_run_id = ?
@@ -1142,7 +1208,7 @@ export class SmithersDb {
 
   getNodeEffect(runId: string, nodeId: string, iteration: number) {
     return this.readEffect(`get node ${nodeId}`, () =>
-      this.internalStorage.queryOne(
+      this.internalStorage.queryOne<NodeRow>(
         `SELECT *
          FROM _smithers_nodes
          WHERE run_id = ? AND node_id = ? AND iteration = ?
@@ -1158,7 +1224,7 @@ export class SmithersDb {
 
   listNodeIterationsEffect(runId: string, nodeId: string) {
     return this.readEffect(`list node iterations ${nodeId}`, () =>
-      this.internalStorage.queryAll(
+      this.internalStorage.queryAll<NodeRow>(
         `SELECT *
          FROM _smithers_nodes
          WHERE run_id = ? AND node_id = ?
@@ -1174,7 +1240,7 @@ export class SmithersDb {
 
   listNodesEffect(runId: string) {
     return this.readEffect(`list nodes ${runId}`, () =>
-      this.internalStorage.queryAll(
+      this.internalStorage.queryAll<NodeRow>(
         `SELECT *
          FROM _smithers_nodes
          WHERE run_id = ?`,
@@ -1437,9 +1503,9 @@ export class SmithersDb {
     );
   }
 
-  listAttemptsEffect(runId: string, nodeId: string, iteration: number): Effect.Effect<any[], SmithersError> {
+  listAttemptsEffect(runId: string, nodeId: string, iteration: number): Effect.Effect<AttemptRow[], SmithersError> {
     return this.readEffect(`list attempts ${nodeId}`, () =>
-      this.internalStorage.queryAll<any>(
+      this.internalStorage.queryAll<AttemptRow>(
         `SELECT *
          FROM _smithers_attempts
          WHERE run_id = ? AND node_id = ? AND iteration = ?
@@ -1454,9 +1520,9 @@ export class SmithersDb {
     return runPromise(this.listAttemptsEffect(runId, nodeId, iteration));
   }
 
-  listAttemptsForRunEffect(runId: string): Effect.Effect<any[], SmithersError> {
+  listAttemptsForRunEffect(runId: string): Effect.Effect<AttemptRow[], SmithersError> {
     return this.readEffect(`list attempts for run ${runId}`, () =>
-      this.internalStorage.queryAll<any>(
+      this.internalStorage.queryAll<AttemptRow>(
         `SELECT *
          FROM _smithers_attempts
          WHERE run_id = ?
@@ -1476,9 +1542,9 @@ export class SmithersDb {
     nodeId: string,
     iteration: number,
     attempt: number,
-  ): Effect.Effect<any | undefined, SmithersError> {
+  ): Effect.Effect<AttemptRow | undefined, SmithersError> {
     return this.readEffect(`get attempt ${nodeId}#${attempt}`, () =>
-      this.internalStorage.queryOne<any>(
+      this.internalStorage.queryOne<AttemptRow>(
         `SELECT *
          FROM _smithers_attempts
          WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?
@@ -1493,9 +1559,9 @@ export class SmithersDb {
     return runPromise(this.getAttemptEffect(runId, nodeId, iteration, attempt));
   }
 
-  listInProgressAttemptsEffect(runId: string): Effect.Effect<any[], SmithersError> {
+  listInProgressAttemptsEffect(runId: string): Effect.Effect<AttemptRow[], SmithersError> {
     return this.readEffect(`list in-progress attempts ${runId}`, () =>
-      this.internalStorage.queryAll<any>(
+      this.internalStorage.queryAll<AttemptRow>(
         `SELECT *
          FROM _smithers_attempts
          WHERE run_id = ? AND state = ?`,
@@ -1727,7 +1793,7 @@ export class SmithersDb {
 
   getApprovalEffect(runId: string, nodeId: string, iteration: number) {
     return this.readEffect(`get approval ${nodeId}`, () =>
-      this.internalStorage.queryOne(
+      this.internalStorage.queryOne<ApprovalRow>(
         `SELECT *
          FROM _smithers_approvals
          WHERE run_id = ? AND node_id = ? AND iteration = ?
@@ -2248,7 +2314,7 @@ export class SmithersDb {
         clauses.push("received_at_ms >= ?");
         params.push(query.receivedAfterMs);
       }
-      return this.internalStorage.queryAll(
+      return this.internalStorage.queryAll<SignalRow>(
         `SELECT *
          FROM _smithers_signals
          WHERE ${clauses.join(" AND ")}
@@ -2536,7 +2602,7 @@ export class SmithersDb {
 
   listPendingApprovalsEffect(runId: string) {
     return this.readEffect(`list pending approvals ${runId}`, () =>
-      this.internalStorage.queryAll(
+      this.internalStorage.queryAll<ApprovalRow>(
         `SELECT *
          FROM _smithers_approvals
          WHERE run_id = ? AND status = ?`,
@@ -2642,7 +2708,7 @@ export class SmithersDb {
 
   getCacheEffect(cacheKey: string) {
     return this.readEffect(`get cache ${cacheKey}`, () =>
-      this.internalStorage.queryOne(
+      this.internalStorage.queryOne<CacheRow>(
         `SELECT *
          FROM _smithers_cache
          WHERE cache_key = ?

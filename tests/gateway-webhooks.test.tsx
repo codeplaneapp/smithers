@@ -93,7 +93,7 @@ function createWebhookTriggerWorkflow(dbPath: string) {
     { dbPath },
   );
 
-  const workflow = api.smithers((ctx) => (
+  const workflow = api.smithers((ctx: any) => (
     <api.Workflow name="gateway-webhook-trigger">
       <api.Task id="record" output={api.outputs.result}>
         {{

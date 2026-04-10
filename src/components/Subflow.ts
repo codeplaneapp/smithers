@@ -1,14 +1,15 @@
 import React from "react";
 import type { CachePolicy } from "../CachePolicy";
 import type { RetryPolicy } from "../RetryPolicy";
+import type { SmithersWorkflow } from "../SmithersWorkflow";
 
 /** Valid output targets: a Zod schema, a Drizzle table object, or a string key. */
 type OutputTarget = import("zod").ZodObject<any> | { $inferSelect: any } | string;
 
 export type SubflowProps = {
   id: string;
-  /** The child workflow definition (a smithers workflow function). */
-  workflow: (...args: any[]) => any;
+  /** The child workflow definition. */
+  workflow: SmithersWorkflow<any>;
   /** Input to pass to the child workflow. */
   input?: unknown;
   /** `"childRun"` gets its own DB row/run; `"inline"` embeds in parent. */

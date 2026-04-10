@@ -94,7 +94,7 @@ describe("pydanticSchemaToZod", () => {
 
     const result = schema.parse({
       author: { name: "Alice", email: "alice@example.com" },
-    });
+    }) as { author: { name: string; email: string } };
     expect(result.author.name).toBe("Alice");
   });
 
@@ -134,7 +134,7 @@ describe("pydanticSchemaToZod", () => {
 
     const result = schema.parse({
       issues: [{ file: "main.ts", line: 42 }],
-    });
+    }) as { issues: Array<{ file: string; line: number }> };
     expect(result.issues[0].file).toBe("main.ts");
   });
 

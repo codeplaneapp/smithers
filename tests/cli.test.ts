@@ -24,7 +24,7 @@ describe("smithers list", () => {
     await adapter.insertRun({
       runId: "run-2",
       workflowName: "test-workflow",
-      status: "in-progress",
+      status: "running",
       createdAtMs: Date.now(),
     });
 
@@ -49,7 +49,7 @@ describe("smithers list", () => {
     await adapter.insertRun({
       runId: "run-2",
       workflowName: "test-workflow",
-      status: "in-progress",
+      status: "running",
       createdAtMs: Date.now(),
     });
 

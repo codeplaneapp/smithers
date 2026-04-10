@@ -76,7 +76,7 @@ export type TaskProps<
   meta?: Record<string, unknown>;
   /** @internal Used by createSmithers() to bind tasks to the correct workflow context. */
   smithersContext?: React.Context<any>;
-  children:
+  children?:
     | string
     | Row
     | (() => Row | Promise<Row>)

@@ -61,8 +61,8 @@ describe("Durability", () => {
     const events = await adapter.listEvents(runId, -1, 50);
     const nodeOutputs = events.filter((event: any) => event.type === "NodeOutput");
     expect(nodeOutputs.length).toBe(2);
-    expect(JSON.parse(nodeOutputs[0]!.payloadJson).text).toContain("hello");
-    expect(JSON.parse(nodeOutputs[1]!.payloadJson).text).toContain("hello");
+    expect((JSON.parse(nodeOutputs[0]!.payloadJson as string) as { text: string }).text).toContain("hello");
+    expect((JSON.parse(nodeOutputs[1]!.payloadJson as string) as { text: string }).text).toContain("hello");
 
     cleanup();
   });

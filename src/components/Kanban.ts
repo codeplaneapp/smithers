@@ -33,7 +33,7 @@ export type KanbanProps = {
   /** Max iterations through the column pipeline. */
   maxIterations?: number;
   skipIf?: boolean;
-  children?: React.ReactNode;
+  children?: React.ReactNode | Record<string, unknown>;
 };
 
 /**

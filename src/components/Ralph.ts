@@ -2,7 +2,7 @@ import React from "react";
 
 export type LoopProps = {
   id?: string;
-  until: boolean;
+  until?: boolean;
   maxIterations?: number;
   onMaxReached?: "fail" | "return-last";
   continueAsNewEvery?: number;

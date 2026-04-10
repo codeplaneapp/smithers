@@ -197,7 +197,7 @@ const awaitBridgeDeferred = async <
 >(
   executionId: string,
   deferred: DurableDeferred.DurableDeferred<Success, Error>,
-) => {
+): Promise<any> => {
   return durableDeferredBridgeRuntime.runPromise(
     DurableDeferred.await(deferred).pipe(
       Workflow.intoResult,

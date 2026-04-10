@@ -39,7 +39,7 @@ describe("Signal component", () => {
           children: jsx(Signal, {
             id: "user-feedback",
             schema: outputs.feedback,
-            children: (data) => {
+            children: (data: any) => {
               seenPayloads.push(data);
               return jsx(Task, {
                 id: "process-feedback",
@@ -138,7 +138,7 @@ describe("Signal component", () => {
                 output: outputs.result,
                 deps: { data: outputs.signalData },
                 needs: { data: "new-data" },
-                children: ({ data }) => ({
+                children: ({ data }: { data: any }) => ({
                   value: data.value,
                   doubled: data.value * 2,
                 }),
