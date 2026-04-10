@@ -73,7 +73,7 @@ import {
 } from "../effect/metrics";
 import { runScorersAsync } from "../scorers/run-scorers";
 import { dirname, resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fromPromise } from "../effect/interop";
 import { logDebug, logError, logInfo, logWarning } from "../effect/logging";
@@ -1451,7 +1451,7 @@ function resolveWorkflowImport(baseFile: string, specifier: string): string | nu
       .map((ext) => resolve(basePath, `index${ext}`)),
   ];
   for (const candidate of candidates) {
-    if (existsSync(candidate)) {
+    if (existsSync(candidate) && statSync(candidate).isFile()) {
       return resolve(candidate);
     }
   }
