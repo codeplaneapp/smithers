@@ -1416,6 +1416,20 @@ const WORKFLOW_IMPORT_EXTENSIONS = [
   ".cjs",
 ];
 
+function getWorkflowImportScanLoader(sourcePath: string | null | undefined) {
+  const lower = sourcePath?.toLowerCase() ?? "";
+  if (lower.endsWith(".tsx")) return "tsx";
+  if (lower.endsWith(".jsx")) return "jsx";
+  if (
+    lower.endsWith(".ts") ||
+    lower.endsWith(".mts") ||
+    lower.endsWith(".cts")
+  ) {
+    return "ts";
+  }
+  return "js";
+}
+
 async function readWorkflowEntryHash(
   workflowPath: string | null,
 ): Promise<string | null> {
@@ -1428,7 +1442,30 @@ async function readWorkflowEntryHash(
   }
 }
 
-function extractWorkflowImportSpecifiers(source: string): string[] {
+function extractWorkflowImportSpecifiers(
+  source: string,
+  sourcePath?: string | null,
+): string[] {
+  if (typeof Bun !== "undefined" && typeof Bun.Transpiler === "function") {
+    try {
+      const scanned = new Bun.Transpiler({
+        loader: getWorkflowImportScanLoader(sourcePath),
+      } as any).scanImports(source) as Array<{
+        path?: string;
+      }>;
+      const specifiers = new Set<string>();
+      for (const entry of scanned) {
+        const specifier = entry?.path?.trim();
+        if (specifier?.startsWith(".")) {
+          specifiers.add(specifier);
+        }
+      }
+      return [...specifiers];
+    } catch {
+      // Fall back to regex scanning if Bun's parser cannot handle the source.
+    }
+  }
+
   const specifiers = new Set<string>();
   for (const pattern of [STATIC_IMPORT_RE, DYNAMIC_IMPORT_RE]) {
     pattern.lastIndex = 0;
@@ -1470,7 +1507,7 @@ async function collectWorkflowModuleHashEntries(
 
   const source = await readFile(resolvedPath, "utf8");
   const entries = [`${resolvedPath}:${sha256Hex(source)}`];
-  for (const specifier of extractWorkflowImportSpecifiers(source)) {
+  for (const specifier of extractWorkflowImportSpecifiers(source, resolvedPath)) {
     const importedPath = resolveWorkflowImport(resolvedPath, specifier);
     if (!importedPath) {
       throw new SmithersError(

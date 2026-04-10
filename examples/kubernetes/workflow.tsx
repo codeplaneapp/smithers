@@ -28,7 +28,7 @@ export default smithers((ctx) => (
       </Task>
       <Task id="report" output={outputs.report}>
         Write a concise markdown report based on this analysis:
-        {JSON.stringify(ctx.output("analyze"))}
+        {JSON.stringify(ctx.output("analysis", { nodeId: "analyze" }))}
       </Task>
     </Sequence>
   </Workflow>

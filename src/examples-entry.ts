@@ -31,4 +31,5 @@ export { PiAgent } from "./agents/PiAgent";
 
 export { createSmithers } from "./create";
 export type { CreateSmithersApi } from "./create";
+export { createPythonWorkflow } from "./external";
 export { runWorkflow, renderFrame } from "./engine";
