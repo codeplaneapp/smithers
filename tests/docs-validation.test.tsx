@@ -1150,7 +1150,7 @@ describe("docs: event types", () => {
 
     const workflow = smithers(() => (
       <Workflow name="events">
-        <Task id="step" output={outputs.output} agent={agent}>
+        <Task id="step" output={outputs.output} agent={agent} noRetry>
           <PlaceholderPrompt />
         </Task>
       </Workflow>
