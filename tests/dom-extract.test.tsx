@@ -224,6 +224,17 @@ describe("extractFromHost", () => {
     expect(result.tasks[0].retryPolicy).toBeUndefined();
   });
 
+  test("continueOnFail defaults to no retries unless explicitly configured", () => {
+    const root = hostEl("smithers:task", {
+      id: "t1",
+      output: "t",
+      continueOnFail: true,
+    });
+    const result = extractFromHost(root);
+    expect(result.tasks[0].retries).toBe(0);
+    expect(result.tasks[0].retryPolicy).toBeUndefined();
+  });
+
   test("extracts skipIf flag", () => {
     const root = hostEl("smithers:task", {
       id: "t1",

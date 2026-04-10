@@ -104,11 +104,21 @@ function getRalphIteration(
 
 function resolveRetryConfig(raw: Record<string, any>) {
   const noRetry = Boolean(raw.noRetry);
+  const continueOnFail = Boolean(raw.continueOnFail);
   const hasExplicitRetries =
     typeof raw.retries === "number" && !Number.isNaN(raw.retries);
-  const retries = noRetry ? 0 : hasExplicitRetries ? raw.retries : Infinity;
+  const hasExplicitRetryPolicy =
+    Boolean(raw.retryPolicy && typeof raw.retryPolicy === "object");
+  const defaultNoRetryForContinueOnFail =
+    continueOnFail && !hasExplicitRetries && !hasExplicitRetryPolicy;
+  const retries =
+    noRetry || defaultNoRetryForContinueOnFail
+      ? 0
+      : hasExplicitRetries
+        ? raw.retries
+        : Infinity;
   const retryPolicy =
-    raw.retryPolicy && typeof raw.retryPolicy === "object"
+    hasExplicitRetryPolicy
       ? raw.retryPolicy
       : retries > 0
         ? { backoff: "exponential" as const, initialDelayMs: 1000 }
