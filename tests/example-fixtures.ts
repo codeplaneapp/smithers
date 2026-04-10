@@ -95,7 +95,7 @@ function exampleInputFor(
 ): Record<string, unknown> {
   return {
     ...sharedExampleInput,
-    ...(exampleInputOverrides[exampleId] ?? {}),
+    ...exampleInputOverrides[exampleId],
     ...sampleInput,
   };
 }

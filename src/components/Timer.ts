@@ -52,7 +52,7 @@ export function Timer(props: TimerProps) {
     timer: true,
     ...(hasDuration ? { duration: props.duration } : {}),
     ...(hasUntil ? { until: untilIso } : {}),
-    ...(props.meta ?? {}),
+    ...props.meta,
   };
 
   return React.createElement("smithers:timer", {

@@ -21,9 +21,9 @@ function emitLog(
   const mergedAnnotations =
     correlationAnnotations || traceAnnotations || annotations
       ? {
-          ...(correlationAnnotations ?? {}),
-          ...(traceAnnotations ?? {}),
-          ...(annotations ?? {}),
+          ...correlationAnnotations,
+          ...traceAnnotations,
+          ...annotations,
         }
       : undefined;
   let program = effect;

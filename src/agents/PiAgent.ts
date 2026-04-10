@@ -439,7 +439,7 @@ export class PiAgent extends BaseCliAgent {
       idleMs: this.idleTimeoutMs,
     });
     const cwd = this.cwd ?? getToolContext()?.rootDir ?? process.cwd();
-    const env = { ...process.env, ...(this.env ?? {}) } as Record<string, string>;
+    const env = { ...process.env, ...this.env } as Record<string, string>;
     const mode = this.resolveMode(options);
 
     if (mode === "rpc" && this.opts.files?.length) {

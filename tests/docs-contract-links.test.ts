@@ -30,7 +30,7 @@ function extractLinks(content: string): Array<{ href: string; index: number }> {
 function normalizePath(value: string) {
   let next = value.trim();
   if (!next) return "";
-  next = next.replace(/^[.\/]+/, (m) => (m === "/" ? "/" : ""));
+  next = next.replace(/^[./]+/, (m) => (m === "/" ? "/" : ""));
   next = next.replace(/\.(mdx|md)$/i, "");
   next = next.replace(/\/$/, "");
   return next;

@@ -93,15 +93,11 @@ import { withTaskRuntime } from "../effect/task-runtime";
 import { hashCapabilityRegistry } from "../agents/capability-registry";
 import {
   cancelPendingTimersBridge,
-  executeTaskBridge,
   executeTaskBridgeEffect,
   isBridgeManagedTimerTask as isTimerTask,
   resolveDeferredTaskStateBridge,
 } from "../effect/workflow-bridge";
-import {
-  createSchedulerWakeQueue,
-  runWorkflowWithMakeBridge,
-} from "../effect/workflow-make-bridge";
+import { runWorkflowWithMakeBridge } from "../effect/workflow-make-bridge";
 import {
   createWorkflowVersioningRuntime,
   getWorkflowPatchDecisions,
@@ -110,6 +106,7 @@ import {
 import {
   runWithCorrelationContext,
   updateCurrentCorrelationContext,
+  withCorrelationContext,
 } from "../observability/correlation";
 
 /**
@@ -4437,7 +4434,7 @@ async function runWorkflowBody<Schema>(
     const runAuth = opts.auth ?? parseRunAuthContext(existingConfig.auth);
     const runConfig = buildDurabilityConfig({
       ...existingConfig,
-      ...(opts.config ?? {}),
+      ...opts.config,
       maxConcurrency,
       rootDir,
       allowNetwork,
@@ -4720,7 +4717,7 @@ async function runWorkflowBody<Schema>(
       yield* Metric.update(schedulerWaitDuration, performance.now() - waitStart);
       return [first, ...Chunk.toArray(rest)];
     });
-    const clearRetryWakeEffect = Effect.gen(function* () {
+    const clearRetryWakeEffect = () => Effect.gen(function* () {
       if (!retryWakeFiber) {
         scheduledRetryAtMs = null;
         return;
@@ -4907,6 +4904,9 @@ async function runWorkflowBody<Schema>(
           runId,
           timestampMs: nowMs(),
         });
+        await annotateRunSpan({
+          status: "cancelled",
+        });
         return {
           type: "return",
           result: { runId, status: "cancelled" },
@@ -4943,7 +4943,7 @@ async function runWorkflowBody<Schema>(
           const meta = parseAttemptMetaJson(candidate.metaJson);
           const continuation = extractHijackContinuation(meta, meta.agentEngine as string);
           if (!continuation) {
-            continue;
+            return { type: "continue" };
           }
           hijackState.completion = {
             requestedAtMs: hijackState.request.requestedAtMs,
@@ -5198,7 +5198,7 @@ async function runWorkflowBody<Schema>(
         )
       ) {
         await cancelInProgress(adapter, runId, eventBus);
-        continue;
+        return { type: "continue" };
       }
 
       const { plan, ralphs } = buildPlanTree(xml, ralphState);
@@ -5230,7 +5230,6 @@ async function runWorkflowBody<Schema>(
         tasks,
         eventBus,
         ralphDoneMap,
-        false,
       );
       const descriptorMap = buildDescriptorMap(tasks);
       const schedule = scheduleTasks(
@@ -5340,6 +5339,10 @@ async function runWorkflowBody<Schema>(
             status: "waiting-approval",
             timestampMs: nowMs(),
           });
+          await annotateRunSpan({
+            status: "waiting-approval",
+            waitReason: "approval",
+          });
           return {
             type: "return",
             result: { runId, status: "waiting-approval" },
@@ -5361,6 +5364,10 @@ async function runWorkflowBody<Schema>(
             status: "waiting-event",
             timestampMs: nowMs(),
           });
+          await annotateRunSpan({
+            status: "waiting-event",
+            waitReason: "event",
+          });
           return {
             type: "return",
             result: { runId, status: "waiting-event" },
@@ -5381,6 +5388,10 @@ async function runWorkflowBody<Schema>(
             runId,
             status: "waiting-timer",
             timestampMs: nowMs(),
+          });
+          await annotateRunSpan({
+            status: "waiting-timer",
+            waitReason: "timer",
           });
           return {
             type: "return",
@@ -5408,6 +5419,9 @@ async function runWorkflowBody<Schema>(
             runId,
             error: schedule.fatalError,
             timestampMs: nowMs(),
+          });
+          await annotateRunSpan({
+            status: "failed",
           });
           return {
             type: "return",
@@ -5442,6 +5456,9 @@ async function runWorkflowBody<Schema>(
             runId,
             error: errorMsg,
             timestampMs: nowMs(),
+          });
+          await annotateRunSpan({
+            status: "failed",
           });
           return {
             type: "return",
@@ -5513,7 +5530,7 @@ async function runWorkflowBody<Schema>(
           } catch (error: any) {
             if (error?.code === "RUN_CANCELLED") {
               runAbortController.abort();
-              continue;
+              return { type: "continue" };
             }
             throw error;
           }
@@ -5542,6 +5559,9 @@ async function runWorkflowBody<Schema>(
           void runPromise(
             Metric.update(runDuration, performance.now() - runStartPerformanceMs),
           );
+          await annotateRunSpan({
+            status: "continued",
+          });
 
           return {
             type: "return",
@@ -5730,11 +5750,17 @@ async function runWorkflowBody<Schema>(
               void runPromise(
                 Metric.update(runDuration, performance.now() - runStartPerformanceMs),
               );
+              await annotateRunSpan({
+                status: "continued",
+              });
 
               return {
-                runId,
-                status: "continued",
-                nextRunId: transition.newRunId,
+                type: "return",
+                result: {
+                  runId,
+                  status: "continued",
+                  nextRunId: transition.newRunId,
+                },
               };
             }
             if (state.iteration + 1 < ralph.maxIterations) {
@@ -5772,10 +5798,16 @@ async function runWorkflowBody<Schema>(
                 error: { code: "RALPH_MAX_REACHED", ralphId: ralph.id },
                 timestampMs: nowMs(),
               });
-              return {
-                runId,
+              await annotateRunSpan({
                 status: "failed",
-                error: { code: "RALPH_MAX_REACHED", ralphId: ralph.id },
+              });
+              return {
+                type: "return",
+                result: {
+                  runId,
+                  status: "failed",
+                  error: { code: "RALPH_MAX_REACHED", ralphId: ralph.id },
+                },
               };
             }
             ralphState.set(ralph.id, { ...state, done: true });
@@ -5787,7 +5819,7 @@ async function runWorkflowBody<Schema>(
               updatedAtMs: nowMs(),
             });
           }
-          continue;
+          return { type: "continue" };
         }
 
         // Guard against premature completion when conditional children
@@ -5805,7 +5837,7 @@ async function runWorkflowBody<Schema>(
           prevMountedTaskIds = currentMounted;
           if (!sameAsPrev) {
             // Mounted task set changed — re-render to pick up new tasks
-            continue;
+            return { type: "continue" };
           }
         }
 
@@ -5827,6 +5859,9 @@ async function runWorkflowBody<Schema>(
         logInfo("workflow run finished", {
           runId,
         }, "engine:run");
+        await annotateRunSpan({
+          status: "finished",
+        });
 
         const outputTable = schema.output;
         let output: unknown = undefined;
@@ -5846,64 +5881,152 @@ async function runWorkflowBody<Schema>(
             output = await db.select().from(outputTable);
           }
         }
-        return { runId, status: "finished", output };
+        return {
+          type: "return",
+          result: { runId, status: "finished", output },
+        };
       }
 
-      const toolConfig = {
-        rootDir,
-        allowNetwork,
-        maxOutputBytes,
-        toolTimeoutMs,
+      return {
+        type: "dispatch",
+        runnable,
+        descriptorMap,
+        workflowName,
+        cacheEnabled,
       };
+    };
 
-      // Launch new tasks and track them in the persistent inflight set.
-      for (const task of runnable) {
-        const p = runWithCorrelationContext(
-          {
-            workflowName,
-            nodeId: task.nodeId,
-            iteration: task.iteration,
-          },
-          () =>
-            executeTaskBridge(
-              adapter,
-              db,
-              runId,
-              task,
-              descriptorMap,
-              inputTable,
-              eventBus,
-              toolConfig,
-              workflowName,
-              cacheEnabled,
-              runAbortController.signal,
-              disabledAgents,
-              runAbortController,
-              hijackState,
-              legacyExecuteTask,
-            ),
-        ).finally(() => {
-          inflight.delete(p);
-          notifyScheduler();
-        });
-        inflight.add(p);
-      }
-      // Wait for at least one task to finish, then loop back to
-      // re-render and schedule newly runnable tasks.
-      {
-        if (inflight.size > 0 || hotController) {
-          armHotReloadWakeup();
-          const waitStart = performance.now();
-          await schedulerWakeQueue.wait();
-          void runPromise(
-            Metric.update(
-              schedulerWaitDuration,
-              performance.now() - waitStart,
+    const schedulerLoopEffect = Effect.scoped(
+      Effect.gen(function* () {
+        yield* Effect.forkScoped(watchExternalSchedulerEventsEffect);
+        offerSchedulerTrigger({ type: "initial" });
+
+        while (true) {
+          const triggerBatch = yield* takeSchedulerTriggerBatchEffect;
+          if (triggerBatch.length > 1) {
+            yield* Effect.sync(() => {
+              logDebug("scheduler trigger batch coalesced", {
+                runId,
+                triggerCount: triggerBatch.length,
+              }, "engine:run");
+            });
+          }
+
+          yield* clearRetryWakeEffect();
+          if (schedulerTaskError) {
+            const error = schedulerTaskError;
+            schedulerTaskError = null;
+            throw error;
+          }
+
+          const action = yield* fromPromise(
+            "run scheduler iteration",
+            runSchedulerIteration,
+          );
+
+          if (action.type === "return") {
+            return action.result;
+          }
+          if (action.type === "continue") {
+            continue;
+          }
+          if (action.type === "schedule-retry") {
+            yield* scheduleRetryWakeEffect(action.waitMs);
+            armHotReloadWakeup();
+            continue;
+          }
+          if (action.type === "await-trigger") {
+            armHotReloadWakeup();
+            continue;
+          }
+
+          const batchKeys = action.runnable.map((task) =>
+            makeSchedulerTaskKey(task),
+          );
+          yield* Effect.sync(() => {
+            for (const taskKey of batchKeys) {
+              schedulerTaskKeys.add(taskKey);
+            }
+          });
+          yield* Effect.forkScoped(
+            Effect.all(
+              action.runnable.map((task) =>
+                withCorrelationContext(
+                  withSmithersSpan(
+                    smithersSpanNames.task,
+                    executeTaskBridgeEffect(
+                      adapter,
+                      db,
+                      runId,
+                      task,
+                      action.descriptorMap,
+                      inputTable,
+                      eventBus,
+                      toolConfig,
+                      action.workflowName,
+                      action.cacheEnabled,
+                      runAbortController.signal,
+                      disabledAgents,
+                      runAbortController,
+                      hijackState,
+                      legacyExecuteTask,
+                    ),
+                    {
+                      runId,
+                      workflowName: action.workflowName,
+                      nodeId: task.nodeId,
+                      iteration: task.iteration,
+                      nodeLabel: task.label ?? null,
+                      status: "running",
+                    },
+                  ),
+                  {
+                    workflowName: action.workflowName,
+                    nodeId: task.nodeId,
+                    iteration: task.iteration,
+                  },
+                ).pipe(
+                  Effect.catchAll((error) =>
+                    Effect.sync(() => {
+                      if (schedulerTaskError == null) {
+                        schedulerTaskError = error;
+                      }
+                    }),
+                  ),
+                  Effect.ensuring(
+                    Effect.sync(() => {
+                      schedulerTaskKeys.delete(makeSchedulerTaskKey(task));
+                      offerSchedulerTrigger({
+                        type: "task-completed",
+                        nodeId: task.nodeId,
+                        iteration: task.iteration,
+                      });
+                    }),
+                  ),
+                )
+              ),
+              {
+                concurrency: schedulerExecutionConcurrency,
+                discard: true,
+              },
+            ).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  for (const taskKey of batchKeys) {
+                    schedulerTaskKeys.delete(taskKey);
+                  }
+                }),
+              ),
             ),
           );
+          armHotReloadWakeup();
         }
-      }
-    }
+      }).pipe(Effect.interruptible),
+    );
+
+    return await runPromise(schedulerLoopEffect, {
+      signal: runAbortController.signal,
+    });
   } catch (err) {
     if (runAbortController.signal.aborted || isAbortError(err)) {
       logInfo("workflow run cancelled while handling error", {
@@ -5933,6 +6056,9 @@ async function runWorkflowBody<Schema>(
         runId,
         timestampMs: nowMs(),
       });
+      await annotateRunSpan({
+        status: "cancelled",
+      });
       return { runId, status: "cancelled" };
     }
     logError("workflow run failed with unhandled error", {
@@ -5959,6 +6085,9 @@ async function runWorkflowBody<Schema>(
         timestampMs: nowMs(),
       });
     }
+    await annotateRunSpan({
+      status: "failed",
+    });
     return { runId, status: "failed", error: errorInfo };
   } finally {
     await stopSupervisor();
@@ -5973,14 +6102,26 @@ export function runWorkflowEffect<Schema>(
   workflow: SmithersWorkflow<Schema>,
   opts: RunOptions,
 ) {
-  return fromPromise("run workflow", () => runWorkflowAsync(workflow, opts)).pipe(
-    Effect.annotateLogs({
-      runId: opts.runId ?? "",
+  const runId = opts.runId ?? newRunId();
+  return withSmithersSpan(
+    smithersSpanNames.run,
+    fromPromise("run workflow", () =>
+      runWorkflowAsync(workflow, {
+        ...opts,
+        runId,
+      }),
+    ),
+    {
+      runId,
+      status: "running",
       workflowPath: opts.workflowPath ?? "",
       maxConcurrency: opts.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
       hot: Boolean(opts.hot),
-    }),
-    Effect.withLogSpan("engine:run-workflow"),
+      resume: Boolean(opts.resume),
+    },
+    {
+      root: true,
+    },
   );
 }
 

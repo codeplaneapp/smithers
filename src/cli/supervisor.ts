@@ -111,7 +111,7 @@ function normalizeSupervisorOptions(
     parseRuntimeOwnerPid,
     isPidAlive,
     spawnResumeDetached: resumeRunDetached,
-    ...(options.deps ?? {}),
+    ...options.deps,
   };
 
   return {

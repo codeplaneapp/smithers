@@ -286,11 +286,6 @@ export function withSmithersSpan<A, E, R>(
   );
 }
 
-function sanitizePrometheusName(name: string): string {
-  const next = name.replace(/[^a-zA-Z0-9_:]/g, "_");
-  return /^[a-zA-Z_:]/.test(next) ? next : `_${next}`;
-}
-
 function escapePrometheusText(text: string): string {
   return text.replace(/\\/g, "\\\\").replace(/\n/g, "\\n");
 }
@@ -312,7 +307,7 @@ function formatPrometheusLabels(labels: ReadonlyArray<[string, string]>): string
   return `{${labels
     .map(
       ([key, value]) =>
-        `${sanitizePrometheusName(key)}="${escapePrometheusLabelValue(value)}"`,
+        `${toPrometheusMetricName(key)}="${escapePrometheusLabelValue(value)}"`,
     )
     .join(",")}}`;
 }
@@ -363,20 +358,62 @@ function histogramBuckets(metricState: any): PrometheusBucket[] {
   >) {
     buckets.push({ boundary, count });
   }
-  return buckets;
+  return buckets.sort((left, right) => left.boundary - right.boundary);
+}
+
+type PrometheusMetricRecord = {
+  type: PrometheusMetricType;
+  help?: string;
+  lines: string[];
+};
+
+function defaultMetricHelp(definition: SmithersMetricDefinition): string | undefined {
+  return definition.description ?? definition.label;
+}
+
+function defaultPrometheusMetricLines(
+  definition: SmithersMetricDefinition,
+): string[] {
+  const labelSets =
+    definition.defaultLabels && definition.defaultLabels.length > 0
+      ? definition.defaultLabels.map((labels) => Object.entries(labels))
+      : [[]];
+
+  if (definition.type === "histogram") {
+    const boundaries = definition.boundaries ?? [];
+    return labelSets.flatMap((labelSet) => {
+      const baseLabels = labelSet as ReadonlyArray<[string, string]>;
+      return [
+        ...boundaries.map(
+          (boundary) =>
+            `${definition.prometheusName}_bucket${mergePrometheusLabels(baseLabels, [["le", String(boundary)]])} 0`,
+        ),
+        `${definition.prometheusName}_bucket${mergePrometheusLabels(baseLabels, [["le", "+Inf"]])} 0`,
+        `${definition.prometheusName}_sum${formatPrometheusLabels(baseLabels)} 0`,
+        `${definition.prometheusName}_count${formatPrometheusLabels(baseLabels)} 0`,
+      ];
+    });
+  }
+
+  return labelSets.map(
+    (labelSet) =>
+      `${definition.prometheusName}${formatPrometheusLabels(labelSet as ReadonlyArray<[string, string]>)} 0`,
+  );
 }
 
 function registerPrometheusMetric(
-  registry: Map<
-    string,
-    { type: PrometheusMetricType; help?: string; lines: string[] }
-  >,
+  registry: Map<string, PrometheusMetricRecord>,
   name: string,
   type: PrometheusMetricType,
   help: string | undefined,
 ) {
   const existing = registry.get(name);
-  if (existing) return existing;
+  if (existing) {
+    if (!existing.help && help) {
+      existing.help = help;
+    }
+    return existing;
+  }
   const created = { type, help, lines: [] };
   registry.set(name, created);
   return created;
@@ -388,13 +425,13 @@ export function renderPrometheusMetrics(): string {
 
   const registry = new Map<
     string,
-    { type: PrometheusMetricType; help?: string; lines: string[] }
+    PrometheusMetricRecord
   >();
 
   for (const snapshot of Metric.unsafeSnapshot()) {
     const metricKey = snapshot.metricKey as any;
     const metricState = snapshot.metricState as any;
-    const name = sanitizePrometheusName(String(metricKey.name ?? ""));
+    const name = toPrometheusMetricName(String(metricKey.name ?? ""));
     if (!name) continue;
 
     const labels = metricLabels(metricKey);
@@ -442,7 +479,7 @@ export function renderPrometheusMetrics(): string {
         number | bigint
       >) {
         metric.lines.push(
-          `${name}${mergePrometheusLabels(labels, [["key", key]])} ${formatPrometheusNumber(count)}`,
+        `${name}${mergePrometheusLabels(labels, [["key", key]])} ${formatPrometheusNumber(count)}`,
         );
       }
       continue;
@@ -472,6 +509,18 @@ export function renderPrometheusMetrics(): string {
     }
   }
 
+  for (const definition of smithersMetricCatalog) {
+    const metric = registerPrometheusMetric(
+      registry,
+      definition.prometheusName,
+      definition.type,
+      defaultMetricHelp(definition),
+    );
+    if (metric.lines.length === 0) {
+      metric.lines.push(...defaultPrometheusMetricLines(definition));
+    }
+  }
+
   const lines: string[] = [];
   for (const [name, metric] of [...registry.entries()].sort(([left], [right]) =>
     left.localeCompare(right),
@@ -480,7 +529,7 @@ export function renderPrometheusMetrics(): string {
       lines.push(`# HELP ${name} ${escapePrometheusText(metric.help)}`);
     }
     lines.push(`# TYPE ${name} ${metric.type}`);
-    lines.push(...metric.lines.sort((left, right) => left.localeCompare(right)));
+    lines.push(...metric.lines);
   }
   return lines.join("\n") + (lines.length > 0 ? "\n" : "");
 }
@@ -607,94 +656,9 @@ export function createSmithersObservabilityLayer(
 
 export const createSmithersRuntimeLayer = createSmithersObservabilityLayer;
 
-export const smithersMetrics = {
-  // existing
-  runsTotal,
-  activeRuns,
-  nodesStarted,
-  nodesFinished,
-  nodesFailed,
-  activeNodes,
-  nodeDuration,
-  attemptDuration,
-  toolCallsTotal,
-  toolDuration,
-  cacheHits,
-  cacheMisses,
-  dbQueryDuration,
-  dbRetries,
-  dbTransactionDuration,
-  dbTransactionRetries,
-  dbTransactionRollbacks,
-  schedulerQueueDepth,
-  hotReloads,
-  hotReloadFailures,
-  hotReloadDuration,
-  httpRequests,
-  httpRequestDuration,
-  approvalsRequested,
-  approvalsGranted,
-  approvalsDenied,
-  vcsDuration,
-  // token usage
-  tokensInputTotal,
-  tokensOutputTotal,
-  tokensCacheReadTotal,
-  tokensCacheWriteTotal,
-  tokensContextWindowBucketTotal,
-  tokensReasoningTotal,
-  tokensInputPerCall,
-  tokensOutputPerCall,
-  tokensContextWindowPerCall,
-  // run lifecycle
-  runsFinishedTotal,
-  runsFailedTotal,
-  runsCancelledTotal,
-  runsResumedTotal,
-  runsContinuedTotal,
-  runDuration,
-  runsAncestryDepth,
-  runsCarriedStateBytes,
-  // sandboxes
-  sandboxCreatedTotal,
-  sandboxCompletedTotal,
-  sandboxActive,
-  sandboxDurationMs,
-  sandboxBundleSizeBytes,
-  sandboxTransportDurationMs,
-  sandboxPatchCount,
-  // errors & retries
-  errorsTotal,
-  nodeRetriesTotal,
-  toolCallErrorsTotal,
-  toolOutputTruncatedTotal,
-  // prompt & response sizes
-  promptSizeBytes,
-  responseSizeBytes,
-  // approvals
-  approvalPending,
-  externalWaitAsyncPending,
-  approvalWaitDuration,
-  // timers
-  timersCreated,
-  timersFired,
-  timersCancelled,
-  timersPending,
-  timerDelayDuration,
-  // scheduler
-  schedulerConcurrencyUtilization,
-  schedulerWaitDuration,
-  // events
-  eventsEmittedTotal,
-  // process
-  processUptimeSeconds,
-  processMemoryRssBytes,
-  processHeapUsedBytes,
-  // scorers
-  scorerEventsStarted,
-  scorerEventsFinished,
-  scorerEventsFailed,
-};
+export const smithersMetrics = Object.fromEntries(
+  smithersMetricCatalog.map((metric) => [metric.key, metric.metric] as const),
+);
 
 export {
   activeNodes,

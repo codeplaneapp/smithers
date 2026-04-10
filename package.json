@@ -60,6 +60,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit",
+    "lint": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore src tests apps/cli/src",
+    "lint:fix": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore --fix src tests apps/cli/src",
     "cli": "bun run src/cli/index.ts",
     "test": "bun test tests/*.test.ts tests/*.test.tsx",
     "e2e": "playwright test",
@@ -111,7 +113,7 @@
     "zod": "^4.3.6"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "~5.9.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0",
@@ -119,6 +121,8 @@
     "@types/bun": "latest",
     "@types/diff": "^5.2.0",
     "@types/react": "^19.2.10",
-    "@types/ws": "^8.5.12"
+    "@types/ws": "^8.5.12",
+    "oxlint": "^1.59.0",
+    "typescript": "~5.9.3"
   }
 }

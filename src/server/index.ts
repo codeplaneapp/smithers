@@ -191,7 +191,6 @@ function sendJson(res: ServerResponse, status: number, payload: any) {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.end(JSON.stringify(payload));
-  void runPromise(Metric.increment(httpRequests));
 }
 
 function sendText(
@@ -205,7 +204,70 @@ function sendText(
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.end(payload);
-  void runPromise(Metric.increment(httpRequests));
+}
+
+function taggedMetric<A extends Metric.Metric<any, any, any>>(
+  metric: A,
+  tags: Record<string, string>,
+): A {
+  let tagged: any = metric;
+  for (const [key, value] of Object.entries(tags)) {
+    tagged = Metric.tagged(tagged, key, value);
+  }
+  return tagged as A;
+}
+
+function normalizeHttpMetricRoute(pathname: string): string {
+  if (pathname === "/metrics" || pathname === "/health" || pathname === "/v1/runs") {
+    return pathname;
+  }
+  if (
+    pathname === "/v1/approval/list"
+    || pathname === "/v1/approvals"
+    || pathname === "/approval/list"
+    || pathname === "/approvals"
+  ) {
+    return pathname;
+  }
+  if (/^\/v1\/runs\/[^/]+\/events$/.test(pathname)) return "/v1/runs/:runId/events";
+  if (/^\/v1\/runs\/[^/]+\/frames$/.test(pathname)) return "/v1/runs/:runId/frames";
+  if (/^\/v1\/runs\/[^/]+\/nodes\/[^/]+\/approve$/.test(pathname)) {
+    return "/v1/runs/:runId/nodes/:nodeId/approve";
+  }
+  if (/^\/v1\/runs\/[^/]+\/nodes\/[^/]+\/deny$/.test(pathname)) {
+    return "/v1/runs/:runId/nodes/:nodeId/deny";
+  }
+  if (/^\/v1\/runs\/[^/]+\/signals\/[^/]+$/.test(pathname)) {
+    return "/v1/runs/:runId/signals/:signalName";
+  }
+  if (/^\/signal\/[^/]+\/[^/]+$/.test(pathname)) {
+    return "/signal/:runId/:signalName";
+  }
+  if (/^\/v1\/runs\/[^/]+$/.test(pathname)) return "/v1/runs/:runId";
+  return pathname;
+}
+
+function statusClass(statusCode: number): string {
+  const normalized = Number.isFinite(statusCode) && statusCode > 0 ? statusCode : 500;
+  return `${Math.floor(normalized / 100)}xx`;
+}
+
+function recordHttpRequestMetrics(
+  method: string,
+  pathname: string,
+  statusCode: number,
+  durationMs: number,
+) {
+  const tags = {
+    method: method.toUpperCase(),
+    route: normalizeHttpMetricRoute(pathname),
+    status_code: String(statusCode),
+    status_class: statusClass(statusCode),
+  };
+  return Effect.all([
+    Metric.increment(taggedMetric(httpRequests, tags)),
+    Metric.update(taggedMetric(httpRequestDuration, tags), durationMs),
+  ], { discard: true });
 }
 
 function assertAuth(req: IncomingMessage, authToken?: string) {
@@ -515,10 +577,13 @@ function startServerInternal(opts: ServerOptions = {}) {
   }, "server:start");
   const server = createServer(async (req, res) => {
     const requestStart = performance.now();
+    const requestMethod = req.method ?? "GET";
+    let requestPathname = (req.url ?? "/").split("?")[0] ?? "/";
     try {
       assertAuth(req, authToken);
       const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
-      const method = req.method ?? "GET";
+      const method = requestMethod;
+      requestPathname = url.pathname;
 
       if (method === "GET" && url.pathname === "/metrics") {
         return sendText(
@@ -902,7 +967,10 @@ function startServerInternal(opts: ServerOptions = {}) {
           if (closed || res.writableEnded) return;
           const events = await adapter.listEvents(runId, lastSeq, 200);
           for (const ev of events) {
-            lastSeq = ev.seq;
+            const seq = typeof ev.seq === "number" ? ev.seq : Number(ev.seq);
+            if (Number.isFinite(seq)) {
+              lastSeq = seq;
+            }
             if (res.writableEnded) break;
             res.write(`event: smithers\n`);
             res.write(`data: ${ev.payloadJson}\n\n`);
@@ -1187,7 +1255,14 @@ function startServerInternal(opts: ServerOptions = {}) {
         },
       });
     } finally {
-      void runPromise(Metric.update(httpRequestDuration, performance.now() - requestStart));
+      void runPromise(
+        recordHttpRequestMetrics(
+          requestMethod,
+          requestPathname,
+          res.statusCode || 500,
+          performance.now() - requestStart,
+        ),
+      );
     }
   });
 

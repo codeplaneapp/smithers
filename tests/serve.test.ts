@@ -59,7 +59,7 @@ function makeRequest(port: number) {
       headers?: Record<string, string>;
     } = {},
   ): Promise<{ status: number; data: any; headers: Headers }> {
-    const headers: Record<string, string> = { ...(options.headers ?? {}) };
+    const headers: Record<string, string> = { ...options.headers };
     if (options.body && !headers["Content-Type"]) {
       headers["Content-Type"] = "application/json";
     }

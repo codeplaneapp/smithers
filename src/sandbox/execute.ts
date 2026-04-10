@@ -126,7 +126,7 @@ export async function executeSandbox(options: ExecuteSandboxOptions): Promise<un
     toolTimeoutMs: options.toolTimeoutMs,
     reviewDiffs: options.reviewDiffs ?? true,
     autoAcceptDiffs: Boolean(options.autoAcceptDiffs),
-    ...(options.config ?? {}),
+    ...options.config,
   });
 
   const sandboxRoot = join(

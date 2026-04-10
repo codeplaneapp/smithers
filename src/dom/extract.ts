@@ -368,7 +368,7 @@ export function extractFromHost(
         },
         label: raw.label,
         meta: {
-          ...(raw.meta ?? {}),
+          ...raw.meta,
           __subflow: true,
           __subflowMode: mode,
           __subflowInput: raw.__smithersSubflowInput,
@@ -513,7 +513,7 @@ export function extractFromHost(
         },
         label: raw.label,
         meta: {
-          ...(raw.meta ?? {}),
+          ...raw.meta,
           __sandbox: true,
           __sandboxRuntime: runtime,
           __sandboxInput: raw.__smithersSandboxInput ?? raw.input,
@@ -603,7 +603,7 @@ export function extractFromHost(
         computeFn: undefined,
         label: raw.label,
         meta: {
-          ...(raw.meta ?? {}),
+          ...raw.meta,
           __waitForEvent: true,
           __eventName: raw.__smithersEventName ?? raw.event,
           __correlationId: raw.__smithersCorrelationId ?? raw.correlationId,
@@ -710,7 +710,7 @@ export function extractFromHost(
         computeFn: undefined,
         label: raw.label ?? `timer:${nodeId}`,
         meta: {
-          ...(raw.meta ?? {}),
+          ...raw.meta,
           __timer: true,
           __timerType: hasDuration ? "duration" : "absolute",
           ...(hasDuration ? { __timerDuration: duration } : {}),

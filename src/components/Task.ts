@@ -210,7 +210,7 @@ function applyCliToolAllowlist(
   }
 
   if (agent instanceof ClaudeCodeAgent) {
-    const opts = { ...((agent as any).opts ?? {}) };
+    const opts = { ...(agent as any).opts };
     if (allowTools.length === 0) {
       return new ClaudeCodeAgent({
         ...opts,
@@ -225,7 +225,7 @@ function applyCliToolAllowlist(
   }
 
   if (agent instanceof PiAgent) {
-    const opts = { ...((agent as any).opts ?? {}) };
+    const opts = { ...(agent as any).opts };
     if (allowTools.length === 0) {
       return new PiAgent({
         ...opts,
@@ -241,7 +241,7 @@ function applyCliToolAllowlist(
   }
 
   if (agent instanceof GeminiAgent) {
-    const opts = { ...((agent as any).opts ?? {}) };
+    const opts = { ...(agent as any).opts };
     return new GeminiAgent({
       ...opts,
       allowedTools: [...allowTools],

@@ -42,6 +42,12 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 import { Text, truncateToWidth, matchesKey } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import {
+  smithersMetricCatalog,
+  toPrometheusMetricName,
+  type SmithersMetricDefinition,
+  type SmithersMetricUnit,
+} from "../effect/metrics";
 import { SmithersError } from "../utils/errors";
 import {
   createSmithersAgentContract,
@@ -297,13 +303,157 @@ function stripAnsi(str: string): string {
   return str.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
+type ParsedPrometheusSample = {
+  type: string;
+  help?: string;
+  value: number;
+  labels: Record<string, string>;
+};
+
+const metricCatalogByKey = new Map(
+  smithersMetricCatalog.map((metric) => [metric.key, metric] as const),
+);
+
+const OVERLAY_COUNTER_GAUGE_KEYS = [
+  "runsTotal",
+  "activeRuns",
+  "runsFinishedTotal",
+  "runsFailedTotal",
+  "runsCancelledTotal",
+  "runsResumedTotal",
+  "nodesStarted",
+  "nodesFinished",
+  "nodesFailed",
+  "activeNodes",
+  "nodeRetriesTotal",
+  "tokensInputTotal",
+  "tokensOutputTotal",
+  "tokensCacheReadTotal",
+  "tokensCacheWriteTotal",
+  "tokensReasoningTotal",
+  "agentTokensTotal",
+  "toolCallsTotal",
+  "toolCallErrorsTotal",
+  "errorsTotal",
+  "cacheHits",
+  "cacheMisses",
+  "approvalsRequested",
+  "approvalsGranted",
+  "approvalsDenied",
+  "approvalPending",
+  "hotReloads",
+  "hotReloadFailures",
+  "httpRequests",
+  "dbRetries",
+  "schedulerQueueDepth",
+  "schedulerConcurrencyUtilization",
+  "eventsEmittedTotal",
+  "processUptimeSeconds",
+  "processMemoryRssBytes",
+  "processHeapUsedBytes",
+] as const;
+
+const OVERLAY_HISTOGRAM_KEYS = [
+  "runDuration",
+  "nodeDuration",
+  "attemptDuration",
+  "toolDuration",
+  "agentDurationMs",
+  "tokensInputPerCall",
+  "tokensOutputPerCall",
+  "tokensContextWindowPerCall",
+  "promptSizeBytes",
+  "responseSizeBytes",
+  "approvalWaitDuration",
+  "schedulerWaitDuration",
+  "dbQueryDuration",
+  "httpRequestDuration",
+  "hotReloadDuration",
+  "vcsDuration",
+] as const;
+
+function overlayMetricDefinitions(
+  keys: readonly string[],
+): SmithersMetricDefinition[] {
+  return keys
+    .map((key) => metricCatalogByKey.get(key))
+    .filter((metric): metric is SmithersMetricDefinition => Boolean(metric));
+}
+
+function canonicalPrometheusMetricName(name: string): string {
+  const suffixMatch = name.match(/(_bucket|_sum|_count)$/);
+  if (!suffixMatch) return toPrometheusMetricName(name);
+  const suffix = suffixMatch[1];
+  return `${toPrometheusMetricName(name.slice(0, -suffix.length))}${suffix}`;
+}
+
+function parsePrometheusLabels(raw: string | undefined): Record<string, string> {
+  if (!raw) return {};
+  const labels: Record<string, string> = {};
+  const pattern = /([a-zA-Z_][a-zA-Z0-9_]*)="((?:\\.|[^"])*)"/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(raw)) !== null) {
+    labels[match[1]] = match[2]
+      .replace(/\\"/g, "\"")
+      .replace(/\\\\/g, "\\")
+      .replace(/\\n/g, "\n");
+  }
+  return labels;
+}
+
+function formatCompactNumber(value: number): string {
+  if (!Number.isFinite(value)) return String(value);
+  if (Math.abs(value) >= 1000) {
+    return new Intl.NumberFormat("en-US", {
+      notation: "compact",
+      maximumFractionDigits: 1,
+    }).format(value);
+  }
+  if (Math.abs(value) >= 100 || Number.isInteger(value)) {
+    return Math.round(value).toString();
+  }
+  return value.toFixed(2);
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value)) return String(value);
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let current = value;
+  let unitIndex = 0;
+  while (Math.abs(current) >= 1024 && unitIndex < units.length - 1) {
+    current /= 1024;
+    unitIndex += 1;
+  }
+  return `${formatCompactNumber(current)}${units[unitIndex]}`;
+}
+
+function formatMetricValue(value: number, unit: SmithersMetricUnit | undefined): string {
+  switch (unit) {
+    case "bytes":
+      return formatBytes(value);
+    case "milliseconds":
+      return `${formatCompactNumber(value)}ms`;
+    case "seconds":
+      return value >= 60 ? elapsed(value * 1000) : `${formatCompactNumber(value)}s`;
+    case "ratio":
+      return `${formatCompactNumber(value * 100)}%`;
+    case "tokens":
+      return formatCompactNumber(value);
+    case "depth":
+      return formatCompactNumber(value);
+    case "count":
+    default:
+      return formatCompactNumber(value);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
 interface MetricsSnapshot {
   raw: string;
-  parsed: Map<string, { type: string; help?: string; value: string; labels?: string }[]>;
+  parsed: Map<string, ParsedPrometheusSample[]>;
   fetchedAtMs: number;
 }
 
@@ -313,41 +463,41 @@ let pollInterval: ReturnType<typeof setInterval> | undefined;
 let latestMetrics: MetricsSnapshot | undefined;
 
 function parsePrometheusText(raw: string): MetricsSnapshot["parsed"] {
-  const result = new Map<string, { type: string; help?: string; value: string; labels?: string }[]>();
-  let currentType = "";
-  let currentHelp: string | undefined;
+  const result = new Map<string, ParsedPrometheusSample[]>();
+  const metricTypes = new Map<string, string>();
+  const metricHelp = new Map<string, string>();
 
   for (const line of raw.split("\n")) {
     if (line.startsWith("# TYPE ")) {
-      const parts = line.slice(7).split(" ");
-      currentType = parts[1] ?? "unknown";
+      const match = line.match(/^# TYPE (\S+) (\S+)$/);
+      if (match) {
+        metricTypes.set(canonicalPrometheusMetricName(match[1]), match[2]);
+      }
       continue;
     }
     if (line.startsWith("# HELP ")) {
-      currentHelp = line.slice(7 + line.slice(7).indexOf(" ") + 1);
+      const match = line.match(/^# HELP (\S+) (.*)$/);
+      if (match) {
+        metricHelp.set(canonicalPrometheusMetricName(match[1]), match[2]);
+      }
       continue;
     }
     if (!line || line.startsWith("#")) continue;
 
-    // Parse: metric_name{labels} value
-    const braceIdx = line.indexOf("{");
-    const spaceIdx = line.lastIndexOf(" ");
-    if (spaceIdx === -1) continue;
+    const match = line.match(/^([^{\s]+)(?:\{([^}]*)\})?\s+(.+)$/);
+    if (!match) continue;
 
-    let name: string;
-    let labels: string | undefined;
-    if (braceIdx !== -1 && braceIdx < spaceIdx) {
-      name = line.slice(0, braceIdx);
-      const closeBrace = line.indexOf("}");
-      labels = line.slice(braceIdx + 1, closeBrace);
-    } else {
-      name = line.slice(0, spaceIdx);
-    }
-    const value = line.slice(spaceIdx + 1);
+    const name = canonicalPrometheusMetricName(match[1]);
+    const labels = parsePrometheusLabels(match[2]);
+    const value = Number(match[3]);
 
     if (!result.has(name)) result.set(name, []);
-    result.get(name)!.push({ type: currentType, help: currentHelp, value, labels });
-    currentHelp = undefined;
+    result.get(name)!.push({
+      type: metricTypes.get(name) ?? "unknown",
+      help: metricHelp.get(name),
+      value,
+      labels,
+    });
   }
   return result;
 }
@@ -1242,59 +1392,8 @@ export default function (pi: ExtensionAPI) {
       if (!snapshot) { ctx.ui.notify("Could not fetch metrics — is the smithers server running?", "warning"); return; }
 
       await ctx.ui.custom<void>((_tui, theme, _kb, done) => {
-        const KEY_METRICS = [
-          { name: "smithers_runs_total", label: "Total runs" },
-          { name: "smithers_active_runs", label: "Active runs" },
-          { name: "smithers_runs_finished_total", label: "Runs finished" },
-          { name: "smithers_runs_failed_total", label: "Runs failed" },
-          { name: "smithers_runs_cancelled_total", label: "Runs cancelled" },
-          { name: "smithers_runs_resumed_total", label: "Runs resumed" },
-          { name: "smithers_nodes_started", label: "Nodes started" },
-          { name: "smithers_nodes_finished", label: "Nodes finished" },
-          { name: "smithers_nodes_failed", label: "Nodes failed" },
-          { name: "smithers_active_nodes", label: "Active nodes" },
-          { name: "smithers_node_retries_total", label: "Node retries" },
-          { name: "smithers_tokens_input_total", label: "Input tokens" },
-          { name: "smithers_tokens_output_total", label: "Output tokens" },
-          { name: "smithers_tokens_cache_read_total", label: "Cache read tokens" },
-          { name: "smithers_tokens_cache_write_total", label: "Cache write tokens" },
-          { name: "smithers_tokens_reasoning_total", label: "Reasoning tokens" },
-          { name: "smithers_tool_calls_total", label: "Tool calls" },
-          { name: "smithers_tool_calls_errors_total", label: "Tool call errors" },
-          { name: "smithers_errors_total", label: "Total errors" },
-          { name: "smithers_cache_hits", label: "Cache hits" },
-          { name: "smithers_cache_misses", label: "Cache misses" },
-          { name: "smithers_approvals_requested", label: "Approvals requested" },
-          { name: "smithers_approvals_granted", label: "Approvals granted" },
-          { name: "smithers_approvals_denied", label: "Approvals denied" },
-          { name: "smithers_approval_pending", label: "Approvals pending" },
-          { name: "smithers_hot_reloads", label: "Hot reloads" },
-          { name: "smithers_hot_reload_failures", label: "Hot reload failures" },
-          { name: "smithers_http_requests", label: "HTTP requests" },
-          { name: "smithers_db_retries", label: "DB retries" },
-          { name: "smithers_scheduler_queue_depth", label: "Scheduler queue depth" },
-          { name: "smithers_events_emitted_total", label: "Events emitted" },
-          { name: "smithers_process_uptime_seconds", label: "Uptime (s)" },
-          { name: "smithers_process_memory_rss_bytes", label: "RSS memory (bytes)" },
-          { name: "smithers_process_heap_used_bytes", label: "Heap used (bytes)" },
-        ];
-
-        const HISTOGRAM_METRICS = [
-          { name: "smithers_run_duration", label: "Run duration (ms)" },
-          { name: "smithers_node_duration", label: "Node duration (ms)" },
-          { name: "smithers_attempt_duration", label: "Attempt duration (ms)" },
-          { name: "smithers_tool_duration", label: "Tool duration (ms)" },
-          { name: "smithers_tokens_input_per_call", label: "Input tokens/call" },
-          { name: "smithers_tokens_output_per_call", label: "Output tokens/call" },
-          { name: "smithers_prompt_size_bytes", label: "Prompt size (bytes)" },
-          { name: "smithers_response_size_bytes", label: "Response size (bytes)" },
-          { name: "smithers_approval_wait_duration", label: "Approval wait (ms)" },
-          { name: "smithers_scheduler_wait_duration", label: "Scheduler wait (ms)" },
-          { name: "smithers_db_query_duration", label: "DB query duration (ms)" },
-          { name: "smithers_http_request_duration", label: "HTTP request duration (ms)" },
-          { name: "smithers_hot_reload_duration", label: "Hot reload duration (ms)" },
-          { name: "smithers_vcs_duration", label: "VCS duration (ms)" },
-        ];
+        const keyMetrics = overlayMetricDefinitions(OVERLAY_COUNTER_GAUGE_KEYS);
+        const histogramMetrics = overlayMetricDefinitions(OVERLAY_HISTOGRAM_KEYS);
 
         let showRaw = false;
         let cachedLines: string[] | undefined;
@@ -1333,58 +1432,62 @@ export default function (pi: ExtensionAPI) {
               lines.push(truncateToWidth(`  ${th.fg("accent", th.bold("Counters & Gauges"))}  ${th.fg("dim", "(r for raw)")}`, W));
               lines.push("");
 
-              for (const { name, label } of KEY_METRICS) {
-                const entries = snapshot?.parsed.get(name);
+              for (const metric of keyMetrics) {
+                const entries = snapshot?.parsed.get(metric.prometheusName);
                 if (!entries || entries.length === 0) continue;
-                // Sum all entries for this metric (handles labels)
-                const total = entries.reduce((sum, e) => sum + (parseFloat(e.value) || 0), 0);
-                const val = total === Math.floor(total) ? String(total) : total.toFixed(2);
-                const color = name.includes("failed") || name.includes("failures") || name.includes("denied")
+                const total = entries.reduce((sum, entry) => sum + (entry.value || 0), 0);
+                const val = formatMetricValue(total, metric.unit);
+                const color = metric.key.includes("failed")
+                  || metric.key.includes("failures")
+                  || metric.key.includes("errors")
+                  || metric.key.includes("denied")
                   ? (total > 0 ? "error" : "dim")
                   : total > 0 ? "success" : "dim";
-                lines.push(truncateToWidth(`  ${th.fg(color, val.padStart(8))}  ${th.fg("muted", label)}`, W));
+                lines.push(truncateToWidth(`  ${th.fg(color, val.padStart(8))}  ${th.fg("muted", metric.label)}`, W));
               }
 
               lines.push("");
               lines.push(truncateToWidth(`  ${th.fg("accent", th.bold("Histograms (p50 / p99 / count)"))}`, W));
               lines.push("");
 
-              for (const { name, label } of HISTOGRAM_METRICS) {
-                const sumEntries = snapshot?.parsed.get(`${name}_sum`);
-                const countEntries = snapshot?.parsed.get(`${name}_count`);
-                const bucketEntries = snapshot?.parsed.get(`${name}_bucket`);
+              for (const metric of histogramMetrics) {
+                const sumEntries = snapshot?.parsed.get(`${metric.prometheusName}_sum`);
+                const countEntries = snapshot?.parsed.get(`${metric.prometheusName}_count`);
+                const bucketEntries = snapshot?.parsed.get(`${metric.prometheusName}_bucket`);
 
                 if (!countEntries) continue;
-                const count = countEntries.reduce((s, e) => s + (parseFloat(e.value) || 0), 0);
+                const count = countEntries.reduce((sum, entry) => sum + (entry.value || 0), 0);
                 if (count === 0) continue;
 
-                const sum = sumEntries?.reduce((s, e) => s + (parseFloat(e.value) || 0), 0) ?? 0;
+                const sum = sumEntries?.reduce((total, entry) => total + (entry.value || 0), 0) ?? 0;
                 const avg = count > 0 ? sum / count : 0;
 
-                // Approximate p50/p99 from histogram buckets
-                let p50 = "?", p99 = "?";
+                let p50: number | undefined;
+                let p99: number | undefined;
                 if (bucketEntries && bucketEntries.length > 0) {
-                  const sorted = bucketEntries
-                    .map((e) => {
-                      const le = e.labels?.match(/le="([^"]+)"/)?.[1];
-                      return { boundary: parseFloat(le ?? "Inf"), count: parseFloat(e.value) || 0 };
-                    })
-                    .filter((b) => isFinite(b.boundary))
+                  const bucketTotals = new Map<number, number>();
+                  for (const entry of bucketEntries) {
+                    const boundary = Number(entry.labels.le ?? "NaN");
+                    if (!Number.isFinite(boundary)) continue;
+                    bucketTotals.set(boundary, (bucketTotals.get(boundary) ?? 0) + entry.value);
+                  }
+                  const sorted = [...bucketTotals.entries()]
+                    .map(([boundary, bucketCount]) => ({ boundary, count: bucketCount }))
                     .sort((a, b) => a.boundary - b.boundary);
 
                   const target50 = count * 0.5;
                   const target99 = count * 0.99;
                   for (const bucket of sorted) {
-                    if (bucket.count >= target50 && p50 === "?") p50 = bucket.boundary.toFixed(0);
-                    if (bucket.count >= target99 && p99 === "?") p99 = bucket.boundary.toFixed(0);
+                    if (bucket.count >= target50 && p50 === undefined) p50 = bucket.boundary;
+                    if (bucket.count >= target99 && p99 === undefined) p99 = bucket.boundary;
                   }
                 }
 
                 lines.push(truncateToWidth(
-                  `  ${th.fg("muted", label.padEnd(28))} ` +
-                  `${th.fg("accent", `p50=${p50}ms`.padEnd(12))} ` +
-                  `${th.fg("warning", `p99=${p99}ms`.padEnd(12))} ` +
-                  `${th.fg("dim", `avg=${avg.toFixed(0)}ms  n=${count}`)}`,
+                  `  ${th.fg("muted", metric.label.padEnd(28))} ` +
+                  `${th.fg("accent", `p50=${p50 === undefined ? "?" : formatMetricValue(p50, metric.unit)}`.padEnd(16))} ` +
+                  `${th.fg("warning", `p99=${p99 === undefined ? "?" : formatMetricValue(p99, metric.unit)}`.padEnd(16))} ` +
+                  `${th.fg("dim", `avg=${formatMetricValue(avg, metric.unit)}  n=${formatCompactNumber(count)}`)}`,
                   W,
                 ));
               }

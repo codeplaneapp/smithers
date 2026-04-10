@@ -4812,8 +4812,8 @@ function registerRawToolsOnMcpServer(
 
   for (const tool of IncurMcp.collectTools(commands, [])) {
     const mergedShape = {
-      ...(tool.command.args?.shape ?? {}),
-      ...(tool.command.options?.shape ?? {}),
+      ...tool.command.args?.shape,
+      ...tool.command.options?.shape,
     };
     const hasInput = Object.keys(mergedShape).length > 0;
 

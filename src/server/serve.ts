@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { Metric } from "effect";
+import { Effect, Metric } from "effect";
 import type { SmithersWorkflow } from "../SmithersWorkflow";
 import { SmithersDb } from "../db/adapter";
 import { approveNode, denyNode } from "../engine/approvals";
@@ -40,6 +40,56 @@ class HttpError extends Error {
   }
 }
 
+function taggedMetric<A extends Metric.Metric<any, any, any>>(
+  metric: A,
+  tags: Record<string, string>,
+): A {
+  let tagged: any = metric;
+  for (const [key, value] of Object.entries(tags)) {
+    tagged = Metric.tagged(tagged, key, value);
+  }
+  return tagged as A;
+}
+
+function normalizeHttpMetricRoute(pathname: string): string {
+  if (
+    pathname === "/"
+    || pathname === "/health"
+    || pathname === "/events"
+    || pathname === "/frames"
+    || pathname === "/cancel"
+    || pathname === "/metrics"
+  ) {
+    return pathname;
+  }
+  if (/^\/approve\/[^/]+$/.test(pathname)) return "/approve/:nodeId";
+  if (/^\/deny\/[^/]+$/.test(pathname)) return "/deny/:nodeId";
+  return pathname;
+}
+
+function statusClass(statusCode: number): string {
+  const normalized = Number.isFinite(statusCode) && statusCode > 0 ? statusCode : 500;
+  return `${Math.floor(normalized / 100)}xx`;
+}
+
+function recordHttpRequestMetrics(
+  method: string,
+  pathname: string,
+  statusCode: number,
+  durationMs: number,
+) {
+  const tags = {
+    method: method.toUpperCase(),
+    route: normalizeHttpMetricRoute(pathname),
+    status_code: String(statusCode),
+    status_class: statusClass(statusCode),
+  };
+  return Effect.all([
+    Metric.increment(taggedMetric(httpRequests, tags)),
+    Metric.update(taggedMetric(httpRequestDuration, tags), durationMs),
+  ], { discard: true });
+}
+
 export function createServeApp(opts: ServeOptions) {
   const { adapter, runId, abort, authToken, metrics: metricsEnabled = true } = opts;
   const app = new Hono();
@@ -73,8 +123,14 @@ export function createServeApp(opts: ServeOptions) {
   app.use("*", async (c, next) => {
     const start = performance.now();
     await next();
-    void runPromise(Metric.update(httpRequestDuration, performance.now() - start));
-    void runPromise(Metric.increment(httpRequests));
+    void runPromise(
+      recordHttpRequestMetrics(
+        c.req.method,
+        c.req.path,
+        c.res.status,
+        performance.now() - start,
+      ),
+    );
   });
 
   // GET / — run status

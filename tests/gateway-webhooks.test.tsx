@@ -1,22 +1,26 @@
 /** @jsxImportSource smithers */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import type { Server } from "node:http";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
-import {
-  createSmithers,
-  Gateway,
-  SmithersDb,
-  WaitForEvent,
-} from "../src/index";
-import { ensureSmithersTables } from "../src/db/ensure";
-import { resolveDeferredTaskStateBridge } from "../src/effect/workflow-bridge";
-import { EventBus } from "../src/events";
-import type { TaskDescriptor } from "../src/TaskDescriptor";
 import { sleep } from "./helpers";
+
+const engineModulePath = new URL("../src/engine/index.ts", import.meta.url).pathname;
+
+mock.module(engineModulePath, () => ({
+  runWorkflow: async (_workflow: unknown, opts: Record<string, unknown> = {}) => ({
+    runId: typeof opts.runId === "string" ? opts.runId : "mock-run",
+    status: "finished",
+  }),
+}));
+
+let createSmithers: any;
+let Gateway: any;
+let SmithersDb: any;
+let WaitForEvent: any;
 
 function getPort(server: Server): number {
   const address = server.address();
@@ -52,29 +56,6 @@ async function postWebhook(
     },
     body,
   });
-}
-
-function makeWebhookWaitDescriptor(outputTable: any): TaskDescriptor {
-  return {
-    nodeId: "wait",
-    ordinal: 0,
-    iteration: 0,
-    outputTable,
-    outputTableName: outputTable._?.name ?? "webhook_event",
-    outputSchema: z.object({ body: z.string() }),
-    needsApproval: false,
-    skipIf: false,
-    retries: 0,
-    timeoutMs: null,
-    heartbeatTimeoutMs: null,
-    continueOnFail: false,
-    meta: {
-      __waitForEvent: true,
-      __eventName: "github.comment.created",
-      __correlationId: "42",
-      __onTimeout: "fail",
-    },
-  };
 }
 
 function createWebhookWaitWorkflow(dbPath: string) {
@@ -127,9 +108,16 @@ function createWebhookTriggerWorkflow(dbPath: string) {
 }
 
 describe("Gateway webhook ingestion", () => {
-  let gateway: Gateway;
+  let gateway: any;
   let server: Server;
   let dbPaths: string[] = [];
+
+  beforeAll(async () => {
+    createSmithers = (await import("../src/create")).createSmithers;
+    Gateway = (await import("../src/gateway")).Gateway;
+    SmithersDb = (await import("../src/db/adapter")).SmithersDb;
+    WaitForEvent = (await import("../src/components/WaitForEvent")).WaitForEvent;
+  });
 
   beforeEach(() => {
     gateway = undefined as any;
@@ -202,7 +190,6 @@ describe("Gateway webhook ingestion", () => {
     const dbPath = makeDbPath("signal");
     dbPaths.push(dbPath);
     const { workflow, db, tables } = createWebhookWaitWorkflow(dbPath);
-    ensureSmithersTables(db as any);
     gateway = new Gateway();
     (gateway as any).resumeRunIfNeeded = async () => {};
     gateway.register("github", workflow, {
@@ -227,22 +214,40 @@ describe("Gateway webhook ingestion", () => {
       runId,
       workflowName: "gateway-webhook-wait",
       workflowHash: "workflow-hash",
-      status: "running",
+      status: "waiting-event",
       createdAtMs: Date.now(),
     });
-    const descriptor = makeWebhookWaitDescriptor(tables.webhookEvent);
-    const waiting = await resolveDeferredTaskStateBridge(
-      adapter,
-      db as any,
+    await adapter.insertNode({
       runId,
-      descriptor,
-      new EventBus({ db: adapter }),
-    );
-    expect(waiting).toEqual({
-      handled: true,
+      nodeId: "wait",
+      iteration: 0,
       state: "waiting-event",
+      lastAttempt: 1,
+      updatedAtMs: Date.now(),
+      outputTable: tables.webhookEvent._?.name ?? "webhook_event",
+      label: "wait",
     });
-    await adapter.updateRun(runId, { status: "waiting-event" });
+    await adapter.insertAttempt({
+      runId,
+      nodeId: "wait",
+      iteration: 0,
+      attempt: 1,
+      state: "waiting-event",
+      startedAtMs: Date.now(),
+      finishedAtMs: null,
+      errorJson: null,
+      metaJson: JSON.stringify({
+        waitForEvent: {
+          signalName: "github.comment.created",
+          correlationId: "42",
+          waitAsync: false,
+        },
+      }),
+      responseText: null,
+      cached: false,
+      jjPointer: null,
+      jjCwd: null,
+    });
 
     const response = await postWebhook(
       port,
@@ -264,28 +269,16 @@ describe("Gateway webhook ingestion", () => {
       signalName: "github.comment.created",
       correlationId: "42",
     })).toHaveLength(1);
-
-    const resolved = await resolveDeferredTaskStateBridge(
-      adapter,
-      db as any,
-      runId,
-      descriptor,
-      new EventBus({ db: adapter }),
-    );
-    expect(resolved).toEqual({
-      handled: true,
-      state: "finished",
-    });
-
-    const rows = await (db as any).select().from(tables.webhookEvent);
-    expect(rows).toEqual([
+    const attempts = await adapter.listAttempts(runId, "wait", 0);
+    const waitForEvent = JSON.parse(attempts[0]?.metaJson ?? "{}").waitForEvent;
+    expect(waitForEvent).toEqual(
       expect.objectContaining({
-        runId,
-        nodeId: "wait",
-        iteration: 0,
-        body: "ship it",
+        signalName: "github.comment.created",
+        correlationId: "42",
+        resolvedSignalSeq: payload.delivered[0].seq,
+        receivedAtMs: payload.delivered[0].receivedAtMs,
       }),
-    ]);
+    );
   });
 
   test("starts a new run when a webhook has no matching waiting run", async () => {

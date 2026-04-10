@@ -78,8 +78,8 @@ function mergeAlertLabels(
 ): Record<string, string> | undefined {
   if (!base && !override) return undefined;
   return {
-    ...(base ?? {}),
-    ...(override ?? {}),
+    ...base,
+    ...override,
   };
 }
 
@@ -90,8 +90,8 @@ function mergeAlertDefaults(
   if (!base && !override) return undefined;
 
   const merged: SmithersAlertPolicyDefaults = {
-    ...(base ?? {}),
-    ...(override ?? {}),
+    ...base,
+    ...override,
   };
   const labels = mergeAlertLabels(base?.labels, override?.labels);
   if (labels) merged.labels = labels;
@@ -105,8 +105,8 @@ function mergeAlertRule(
   if (!base && !override) return undefined;
 
   const merged: SmithersAlertPolicyRule = {
-    ...(base ?? {}),
-    ...(override ?? {}),
+    ...base,
+    ...override,
   };
   const labels = mergeAlertLabels(base?.labels, override?.labels);
   if (labels) merged.labels = labels;
@@ -120,7 +120,7 @@ function mergeAlertRules(
   if (!base && !override) return undefined;
 
   const merged: Record<string, SmithersAlertPolicyRule> = {
-    ...(base ?? {}),
+    ...base,
   };
   for (const [name, rule] of Object.entries(override ?? {})) {
     merged[name] = mergeAlertRule(base?.[name], rule) ?? rule;
@@ -140,8 +140,8 @@ function mergeAlertPolicies(
   const reactions =
     base?.reactions || override?.reactions
       ? {
-          ...(base?.reactions ?? {}),
-          ...(override?.reactions ?? {}),
+          ...base?.reactions,
+          ...override?.reactions,
         }
       : undefined;
 
@@ -376,7 +376,7 @@ export function createSmithers<
     smithersOpts?: SmithersWorkflowOptions,
   ): SmithersWorkflow<Schemas> {
     const workflowOpts: SmithersWorkflowOptions = {
-      ...(smithersOpts ?? {}),
+      ...smithersOpts,
     };
     const alertPolicy = mergeAlertPolicies(
       moduleAlertPolicy,

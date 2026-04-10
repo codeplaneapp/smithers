@@ -1452,7 +1452,7 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
       idleMs: this.idleTimeoutMs,
     });
     const cwd = this.cwd ?? getToolContext()?.rootDir ?? process.cwd();
-    const env = { ...process.env, ...(this.env ?? {}) } as Record<
+    const env = { ...process.env, ...this.env } as Record<
       string,
       string
     >;

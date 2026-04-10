@@ -209,7 +209,7 @@ export class EventBus extends EventEmitter {
 
   private eventLogAnnotations(event: CorrelatedSmithersEvent) {
     return {
-      ...(correlationContextToLogAnnotations(event.correlation) ?? {}),
+      ...correlationContextToLogAnnotations(event.correlation),
       runId: event.runId,
       eventType: event.type,
     };

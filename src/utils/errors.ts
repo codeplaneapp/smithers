@@ -520,7 +520,7 @@ export function fromTaggedError(error: unknown): SmithersError | undefined {
         smithersTaggedErrorCodes.WorkflowFailed,
         payload.message,
         {
-          ...(payload.details ?? {}),
+          ...payload.details,
           ...(payload.status === undefined ? {} : { status: payload.status }),
         },
         {
@@ -562,7 +562,7 @@ export function toSmithersError(
   );
   const details = {
     ...(normalizedCause instanceof SmithersError ? normalizedCause.details : {}),
-    ...(options.details ?? {}),
+    ...options.details,
   };
   if (label && details.operation === undefined) {
     details.operation = label;

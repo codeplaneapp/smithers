@@ -599,7 +599,7 @@ function describeRetryContext(insight: RetryInsight, nowMs: number): string {
 
 function shellEscape(value: string): string {
   if (/^[a-zA-Z0-9._/:-]+$/.test(value)) return value;
-  return `'${value.replaceAll("'", `'\"'\"'`)}'`;
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 function buildResumeUnblocker(run: DbRunRow, force = false) {

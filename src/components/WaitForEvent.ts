@@ -39,7 +39,7 @@ export function WaitForEvent(props: WaitForEventProps) {
     event: props.event,
     ...(props.correlationId ? { correlationId: props.correlationId } : {}),
     ...(props.onTimeout ? { onTimeout: props.onTimeout } : {}),
-    ...(props.meta ?? {}),
+    ...props.meta,
   };
 
   return React.createElement("smithers:wait-for-event", {

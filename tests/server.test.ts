@@ -25,7 +25,7 @@ function makeRequest(port: number) {
     path: string,
     options: { method?: string; body?: any; headers?: Record<string, string> } = {}
   ): Promise<{ status: number; data: any }> {
-    const headers: Record<string, string> = { ...(options.headers ?? {}) };
+    const headers: Record<string, string> = { ...options.headers };
     if (options.body && !headers["Content-Type"]) {
       headers["Content-Type"] = "application/json";
     }

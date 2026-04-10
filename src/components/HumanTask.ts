@@ -50,7 +50,7 @@ export function HumanTask(props: HumanTaskProps) {
     humanTask: true,
     maxAttempts,
     prompt: promptText,
-    ...(props.meta ?? {}),
+    ...props.meta,
   };
 
   const computeHumanInput = async (): Promise<unknown> => {

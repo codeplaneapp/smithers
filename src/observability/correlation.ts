@@ -59,8 +59,8 @@ export function mergeCorrelationContext(
 ): CorrelationContext | undefined {
   const normalizedPatch = normalizeCorrelationContextPatch(patch);
   const merged = {
-    ...(base ?? {}),
-    ...(normalizedPatch ?? {}),
+    ...base,
+    ...normalizedPatch,
   } as Partial<CorrelationContext>;
   return merged.runId ? (merged as CorrelationContext) : undefined;
 }

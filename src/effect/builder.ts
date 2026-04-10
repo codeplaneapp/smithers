@@ -954,7 +954,7 @@ function createWorkflow(options: { name: string; input: AnySchema }) {
                   } as any;
 
                   const result = await runWorkflow(workflow, {
-                    ...(opts ?? {}),
+                    ...opts,
                     input: encodedInput as Record<string, unknown>,
                   });
 

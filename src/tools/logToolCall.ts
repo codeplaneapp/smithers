@@ -114,7 +114,7 @@ export function logToolCallEffect(
           insertToolCallEffect(ctx, row).pipe(Effect.catchAllCause(() => Effect.void)),
         ),
         Effect.annotateLogs({
-          ...(correlationContextToLogAnnotations(correlation) ?? {}),
+          ...correlationContextToLogAnnotations(correlation),
           toolName,
           toolStatus: status,
         }),

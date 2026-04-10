@@ -174,8 +174,8 @@ export function Approval<Row = ApprovalDecision>(props: ApprovalProps<Row>) {
     ...(props.allowedScopes?.length ? { approvalAllowedScopes: props.allowedScopes } : {}),
     ...(props.allowedUsers?.length ? { approvalAllowedUsers: props.allowedUsers } : {}),
     ...(autoApprove ? { approvalAutoApprove: autoApprove } : {}),
-    ...(props.request.metadata ?? {}),
-    ...(props.meta ?? {}),
+    ...props.request.metadata,
+    ...props.meta,
   };
 
   const computeDecision = async (): Promise<Row> => {

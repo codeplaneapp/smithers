@@ -96,7 +96,7 @@ export function Runbook(props: RunbookProps) {
       const approvalMeta: Record<string, unknown> = {
         stepId: step.id,
         risk: step.risk,
-        ...(props.approvalRequest?.metadata ?? {}),
+        ...props.approvalRequest?.metadata,
       };
       if (isCritical) {
         approvalMeta.elevated = true;
