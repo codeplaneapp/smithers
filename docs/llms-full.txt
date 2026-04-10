@@ -8261,12 +8261,12 @@ const analysisSchema = z.object({
 Tasks without an `agent` prop write children directly to the database, still validated against the table schema:
 
 ```tsx
-<Task id="config" output={outputs.config}>
+<Task id="config" output={outputs.config} noRetry>
   {{ environment: "production", version: 3 }}
 </Task>
 ```
 
-Mismatched payloads fail immediately without retries.
+Because static payload mismatches are usually deterministic authoring errors, `noRetry` is a good default for one-shot validation. Without it, the normal task retry policy still applies.
 
 ## JSON Mode Columns
 

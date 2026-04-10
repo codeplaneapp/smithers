@@ -90,7 +90,7 @@ describe("docs: <Task>", () => {
 
     const workflow = smithers(() => (
       <Workflow name="compute-timeout">
-        <Task id="slow" output={outputs.outputA} timeoutMs={20}>
+        <Task id="slow" output={outputs.outputA} timeoutMs={20} noRetry>
           {async () => {
             await sleep(200);
             return { value: 1 };
@@ -111,7 +111,7 @@ describe("docs: <Task>", () => {
 
     const workflow = smithers(() => (
       <Workflow name="static-validate">
-        <Task id="bad" output={outputs.output}>
+        <Task id="bad" output={outputs.output} noRetry>
           {{ value: "not-a-number" }}
         </Task>
       </Workflow>
