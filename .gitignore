@@ -60,6 +60,7 @@ burns
 # External reference repos
 .mastra-ref/
 .opentui_temp/
+temporal-*
 
 # Worktree script SQLite artifacts
 scripts/worktree-feature/*.db*
