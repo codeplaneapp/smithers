@@ -1314,7 +1314,7 @@ function renderWorkflows(): TemplateFile[] {
       "export default smithers((ctx) => (",
       '  <Workflow name="tickets-create">',
       '    <Task id="tickets" output={ticketsCreateOutputSchema} agent={agents.smart}>',
-      "      {`Break the following request into well-defined tickets with titles, descriptions, and acceptance criteria.\\n\\nRequest: ${ctx.input.prompt}`}",
+      "      Break the following request into well-defined tickets with titles, descriptions, and acceptance criteria.\\n\\nRequest: {ctx.input.prompt}",
       "    </Task>",
       "  </Workflow>",
       "));",
