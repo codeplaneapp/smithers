@@ -6,9 +6,11 @@ import type { VectorStore, RetrievalResult } from "@smithers/rag/types";
 import { embedQueryEffect, embedChunksEffect } from "@smithers/rag/embedder";
 import type { SmithersError } from "@smithers/core/errors";
 import { nowMs } from "@smithers/core/utils/time";
-import type { MemoryNamespace, SemanticRecallConfig } from "./types";
-import { namespaceToString } from "./types";
-import { memoryRecallQueries, memoryRecallDuration } from "./metrics";
+import type { MemoryNamespace } from "./MemoryNamespace";
+import type { SemanticRecallConfig } from "./SemanticRecallConfig";
+import { namespaceToString } from "./namespaceToString";
+import { memoryRecallQueries } from "./memoryRecallQueries";
+import { memoryRecallDuration } from "./memoryRecallDuration";
 
 // ---------------------------------------------------------------------------
 // Types

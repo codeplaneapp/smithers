@@ -1,17 +1,16 @@
 // Types
-export type {
-  MemoryNamespace,
-  MemoryNamespaceKind,
-  MemoryFact,
-  MemoryThread,
-  MemoryMessage,
-  WorkingMemoryConfig,
-  SemanticRecallConfig,
-  MessageHistoryConfig,
-  MemoryProcessorConfig,
-  TaskMemoryConfig,
-} from "./types";
-export { namespaceToString, parseNamespace } from "./types";
+export type { MemoryNamespace } from "./MemoryNamespace";
+export type { MemoryNamespaceKind } from "./MemoryNamespaceKind";
+export type { MemoryFact } from "./MemoryFact";
+export type { MemoryThread } from "./MemoryThread";
+export type { MemoryMessage } from "./MemoryMessage";
+export type { WorkingMemoryConfig } from "./WorkingMemoryConfig";
+export type { SemanticRecallConfig } from "./SemanticRecallConfig";
+export type { MessageHistoryConfig } from "./MessageHistoryConfig";
+export type { MemoryProcessorConfig } from "./MemoryProcessorConfig";
+export type { TaskMemoryConfig } from "./TaskMemoryConfig";
+export { namespaceToString } from "./namespaceToString";
+export { parseNamespace } from "./parseNamespace";
 
 // Schema (Drizzle tables)
 export {
@@ -21,30 +20,28 @@ export {
 } from "./schema";
 
 // Store
-export { createMemoryStore } from "./store";
-export type { MemoryStore } from "./store";
+export { createMemoryStore } from "./store/createMemoryStore";
+export type { MemoryStore } from "./store/MemoryStore";
 
 // Semantic
 export { createSemanticMemory } from "./semantic";
 export type { SemanticMemory } from "./semantic";
 
 // Processors
-export {
-  TtlGarbageCollector,
-  TokenLimiter,
-  Summarizer,
-} from "./processors";
-export type { MemoryProcessor } from "./processors";
+export { TtlGarbageCollector } from "./TtlGarbageCollector";
+export { TokenLimiter } from "./TokenLimiter";
+export { Summarizer } from "./Summarizer";
+export type { MemoryProcessor } from "./MemoryProcessor";
 
 // Effect service
-export { MemoryService, createMemoryLayer } from "./service";
-export type { MemoryServiceApi, MemoryLayerConfig } from "./service";
+export { MemoryService } from "./MemoryService";
+export { createMemoryLayer } from "./createMemoryLayer";
+export type { MemoryServiceApi } from "./MemoryServiceApi";
+export type { MemoryLayerConfig } from "./MemoryLayerConfig";
 
 // Metrics
-export {
-  memoryFactReads,
-  memoryFactWrites,
-  memoryRecallQueries,
-  memoryMessageSaves,
-  memoryRecallDuration,
-} from "./metrics";
+export { memoryFactReads } from "./memoryFactReads";
+export { memoryFactWrites } from "./memoryFactWrites";
+export { memoryRecallQueries } from "./memoryRecallQueries";
+export { memoryMessageSaves } from "./memoryMessageSaves";
+export { memoryRecallDuration } from "./memoryRecallDuration";
