@@ -8,7 +8,7 @@ import { Parallel } from "@smithers/react/components/Parallel";
 import { SmithersRenderer } from "@smithers/react/dom/renderer";
 import type { VoiceProvider } from "../src/types";
 import { createCompositeVoice } from "../src/composite";
-import type { SmithersEvent } from "@smithers/core/SmithersEvent";
+import type { SmithersEvent } from "@smithers/observability/SmithersEvent";
 
 // ---------------------------------------------------------------------------
 // Helpers
