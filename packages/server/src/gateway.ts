@@ -41,7 +41,7 @@ import {
   assertJsonPayloadWithinBounds,
   assertOptionalStringMaxLength,
   assertPositiveFiniteInteger,
-} from "@smithers/core/utils/input-bounds";
+} from "@smithers/db/input-bounds";
 import { loadLatestSnapshot, loadSnapshot } from "@smithers/time-travel/snapshot";
 import { diffRawSnapshots } from "@smithers/time-travel/diff";
 

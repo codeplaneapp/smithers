@@ -21,7 +21,7 @@ import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { nowMs } from "@smithers/scheduler/nowMs";
 import { errorToJson } from "@smithers/errors/errorToJson";
 import { SmithersError } from "@smithers/errors/SmithersError";
-import { assertMaxBytes, assertMaxJsonDepth } from "@smithers/core/utils/input-bounds";
+import { assertMaxBytes, assertMaxJsonDepth } from "@smithers/db/input-bounds";
 import {
   prometheusContentType,
   renderPrometheusMetrics,
