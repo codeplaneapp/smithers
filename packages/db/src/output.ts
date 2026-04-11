@@ -215,8 +215,10 @@ export function validateExistingOutput(
 export function getAgentOutputSchema(table: Table): z.ZodObject<any> {
   const baseSchema = createInsertSchema(table as any) as z.ZodObject<any>;
   // Remove the key columns that smithers populates automatically
-  const shape = baseSchema.shape;
-  const { runId, nodeId, iteration, ...rest } = shape;
+  const rest = { ...baseSchema.shape };
+  delete rest.runId;
+  delete rest.nodeId;
+  delete rest.iteration;
   return z.object(rest);
 }
 
