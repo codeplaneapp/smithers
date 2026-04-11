@@ -44,7 +44,6 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.36",
     "@ai-sdk/openai": "^3.0.41",
-    "@smithers/core": "workspace:*",
     "@smithers/driver": "workspace:*",
     "@smithers/errors": "workspace:*",
     "@smithers/observability": "workspace:*",
