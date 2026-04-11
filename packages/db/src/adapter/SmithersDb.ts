@@ -21,7 +21,7 @@ import type { SmithersError } from "@smithers/errors/SmithersError";
 import {
   assertOptionalStringMaxLength,
   assertPositiveFiniteNumber,
-} from "@smithers/core/utils/input-bounds";
+} from "../input-bounds";
 import {
   FRAME_KEYFRAME_INTERVAL,
   applyFrameDeltaJson,

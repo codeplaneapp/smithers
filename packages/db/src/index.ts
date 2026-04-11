@@ -1,6 +1,7 @@
 export * from "./adapter";
 export * from "./ensure";
 export type { SchemaRegistryEntry } from "./SchemaRegistryEntry";
+export * from "./input-bounds";
 export * from "./frame-codec";
 export * from "./input";
 export * from "./internal-schema";
