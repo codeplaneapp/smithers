@@ -9,7 +9,8 @@ import {
   smithersSpanNames,
 } from "@smithers/observability";
 import { getToolContext } from "@smithers/tools/context";
-import { type SmithersError, toSmithersError } from "@smithers/core/errors";
+import { toSmithersError } from "@smithers/errors/toSmithersError";
+import type { SmithersError } from "@smithers/errors/SmithersError";
 
 const SmithersWorkflowEngineLayer = Layer.suspend(() => WorkflowEngine.layerMemory);
 const SmithersRuntimeLayer = Layer.mergeAll(

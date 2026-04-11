@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { Effect, Metric } from "effect";
 import { fromSync, ignoreSyncError, toError } from "./interop";
-import { SmithersError } from "@smithers/core/errors";
+import { SmithersError } from "@smithers/errors/SmithersError";
 import { runPromise } from "./runtime";
 import { toolOutputTruncatedTotal } from "@smithers/observability/metrics";
 import { logDebug, logWarning } from "@smithers/observability/logging";
