@@ -1,5 +1,4 @@
 import { Effect } from "effect";
-import { runPromise } from "@smithers/runtime/runtime";
 import type { SmithersError } from "@smithers/errors/SmithersError";
 import type { MemoryStore } from "./store/MemoryStore";
 import type { MemoryProcessor } from "./MemoryProcessor";
@@ -25,7 +24,7 @@ export function TokenLimiter(maxTokens: number): MemoryProcessor {
 
   return {
     name: "TokenLimiter",
-    process: (store) => runPromise(processEffect(store)),
+    process: (store) => Effect.runPromise(processEffect(store)),
     processEffect,
   };
 }

@@ -1,8 +1,7 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { Effect, Layer, Metric } from "effect";
-import { fromPromise } from "@smithers/runtime/interop";
-import { runPromise, runSync } from "@smithers/runtime/runtime";
+import { fromPromise } from "@smithers/driver/interop";
 import { dbQueryDuration } from "@smithers/observability/metrics";
 import { nowMs } from "@smithers/scheduler/nowMs";
 import type { SmithersError } from "@smithers/errors/SmithersError";
@@ -312,17 +311,17 @@ function makeMemoryStore(db: BunSQLiteDatabase<any>): MemoryStore {
 
   return {
     // Promise variants (delegate to Effect)
-    getFact: (ns, key) => runPromise(getFactEffect(ns, key)),
-    setFact: (ns, key, value, ttlMs) => runPromise(setFactEffect(ns, key, value, ttlMs)),
-    deleteFact: (ns, key) => runPromise(deleteFactEffect(ns, key)),
-    listFacts: (ns) => runPromise(listFactsEffect(ns)),
-    createThread: (ns, title) => runPromise(createThreadEffect(ns, title)),
-    getThread: (threadId) => runPromise(getThreadEffect(threadId)),
-    deleteThread: (threadId) => runPromise(deleteThreadEffect(threadId)),
-    saveMessage: (msg) => runPromise(saveMessageEffect(msg)),
-    listMessages: (threadId, limit) => runPromise(listMessagesEffect(threadId, limit)),
-    countMessages: (threadId) => runPromise(countMessagesEffect(threadId)),
-    deleteExpiredFacts: () => runPromise(deleteExpiredFactsEffect()),
+    getFact: (ns, key) => Effect.runPromise(getFactEffect(ns, key)),
+    setFact: (ns, key, value, ttlMs) => Effect.runPromise(setFactEffect(ns, key, value, ttlMs)),
+    deleteFact: (ns, key) => Effect.runPromise(deleteFactEffect(ns, key)),
+    listFacts: (ns) => Effect.runPromise(listFactsEffect(ns)),
+    createThread: (ns, title) => Effect.runPromise(createThreadEffect(ns, title)),
+    getThread: (threadId) => Effect.runPromise(getThreadEffect(threadId)),
+    deleteThread: (threadId) => Effect.runPromise(deleteThreadEffect(threadId)),
+    saveMessage: (msg) => Effect.runPromise(saveMessageEffect(msg)),
+    listMessages: (threadId, limit) => Effect.runPromise(listMessagesEffect(threadId, limit)),
+    countMessages: (threadId) => Effect.runPromise(countMessagesEffect(threadId)),
+    deleteExpiredFacts: () => Effect.runPromise(deleteExpiredFactsEffect()),
 
     // Effect variants
     getFactEffect,

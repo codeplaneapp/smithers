@@ -1,5 +1,4 @@
 import { Effect } from "effect";
-import { runPromise } from "@smithers/runtime/runtime";
 import type { SmithersError } from "@smithers/errors/SmithersError";
 import type { MemoryStore } from "./store/MemoryStore";
 import type { MemoryProcessor } from "./MemoryProcessor";
@@ -19,7 +18,7 @@ export function Summarizer(agent: { run: (prompt: string) => Promise<any> }): Me
 
   return {
     name: "Summarizer",
-    process: (store) => runPromise(processEffect(store)),
+    process: (store) => Effect.runPromise(processEffect(store)),
     processEffect,
   };
 }

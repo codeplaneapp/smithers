@@ -1,5 +1,4 @@
 import { Effect } from "effect";
-import { runPromise } from "@smithers/runtime/runtime";
 import type { SmithersError } from "@smithers/errors/SmithersError";
 import type { MemoryStore } from "./store/MemoryStore";
 import type { MemoryProcessor } from "./MemoryProcessor";
@@ -17,7 +16,7 @@ export function TtlGarbageCollector(): MemoryProcessor {
 
   return {
     name: "TtlGarbageCollector",
-    process: (store) => runPromise(processEffect(store)),
+    process: (store) => Effect.runPromise(processEffect(store)),
     processEffect,
   };
 }

@@ -1,7 +1,6 @@
 import type { EmbeddingModel } from "ai";
 import { Effect, Metric } from "effect";
-import { fromPromise } from "@smithers/runtime/interop";
-import { runPromise } from "@smithers/runtime/runtime";
+import { fromPromise } from "@smithers/driver/interop";
 import type { VectorStore, RetrievalResult } from "@smithers/rag/types";
 import { embedQueryEffect, embedChunksEffect } from "@smithers/rag/embedder";
 import type { SmithersError } from "@smithers/errors/SmithersError";
@@ -110,8 +109,8 @@ export function createSemanticMemory(
   }
 
   return {
-    remember: (ns, content, metadata) => runPromise(rememberEffect(ns, content, metadata)),
-    recall: (ns, query, config) => runPromise(recallEffect(ns, query, config)),
+    remember: (ns, content, metadata) => Effect.runPromise(rememberEffect(ns, content, metadata)),
+    recall: (ns, query, config) => Effect.runPromise(recallEffect(ns, query, config)),
     rememberEffect,
     recallEffect,
   };
