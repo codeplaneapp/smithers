@@ -29,6 +29,7 @@
         "@opentui/core": "^0.1.92",
         "@opentui/react": "^0.1.92",
         "@smithers/agents": "workspace:*",
+        "@smithers/components": "workspace:*",
         "@smithers/db": "workspace:*",
         "@smithers/driver": "workspace:*",
         "@smithers/durables": "workspace:*",
@@ -279,36 +280,11 @@
         "typescript": "~5.9.3",
       },
     },
-    "packages/react": {
-      "name": "@smithers/react",
-      "version": "0.0.0",
-      "dependencies": {
-        "@smithers/agents": "workspace:*",
-        "@smithers/db": "workspace:*",
-        "@smithers/devtools": "workspace:*",
-        "@smithers/driver": "workspace:*",
-        "@smithers/durables": "workspace:*",
-        "@smithers/errors": "workspace:*",
-        "@smithers/graph": "workspace:*",
-        "@smithers/memory": "workspace:*",
-        "@smithers/react-reconciler": "workspace:*",
-        "@smithers/scheduler": "workspace:*",
-        "@smithers/scorers": "workspace:*",
-        "@smithers/voice": "workspace:*",
-        "bippy": "^0.5.32",
-        "react": "^18.3.0 || ^19.0.0",
-        "react-dom": "^18.3.0 || ^19.0.0",
-        "zod": "^4.3.6",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
-        "typescript": "~5.9.3",
-      },
-    },
     "packages/react-reconciler": {
       "name": "@smithers/react-reconciler",
       "version": "0.0.0",
       "dependencies": {
+        "@smithers/devtools": "workspace:*",
         "@smithers/driver": "workspace:*",
         "@smithers/errors": "workspace:*",
         "@smithers/graph": "workspace:*",
@@ -325,6 +301,7 @@
       "name": "@smithers/sandbox",
       "version": "0.0.0",
       "dependencies": {
+        "@smithers/components": "workspace:*",
         "@smithers/db": "workspace:*",
         "@smithers/driver": "workspace:*",
         "@smithers/errors": "workspace:*",
@@ -373,6 +350,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@effect/workflow": "^0.18.0",
+        "@smithers/components": "workspace:*",
         "@smithers/db": "workspace:*",
         "@smithers/driver": "workspace:*",
         "@smithers/durables": "workspace:*",
@@ -397,6 +375,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@smithers/agents": "workspace:*",
+        "@smithers/components": "workspace:*",
         "@smithers/db": "workspace:*",
         "@smithers/driver": "workspace:*",
         "@smithers/engine": "workspace:*",
@@ -406,7 +385,6 @@
         "@smithers/observability": "workspace:*",
         "@smithers/openapi": "workspace:*",
         "@smithers/rag": "workspace:*",
-        "@smithers/react": "workspace:*",
         "@smithers/react-reconciler": "workspace:*",
         "@smithers/sandbox": "workspace:*",
         "@smithers/scheduler": "workspace:*",
@@ -748,8 +726,6 @@
     "@smithers/protocol": ["@smithers/protocol@workspace:packages/protocol"],
 
     "@smithers/rag": ["@smithers/rag@workspace:packages/rag"],
-
-    "@smithers/react": ["@smithers/react@workspace:packages/react"],
 
     "@smithers/react-reconciler": ["@smithers/react-reconciler@workspace:packages/react-reconciler"],
 
@@ -1247,8 +1223,6 @@
 
     "@smithers/rag/@types/bun": ["@types/bun@1.3.12", "", { "dependencies": { "bun-types": "1.3.12" } }, "sha512-DBv81elK+/VSwXHDlnH3Qduw+KxkTIWi7TXkAeh24zpi5l0B2kUg9Ga3tb4nJaPcOFswflgi/yAvMVBPrxMB+A=="],
 
-    "@smithers/react/@types/bun": ["@types/bun@1.3.12", "", { "dependencies": { "bun-types": "1.3.12" } }, "sha512-DBv81elK+/VSwXHDlnH3Qduw+KxkTIWi7TXkAeh24zpi5l0B2kUg9Ga3tb4nJaPcOFswflgi/yAvMVBPrxMB+A=="],
-
     "@smithers/react-reconciler/@types/bun": ["@types/bun@1.3.12", "", { "dependencies": { "bun-types": "1.3.12" } }, "sha512-DBv81elK+/VSwXHDlnH3Qduw+KxkTIWi7TXkAeh24zpi5l0B2kUg9Ga3tb4nJaPcOFswflgi/yAvMVBPrxMB+A=="],
 
     "@smithers/sandbox/@types/bun": ["@types/bun@1.3.12", "", { "dependencies": { "bun-types": "1.3.12" } }, "sha512-DBv81elK+/VSwXHDlnH3Qduw+KxkTIWi7TXkAeh24zpi5l0B2kUg9Ga3tb4nJaPcOFswflgi/yAvMVBPrxMB+A=="],
@@ -1310,8 +1284,6 @@
     "@smithers/rag/@types/bun/bun-types": ["bun-types@1.3.12", "", { "dependencies": { "@types/node": "*" } }, "sha512-HqOLj5PoFajAQciOMRiIZGNoKxDJSr6qigAttOX40vJuSp6DN/CxWp9s3C1Xwm4oH7ybueITwiaOcWXoYVoRkA=="],
 
     "@smithers/react-reconciler/@types/bun/bun-types": ["bun-types@1.3.12", "", { "dependencies": { "@types/node": "*" } }, "sha512-HqOLj5PoFajAQciOMRiIZGNoKxDJSr6qigAttOX40vJuSp6DN/CxWp9s3C1Xwm4oH7ybueITwiaOcWXoYVoRkA=="],
-
-    "@smithers/react/@types/bun/bun-types": ["bun-types@1.3.12", "", { "dependencies": { "@types/node": "*" } }, "sha512-HqOLj5PoFajAQciOMRiIZGNoKxDJSr6qigAttOX40vJuSp6DN/CxWp9s3C1Xwm4oH7ybueITwiaOcWXoYVoRkA=="],
 
     "@smithers/sandbox/@types/bun/bun-types": ["bun-types@1.3.12", "", { "dependencies": { "@types/node": "*" } }, "sha512-HqOLj5PoFajAQciOMRiIZGNoKxDJSr6qigAttOX40vJuSp6DN/CxWp9s3C1Xwm4oH7ybueITwiaOcWXoYVoRkA=="],
 
