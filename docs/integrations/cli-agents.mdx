@@ -731,29 +731,25 @@ The agent contract describes the Smithers [MCP server](/integrations/mcp-server)
 
 `SmithersToolSurface` is `"raw"` or `"semantic"`. The semantic surface groups and renames tools to reduce noise for general-purpose agents. The raw surface exposes every tool name as-is.
 
-```ts
-import { buildSmithersMcpLaunchSpec } from "smithers-orchestrator";
-
-const launchSpec = buildSmithersMcpLaunchSpec("semantic");
-// Use launchSpec.command and launchSpec.args in the agent-specific MCP config.
-```
-
-### Live MCP Tool Probe
-
-`listLiveSmithersMcpTools` starts the Smithers [MCP server](/integrations/mcp-server) in a subprocess and calls `tools/list` to retrieve the live tool set. Use this to build a contract from the actual running server rather than a static snapshot.
+`smithers ask` builds the MCP launch configuration and probes the live tool surface internally. For direct package use, build a contract from the tools you expose to an agent:
 
 ```ts
-import { listLiveSmithersMcpTools } from "smithers-orchestrator";
+import { createSmithersAgentContract } from "smithers-orchestrator";
 
-const tools = await listLiveSmithersMcpTools({ toolSurface: "semantic" });
-```
-
-`probeSmithersAgentContract` wraps the probe and returns a full `SmithersAgentContract`:
-
-```ts
-import { probeSmithersAgentContract } from "smithers-orchestrator";
-
-const contract = await probeSmithersAgentContract({ toolSurface: "semantic" });
+const contract = createSmithersAgentContract({
+  serverName: "smithers",
+  toolSurface: "semantic",
+  tools: [
+    {
+      name: "list_workflows",
+      description: "List discovered local Smithers workflows.",
+    },
+    {
+      name: "run_workflow",
+      description: "Start a discovered workflow directly through the engine.",
+    },
+  ],
+});
 ```
 
 ### Prompt Guidance

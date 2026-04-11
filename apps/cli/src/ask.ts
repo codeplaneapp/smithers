@@ -1,6 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { BaseCliAgent } from "@smithers/agents/BaseCliAgent";
 import { ClaudeCodeAgent } from "@smithers/agents/ClaudeCodeAgent";
 import { CodexAgent } from "@smithers/agents/CodexAgent";
@@ -9,10 +12,10 @@ import { KimiAgent } from "@smithers/agents/KimiAgent";
 import { PiAgent } from "@smithers/agents/PiAgent";
 import { SmithersError } from "@smithers/core/errors";
 import {
-  buildSmithersMcpLaunchSpec,
-  probeSmithersAgentContract,
+  createSmithersAgentContract,
   renderSmithersAgentPromptGuidance,
   type SmithersAgentContract,
+  type SmithersListedTool,
   type SmithersToolSurface,
 } from "@smithers/agents/agent-contract";
 import {
@@ -117,6 +120,21 @@ function bootstrapRank(mode: AskBootstrapMode) {
     case "prompt-only":
       return 1;
   }
+}
+
+function buildSmithersMcpLaunchSpec(
+  toolSurface: SmithersToolSurface = "semantic",
+): { command: string; args: string[] } {
+  return {
+    command: process.execPath,
+    args: [
+      "run",
+      resolve(dirname(fileURLToPath(import.meta.url)), "index.ts"),
+      "--mcp",
+      "--surface",
+      toolSurface,
+    ],
+  };
 }
 
 function buildJsonMcpConfig(
@@ -482,10 +500,50 @@ export async function ask(
 
   const selection = selectAgent(agents, options);
   const toolSurface = options.toolSurface ?? "semantic";
-  const contract = await probeSmithersAgentContract({
+  const launchSpec = buildSmithersMcpLaunchSpec(toolSurface);
+  const transport = new StdioClientTransport({
+    command: launchSpec.command,
+    args: launchSpec.args,
     cwd,
+    stderr: "pipe",
+  });
+  const client = new Client({
+    name: "smithers-ask-contract-probe",
+    version: "1.0.0",
+  });
+  let tools: SmithersListedTool[];
+
+  try {
+    await client.connect(transport);
+    const listed = await client.listTools();
+    tools = listed.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+    }));
+  } catch (error: any) {
+    throw new SmithersError(
+      "ASK_BOOTSTRAP_FAILED",
+      `Failed to probe the live Smithers MCP tools: ${error?.message ?? String(error)}`,
+      {
+        cwd,
+        toolSurface,
+        command: launchSpec.command,
+        args: launchSpec.args,
+      },
+    );
+  } finally {
+    try {
+      await client.close();
+    } catch {}
+    try {
+      await transport.close();
+    } catch {}
+  }
+
+  const contract = createSmithersAgentContract({
     toolSurface,
     serverName: DEFAULT_SERVER_NAME,
+    tools,
   });
   const bootstrap = buildBootstrap(selection, toolSurface);
   const systemPrompt = buildSystemPrompt(contract, bootstrap);
