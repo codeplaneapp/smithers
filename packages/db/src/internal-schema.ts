@@ -137,6 +137,20 @@ export const smithersAlerts = sqliteTable("_smithers_alerts", {
   acknowledgedAtMs: integer("acknowledged_at_ms"),
   message: text("message").notNull(),
   detailsJson: text("details_json"),
+  fingerprint: text("fingerprint"),
+  nodeId: text("node_id"),
+  iteration: integer("iteration"),
+  owner: text("owner"),
+  runbook: text("runbook"),
+  labelsJson: text("labels_json"),
+  reactionJson: text("reaction_json"),
+  sourceEventType: text("source_event_type"),
+  firstFiredAtMs: integer("first_fired_at_ms"),
+  lastFiredAtMs: integer("last_fired_at_ms"),
+  occurrenceCount: integer("occurrence_count").default(1),
+  silencedUntilMs: integer("silenced_until_ms"),
+  acknowledgedBy: text("acknowledged_by"),
+  resolvedBy: text("resolved_by"),
 });
 
 export const smithersSignals = sqliteTable(

@@ -12,4 +12,18 @@ export type AlertRow = {
   acknowledgedAtMs: number | null;
   message: string;
   detailsJson: string | null;
+  fingerprint?: string | null;
+  nodeId?: string | null;
+  iteration?: number | null;
+  owner?: string | null;
+  runbook?: string | null;
+  labelsJson?: string | null;
+  reactionJson?: string | null;
+  sourceEventType?: string | null;
+  firstFiredAtMs?: number | null;
+  lastFiredAtMs?: number | null;
+  occurrenceCount?: number;
+  silencedUntilMs?: number | null;
+  acknowledgedBy?: string | null;
+  resolvedBy?: string | null;
 };
