@@ -17,8 +17,8 @@
   "exports": {
     ".": "./packages/smithers/src/index.ts",
     "./gateway": "./packages/server/src/gateway.ts",
-    "./jsx-runtime": "./packages/react/src/jsx-runtime.ts",
-    "./jsx-dev-runtime": "./packages/react/src/jsx-runtime.ts",
+    "./jsx-runtime": "./packages/smithers/src/jsx-runtime.ts",
+    "./jsx-dev-runtime": "./packages/smithers/src/jsx-runtime.ts",
     "./tools": "./packages/tools/src/index.ts",
     "./server": "./packages/server/src/index.ts",
     "./observability": "./packages/observability/src/index.ts",
