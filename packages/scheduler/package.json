@@ -1,0 +1,192 @@
+{
+  "name": "@smithers/scheduler",
+  "version": "0.0.0",
+  "description": "Pure decision engine: session, scheduler, and task state management for Smithers workflows",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./TaskState": {
+      "types": "./src/TaskState.ts",
+      "default": "./src/TaskState.ts"
+    },
+    "./TaskStateMap": {
+      "types": "./src/TaskStateMap.ts",
+      "default": "./src/TaskStateMap.ts"
+    },
+    "./ReadonlyTaskStateMap": {
+      "types": "./src/ReadonlyTaskStateMap.ts",
+      "default": "./src/ReadonlyTaskStateMap.ts"
+    },
+    "./TaskRecord": {
+      "types": "./src/TaskRecord.ts",
+      "default": "./src/TaskRecord.ts"
+    },
+    "./buildStateKey": {
+      "types": "./src/buildStateKey.ts",
+      "default": "./src/buildStateKey.ts"
+    },
+    "./parseStateKey": {
+      "types": "./src/parseStateKey.ts",
+      "default": "./src/parseStateKey.ts"
+    },
+    "./cloneTaskStateMap": {
+      "types": "./src/cloneTaskStateMap.ts",
+      "default": "./src/cloneTaskStateMap.ts"
+    },
+    "./isTerminalState": {
+      "types": "./src/isTerminalState.ts",
+      "default": "./src/isTerminalState.ts"
+    },
+    "./PlanNode": {
+      "types": "./src/PlanNode.ts",
+      "default": "./src/PlanNode.ts"
+    },
+    "./ScheduleResult": {
+      "types": "./src/ScheduleResult.ts",
+      "default": "./src/ScheduleResult.ts"
+    },
+    "./RalphMeta": {
+      "types": "./src/RalphMeta.ts",
+      "default": "./src/RalphMeta.ts"
+    },
+    "./ContinuationRequest": {
+      "types": "./src/ContinuationRequest.ts",
+      "default": "./src/ContinuationRequest.ts"
+    },
+    "./RalphState": {
+      "types": "./src/RalphState.ts",
+      "default": "./src/RalphState.ts"
+    },
+    "./RalphStateMap": {
+      "types": "./src/RalphStateMap.ts",
+      "default": "./src/RalphStateMap.ts"
+    },
+    "./RetryWaitMap": {
+      "types": "./src/RetryWaitMap.ts",
+      "default": "./src/RetryWaitMap.ts"
+    },
+    "./ScheduleSnapshot": {
+      "types": "./src/ScheduleSnapshot.ts",
+      "default": "./src/ScheduleSnapshot.ts"
+    },
+    "./Scheduler": {
+      "types": "./src/Scheduler.ts",
+      "default": "./src/Scheduler.ts"
+    },
+    "./buildPlanTree": {
+      "types": "./src/buildPlanTree.ts",
+      "default": "./src/buildPlanTree.ts"
+    },
+    "./scheduleTasks": {
+      "types": "./src/scheduleTasks.ts",
+      "default": "./src/scheduleTasks.ts"
+    },
+    "./WorkflowSession": {
+      "types": "./src/WorkflowSession.ts",
+      "default": "./src/WorkflowSession.ts"
+    },
+    "./WorkflowSessionService": {
+      "types": "./src/WorkflowSessionService.ts",
+      "default": "./src/WorkflowSessionService.ts"
+    },
+    "./WorkflowSessionOptions": {
+      "types": "./src/WorkflowSessionOptions.ts",
+      "default": "./src/WorkflowSessionOptions.ts"
+    },
+    "./makeWorkflowSession": {
+      "types": "./src/makeWorkflowSession.ts",
+      "default": "./src/makeWorkflowSession.ts"
+    },
+    "./WorkflowSessionLive": {
+      "types": "./src/WorkflowSessionLive.ts",
+      "default": "./src/WorkflowSessionLive.ts"
+    },
+    "./EngineDecision": {
+      "types": "./src/EngineDecision.ts",
+      "default": "./src/EngineDecision.ts"
+    },
+    "./RenderContext": {
+      "types": "./src/RenderContext.ts",
+      "default": "./src/RenderContext.ts"
+    },
+    "./WaitReason": {
+      "types": "./src/WaitReason.ts",
+      "default": "./src/WaitReason.ts"
+    },
+    "./RunResult": {
+      "types": "./src/RunResult.ts",
+      "default": "./src/RunResult.ts"
+    },
+    "./TaskOutput": {
+      "types": "./src/TaskOutput.ts",
+      "default": "./src/TaskOutput.ts"
+    },
+    "./TaskFailure": {
+      "types": "./src/TaskFailure.ts",
+      "default": "./src/TaskFailure.ts"
+    },
+    "./TokenUsage": {
+      "types": "./src/TokenUsage.ts",
+      "default": "./src/TokenUsage.ts"
+    },
+    "./RetryPolicy": {
+      "types": "./src/RetryPolicy.ts",
+      "default": "./src/RetryPolicy.ts"
+    },
+    "./CachePolicy": {
+      "types": "./src/CachePolicy.ts",
+      "default": "./src/CachePolicy.ts"
+    },
+    "./SmithersWorkflowOptions": {
+      "types": "./src/SmithersWorkflowOptions.ts",
+      "default": "./src/SmithersWorkflowOptions.ts"
+    },
+    "./ApprovalResolution": {
+      "types": "./src/ApprovalResolution.ts",
+      "default": "./src/ApprovalResolution.ts"
+    },
+    "./ContinueAsNewTransition": {
+      "types": "./src/ContinueAsNewTransition.ts",
+      "default": "./src/ContinueAsNewTransition.ts"
+    },
+    "./retryPolicyToSchedule": {
+      "types": "./src/retryPolicyToSchedule.ts",
+      "default": "./src/retryPolicyToSchedule.ts"
+    },
+    "./retryScheduleDelayMs": {
+      "types": "./src/retryScheduleDelayMs.ts",
+      "default": "./src/retryScheduleDelayMs.ts"
+    },
+    "./computeRetryDelayMs": {
+      "types": "./src/computeRetryDelayMs.ts",
+      "default": "./src/computeRetryDelayMs.ts"
+    },
+    "./nowMs": {
+      "types": "./src/nowMs.ts",
+      "default": "./src/nowMs.ts"
+    },
+    "./*": {
+      "types": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@smithers/errors": "workspace:*",
+    "@smithers/graph": "workspace:*",
+    "effect": "^3.21.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "~5.9.3"
+  }
+}
