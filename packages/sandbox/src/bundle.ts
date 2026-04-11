@@ -5,7 +5,7 @@ import {
   assertJsonPayloadWithinBounds,
   assertOptionalArrayMaxLength,
   assertOptionalStringMaxLength,
-} from "@smithers/core/utils/input-bounds";
+} from "@smithers/db/input-bounds";
 import { resolveSandboxPath } from "@smithers/tools/utils";
 
 export const SANDBOX_MAX_BUNDLE_BYTES = 100 * 1024 * 1024; // 100MB
