@@ -40,7 +40,7 @@ import {
   assertJsonPayloadWithinBounds,
   assertOptionalStringMaxLength,
   assertPositiveFiniteInteger,
-} from "@smithers/core/utils/input-bounds";
+} from "@smithers/db/input-bounds";
 import { retryPolicyToSchedule } from "@smithers/scheduler/retryPolicyToSchedule";
 import { retryScheduleDelayMs } from "@smithers/scheduler/retryScheduleDelayMs";
 import {
@@ -4917,6 +4917,36 @@ async function runWorkflowBodyDriver<Schema>(
     if (!task) {
       return markRunWaiting("waiting-approval", "approval");
     }
+    const approvalResolutionPayload = (approval: {
+      note?: string | null;
+      decidedBy?: string | null;
+      decisionJson?: string | null;
+    }) => ({
+      note: approval.note ?? undefined,
+      decidedBy: approval.decidedBy ?? undefined,
+      payload: approval.decisionJson
+        ? JSON.parse(approval.decisionJson)
+        : undefined,
+    });
+    const resolveSessionApproval = async (
+      approval: {
+        status?: string | null;
+        note?: string | null;
+        decidedBy?: string | null;
+        decisionJson?: string | null;
+      },
+      approved: boolean,
+    ) =>
+      runPromise(
+        workflowSession.approvalResolved(task.nodeId, {
+          approved,
+          ...approvalResolutionPayload(approval),
+        }),
+      );
+    const shouldExecuteDeniedApprovalTask = (approval: { status?: string | null }) =>
+      approval.status === "denied" &&
+      task.approvalMode !== "gate" &&
+      task.approvalOnDeny !== "fail";
     const resolved = await resolveDeferredTaskStateBridge(
       adapter,
       db,
@@ -4935,20 +4965,19 @@ async function runWorkflowBodyDriver<Schema>(
           task.iteration,
         );
         if (approval?.status === "denied") {
-          return runPromise(
-            workflowSession.approvalResolved(task.nodeId, {
-              approved: false,
-              note: approval.note ?? undefined,
-              decidedBy: approval.decidedBy ?? undefined,
-              payload: approval.decisionJson
-                ? JSON.parse(approval.decisionJson)
-                : undefined,
-            }),
-          );
+          return resolveSessionApproval(approval, false);
         }
         return failSessionTask(task as TaskDescriptor);
       }
       if (resolved.state === "pending") {
+        const approval = await adapter.getApproval(
+          runId,
+          task.nodeId,
+          task.iteration,
+        );
+        if (approval && shouldExecuteDeniedApprovalTask(approval)) {
+          return resolveSessionApproval(approval, true);
+        }
         return submitLastGraph();
       }
       return markRunWaiting("waiting-approval", "approval");
@@ -4956,16 +4985,7 @@ async function runWorkflowBodyDriver<Schema>(
 
     const approval = await adapter.getApproval(runId, task.nodeId, task.iteration);
     if (approval?.status === "approved" || approval?.status === "denied") {
-      return runPromise(
-        workflowSession.approvalResolved(task.nodeId, {
-          approved: approval.status === "approved",
-          note: approval.note ?? undefined,
-          decidedBy: approval.decidedBy ?? undefined,
-          payload: approval.decisionJson
-            ? JSON.parse(approval.decisionJson)
-            : undefined,
-        }),
-      );
+      return resolveSessionApproval(approval, approval.status === "approved");
     }
     return markRunWaiting("waiting-approval", "approval");
   };
