@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { SmithersError } from "../utils/errors";
+import { SmithersError } from "@smithers/core/errors";
 
 export type SmithersTaskRuntime = {
   runId: string;

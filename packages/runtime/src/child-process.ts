@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { Effect, Metric } from "effect";
 import { fromSync, ignoreSyncError, toError } from "./interop";
-import { SmithersError } from "../utils/errors";
+import { SmithersError } from "@smithers/core/errors";
 import { runPromise } from "./runtime";
-import { toolOutputTruncatedTotal } from "./metrics";
-import { logDebug, logWarning } from "./logging";
+import { toolOutputTruncatedTotal } from "@smithers/observability/metrics";
+import { logDebug, logWarning } from "@smithers/observability/logging";
 
 export type SpawnCaptureOptions = {
   cwd: string;

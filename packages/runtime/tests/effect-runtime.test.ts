@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { runPromise, runSync } from "../src/effect/runtime";
-import { ERROR_REFERENCE_URL, SmithersError } from "../src/utils/errors";
+import { runPromise, runSync } from "@smithers/runtime/runtime";
+import { ERROR_REFERENCE_URL, SmithersError } from "@smithers/core/errors";
 
 describe("effect runtime", () => {
   test("runPromise resolves successful effect", async () => {

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { spawnCaptureEffect } from "../src/effect/child-process";
-import { runPromise } from "../src/effect/runtime";
-import { renderPrometheusMetrics } from "../src/observability";
+import { spawnCaptureEffect } from "@smithers/runtime/child-process";
+import { runPromise } from "@smithers/runtime/runtime";
+import { renderPrometheusMetrics } from "@smithers/observability";
 
 const CWD = "/tmp";
 

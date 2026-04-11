@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { withTaskRuntime, getTaskRuntime, requireTaskRuntime } from "../src/effect/task-runtime";
+import { withTaskRuntime, getTaskRuntime, requireTaskRuntime } from "@smithers/runtime/task-runtime";
 
 describe("task runtime", () => {
   test("getTaskRuntime returns undefined outside context", () => {

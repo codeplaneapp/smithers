@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { toError, fromPromise, fromSync, ignoreSyncError } from "../src/effect/interop";
-import { runPromise } from "../src/effect/runtime";
-import { SmithersError, isSmithersError } from "../src/utils/errors";
+import { toError, fromPromise, fromSync, ignoreSyncError } from "@smithers/runtime/interop";
+import { runPromise } from "@smithers/runtime/runtime";
+import { SmithersError, isSmithersError } from "@smithers/core/errors";
 
 describe("toError", () => {
   test("wraps plain Error into SmithersError", () => {

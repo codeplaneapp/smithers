@@ -1,15 +1,15 @@
 import * as WorkflowEngine from "@effect/workflow/WorkflowEngine";
 import { Cause, Effect, Exit, Layer, ManagedRuntime } from "effect";
-import { SmithersCoreLayer } from "../../packages/core/src/runtime/index.ts";
+import { SmithersCoreLayer } from "@smithers/core/runtime";
 import {
   createSmithersRuntimeLayer,
   getCurrentSmithersTraceAnnotations,
   getCurrentSmithersTraceSpan,
   makeSmithersSpanAttributes,
   smithersSpanNames,
-} from "../observability";
-import { getToolContext } from "../tools/context";
-import { type SmithersError, toSmithersError } from "../utils/errors";
+} from "@smithers/observability";
+import { getToolContext } from "@smithers/tools/context";
+import { type SmithersError, toSmithersError } from "@smithers/core/errors";
 
 const SmithersWorkflowEngineLayer = Layer.suspend(() => WorkflowEngine.layerMemory);
 const SmithersRuntimeLayer = Layer.mergeAll(

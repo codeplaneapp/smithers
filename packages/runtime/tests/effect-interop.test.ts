@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit } from "effect";
-import { toError, fromPromise, fromSync, ignoreSyncError } from "../src/effect/interop";
-import { SmithersError } from "../src/utils/errors";
+import { toError, fromPromise, fromSync, ignoreSyncError } from "@smithers/runtime/interop";
+import { SmithersError } from "@smithers/core/errors";
 
 const DOCS_URL = "https://smithers.sh/reference/errors";
 

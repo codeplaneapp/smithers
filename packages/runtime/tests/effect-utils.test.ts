@@ -5,22 +5,22 @@ import {
   fromPromise,
   fromSync,
   ignoreSyncError,
-} from "../src/effect/interop";
+} from "@smithers/runtime/interop";
 import {
   runPromise,
   runFork,
   runSync,
-} from "../src/effect/runtime";
+} from "@smithers/runtime/runtime";
 import {
   logDebug,
   logInfo,
   logWarning,
   logError,
-} from "../src/effect/logging";
+} from "@smithers/observability/logging";
 import {
   ERROR_REFERENCE_URL,
   SmithersError,
-} from "../src/utils/errors";
+} from "@smithers/core/errors";
 
 function expectSmithersMessage(err: unknown, summary: string) {
   expect(err).toBeInstanceOf(SmithersError);
