@@ -12,4 +12,18 @@ export type AlertRow = {
   readonly acknowledgedAtMs?: number | null;
   readonly message: string;
   readonly detailsJson?: string | null;
+  readonly fingerprint?: string | null;
+  readonly nodeId?: string | null;
+  readonly iteration?: number | null;
+  readonly owner?: string | null;
+  readonly runbook?: string | null;
+  readonly labelsJson?: string | null;
+  readonly reactionJson?: string | null;
+  readonly sourceEventType?: string | null;
+  readonly firstFiredAtMs?: number | null;
+  readonly lastFiredAtMs?: number | null;
+  readonly occurrenceCount?: number;
+  readonly silencedUntilMs?: number | null;
+  readonly acknowledgedBy?: string | null;
+  readonly resolvedBy?: string | null;
 };
