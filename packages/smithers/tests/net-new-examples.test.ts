@@ -69,7 +69,7 @@ describe("net-new examples", () => {
 
   for (const exampleId of exampleIds) {
     test(exampleId, async () => {
-      const module = await import(`../examples/${exampleId}.tsx`);
+      const module = await import(`../../../examples/${exampleId}.tsx`);
       const workflow = module.default;
       const { frame } = await renderHydratedExampleFrame(
         workflow,
