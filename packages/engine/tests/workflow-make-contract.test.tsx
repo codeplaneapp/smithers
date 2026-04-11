@@ -323,14 +323,15 @@ describe("workflow make contract", () => {
     try {
       const adapter = new SmithersDb(db as any);
 
-      await waitFor(async () => {
-        const run = await adapter.getRun(runId);
-        const attempts = await adapter.listAttempts(runId, "stuck", 0);
-        return (
-          run?.status === "running" &&
-          attempts.some((attempt: any) => attempt.state === "in-progress")
-        );
-      }, { timeoutMs: 10_000, intervalMs: 50 });
+	      await waitFor(async () => {
+	        const run = await adapter.getRun(runId);
+	        const attempts = await adapter.listAttempts(runId, "stuck", 0);
+	        return (
+	          run?.status === "running" &&
+	          attempts.some((attempt: any) => attempt.state === "in-progress") &&
+	          readCounter(counterPath) === 1
+	        );
+	      }, { timeoutMs: 10_000, intervalMs: 50 });
 
       spawned.child.kill("SIGKILL");
       await spawned.exited;
