@@ -8,7 +8,7 @@ import {
   makeSandboxTransportServiceEffect,
 } from "./effect/sandbox-entity";
 import { BubblewrapSandboxExecutorLive } from "./effect/socket-runner";
-import { type SmithersError } from "@smithers/core/errors";
+import { type SmithersError } from "@smithers/errors/SmithersError";
 
 export type SandboxRuntime = "bubblewrap" | "docker" | "codeplane";
 

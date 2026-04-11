@@ -7,7 +7,8 @@ import type {
   SandboxTransportConfig,
   SandboxTransportService,
 } from "../transport";
-import { toSmithersError, type SmithersError } from "@smithers/core/errors";
+import { toSmithersError } from "@smithers/errors/toSmithersError";
+import type { SmithersError } from "@smithers/errors/SmithersError";
 
 const SandboxRuntimeSchema = Schema.Literal("bubblewrap", "docker", "codeplane");
 

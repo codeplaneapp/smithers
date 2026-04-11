@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
-import { SmithersError } from "@smithers/core/errors";
+import { SmithersError } from "@smithers/errors/SmithersError";
 import {
   assertJsonPayloadWithinBounds,
   assertOptionalArrayMaxLength,
