@@ -4,7 +4,7 @@ import {
   isRetryableSqliteWriteError,
 } from "../src/write-retry";
 import { Effect } from "effect";
-import { SmithersError } from "@smithers/core/errors";
+import { SmithersError } from "@smithers/errors/SmithersError";
 
 // ---------------------------------------------------------------------------
 // Helpers

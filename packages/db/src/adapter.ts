@@ -1143,6 +1143,10 @@ export class SmithersDb {
   }
 
   insertNode(row: any) {
+    return this.insertNodeEffect(row);
+  }
+
+  insertNodeEffect(row: any) {
     return this.write(`insert node ${row.nodeId}`, () =>
       this.internalStorage.upsert(
         "_smithers_nodes",
@@ -1150,10 +1154,6 @@ export class SmithersDb {
         ["runId", "nodeId", "iteration"],
       ),
     );
-  }
-
-  insertNodeEffect(row: any) {
-    return this.insertNode(row);
   }
 
   getNode(runId: string, nodeId: string, iteration: number) {

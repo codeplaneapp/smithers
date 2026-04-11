@@ -3,7 +3,7 @@ import {
   isRetryableSqliteWriteError,
   withSqliteWriteRetry,
 } from "../src/write-retry";
-import { SmithersError } from "@smithers/core/errors";
+import { SmithersError } from "@smithers/errors/SmithersError";
 
 describe("isRetryableSqliteWriteError", () => {
   test("SQLITE_BUSY code is retryable", () => {

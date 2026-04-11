@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { Effect } from "effect";
 import { SmithersDb } from "../src/adapter";
 import { ensureSmithersTables } from "../src/ensure";
-import { toSmithersError } from "@smithers/core/errors";
+import { toSmithersError } from "@smithers/errors/toSmithersError";
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
