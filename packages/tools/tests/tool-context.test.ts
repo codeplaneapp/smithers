@@ -4,11 +4,11 @@ import {
   getToolContext,
   nextToolSeq,
   type ToolContext,
-} from "../src/tools/context";
-import { ensureSmithersTables } from "../src/db/ensure";
-import { SmithersDb } from "../src/db/adapter";
-import { createTestDb } from "./helpers";
-import { ddl, schema } from "./schema";
+} from "../src/context";
+import { ensureSmithersTables } from "@smithers/db/ensure";
+import { SmithersDb } from "@smithers/db/adapter";
+import { createTestDb } from "../../smithers/tests/helpers";
+import { ddl, schema } from "../../smithers/tests/schema";
 
 function makeCtx(overrides?: Partial<ToolContext>): ToolContext {
   const { db, cleanup } = createTestDb(schema, ddl);

@@ -2,9 +2,9 @@ import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runWithToolContext, type ToolContext } from "../src/tools/context";
-import { runPromise } from "../src/effect/runtime";
-import { grepToolEffect } from "../src/tools/grep";
+import { runWithToolContext, type ToolContext } from "../src/context";
+import { runPromise } from "@smithers/runtime/runtime";
+import { grepToolEffect } from "../src/grep";
 
 const TMP = join(tmpdir(), `smithers-grep-test-${Date.now()}`);
 

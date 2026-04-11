@@ -1,13 +1,13 @@
 import { tool, zodSchema } from "ai";
 import type { z } from "zod";
-import { nowMs } from "../utils/time";
+import { nowMs } from "@smithers/core/utils/time";
 import {
   getToolContext,
   getToolIdempotencyKey,
   type ToolContext,
 } from "./context";
 import { logToolCallEffect, logToolCallStartEffect } from "./logToolCall";
-import { runPromise } from "../effect/runtime";
+import { runPromise } from "@smithers/runtime/runtime";
 
 const smithersToolMetadata = Symbol.for("smithers.tool.metadata");
 const warnedToolNames = new Set<string>();

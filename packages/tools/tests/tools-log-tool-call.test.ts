@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { truncateToBytes, safeJson } from "../src/tools/logToolCall";
+import { truncateToBytes, safeJson } from "../src/logToolCall";
 
 describe("truncateToBytes", () => {
   test("returns text unchanged when within limit", () => {

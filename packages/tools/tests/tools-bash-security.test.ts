@@ -2,12 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bash, read, grep } from "../src/tools/index";
-import { runWithToolContext } from "../src/tools/context";
-import { ensureSmithersTables } from "../src/db/ensure";
-import { SmithersDb } from "../src/db/adapter";
-import { createTestDb } from "./helpers";
-import { ddl, schema } from "./schema";
+import { bash, read, grep } from "../src/index";
+import { runWithToolContext } from "../src/context";
+import { ensureSmithersTables } from "@smithers/db/ensure";
+import { SmithersDb } from "@smithers/db/adapter";
+import { createTestDb } from "../../smithers/tests/helpers";
+import { ddl, schema } from "../../smithers/tests/schema";
 
 function makeTempDir() {
   return mkdtempSync(join(tmpdir(), "smithers-bash-"));

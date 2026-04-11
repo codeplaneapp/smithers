@@ -2,9 +2,9 @@ import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runWithToolContext, type ToolContext } from "../src/tools/context";
-import { runPromise } from "../src/effect/runtime";
-import { bashToolEffect } from "../src/tools/bash";
+import { runWithToolContext, type ToolContext } from "../src/context";
+import { runPromise } from "@smithers/runtime/runtime";
+import { bashToolEffect } from "../src/bash";
 
 const TMP = join(tmpdir(), `smithers-bash-test-${Date.now()}`);
 

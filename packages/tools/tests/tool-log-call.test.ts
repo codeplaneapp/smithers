@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { runPromise } from "../src/effect/runtime";
-import { renderPrometheusMetrics } from "../src/observability";
-import { runWithToolContext } from "../src/tools/context";
-import { logToolCallEffect } from "../src/tools/logToolCall";
+import { runPromise } from "@smithers/runtime/runtime";
+import { renderPrometheusMetrics } from "@smithers/observability";
+import { runWithToolContext } from "../src/context";
+import { logToolCallEffect } from "../src/logToolCall";
 
 function metricValue(name: string): number {
   const prefix = `${name} `;

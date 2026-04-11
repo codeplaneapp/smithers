@@ -1,9 +1,9 @@
 import { resolve, isAbsolute, sep, dirname } from "node:path";
 import { realpath } from "node:fs/promises";
 import { Effect } from "effect";
-import { fromPromise } from "../effect/interop";
-import { runPromise } from "../effect/runtime";
-import { SmithersError } from "../utils/errors";
+import { fromPromise } from "@smithers/runtime/interop";
+import { runPromise } from "@smithers/runtime/runtime";
+import { SmithersError } from "@smithers/core/errors";
 
 export function resolveSandboxPath(rootDir: string, inputPath: string): string {
   if (!inputPath || typeof inputPath !== "string") {

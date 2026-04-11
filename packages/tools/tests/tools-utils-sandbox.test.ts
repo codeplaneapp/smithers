@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { resolveSandboxPath, assertPathWithinRoot } from "../src/tools/utils";
+import { resolveSandboxPath, assertPathWithinRoot } from "../src/utils";
 
 function makeTempDir() {
   return mkdtempSync(join(tmpdir(), "smithers-sandbox-"));

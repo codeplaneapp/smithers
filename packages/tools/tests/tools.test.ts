@@ -3,13 +3,13 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { read, grep, bash } from "../src/tools/index";
-import { runWithToolContext } from "../src/tools/context";
-import { ensureSmithersTables } from "../src/db/ensure";
-import { SmithersDb } from "../src/db/adapter";
-import { smithersToolCalls } from "../src/db/internal-schema";
-import { createTestDb } from "./helpers";
-import { ddl, schema } from "./schema";
+import { read, grep, bash } from "../src/index";
+import { runWithToolContext } from "../src/context";
+import { ensureSmithersTables } from "@smithers/db/ensure";
+import { SmithersDb } from "@smithers/db/adapter";
+import { smithersToolCalls } from "@smithers/db/internal-schema";
+import { createTestDb } from "../../smithers/tests/helpers";
+import { ddl, schema } from "../../smithers/tests/schema";
 
 function makeTempDir(prefix: string) {
   return mkdtempSync(join(tmpdir(), prefix));

@@ -2,7 +2,7 @@ import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { resolveSandboxPath } from "../src/tools/utils";
+import { resolveSandboxPath } from "../src/utils";
 
 const TMP = join(tmpdir(), `smithers-sandbox-test-${Date.now()}`);
 

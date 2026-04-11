@@ -4,7 +4,7 @@ import {
   getToolContext,
   nextToolSeq,
   type ToolContext,
-} from "../src/tools/context";
+} from "../src/context";
 
 function makeContext(overrides: Partial<ToolContext> = {}): ToolContext {
   return {

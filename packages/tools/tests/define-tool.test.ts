@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import React from "react";
 import { z } from "zod";
-import { Task, Workflow, runWorkflow } from "../src/index";
-import { defineTool, getDefinedToolMetadata } from "../src/tools";
-import { runWithToolContext } from "../src/tools/context";
-import { createTestSmithers, sleep } from "./helpers";
+import { Task, Workflow, runWorkflow } from "smithers";
+import { defineTool, getDefinedToolMetadata } from "../src";
+import { runWithToolContext } from "../src/context";
+import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 
 describe("defineTool", () => {
   test("injects a deterministic idempotency key and logs tool calls", async () => {
@@ -90,7 +90,7 @@ describe("defineTool", () => {
   });
 
   test("re-exports defineTool from the package root", async () => {
-    const root = await import("../src/index");
+    const root = await import("smithers");
 
     expect(root.defineTool).toBe(defineTool);
     expect(root.getDefinedToolMetadata).toBe(getDefinedToolMetadata);
