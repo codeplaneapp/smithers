@@ -69,10 +69,10 @@ function spawnHangingRun(params: {
   counterPath: string;
   runId: string;
 }) {
-  const entryPath = resolve(import.meta.dir, "../src/index.ts");
+  const smithersPath = resolve(import.meta.dir, "../../smithers/src/index.ts");
   const script = `
 import React from "react";
-import { createSmithers, Task, Workflow, runWorkflow } from ${JSON.stringify(entryPath)};
+import { createSmithers, Task, Workflow, runWorkflow } from ${JSON.stringify(smithersPath)};
 import { z } from "zod";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
