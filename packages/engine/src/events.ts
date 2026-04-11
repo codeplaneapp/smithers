@@ -132,7 +132,7 @@ export class EventBus extends EventEmitter {
     return fromPromise("enqueue event persistence", () => task);
   }
 
-  private persistDbEffect(event: CorrelatedSmithersEvent) {
+  private persistDbEffect(event: CorrelatedSmithersEvent): Effect.Effect<void> {
     if (!this.db) return Effect.void;
     const payloadJson = JSON.stringify(event);
     if (typeof this.db.insertEventWithNextSeq === "function") {
@@ -141,7 +141,7 @@ export class EventBus extends EventEmitter {
         timestampMs: event.timestampMs,
         type: event.type,
         payloadJson,
-      });
+      }) as Effect.Effect<void>;
     }
     if (typeof this.db.insertEvent === "function") {
       return this.db.insertEvent({
@@ -150,7 +150,7 @@ export class EventBus extends EventEmitter {
         timestampMs: event.timestampMs,
         type: event.type,
         payloadJson,
-      });
+      }) as Effect.Effect<void>;
     }
     return Effect.void;
   }

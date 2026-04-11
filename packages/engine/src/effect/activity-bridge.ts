@@ -1,18 +1,10 @@
 import * as Activity from "@effect/workflow/Activity";
-import * as Workflow from "@effect/workflow/Workflow";
-import * as WorkflowEngine from "@effect/workflow/WorkflowEngine";
-import { Cause, Effect, Exit, Layer, Schema } from "effect";
+import { Effect } from "effect";
 import type { SmithersDb } from "@smithers/db/adapter";
 import type { TaskDescriptor } from "@smithers/graph/TaskDescriptor";
 
-const TaskBridgeWorkflow = Workflow.make({
-  name: "SmithersTaskBridge",
-  payload: { executionId: Schema.String },
-  success: Schema.Unknown,
-  idempotencyKey: ({ executionId }) => executionId,
-});
-
 const adapterNamespaces = new WeakMap<object, string>();
+const completedActivityResults = new Map<string, unknown>();
 let nextAdapterNamespace = 0;
 
 const getAdapterNamespace = (adapter: SmithersDb): string => {
@@ -72,6 +64,18 @@ export const makeTaskBridgeKey = (
     String(desc.iteration),
   ].join(":");
 
+const makeActivityIdempotencyKey = (
+  adapter: SmithersDb,
+  workflowName: string,
+  runId: string,
+  desc: TaskDescriptor,
+  attempt: number,
+  includeAttempt?: boolean,
+): string => {
+  const base = makeTaskBridgeKey(adapter, workflowName, runId, desc);
+  return includeAttempt ? `${base}:attempt:${attempt}` : base;
+};
+
 export const makeTaskActivity = <A>(
   desc: TaskDescriptor,
   executeFn: (context: TaskActivityContext) => Promise<A> | A,
@@ -93,33 +97,6 @@ export const makeTaskActivity = <A>(
     }),
   });
 
-const runTaskActivityAttempt = async <A>(
-  activity: ReturnType<typeof makeTaskActivity<A>>,
-  instance: WorkflowEngine.WorkflowInstance["Type"],
-  attempt: number,
-): Promise<A> => {
-  const exit = await Effect.runPromiseExit(
-    activity.pipe(
-      Effect.provide(
-        Layer.mergeAll(
-          Layer.succeed(Activity.CurrentAttempt, attempt),
-          Layer.succeed(WorkflowEngine.WorkflowInstance, instance),
-        ),
-      ),
-    ) as Effect.Effect<A, unknown, never>,
-  );
-
-  if (Exit.isSuccess(exit)) {
-    return exit.value;
-  }
-
-  const failure = Cause.failureOption(exit.cause);
-  if (failure._tag === "Some") {
-    throw failure.value;
-  }
-  throw Cause.squash(exit.cause);
-};
-
 export const executeTaskActivity = async <A>(
   adapter: SmithersDb,
   workflowName: string,
@@ -128,11 +105,6 @@ export const executeTaskActivity = async <A>(
   executeFn: (context: TaskActivityContext) => Promise<A> | A,
   options?: ExecuteTaskActivityOptions,
 ): Promise<A> => {
-  const activity = makeTaskActivity(desc, executeFn, options);
-  const instance = WorkflowEngine.WorkflowInstance.initial(
-    TaskBridgeWorkflow,
-    makeTaskBridgeKey(adapter, workflowName, runId, desc),
-  );
   const initialAttempt = Math.max(1, options?.initialAttempt ?? 1);
   const retry = options?.retry === undefined
     ? { times: desc.retries, while: isRetriableTaskFailure }
@@ -140,8 +112,22 @@ export const executeTaskActivity = async <A>(
 
   let attempt = initialAttempt;
   while (true) {
+    const idempotencyKey = makeActivityIdempotencyKey(
+      adapter,
+      workflowName,
+      runId,
+      desc,
+      attempt,
+      options?.includeAttemptInIdempotencyKey,
+    );
+    if (completedActivityResults.has(idempotencyKey)) {
+      return completedActivityResults.get(idempotencyKey) as A;
+    }
+
     try {
-      return await runTaskActivityAttempt(activity, instance, attempt);
+      const result = await Promise.resolve(executeFn({ attempt, idempotencyKey }));
+      completedActivityResults.set(idempotencyKey, result);
+      return result;
     } catch (error) {
       if (
         retry === false ||

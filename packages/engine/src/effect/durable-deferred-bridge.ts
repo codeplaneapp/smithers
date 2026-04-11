@@ -185,8 +185,8 @@ const makeWorkflowInstance = (executionId: string) =>
     executionId,
   );
 
-async function runBridgeEffect<A, E, R>(
-  effect: Effect.Effect<A, E, R>,
+async function runBridgeEffect<A, E>(
+  effect: Effect.Effect<A, E>,
 ): Promise<A> {
   const exit = await Effect.runPromiseExit(effect);
   if (Exit.isSuccess(exit)) {

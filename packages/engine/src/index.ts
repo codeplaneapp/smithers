@@ -4773,7 +4773,7 @@ async function runWorkflowBodyDriver<Schema>(
     maxOutputBytes,
     toolTimeoutMs,
   };
-  let frameNo = (await Effect.runPromise(adapter.getLastFrame(runId))?.frameNo ?? 0);
+  let frameNo = ((await adapter.getLastFrame(runId))?.frameNo ?? 0);
   let defaultIteration = 0;
   let workflowRef = workflow;
   let lastGraph: WorkflowGraph | null = null;
@@ -6365,7 +6365,7 @@ async function runWorkflowBodyLegacy<Schema>(
 
     const disabledAgents = new Set<any>();
     const renderer = new SmithersRenderer();
-    let frameNo = (await Effect.runPromise(adapter.getLastFrame(runId))?.frameNo ?? 0);
+    let frameNo = ((await adapter.getLastFrame(runId))?.frameNo ?? 0);
     let defaultIteration = 0;
     let prevMountedTaskIds: Set<string> = new Set();
 
@@ -6411,7 +6411,7 @@ async function runWorkflowBodyLegacy<Schema>(
     const workflowSessionTaskNotifications = new Set<string>();
     const runWorkflowSessionShadow = async (
       operation: string,
-      makeEffect: () => Effect.Effect<EngineDecision, unknown, unknown>,
+      makeEffect: () => Effect.Effect<EngineDecision, unknown>,
       context: Readonly<Record<string, unknown>> = {},
     ): Promise<EngineDecision | null> => {
       if (!workflowSessionShadow) {
