@@ -1,6 +1,9 @@
 import * as Command from "@effect/platform/Command";
-import { Duration, Effect, Fiber, Metric, Stream } from "effect";
+import * as BunContext from "@effect/platform-bun/BunContext";
+import { Duration, Effect, Fiber, Layer, Metric, Stream } from "effect";
 import { vcsDuration } from "@smithers/observability/metrics";
+
+const platformLayer = BunContext.layer;
 
 /**
  * Cross-version-safe JJ helpers.
@@ -81,7 +84,7 @@ export function runJj(
   args: string[],
   opts: RunJjOptions = {},
 ): Promise<RunJjResult> {
-  return Effect.runPromise(runJjEffect(args, opts));
+  return Effect.runPromise(runJjEffect(args, opts).pipe(Effect.provide(platformLayer)));
 }
 
 function jjError(res: RunJjResult): string {
@@ -117,7 +120,7 @@ export function getJjPointerEffect(cwd?: string) {
 }
 
 export function getJjPointer(cwd?: string): Promise<string | null> {
-  return Effect.runPromise(getJjPointerEffect(cwd));
+  return Effect.runPromise(getJjPointerEffect(cwd).pipe(Effect.provide(platformLayer)));
 }
 
 export type JjRevertResult = {
@@ -148,7 +151,7 @@ export function revertToJjPointer(
   pointer: string,
   cwd?: string,
 ): Promise<JjRevertResult> {
-  return Effect.runPromise(revertToJjPointerEffect(pointer, cwd));
+  return Effect.runPromise(revertToJjPointerEffect(pointer, cwd).pipe(Effect.provide(platformLayer)));
 }
 
 /**
@@ -165,7 +168,7 @@ export function isJjRepoEffect(cwd?: string) {
 }
 
 export function isJjRepo(cwd?: string): Promise<boolean> {
-  return Effect.runPromise(isJjRepoEffect(cwd));
+  return Effect.runPromise(isJjRepoEffect(cwd).pipe(Effect.provide(platformLayer)));
 }
 
 export type WorkspaceAddOptions = {
@@ -242,7 +245,7 @@ export function workspaceAdd(
   path: string,
   opts: WorkspaceAddOptions = {},
 ): Promise<WorkspaceResult> {
-  return Effect.runPromise(workspaceAddEffect(name, path, opts));
+  return Effect.runPromise(workspaceAddEffect(name, path, opts).pipe(Effect.provide(platformLayer)));
 }
 
 export type WorkspaceInfo = {
@@ -290,7 +293,7 @@ export function workspaceListEffect(
 }
 
 export function workspaceList(cwd?: string): Promise<WorkspaceInfo[]> {
-  return Effect.runPromise(workspaceListEffect(cwd));
+  return Effect.runPromise(workspaceListEffect(cwd).pipe(Effect.provide(platformLayer)));
 }
 
 /**
@@ -315,5 +318,5 @@ export function workspaceClose(
   name: string,
   opts: { cwd?: string } = {},
 ): Promise<WorkspaceResult> {
-  return Effect.runPromise(workspaceCloseEffect(name, opts));
+  return Effect.runPromise(workspaceCloseEffect(name, opts).pipe(Effect.provide(platformLayer)));
 }
