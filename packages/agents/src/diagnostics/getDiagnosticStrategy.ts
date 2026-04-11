@@ -362,8 +362,11 @@ const googleAuthCheck: DiagnosticCheckDef = {
       // Probe the models endpoint to validate the key
       try {
         const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
-          { signal: AbortSignal.timeout(4_000) },
+          "https://generativelanguage.googleapis.com/v1beta/models",
+          {
+            headers: { "x-goog-api-key": apiKey },
+            signal: AbortSignal.timeout(4_000),
+          },
         );
         const elapsed = performance.now() - start;
 
@@ -432,8 +435,11 @@ const googleRateLimitCheck: DiagnosticCheckDef = {
 
     try {
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
-        { signal: AbortSignal.timeout(4_000) },
+        "https://generativelanguage.googleapis.com/v1beta/models",
+        {
+          headers: { "x-goog-api-key": apiKey },
+          signal: AbortSignal.timeout(4_000),
+        },
       );
       const elapsed = performance.now() - start;
 

@@ -4,6 +4,7 @@ import {
   pushFlag,
 } from "./BaseCliAgent";
 import type { BaseCliAgentOptions } from "./BaseCliAgent";
+import type { AgentCapabilityRegistry } from "./capability-registry";
 import { randomUUID } from "node:crypto";
 
 type ForgeAgentOptions = BaseCliAgentOptions & {
@@ -19,14 +20,38 @@ type ForgeAgentOptions = BaseCliAgentOptions & {
   conversation?: string;
 };
 
+export function createForgeCapabilityRegistry(): AgentCapabilityRegistry {
+  return {
+    version: 1,
+    engine: "forge",
+    runtimeTools: {},
+    mcp: {
+      bootstrap: "unsupported",
+      supportsProjectScope: false,
+      supportsUserScope: false,
+    },
+    skills: {
+      supportsSkills: false,
+      smithersSkillIds: [],
+    },
+    humanInteraction: {
+      supportsUiRequests: false,
+      methods: [],
+    },
+    builtIns: ["default"],
+  };
+}
+
 export class ForgeAgent extends BaseCliAgent {
   private readonly opts: ForgeAgentOptions;
+  readonly capabilities: AgentCapabilityRegistry;
   readonly cliEngine = "forge";
   private issuedConversationId?: string;
 
   constructor(opts: ForgeAgentOptions = {}) {
     super(opts);
     this.opts = opts;
+    this.capabilities = createForgeCapabilityRegistry();
   }
 
   protected createOutputInterpreter(): CliOutputInterpreter {

@@ -1,4 +1,5 @@
 import {
+  type AgentCliActionKind,
   type AgentCliEvent,
   BaseCliAgent,
   type CliOutputInterpreter,
@@ -188,6 +189,8 @@ export class AmpAgent extends BaseCliAgent {
       }
 
       if (type === "result") {
+        if (didEmitCompleted) return [];
+        didEmitCompleted = true;
         const ok = payload.is_error !== true;
         return [{
           type: "completed",
@@ -206,7 +209,9 @@ export class AmpAgent extends BaseCliAgent {
     return {
       onStdoutLine: parseLine,
       onExit: (result) => {
+        if (didEmitCompleted) return [];
         if (result.exitCode === 0) return [];
+        didEmitCompleted = true;
         return [{
           type: "completed",
           engine: this.cliEngine,

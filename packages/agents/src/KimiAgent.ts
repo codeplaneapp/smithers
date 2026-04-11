@@ -3,12 +3,15 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import {
-  type AgentCliActionKind,
   type AgentCliEvent,
   BaseCliAgent,
   type CliOutputInterpreter,
   pushFlag,
   pushList,
+  isRecord,
+  asString,
+  toolKindFromName,
+  createSyntheticIdGenerator,
 } from "./BaseCliAgent";
 import type { BaseCliAgentOptions } from "./BaseCliAgent";
 import {
@@ -81,34 +84,9 @@ export class KimiAgent extends BaseCliAgent {
 
   protected createOutputInterpreter(): CliOutputInterpreter {
     let emittedStarted = false;
+    let didEmitCompleted = false;
     let finalAnswer = "";
-    let syntheticCounter = 0;
-
-    const nextSyntheticId = (prefix: string) => {
-      syntheticCounter += 1;
-      return `${prefix}-${syntheticCounter}`;
-    };
-
-    const asString = (value: unknown) =>
-      typeof value === "string" ? value : undefined;
-
-    const isRecord = (value: unknown): value is Record<string, unknown> =>
-      Boolean(value) && typeof value === "object" && !Array.isArray(value);
-
-    const toolKindForKimi = (name: string | undefined): AgentCliActionKind => {
-      const normalized = (name ?? "").toLowerCase();
-      if (!normalized) return "tool";
-      if (normalized.includes("shell") || normalized.includes("bash") || normalized.includes("command")) {
-        return "command";
-      }
-      if (normalized.includes("search") || normalized.includes("web")) {
-        return "web_search";
-      }
-      if (normalized.includes("todo")) {
-        return "todo_list";
-      }
-      return "tool";
-    };
+    const nextSyntheticId = createSyntheticIdGenerator();
 
     const parseLine = (line: string): AgentCliEvent[] => {
       const trimmed = line.trim();
@@ -154,7 +132,7 @@ export class KimiAgent extends BaseCliAgent {
             entryType: "thought",
             action: {
               id,
-              kind: toolKindForKimi(name),
+              kind: toolKindFromName(name),
               title: name,
               detail: {
                 arguments: asString(fn?.arguments),
@@ -190,17 +168,21 @@ export class KimiAgent extends BaseCliAgent {
 
     return {
       onStdoutLine: parseLine,
-      onExit: (result) => [{
-        type: "completed",
-        engine: this.cliEngine,
-        ok: !result.exitCode || result.exitCode === 0,
-        answer: finalAnswer || undefined,
-        error:
-          result.exitCode && result.exitCode !== 0
-            ? result.stderr.trim() || `Kimi exited with code ${result.exitCode}`
-            : undefined,
-        resume: this.issuedSessionId,
-      }],
+      onExit: (result) => {
+        if (didEmitCompleted) return [];
+        didEmitCompleted = true;
+        return [{
+          type: "completed",
+          engine: this.cliEngine,
+          ok: !result.exitCode || result.exitCode === 0,
+          answer: finalAnswer || undefined,
+          error:
+            result.exitCode && result.exitCode !== 0
+              ? result.stderr.trim() || `Kimi exited with code ${result.exitCode}`
+              : undefined,
+          resume: this.issuedSessionId,
+        }];
+      },
     };
   }
 
@@ -265,7 +247,6 @@ export class KimiAgent extends BaseCliAgent {
     pushFlag(args, "--model", this.opts.model ?? this.model);
     const thinking = this.opts.thinking ?? true;
     args.push(thinking ? "--thinking" : "--no-thinking");
-    if (this.opts.finalMessageOnly) args.push("--final-message-only");
     if (this.opts.quiet) args.push("--quiet");
     pushFlag(args, "--agent", this.opts.agent);
     pushFlag(args, "--agent-file", this.opts.agentFile);

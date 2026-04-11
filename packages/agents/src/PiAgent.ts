@@ -1,21 +1,20 @@
 import type { GenerateTextResult } from "ai";
 import { Effect } from "effect";
 import {
-  type AgentCliActionKind,
   type AgentCliEvent,
   BaseCliAgent,
   buildGenerateResult,
   combineNonEmpty,
-  createAgentStdoutTextEmitter,
   type CliOutputInterpreter,
   extractPrompt,
   extractTextFromJsonValue,
-  extractTextFromPiNdjson,
   pushFlag,
   resolveTimeouts,
-  runCommandEffect,
   runRpcCommandEffect,
   tryParseJson,
+  asString,
+  truncate,
+  toolKindFromName,
 } from "./BaseCliAgent";
 import type {
   BaseCliAgentOptions,
@@ -30,7 +29,7 @@ import { fromPromise } from "@smithers/runtime/interop";
 import { runPromise } from "@smithers/runtime/runtime";
 import { getToolContext } from "@smithers/tools/context";
 import { SmithersError } from "@smithers/core/errors";
-import { enrichReportWithErrorAnalysis, formatDiagnosticSummary, launchDiagnostics } from "./diagnostics";
+import { enrichReportWithErrorAnalysis, launchDiagnostics } from "./diagnostics";
 
 export type { PiExtensionUiRequest, PiExtensionUiResponse };
 
@@ -237,39 +236,15 @@ export class PiAgent extends BaseCliAgent {
     let emittedStarted = false;
     let finalAnswer = "";
 
-    const asString = (value: unknown) =>
-      typeof value === "string" ? value : undefined;
-
-    const truncate = (value: string, maxLength = 400) =>
-      value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
-
     const summarizeValue = (value: unknown) => {
       if (value == null) return undefined;
       const text = extractTextFromJsonValue(value);
-      if (text) return truncate(text);
+      if (text) return truncate(text, 400);
       try {
-        return truncate(JSON.stringify(value));
+        return truncate(JSON.stringify(value), 400);
       } catch {
-        return truncate(String(value));
+        return truncate(String(value), 400);
       }
-    };
-
-    const toolKindForPi = (name: string | undefined): AgentCliActionKind => {
-      const normalized = (name ?? "").toLowerCase();
-      if (!normalized) return "tool";
-      if (normalized.includes("bash") || normalized.includes("shell") || normalized.includes("command")) {
-        return "command";
-      }
-      if (normalized.includes("search") || normalized.includes("web")) {
-        return "web_search";
-      }
-      if (normalized.includes("todo") || normalized.includes("plan")) {
-        return "todo_list";
-      }
-      if (normalized.includes("write") || normalized.includes("edit") || normalized.includes("file")) {
-        return "file_change";
-      }
-      return "tool";
     };
 
     const startedEvents = (detail?: Record<string, unknown>): AgentCliEvent[] => {
@@ -343,7 +318,7 @@ export class PiAgent extends BaseCliAgent {
             entryType: "thought",
             action: {
               id: toolId,
-              kind: toolKindForPi(toolName),
+              kind: toolKindFromName(toolName),
               title: toolName,
               detail: {
                 args: (payload as any).args,
@@ -367,7 +342,7 @@ export class PiAgent extends BaseCliAgent {
             entryType: "thought",
             action: {
               id: toolId,
-              kind: toolKindForPi(toolName),
+              kind: toolKindFromName(toolName),
               title: toolName,
               detail: {
                 args: (payload as any).args,
@@ -392,7 +367,7 @@ export class PiAgent extends BaseCliAgent {
             entryType: "thought",
             action: {
               id: toolId,
-              kind: toolKindForPi(toolName),
+              kind: toolKindFromName(toolName),
               title: toolName,
               detail: {
                 result: summarizeValue((payload as any).result),
@@ -433,6 +408,19 @@ export class PiAgent extends BaseCliAgent {
   }
 
   async generate(options: any): Promise<GenerateTextResult<any, any>> {
+    const mode = this.resolveMode(options);
+
+    // Non-RPC modes delegate to BaseCliAgent.generate() which handles
+    // metrics, diagnostics, and the full process lifecycle.
+    if (mode !== "rpc") {
+      return super.generate(options);
+    }
+
+    // RPC mode requires a custom transport (stdin/stdout JSON-RPC).
+    if (this.opts.files?.length) {
+      throw new SmithersError("AGENT_RPC_FILE_ARGS", "RPC mode does not support file arguments");
+    }
+
     const { prompt } = extractPrompt(options);
     const callTimeouts = resolveTimeouts(options?.timeout, {
       totalMs: this.timeoutMs,
@@ -440,12 +428,6 @@ export class PiAgent extends BaseCliAgent {
     });
     const cwd = this.cwd ?? getToolContext()?.rootDir ?? process.cwd();
     const env = { ...process.env, ...this.env } as Record<string, string>;
-    const mode = this.resolveMode(options);
-
-    if (mode === "rpc" && this.opts.files?.length) {
-      throw new SmithersError("AGENT_RPC_FILE_ARGS", "RPC mode does not support file arguments");
-    }
-
     const args = this.buildArgs({ prompt, cwd, options, mode });
     const diagnosticsPromise = launchDiagnostics("pi", env, cwd);
 
@@ -460,109 +442,15 @@ export class PiAgent extends BaseCliAgent {
       }
     };
 
-    const diagnosticsEnrichment = (err: Error) =>
+    const diagnosticsEnrichment = (err: unknown) =>
       fromPromise("enrich diagnostics", async () => {
         if (!diagnosticsPromise) return;
         const report = await diagnosticsPromise.catch(() => null);
         if (report && err instanceof SmithersError) {
           enrichReportWithErrorAnalysis(report, err.message);
           err.details = { ...err.details, diagnostics: report };
-          console.warn(formatDiagnosticSummary(report));
         }
       }).pipe(Effect.ignore);
-
-    if (mode !== "rpc") {
-      const stdoutEmitter = createAgentStdoutTextEmitter({
-        outputFormat: mode,
-        onText: options?.onStdout,
-      });
-      let stdoutBuffer = "";
-      let stderrBuffer = "";
-
-      const flushBufferedLines = (
-        stream: "stdout" | "stderr",
-        includePartial: boolean,
-      ) => {
-        let buffer = stream === "stdout" ? stdoutBuffer : stderrBuffer;
-        const lines = buffer.split("\n");
-        if (!includePartial) {
-          buffer = lines.pop() ?? "";
-        } else {
-          buffer = "";
-        }
-
-        for (const line of lines) {
-          if (!line) continue;
-          emitEvents(
-            stream === "stdout"
-              ? interpreter.onStdoutLine?.(line)
-              : interpreter.onStderrLine?.(line),
-          );
-        }
-
-        if (stream === "stdout") {
-          stdoutBuffer = buffer;
-        } else {
-          stderrBuffer = buffer;
-        }
-      };
-
-      const handleInterpreterChunk = (
-        stream: "stdout" | "stderr",
-        chunk: string,
-      ) => {
-        if (!chunk) return;
-        if (stream === "stdout") {
-          stdoutBuffer += chunk;
-        } else {
-          stderrBuffer += chunk;
-        }
-        flushBufferedLines(stream, false);
-      };
-
-      const nonRpcProgram = Effect.gen(this, function* () {
-        const result = yield* runCommandEffect("pi", args, {
-          cwd,
-          env,
-          timeoutMs: callTimeouts.totalMs,
-          idleTimeoutMs: callTimeouts.idleMs,
-          signal: options?.abortSignal,
-          maxOutputBytes: this.maxOutputBytes ?? getToolContext()?.maxOutputBytes,
-          onStdout: (chunk) => {
-            stdoutEmitter.push(chunk);
-            handleInterpreterChunk("stdout", chunk);
-          },
-          onStderr: (chunk) => {
-            options?.onStderr?.(chunk);
-            handleInterpreterChunk("stderr", chunk);
-          },
-        });
-
-        flushBufferedLines("stdout", true);
-        flushBufferedLines("stderr", true);
-        emitEvents(interpreter.onExit?.(result));
-
-        if (result.exitCode && result.exitCode !== 0) {
-          return yield* Effect.fail(new SmithersError(
-            "AGENT_CLI_ERROR",
-            result.stderr.trim() || result.stdout.trim() || `CLI exited with code ${result.exitCode}`,
-          ));
-        }
-
-        const rawText = result.stdout.trim();
-        const extractedText = mode === "json"
-          ? (extractTextFromPiNdjson(rawText) ?? rawText)
-          : rawText;
-        stdoutEmitter.flush(extractedText);
-        const output = tryParseJson(extractedText);
-        return buildGenerateResult(extractedText, output, this.opts.model ?? "pi");
-      }).pipe(
-        Effect.ensuring(Effect.sync(() => { stdoutEmitter.flush(); })),
-        Effect.tapError(diagnosticsEnrichment),
-      );
-
-      return runPromise(nonRpcProgram);
-    }
 
     const rpcProgram = Effect.gen(this, function* () {
       const rpcResult = yield* runRpcCommandEffect("pi", args, {

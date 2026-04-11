@@ -24,7 +24,6 @@ import { launchDiagnostics, enrichReportWithErrorAnalysis, formatDiagnosticSumma
 import type { BaseCliAgentOptions } from "./BaseCliAgentOptions";
 import type { AgentCliEvent } from "./AgentCliEvent";
 import type { CliOutputInterpreter } from "./CliOutputInterpreter";
-import type { CliUsageInfo } from "./CliUsageInfo";
 import type { RunCommandResult } from "./RunCommandResult";
 import { extractPrompt } from "./extractPrompt";
 import { resolveTimeouts } from "./resolveTimeouts";
@@ -54,6 +53,14 @@ type AgentStdoutTextEmitter = {
 };
 
 type AgentInvocationOperation = "generate" | "stream";
+
+type CliUsageInfo = {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
+};
 
 type AgentInvocationTags = {
   source: "adapter";
@@ -825,7 +832,7 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
             if (report && err instanceof SmithersError) {
               enrichReportWithErrorAnalysis(report, err.message);
               err.details = { ...err.details, diagnostics: report };
-              console.warn(formatDiagnosticSummary(report));
+              logWarning(formatDiagnosticSummary(report), {}, span);
             }
           }).pipe(Effect.ignore),
         ], { discard: true }),
