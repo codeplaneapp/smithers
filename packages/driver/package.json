@@ -80,6 +80,7 @@
     "@smithers/core": "workspace:*",
     "@smithers/errors": "workspace:*",
     "@smithers/graph": "workspace:*",
+    "@smithers/observability": "workspace:*",
     "@smithers/scheduler": "workspace:*",
     "effect": "^3.21.0",
     "zod": "^4.3.6"
