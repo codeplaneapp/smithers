@@ -5,7 +5,7 @@
  * so ensureWorktree creates jj workspaces and getJjPointer works.
  */
 import { describe, expect, test, afterEach } from "bun:test";
-import { findVcsRoot } from "../src/vcs/find-root";
+import { findVcsRoot } from "../src/find-root";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

@@ -2,7 +2,7 @@ import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { findVcsRoot } from "../src/vcs/find-root";
+import { findVcsRoot } from "../src/find-root";
 
 const TMP = join(tmpdir(), `smithers-vcs-root-test-${Date.now()}`);
 

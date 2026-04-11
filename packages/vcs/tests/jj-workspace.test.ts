@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
-import * as vcs from "../src/vcs/jj";
+import * as vcs from "../src/jj";
 
 async function withFakeJj(script: string, fn: () => Promise<void>) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "jj-bin-"));

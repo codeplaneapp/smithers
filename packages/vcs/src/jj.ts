@@ -1,7 +1,7 @@
 import * as Command from "@effect/platform/Command";
 import { Effect, Fiber, Metric, Stream } from "effect";
-import { runPromise } from "../effect/runtime";
-import { vcsDuration } from "../effect/metrics";
+import { runPromise } from "@smithers/runtime/runtime";
+import { vcsDuration } from "@smithers/observability/metrics";
 
 /**
  * Cross-version-safe JJ helpers.

@@ -1,0 +1,34 @@
+{
+  "name": "@smithers/vcs",
+  "version": "0.0.0",
+  "description": "VCS discovery and jj workspace operations for Smithers",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "types": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@smithers/core": "workspace:*",
+    "@smithers/runtime": "workspace:*",
+    "@smithers/observability": "workspace:*",
+    "@effect/platform": "^0.96.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "~5.9.3"
+  }
+}
