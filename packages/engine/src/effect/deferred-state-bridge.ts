@@ -647,7 +647,7 @@ async function resolveTimerTaskStateBridge(
     );
     const nodeState = immediateFire ? "finished" : "waiting-timer";
 
-    await Effect.runPromise(adapter.withTransaction(
+    await adapter.withTransaction(
       "timer-start",
       Effect.gen(function* () {
         yield* adapter.insertAttempt({
@@ -676,7 +676,7 @@ async function resolveTimerTaskStateBridge(
           label: desc.label ?? null,
         });
       }),
-    ));
+    );
 
     await eventBus.emitEventWithPersist({
       type: "TimerCreated",
@@ -740,7 +740,7 @@ async function resolveTimerTaskStateBridge(
       ...snapshot,
       firedAtMs,
     };
-    await Effect.runPromise(adapter.withTransaction(
+    await adapter.withTransaction(
       "timer-fire",
       Effect.gen(function* () {
         yield* adapter.updateAttempt(
@@ -765,7 +765,7 @@ async function resolveTimerTaskStateBridge(
           label: desc.label ?? null,
         });
       }),
-    ));
+    );
     await eventBus.emitEventWithPersist({
       type: "TimerFired",
       runId,
@@ -842,7 +842,7 @@ async function failWaitForEventTaskBridge(
 ): Promise<DeferredBridgeResolution> {
   const finishedAtMs = nowMs();
   const errorJson = JSON.stringify(errorToJson(error));
-  await Effect.runPromise(adapter.withTransaction(
+  await adapter.withTransaction(
     "wait-event-fail",
     Effect.gen(function* () {
       yield* adapter.updateAttempt(
@@ -868,7 +868,7 @@ async function failWaitForEventTaskBridge(
         label: desc.label ?? null,
       });
     }),
-  ));
+  );
   if (shouldClearAsyncWaitMetric(snapshot)) {
     await updateAsyncExternalWaitPendingSafe("event", -1);
   }
@@ -886,7 +886,7 @@ async function finishWaitForEventTaskBridge(
 ): Promise<DeferredBridgeResolution> {
   const outputPayload = validateDeferredOutputPayload(desc, runId, payload);
   const finishedAtMs = nowMs();
-  await Effect.runPromise(adapter.withTransaction(
+  await adapter.withTransaction(
     "wait-event-finish",
     Effect.gen(function* () {
       yield* adapter.upsertOutputRow(
@@ -917,7 +917,7 @@ async function finishWaitForEventTaskBridge(
         label: desc.label ?? null,
       });
     }),
-  ));
+  );
   if (shouldClearAsyncWaitMetric(snapshot)) {
     await updateAsyncExternalWaitPendingSafe("event", -1);
   }
@@ -962,7 +962,7 @@ async function resolveWaitForEventTimeoutBridge(
   }
 
   if (snapshot.onTimeout === "skip") {
-    await Effect.runPromise(adapter.withTransaction(
+    await adapter.withTransaction(
       "wait-event-skip",
       Effect.gen(function* () {
         yield* adapter.updateAttempt(
@@ -988,7 +988,7 @@ async function resolveWaitForEventTimeoutBridge(
           label: desc.label ?? null,
         });
       }),
-    ));
+    );
     if (shouldClearAsyncWaitMetric(timeoutSnapshot)) {
       await updateAsyncExternalWaitPendingSafe("event", -1);
     }
@@ -1089,7 +1089,7 @@ async function resolveWaitForEventTaskStateBridge(
   if (!latest) {
     const snapshot = buildWaitForEventSnapshot(desc, now);
     const metaJson = JSON.stringify(buildWaitForEventAttemptMeta(snapshot));
-    await Effect.runPromise(adapter.withTransaction(
+    await adapter.withTransaction(
       "wait-event-start",
       Effect.gen(function* () {
         yield* adapter.insertAttempt({
@@ -1118,7 +1118,7 @@ async function resolveWaitForEventTaskStateBridge(
           label: desc.label ?? null,
         });
       }),
-    ));
+    );
     if (snapshot.waitAsync) {
       await updateAsyncExternalWaitPendingSafe("event", 1);
     }
@@ -1560,7 +1560,7 @@ export async function cancelPendingTimersBridge(
     if (!waiting) continue;
 
     const cancelledAtMs = nowMs();
-    await Effect.runPromise(adapter.withTransaction(
+    await adapter.withTransaction(
       "cancel-pending-timer",
       Effect.gen(function* () {
         yield* adapter.updateAttempt(
@@ -1584,7 +1584,7 @@ export async function cancelPendingTimersBridge(
           label: node.label ?? null,
         });
       }),
-    ));
+    );
     await eventBus.emitEventWithPersist({
       type: "TimerCancelled",
       runId,

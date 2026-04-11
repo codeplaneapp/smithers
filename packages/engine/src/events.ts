@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import * as FileSystem from "@effect/platform/FileSystem";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect } from "effect";
 import type { SmithersEvent } from "@smithers/observability/SmithersEvent";
@@ -158,14 +158,23 @@ export class EventBus extends EventEmitter {
   private persistLogEffect(event: CorrelatedSmithersEvent) {
     if (!this.logDir) return Effect.void;
     const dir = this.logDir;
-    return Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      yield* fs.makeDirectory(dir, { recursive: true });
+    return fromPromise("append event log", async () => {
+      await mkdir(dir, { recursive: true });
       const file = join(dir, "stream.ndjson");
       const line = JSON.stringify(event) + "\n";
-      const current = yield* Effect.option(fs.readFileString(file, "utf8"));
-      const prefix = current._tag === "Some" ? current.value : "";
-      yield* fs.writeFileString(file, prefix + line);
+      let prefix = "";
+      try {
+        prefix = await readFile(file, "utf8");
+      } catch (error) {
+        if (
+          !error ||
+          typeof error !== "object" ||
+          (error as NodeJS.ErrnoException).code !== "ENOENT"
+        ) {
+          throw error;
+        }
+      }
+      await writeFile(file, prefix + line);
     });
   }
 
