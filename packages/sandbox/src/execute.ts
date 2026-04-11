@@ -2,7 +2,7 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect, Metric } from "effect";
 import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
-import type { SmithersEvent } from "@smithers/core/SmithersEvent";
+import type { SmithersEvent } from "@smithers/observability/SmithersEvent";
 import { SmithersDb } from "@smithers/db/adapter";
 import { trackEvent, sandboxTransportDurationMs } from "@smithers/observability/metrics";
 import { runPromise } from "@smithers/runtime/runtime";
