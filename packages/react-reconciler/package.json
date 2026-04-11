@@ -13,6 +13,10 @@
       "types": "./src/context.ts",
       "default": "./src/context.ts"
     },
+    "./devtools": {
+      "types": "./src/devtools/index.ts",
+      "default": "./src/devtools/index.ts"
+    },
     "./driver": {
       "types": "./src/driver.ts",
       "default": "./src/driver.ts"
@@ -34,6 +38,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@smithers/devtools": "workspace:*",
     "@smithers/driver": "workspace:*",
     "@smithers/errors": "workspace:*",
     "@smithers/graph": "workspace:*",
