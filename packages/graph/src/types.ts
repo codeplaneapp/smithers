@@ -1,3 +1,6 @@
+import type { z } from "zod";
+import type { AgentCapabilityRegistry } from "@smithers/core/agents/capability-registry";
+
 export type XmlNode = XmlElement | XmlText;
 
 export type XmlElement = {
@@ -28,79 +31,140 @@ export type HostText = {
 };
 
 export type RetryPolicy = {
-  readonly backoff?: "fixed" | "linear" | "exponential";
-  readonly initialDelayMs?: number;
-  readonly maxDelayMs?: number;
-  readonly multiplier?: number;
-  readonly jitter?: boolean;
+  backoff?: "fixed" | "linear" | "exponential";
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  multiplier?: number;
+  jitter?: boolean;
 };
 
-export type CachePolicy = {
-  readonly key?: string;
-  readonly ttlMs?: number;
-  readonly scope?: "run" | "workflow" | "global";
-  readonly [key: string]: unknown;
+export type CachePolicy<Ctx = any> = {
+  by?: (ctx: Ctx) => unknown;
+  version?: string;
+  key?: string;
+  ttlMs?: number;
+  scope?: "run" | "workflow" | "global";
+  [key: string]: unknown;
 };
 
 export type VoiceProvider = unknown;
-export type AgentLike = unknown;
+export type AgentLike = {
+  id?: string;
+  tools?: Record<string, any>;
+  capabilities?: AgentCapabilityRegistry;
+  generate: (args: any) => Promise<any>;
+};
+
+export type ScoreResult = {
+  score: number;
+  reason?: string;
+  meta?: Record<string, unknown>;
+};
+
+export type ScorerInput = {
+  input: unknown;
+  output: unknown;
+  groundTruth?: unknown;
+  context?: unknown;
+  latencyMs?: number;
+  outputSchema?: z.ZodObject<any>;
+};
+
+export type ScorerFn = (input: ScorerInput) => Promise<ScoreResult>;
+
+export type Scorer = {
+  id: string;
+  name: string;
+  description: string;
+  score: ScorerFn;
+};
+
+export type SamplingConfig =
+  | { type: "all" }
+  | { type: "ratio"; rate: number }
+  | { type: "none" };
+
+export type ScorerBinding = {
+  scorer: Scorer;
+  sampling?: SamplingConfig;
+};
+
 export type ScorersMap = Record<string, unknown>;
-export type TaskMemoryConfig = Record<string, unknown>;
+
+export type MemoryNamespaceKind = "workflow" | "agent" | "user" | "global";
+
+export type MemoryNamespace = {
+  kind: MemoryNamespaceKind;
+  id: string;
+};
+
+export type TaskMemoryConfig = {
+  recall?: {
+    namespace?: MemoryNamespace;
+    query?: string;
+    topK?: number;
+  };
+  remember?: {
+    namespace?: MemoryNamespace;
+    key?: string;
+  };
+  threadId?: string;
+};
 
 export type ApprovalOption = {
-  readonly key: string;
-  readonly label: string;
-  readonly summary?: string;
-  readonly metadata?: Record<string, unknown>;
+  key: string;
+  label: string;
+  summary?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type TaskDescriptor = {
-  readonly nodeId: string;
-  readonly ordinal: number;
-  readonly iteration: number;
-  readonly ralphId?: string;
-  readonly dependsOn?: readonly string[];
-  readonly needs?: Record<string, string>;
-  readonly worktreeId?: string;
-  readonly worktreePath?: string;
-  readonly worktreeBranch?: string;
-  readonly worktreeBaseBranch?: string;
-  readonly outputTable: unknown | null;
-  readonly outputTableName: string;
-  readonly outputRef?: unknown;
-  readonly outputSchema?: unknown;
-  readonly parallelGroupId?: string;
-  readonly parallelMaxConcurrency?: number;
-  readonly needsApproval: boolean;
-  readonly waitAsync?: boolean;
-  readonly approvalMode?: "gate" | "decision" | "select" | "rank";
-  readonly approvalOnDeny?: "fail" | "continue" | "skip";
-  readonly approvalOptions?: readonly ApprovalOption[];
-  readonly approvalAllowedScopes?: readonly string[];
-  readonly approvalAllowedUsers?: readonly string[];
-  readonly approvalAutoApprove?: {
-    readonly after?: number;
-    readonly audit?: boolean;
-    readonly conditionMet?: boolean;
-    readonly revertOnMet?: boolean;
+  nodeId: string;
+  ordinal: number;
+  iteration: number;
+  ralphId?: string;
+  dependsOn?: string[];
+  needs?: Record<string, string>;
+  worktreeId?: string;
+  worktreePath?: string;
+  worktreeBranch?: string;
+  worktreeBaseBranch?: string;
+  outputTable: unknown | null;
+  outputTableName: string;
+  outputRef?: z.ZodObject<any>;
+  outputSchema?: z.ZodObject<any>;
+  parallelGroupId?: string;
+  parallelMaxConcurrency?: number;
+  needsApproval: boolean;
+  waitAsync?: boolean;
+  approvalMode?: "gate" | "decision" | "select" | "rank";
+  approvalOnDeny?: "fail" | "continue" | "skip";
+  approvalOptions?: ApprovalOption[];
+  approvalAllowedScopes?: string[];
+  approvalAllowedUsers?: string[];
+  approvalAutoApprove?: {
+    after?: number;
+    audit?: boolean;
+    conditionMet?: boolean;
+    revertOnMet?: boolean;
   };
-  readonly skipIf: boolean;
-  readonly retries: number;
-  readonly retryPolicy?: RetryPolicy;
-  readonly timeoutMs: number | null;
-  readonly heartbeatTimeoutMs: number | null;
-  readonly continueOnFail: boolean;
-  readonly cachePolicy?: CachePolicy;
-  readonly agent?: AgentLike | readonly AgentLike[];
-  readonly prompt?: string;
-  readonly staticPayload?: unknown;
-  readonly computeFn?: () => unknown | Promise<unknown>;
-  readonly label?: string;
-  readonly meta?: Record<string, unknown>;
-  readonly scorers?: ScorersMap;
-  readonly voice?: VoiceProvider;
-  readonly voiceSpeaker?: string;
-  readonly memoryConfig?: TaskMemoryConfig;
+  skipIf: boolean;
+  retries: number;
+  retryPolicy?: RetryPolicy;
+  timeoutMs: number | null;
+  heartbeatTimeoutMs: number | null;
+  continueOnFail: boolean;
+  cachePolicy?: CachePolicy;
+  agent?: AgentLike | AgentLike[];
+  prompt?: string;
+  staticPayload?: unknown;
+  computeFn?: () => unknown | Promise<unknown>;
+  label?: string;
+  meta?: Record<string, unknown>;
+  scorers?: ScorersMap;
+  voice?: VoiceProvider;
+  voiceSpeaker?: string;
+  memoryConfig?: TaskMemoryConfig;
 };
 
 export type WorkflowGraph = {

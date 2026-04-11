@@ -30,7 +30,7 @@ function resolveStableId(
   return stablePathId(prefix, path);
 }
 
-function isZodObject(value: unknown): boolean {
+function isZodObject(value: unknown): value is import("zod").ZodObject<any> {
   return Boolean(value && typeof value === "object" && "shape" in value);
 }
 
@@ -53,8 +53,8 @@ function maybeTableName(value: unknown): string | undefined {
 function resolveOutput(raw: Record<string, unknown>): {
   outputTable: unknown | null;
   outputTableName: string;
-  outputRef: unknown | undefined;
-  outputSchema: unknown | undefined;
+  outputRef: import("zod").ZodObject<any> | undefined;
+  outputSchema: import("zod").ZodObject<any> | undefined;
 } {
   const outputRaw = raw.output;
   if (!outputRaw) {
@@ -69,7 +69,7 @@ function resolveOutput(raw: Record<string, unknown>): {
   const tableName =
     typeof outputRaw === "string" ? outputRaw : maybeTableName(outputRaw) ?? "";
   const outputTable = outputRef ? null : typeof outputRaw === "string" ? null : outputRaw;
-  const outputSchema = raw.outputSchema ?? outputRef;
+  const outputSchema = isZodObject(raw.outputSchema) ? raw.outputSchema : outputRef;
   return {
     outputTable,
     outputTableName: tableName,
@@ -651,7 +651,7 @@ export function extractGraph(
             : undefined,
         scorers:
           raw.scorers && typeof raw.scorers === "object" && !Array.isArray(raw.scorers)
-            ? (raw.scorers as Record<string, unknown>)
+            ? (raw.scorers as TaskDescriptor["scorers"])
             : undefined,
         voice: topVoice?.provider,
         voiceSpeaker: topVoice?.speaker,
