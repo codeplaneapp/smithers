@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { BaseCliAgent } from "@smithers/agents/BaseCliAgent";
 import { ClaudeCodeAgent } from "@smithers/agents/ClaudeCodeAgent";
 import { CodexAgent } from "@smithers/agents/CodexAgent";
@@ -6,7 +9,6 @@ import { KimiAgent } from "@smithers/agents/KimiAgent";
 import { PiAgent } from "@smithers/agents/PiAgent";
 import { SmithersError } from "@smithers/core/errors";
 import {
-  buildSmithersMcpConfigFile,
   buildSmithersMcpLaunchSpec,
   probeSmithersAgentContract,
   renderSmithersAgentPromptGuidance,
@@ -128,6 +130,26 @@ function buildJsonMcpConfig(
         command: launchSpec.command,
         args: launchSpec.args,
       },
+    },
+  };
+}
+
+function buildSmithersMcpConfigFile(
+  toolSurface: SmithersToolSurface = "semantic",
+  serverName = DEFAULT_SERVER_NAME,
+) {
+  const dir = mkdtempSync(join(tmpdir(), "smithers-ask-"));
+  const configPath = join(dir, "mcp.json");
+  const contents = buildJsonMcpConfig(toolSurface, serverName);
+
+  writeFileSync(configPath, JSON.stringify(contents, null, 2));
+
+  return {
+    dir,
+    path: configPath,
+    contents,
+    cleanup() {
+      rmSync(dir, { recursive: true, force: true });
     },
   };
 }

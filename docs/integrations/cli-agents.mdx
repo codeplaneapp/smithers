@@ -732,10 +732,10 @@ The agent contract describes the Smithers [MCP server](/integrations/mcp-server)
 `SmithersToolSurface` is `"raw"` or `"semantic"`. The semantic surface groups and renames tools to reduce noise for general-purpose agents. The raw surface exposes every tool name as-is.
 
 ```ts
-import { buildSmithersMcpConfigFile } from "smithers-orchestrator";
+import { buildSmithersMcpLaunchSpec } from "smithers-orchestrator";
 
-const { path, cleanup } = buildSmithersMcpConfigFile("semantic");
-// Writes a temporary mcp.json pointing at the Smithers MCP server
+const launchSpec = buildSmithersMcpLaunchSpec("semantic");
+// Use launchSpec.command and launchSpec.args in the agent-specific MCP config.
 ```
 
 ### Live MCP Tool Probe
@@ -809,7 +809,7 @@ console.log(result.usage);
 
 ### Usage Extraction
 
-`extractUsageFromOutput` parses the raw CLI stdout to find token counts. The extraction strategy is format-specific:
+`BaseCliAgent` parses raw CLI stdout to find token counts. The extraction strategy is format-specific:
 
 | Agent / Format | Source |
 |---|---|
