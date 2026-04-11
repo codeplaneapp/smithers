@@ -1,18 +1,18 @@
 import { eq, and } from "drizzle-orm";
 import type { CommandExecutor } from "@effect/platform/CommandExecutor";
 import { Effect, Metric } from "effect";
-import type { SmithersDb } from "../db/adapter";
-import { fromPromise } from "../effect/interop";
-import { runPromise } from "../effect/runtime";
-import { nowMs } from "../utils/time";
-import { SmithersError } from "../utils/errors";
+import type { SmithersDb } from "@smithers/db/adapter";
+import { fromPromise } from "@smithers/runtime/interop";
+import { runPromise } from "@smithers/runtime/runtime";
+import { nowMs } from "@smithers/core/utils/time";
+import { SmithersError } from "@smithers/core/errors";
 import { smithersVcsTags } from "./schema";
 import {
   getJjPointerEffect,
   revertToJjPointerEffect,
   workspaceAddEffect,
   runJjEffect,
-} from "../vcs/jj";
+} from "@smithers/vcs/jj";
 
 // ---------------------------------------------------------------------------
 // Types

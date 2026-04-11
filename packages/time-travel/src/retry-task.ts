@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import type { SmithersDb } from "./db/adapter";
-import type { SmithersEvent } from "./SmithersEvent";
-import { nowMs } from "./utils/time";
+import type { SmithersDb } from "@smithers/db/adapter";
+import type { SmithersEvent } from "@smithers/core/SmithersEvent";
+import { nowMs } from "@smithers/core/utils/time";
 
 export type RetryTaskOptions = {
   runId: string;

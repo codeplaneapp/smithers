@@ -1,8 +1,8 @@
 import { Effect } from "effect";
-import type { SmithersDb } from "./db/adapter";
-import type { SmithersEvent } from "./SmithersEvent";
-import { nowMs } from "./utils/time";
-import { revertToJjPointer } from "./vcs/jj";
+import type { SmithersDb } from "@smithers/db/adapter";
+import type { SmithersEvent } from "@smithers/core/SmithersEvent";
+import { nowMs } from "@smithers/core/utils/time";
+import { revertToJjPointer } from "@smithers/vcs/jj";
 
 export type TimeTravelOptions = {
   runId: string;

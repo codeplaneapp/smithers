@@ -4,14 +4,14 @@ import {
   diffRawSnapshots,
   formatDiffForTui,
   formatDiffAsJson,
-} from "../../src/time-travel/diff";
-import type { ParsedSnapshot } from "../../src/time-travel/types";
+} from "../src/diff";
+import type { ParsedSnapshot } from "../src/types";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { ensureSmithersTables } from "../../src/db/ensure";
-import { SmithersDb } from "../../src/db/adapter";
-import { captureSnapshot } from "../../src/time-travel/snapshot";
-import type { SnapshotData } from "../../src/time-travel/snapshot";
+import { ensureSmithersTables } from "@smithers/db/ensure";
+import { SmithersDb } from "@smithers/db/adapter";
+import { captureSnapshot } from "../src/snapshot";
+import type { SnapshotData } from "../src/snapshot";
 
 function makeParsed(overrides: Partial<ParsedSnapshot> = {}): ParsedSnapshot {
   return {

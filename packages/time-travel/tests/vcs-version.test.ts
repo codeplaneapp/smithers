@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { ensureSmithersTables } from "../../src/db/ensure";
-import { SmithersDb } from "../../src/db/adapter";
-import { loadVcsTag } from "../../src/time-travel/vcs-version";
+import { ensureSmithersTables } from "@smithers/db/ensure";
+import { SmithersDb } from "@smithers/db/adapter";
+import { loadVcsTag } from "../src/vcs-version";
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
@@ -27,7 +27,7 @@ describe("tagSnapshotVcs", () => {
   test("returns null when jj is not available (no crash)", async () => {
     const { adapter } = createTestDb();
     // Import dynamically so we don't fail at module level if jj helpers change
-    const { tagSnapshotVcs } = await import("../../src/time-travel/vcs-version");
+    const { tagSnapshotVcs } = await import("../src/vcs-version");
 
     // tagSnapshotVcs calls getJjPointer which returns null when jj is not installed
     // or the cwd is not a jj repo. This should return null without throwing.
@@ -41,7 +41,7 @@ describe("tagSnapshotVcs", () => {
 describe("rerunAtRevision", () => {
   test("returns restored:false when no VCS tag exists", async () => {
     const { adapter } = createTestDb();
-    const { rerunAtRevision } = await import("../../src/time-travel/vcs-version");
+    const { rerunAtRevision } = await import("../src/vcs-version");
 
     const result = await rerunAtRevision(adapter, "run-1", 0);
     expect(result.restored).toBe(false);
@@ -52,7 +52,7 @@ describe("rerunAtRevision", () => {
 describe("resolveWorkflowAtRevision", () => {
   test("returns null when no VCS tag exists", async () => {
     const { adapter } = createTestDb();
-    const { resolveWorkflowAtRevision } = await import("../../src/time-travel/vcs-version");
+    const { resolveWorkflowAtRevision } = await import("../src/vcs-version");
 
     const result = await resolveWorkflowAtRevision(
       adapter,

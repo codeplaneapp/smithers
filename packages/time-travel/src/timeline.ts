@@ -1,10 +1,10 @@
 import { eq } from "drizzle-orm";
 import pc from "picocolors";
 import { Effect } from "effect";
-import type { SmithersDb } from "../db/adapter";
-import { fromPromise } from "../effect/interop";
-import { runPromise } from "../effect/runtime";
-import type { SmithersError } from "../utils/errors";
+import type { SmithersDb } from "@smithers/db/adapter";
+import { fromPromise } from "@smithers/runtime/interop";
+import { runPromise } from "@smithers/runtime/runtime";
+import type { SmithersError } from "@smithers/core/errors";
 import { listSnapshotsEffect } from "./snapshot";
 import { listBranchesEffect, getBranchInfoEffect } from "./fork";
 import { smithersBranches } from "./schema";

@@ -5,7 +5,7 @@ import {
   runForksCreated,
   replaysStarted,
   snapshotDuration,
-} from "../src/time-travel/metrics";
+} from "../src/metrics";
 
 describe("time-travel metrics", () => {
   test("snapshotsCaptured is a counter metric", async () => {

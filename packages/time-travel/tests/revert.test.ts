@@ -1,11 +1,11 @@
 import { describe, expect, test, mock, beforeEach, afterEach } from "bun:test";
-import { SmithersDb } from "../src/db/adapter";
-import { ensureSmithersTables } from "../src/db/ensure";
-import { revertToJjPointer, getJjPointer } from "../src/vcs/jj";
+import { SmithersDb } from "@smithers/db/adapter";
+import { ensureSmithersTables } from "@smithers/db/ensure";
+import { revertToJjPointer, getJjPointer } from "@smithers/vcs/jj";
 import { revertToAttempt, type RevertResult } from "../src/revert";
-import { createTestDb } from "./helpers";
-import { schema, ddl } from "./schema";
-import type { SmithersEvent } from "../src";
+import { createTestDb } from "../../smithers/tests/helpers";
+import { schema, ddl } from "../../smithers/tests/schema";
+import type { SmithersEvent } from "@smithers/core/SmithersEvent";
 
 function buildDb() {
   const result = createTestDb(schema, ddl);

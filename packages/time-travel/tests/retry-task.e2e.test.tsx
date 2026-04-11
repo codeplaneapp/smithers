@@ -1,10 +1,10 @@
 /** @jsxImportSource smithers */
 import { describe, expect, test } from "bun:test";
-import { SmithersDb } from "../src/db/adapter";
+import { SmithersDb } from "@smithers/db/adapter";
 import { retryTask } from "../src/retry-task";
-import { runWorkflow } from "../src/index";
-import { createTestSmithers } from "./helpers";
-import { outputSchemas } from "./schema";
+import { runWorkflow } from "smithers";
+import { createTestSmithers } from "../../smithers/tests/helpers";
+import { outputSchemas } from "../../smithers/tests/schema";
 
 function makeAgent(
   nodeId: string,

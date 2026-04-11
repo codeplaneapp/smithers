@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { ensureSmithersTables } from "../src/db/ensure";
-import { SmithersDb } from "../src/db/adapter";
-import { captureSnapshot } from "../src/time-travel/snapshot";
+import { ensureSmithersTables } from "@smithers/db/ensure";
+import { SmithersDb } from "@smithers/db/adapter";
+import { captureSnapshot } from "../src/snapshot";
 import {
   replayFromCheckpoint,
   type ReplayResult,
-} from "../src/time-travel/replay";
-import { loadSnapshot, parseSnapshot } from "../src/time-travel/snapshot";
-import { getBranchInfo } from "../src/time-travel/fork";
-import type { SnapshotData } from "../src/time-travel/snapshot";
+} from "../src/replay";
+import { loadSnapshot, parseSnapshot } from "../src/snapshot";
+import { getBranchInfo } from "../src/fork";
+import type { SnapshotData } from "../src/snapshot";
 
 function createTestDb() {
   const sqlite = new Database(":memory:");

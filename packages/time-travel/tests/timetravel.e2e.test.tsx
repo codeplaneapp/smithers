@@ -1,10 +1,10 @@
 /** @jsxImportSource smithers */
 import { describe, expect, test } from "bun:test";
-import { SmithersDb } from "../src/db/adapter";
-import { ensureSmithersTables } from "../src/db/ensure";
-import { Task, Workflow, runWorkflow } from "../src/index";
-import { createTestSmithers } from "./helpers";
-import { outputSchemas } from "./schema";
+import { SmithersDb } from "@smithers/db/adapter";
+import { ensureSmithersTables } from "@smithers/db/ensure";
+import { Task, Workflow, runWorkflow } from "smithers";
+import { createTestSmithers } from "../../smithers/tests/helpers";
+import { outputSchemas } from "../../smithers/tests/schema";
 
 const END_TO_END_TIMEOUT_MS = 15_000;
 
