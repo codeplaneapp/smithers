@@ -1,0 +1,20 @@
+import type { TaskDescriptor } from "@smithers/graph";
+import type { SmithersError } from "@smithers/errors/SmithersError.ts";
+import type { ContinueAsNewTransition } from "./ContinueAsNewTransition.ts";
+import type { RenderContext } from "./RenderContext.ts";
+import type { RunResult } from "./RunResult.ts";
+import type { WaitReason } from "./WaitReason.ts";
+
+export type EngineDecision =
+  | { readonly _tag: "Execute"; readonly tasks: readonly TaskDescriptor[] }
+  | { readonly _tag: "ReRender"; readonly context: RenderContext }
+  | {
+      readonly _tag: "Wait";
+      readonly reason: WaitReason;
+    }
+  | {
+      readonly _tag: "ContinueAsNew";
+      readonly transition: ContinueAsNewTransition;
+    }
+  | { readonly _tag: "Finished"; readonly result: RunResult }
+  | { readonly _tag: "Failed"; readonly error: SmithersError };
