@@ -1,8 +1,8 @@
 import type { z } from "zod";
 
-type InferRow<TTable> = TTable extends { $inferSelect: infer R } ? R : never;
+export type InferRow<TTable> = TTable extends { $inferSelect: infer R } ? R : never;
 
-type InferOutputEntry<T> = T extends z.ZodTypeAny
+export type InferOutputEntry<T> = T extends z.ZodTypeAny
   ? z.infer<T>
   : T extends { $inferSelect: any }
     ? InferRow<T>
