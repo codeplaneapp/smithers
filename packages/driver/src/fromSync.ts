@@ -1,5 +1,6 @@
 import { Effect } from "effect";
-import type { ErrorWrapOptions, SmithersError } from "@smithers/errors";
+import type { ErrorWrapOptions } from "@smithers/errors/ErrorWrapOptions";
+import type { SmithersError } from "@smithers/errors/SmithersError";
 import { toError } from "./toError.ts";
 
 export function fromSync<A>(

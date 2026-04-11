@@ -1,7 +1,7 @@
 import type { OutputAccessor } from "./OutputAccessor.ts";
 import type { OutputKey } from "./OutputKey.ts";
 import type { SmithersCtx } from "./SmithersCtx.ts";
-import { SmithersError } from "@smithers/errors";
+import { SmithersError } from "@smithers/errors/SmithersError";
 import type { BuildContextOptions } from "./BuildContextOptions.ts";
 import { buildCurrentScopes } from "./buildCurrentScopes.ts";
 import { filterRowsByNodeId } from "./filterRowsByNodeId.ts";

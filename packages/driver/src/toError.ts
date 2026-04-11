@@ -1,8 +1,6 @@
-import {
-  type ErrorWrapOptions,
-  type SmithersError,
-  toSmithersError,
-} from "@smithers/errors";
+import type { ErrorWrapOptions } from "@smithers/errors/ErrorWrapOptions";
+import type { SmithersError } from "@smithers/errors/SmithersError";
+import { toSmithersError } from "@smithers/errors/toSmithersError";
 
 export function toError(
   cause: unknown,
