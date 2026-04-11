@@ -7,7 +7,7 @@ import { EventBus } from "../src/events";
 import { runWorkflow, Task, Workflow } from "smithers";
 import { ensureSmithersTables } from "@smithers/db/ensure";
 import { SmithersDb } from "@smithers/db/adapter";
-import { nowMs } from "@smithers/core/utils/time";
+import { nowMs } from "@smithers/scheduler/nowMs";
 import { createTestDb, createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { ddl, outputSchemas, schema } from "../../smithers/tests/schema";
 

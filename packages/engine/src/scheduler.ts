@@ -22,7 +22,7 @@ export type {
 export type { RetryWaitMap, ScheduleSnapshot } from "@smithers/scheduler";
 
 // TODO(migration): Re-export scheduler types directly once src/TaskDescriptor.ts
-// can use @smithers/core/graph and engine Ralph state no longer needs
+// can use @smithers/graph and engine Ralph state no longer needs
 // the legacy mutable compatibility surface.
 export type PlanNode =
   | { kind: "task"; nodeId: string }
