@@ -27,12 +27,14 @@
   },
   "dependencies": {
     "@smithers/core": "workspace:*",
-    "@smithers/runtime": "workspace:*",
-    "@smithers/observability": "workspace:*",
     "@smithers/db": "workspace:*",
+    "@smithers/errors": "workspace:*",
+    "@smithers/observability": "workspace:*",
     "@smithers/rag": "workspace:*",
-    "drizzle-orm": "^0.45.1",
+    "@smithers/runtime": "workspace:*",
+    "@smithers/scheduler": "workspace:*",
     "ai": "^6.0.69",
+    "drizzle-orm": "^0.45.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
