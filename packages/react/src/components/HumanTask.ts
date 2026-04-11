@@ -1,6 +1,5 @@
 import React from "react";
 import { renderPromptToText } from "./Task";
-// TODO: verify @smithers/driver/task-runtime resolves correctly
 import { getTaskRuntime } from "@smithers/driver/task-runtime";
 import { SmithersDb } from "@smithers/db/adapter";
 import { buildHumanRequestId } from "@smithers/durables";

@@ -1,7 +1,6 @@
 import React from "react";
 import { z } from "zod";
 import { SmithersContext } from "../context";
-// TODO: verify @smithers/driver/task-runtime resolves correctly
 import { getTaskRuntime } from "@smithers/driver/task-runtime";
 import { SmithersDb } from "@smithers/db/adapter";
 import { SmithersError } from "@smithers/errors/SmithersError";
