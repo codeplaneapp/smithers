@@ -3,8 +3,8 @@ import * as WorkflowEngine from "@effect/workflow/WorkflowEngine";
 import { Effect, Exit, Layer, Schema, Scope } from "effect";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { SmithersDb } from "@smithers/db/adapter";
-import type { RunOptions } from "@smithers/core/RunOptions";
-import type { RunResult } from "@smithers/core/RunResult";
+import type { RunOptions } from "@smithers/driver/RunOptions";
+import type { RunResult } from "@smithers/driver/RunResult";
 import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
 
 type RunBodyResult = RunResult | (RunResult & { status: "continued"; nextRunId: string });

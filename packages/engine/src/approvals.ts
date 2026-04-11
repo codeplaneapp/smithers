@@ -1,5 +1,5 @@
 import { Effect, Metric } from "effect";
-import { nowMs } from "@smithers/core/utils/time";
+import { nowMs } from "@smithers/scheduler/nowMs";
 import { SmithersDb } from "@smithers/db/adapter";
 import { runPromise } from "@smithers/runtime/runtime";
 import {
@@ -8,7 +8,7 @@ import {
   updateAsyncExternalWaitPending,
 } from "@smithers/observability/metrics";
 import { bridgeApprovalResolve } from "./effect/durable-deferred-bridge";
-import { SmithersError } from "@smithers/core/errors";
+import { SmithersError } from "@smithers/errors/SmithersError";
 
 function nextRunStatusForApproval(
   currentStatus: string | null | undefined,

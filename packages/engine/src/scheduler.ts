@@ -1,25 +1,25 @@
 import {
   buildPlanTree as coreBuildPlanTree,
   scheduleTasks as coreScheduleTasks,
-} from "@smithers/core/scheduler";
-import type { TaskStateMap } from "@smithers/core/state";
+} from "@smithers/scheduler";
+import type { TaskStateMap } from "@smithers/scheduler";
 import type { TaskDescriptor } from "@smithers/graph/TaskDescriptor";
 import type { XmlNode } from "@smithers/graph/XmlNode";
 
-export { buildStateKey } from "@smithers/core/scheduler";
-export { Scheduler, SchedulerLive } from "@smithers/core/scheduler";
+export { buildStateKey } from "@smithers/scheduler";
+export { Scheduler, SchedulerLive } from "@smithers/scheduler";
 export {
   cloneTaskStateMap,
   isTerminalState,
   parseStateKey,
-} from "@smithers/core/state";
+} from "@smithers/scheduler";
 export type {
   ReadonlyTaskStateMap,
   TaskRecord,
   TaskState,
   TaskStateMap,
-} from "@smithers/core/state";
-export type { RetryWaitMap, ScheduleSnapshot } from "@smithers/core/scheduler";
+} from "@smithers/scheduler";
+export type { RetryWaitMap, ScheduleSnapshot } from "@smithers/scheduler";
 
 // TODO(migration): Re-export scheduler types directly once src/TaskDescriptor.ts
 // can use @smithers/core/graph and engine Ralph state no longer needs

@@ -12,8 +12,8 @@ import {
 } from "effect";
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import React from "react";
-import type { CachePolicy } from "@smithers/core/CachePolicy";
-import type { RetryPolicy } from "@smithers/core/RetryPolicy";
+import type { CachePolicy } from "@smithers/scheduler/CachePolicy";
+import type { RetryPolicy } from "@smithers/scheduler/RetryPolicy";
 import { SmithersDb } from "@smithers/db/adapter";
 import { runWorkflow } from "../index";
 import { ignoreSyncError } from "@smithers/runtime/interop";
@@ -29,7 +29,7 @@ import {
   Workflow,
 } from "@smithers/react/components/index";
 import { camelToSnake } from "@smithers/db/utils/camelToSnake";
-import { SmithersError } from "@smithers/core/errors";
+import { SmithersError } from "@smithers/errors/SmithersError";
 
 type AnySchema = any;
 type AnyEffect = any;

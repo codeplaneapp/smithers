@@ -1,6 +1,6 @@
 import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
-import type { RunResult } from "@smithers/core/RunResult";
-import { SmithersError } from "@smithers/core/errors";
+import type { RunResult } from "@smithers/driver/RunResult";
+import { SmithersError } from "@smithers/errors/SmithersError";
 import { SmithersDb } from "@smithers/db/adapter";
 import { requireTaskRuntime } from "@smithers/runtime/task-runtime";
 import { getWorkflowMakeBridgeRuntime } from "./effect/workflow-make-bridge";

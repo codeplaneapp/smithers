@@ -2,7 +2,7 @@ import { applyPatch as applyUnifiedPatch } from "diff";
 import { spawn } from "node:child_process";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { SmithersError } from "@smithers/core/errors";
+import { SmithersError } from "@smithers/errors/SmithersError";
 
 export type FilePatch = {
   path: string;

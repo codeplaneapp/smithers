@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { Effect } from "effect";
 import { fromPromise } from "@smithers/runtime/interop";
 import { runPromise } from "@smithers/runtime/runtime";
-import type { SmithersError } from "@smithers/core/errors";
+import type { SmithersError } from "@smithers/errors/SmithersError";
 
 const DEFAULT_EXCLUDE = [
   "node_modules",

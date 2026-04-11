@@ -1,20 +1,20 @@
 import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
-import type { RunOptions } from "@smithers/core/RunOptions";
-import type { RunResult } from "@smithers/core/RunResult";
+import type { RunOptions } from "@smithers/driver/RunOptions";
+import type { RunResult } from "@smithers/driver/RunResult";
 import type { SmithersEvent } from "@smithers/core/SmithersEvent";
 import type { TaskDescriptor } from "@smithers/graph/TaskDescriptor";
 import type { GraphSnapshot } from "@smithers/graph/GraphSnapshot";
-import type { RunAuthContext } from "@smithers/core/RunAuthContext";
+import type { RunAuthContext } from "@smithers/driver/RunAuthContext";
 import type { AgentCliEvent } from "@smithers/agents/BaseCliAgent";
 import {
   makeWorkflowSession,
   type EngineDecision,
   type WaitReason,
-} from "@smithers/core/session";
+} from "@smithers/scheduler";
 import { ReactWorkflowDriver } from "@smithers/react/driver";
 import type { WorkflowGraph } from "@smithers/graph/types";
 import { SmithersRenderer } from "@smithers/react-reconciler/dom/renderer";
-import { buildContext } from "@smithers/core/context";
+import { buildContext } from "@smithers/driver/buildContext";
 import { loadInput, loadOutputs } from "@smithers/db/snapshot";
 import { ensureSmithersTables } from "@smithers/db/ensure";
 import { SmithersDb } from "@smithers/db/adapter";
@@ -31,16 +31,18 @@ import { validateInput } from "@smithers/db/input";
 import { schemaSignature } from "@smithers/db/schema-signature";
 import { withSqliteWriteRetry } from "@smithers/db/write-retry";
 import { canonicalizeXml } from "@smithers/graph/utils/xml";
-import { sha256Hex } from "@smithers/core/utils/hash";
-import { nowMs } from "@smithers/core/utils/time";
-import { newRunId } from "@smithers/core/utils/ids";
-import { errorToJson, SmithersError } from "@smithers/core/errors";
+import { sha256Hex } from "@smithers/driver/sha256Hex";
+import { nowMs } from "@smithers/scheduler/nowMs";
+import { newRunId } from "@smithers/driver/newRunId";
+import { errorToJson } from "@smithers/errors/errorToJson";
+import { SmithersError } from "@smithers/errors/SmithersError";
 import {
   assertJsonPayloadWithinBounds,
   assertOptionalStringMaxLength,
   assertPositiveFiniteInteger,
 } from "@smithers/core/utils/input-bounds";
-import { retryPolicyToSchedule, retryScheduleDelayMs } from "@smithers/core/utils/retry";
+import { retryPolicyToSchedule } from "@smithers/scheduler/retryPolicyToSchedule";
+import { retryScheduleDelayMs } from "@smithers/scheduler/retryScheduleDelayMs";
 import {
   buildPlanTree,
   scheduleTasks,
@@ -87,7 +89,7 @@ import { logDebug, logError, logInfo, logWarning } from "@smithers/observability
 import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner";
 import { runFork, runPromise, runSync } from "@smithers/runtime/runtime";
 import { HotWorkflowController } from "./hot";
-import type { HotReloadOptions } from "@smithers/core/RunOptions";
+import type { HotReloadOptions } from "@smithers/driver/RunOptions";
 import { spawn as nodeSpawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { platform } from "node:os";

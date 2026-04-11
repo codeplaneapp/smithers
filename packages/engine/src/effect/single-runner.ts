@@ -1,10 +1,8 @@
 import * as SingleRunner from "@effect/cluster/SingleRunner";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { Effect, Layer, Scope } from "effect";
-import {
-  fromTaggedErrorPayload,
-  toTaggedErrorPayload,
-} from "@smithers/core/errors/tagged";
+import { fromTaggedErrorPayload } from "@smithers/errors/fromTaggedErrorPayload";
+import { toTaggedErrorPayload } from "@smithers/errors/toTaggedErrorPayload";
 import {
   isUnknownWorkerError,
   isTaskResultFailure,

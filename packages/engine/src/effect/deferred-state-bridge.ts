@@ -27,8 +27,9 @@ import { parseAttemptMetaJson } from "./bridge-utils";
 import { updateAsyncExternalWaitPending } from "@smithers/observability/metrics";
 import { runPromise } from "@smithers/runtime/runtime";
 import { markdownComponents } from "@smithers/react/markdownComponents";
-import { errorToJson, SmithersError } from "@smithers/core/errors";
-import { nowMs } from "@smithers/core/utils/time";
+import { errorToJson } from "@smithers/errors/errorToJson";
+import { SmithersError } from "@smithers/errors/SmithersError";
+import { nowMs } from "@smithers/scheduler/nowMs";
 
 type TimerType = "duration" | "absolute";
 type WaitForEventOnTimeout = "fail" | "skip" | "continue";

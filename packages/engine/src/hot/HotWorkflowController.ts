@@ -9,13 +9,13 @@ import {
   resolveOverlayEntry,
 } from "./overlay";
 import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
-import type { HotReloadOptions } from "@smithers/core/RunOptions";
+import type { HotReloadOptions } from "@smithers/driver/RunOptions";
 import { Metric } from "effect";
 import { fromPromise } from "@smithers/runtime/interop";
 import { logInfo, logWarning } from "@smithers/observability/logging";
 import { runPromise } from "@smithers/runtime/runtime";
 import { hotReloads, hotReloadFailures, hotReloadDuration } from "@smithers/observability/metrics";
-import { SmithersError } from "@smithers/core/errors";
+import { SmithersError } from "@smithers/errors/SmithersError";
 
 export type HotReloadEvent =
   | { type: "reloaded"; generation: number; changedFiles: string[]; newBuild: SmithersWorkflow<any>["build"] }

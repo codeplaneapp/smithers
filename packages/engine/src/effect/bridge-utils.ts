@@ -1,4 +1,4 @@
-import { TaskAborted } from "@smithers/core/errors/tagged";
+import { TaskAborted } from "@smithers/errors/TaskAborted";
 
 export function makeAbortError(message = "Task aborted"): TaskAborted {
   return new TaskAborted({

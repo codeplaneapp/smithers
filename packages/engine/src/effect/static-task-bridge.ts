@@ -8,8 +8,9 @@ import { makeAbortError, wireAbortSignal } from "./bridge-utils";
 import { logDebug, logError, logInfo } from "@smithers/observability/logging";
 import { attemptDuration, nodeDuration } from "@smithers/observability/metrics";
 import { runPromise } from "@smithers/runtime/runtime";
-import { errorToJson, SmithersError } from "@smithers/core/errors";
-import { nowMs } from "@smithers/core/utils/time";
+import { errorToJson } from "@smithers/errors/errorToJson";
+import { SmithersError } from "@smithers/errors/SmithersError";
+import { nowMs } from "@smithers/scheduler/nowMs";
 import { getJjPointer } from "@smithers/vcs/jj";
 
 type StaticTaskBridgeToolConfig = {
