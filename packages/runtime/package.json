@@ -24,10 +24,12 @@
   "dependencies": {
     "@effect/platform": "^0.96.0",
     "@effect/workflow": "^0.18.0",
-    "@smithers/core": "workspace:*",
     "@smithers/driver": "workspace:*",
+    "@smithers/durables": "workspace:*",
     "@smithers/errors": "workspace:*",
     "@smithers/observability": "workspace:*",
+    "@smithers/scheduler": "workspace:*",
+    "@smithers/tools": "workspace:*",
     "effect": "^3.21.0"
   },
   "devDependencies": {

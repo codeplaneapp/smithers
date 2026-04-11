@@ -2,14 +2,11 @@ import * as WorkflowEngine from "@effect/workflow/WorkflowEngine";
 import { Cause, Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { DurablePrimitivesLive } from "@smithers/durables/DurablePrimitivesLive";
 import { ExecutionServiceLive } from "@smithers/driver/ExecutionServiceLive";
+import { SchedulerLive, WorkflowSessionLive } from "@smithers/scheduler";
 import {
   CorrelationContextLive,
   MetricsServiceLive,
   TracingServiceLive,
-  SchedulerLive,
-  WorkflowSessionLive,
-} from "@smithers/scheduler";
-import {
   createSmithersRuntimeLayer,
   getCurrentSmithersTraceAnnotations,
   getCurrentSmithersTraceSpan,
@@ -19,6 +16,20 @@ import {
 import { getToolContext } from "@smithers/tools/context";
 import { toSmithersError } from "@smithers/errors/toSmithersError";
 import type { SmithersError } from "@smithers/errors/SmithersError";
+
+const ObservabilityLayer = Layer.mergeAll(
+  CorrelationContextLive,
+  MetricsServiceLive,
+  TracingServiceLive,
+);
+
+const SmithersCoreLayer = Layer.mergeAll(
+  ObservabilityLayer,
+  SchedulerLive.pipe(Layer.provide(ObservabilityLayer)),
+  DurablePrimitivesLive,
+  ExecutionServiceLive,
+  WorkflowSessionLive,
+);
 
 const SmithersWorkflowEngineLayer = Layer.suspend(() => WorkflowEngine.layerMemory);
 const SmithersRuntimeLayer = Layer.mergeAll(
