@@ -22,7 +22,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@smithers/core": "workspace:*",
     "@smithers/db": "workspace:*",
     "@smithers/errors": "workspace:*",
     "@smithers/graph": "workspace:*",
