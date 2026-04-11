@@ -1,12 +1,12 @@
 import type { Table } from "drizzle-orm";
 import { Effect } from "effect";
-import { fromPromise } from "@smithers/runtime/interop";
+import { fromPromise } from "@smithers/driver/interop";
 import type { SmithersError } from "@smithers/errors/SmithersError";
-import { withSqliteWriteRetryEffect } from "../write-retry";
+import { withSqliteWriteRetry } from "../write-retry";
 import { getKeyColumns } from "./getKeyColumns";
 import type { OutputKey } from "./OutputKey";
 
-export function upsertOutputRowEffect(
+export function upsertOutputRow(
   db: any,
   table: Table,
   key: OutputKey,
@@ -24,7 +24,7 @@ export function upsertOutputRowEffect(
     ? [cols.runId, cols.nodeId, cols.iteration]
     : [cols.runId, cols.nodeId];
 
-  return withSqliteWriteRetryEffect(
+  return withSqliteWriteRetry(
     () =>
       fromPromise<any[]>(
         `upsert output ${(table as any)["_"]?.name ?? "output"}`,

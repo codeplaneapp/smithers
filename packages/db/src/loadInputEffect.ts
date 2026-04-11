@@ -1,10 +1,10 @@
 import { eq } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { Effect } from "effect";
-import { fromPromise } from "@smithers/runtime/interop";
+import { fromPromise } from "@smithers/driver/interop";
 import { SmithersError } from "@smithers/errors/SmithersError";
 
-export function loadInputEffect(
+export function loadInput(
   db: any,
   inputTable: any,
   runId: string,

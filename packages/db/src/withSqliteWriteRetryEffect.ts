@@ -83,7 +83,7 @@ function makeSqliteRetrySchedule(
   );
 }
 
-export function withSqliteWriteRetryEffect<A>(
+export function withSqliteWriteRetry<A>(
   operation: () => Effect.Effect<A, SmithersError>,
   opts: SqliteWriteRetryOptions = {},
 ): Effect.Effect<A, SmithersError> {

@@ -1,11 +1,11 @@
 import type { Table } from "drizzle-orm";
 import { Effect } from "effect";
-import { fromPromise } from "@smithers/runtime/interop";
+import { fromPromise } from "@smithers/driver/interop";
 import type { SmithersError } from "@smithers/errors/SmithersError";
 import { buildKeyWhere } from "./buildKeyWhere";
 import type { OutputKey } from "./OutputKey";
 
-export function selectOutputRowEffect<T>(
+export function selectOutputRow<T>(
   db: any,
   table: Table,
   key: OutputKey,

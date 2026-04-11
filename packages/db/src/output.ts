@@ -4,10 +4,9 @@ import type { AnyColumn, Table } from "drizzle-orm";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { Effect } from "effect";
 import { z } from "zod";
-import { fromPromise } from "@smithers/runtime/interop";
-import { runPromise } from "@smithers/runtime/runtime";
+import { fromPromise } from "@smithers/driver/interop";
 import { SmithersError } from "@smithers/errors/SmithersError";
-import { withSqliteWriteRetryEffect } from "./write-retry";
+import { withSqliteWriteRetry } from "./write-retry";
 
 export type OutputKey = { runId: string; nodeId: string; iteration?: number };
 
@@ -82,7 +81,7 @@ export function buildKeyWhere(table: Table, key: OutputKey) {
   return and(...clauses);
 }
 
-export function selectOutputRowEffect<T>(
+export function selectOutputRow<T>(
   db: any,
   table: Table,
   key: OutputKey,
@@ -112,15 +111,7 @@ export function selectOutputRowEffect<T>(
   );
 }
 
-export async function selectOutputRow<T>(
-  db: any,
-  table: Table,
-  key: OutputKey,
-): Promise<T | undefined> {
-  return runPromise(selectOutputRowEffect<T>(db, table, key));
-}
-
-export function upsertOutputRowEffect(
+export function upsertOutputRow(
   db: any,
   table: Table,
   key: OutputKey,
@@ -138,7 +129,7 @@ export function upsertOutputRowEffect(
     ? [cols.runId, cols.nodeId, cols.iteration]
     : [cols.runId, cols.nodeId];
 
-  return withSqliteWriteRetryEffect(
+  return withSqliteWriteRetry(
     () =>
       fromPromise<any[]>(
         `upsert output ${(table as any)["_"]?.name ?? "output"}`,
@@ -166,15 +157,6 @@ export function upsertOutputRowEffect(
     }),
     Effect.withLogSpan("db:upsert-output-row"),
   );
-}
-
-export async function upsertOutputRow(
-  db: any,
-  table: Table,
-  key: OutputKey,
-  payload: Record<string, unknown>,
-) {
-  await runPromise(upsertOutputRowEffect(db, table, key, payload));
 }
 
 export function validateOutput(

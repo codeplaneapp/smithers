@@ -3,8 +3,7 @@ import { getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { Effect, Option } from "effect";
 import type { OutputSnapshot } from "@smithers/driver/OutputSnapshot";
-import { fromPromise, fromSync } from "@smithers/runtime/interop";
-import { runPromise } from "@smithers/runtime/runtime";
+import { fromPromise, fromSync } from "@smithers/driver/interop";
 import { SmithersError } from "@smithers/errors/SmithersError";
 
 /**
@@ -54,7 +53,7 @@ function coerceBooleanColumns(rows: any[], boolKeys: string[]): any[] {
   });
 }
 
-export function loadInputEffect(
+export function loadInput(
   db: any,
   inputTable: any,
   runId: string,
@@ -81,11 +80,7 @@ export function loadInputEffect(
   );
 }
 
-export async function loadInput(db: any, inputTable: any, runId: string) {
-  return runPromise(loadInputEffect(db, inputTable, runId));
-}
-
-export function loadOutputsEffect(
+export function loadOutputs(
   db: any,
   schema: Record<string, any>,
   runId: string,
@@ -131,12 +126,4 @@ export function loadOutputsEffect(
     Effect.annotateLogs({ runId }),
     Effect.withLogSpan("db:load-outputs"),
   );
-}
-
-export async function loadOutputs(
-  db: any,
-  schema: Record<string, any>,
-  runId: string,
-): Promise<OutputSnapshot> {
-  return runPromise(loadOutputsEffect(db, schema, runId));
 }

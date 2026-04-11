@@ -7,9 +7,7 @@ import {
   ScheduleIntervals,
 } from "effect";
 import { dbRetries } from "@smithers/observability/metrics";
-import { runPromise } from "@smithers/runtime/runtime";
 import { retryPolicyToSchedule } from "@smithers/scheduler/retryPolicyToSchedule";
-import { toSmithersError } from "@smithers/errors/toSmithersError";
 import type { SmithersError } from "@smithers/errors/SmithersError";
 
 const DEFAULT_MAX_ATTEMPTS = 6;
@@ -107,7 +105,7 @@ function makeSqliteRetrySchedule(
   );
 }
 
-export function withSqliteWriteRetryEffect<A>(
+export function withSqliteWriteRetry<A>(
   operation: () => Effect.Effect<A, SmithersError>,
   opts: SqliteWriteRetryOptions = {},
 ): Effect.Effect<A, SmithersError> {
@@ -168,24 +166,5 @@ export function withSqliteWriteRetryEffect<A>(
         : retrySchedule,
     ),
     Effect.withLogSpan("sqlite-write-retry"),
-  );
-}
-
-export async function withSqliteWriteRetry<T>(
-  operation: () => Promise<T>,
-  opts: SqliteWriteRetryOptions = {},
-): Promise<T> {
-  return runPromise(
-    withSqliteWriteRetryEffect(
-      () =>
-        Effect.tryPromise({
-          try: () => operation(),
-          catch: (cause) =>
-            toSmithersError(cause, opts.label ?? "sqlite write", {
-              code: "DB_WRITE_FAILED",
-            }),
-        }),
-      opts,
-    ),
   );
 }

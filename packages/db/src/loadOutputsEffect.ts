@@ -3,7 +3,7 @@ import { getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { Effect, Option } from "effect";
 import type { OutputSnapshot } from "@smithers/driver/OutputSnapshot";
-import { fromPromise, fromSync } from "@smithers/runtime/interop";
+import { fromPromise, fromSync } from "@smithers/driver/interop";
 import { SmithersError } from "@smithers/errors/SmithersError";
 
 /**
@@ -53,7 +53,7 @@ function coerceBooleanColumns(rows: any[], boolKeys: string[]): any[] {
   });
 }
 
-export function loadOutputsEffect(
+export function loadOutputs(
   db: any,
   schema: Record<string, any>,
   runId: string,
