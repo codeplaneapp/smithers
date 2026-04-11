@@ -214,7 +214,7 @@ export async function timeTravel(
     );
   }
 
-  await Effect.runPromise(adapter.withTransaction(
+  await adapter.withTransaction(
     "time-travel",
     Effect.gen(function* () {
       const frames = yield* adapter.listFrames(runId, 1_000_000);
@@ -270,7 +270,7 @@ export async function timeTravel(
         errorJson: null,
       });
     }),
-  ));
+  );
 
   opts.onProgress?.({
     type: "TimeTravelFinished",
