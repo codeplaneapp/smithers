@@ -2,7 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
+import type { SmithersWorkflow } from "@smithers/components/SmithersWorkflow";
 import type { SmithersDb } from "@smithers/db/adapter";
 import { buildContext } from "@smithers/driver";
 import { loadInput, loadOutputs } from "@smithers/db/snapshot";

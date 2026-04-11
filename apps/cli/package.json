@@ -30,6 +30,7 @@
     "@opentui/core": "^0.1.92",
     "@opentui/react": "^0.1.92",
     "@smithers/agents": "workspace:*",
+    "@smithers/components": "workspace:*",
     "@smithers/db": "workspace:*",
     "@smithers/driver": "workspace:*",
     "@smithers/durables": "workspace:*",

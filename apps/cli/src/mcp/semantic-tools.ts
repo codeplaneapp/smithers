@@ -27,7 +27,7 @@ import { runWorkflow } from "@smithers/engine";
 import { revertToAttempt } from "@smithers/time-travel/revert";
 import { runPromise } from "../smithersRuntime";
 import type { RunResult } from "@smithers/driver/RunResult";
-import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
+import type { SmithersWorkflow } from "@smithers/components/SmithersWorkflow";
 import { newRunId } from "@smithers/driver/newRunId";
 import { SmithersError } from "@smithers/errors";
 import { toSmithersError } from "@smithers/errors/toSmithersError";

@@ -15,7 +15,7 @@ import { SmithersDb } from "@smithers/db/adapter";
 import { buildContext } from "@smithers/driver";
 import { fromPromise } from "@smithers/driver/interop";
 import { runFork, runPromise } from "./smithersRuntime";
-import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
+import type { SmithersWorkflow } from "@smithers/components/SmithersWorkflow";
 import { trackEvent } from "@smithers/observability/metrics";
 
 import { revertToAttempt } from "@smithers/time-travel/revert";
