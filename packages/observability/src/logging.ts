@@ -1,5 +1,4 @@
 import { Effect } from "effect";
-import { runFork } from "@smithers/runtime/runtime";
 import { getCurrentSmithersTraceAnnotations } from "./getCurrentSmithersTraceAnnotations";
 import {
   correlationContextToLogAnnotations,
@@ -33,7 +32,7 @@ function emitLog(
   if (span) {
     program = program.pipe(Effect.withLogSpan(span));
   }
-  void runFork(withCurrentCorrelationContext(program));
+  void Effect.runFork(withCurrentCorrelationContext(program));
 }
 
 export function logDebug(
