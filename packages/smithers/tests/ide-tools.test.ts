@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Cli } from "incur";
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 import {
   createAvailableSmithersIdeCli,
   createSmithersIdeCli,
@@ -163,7 +163,7 @@ async function callIdeTool(
 async function listMainCliToolNames(env: Record<string, string>) {
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: ["run", "src/cli/index.ts", "--mcp"],
+    args: ["run", "apps/cli/src/index.ts", "--mcp"],
     cwd: process.cwd(),
     env,
     stderr: "pipe",
@@ -363,9 +363,23 @@ describe("Smithers IDE tools", () => {
       timeoutMs: 50,
     });
 
-    await expect(
-      Effect.runPromise(service.openWebview("https://example.com")),
-    ).rejects.toMatchObject({
+    const exit = await Effect.runPromiseExit(
+      service.openWebview("https://example.com"),
+    );
+    expect(exit._tag).toBe("Failure");
+
+    if (exit._tag !== "Failure") {
+      return;
+    }
+
+    const failure = Cause.failureOption(exit.cause);
+    expect(failure._tag).toBe("Some");
+
+    if (failure._tag !== "Some") {
+      return;
+    }
+
+    expect(failure.value).toMatchObject({
       code: "PROCESS_TIMEOUT",
     });
   });
