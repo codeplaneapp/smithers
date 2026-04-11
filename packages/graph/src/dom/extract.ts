@@ -11,7 +11,7 @@ import {
 import { SmithersError } from "@smithers/errors/SmithersError";
 
 // TODO(migration): Delegate extractFromHost to
-// @smithers/core/graph.extractGraph once core extraction reaches full
+// @smithers/graph.extractGraph once core extraction reaches full
 // legacy parity. Current blockers:
 // - <Subflow> and <Sandbox> descriptors here attach runtime computeFn handlers
 //   that call executeChildWorkflow/executeSandbox; core extractGraph currently
