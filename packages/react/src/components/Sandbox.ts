@@ -1,6 +1,6 @@
 import React from "react";
-import type { CachePolicy } from "../CachePolicy";
-import type { RetryPolicy } from "../RetryPolicy";
+import type { CachePolicy } from "@smithers/core/CachePolicy";
+import type { RetryPolicy } from "@smithers/core/RetryPolicy";
 
 /** Valid output targets: a Zod schema, a Drizzle table object, or a string key. */
 type OutputTarget = import("zod").ZodObject<any> | { $inferSelect: any } | string;

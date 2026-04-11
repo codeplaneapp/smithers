@@ -1,12 +1,13 @@
 import type React from "react";
-import type { SchemaRegistryEntry } from "./SchemaRegistryEntry";
-import type { SmithersCtx } from "./SmithersCtx";
-import type { SmithersWorkflowOptions } from "./SmithersWorkflowOptions";
+import type { SmithersCtx } from "@smithers/core/SmithersCtx";
+import type { SmithersWorkflowOptions } from "@smithers/core/SmithersWorkflowOptions";
+import type { SchemaRegistryEntry } from "@smithers/core/SchemaRegistryEntry";
 
-export type SmithersWorkflow<Schema = unknown> = {
-  db?: unknown;
+export type SmithersWorkflow<Schema> = {
+  db: unknown;
   build: (ctx: SmithersCtx<Schema>) => React.ReactElement;
   opts: SmithersWorkflowOptions;
   schemaRegistry?: Map<string, SchemaRegistryEntry>;
+  /** Reverse lookup: ZodObject reference → schema key name */
   zodToKeyName?: Map<import("zod").ZodObject<any>, string>;
 };

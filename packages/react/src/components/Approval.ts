@@ -1,7 +1,9 @@
 import React from "react";
 import { z } from "zod";
-import { SmithersContext } from "../context/index";
-import { SmithersError } from "../utils/errors";
+import { SmithersContext } from "../context";
+import { getTaskRuntime } from "@smithers/runtime/task-runtime";
+import { SmithersDb } from "@smithers/db/adapter";
+import { SmithersError } from "@smithers/core/errors";
 
 export const approvalDecisionSchema = z.object({
   approved: z.boolean(),
@@ -72,9 +74,9 @@ export type ApprovalProps<Row = ApprovalDecision, Output extends OutputTarget = 
   heartbeatTimeoutMs?: number;
   heartbeatTimeout?: number;
   retries?: number;
-  retryPolicy?: import("../RetryPolicy").RetryPolicy;
+  retryPolicy?: import("@smithers/core/RetryPolicy").RetryPolicy;
   continueOnFail?: boolean;
-  cache?: import("../CachePolicy").CachePolicy;
+  cache?: import("@smithers/core/CachePolicy").CachePolicy;
   label?: string;
   meta?: Record<string, unknown>;
   key?: string;
@@ -84,6 +86,17 @@ export type ApprovalProps<Row = ApprovalDecision, Output extends OutputTarget = 
 
 function isZodObject(value: any): value is import("zod").ZodObject<any> {
   return Boolean(value && typeof value === "object" && "shape" in value);
+}
+
+function parseJson<T>(value: unknown): T | null {
+  if (typeof value !== "string" || value.length === 0) {
+    return null;
+  }
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
 }
 
 function defaultSchemaForMode(mode: ApprovalMode) {
@@ -165,6 +178,50 @@ export function Approval<Row = ApprovalDecision>(props: ApprovalProps<Row>) {
     ...props.meta,
   };
 
+  const computeDecision = async (): Promise<Row> => {
+    const runtime = getTaskRuntime();
+    if (!runtime) {
+      throw new SmithersError(
+        "APPROVAL_OUTSIDE_TASK",
+        "Approval decisions can only be resolved while a Smithers task is executing.",
+      );
+    }
+    const adapter = new SmithersDb(runtime.db);
+    const approval = await adapter.getApproval(
+      runtime.runId,
+      props.id,
+      runtime.iteration,
+    );
+    const decision = parseJson<Record<string, unknown>>(approval?.decisionJson);
+    if (approvalMode === "select") {
+      return {
+        selected:
+          typeof decision?.selected === "string" ? decision.selected : "",
+        notes:
+          typeof decision?.notes === "string"
+            ? decision.notes
+            : approval?.note ?? null,
+      } as Row;
+    }
+    if (approvalMode === "rank") {
+      return {
+        ranked: Array.isArray(decision?.ranked)
+          ? decision.ranked.filter((value): value is string => typeof value === "string")
+          : [],
+        notes:
+          typeof decision?.notes === "string"
+            ? decision.notes
+            : approval?.note ?? null,
+      } as Row;
+    }
+    return {
+      approved: approval?.status === "approved",
+      note: approval?.note ?? null,
+      decidedBy: approval?.decidedBy ?? null,
+      decidedAt: null,
+    } as Row;
+  };
+
   return React.createElement("smithers:task", {
     id: props.id,
     key: props.key,
@@ -191,6 +248,7 @@ export function Approval<Row = ApprovalDecision>(props: ApprovalProps<Row>) {
     cache: props.cache,
     label: props.label ?? props.request.title,
     meta: Object.keys(requestMeta).length > 0 ? requestMeta : undefined,
-    __smithersKind: "approval",
+    __smithersKind: "compute",
+    __smithersComputeFn: computeDecision,
   });
 }

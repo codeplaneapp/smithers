@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import React from "react";
-import { SmithersRenderer } from "../src/reconciler/index";
-import type { HostNode, WorkflowGraph } from "../src/core-types";
+import { SmithersRenderer } from "../src/reconciler";
+import type { HostNode, WorkflowGraph } from "@smithers/graph/types";
 
 function graphFrom(root: HostNode | null): WorkflowGraph {
   return {

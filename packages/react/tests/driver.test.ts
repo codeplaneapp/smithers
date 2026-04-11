@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import React from "react";
-import { ReactWorkflowDriver } from "../src/driver/index";
+import { ReactWorkflowDriver } from "../src/driver";
 import type {
   EngineDecision,
   SmithersWorkflow,

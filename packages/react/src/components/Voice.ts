@@ -1,5 +1,5 @@
 import React from "react";
-import type { VoiceProvider } from "../voice/types";
+import type { VoiceProvider } from "@smithers/voice/types";
 
 export type VoiceProps = {
   /** Voice provider instance. */

@@ -1,5 +1,5 @@
 import React from "react";
-import { DEFAULT_MERGE_QUEUE_CONCURRENCY } from "../constants";
+import { DEFAULT_MERGE_QUEUE_CONCURRENCY } from "@smithers/graph/constants";
 
 /**
  * Queue tasks so that at most `maxConcurrency` run concurrently across the group.

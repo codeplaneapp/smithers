@@ -1,6 +1,6 @@
 import React from "react";
 
-function fragment(...parts: React.ReactNode[]) {
+function fragment(...parts: any[]) {
   return React.createElement(React.Fragment, null, ...parts);
 }
 
@@ -17,10 +17,13 @@ export const markdownComponents: Record<string, React.FC<any>> = {
   ul: ({ children }: any) => fragment(children, "\n"),
   ol: ({ children }: any) => fragment(children, "\n"),
   li: ({ children }: any) => fragment("- ", children, "\n"),
-  code: ({ children, className }: any) =>
-    className
-      ? fragment("```", String(className).replace("language-", ""), "\n", children, "\n```\n\n")
-      : fragment("`", children, "`"),
+  code: ({ children, className }: any) => {
+    if (className) {
+      const lang = className.replace("language-", "");
+      return fragment("```", lang, "\n", children, "\n```\n\n");
+    }
+    return fragment("`", children, "`");
+  },
   pre: ({ children }: any) => fragment(children),
   strong: ({ children }: any) => fragment("**", children, "**"),
   em: ({ children }: any) => fragment("*", children, "*"),

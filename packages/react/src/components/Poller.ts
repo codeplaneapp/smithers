@@ -1,6 +1,6 @@
 import React from "react";
-import type { AgentLike } from "../AgentLike";
-import { SmithersContext } from "../context/index";
+import type { AgentLike } from "@smithers/core/AgentLike";
+import { SmithersContext } from "../context";
 import type { OutputTarget, TaskProps } from "./Task";
 import { Task } from "./Task";
 import { Loop } from "./Ralph";

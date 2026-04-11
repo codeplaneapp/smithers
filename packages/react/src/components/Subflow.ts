@@ -1,21 +1,15 @@
 import React from "react";
-import type { CachePolicy } from "../CachePolicy";
-import type { RetryPolicy } from "../RetryPolicy";
-import type { SmithersWorkflowOptions } from "../SmithersWorkflowOptions";
+import type { CachePolicy } from "@smithers/core/CachePolicy";
+import type { RetryPolicy } from "@smithers/core/RetryPolicy";
+import type { SmithersWorkflow } from "../SmithersWorkflow";
 
 /** Valid output targets: a Zod schema, a Drizzle table object, or a string key. */
 type OutputTarget = import("zod").ZodObject<any> | { $inferSelect: any } | string;
-type SubflowWorkflow = {
-  build: (ctx: any) => React.ReactElement;
-  opts: SmithersWorkflowOptions;
-  schemaRegistry?: Map<string, unknown>;
-  zodToKeyName?: Map<import("zod").ZodObject<any>, string>;
-};
 
 export type SubflowProps = {
   id: string;
   /** The child workflow definition. */
-  workflow: SubflowWorkflow;
+  workflow: SmithersWorkflow<any>;
   /** Input to pass to the child workflow. */
   input?: unknown;
   /** `"childRun"` gets its own DB row/run; `"inline"` embeds in parent. */

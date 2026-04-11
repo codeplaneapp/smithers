@@ -1,8 +1,8 @@
 import React from "react";
 import { z } from "zod";
-import { SmithersContext } from "../context/index";
-import { stripAutoColumns } from "../db/output";
-import { SmithersError } from "../utils/errors";
+import { SmithersContext } from "../context";
+import { stripAutoColumns } from "@smithers/db/react-output";
+import { SmithersError } from "@smithers/core/errors";
 import { WaitForEvent } from "./WaitForEvent";
 
 export type SignalProps<Schema extends z.ZodObject<any> = z.ZodObject<any>> = {

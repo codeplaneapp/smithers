@@ -1,55 +1,59 @@
 import type { z } from "zod";
 
 export function zodSchemaToJsonExample(schema: z.ZodObject<any>): string {
-  const example: Record<string, unknown> = {};
+  const example: Record<string, any> = {};
   for (const [key, field] of Object.entries(schema.shape)) {
     example[key] = zodFieldToExample(field as z.ZodTypeAny);
   }
   return JSON.stringify(example, null, 2);
 }
 
-function zodFieldToExample(field: z.ZodTypeAny): unknown {
+function zodFieldToExample(field: z.ZodTypeAny): any {
   const anyField = field as any;
-  const def = anyField._zod?.def ?? anyField._def;
+  const zod = anyField._zod;
+  const def = zod?.def;
   if (!def) return "value";
+
   const description =
     anyField.description ??
     anyField._def?.description ??
-    anyField._zod?.bag?.description ??
+    zod?.bag?.description ??
     def.description ??
     "";
+  const typeName = def.type;
 
-  switch (def.type ?? def.typeName) {
+  switch (typeName) {
     case "string":
-    case "ZodString":
       return description || "string";
     case "number":
-    case "ZodNumber":
       return 0;
     case "boolean":
-    case "ZodBoolean":
       return false;
-    case "array":
-    case "ZodArray":
-      return [zodFieldToExample(def.element ?? def.type)];
-    case "enum":
-    case "ZodEnum":
-      return Array.isArray(def.values)
-        ? def.values[0] ?? "enum"
-        : Object.keys(def.entries ?? {})[0] ?? "enum";
-    case "object":
-    case "ZodObject": {
-      const shape = (field as z.ZodObject<any>).shape;
-      const value: Record<string, unknown> = {};
-      for (const [key, child] of Object.entries(shape ?? {})) {
-        value[key] = zodFieldToExample(child as z.ZodTypeAny);
+    case "array": {
+      const inner = def.element;
+      if (inner && typeof inner === "object") return [zodFieldToExample(inner)];
+      return ["value"];
+    }
+    case "enum": {
+      if (Array.isArray(def.values)) return def.values[0] ?? "enum";
+      if (def.entries && typeof def.entries === "object") {
+        const keys = Object.keys(def.entries);
+        return keys[0] ?? "enum";
       }
-      return value;
+      return "enum";
+    }
+    case "object": {
+      const shape = (field as z.ZodObject<any>).shape;
+      if (!shape) return {};
+      const obj: Record<string, any> = {};
+      for (const [key, value] of Object.entries(shape)) {
+        obj[key] = zodFieldToExample(value as z.ZodTypeAny);
+      }
+      return obj;
     }
     case "nullable":
+      return zodFieldToExample(def.innerType);
     case "optional":
-    case "ZodNullable":
-    case "ZodOptional":
       return zodFieldToExample(def.innerType);
     default:
       return description || "value";

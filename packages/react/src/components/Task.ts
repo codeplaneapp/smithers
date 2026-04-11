@@ -2,15 +2,18 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { markdownComponents } from "../markdownComponents";
 import { zodSchemaToJsonExample } from "../zod-to-example";
-import type { AgentLike } from "../AgentLike";
-import { SmithersError } from "../utils/errors";
-import type { CachePolicy } from "../CachePolicy";
-import type { RetryPolicy } from "../RetryPolicy";
-import type { ScorersMap } from "../scorers/types";
-import type { TaskMemoryConfig } from "../memory/types";
-import { SmithersContext } from "../context/index";
-import type { InferOutputEntry } from "../OutputAccessor";
+import type { AgentLike } from "@smithers/core/AgentLike";
+import { SmithersError } from "@smithers/core/errors";
+import type { CachePolicy } from "@smithers/core/CachePolicy";
+import type { RetryPolicy } from "@smithers/core/RetryPolicy";
+import type { ScorersMap } from "@smithers/scorers/types";
+import type { TaskMemoryConfig } from "@smithers/memory/types";
+import { SmithersContext } from "../context";
+import type { InferOutputEntry } from "@smithers/core/OutputAccessor";
 import { AspectContext, type AspectContextValue } from "../aspects/AspectContext";
+import { ClaudeCodeAgent } from "@smithers/agents/ClaudeCodeAgent";
+import { GeminiAgent } from "@smithers/agents/GeminiAgent";
+import { PiAgent } from "@smithers/agents/PiAgent";
 
 /**
  * Valid output targets: a Zod schema (recommended with createSmithers),
@@ -206,46 +209,41 @@ function applyCliToolAllowlist(
     return agent;
   }
 
-  const cliEngine =
-    agent && typeof agent === "object" ? (agent as any).cliEngine : undefined;
-  const cloneAgent = (patch: Record<string, unknown>) => {
-    const ctor = (agent as any)?.constructor;
-    if (typeof ctor !== "function") {
-      return agent;
-    }
-    return new ctor({
-      ...((agent as any).opts ?? {}),
-      ...patch,
-    });
-  };
-
-  if (cliEngine === "claude-code") {
+  if (agent instanceof ClaudeCodeAgent) {
+    const opts = { ...(agent as any).opts };
     if (allowTools.length === 0) {
-      return cloneAgent({
+      return new ClaudeCodeAgent({
+        ...opts,
         allowedTools: [],
         tools: "",
       });
     }
-    return cloneAgent({
+    return new ClaudeCodeAgent({
+      ...opts,
       allowedTools: [...allowTools],
     });
   }
 
-  if (cliEngine === "pi") {
+  if (agent instanceof PiAgent) {
+    const opts = { ...(agent as any).opts };
     if (allowTools.length === 0) {
-      return cloneAgent({
+      return new PiAgent({
+        ...opts,
         tools: [],
         noTools: true,
       });
     }
-    return cloneAgent({
+    return new PiAgent({
+      ...opts,
       tools: [...allowTools],
       noTools: false,
     });
   }
 
-  if (cliEngine === "gemini") {
-    return cloneAgent({
+  if (agent instanceof GeminiAgent) {
+    const opts = { ...(agent as any).opts };
+    return new GeminiAgent({
+      ...opts,
       allowedTools: [...allowTools],
     });
   }

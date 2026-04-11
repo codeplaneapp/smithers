@@ -1,6 +1,10 @@
 import React from "react";
 import { renderPromptToText } from "./Task";
-import type { RetryPolicy } from "../RetryPolicy";
+import { getTaskRuntime } from "@smithers/runtime/task-runtime";
+import { SmithersDb } from "@smithers/db/adapter";
+import { buildHumanRequestId } from "@smithers/core/human-requests";
+import { SmithersError } from "@smithers/core/errors";
+import type { RetryPolicy } from "@smithers/core/RetryPolicy";
 
 /** Valid output targets: a Zod schema, a Drizzle table object, or a string key. */
 type OutputTarget = import("zod").ZodObject<any> | { $inferSelect: any } | string;
@@ -49,6 +53,77 @@ export function HumanTask(props: HumanTaskProps) {
     ...props.meta,
   };
 
+  const computeHumanInput = async (): Promise<unknown> => {
+    const runtime = getTaskRuntime();
+    if (!runtime) {
+      throw new SmithersError(
+        "HUMAN_TASK_OUTSIDE_RUNTIME",
+        "HumanTask can only be resolved while a Smithers task is executing.",
+      );
+    }
+    const adapter = new SmithersDb(runtime.db);
+    const requestId = buildHumanRequestId(
+      runtime.runId,
+      props.id,
+      runtime.iteration,
+    );
+    const humanRequest = await adapter.getHumanRequest(requestId);
+    const approval = await adapter.getApproval(runtime.runId, props.id, runtime.iteration);
+
+    let rawInput = humanRequest?.responseJson ?? null;
+    if (
+      rawInput == null &&
+      humanRequest?.status !== "cancelled" &&
+      humanRequest?.status !== "expired" &&
+      typeof approval?.note === "string"
+    ) {
+      rawInput = approval.note;
+      await adapter.answerHumanRequest(
+        requestId,
+        rawInput,
+        approval.decidedAtMs ?? Date.now(),
+        approval.decidedBy ?? null,
+      );
+    }
+
+    if (rawInput == null) {
+      if (humanRequest?.status === "cancelled") {
+        throw new SmithersError(
+          "HUMAN_TASK_CANCELLED",
+          `Human input for task "${props.id}" was cancelled.`,
+        );
+      }
+      throw new SmithersError(
+        "HUMAN_TASK_NO_INPUT",
+        `No human input received for task "${props.id}".`,
+      );
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = typeof rawInput === "string" ? JSON.parse(rawInput) : rawInput;
+    } catch {
+      throw new SmithersError(
+        "HUMAN_TASK_INVALID_JSON",
+        `Human input for task "${props.id}" is not valid JSON.`,
+      );
+    }
+
+    // Validate against output schema if provided
+    if (outputSchema) {
+      const result = outputSchema.safeParse(parsed);
+      if (!result.success) {
+        throw new SmithersError(
+          "HUMAN_TASK_VALIDATION_FAILED",
+          `Human input for task "${props.id}" does not match the output schema: ${result.error.message}`,
+        );
+      }
+      return result.data;
+    }
+
+    return parsed;
+  };
+
   return React.createElement("smithers:task", {
     id: props.id,
     key: props.key,
@@ -66,5 +141,6 @@ export function HumanTask(props: HumanTaskProps) {
     label: props.label ?? `human:${props.id}`,
     meta: humanMeta,
     __smithersKind: "human",
+    __smithersComputeFn: computeHumanInput,
   });
 }

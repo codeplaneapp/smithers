@@ -20,7 +20,7 @@ export type {
 
 export { Task } from "./Task";
 export type { TaskProps, OutputTarget, DepsSpec, InferDeps } from "./Task";
-export type { ScorersMap } from "../scorers/types";
+export type { ScorersMap } from "@smithers/scorers/types";
 
 export { Sequence } from "./Sequence";
 export type { SequenceProps } from "./Sequence";

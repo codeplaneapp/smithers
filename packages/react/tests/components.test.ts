@@ -42,8 +42,8 @@ import {
   Workflow,
   Worktree,
 } from "../src/components/index";
-import { SmithersRenderer } from "../src/reconciler/index";
-import type { HostNode, WorkflowGraph } from "../src/core-types";
+import { SmithersRenderer } from "../src/reconciler";
+import type { HostNode, WorkflowGraph } from "@smithers/graph/types";
 
 function graphFrom(root: HostNode | null): WorkflowGraph {
   return {
