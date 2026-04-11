@@ -1,4 +1,4 @@
-import { Cause, Duration, Effect, Either, Metric, Schedule } from "effect";
+import { Cause, Duration, Effect, Either, Exit, Metric, Schedule } from "effect";
 import { z } from "zod";
 import type { TaskDescriptor } from "@smithers/graph/TaskDescriptor";
 import type { SmithersDb } from "@smithers/db/adapter";
@@ -402,9 +402,23 @@ export const executeComputeTaskBridge = async (
   const runWithHeartbeatWatchdog = async <A>(
     taskEffect: Effect.Effect<A, unknown>,
   ): Promise<A> => {
+    const runTaskEffect = async (effect: Effect.Effect<A, unknown>) => {
+      const exit = await Effect.runPromiseExit(effect as Effect.Effect<A, unknown, never>, {
+        signal: taskSignal,
+      });
+      if (Exit.isSuccess(exit)) {
+        return exit.value;
+      }
+      const failure = Cause.failureOption(exit.cause);
+      if (failure._tag === "Some") {
+        throw failure.value;
+      }
+      throw Cause.squash(exit.cause);
+    };
+
     const heartbeatTimeoutMs = desc.heartbeatTimeoutMs;
     if (!heartbeatTimeoutMs) {
-      return await Effect.runPromise(taskEffect, { signal: taskSignal });
+      return await runTaskEffect(taskEffect);
     }
 
     const checkHeartbeat = Effect.suspend(() => {
