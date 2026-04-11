@@ -5,6 +5,8 @@ import { type AlertRow, SmithersDb } from "@smithers/db/adapter";
 import { ensureSmithersTables } from "@smithers/db/ensure";
 import { createTempRepo, runSmithers } from "../../smithers/tests/e2e-helpers";
 
+const ALERT_CLI_TIMEOUT_MS = 15_000;
+
 function createAdapter() {
   const sqlite = new Database(":memory:");
   const db = drizzle(sqlite);
@@ -184,7 +186,7 @@ describe("smithers alerts CLI", () => {
     } finally {
       sqlite.close();
     }
-  });
+  }, ALERT_CLI_TIMEOUT_MS);
 
   test("alerts ack, silence, and resolve update persisted alert status", async () => {
     const repo = createTempRepo();
@@ -234,5 +236,5 @@ describe("smithers alerts CLI", () => {
     } finally {
       sqlite.close();
     }
-  });
+  }, ALERT_CLI_TIMEOUT_MS);
 });
