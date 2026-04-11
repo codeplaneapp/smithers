@@ -1,5 +1,5 @@
 import { Cli, z } from "incur";
-import { runPromise } from "@smithers/runtime/runtime";
+import { Effect } from "effect";
 import {
   createSmithersIdeService,
   type SmithersIdeServiceConfig,
@@ -31,7 +31,7 @@ export function createSmithersIdeCli(
         col: z.number().int().positive().optional().describe("1-based column number"),
       }),
       async run(c) {
-        return runPromise(
+        return Effect.runPromise(
           service.openFile(c.args.path, c.args.line, c.args.col),
         );
       },
@@ -42,7 +42,7 @@ export function createSmithersIdeCli(
         content: z.string().min(1).describe("Unified diff content"),
       }),
       async run(c) {
-        return runPromise(service.openDiff(c.args.content));
+        return Effect.runPromise(service.openDiff(c.args.content));
       },
     })
     .command("smithers_ide_show_overlay", {
@@ -59,7 +59,7 @@ export function createSmithersIdeCli(
         percent: z.number().min(0).max(100).optional().describe("Overlay progress percent"),
       }),
       async run(c) {
-        return runPromise(
+        return Effect.runPromise(
           service.showOverlay(c.args.type, {
             message: c.args.message,
             title: c.args.title,
@@ -77,7 +77,7 @@ export function createSmithersIdeCli(
         cwd: z.string().optional().describe("Optional working directory"),
       }),
       async run(c) {
-        return runPromise(service.runTerminal(c.args.cmd, c.args.cwd));
+        return Effect.runPromise(service.runTerminal(c.args.cmd, c.args.cwd));
       },
     })
     .command("smithers_ide_ask_user", {
@@ -86,7 +86,7 @@ export function createSmithersIdeCli(
         prompt: z.string().min(1).describe("Prompt to show to the user"),
       }),
       async run(c) {
-        return runPromise(service.askUser(c.args.prompt));
+        return Effect.runPromise(service.askUser(c.args.prompt));
       },
     })
     .command("smithers_ide_open_webview", {
@@ -95,7 +95,7 @@ export function createSmithersIdeCli(
         url: z.string().url().describe("URL to open"),
       }),
       async run(c) {
-        return runPromise(service.openWebview(c.args.url));
+        return Effect.runPromise(service.openWebview(c.args.url));
       },
     });
 }

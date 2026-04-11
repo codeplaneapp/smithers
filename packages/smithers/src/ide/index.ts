@@ -1,4 +1,4 @@
-import { runPromise } from "@smithers/runtime/runtime";
+import { Effect } from "effect";
 import {
   createSmithersIdeService,
   createSmithersIdeLayer,
@@ -49,7 +49,7 @@ export function isSmithersIdeAvailable(
 export async function getSmithersIdeAvailability(
   config: SmithersIdeServiceConfig = {},
 ): Promise<SmithersIdeAvailability> {
-  return runPromise(detectSmithersIdeAvailabilityEffect(config));
+  return Effect.runPromise(detectSmithersIdeAvailabilityEffect(config));
 }
 
 export async function createAvailableSmithersIdeCli(
