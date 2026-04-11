@@ -6,7 +6,7 @@ import { ReviewOutput } from "./components/Review.schema";
 import { ReviewFixOutput } from "./components/ReviewFix.schema";
 import { ReportOutput } from "./components/Report.schema";
 
-export const { Workflow, Task, useCtx, smithers, tables } = createSmithers({
+export const { Workflow, Task, useCtx, smithers, tables, outputs } = createSmithers({
   discover: DiscoverOutput,
   implement: ImplementOutput,
   validate: ValidateOutput,

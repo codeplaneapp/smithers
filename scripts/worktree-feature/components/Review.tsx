@@ -1,6 +1,6 @@
 
 import { Parallel } from "smithers";
-import { Task } from "../smithers";
+import { Task, outputs } from "../smithers";
 import { claude, codex } from "../agents";
 import ReviewPrompt from "./Review.mdx";
 import type { Ticket } from "./Discover.schema";
