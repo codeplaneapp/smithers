@@ -5,8 +5,8 @@ import { scorerDuration, scorersFinished, scorersFailed, scorersStarted } from "
 import type { SmithersDb } from "@smithers/db/adapter";
 import type { EventBus } from "@smithers/engine/events";
 import type { ScoreResult, ScorerBinding, ScorerContext, ScorersMap } from "./types";
-import { nowMs } from "@smithers/core/utils/time";
-import type { SmithersError } from "@smithers/core/errors";
+import { nowMs } from "@smithers/scheduler/nowMs";
+import type { SmithersError } from "@smithers/errors/SmithersError";
 import crypto from "node:crypto";
 
 // ---------------------------------------------------------------------------
