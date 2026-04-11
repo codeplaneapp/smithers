@@ -1,6 +1,14 @@
 import * as WorkflowEngine from "@effect/workflow/WorkflowEngine";
 import { Cause, Effect, Exit, Layer, ManagedRuntime } from "effect";
-import { SmithersCoreLayer } from "@smithers/core/runtime";
+import { DurablePrimitivesLive } from "@smithers/durables/DurablePrimitivesLive";
+import { ExecutionServiceLive } from "@smithers/driver/ExecutionServiceLive";
+import {
+  CorrelationContextLive,
+  MetricsServiceLive,
+  TracingServiceLive,
+  SchedulerLive,
+  WorkflowSessionLive,
+} from "@smithers/scheduler";
 import {
   createSmithersRuntimeLayer,
   getCurrentSmithersTraceAnnotations,
