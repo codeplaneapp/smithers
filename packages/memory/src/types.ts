@@ -11,3 +11,5 @@ export type { MessageHistoryConfig } from "./MessageHistoryConfig";
 export type { SemanticRecallConfig } from "./SemanticRecallConfig";
 export type { TaskMemoryConfig } from "./TaskMemoryConfig";
 export type { WorkingMemoryConfig } from "./WorkingMemoryConfig";
+export { namespaceToString } from "./namespaceToString";
+export { parseNamespace } from "./parseNamespace";

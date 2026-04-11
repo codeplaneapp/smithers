@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { SmithersError } from "@smithers/core/errors";
+import type { SmithersError } from "@smithers/errors/SmithersError";
 import type { MemoryNamespace } from "../MemoryNamespace";
 import type { MemoryFact } from "../MemoryFact";
 import type { MemoryThread } from "../MemoryThread";

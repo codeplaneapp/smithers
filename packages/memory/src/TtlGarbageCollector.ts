@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { runPromise } from "@smithers/runtime/runtime";
-import type { SmithersError } from "@smithers/core/errors";
+import type { SmithersError } from "@smithers/errors/SmithersError";
 import type { MemoryStore } from "./store/MemoryStore";
 import type { MemoryProcessor } from "./MemoryProcessor";
 

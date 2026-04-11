@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { SmithersError } from "@smithers/core/errors";
+import type { SmithersError } from "@smithers/errors/SmithersError";
 import type { MemoryStore } from "./store/MemoryStore";
 
 export type MemoryProcessor = {
