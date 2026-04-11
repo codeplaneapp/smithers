@@ -54,7 +54,7 @@ type AgentStdoutTextEmitter = {
 
 type AgentInvocationOperation = "generate" | "stream";
 
-type CliUsageInfo = {
+export type CliUsageInfo = {
   inputTokens?: number;
   outputTokens?: number;
   cacheReadTokens?: number;
@@ -407,7 +407,7 @@ function buildStreamResult(
   } as unknown as StreamTextResult<any, any>;
 }
 
-function extractUsageFromOutput(raw: string): CliUsageInfo | undefined {
+export function extractUsageFromOutput(raw: string): CliUsageInfo | undefined {
   const lines = raw.split(/\r?\n/).filter(Boolean);
   const usage: CliUsageInfo = {};
   let found = false;
