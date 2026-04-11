@@ -1,5 +1,5 @@
 import { Effect, Metric } from "effect";
-import type { SmithersEvent } from "@smithers/core/SmithersEvent";
+import type { SmithersEvent } from "@smithers/observability/SmithersEvent";
 import {
   ragIngestCount,
   ragRetrieveCount,

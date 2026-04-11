@@ -9,6 +9,7 @@ export type {
   MetricsSnapshot,
 } from "@smithers/core/observability";
 
+export type { SmithersEvent } from "./SmithersEvent";
 export type { SmithersLogFormat } from "./SmithersLogFormat";
 export type { SmithersObservabilityOptions } from "./SmithersObservabilityOptions";
 export type { ResolvedSmithersObservabilityOptions } from "./ResolvedSmithersObservabilityOptions";

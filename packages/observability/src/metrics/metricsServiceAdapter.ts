@@ -6,7 +6,7 @@ import {
   type PrometheusSample,
 } from "@smithers/core/observability";
 import { Effect, Metric, MetricState } from "effect";
-import type { SmithersEvent } from "@smithers/core/SmithersEvent";
+import type { SmithersEvent } from "@smithers/observability/SmithersEvent";
 import type { SmithersMetricDefinition } from "./SmithersMetricDefinition";
 import { toPrometheusMetricName } from "./toPrometheusMetricName";
 import { durationBuckets } from "./_buckets";
