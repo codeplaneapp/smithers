@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
-import { Effect, Metric } from "effect";
+import { Cause, Effect, Exit, Metric } from "effect";
 import type {
   Agent,
   GenerateTextResult,
@@ -71,6 +71,20 @@ type AgentInvocationTags = {
 type AgentTokenTotals = CliUsageInfo & {
   totalTokens?: number;
 };
+
+export async function runAgentPromise<A>(
+  effect: Effect.Effect<A, SmithersError, never>,
+): Promise<A> {
+  const exit = await Effect.runPromiseExit(effect);
+  if (Exit.isSuccess(exit)) {
+    return exit.value;
+  }
+  const failure = Cause.failureOption(exit.cause);
+  if (failure._tag === "Some") {
+    throw failure.value;
+  }
+  throw Cause.squash(exit.cause);
+}
 
 function normalizeMetricTag(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -888,11 +902,11 @@ export abstract class BaseCliAgent implements Agent<any, any, any> {
   }
 
   async generate(options: any): Promise<GenerateTextResult<any, any>> {
-    return Effect.runPromise(this.runGenerateEffect(options, "generate"));
+    return runAgentPromise(this.runGenerateEffect(options, "generate"));
   }
 
   async stream(options: any): Promise<StreamTextResult<any, any>> {
-    const result = await Effect.runPromise(
+    const result = await runAgentPromise(
       this.runGenerateEffect(options, "stream").pipe(
         Effect.map((generateResult) => buildStreamResult(generateResult)),
       ),

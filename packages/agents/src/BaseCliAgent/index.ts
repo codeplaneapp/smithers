@@ -26,7 +26,7 @@ export { runRpcCommandEffect } from "./runRpcCommandEffect";
 export { pushFlag } from "./pushFlag";
 export { pushList } from "./pushList";
 export { normalizeCodexConfig } from "./normalizeCodexConfig";
-export { BaseCliAgent, extractUsageFromOutput } from "./BaseCliAgent";
+export { BaseCliAgent, extractUsageFromOutput, runAgentPromise } from "./BaseCliAgent";
 export type { CliUsageInfo } from "./BaseCliAgent";
 export {
   isRecord,

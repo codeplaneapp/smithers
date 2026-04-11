@@ -10,6 +10,7 @@ import {
   extractTextFromJsonValue,
   pushFlag,
   resolveTimeouts,
+  runAgentPromise,
   runRpcCommandEffect,
   tryParseJson,
   asString,
@@ -482,7 +483,7 @@ export class PiAgent extends BaseCliAgent {
       Effect.tapError(diagnosticsEnrichment),
     );
 
-    return Effect.runPromise(rpcProgram);
+    return runAgentPromise(rpcProgram);
   }
 
   protected async buildCommand(params: {
