@@ -39,7 +39,7 @@ import {
   bashToolEffect,
 } from "@smithers/tools/bash";
 import { ensureSmithersTables } from "@smithers/db/ensure";
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 import { runWithToolContext } from "@smithers/tools/context";
 import { createTestDb, createTestSmithers } from "./helpers";
 import { ddl, schema } from "./schema";
@@ -60,7 +60,26 @@ async function expectAsyncSmithersError(
   promise: Promise<unknown>,
   code = "INVALID_INPUT",
 ) {
-  await expect(promise).rejects.toMatchObject({ code });
+  let rejection: unknown;
+  try {
+    await promise;
+  } catch (error) {
+    rejection = error;
+  }
+
+  expect(rejection).toBeDefined();
+
+  const cause = (rejection as any)?.[
+    Symbol.for("effect/Runtime/FiberFailure/Cause")
+  ];
+  if (cause) {
+    const failure = Cause.failureOption(cause);
+    const error = failure._tag === "Some" ? failure.value : Cause.squash(cause);
+    expect(error).toMatchObject({ code });
+    return;
+  }
+
+  expect(rejection).toMatchObject({ code });
 }
 
 function expectSmithersError(fn: () => unknown, code = "INVALID_INPUT") {
