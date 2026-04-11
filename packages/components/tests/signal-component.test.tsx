@@ -1,10 +1,18 @@
 /** @jsxImportSource smithers */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
+import { dirname } from "node:path";
 import { jsx, jsxs } from "smithers/jsx-runtime";
 import { SmithersDb, runWorkflow, signalRun } from "smithers";
 import { renderPrometheusMetrics } from "@smithers/observability";
 import { createTestSmithers } from "./helpers";
+
+function runInTestRoot(workflow: any, dbPath: string, opts: any) {
+  return runWorkflow(workflow, {
+    ...opts,
+    rootDir: dirname(dbPath),
+  });
+}
 
 function asyncPendingMetric(kind: "approval" | "event"): number {
   const text = renderPrometheusMetrics();
@@ -19,7 +27,7 @@ function asyncPendingMetric(kind: "approval" | "event"): number {
 
 describe("Signal component", () => {
   test("blocks, validates delivered data, and renders typed children after resume", async () => {
-    const { smithers, Signal, Workflow, Task, outputs, tables, db, cleanup } =
+      const { smithers, Signal, Workflow, Task, outputs, tables, db, dbPath, cleanup } =
       createTestSmithers({
         feedback: z.object({
           rating: z.number(),
@@ -54,7 +62,7 @@ describe("Signal component", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await runInTestRoot(workflow, dbPath, { input: {} });
       expect(first.status).toBe("waiting-event");
       expect(seenPayloads).toEqual([]);
 
@@ -65,7 +73,7 @@ describe("Signal component", () => {
         { rating: 5, comment: "great" },
       );
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await runInTestRoot(workflow, dbPath, {
         input: {},
         runId: first.runId,
         resume: true,
@@ -114,6 +122,7 @@ describe("Signal component", () => {
       outputs,
       tables,
       db,
+      dbPath,
       cleanup,
     } = createTestSmithers({
       signalData: z.object({ value: z.number() }),
@@ -148,7 +157,7 @@ describe("Signal component", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await runInTestRoot(workflow, dbPath, { input: {} });
       expect(first.status).toBe("waiting-event");
 
       const beforeRows = await (db as any).select().from(tables.result);
@@ -161,7 +170,7 @@ describe("Signal component", () => {
         { value: 7 },
       );
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await runInTestRoot(workflow, dbPath, {
         input: {},
         runId: first.runId,
         resume: true,
@@ -194,6 +203,7 @@ describe("Signal component", () => {
       outputs,
       tables,
       db,
+      dbPath,
       cleanup,
     } = createTestSmithers({
       signalData: z.object({ value: z.number() }),
@@ -224,7 +234,7 @@ describe("Signal component", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await runInTestRoot(workflow, dbPath, { input: {} });
       expect(first.status).toBe("waiting-event");
       expect(asyncPendingMetric("event") - metricBefore).toBe(1);
 
@@ -246,7 +256,7 @@ describe("Signal component", () => {
       );
       expect(asyncPendingMetric("event")).toBe(metricBefore);
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await runInTestRoot(workflow, dbPath, {
         input: {},
         runId: first.runId,
         resume: true,
