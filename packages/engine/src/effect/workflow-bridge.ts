@@ -1,5 +1,6 @@
 import type { TaskDescriptor } from "@smithers/graph/TaskDescriptor";
 import type { HijackState } from "../index";
+import { Effect } from "effect";
 import { SmithersDb } from "@smithers/db/adapter";
 import { EventBus } from "../events";
 import { fromPromise } from "@smithers/driver/interop";
@@ -125,7 +126,7 @@ const classifyTaskAttempt = async (
   desc: TaskDescriptor,
   context: TaskActivityContext,
 ) => {
-  const attempts = await adapter.listAttempts(runId, desc.nodeId, desc.iteration);
+  const attempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
   const latest = attempts[0];
   const latestAttempt = latest?.attempt ?? context.attempt;
   const latestState = latest?.state ?? null;
@@ -149,7 +150,7 @@ const getNextTaskActivityAttempt = async (
   runId: string,
   desc: TaskDescriptor,
 ) => {
-  const attempts = await adapter.listAttempts(runId, desc.nodeId, desc.iteration);
+  const attempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
   const latestAttempt = attempts[0]?.attempt ?? 0;
   return latestAttempt + 1;
 };

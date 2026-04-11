@@ -85,7 +85,7 @@ export const executeStaticTaskBridge = async (
     hijackHandoff: null,
   };
 
-  await Effect.runPromise(adapter.withTransaction(
+  await adapter.withTransaction(
     "task-start",
     Effect.gen(function* () {
       yield* adapter.insertAttempt({
@@ -115,7 +115,7 @@ export const executeStaticTaskBridge = async (
         label: desc.label ?? null,
       });
     }),
-  ));
+  );
 
   await eventBus.emitEventWithPersist({
     type: "NodeStarted",
@@ -180,7 +180,7 @@ export const executeStaticTaskBridge = async (
     const completedAtMs = nowMs();
     const jjPointer = await getJjPointer(toolConfig.rootDir);
 
-    await Effect.runPromise(adapter.withTransaction(
+    await adapter.withTransaction(
       "task-completion",
       Effect.gen(function* () {
         yield* adapter.upsertOutputRow(
@@ -213,7 +213,7 @@ export const executeStaticTaskBridge = async (
           label: desc.label ?? null,
         });
       }),
-    ));
+    );
 
     await eventBus.emitEventWithPersist({
       type: "NodeFinished",
@@ -258,7 +258,7 @@ export const executeStaticTaskBridge = async (
 
     if (aborted) {
       const cancelledAtMs = nowMs();
-      await Effect.runPromise(adapter.withTransaction(
+      await adapter.withTransaction(
         "task-cancel",
         Effect.gen(function* () {
           yield* adapter.updateAttempt(
@@ -285,7 +285,7 @@ export const executeStaticTaskBridge = async (
             label: desc.label ?? null,
           });
         }),
-      ));
+      );
 
       await eventBus.emitEventWithPersist({
         type: "NodeCancelled",
@@ -331,7 +331,7 @@ export const executeStaticTaskBridge = async (
     );
 
     const failedAtMs = nowMs();
-    await Effect.runPromise(adapter.withTransaction(
+    await adapter.withTransaction(
       "task-fail",
       Effect.gen(function* () {
         yield* adapter.updateAttempt(
@@ -358,7 +358,7 @@ export const executeStaticTaskBridge = async (
           label: desc.label ?? null,
         });
       }),
-    ));
+    );
 
     await eventBus.emitEventWithPersist({
       type: "NodeFailed",

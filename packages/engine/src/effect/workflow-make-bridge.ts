@@ -281,7 +281,7 @@ export async function runWorkflowWithMakeBridge<Schema>(
       throw result.exit;
     }
 
-    const run = await adapter.getRun(lastRunIdRef.current);
+    const run = await Effect.runPromise(adapter.getRun(lastRunIdRef.current));
     const status =
       run?.status === "waiting-approval" ||
       run?.status === "waiting-event" ||

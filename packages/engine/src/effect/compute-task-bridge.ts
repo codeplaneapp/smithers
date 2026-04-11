@@ -484,7 +484,7 @@ export const executeComputeTaskBridge = async (
     hijackHandoff: null,
   };
 
-  await Effect.runPromise(adapter.withTransaction(
+  await adapter.withTransaction(
     "task-start",
     Effect.gen(function* () {
       yield* adapter.insertAttempt({
@@ -514,7 +514,7 @@ export const executeComputeTaskBridge = async (
         label: desc.label ?? null,
       });
     }),
-  ));
+  );
 
   await eventBus.emitEventWithPersist({
     type: "NodeStarted",
@@ -647,7 +647,7 @@ export const executeComputeTaskBridge = async (
     await flushHeartbeat(true);
     taskCompleted = true;
     const completedAtMs = nowMs();
-    await Effect.runPromise(adapter.withTransaction(
+    await adapter.withTransaction(
       "task-completion",
       Effect.gen(function* () {
         yield* adapter.upsertOutputRow(
@@ -680,7 +680,7 @@ export const executeComputeTaskBridge = async (
           label: desc.label ?? null,
         });
       }),
-    ));
+    );
 
     await eventBus.emitEventWithPersist({
       type: "NodeFinished",
@@ -755,7 +755,7 @@ export const executeComputeTaskBridge = async (
       await flushHeartbeat(true);
       taskCompleted = true;
       const cancelledAtMs = nowMs();
-      await Effect.runPromise(adapter.withTransaction(
+      await adapter.withTransaction(
         "task-cancel",
         Effect.gen(function* () {
           yield* adapter.updateAttempt(
@@ -782,7 +782,7 @@ export const executeComputeTaskBridge = async (
             label: desc.label ?? null,
           });
         }),
-      ));
+      );
 
       await eventBus.emitEventWithPersist({
         type: "NodeCancelled",
@@ -830,7 +830,7 @@ export const executeComputeTaskBridge = async (
       "engine:task",
     );
     const failedAtMs = nowMs();
-    await Effect.runPromise(adapter.withTransaction(
+    await adapter.withTransaction(
       "task-fail",
       Effect.gen(function* () {
         yield* adapter.updateAttempt(
@@ -857,7 +857,7 @@ export const executeComputeTaskBridge = async (
           label: desc.label ?? null,
         });
       }),
-    ));
+    );
 
     await eventBus.emitEventWithPersist({
       type: "NodeFailed",

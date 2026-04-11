@@ -993,7 +993,7 @@ async function restoreDurableStateFromSnapshot(
   );
 
   for (const node of Object.values(parsed.nodes)) {
-    await adapter.insertNode({
+    await Effect.runPromise(adapter.insertNode({
       runId,
       nodeId: node.nodeId,
       iteration: node.iteration ?? 0,
@@ -1002,17 +1002,17 @@ async function restoreDurableStateFromSnapshot(
       updatedAtMs: restoredAtMs,
       outputTable: node.outputTable ?? "",
       label: node.label ?? null,
-    });
+    }));
   }
 
   for (const ralph of Object.values(parsed.ralph)) {
-    await adapter.insertOrUpdateRalph({
+    await Effect.runPromise(adapter.insertOrUpdateRalph({
       runId,
       ralphId: ralph.ralphId,
       iteration: ralph.iteration ?? 0,
       done: Boolean(ralph.done),
       updatedAtMs: restoredAtMs,
-    });
+    }));
   }
 
   for (const [schemaKey, table] of Object.entries(schema)) {
@@ -1234,7 +1234,7 @@ async function continueRunAsNew(
     ralphState,
   } = params;
 
-  const sourceRun = await adapter.getRun(runId);
+  const sourceRun = await Effect.runPromise(adapter.getRun(runId));
   if (!sourceRun) {
     throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`, { runId });
   }
@@ -1255,7 +1255,7 @@ async function continueRunAsNew(
     );
   }
 
-  const ancestry = await adapter.listRunAncestry(runId, 10_000);
+  const ancestry = await Effect.runPromise(adapter.listRunAncestry(runId, 10_000));
   const ancestryDepth = ancestry.length;
   const targetRunId = newRunId();
   const ts = nowMs();
@@ -1910,7 +1910,7 @@ function startRunSupervisor(
   const cancelWatcher = (async () => {
     while (!closed && !controller.signal.aborted) {
       try {
-        const run = await adapter.getRun(runId);
+        const run = await Effect.runPromise(adapter.getRun(runId));
         if (
           run?.hijackRequestedAtMs &&
           (!hijackState.request ||
@@ -2370,7 +2370,7 @@ async function computeTaskStates(
 ): Promise<{ stateMap: TaskStateMap; retryWait: Map<string, number> }> {
   const stateMap: TaskStateMap = new Map();
   const retryWait = new Map<string, number>();
-  const existing = await adapter.listNodes(runId);
+  const existing = await Effect.runPromise(adapter.listNodes(runId));
   const existingState = new Map<string, TaskState>();
   for (const node of existing) {
     existingState.set(
@@ -2409,7 +2409,7 @@ async function computeTaskStates(
 
     if (desc.skipIf) {
       stateMap.set(key, "skipped");
-      await adapter.insertNode({
+      await Effect.runPromise(adapter.insertNode({
         runId,
         nodeId: desc.nodeId,
         iteration: desc.iteration,
@@ -2418,7 +2418,7 @@ async function computeTaskStates(
         updatedAtMs: nowMs(),
         outputTable: desc.outputTableName,
         label: desc.label ?? null,
-      });
+      }));
       await maybeEmitStateEvent("skipped", desc);
       continue;
     }
@@ -2436,11 +2436,11 @@ async function computeTaskStates(
       continue;
     }
 
-    const attempts = await adapter.listAttempts(
+    const attempts = await Effect.runPromise(adapter.listAttempts(
       runId,
       desc.nodeId,
       desc.iteration,
-    );
+    ));
 
     // Check for a valid output row BEFORE checking attempt state.
     // After hot reload (or resume/restart), a task may have a stale
@@ -2459,7 +2459,7 @@ async function computeTaskStates(
         const valid = validateExistingOutput(desc.outputTable as any, outputRow);
         if (valid.ok) {
           stateMap.set(key, "finished");
-          await adapter.insertNode({
+          await Effect.runPromise(adapter.insertNode({
             runId,
             nodeId: desc.nodeId,
             iteration: desc.iteration,
@@ -2468,7 +2468,7 @@ async function computeTaskStates(
             updatedAtMs: nowMs(),
             outputTable: desc.outputTableName,
             label: desc.label ?? null,
-          });
+          }));
           continue;
         }
       }
@@ -2477,7 +2477,7 @@ async function computeTaskStates(
     const inProgress = attempts.find((a: any) => a.state === "in-progress");
     if (inProgress) {
       stateMap.set(key, "in-progress");
-      await adapter.insertNode({
+      await Effect.runPromise(adapter.insertNode({
         runId,
         nodeId: desc.nodeId,
         iteration: desc.iteration,
@@ -2486,13 +2486,13 @@ async function computeTaskStates(
         updatedAtMs: nowMs(),
         outputTable: desc.outputTableName,
         label: desc.label ?? null,
-      });
+      }));
       continue;
     }
 
     if (desc.ralphId && ralphDone.get(desc.ralphId)) {
       stateMap.set(key, "skipped");
-      await adapter.insertNode({
+      await Effect.runPromise(adapter.insertNode({
         runId,
         nodeId: desc.nodeId,
         iteration: desc.iteration,
@@ -2501,7 +2501,7 @@ async function computeTaskStates(
         updatedAtMs: nowMs(),
         outputTable: desc.outputTableName,
         label: desc.label ?? null,
-      });
+      }));
       await maybeEmitStateEvent("skipped", desc);
       continue;
     }
@@ -2513,7 +2513,7 @@ async function computeTaskStates(
     );
     if (hasNonRetryableFailure || failedAttempts.length >= maxAttempts) {
       stateMap.set(key, "failed");
-      await adapter.insertNode({
+      await Effect.runPromise(adapter.insertNode({
         runId,
         nodeId: desc.nodeId,
         iteration: desc.iteration,
@@ -2522,7 +2522,7 @@ async function computeTaskStates(
         updatedAtMs: nowMs(),
         outputTable: desc.outputTableName,
         label: desc.label ?? null,
-      });
+      }));
       continue;
     }
 
@@ -2545,7 +2545,7 @@ async function computeTaskStates(
     }
 
     stateMap.set(key, "pending");
-    await adapter.insertNode({
+    await Effect.runPromise(adapter.insertNode({
       runId,
       nodeId: desc.nodeId,
       iteration: desc.iteration,
@@ -2554,7 +2554,7 @@ async function computeTaskStates(
       updatedAtMs: nowMs(),
       outputTable: desc.outputTableName,
       label: desc.label ?? null,
-    });
+    }));
     if (!waitingForRetry) {
       await maybeEmitStateEvent("pending", desc);
     }
@@ -2600,18 +2600,18 @@ async function cancelInProgress(
   runId: string,
   eventBus: EventBus,
 ) {
-  const inProgress = await adapter.listInProgressAttempts(runId);
+  const inProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
   for (const attempt of inProgress) {
-    const existingNode = await adapter.getNode(
+    const existingNode = await Effect.runPromise(adapter.getNode(
       runId,
       attempt.nodeId,
       attempt.iteration,
-    );
+    ));
     const cancelledAtMs = nowMs();
     await adapter.withTransaction(
       "cancel-in-progress",
       Effect.gen(function* () {
-        yield* adapter.updateAttemptEffect(
+        yield* adapter.updateAttempt(
           runId,
           attempt.nodeId,
           attempt.iteration,
@@ -2621,7 +2621,7 @@ async function cancelInProgress(
             finishedAtMs: cancelledAtMs,
           },
         );
-        yield* adapter.insertNodeEffect({
+        yield* adapter.insertNode({
           runId,
           nodeId: attempt.nodeId,
           iteration: attempt.iteration,
@@ -2655,19 +2655,19 @@ async function cancelPendingTimers(
 }
 
 async function cancelStaleAttempts(adapter: SmithersDb, runId: string) {
-  const inProgress = await adapter.listInProgressAttempts(runId);
+  const inProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
   const now = nowMs();
   for (const attempt of inProgress) {
     if (attempt.startedAtMs && now - attempt.startedAtMs > STALE_ATTEMPT_MS) {
-      const existingNode = await adapter.getNode(
+      const existingNode = await Effect.runPromise(adapter.getNode(
         runId,
         attempt.nodeId,
         attempt.iteration,
-      );
+      ));
       await adapter.withTransaction(
         "cancel-stale-attempt",
         Effect.gen(function* () {
-          yield* adapter.updateAttemptEffect(
+          yield* adapter.updateAttempt(
             runId,
             attempt.nodeId,
             attempt.iteration,
@@ -2677,7 +2677,7 @@ async function cancelStaleAttempts(adapter: SmithersDb, runId: string) {
               finishedAtMs: now,
             },
           );
-          yield* adapter.insertNodeEffect({
+          yield* adapter.insertNode({
             runId,
             nodeId: attempt.nodeId,
             iteration: attempt.iteration,
@@ -2716,11 +2716,11 @@ export async function legacyExecuteTask(
 ) {
   // Legacy execution goes here (renamed function)
   const taskStartMs = performance.now();
-  const attempts = await adapter.listAttempts(
+  const attempts = await Effect.runPromise(adapter.listAttempts(
     runId,
     desc.nodeId,
     desc.iteration,
-  );
+  ));
   const previousHeartbeat = (() => {
     for (const attempt of attempts) {
       const parsed = parseAttemptHeartbeatData(attempt.heartbeatDataJson);
@@ -2792,14 +2792,14 @@ export async function legacyExecuteTask(
     heartbeatLastReceivedAtMs = heartbeatAtMs;
 
     try {
-      await adapter.heartbeatAttempt(
+      await Effect.runPromise(adapter.heartbeatAttempt(
         runId,
         desc.nodeId,
         desc.iteration,
         attemptNo,
         heartbeatAtMs,
         heartbeatDataJson,
-      );
+      ));
       heartbeatLastPersistedWriteAtMs = nowMs();
       logDebug("task heartbeat recorded", {
         runId,
@@ -2915,7 +2915,7 @@ export async function legacyExecuteTask(
   await adapter.withTransaction(
     "task-start",
     Effect.gen(function* () {
-      yield* adapter.insertAttemptEffect({
+      yield* adapter.insertAttempt({
         runId,
         nodeId: desc.nodeId,
         iteration: desc.iteration,
@@ -2931,7 +2931,7 @@ export async function legacyExecuteTask(
         cached: false,
         metaJson: JSON.stringify(attemptMeta),
       });
-      yield* adapter.insertNodeEffect({
+      yield* adapter.insertNode({
         runId,
         nodeId: desc.nodeId,
         iteration: desc.iteration,
@@ -3121,7 +3121,7 @@ export async function legacyExecuteTask(
         }, "engine:task-cache");
       }
       if (cacheKey) {
-        const cachedRow = await adapter.getCache(cacheKey);
+        const cachedRow = await Effect.runPromise(adapter.getCache(cacheKey));
         if (cachedRow) {
           const parsed = JSON.parse(cachedRow.payloadJson);
           const valid = validateOutput(desc.outputTable as any, parsed);
@@ -3155,7 +3155,7 @@ export async function legacyExecuteTask(
         : allAgents[Math.min(attemptNo - 1, allAgents.length - 1)]; // fallback to disabled agent if all disabled
       const priorToolCalls =
         attemptNo > 1
-          ? await adapter.listToolCalls(runId, desc.nodeId, desc.iteration)
+          ? await Effect.runPromise(adapter.listToolCalls(runId, desc.nodeId, desc.iteration))
           : [];
       const toolResumeWarnings = collectToolResumeWarnings(
         priorToolCalls as any[],
@@ -3246,9 +3246,9 @@ export async function legacyExecuteTask(
         if (toolResumeWarnings.length > 0) {
           attemptMeta.toolResumeWarnings = toolResumeWarnings;
         }
-        await adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
+        await Effect.runPromise(adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
           metaJson: JSON.stringify(attemptMeta),
-        });
+        }));
 
         const activeCliActions = new Set<string>();
         let conversationMessages = guidedResumeMessages ? [...guidedResumeMessages] : null;
@@ -4097,13 +4097,13 @@ export async function legacyExecuteTask(
     await adapter.withTransaction(
       "task-completion",
       Effect.gen(function* () {
-        yield* adapter.upsertOutputRowEffect(
+        yield* adapter.upsertOutputRow(
           desc.outputTable as any,
           { runId, nodeId: desc.nodeId, iteration: desc.iteration },
           payload,
         );
         if (stepCacheEnabled && cacheKey && !cached) {
-          yield* adapter.insertCacheEffect({
+          yield* adapter.insertCache({
             cacheKey,
             createdAtMs: completedAtMs,
             workflowName,
@@ -4121,7 +4121,7 @@ export async function legacyExecuteTask(
             payloadJson: JSON.stringify(payload),
           });
         }
-        yield* adapter.updateAttemptEffect(
+        yield* adapter.updateAttempt(
           runId,
           desc.nodeId,
           desc.iteration,
@@ -4135,7 +4135,7 @@ export async function legacyExecuteTask(
             responseText,
           },
         );
-        yield* adapter.insertNodeEffect({
+        yield* adapter.insertNode({
           runId,
           nodeId: desc.nodeId,
           iteration: desc.iteration,
@@ -4224,7 +4224,7 @@ export async function legacyExecuteTask(
       await adapter.withTransaction(
         "task-cancel",
         Effect.gen(function* () {
-          yield* adapter.updateAttemptEffect(
+          yield* adapter.updateAttempt(
             runId,
             desc.nodeId,
             desc.iteration,
@@ -4237,7 +4237,7 @@ export async function legacyExecuteTask(
               responseText,
             },
           );
-          yield* adapter.insertNodeEffect({
+          yield* adapter.insertNode({
             runId,
             nodeId: desc.nodeId,
             iteration: desc.iteration,
@@ -4291,7 +4291,7 @@ export async function legacyExecuteTask(
     await adapter.withTransaction(
       "task-fail",
       Effect.gen(function* () {
-        yield* adapter.updateAttemptEffect(
+        yield* adapter.updateAttempt(
           runId,
           desc.nodeId,
           desc.iteration,
@@ -4304,7 +4304,7 @@ export async function legacyExecuteTask(
             responseText,
           },
         );
-        yield* adapter.insertNodeEffect({
+        yield* adapter.insertNode({
           runId,
           nodeId: desc.nodeId,
           iteration: desc.iteration,
@@ -4352,11 +4352,11 @@ export async function legacyExecuteTask(
       status: "failed",
     });
 
-    const attempts = await adapter.listAttempts(
+    const attempts = await Effect.runPromise(adapter.listAttempts(
       runId,
       desc.nodeId,
       desc.iteration,
-    );
+    ));
     if (
       attempts.filter((a: any) => a.state === "failed").length <= desc.retries
     ) {
@@ -4443,12 +4443,12 @@ async function releaseResumeClaimQuietly(
   cleanup: ResumeClaimCleanup,
 ) {
   try {
-    await adapter.releaseRunResumeClaim({
+    await Effect.runPromise(adapter.releaseRunResumeClaim({
       runId,
       claimOwnerId: cleanup.claimOwnerId,
       restoreRuntimeOwnerId: cleanup.restoreRuntimeOwnerId,
       restoreHeartbeatAtMs: cleanup.restoreHeartbeatAtMs,
-    });
+    }));
   } catch (error) {
     logWarning("failed to release resume claim", {
       runId,
@@ -4513,7 +4513,7 @@ async function activateRunForResume(
   let claimHeld = false;
   try {
     if (opts.resumeClaim) {
-      const claimedRun = await adapter.getRun(existingRun.runId);
+      const claimedRun = await Effect.runPromise(adapter.getRun(existingRun.runId));
       if (
         !claimedRun ||
         claimedRun.runtimeOwnerId !== claimOwnerId ||
@@ -4545,7 +4545,7 @@ async function activateRunForResume(
         }
       }
 
-      const claimed = await adapter.claimRunForResume({
+      const claimed = await Effect.runPromise(adapter.claimRunForResume({
         runId: existingRun.runId,
         expectedStatus: existingRun.status,
         expectedRuntimeOwnerId: existingRun.runtimeOwnerId ?? null,
@@ -4554,7 +4554,7 @@ async function activateRunForResume(
         claimOwnerId,
         claimHeartbeatAtMs,
         requireStale: existingRun.status === "running" ? !opts.force : false,
-      });
+      }));
       if (!claimed) {
         throw new SmithersError(
           "RUN_RESUME_CLAIM_FAILED",
@@ -4569,7 +4569,7 @@ async function activateRunForResume(
     }
 
     const activatedAtMs = nowMs();
-    const activated = await adapter.updateClaimedRun({
+    const activated = await Effect.runPromise(adapter.updateClaimedRun({
       runId: existingRun.runId,
       expectedRuntimeOwnerId: claimOwnerId,
       expectedHeartbeatAtMs: claimHeartbeatAtMs,
@@ -4594,7 +4594,7 @@ async function activateRunForResume(
         errorJson: null,
         configJson: runConfigJson,
       },
-    });
+    }));
     if (!activated) {
       throw new SmithersError(
         "RUN_RESUME_ACTIVATION_FAILED",
@@ -4739,7 +4739,7 @@ async function runWorkflowBodyDriver<Schema>(
     rootDir,
   );
 
-  const lastSeq = await adapter.getLastEventSeq(runId);
+  const lastSeq = await Effect.runPromise(adapter.getLastEventSeq(runId));
   const eventBus = new EventBus({
     db: adapter,
     logDir,
@@ -4773,7 +4773,7 @@ async function runWorkflowBodyDriver<Schema>(
     maxOutputBytes,
     toolTimeoutMs,
   };
-  let frameNo = (await adapter.getLastFrame(runId))?.frameNo ?? 0;
+  let frameNo = (await Effect.runPromise(adapter.getLastFrame(runId))?.frameNo ?? 0);
   let defaultIteration = 0;
   let workflowRef = workflow;
   let lastGraph: WorkflowGraph | null = null;
@@ -4811,7 +4811,7 @@ async function runWorkflowBodyDriver<Schema>(
   const waitForAbortedTasksToSettle = async () => {
     const deadlineAt = nowMs() + RUN_ABORT_SETTLE_TIMEOUT_MS;
     while (true) {
-      const inProgress = await adapter.listInProgressAttempts(runId);
+      const inProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
       if (activeDriverTaskKeys.size === 0 && inProgress.length === 0) {
         return;
       }
@@ -4838,11 +4838,11 @@ async function runWorkflowBodyDriver<Schema>(
   };
 
   const readTaskFailure = async (task: TaskDescriptor): Promise<unknown> => {
-    const attempts = await adapter.listAttempts(
+    const attempts = await Effect.runPromise(adapter.listAttempts(
       runId,
       task.nodeId,
       task.iteration,
-    );
+    ));
     const latest = attempts[0] as { errorJson?: string | null } | undefined;
     if (latest?.errorJson) {
       try {
@@ -4890,14 +4890,14 @@ async function runWorkflowBodyDriver<Schema>(
     status: "waiting-approval" | "waiting-event" | "waiting-timer",
     waitReason: "approval" | "event" | "timer",
   ): Promise<RunResult> => {
-    await adapter.updateRun(runId, {
+    await Effect.runPromise(adapter.updateRun(runId, {
       status,
       heartbeatAtMs: null,
       runtimeOwnerId: null,
       cancelRequestedAtMs: null,
       hijackRequestedAtMs: null,
       hijackTarget: null,
-    });
+    }));
     await eventBus.emitEventWithPersist({
       type: "RunStatusChanged",
       runId,
@@ -4958,22 +4958,22 @@ async function runWorkflowBodyDriver<Schema>(
         return completeSessionTask(task as TaskDescriptor);
       }
       if (resolved.state === "failed") {
-        const approval = await adapter.getApproval(
+        const approval = await Effect.runPromise(adapter.getApproval(
           runId,
           task.nodeId,
           task.iteration,
-        );
+        ));
         if (approval?.status === "denied") {
           return resolveSessionApproval(approval, false);
         }
         return failSessionTask(task as TaskDescriptor);
       }
       if (resolved.state === "pending") {
-        const approval = await adapter.getApproval(
+        const approval = await Effect.runPromise(adapter.getApproval(
           runId,
           task.nodeId,
           task.iteration,
-        );
+        ));
         if (approval && shouldExecuteDeniedApprovalTask(approval)) {
           return resolveSessionApproval(approval, true);
         }
@@ -4982,7 +4982,7 @@ async function runWorkflowBodyDriver<Schema>(
       return markRunWaiting("waiting-approval", "approval");
     }
 
-    const approval = await adapter.getApproval(runId, task.nodeId, task.iteration);
+    const approval = await Effect.runPromise(adapter.getApproval(runId, task.nodeId, task.iteration));
     if (approval?.status === "approved" || approval?.status === "denied") {
       return resolveSessionApproval(approval, approval.status === "approved");
     }
@@ -5091,7 +5091,7 @@ async function runWorkflowBodyDriver<Schema>(
       try {
         const existingOutput = await readTaskOutput(task);
         if (existingOutput !== undefined) {
-          await adapter.insertNode({
+          await Effect.runPromise(adapter.insertNode({
             runId,
             nodeId: task.nodeId,
             iteration: task.iteration,
@@ -5100,15 +5100,15 @@ async function runWorkflowBodyDriver<Schema>(
             updatedAtMs: nowMs(),
             outputTable: task.outputTableName,
             label: task.label ?? null,
-          });
+          }));
           return existingOutput;
         }
 
-        const attempts = await adapter.listAttempts(
+        const attempts = await Effect.runPromise(adapter.listAttempts(
           runId,
           task.nodeId,
           task.iteration,
-        );
+        ));
         const failedAttempts = attempts.filter((attempt: any) => attempt.state === "failed");
         const hasNonRetryableFailure = failedAttempts.some(
           (attempt) => !isRetryableTaskFailure(attempt),
@@ -5117,7 +5117,7 @@ async function runWorkflowBodyDriver<Schema>(
           hasNonRetryableFailure ||
           failedAttempts.length >= task.retries + 1
         ) {
-          await adapter.insertNode({
+          await Effect.runPromise(adapter.insertNode({
             runId,
             nodeId: task.nodeId,
             iteration: task.iteration,
@@ -5126,7 +5126,7 @@ async function runWorkflowBodyDriver<Schema>(
             updatedAtMs: nowMs(),
             outputTable: task.outputTableName,
             label: task.label ?? null,
-          });
+          }));
           throw await readTaskFailure(task);
         }
 
@@ -5168,7 +5168,7 @@ async function runWorkflowBodyDriver<Schema>(
           ),
         );
 
-        const node = await adapter.getNode(runId, task.nodeId, task.iteration);
+        const node = await Effect.runPromise(adapter.getNode(runId, task.nodeId, task.iteration));
         if (node?.state === "failed") {
           throw await readTaskFailure(task);
         }
@@ -5208,8 +5208,8 @@ async function runWorkflowBodyDriver<Schema>(
       note: "react-driver",
     };
 
-    const snapNodes = await adapter.listNodes(runId);
-    const snapRalph = await adapter.listRalph(runId);
+    const snapNodes = await Effect.runPromise(adapter.listNodes(runId));
+    const snapRalph = await Effect.runPromise(adapter.listRalph(runId));
     const snapInputRow = await loadInput(db, inputTable, runId);
     const snapOutputs = await loadOutputs(db, schema, runId);
     const snapshotData = {
@@ -5236,7 +5236,7 @@ async function runWorkflowBodyDriver<Schema>(
       const snap = await adapter.withTransaction(
         "frame-commit",
         Effect.gen(function* () {
-          yield* adapter.insertFrameEffect(frameRow);
+          yield* adapter.insertFrame(frameRow);
           return yield* captureSnapshotEffect(
             adapter,
             runId,
@@ -5270,7 +5270,7 @@ async function runWorkflowBodyDriver<Schema>(
   };
 
   const persistDriverGraphTaskStates = async (graph: WorkflowGraph) => {
-    const existingRows = await adapter.listNodes(runId);
+    const existingRows = await Effect.runPromise(adapter.listNodes(runId));
     const existingState = new Map<string, TaskState>();
     for (const node of existingRows) {
       existingState.set(
@@ -5288,7 +5288,7 @@ async function runWorkflowBodyDriver<Schema>(
 
       if (task.skipIf) {
         if (previous === "skipped") continue;
-        await adapter.insertNode({
+        await Effect.runPromise(adapter.insertNode({
           runId,
           nodeId: task.nodeId,
           iteration: task.iteration,
@@ -5297,7 +5297,7 @@ async function runWorkflowBodyDriver<Schema>(
           updatedAtMs: nowMs(),
           outputTable: task.outputTableName,
           label: task.label ?? null,
-        });
+        }));
         await eventBus.emitEventWithPersist({
           type: "NodeSkipped",
           runId,
@@ -5310,7 +5310,7 @@ async function runWorkflowBodyDriver<Schema>(
       }
 
       if (previous != null) continue;
-      await adapter.insertNode({
+      await Effect.runPromise(adapter.insertNode({
         runId,
         nodeId: task.nodeId,
         iteration: task.iteration,
@@ -5319,7 +5319,7 @@ async function runWorkflowBodyDriver<Schema>(
         updatedAtMs: nowMs(),
         outputTable: task.outputTableName,
         label: task.label ?? null,
-      });
+      }));
       await eventBus.emitEventWithPersist({
         type: "NodePending",
         runId,
@@ -5355,7 +5355,7 @@ async function runWorkflowBodyDriver<Schema>(
           : null;
       await waitForAbortedTasksToSettle();
       await cancelPendingTimers(adapter, runId, eventBus, "run-cancelled");
-      await adapter.updateRun(runId, {
+      await Effect.runPromise(adapter.updateRun(runId, {
         status: "cancelled",
         finishedAtMs: nowMs(),
         heartbeatAtMs: null,
@@ -5364,7 +5364,7 @@ async function runWorkflowBodyDriver<Schema>(
         hijackRequestedAtMs: null,
         hijackTarget: null,
         errorJson: hijackError ? JSON.stringify(hijackError) : null,
-      });
+      }));
       await eventBus.emitEventWithPersist({
         type: "RunCancelled",
         runId,
@@ -5377,7 +5377,7 @@ async function runWorkflowBodyDriver<Schema>(
       const errorInfo = errorToJson(result.error ?? driverTaskError);
       if (runOwnedByCurrentProcess) {
         await cancelPendingTimers(adapter, runId, eventBus, "run-failed");
-        await adapter.updateRun(runId, {
+        await Effect.runPromise(adapter.updateRun(runId, {
           status: "failed",
           finishedAtMs: nowMs(),
           heartbeatAtMs: null,
@@ -5386,7 +5386,7 @@ async function runWorkflowBodyDriver<Schema>(
           hijackRequestedAtMs: null,
           hijackTarget: null,
           errorJson: JSON.stringify(errorInfo),
-        });
+        }));
         await eventBus.emitEventWithPersist({
           type: "RunFailed",
           runId,
@@ -5398,7 +5398,7 @@ async function runWorkflowBodyDriver<Schema>(
       return { runId, status: "failed", error: errorInfo };
     }
 
-    await adapter.updateRun(runId, {
+    await Effect.runPromise(adapter.updateRun(runId, {
       status: "finished",
       finishedAtMs: nowMs(),
       heartbeatAtMs: null,
@@ -5406,7 +5406,7 @@ async function runWorkflowBodyDriver<Schema>(
       cancelRequestedAtMs: null,
       hijackRequestedAtMs: null,
       hijackTarget: null,
-    });
+    }));
     await eventBus.emitEventWithPersist({
       type: "RunFinished",
       runId,
@@ -5437,7 +5437,7 @@ async function runWorkflowBodyDriver<Schema>(
   };
 
   try {
-    const existingRun = await adapter.getRun(runId);
+    const existingRun = await Effect.runPromise(adapter.getRun(runId));
     updateCurrentCorrelationContext({
       parentRunId: opts.parentRunId ?? existingRun?.parentRunId ?? undefined,
       workflowName: existingRun?.workflowName ?? "workflow",
@@ -5480,13 +5480,13 @@ async function runWorkflowBodyDriver<Schema>(
       initialDecisions: getWorkflowPatchDecisions(existingConfig),
       isNewRun: !existingRun,
       persist: async (config) => {
-        await adapter.updateRun(runId, {
+        await Effect.runPromise(adapter.updateRun(runId, {
           configJson: JSON.stringify(config),
-        });
+        }));
       },
       recordDecision: async (record) => {
         const timestampMs = nowMs();
-        await adapter.insertEventWithNextSeq({
+        await Effect.runPromise(adapter.insertEventWithNextSeq({
           runId,
           timestampMs,
           type: "WorkflowPatchRecorded",
@@ -5496,7 +5496,7 @@ async function runWorkflowBodyDriver<Schema>(
             decision: record.decision,
             timestampMs,
           }),
-        });
+        }));
       },
     });
     if (opts.resume && existingRun) {
@@ -5566,7 +5566,7 @@ async function runWorkflowBodyDriver<Schema>(
     }
 
     if (!existingRun) {
-      await adapter.insertRun({
+      await Effect.runPromise(adapter.insertRun({
         runId,
         parentRunId: opts.parentRunId ?? null,
         workflowName: "workflow",
@@ -5586,7 +5586,7 @@ async function runWorkflowBodyDriver<Schema>(
         vcsRevision: runMetadata.vcsRevision,
         errorJson: null,
         configJson: runConfigJson,
-      });
+      }));
       runOwnedByCurrentProcess = true;
     } else if (opts.resume) {
       await activateRunForResume(
@@ -5600,7 +5600,7 @@ async function runWorkflowBodyDriver<Schema>(
       );
       runOwnedByCurrentProcess = true;
     } else {
-      await adapter.updateRun(runId, {
+      await Effect.runPromise(adapter.updateRun(runId, {
         status: "running",
         startedAtMs: existingRun.startedAtMs ?? nowMs(),
         finishedAtMs: null,
@@ -5620,7 +5620,7 @@ async function runWorkflowBodyDriver<Schema>(
         vcsRevision: runMetadata.vcsRevision ?? existingRun.vcsRevision ?? null,
         errorJson: null,
         configJson: runConfigJson,
-      });
+      }));
       runOwnedByCurrentProcess = true;
     }
     stopSupervisor = startRunSupervisor(
@@ -5644,7 +5644,7 @@ async function runWorkflowBodyDriver<Schema>(
         eventBus,
         requestCancel: () => runAbortController.abort(),
         createHumanRequest: async (reqOpts) => {
-          await adapter.insertHumanRequest({
+          await Effect.runPromise(adapter.insertHumanRequest({
             requestId: `human:${reqOpts.runId}:${reqOpts.nodeId}:${reqOpts.iteration}`,
             runId: reqOpts.runId,
             nodeId: reqOpts.nodeId,
@@ -5659,7 +5659,7 @@ async function runWorkflowBodyDriver<Schema>(
             answeredAtMs: null,
             answeredBy: null,
             timeoutAtMs: null,
-          });
+          }));
         },
         pauseScheduler: (_reason: string) => {},
       });
@@ -5671,18 +5671,18 @@ async function runWorkflowBodyDriver<Schema>(
 
     if (opts.resume) {
       void Effect.runPromise(Metric.increment(runsResumedTotal));
-      const staleInProgress = await adapter.listInProgressAttempts(runId);
+      const staleInProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
       const now = nowMs();
       for (const attempt of staleInProgress) {
-        const existingNode = await adapter.getNode(
+        const existingNode = await Effect.runPromise(adapter.getNode(
           runId,
           attempt.nodeId,
           attempt.iteration,
-        );
+        ));
         await adapter.withTransaction(
           "resume-cancel-stale-attempt",
           Effect.gen(function* () {
-            yield* adapter.updateAttemptEffect(
+            yield* adapter.updateAttempt(
               runId,
               attempt.nodeId,
               attempt.iteration,
@@ -5692,7 +5692,7 @@ async function runWorkflowBodyDriver<Schema>(
                 finishedAtMs: now,
               },
             );
-            yield* adapter.insertNodeEffect({
+            yield* adapter.insertNode({
               runId,
               nodeId: attempt.nodeId,
               iteration: attempt.iteration,
@@ -5708,13 +5708,13 @@ async function runWorkflowBodyDriver<Schema>(
     }
 
     if (opts.resume) {
-      const nodes = await adapter.listNodes(runId);
+      const nodes = await Effect.runPromise(adapter.listNodes(runId));
       defaultIteration = nodes.reduce(
         (max, node) => Math.max(max, node.iteration ?? 0),
         0,
       );
     }
-    ralphState = buildRalphStateMap(await adapter.listRalph(runId));
+    ralphState = buildRalphStateMap(await Effect.runPromise(adapter.listRalph(runId)));
     if (opts.resume && ralphState.size > 0) {
       const maxRalphIteration = [...ralphState.values()].reduce(
         (max, state) => Math.max(max, state.iteration),
@@ -5752,7 +5752,7 @@ async function runWorkflowBodyDriver<Schema>(
             graph.xml.kind === "element" &&
             (graph.xml.props.cache === "true" || graph.xml.props.cache === "1"),
           );
-        await adapter.updateRun(runId, { workflowName });
+        await Effect.runPromise(adapter.updateRun(runId, { workflowName }));
         await annotateRunSpan({ workflowName });
 
         const renderIterations = iterationsToMap(renderOpts?.ralphIterations);
@@ -5767,13 +5767,13 @@ async function runWorkflowBodyDriver<Schema>(
             existing?.iteration !== nextState.iteration ||
             existing?.done !== nextState.done
           ) {
-            await adapter.insertOrUpdateRalph({
+            await Effect.runPromise(adapter.insertOrUpdateRalph({
               runId,
               ralphId,
               iteration: nextState.iteration,
               done: nextState.done,
               updatedAtMs: nowMs(),
-            });
+            }));
           }
         }
         if (typeof renderOpts?.defaultIteration === "number") {
@@ -5784,13 +5784,13 @@ async function runWorkflowBodyDriver<Schema>(
           if (!ralphState.has(ralph.id)) {
             const iteration = renderIterations.get(ralph.id) ?? 0;
             ralphState.set(ralph.id, { iteration, done: false });
-            await adapter.insertOrUpdateRalph({
+            await Effect.runPromise(adapter.insertOrUpdateRalph({
               runId,
               ralphId: ralph.id,
               iteration,
               done: false,
               updatedAtMs: nowMs(),
-            });
+            }));
           }
         }
         if (ralphs.length === 1) {
@@ -5845,7 +5845,7 @@ async function runWorkflowBodyDriver<Schema>(
         if (runAbortController.signal.aborted) {
           return { runId, status: "cancelled" };
         }
-        const latestRun = await adapter.getRun(runId);
+        const latestRun = await Effect.runPromise(adapter.getRun(runId));
         if (latestRun?.cancelRequestedAtMs) {
           runAbortController.abort();
           return { runId, status: "cancelled" };
@@ -5943,7 +5943,7 @@ async function runWorkflowBodyDriver<Schema>(
           : errorToJson(err);
       await waitForAbortedTasksToSettle();
       await cancelPendingTimers(adapter, runId, eventBus, "run-cancelled");
-      await adapter.updateRun(runId, {
+      await Effect.runPromise(adapter.updateRun(runId, {
         status: "cancelled",
         finishedAtMs: nowMs(),
         heartbeatAtMs: null,
@@ -5952,7 +5952,7 @@ async function runWorkflowBodyDriver<Schema>(
         hijackRequestedAtMs: null,
         hijackTarget: null,
         errorJson: JSON.stringify(hijackError),
-      });
+      }));
       await eventBus.emitEventWithPersist({
         type: "RunCancelled",
         runId,
@@ -5968,7 +5968,7 @@ async function runWorkflowBodyDriver<Schema>(
     const errorInfo = errorToJson(err);
     if (runOwnedByCurrentProcess) {
       await cancelPendingTimers(adapter, runId, eventBus, "run-failed");
-      await adapter.updateRun(runId, {
+      await Effect.runPromise(adapter.updateRun(runId, {
         status: "failed",
         finishedAtMs: nowMs(),
         heartbeatAtMs: null,
@@ -5977,7 +5977,7 @@ async function runWorkflowBodyDriver<Schema>(
         hijackRequestedAtMs: null,
         hijackTarget: null,
         errorJson: JSON.stringify(errorInfo),
-      });
+      }));
       await eventBus.emitEventWithPersist({
         type: "RunFailed",
         runId,
@@ -6059,7 +6059,7 @@ async function runWorkflowBodyLegacy<Schema>(
     rootDir,
   );
 
-  const lastSeq = await adapter.getLastEventSeq(runId);
+  const lastSeq = await Effect.runPromise(adapter.getLastEventSeq(runId));
   const eventBus = new EventBus({
     db: adapter,
     logDir,
@@ -6090,7 +6090,7 @@ async function runWorkflowBodyLegacy<Schema>(
   const wakeLock = acquireCaffeinate();
   let alertRuntime: AlertRuntime | null = null;
   try {
-    const existingRun = await adapter.getRun(runId);
+    const existingRun = await Effect.runPromise(adapter.getRun(runId));
     updateCurrentCorrelationContext({
       parentRunId: opts.parentRunId ?? existingRun?.parentRunId ?? undefined,
       workflowName: existingRun?.workflowName ?? "workflow",
@@ -6131,13 +6131,13 @@ async function runWorkflowBodyLegacy<Schema>(
       initialDecisions: getWorkflowPatchDecisions(existingConfig),
       isNewRun: !existingRun,
       persist: async (config) => {
-        await adapter.updateRun(runId, {
+        await Effect.runPromise(adapter.updateRun(runId, {
           configJson: JSON.stringify(config),
-        });
+        }));
       },
       recordDecision: async (record) => {
         const timestampMs = nowMs();
-        await adapter.insertEventWithNextSeq({
+        await Effect.runPromise(adapter.insertEventWithNextSeq({
           runId,
           timestampMs,
           type: "WorkflowPatchRecorded",
@@ -6147,7 +6147,7 @@ async function runWorkflowBodyLegacy<Schema>(
             decision: record.decision,
             timestampMs,
           }),
-        });
+        }));
       },
     });
     if (opts.resume && existingRun) {
@@ -6217,7 +6217,7 @@ async function runWorkflowBodyLegacy<Schema>(
     }
 
     if (!existingRun) {
-      await adapter.insertRun({
+      await Effect.runPromise(adapter.insertRun({
         runId,
         parentRunId: opts.parentRunId ?? null,
         workflowName: "workflow",
@@ -6237,7 +6237,7 @@ async function runWorkflowBodyLegacy<Schema>(
         vcsRevision: runMetadata.vcsRevision,
         errorJson: null,
         configJson: runConfigJson,
-      });
+      }));
       runOwnedByCurrentProcess = true;
     } else if (opts.resume) {
       await activateRunForResume(
@@ -6251,7 +6251,7 @@ async function runWorkflowBodyLegacy<Schema>(
       );
       runOwnedByCurrentProcess = true;
     } else {
-      await adapter.updateRun(runId, {
+      await Effect.runPromise(adapter.updateRun(runId, {
         status: "running",
         startedAtMs: existingRun.startedAtMs ?? nowMs(),
         finishedAtMs: null,
@@ -6271,7 +6271,7 @@ async function runWorkflowBodyLegacy<Schema>(
         vcsRevision: runMetadata.vcsRevision ?? existingRun.vcsRevision ?? null,
         errorJson: null,
         configJson: runConfigJson,
-      });
+      }));
       runOwnedByCurrentProcess = true;
     }
     stopSupervisor = startRunSupervisor(
@@ -6296,7 +6296,7 @@ async function runWorkflowBodyLegacy<Schema>(
         eventBus,
         requestCancel: () => runAbortController.abort(),
         createHumanRequest: async (reqOpts) => {
-          await adapter.insertHumanRequest({
+          await Effect.runPromise(adapter.insertHumanRequest({
             requestId: `human:${reqOpts.runId}:${reqOpts.nodeId}:${reqOpts.iteration}`,
             runId: reqOpts.runId,
             nodeId: reqOpts.nodeId,
@@ -6311,7 +6311,7 @@ async function runWorkflowBodyLegacy<Schema>(
             answeredAtMs: null,
             answeredBy: null,
             timeoutAtMs: null,
-          });
+          }));
         },
         pauseScheduler: (_reason: string) => {
           // The human request will cause the scheduler to enter waiting-event state
@@ -6327,18 +6327,18 @@ async function runWorkflowBodyLegacy<Schema>(
     if (opts.resume) {
       void Effect.runPromise(Metric.increment(runsResumedTotal));
       // On resume, cancel ALL in-progress attempts since the previous process is dead
-      const staleInProgress = await adapter.listInProgressAttempts(runId);
+      const staleInProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
       const now = nowMs();
       for (const attempt of staleInProgress) {
-        const existingNode = await adapter.getNode(
+        const existingNode = await Effect.runPromise(adapter.getNode(
           runId,
           attempt.nodeId,
           attempt.iteration,
-        );
+        ));
         await adapter.withTransaction(
           "resume-cancel-stale-attempt",
           Effect.gen(function* () {
-            yield* adapter.updateAttemptEffect(
+            yield* adapter.updateAttempt(
               runId,
               attempt.nodeId,
               attempt.iteration,
@@ -6348,7 +6348,7 @@ async function runWorkflowBodyLegacy<Schema>(
                 finishedAtMs: now,
               },
             );
-            yield* adapter.insertNodeEffect({
+            yield* adapter.insertNode({
               runId,
               nodeId: attempt.nodeId,
               iteration: attempt.iteration,
@@ -6365,7 +6365,7 @@ async function runWorkflowBodyLegacy<Schema>(
 
     const disabledAgents = new Set<any>();
     const renderer = new SmithersRenderer();
-    let frameNo = (await adapter.getLastFrame(runId))?.frameNo ?? 0;
+    let frameNo = (await Effect.runPromise(adapter.getLastFrame(runId))?.frameNo ?? 0);
     let defaultIteration = 0;
     let prevMountedTaskIds: Set<string> = new Set();
 
@@ -6470,12 +6470,12 @@ async function runWorkflowBodyLegacy<Schema>(
         return;
       }
       try {
-        const node = await adapter.getNode(runId, task.nodeId, task.iteration);
-        const attempts = await adapter.listAttempts(
+        const node = await Effect.runPromise(adapter.getNode(runId, task.nodeId, task.iteration));
+        const attempts = await Effect.runPromise(adapter.listAttempts(
           runId,
           task.nodeId,
           task.iteration,
-        );
+        ));
         const latestAttempt = attempts[0] as
           | { attempt?: number | null; errorJson?: string | null }
           | undefined;
@@ -6549,7 +6549,7 @@ async function runWorkflowBodyLegacy<Schema>(
     waitForAbortedTasksToSettle = async () => {
       const deadlineAt = nowMs() + RUN_ABORT_SETTLE_TIMEOUT_MS;
       while (true) {
-        const inProgress = await adapter.listInProgressAttempts(runId);
+        const inProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
         if (schedulerTaskKeys.size === 0 && inProgress.length === 0) {
           return;
         }
@@ -6565,8 +6565,8 @@ async function runWorkflowBodyLegacy<Schema>(
       }
     };
     const readExternalSchedulerState = async () => {
-      const pendingApprovals = await adapter.listPendingApprovals(runId);
-      const [latestSignal] = await adapter.listSignals(runId, { limit: 1 });
+      const pendingApprovals = await Effect.runPromise(adapter.listPendingApprovals(runId));
+      const [latestSignal] = await Effect.runPromise(adapter.listSignals(runId, { limit: 1 }));
       return {
         latestSignalSeq: latestSignal?.seq ?? 0,
         pendingApprovalFingerprint: pendingApprovals
@@ -6716,7 +6716,7 @@ async function runWorkflowBodyLegacy<Schema>(
         });
     };
     if (opts.resume) {
-      const nodes = await adapter.listNodes(runId);
+      const nodes = await Effect.runPromise(adapter.listNodes(runId));
       const maxIteration = nodes.reduce(
         (max, node) => Math.max(max, node.iteration ?? 0),
         0,
@@ -6724,7 +6724,7 @@ async function runWorkflowBodyLegacy<Schema>(
       defaultIteration = maxIteration;
     }
     const ralphState: RalphStateMap = buildRalphStateMap(
-      await adapter.listRalph(runId),
+      await Effect.runPromise(adapter.listRalph(runId),)
     );
     if (opts.resume && ralphState.size > 0) {
       const maxRalphIteration = [...ralphState.values()].reduce(
@@ -6758,7 +6758,7 @@ async function runWorkflowBodyLegacy<Schema>(
             : null;
         await waitForAbortedTasksToSettle();
         await cancelPendingTimers(adapter, runId, eventBus, "run-cancelled");
-        await adapter.updateRun(runId, {
+        await Effect.runPromise(adapter.updateRun(runId, {
           status: "cancelled",
           finishedAtMs: nowMs(),
           heartbeatAtMs: null,
@@ -6767,7 +6767,7 @@ async function runWorkflowBodyLegacy<Schema>(
           hijackRequestedAtMs: null,
           hijackTarget: null,
           errorJson: hijackError ? JSON.stringify(hijackError) : null,
-        });
+        }));
         await eventBus.emitEventWithPersist({
           type: "RunCancelled",
           runId,
@@ -6787,7 +6787,7 @@ async function runWorkflowBodyLegacy<Schema>(
         !hijackState.completion &&
         schedulerTaskKeys.size === 0
       ) {
-        const hijackAttempts = await adapter.listAttemptsForRun(runId);
+        const hijackAttempts = await Effect.runPromise(adapter.listAttemptsForRun(runId));
         const target = hijackState.request.target ?? null;
         const candidate = [...(hijackAttempts as any[])].sort((a, b) => {
           const aMs = a.startedAtMs ?? 0;
@@ -6990,7 +6990,7 @@ async function runWorkflowBodyLegacy<Schema>(
           xml.kind === "element" &&
           (xml.props.cache === "true" || xml.props.cache === "1"),
         );
-      await adapter.updateRun(runId, { workflowName });
+      await Effect.runPromise(adapter.updateRun(runId, { workflowName }));
       await annotateRunSpan({
         workflowName,
       });
@@ -7014,8 +7014,8 @@ async function runWorkflowBodyLegacy<Schema>(
         note: null,
       };
 
-      const snapNodes = await adapter.listNodes(runId);
-      const snapRalph = await adapter.listRalph(runId);
+      const snapNodes = await Effect.runPromise(adapter.listNodes(runId));
+      const snapRalph = await Effect.runPromise(adapter.listRalph(runId));
       const snapInputRow = await loadInput(db, inputTable, runId);
       const snapOutputs = await loadOutputs(db, schema, runId);
       const snapshotData = {
@@ -7043,7 +7043,7 @@ async function runWorkflowBodyLegacy<Schema>(
         const snap = await adapter.withTransaction(
           "frame-commit",
           Effect.gen(function* () {
-            yield* adapter.insertFrameEffect(frameRow);
+            yield* adapter.insertFrame(frameRow);
             return yield* captureSnapshotEffect(
               adapter,
               runId,
@@ -7077,7 +7077,7 @@ async function runWorkflowBodyLegacy<Schema>(
         }, "engine:snapshot");
       }
 
-      const inProgress = await adapter.listInProgressAttempts(runId);
+      const inProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
       const mountedSet = new Set(mountedTaskIds);
       if (
         !hotOpts.enabled &&
@@ -7094,13 +7094,13 @@ async function runWorkflowBodyLegacy<Schema>(
         if (!ralphState.has(ralph.id)) {
           const iteration = 0;
           ralphState.set(ralph.id, { iteration, done: false });
-          await adapter.insertOrUpdateRalph({
+          await Effect.runPromise(adapter.insertOrUpdateRalph({
             runId,
             ralphId: ralph.id,
             iteration,
             done: false,
             updatedAtMs: nowMs(),
-          });
+          }));
         }
       }
       if (ralphs.length === 1) {
@@ -7188,13 +7188,13 @@ async function runWorkflowBodyLegacy<Schema>(
         if (orphanedInProgress.length > 0) {
           const now = nowMs();
           for (const task of orphanedInProgress) {
-            const attempts = await adapter.listAttempts(runId, task.nodeId, task.iteration);
+            const attempts = await Effect.runPromise(adapter.listAttempts(runId, task.nodeId, task.iteration));
             await adapter.withTransaction(
               "recover-orphaned-task",
               Effect.gen(function* () {
                 for (const attempt of attempts) {
                   if (attempt.state === "in-progress") {
-                    yield* adapter.updateAttemptEffect(
+                    yield* adapter.updateAttempt(
                       runId,
                       task.nodeId,
                       task.iteration,
@@ -7206,7 +7206,7 @@ async function runWorkflowBodyLegacy<Schema>(
                     );
                   }
                 }
-                yield* adapter.insertNodeEffect({
+                yield* adapter.insertNode({
                   runId,
                   nodeId: task.nodeId,
                   iteration: task.iteration,
@@ -7228,14 +7228,14 @@ async function runWorkflowBodyLegacy<Schema>(
         }
 
         if (schedule.waitingApprovalExists) {
-          await adapter.updateRun(runId, {
+          await Effect.runPromise(adapter.updateRun(runId, {
             status: "waiting-approval",
             heartbeatAtMs: null,
             runtimeOwnerId: null,
             cancelRequestedAtMs: null,
             hijackRequestedAtMs: null,
             hijackTarget: null,
-          });
+          }));
           await eventBus.emitEventWithPersist({
             type: "RunStatusChanged",
             runId,
@@ -7253,14 +7253,14 @@ async function runWorkflowBodyLegacy<Schema>(
         }
 
         if (schedule.waitingEventExists) {
-          await adapter.updateRun(runId, {
+          await Effect.runPromise(adapter.updateRun(runId, {
             status: "waiting-event",
             heartbeatAtMs: null,
             runtimeOwnerId: null,
             cancelRequestedAtMs: null,
             hijackRequestedAtMs: null,
             hijackTarget: null,
-          });
+          }));
           await eventBus.emitEventWithPersist({
             type: "RunStatusChanged",
             runId,
@@ -7278,14 +7278,14 @@ async function runWorkflowBodyLegacy<Schema>(
         }
 
         if (schedule.waitingTimerExists) {
-          await adapter.updateRun(runId, {
+          await Effect.runPromise(adapter.updateRun(runId, {
             status: "waiting-timer",
             heartbeatAtMs: null,
             runtimeOwnerId: null,
             cancelRequestedAtMs: null,
             hijackRequestedAtMs: null,
             hijackTarget: null,
-          });
+          }));
           await eventBus.emitEventWithPersist({
             type: "RunStatusChanged",
             runId,
@@ -7308,7 +7308,7 @@ async function runWorkflowBodyLegacy<Schema>(
             error: schedule.fatalError,
           }, "engine:run");
           await cancelPendingTimers(adapter, runId, eventBus, "run-failed");
-          await adapter.updateRun(runId, {
+          await Effect.runPromise(adapter.updateRun(runId, {
             status: "failed",
             finishedAtMs: nowMs(),
             heartbeatAtMs: null,
@@ -7316,7 +7316,7 @@ async function runWorkflowBodyLegacy<Schema>(
             cancelRequestedAtMs: null,
             hijackRequestedAtMs: null,
             hijackTarget: null,
-          });
+          }));
           await eventBus.emitEventWithPersist({
             type: "RunFailed",
             runId,
@@ -7345,7 +7345,7 @@ async function runWorkflowBodyLegacy<Schema>(
             failedTaskIds: failedIds.join(","),
           }, "engine:run");
           await cancelPendingTimers(adapter, runId, eventBus, "run-failed");
-          await adapter.updateRun(runId, {
+          await Effect.runPromise(adapter.updateRun(runId, {
             status: "failed",
             finishedAtMs: nowMs(),
             heartbeatAtMs: null,
@@ -7353,7 +7353,7 @@ async function runWorkflowBodyLegacy<Schema>(
             cancelRequestedAtMs: null,
             hijackRequestedAtMs: null,
             hijackTarget: null,
-          });
+          }));
           await eventBus.emitEventWithPersist({
             type: "RunFailed",
             runId,
@@ -7389,7 +7389,7 @@ async function runWorkflowBodyLegacy<Schema>(
           if (runAbortController.signal.aborted) {
             return { type: "continue" };
           }
-          const latestRun = await adapter.getRun(runId);
+          const latestRun = await Effect.runPromise(adapter.getRun(runId));
           if (latestRun?.cancelRequestedAtMs) {
             runAbortController.abort();
             return { type: "continue" };
@@ -7538,13 +7538,13 @@ async function runWorkflowBodyLegacy<Schema>(
               // Fresh re-evaluation says the condition is now met — mark done.
               if (freshUntil && !state.done) {
                 ralphState.set(ralph.id, { ...state, done: true });
-                await adapter.insertOrUpdateRalph({
+                await Effect.runPromise(adapter.insertOrUpdateRalph({
                   runId,
                   ralphId: ralph.id,
                   iteration: state.iteration,
                   done: true,
                   updatedAtMs: nowMs(),
-                });
+                }));
               }
               continue;
             }
@@ -7566,7 +7566,7 @@ async function runWorkflowBodyLegacy<Schema>(
               if (runAbortController.signal.aborted) {
                 continue;
               }
-              const latestRun = await adapter.getRun(runId);
+              const latestRun = await Effect.runPromise(adapter.getRun(runId));
               if (latestRun?.cancelRequestedAtMs) {
                 runAbortController.abort();
                 continue;
@@ -7672,17 +7672,17 @@ async function runWorkflowBodyLegacy<Schema>(
               if (singleRalphId && ralph.id === singleRalphId) {
                 defaultIteration = state.iteration;
               }
-              await adapter.insertOrUpdateRalph({
+              await Effect.runPromise(adapter.insertOrUpdateRalph({
                 runId,
                 ralphId: ralph.id,
                 iteration: state.iteration,
                 done: false,
                 updatedAtMs: nowMs(),
-              });
+              }));
               continue;
             }
             if (ralph.onMaxReached === "fail") {
-              await adapter.updateRun(runId, {
+              await Effect.runPromise(adapter.updateRun(runId, {
                 status: "failed",
                 finishedAtMs: nowMs(),
                 heartbeatAtMs: null,
@@ -7694,7 +7694,7 @@ async function runWorkflowBodyLegacy<Schema>(
                   code: "RALPH_MAX_REACHED",
                   ralphId: ralph.id,
                 }),
-              });
+              }));
               await eventBus.emitEventWithPersist({
                 type: "RunFailed",
                 runId,
@@ -7714,13 +7714,13 @@ async function runWorkflowBodyLegacy<Schema>(
               };
             }
             ralphState.set(ralph.id, { ...state, done: true });
-            await adapter.insertOrUpdateRalph({
+            await Effect.runPromise(adapter.insertOrUpdateRalph({
               runId,
               ralphId: ralph.id,
               iteration: state.iteration,
               done: true,
               updatedAtMs: nowMs(),
-            });
+            }));
           }
           offerSchedulerTrigger({
             type: "external-event",
@@ -7752,7 +7752,7 @@ async function runWorkflowBodyLegacy<Schema>(
           }
         }
 
-        await adapter.updateRun(runId, {
+        await Effect.runPromise(adapter.updateRun(runId, {
           status: "finished",
           finishedAtMs: nowMs(),
           heartbeatAtMs: null,
@@ -7760,7 +7760,7 @@ async function runWorkflowBodyLegacy<Schema>(
           cancelRequestedAtMs: null,
           hijackRequestedAtMs: null,
           hijackTarget: null,
-        });
+        }));
         await eventBus.emitEventWithPersist({
           type: "RunFinished",
           runId,
@@ -7962,7 +7962,7 @@ async function runWorkflowBodyLegacy<Schema>(
           : errorToJson(err);
       await waitForAbortedTasksToSettle();
       await cancelPendingTimers(adapter, runId, eventBus, "run-cancelled");
-      await adapter.updateRun(runId, {
+      await Effect.runPromise(adapter.updateRun(runId, {
         status: "cancelled",
         finishedAtMs: nowMs(),
         heartbeatAtMs: null,
@@ -7971,7 +7971,7 @@ async function runWorkflowBodyLegacy<Schema>(
         hijackRequestedAtMs: null,
         hijackTarget: null,
         errorJson: JSON.stringify(hijackError),
-      });
+      }));
       await eventBus.emitEventWithPersist({
         type: "RunCancelled",
         runId,
@@ -7989,7 +7989,7 @@ async function runWorkflowBodyLegacy<Schema>(
     const errorInfo = errorToJson(err);
     if (runOwnedByCurrentProcess) {
       await cancelPendingTimers(adapter, runId, eventBus, "run-failed");
-      await adapter.updateRun(runId, {
+      await Effect.runPromise(adapter.updateRun(runId, {
         status: "failed",
         finishedAtMs: nowMs(),
         heartbeatAtMs: null,
@@ -7998,7 +7998,7 @@ async function runWorkflowBodyLegacy<Schema>(
         hijackRequestedAtMs: null,
         hijackTarget: null,
         errorJson: JSON.stringify(errorInfo),
-      });
+      }));
       await eventBus.emitEventWithPersist({
         type: "RunFailed",
         runId,

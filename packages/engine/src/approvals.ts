@@ -73,7 +73,7 @@ export function approveNodeEffect(
     const existing = yield* adapter.getApproval(runId, nodeId, iteration);
     const currentNode = yield* adapter.getNode(runId, nodeId, iteration);
     assertNodeWaitingForApproval(runId, nodeId, iteration, currentNode?.state);
-    yield* adapter.withTransaction(
+    yield* adapter.withTransactionEffect(
       "approval",
       Effect.gen(function* () {
         yield* adapter.insertOrUpdateApproval({
@@ -177,7 +177,7 @@ export function denyNodeEffect(
     const existing = yield* adapter.getApproval(runId, nodeId, iteration);
     const currentNode = yield* adapter.getNode(runId, nodeId, iteration);
     assertNodeWaitingForApproval(runId, nodeId, iteration, currentNode?.state);
-    yield* adapter.withTransaction(
+    yield* adapter.withTransactionEffect(
       "approval",
       Effect.gen(function* () {
         yield* adapter.insertOrUpdateApproval({

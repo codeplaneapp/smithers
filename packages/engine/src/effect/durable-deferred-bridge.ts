@@ -153,7 +153,7 @@ async function markWaitForEventResolved(
   iteration: number,
   signal: WaitForEventSignalInput,
 ) {
-  const attempts = await adapter.listAttempts(runId, nodeId, iteration);
+  const attempts = await Effect.runPromise(adapter.listAttempts(runId, nodeId, iteration));
   const waitingAttempt =
     (attempts as any[]).find((attempt) => attempt.state === "waiting-event") ??
     attempts[0];
@@ -162,7 +162,7 @@ async function markWaitForEventResolved(
     return;
   }
 
-  await adapter.updateAttempt(
+  await Effect.runPromise(adapter.updateAttempt(
     runId,
     nodeId,
     iteration,
@@ -170,7 +170,7 @@ async function markWaitForEventResolved(
     {
       metaJson: buildResolvedWaitForEventMetaJson(snapshot, signal),
     },
-  );
+  ));
 
   if (snapshot.waitAsync) {
     try {
@@ -338,13 +338,13 @@ export const bridgeSignalResolve = async (
   runId: string,
   signal: WaitForEventSignalInput,
 ) => {
-  const nodes = await adapter.listNodes(runId);
+  const nodes = await Effect.runPromise(adapter.listNodes(runId));
   const normalizedCorrelationId = normalizeCorrelationId(signal.correlationId);
 
   for (const node of nodes as any[]) {
     if (node.state !== "waiting-event") continue;
     const iteration = node.iteration ?? 0;
-    const attempts = await adapter.listAttempts(runId, node.nodeId, iteration);
+    const attempts = await Effect.runPromise(adapter.listAttempts(runId, node.nodeId, iteration));
     const waitingAttempt =
       (attempts as any[]).find((attempt) => attempt.state === "waiting-event") ??
       attempts[0];
