@@ -1,5 +1,5 @@
 import type React from "react";
-import type { Workflow } from "@smithers/core";
+import type { Workflow } from "@smithers/driver/Workflow";
 import type { WorkflowDriverOptions } from "@smithers/driver/WorkflowDriverOptions";
 
 export type SmithersWorkflow<Schema = unknown> = Workflow<
@@ -17,7 +17,7 @@ export type {
   SmithersWorkflowOptions,
 } from "@smithers/scheduler";
 export type { RunOptions, RunResult, SmithersCtx } from "@smithers/driver";
-export type { WorkflowRuntime, WorkflowSession } from "@smithers/core/workflow-types";
+export type { WorkflowRuntime, WorkflowSession } from "@smithers/driver/workflow-types";
 export type {
   ExtractOptions,
   HostElement,
