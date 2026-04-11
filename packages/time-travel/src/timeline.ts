@@ -5,15 +5,13 @@ import type { SmithersDb } from "@smithers/db/adapter";
 import { fromPromise } from "@smithers/runtime/interop";
 import { runPromise } from "@smithers/runtime/runtime";
 import type { SmithersError } from "@smithers/core/errors";
-import { listSnapshotsEffect } from "./snapshot";
+import { listSnapshotsEffect } from "./snapshot/listSnapshotsEffect";
 import { listBranchesEffect, getBranchInfoEffect } from "./fork";
 import { smithersBranches } from "./schema";
-import type {
-  BranchInfo,
-  RunTimeline,
-  TimelineFrame,
-  TimelineTree,
-} from "./types";
+import type { BranchInfo } from "./BranchInfo";
+import type { RunTimeline } from "./RunTimeline";
+import type { TimelineFrame } from "./TimelineFrame";
+import type { TimelineTree } from "./TimelineTree";
 
 // ---------------------------------------------------------------------------
 // Build timeline for a single run

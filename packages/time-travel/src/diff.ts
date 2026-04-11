@@ -1,13 +1,11 @@
 import pc from "picocolors";
-import type {
-  ParsedSnapshot,
-  SnapshotDiff,
-  NodeChange,
-  OutputChange,
-  RalphChange,
-} from "./types";
-import { parseSnapshot } from "./snapshot";
-import type { Snapshot } from "./types";
+import type { ParsedSnapshot } from "./ParsedSnapshot";
+import type { SnapshotDiff } from "./SnapshotDiff";
+import type { NodeChange } from "./NodeChange";
+import type { OutputChange } from "./OutputChange";
+import type { RalphChange } from "./RalphChange";
+import { parseSnapshot } from "./snapshot/parseSnapshot";
+import type { Snapshot } from "./snapshot/Snapshot";
 
 // ---------------------------------------------------------------------------
 // Diffing — pure function, no DB access

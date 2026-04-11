@@ -9,6 +9,14 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./snapshot": {
+      "types": "./src/snapshot/index.ts",
+      "default": "./src/snapshot/index.ts"
+    },
+    "./metrics": {
+      "types": "./src/metrics.ts",
+      "default": "./src/metrics.ts"
+    },
     "./*": {
       "types": "./src/*.ts",
       "default": "./src/*.ts"

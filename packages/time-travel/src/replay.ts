@@ -5,8 +5,10 @@ import { runPromise } from "@smithers/runtime/runtime";
 import type { SmithersError } from "@smithers/core/errors";
 import { forkRunEffect } from "./fork";
 import { rerunAtRevision } from "./vcs-version";
-import { replaysStarted } from "./metrics";
-import type { ReplayParams, BranchInfo, Snapshot } from "./types";
+import { replaysStarted } from "./replaysStarted";
+import type { ReplayParams } from "./ReplayParams";
+import type { BranchInfo } from "./BranchInfo";
+import type { Snapshot } from "./snapshot/Snapshot";
 
 // ---------------------------------------------------------------------------
 // Replay = fork + optional VCS restore
