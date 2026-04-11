@@ -29,6 +29,8 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@smithers/components": "workspace:*",
+    "@smithers/react-reconciler": "workspace:*",
     "@types/bun": "latest",
     "typescript": "~5.9.3"
   }
