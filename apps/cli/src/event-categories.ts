@@ -1,4 +1,4 @@
-import type { SmithersEvent } from "@smithers/core/SmithersEvent";
+import type { SmithersEvent } from "@smithers/observability/SmithersEvent";
 
 export type SmithersEventType = SmithersEvent["type"];
 

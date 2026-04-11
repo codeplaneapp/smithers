@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { Effect, Schedule } from "effect";
-import type { SmithersEvent } from "@smithers/core/SmithersEvent";
+import type { SmithersEvent } from "@smithers/observability/SmithersEvent";
 import type { SmithersDb, StaleRunRecord } from "@smithers/db/adapter";
 import { fromSync } from "@smithers/runtime/interop";
 import { trackEvent } from "@smithers/observability/metrics";
