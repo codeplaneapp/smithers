@@ -34,23 +34,19 @@ export {
 } from "./vector-store";
 
 // Pipeline
-export {
-  createRagPipeline,
-  ingestEffect,
-  retrieveEffect,
-} from "./pipeline";
+export { createRagPipeline } from "./createRagPipeline";
+export { ingestEffect } from "./ingestEffect";
+export { retrieveEffect } from "./retrieveEffect";
 
 // Tool
 export { createRagTool } from "./tool";
 export type { RagToolOptions } from "./tool";
 
 // Effect service
-export {
-  RagService,
-  createRagServiceLayer,
-  ingest,
-  retrieve,
-} from "./effect";
+export { RagService } from "./RagService";
+export { createRagServiceLayer } from "./createRagServiceLayer";
+export { ingest } from "./ingest";
+export { retrieve } from "./retrieve";
 
 // Metrics
 export { ragIngestCount } from "./ragIngestCount";
