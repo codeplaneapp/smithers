@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { BaseCliAgent } from "../src/agents/BaseCliAgent";
-import type { BaseCliAgentOptions } from "../src/agents/BaseCliAgent";
+import { BaseCliAgent } from "../src/BaseCliAgent";
+import type { BaseCliAgentOptions } from "../src/BaseCliAgent";
 
 class TimedAgent extends BaseCliAgent {
   constructor(

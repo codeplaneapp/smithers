@@ -1,4 +1,4 @@
-import { sha256Hex } from "../utils/hash";
+import { sha256Hex } from "@smithers/core/utils/hash";
 
 export type AgentToolDescriptor = {
   description?: string;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BaseCliAgent } from "../src/agents/BaseCliAgent";
+import { BaseCliAgent } from "../src/BaseCliAgent";
 
 type StdoutHandling = {
   stdoutBannerPatterns?: RegExp[];

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { SmithersError } from "../utils/errors";
+import { SmithersError } from "@smithers/core/errors";
 
 // ---------------------------------------------------------------------------
 // Types

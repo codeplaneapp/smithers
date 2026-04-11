@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BaseCliAgent } from "../src/agents/BaseCliAgent";
+import { BaseCliAgent } from "../src/BaseCliAgent";
 
 async function exists(path: string): Promise<boolean> {
   try {

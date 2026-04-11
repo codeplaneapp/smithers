@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createAgentStdoutTextEmitter } from "../src/agents/BaseCliAgent";
+import { createAgentStdoutTextEmitter } from "../src/BaseCliAgent";
 
 describe("CLI agent stdout transcript emitter", () => {
   test("emits streamed assistant deltas without duplicating the final turn payload", () => {

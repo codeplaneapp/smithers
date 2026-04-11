@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ClaudeCodeAgent } from "../src/agents";
+import { ClaudeCodeAgent } from "../src";
 
 const originalPath = process.env.PATH ?? "";
 

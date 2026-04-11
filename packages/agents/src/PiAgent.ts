@@ -26,10 +26,10 @@ import {
   normalizeCapabilityStringList,
   type AgentCapabilityRegistry,
 } from "./capability-registry";
-import { fromPromise } from "../effect/interop";
-import { runPromise } from "../effect/runtime";
-import { getToolContext } from "../tools/context";
-import { SmithersError } from "../utils/errors";
+import { fromPromise } from "@smithers/runtime/interop";
+import { runPromise } from "@smithers/runtime/runtime";
+import { getToolContext } from "@smithers/tools/context";
+import { SmithersError } from "@smithers/core/errors";
 import { enrichReportWithErrorAnalysis, formatDiagnosticSummary, launchDiagnostics } from "./diagnostics";
 
 export type { PiExtensionUiRequest, PiExtensionUiResponse };

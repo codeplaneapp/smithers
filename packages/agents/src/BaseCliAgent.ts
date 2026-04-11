@@ -10,10 +10,10 @@ import type {
   ModelMessage,
 } from "ai";
 import type { AgentCapabilityRegistry } from "./capability-registry";
-import { spawnCaptureEffect } from "../effect/child-process";
-import { fromPromise } from "../effect/interop";
-import { runPromise } from "../effect/runtime";
-import { logDebug, logInfo, logWarning } from "../effect/logging";
+import { spawnCaptureEffect } from "@smithers/runtime/child-process";
+import { fromPromise } from "@smithers/runtime/interop";
+import { runPromise } from "@smithers/runtime/runtime";
+import { logDebug, logInfo, logWarning } from "@smithers/observability/logging";
 import {
   agentDurationMs,
   agentErrorsTotal,
@@ -21,9 +21,9 @@ import {
   agentRetriesTotal,
   agentTokensTotal,
   toolOutputTruncatedTotal,
-} from "../effect/metrics";
-import { getToolContext } from "../tools/context";
-import { SmithersError, toSmithersError } from "../utils/errors";
+} from "@smithers/observability/metrics";
+import { getToolContext } from "@smithers/tools/context";
+import { SmithersError, toSmithersError } from "@smithers/core/errors";
 import { launchDiagnostics, enrichReportWithErrorAnalysis, formatDiagnosticSummary } from "./diagnostics";
 
 type TimeoutInput = number | { totalMs?: number; idleMs?: number } | undefined;

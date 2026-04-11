@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
-import { AnthropicAgent, OpenAIAgent } from "../src/agents";
+import { AnthropicAgent, OpenAIAgent } from "../src";
 
 function createFakeModel() {
   let lastCall: any;

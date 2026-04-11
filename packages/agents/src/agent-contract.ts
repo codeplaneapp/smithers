@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { SmithersError } from "../utils/errors";
+import { SmithersError } from "@smithers/core/errors";
 
 export type SmithersToolSurface = "raw" | "semantic";
 

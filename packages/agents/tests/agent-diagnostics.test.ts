@@ -5,10 +5,10 @@ import {
   enrichReportWithErrorAnalysis,
   formatDiagnosticSummary,
   launchDiagnostics,
-} from "../src/agents/diagnostics";
-import type { DiagnosticReport } from "../src/agents/diagnostics";
-import { BaseCliAgent } from "../src/agents/BaseCliAgent";
-import { SmithersError } from "../src/utils/errors";
+} from "../src/diagnostics";
+import type { DiagnosticReport } from "../src/diagnostics";
+import { BaseCliAgent } from "../src/BaseCliAgent";
+import { SmithersError } from "@smithers/core/errors";
 
 // ---------------------------------------------------------------------------
 // runDiagnostics

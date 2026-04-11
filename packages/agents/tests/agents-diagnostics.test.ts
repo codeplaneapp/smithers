@@ -6,7 +6,7 @@ import {
   runDiagnostics,
   type DiagnosticReport,
   type DiagnosticCheck,
-} from "../src/agents/diagnostics";
+} from "../src/diagnostics";
 
 // ---------------------------------------------------------------------------
 // getDiagnosticStrategy — strategy registry lookup

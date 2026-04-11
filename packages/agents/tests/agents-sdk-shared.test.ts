@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   resolveSdkModel,
   streamResultToGenerateResult,
-} from "../src/agents/sdk-shared";
+} from "../src/sdk-shared";
 
 // ---------------------------------------------------------------------------
 // resolveSdkModel — model factory pattern

@@ -3,8 +3,8 @@ import {
   createSmithersAgentContract,
   probeSmithersAgentContract,
   renderSmithersAgentPromptGuidance,
-} from "../src/cli/agent-contract";
-import { buildSmithersPiSystemPrompt } from "../src/pi-plugin/extension";
+} from "../src/agent-contract";
+import { buildSmithersPiSystemPrompt } from "smithers/pi-plugin/extension";
 
 function extractBacktickedNames(text: string) {
   return [...text.matchAll(/`([^`]+)`/g)].map((match) => match[1]!);

@@ -1,18 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import { z } from "zod";
-import { Workflow, Task, runWorkflow } from "../src/index";
-import { ClaudeCodeAgent } from "../src/agents/ClaudeCodeAgent";
-import { CodexAgent } from "../src/agents/CodexAgent";
-import { GeminiAgent } from "../src/agents/GeminiAgent";
-import { KimiAgent } from "../src/agents/KimiAgent";
-import { PiAgent } from "../src/agents/PiAgent";
+import { Workflow, Task, runWorkflow } from "smithers";
+import { ClaudeCodeAgent } from "../src/ClaudeCodeAgent";
+import { CodexAgent } from "../src/CodexAgent";
+import { GeminiAgent } from "../src/GeminiAgent";
+import { KimiAgent } from "../src/KimiAgent";
+import { PiAgent } from "../src/PiAgent";
 import {
   hashCapabilityRegistry,
   type AgentCapabilityRegistry,
-} from "../src/agents/capability-registry";
-import { createTestSmithers } from "./helpers";
-import { createTempRepo, runSmithers } from "./e2e-helpers";
+} from "../src/capability-registry";
+import { createTestSmithers } from "../../smithers/tests/helpers";
+import { createTempRepo, runSmithers } from "../../smithers/tests/e2e-helpers";
 
 function withMutedWarn<T>(fn: () => T): T {
   const originalWarn = console.warn;

@@ -1,7 +1,7 @@
 /** @jsxImportSource smithers */
 import { describe, expect, test } from "bun:test";
-import { Workflow, Task, Sequence, runWorkflow } from "../src/index";
-import { createTestSmithers, sleep } from "./helpers";
+import { Workflow, Task, Sequence, runWorkflow } from "smithers";
+import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { z } from "zod";
 
 function fakeAgent(response: any, opts?: { delay?: number }) {
