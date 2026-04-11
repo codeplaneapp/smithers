@@ -1,12 +1,12 @@
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import type { SmithersDb } from "@smithers/db/adapter";
-import { fromPromise } from "@smithers/runtime/interop";
+import { fromPromise } from "@smithers/driver/interop";
 import type { SmithersError } from "@smithers/errors/SmithersError";
 import { smithersBranches } from "../schema";
 import type { BranchInfo } from "../BranchInfo";
 
-export function getBranchInfoEffect(
+export function getBranchInfo(
   adapter: SmithersDb,
   runId: string,
 ): Effect.Effect<BranchInfo | undefined, SmithersError> {

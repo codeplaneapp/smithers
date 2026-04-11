@@ -3,9 +3,9 @@ import { Effect } from "effect";
 import type { SmithersDb } from "@smithers/db/adapter";
 import type { SmithersError } from "@smithers/errors/SmithersError";
 import { revertToJjPointerEffect } from "@smithers/vcs/jj";
-import { loadVcsTagEffect } from "./loadVcsTagEffect";
+import { loadVcsTag } from "./loadVcsTagEffect";
 
-export function rerunAtRevisionEffect(
+export function rerunAtRevision(
   adapter: SmithersDb,
   runId: string,
   frameNo: number,
@@ -16,7 +16,7 @@ export function rerunAtRevisionEffect(
   CommandExecutor
 > {
   return Effect.gen(function* () {
-    const tag = yield* loadVcsTagEffect(adapter, runId, frameNo);
+    const tag = yield* loadVcsTag(adapter, runId, frameNo);
     if (!tag) {
       return { restored: false, vcsPointer: null };
     }

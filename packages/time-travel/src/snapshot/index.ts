@@ -1,11 +1,9 @@
-export { captureSnapshot, captureSnapshotEffect } from "./captureSnapshotEffect";
+export { captureSnapshot } from "./captureSnapshotEffect";
 export {
   loadLatestSnapshot,
-  loadLatestSnapshotEffect,
   loadSnapshot,
-  loadSnapshotEffect,
 } from "./loadSnapshotEffect";
-export { listSnapshots, listSnapshotsEffect } from "./listSnapshotsEffect";
+export { listSnapshots } from "./listSnapshotsEffect";
 
 export type { Snapshot } from "./Snapshot";
 export type { SnapshotData } from "./SnapshotData";

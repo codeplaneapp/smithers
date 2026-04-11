@@ -1,6 +1,6 @@
 import { Effect, Metric } from "effect";
 import type { SmithersDb } from "@smithers/db/adapter";
-import { fromPromise } from "@smithers/runtime/interop";
+import { fromPromise } from "@smithers/driver/interop";
 import { nowMs } from "@smithers/scheduler/nowMs";
 import { newRunId } from "@smithers/driver/newRunId";
 import { SmithersError } from "@smithers/errors/SmithersError";
@@ -14,7 +14,7 @@ import type { BranchInfo } from "../BranchInfo";
 import type { Snapshot } from "../snapshot/Snapshot";
 import type { NodeSnapshot } from "../NodeSnapshot";
 
-export function forkRunEffect(
+export function forkRun(
   adapter: SmithersDb,
   params: ForkParams,
 ): Effect.Effect<{ runId: string; branch: BranchInfo; snapshot: Snapshot }, SmithersError> {

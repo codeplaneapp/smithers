@@ -1,15 +1,15 @@
 import { Effect } from "effect";
 import type { SmithersDb } from "@smithers/db/adapter";
 import type { SmithersError } from "@smithers/errors/SmithersError";
-import { buildTimelineEffect } from "./buildTimelineEffect";
+import { buildTimeline } from "./buildTimelineEffect";
 import type { TimelineTree } from "../TimelineTree";
 
-export function buildTimelineTreeEffect(
+export function buildTimelineTree(
   adapter: SmithersDb,
   runId: string,
 ): Effect.Effect<TimelineTree, SmithersError> {
   return Effect.gen(function* () {
-    const timeline = yield* buildTimelineEffect(adapter, runId);
+    const timeline = yield* buildTimeline(adapter, runId);
 
     // Collect all child runs that branch from this run
     const childRunIds: string[] = [];
@@ -22,7 +22,7 @@ export function buildTimelineTreeEffect(
     // Recursively build subtrees
     const children: TimelineTree[] = [];
     for (const childId of childRunIds) {
-      const childTree = yield* buildTimelineTreeEffect(adapter, childId);
+      const childTree = yield* buildTimelineTree(adapter, childId);
       children.push(childTree);
     }
 

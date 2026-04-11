@@ -1,12 +1,12 @@
 import { eq, and } from "drizzle-orm";
 import { Effect } from "effect";
 import type { SmithersDb } from "@smithers/db/adapter";
-import { fromPromise } from "@smithers/runtime/interop";
+import { fromPromise } from "@smithers/driver/interop";
 import type { SmithersError } from "@smithers/errors/SmithersError";
 import { smithersVcsTags } from "../schema";
 import type { VcsTag } from "./VcsTag";
 
-export function loadVcsTagEffect(
+export function loadVcsTag(
   adapter: SmithersDb,
   runId: string,
   frameNo: number,

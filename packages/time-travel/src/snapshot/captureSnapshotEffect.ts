@@ -1,7 +1,6 @@
 import { Effect, Metric } from "effect";
 import type { SmithersDb } from "@smithers/db/adapter";
-import { fromPromise } from "@smithers/runtime/interop";
-import { runPromise } from "@smithers/runtime/runtime";
+import { fromPromise } from "@smithers/driver/interop";
 import { sha256Hex } from "@smithers/driver/sha256Hex";
 import { nowMs } from "@smithers/scheduler/nowMs";
 import type { SmithersError } from "@smithers/errors/SmithersError";
@@ -20,7 +19,7 @@ function serializeSnapshotContent(data: SnapshotData): string {
   });
 }
 
-export function captureSnapshotEffect(
+export function captureSnapshot(
   adapter: SmithersDb,
   runId: string,
   frameNo: number,
@@ -73,11 +72,3 @@ export function captureSnapshotEffect(
   );
 }
 
-export function captureSnapshot(
-  adapter: SmithersDb,
-  runId: string,
-  frameNo: number,
-  data: SnapshotData,
-): Promise<Snapshot> {
-  return runPromise(captureSnapshotEffect(adapter, runId, frameNo, data));
-}

@@ -1,13 +1,12 @@
 import { and, desc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import type { SmithersDb } from "@smithers/db/adapter";
-import { fromPromise } from "@smithers/runtime/interop";
-import { runPromise } from "@smithers/runtime/runtime";
+import { fromPromise } from "@smithers/driver/interop";
 import type { SmithersError } from "@smithers/errors/SmithersError";
 import { smithersSnapshots } from "../schema";
 import type { Snapshot } from "./Snapshot";
 
-export function loadSnapshotEffect(
+export function loadSnapshot(
   adapter: SmithersDb,
   runId: string,
   frameNo: number,
@@ -34,15 +33,7 @@ export function loadSnapshotEffect(
   );
 }
 
-export function loadSnapshot(
-  adapter: SmithersDb,
-  runId: string,
-  frameNo: number,
-): Promise<Snapshot | undefined> {
-  return runPromise(loadSnapshotEffect(adapter, runId, frameNo));
-}
-
-export function loadLatestSnapshotEffect(
+export function loadLatestSnapshot(
   adapter: SmithersDb,
   runId: string,
 ): Effect.Effect<Snapshot | undefined, SmithersError> {
@@ -64,9 +55,3 @@ export function loadLatestSnapshotEffect(
   );
 }
 
-export function loadLatestSnapshot(
-  adapter: SmithersDb,
-  runId: string,
-): Promise<Snapshot | undefined> {
-  return runPromise(loadLatestSnapshotEffect(adapter, runId));
-}

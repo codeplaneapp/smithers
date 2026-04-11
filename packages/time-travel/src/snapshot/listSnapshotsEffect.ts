@@ -1,13 +1,12 @@
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import type { SmithersDb } from "@smithers/db/adapter";
-import { fromPromise } from "@smithers/runtime/interop";
-import { runPromise } from "@smithers/runtime/runtime";
+import { fromPromise } from "@smithers/driver/interop";
 import type { SmithersError } from "@smithers/errors/SmithersError";
 import { smithersSnapshots } from "../schema";
 import type { Snapshot } from "./Snapshot";
 
-export function listSnapshotsEffect(
+export function listSnapshots(
   adapter: SmithersDb,
   runId: string,
 ): Effect.Effect<Array<Pick<Snapshot, "runId" | "frameNo" | "contentHash" | "createdAtMs" | "vcsPointer">>, SmithersError> {
@@ -35,9 +34,3 @@ export function listSnapshotsEffect(
   );
 }
 
-export function listSnapshots(
-  adapter: SmithersDb,
-  runId: string,
-): Promise<Array<Pick<Snapshot, "runId" | "frameNo" | "contentHash" | "createdAtMs" | "vcsPointer">>> {
-  return runPromise(listSnapshotsEffect(adapter, runId));
-}
