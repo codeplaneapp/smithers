@@ -132,7 +132,21 @@ const CREATE_TABLE_STATEMENTS = [
     resolved_at_ms INTEGER,
     acknowledged_at_ms INTEGER,
     message TEXT NOT NULL,
-    details_json TEXT
+    details_json TEXT,
+    fingerprint TEXT,
+    node_id TEXT,
+    iteration INTEGER,
+    owner TEXT,
+    runbook TEXT,
+    labels_json TEXT,
+    reaction_json TEXT,
+    source_event_type TEXT,
+    first_fired_at_ms INTEGER,
+    last_fired_at_ms INTEGER,
+    occurrence_count INTEGER DEFAULT 1,
+    silenced_until_ms INTEGER,
+    acknowledged_by TEXT,
+    resolved_by TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS _smithers_signals (
     run_id TEXT NOT NULL,
@@ -325,6 +339,23 @@ const MIGRATION_STATEMENTS = [
   `ALTER TABLE _smithers_approvals ADD COLUMN decision_json TEXT`,
   `ALTER TABLE _smithers_approvals ADD COLUMN auto_approved INTEGER NOT NULL DEFAULT 0`,
   `CREATE INDEX IF NOT EXISTS _smithers_runs_parent_idx ON _smithers_runs (parent_run_id)`,
+  // Ticket 0001: Alert model extensions
+  `ALTER TABLE _smithers_alerts ADD COLUMN fingerprint TEXT`,
+  `ALTER TABLE _smithers_alerts ADD COLUMN node_id TEXT`,
+  `ALTER TABLE _smithers_alerts ADD COLUMN iteration INTEGER`,
+  `ALTER TABLE _smithers_alerts ADD COLUMN owner TEXT`,
+  `ALTER TABLE _smithers_alerts ADD COLUMN runbook TEXT`,
+  `ALTER TABLE _smithers_alerts ADD COLUMN labels_json TEXT`,
+  `ALTER TABLE _smithers_alerts ADD COLUMN reaction_json TEXT`,
+  `ALTER TABLE _smithers_alerts ADD COLUMN source_event_type TEXT`,
+  `ALTER TABLE _smithers_alerts ADD COLUMN first_fired_at_ms INTEGER`,
+  `ALTER TABLE _smithers_alerts ADD COLUMN last_fired_at_ms INTEGER`,
+  `ALTER TABLE _smithers_alerts ADD COLUMN occurrence_count INTEGER DEFAULT 1`,
+  `ALTER TABLE _smithers_alerts ADD COLUMN silenced_until_ms INTEGER`,
+  `ALTER TABLE _smithers_alerts ADD COLUMN acknowledged_by TEXT`,
+  `ALTER TABLE _smithers_alerts ADD COLUMN resolved_by TEXT`,
+  `CREATE INDEX IF NOT EXISTS _smithers_alerts_fingerprint_idx ON _smithers_alerts (fingerprint)`,
+  `CREATE INDEX IF NOT EXISTS _smithers_alerts_run_status_idx ON _smithers_alerts (run_id, status)`,
 ] as const;
 
 function quoteIdentifier(identifier: string): string {
@@ -529,6 +560,8 @@ function makeSqlClientLayer(sqlite: Database) {
 
 export class SqlMessageStorage {
   readonly sqlite: Database;
+  // TODO(Phase 8): Keep this per-DB runtime until the unified runtime can
+  // inject a scoped SqlClient without rebuilding the per-connection semaphore.
   private runtime: ManagedRuntime.ManagedRuntime<SqlClient.SqlClient, never>;
   private tableColumnsCache = new Map<string, Set<string>>();
 

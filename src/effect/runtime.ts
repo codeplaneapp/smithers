@@ -1,4 +1,6 @@
-import { Cause, Effect, Exit, ManagedRuntime } from "effect";
+import * as WorkflowEngine from "@effect/workflow/WorkflowEngine";
+import { Cause, Effect, Exit, Layer, ManagedRuntime } from "effect";
+import { SmithersCoreLayer } from "../../packages/core/src/runtime/index.ts";
 import {
   createSmithersRuntimeLayer,
   getCurrentSmithersTraceAnnotations,
@@ -9,7 +11,12 @@ import {
 import { getToolContext } from "../tools/context";
 import { type SmithersError, toSmithersError } from "../utils/errors";
 
-const SmithersRuntimeLayer = createSmithersRuntimeLayer();
+const SmithersWorkflowEngineLayer = Layer.suspend(() => WorkflowEngine.layerMemory);
+const SmithersRuntimeLayer = Layer.mergeAll(
+  SmithersCoreLayer,
+  SmithersWorkflowEngineLayer,
+  createSmithersRuntimeLayer(),
+).pipe(Layer.orDie) as Layer.Layer<unknown, never, never>;
 
 const runtime = ManagedRuntime.make(SmithersRuntimeLayer);
 
@@ -65,6 +72,16 @@ export async function runPromise<A, E, R>(
     throw normalizeRejection(failure.value);
   }
   throw normalizeRejection(Cause.squash(exit.cause));
+}
+
+export function runPromiseExit<A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  options?: { signal?: AbortSignal },
+) {
+  return runtime.runPromiseExit(
+    decorate(effect) as Effect.Effect<A, E, never>,
+    options,
+  );
 }
 
 export function runFork<A, E, R>(effect: Effect.Effect<A, E, R>) {

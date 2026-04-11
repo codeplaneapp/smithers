@@ -3,7 +3,9 @@ import { getTableName } from "drizzle-orm";
 import type { SmithersCtx } from "./SmithersCtx";
 import type { OutputKey } from "./OutputKey";
 import type { RunAuthContext } from "./RunAuthContext";
-import { SmithersError } from "./utils/errors";
+import { SmithersError } from "../packages/core/src/errors/index";
+
+export { SmithersContext } from "../packages/react/src/context/index";
 
 export type OutputSnapshot = {
   [tableName: string]: Array<any>;
@@ -13,9 +15,8 @@ export type SmithersRuntimeConfig = {
   cliAgentToolsDefault?: "all" | "explicit-only";
 };
 
-export const SmithersContext = React.createContext<SmithersCtx<any> | null>(null);
-SmithersContext.displayName = "SmithersContext";
-
+// TODO: Re-export the full React package context module once the legacy
+// RunAuthContext and output accessor types are aligned.
 function normalizeInputRow(input: any) {
   if (!input || typeof input !== "object") return input;
   if (!("payload" in input)) return input;

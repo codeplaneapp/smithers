@@ -12,6 +12,16 @@ import { SmithersError } from "../utils/errors";
 import { executeChildWorkflow } from "../engine/child-workflow";
 import { executeSandbox } from "../sandbox/execute";
 
+// TODO(migration): Delegate extractFromHost to
+// @smithers/core/graph.extractGraph once core extraction reaches full
+// legacy parity. Current blockers:
+// - <Subflow> and <Sandbox> descriptors here attach runtime computeFn handlers
+//   that call executeChildWorkflow/executeSandbox; core extractGraph currently
+//   emits extraction metadata only.
+// - Inline <Subflow> validation and some legacy descriptor-shape details still
+//   differ, so replacing this implementation would not produce identical output
+//   for all inputs.
+
 export type HostNode = HostElement | HostText;
 
 export type HostElement = {

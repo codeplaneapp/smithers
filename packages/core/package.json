@@ -1,0 +1,71 @@
+{
+  "name": "@smithers/core",
+  "version": "0.0.0",
+  "description": "React-free Effect core for Smithers workflow execution",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./session": {
+      "types": "./src/session/index.ts",
+      "default": "./src/session/index.ts"
+    },
+    "./scheduler": {
+      "types": "./src/scheduler/index.ts",
+      "default": "./src/scheduler/index.ts"
+    },
+    "./graph": {
+      "types": "./src/graph/index.ts",
+      "default": "./src/graph/index.ts"
+    },
+    "./state": {
+      "types": "./src/state/index.ts",
+      "default": "./src/state/index.ts"
+    },
+    "./persistence": {
+      "types": "./src/persistence/index.ts",
+      "default": "./src/persistence/index.ts"
+    },
+    "./observability": {
+      "types": "./src/observability/index.ts",
+      "default": "./src/observability/index.ts"
+    },
+    "./durables": {
+      "types": "./src/durables/index.ts",
+      "default": "./src/durables/index.ts"
+    },
+    "./execution": {
+      "types": "./src/execution/index.ts",
+      "default": "./src/execution/index.ts"
+    },
+    "./interop": {
+      "types": "./src/interop/index.ts",
+      "default": "./src/interop/index.ts"
+    },
+    "./runtime": {
+      "types": "./src/runtime/index.ts",
+      "default": "./src/runtime/index.ts"
+    },
+    "./errors": {
+      "types": "./src/errors/index.ts",
+      "default": "./src/errors/index.ts"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "effect": "^3.21.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "~5.9.3"
+  }
+}

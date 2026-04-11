@@ -1,0 +1,53 @@
+{
+  "name": "@smithers/core-react",
+  "version": "0.0.0",
+  "description": "React adapter for Smithers Effect workflows",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./components": {
+      "types": "./src/components/index.ts",
+      "default": "./src/components/index.ts"
+    },
+    "./driver": {
+      "types": "./src/driver/index.ts",
+      "default": "./src/driver/index.ts"
+    },
+    "./reconciler": {
+      "types": "./src/reconciler/index.ts",
+      "default": "./src/reconciler/index.ts"
+    },
+    "./context": {
+      "types": "./src/context/index.ts",
+      "default": "./src/context/index.ts"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "peerDependencies": {
+    "@smithers/core": "workspace:*",
+    "react": "^18.3.0 || ^19.0.0",
+    "react-dom": "^18.3.0 || ^19.0.0"
+  },
+  "dependencies": {
+    "bippy": "^0.5.32",
+    "react-reconciler": "^0.31.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "^19.2.3",
+    "@types/react-reconciler": "^0.28.9",
+    "typescript": "~5.9.3"
+  }
+}

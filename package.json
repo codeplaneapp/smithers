@@ -6,6 +6,10 @@
   "license": "MIT",
   "module": "src/index.ts",
   "type": "module",
+  "workspaces": [
+    "packages/core",
+    "packages/react"
+  ],
   "bin": {
     "smithers": "src/cli/index.ts"
   },
@@ -94,6 +98,8 @@
     "@opentui/core": "^0.1.92",
     "@opentui/react": "^0.1.92",
     "@sinclair/typebox": "0.34.49",
+    "@smithers/core": "workspace:*",
+    "@smithers/core-react": "workspace:*",
     "@types/react-dom": "^19.2.3",
     "@types/react-reconciler": "^0.28.9",
     "ai": "^6.0.69",

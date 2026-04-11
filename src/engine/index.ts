@@ -7,6 +7,13 @@ import type { GraphSnapshot } from "../GraphSnapshot";
 import type { RunAuthContext } from "../RunAuthContext";
 import type { AgentCliEvent } from "../agents/BaseCliAgent";
 import { isBlockingAgentActionKind } from "../agents/BaseCliAgent";
+import {
+  makeWorkflowSession,
+  type EngineDecision,
+  type WaitReason,
+} from "../../packages/core/src/session/index.ts";
+import { ReactWorkflowDriver } from "../../packages/react/src/driver/index.ts";
+import type { WorkflowGraph } from "../../packages/core/src/graph/types.ts";
 import { SmithersRenderer } from "../dom/renderer";
 import { buildContext } from "../context";
 import { loadInput, loadOutputs } from "../db/snapshot";
@@ -97,6 +104,8 @@ import {
   isBridgeManagedTimerTask as isTimerTask,
   resolveDeferredTaskStateBridge,
 } from "../effect/workflow-bridge";
+import { AlertRuntime } from "./alert-runtime";
+import { executeChildWorkflow } from "./child-workflow";
 import { runWorkflowWithMakeBridge } from "../effect/workflow-make-bridge";
 import {
   createWorkflowVersioningRuntime,
@@ -715,6 +724,124 @@ type ContinueAsNewTransition = {
 };
 
 type RunBodyResult = RunResult | (RunResult & { status: "continued"; nextRunId: string });
+
+type WorkflowSessionShadowDecisionSummary =
+  | { tag: "Execute"; tasks: string[] }
+  | { tag: "Wait"; reason: string }
+  | { tag: "ContinueAsNew"; reason?: string }
+  | { tag: "Finished"; status: string }
+  | { tag: "Failed"; code?: string }
+  | { tag: "ReRender" };
+
+function workflowSessionTaskId(
+  task: Pick<TaskDescriptor, "nodeId" | "iteration">,
+): string {
+  return `${task.nodeId}::${task.iteration ?? 0}`;
+}
+
+function workflowSessionTaskIds(
+  tasks: readonly Pick<TaskDescriptor, "nodeId" | "iteration">[],
+): string[] {
+  return tasks.map(workflowSessionTaskId).sort();
+}
+
+function summarizeWorkflowSessionDecision(
+  decision: EngineDecision,
+): WorkflowSessionShadowDecisionSummary {
+  switch (decision._tag) {
+    case "Execute":
+      return { tag: "Execute", tasks: workflowSessionTaskIds(decision.tasks) };
+    case "Wait":
+      return { tag: "Wait", reason: decision.reason._tag };
+    case "ContinueAsNew":
+      return {
+        tag: "ContinueAsNew",
+        reason: decision.transition.reason,
+      };
+    case "Finished":
+      return {
+        tag: "Finished",
+        status: decision.result.status,
+      };
+    case "Failed":
+      return {
+        tag: "Failed",
+        code:
+          typeof (decision.error as any)?.code === "string"
+            ? (decision.error as any).code
+            : undefined,
+      };
+    case "ReRender":
+      return { tag: "ReRender" };
+  }
+  return { tag: "Failed", code: "UNKNOWN_DECISION" };
+}
+
+function summarizeLegacySchedulerDecision(
+  schedule: {
+    runnable: TaskDescriptor[];
+    pendingExists: boolean;
+    waitingApprovalExists: boolean;
+    waitingEventExists: boolean;
+    waitingTimerExists: boolean;
+    readyRalphs: unknown[];
+    continuation?: unknown;
+    nextRetryAtMs?: number;
+    fatalError?: string;
+  },
+  stateMap: TaskStateMap,
+  tasks: TaskDescriptor[],
+  schedulerTaskKeys: ReadonlySet<string>,
+): WorkflowSessionShadowDecisionSummary {
+  if (schedule.fatalError) {
+    return { tag: "Failed" };
+  }
+  const failedTask = tasks.find((task) => {
+    const state = stateMap.get(buildStateKey(task.nodeId, task.iteration));
+    return state === "failed" && !task.continueOnFail;
+  });
+  if (failedTask) {
+    return { tag: "Failed" };
+  }
+  if (schedule.continuation) {
+    return { tag: "ContinueAsNew", reason: "explicit" };
+  }
+  if (schedule.runnable.length > 0) {
+    return {
+      tag: "Execute",
+      tasks: workflowSessionTaskIds(schedule.runnable),
+    };
+  }
+  if (schedulerTaskKeys.size > 0) {
+    return { tag: "Wait", reason: "ExternalTrigger" };
+  }
+  if (schedule.waitingApprovalExists) {
+    return { tag: "Wait", reason: "Approval" };
+  }
+  if (schedule.waitingEventExists) {
+    return { tag: "Wait", reason: "Event" };
+  }
+  if (schedule.waitingTimerExists) {
+    return { tag: "Wait", reason: "Timer" };
+  }
+  if (schedule.pendingExists) {
+    return {
+      tag: "Wait",
+      reason:
+        schedule.nextRetryAtMs == null ? "ExternalTrigger" : "RetryBackoff",
+    };
+  }
+  if (schedule.readyRalphs.length > 0) {
+    return { tag: "ReRender" };
+  }
+  return { tag: "Finished", status: "finished" };
+}
+
+function workflowSessionSummaryKey(
+  summary: WorkflowSessionShadowDecisionSummary,
+): string {
+  return JSON.stringify(summary);
+}
 
 function buildRuntimeOwnerId() {
   return `pid:${process.pid}:${randomUUID()}`;
@@ -2070,6 +2197,38 @@ function resolveTaskOutputs(tasks: TaskDescriptor[], workflow: SmithersWorkflow<
   }
 }
 
+function attachSubflowComputeFns(
+  tasks: TaskDescriptor[],
+  workflow: SmithersWorkflow<any>,
+  opts: { rootDir?: string; workflowPath?: string | null } = {},
+) {
+  for (const task of tasks) {
+    if (!task.meta?.__subflow || task.computeFn) continue;
+    const subflowWorkflow = task.meta.__subflowWorkflow;
+    if (!subflowWorkflow) continue;
+    const subflowInput = task.meta.__subflowInput;
+    task.computeFn = async () => {
+      const result = await executeChildWorkflow(workflow, {
+        workflow: subflowWorkflow as any,
+        input: subflowInput,
+        rootDir: opts.rootDir,
+        workflowPath: opts.workflowPath ?? undefined,
+      });
+      if (result.status !== "finished") {
+        throw new SmithersError(
+          "WORKFLOW_EXECUTION_FAILED",
+          `Subflow ${task.nodeId} failed with status ${result.status}.`,
+          { nodeId: task.nodeId, status: result.status },
+        );
+      }
+      return result.output;
+    };
+
+    const { __subflowWorkflow: _workflow, ...persistableMeta } = task.meta;
+    task.meta = persistableMeta;
+  }
+}
+
 function getWorkflowNameFromXml(xml: any): string {
   if (!xml || xml.kind !== "element") return "workflow";
   if (xml.tag !== "smithers:workflow") return "workflow";
@@ -2168,6 +2327,27 @@ function buildRalphDoneMap(
   return done;
 }
 
+function parseAttemptErrorCode(errorJson?: string | null): string | null {
+  if (!errorJson) return null;
+  try {
+    const parsed = JSON.parse(errorJson);
+    return typeof parsed?.code === "string" ? parsed.code : null;
+  } catch {
+    return null;
+  }
+}
+
+function isRetryableTaskFailure(
+  attempt?: { errorJson?: string | null; metaJson?: string | null } | null,
+) {
+  const meta = parseAttemptMetaJson(attempt?.metaJson);
+  if (meta?.failureRetryable === false) {
+    return false;
+  }
+  const kind = typeof meta?.kind === "string" ? meta.kind : null;
+  return !(kind !== "agent" && parseAttemptErrorCode(attempt?.errorJson) === "INVALID_OUTPUT");
+}
+
 async function computeTaskStates(
   adapter: SmithersDb,
   db: any,
@@ -2210,35 +2390,6 @@ async function computeTaskStates(
       });
       existingState.set(key, state);
     }
-  };
-
-  const parseAttemptMeta = (metaJson?: string | null): Record<string, unknown> | null => {
-    if (!metaJson) return null;
-    try {
-      const parsed = JSON.parse(metaJson);
-      return parsed && typeof parsed === "object" ? parsed : null;
-    } catch {
-      return null;
-    }
-  };
-  const parseAttemptErrorCode = (errorJson?: string | null): string | null => {
-    if (!errorJson) return null;
-    try {
-      const parsed = JSON.parse(errorJson);
-      return typeof parsed?.code === "string" ? parsed.code : null;
-    } catch {
-      return null;
-    }
-  };
-  const isRetryableTaskFailure = (
-    attempt?: { errorJson?: string | null; metaJson?: string | null } | null,
-  ) => {
-    const meta = parseAttemptMeta(attempt?.metaJson);
-    if (meta?.failureRetryable === false) {
-      return false;
-    }
-    const kind = typeof meta?.kind === "string" ? meta.kind : null;
-    return !(kind !== "agent" && parseAttemptErrorCode(attempt?.errorJson) === "INVALID_OUTPUT");
   };
 
   for (const desc of tasks) {
@@ -4240,11 +4391,16 @@ async function renderFrameAsync<Schema>(
     workflowPath: opts?.workflowPath,
     defaultIteration: ctx?.iteration,
   });
+  const tasks = result.tasks as unknown as TaskDescriptor[];
 
   // Resolve output tasks: ZodObject references via zodToKeyName, string keys via schemaRegistry
-  resolveTaskOutputs(result.tasks, workflow);
+  resolveTaskOutputs(tasks, workflow);
+  attachSubflowComputeFns(tasks, workflow, {
+    rootDir: opts?.baseRootDir,
+    workflowPath: opts?.workflowPath,
+  });
 
-  return { runId: ctx.runId, frameNo: 0, xml: result.xml, tasks: result.tasks };
+  return { runId: ctx.runId, frameNo: 0, xml: result.xml, tasks };
 }
 
 export function renderFrameEffect<Schema>(
@@ -4474,6 +4630,56 @@ async function runWorkflowBody<Schema>(
   workflow: SmithersWorkflow<Schema>,
   opts: RunOptions,
 ): Promise<RunBodyResult> {
+  if (process.env.SMITHERS_LEGACY_ENGINE === "1") {
+    return runWorkflowBodyLegacy(workflow, opts);
+  }
+  return runWorkflowBodyDriver(workflow, opts);
+}
+
+function iterationsToMap(
+  iterations?: ReadonlyMap<string, number> | Record<string, number> | null,
+): Map<string, number> {
+  if (!iterations) return new Map();
+  if (typeof (iterations as ReadonlyMap<string, number>).entries === "function") {
+    return new Map(iterations as ReadonlyMap<string, number>);
+  }
+  return new Map(Object.entries(iterations as Record<string, number>));
+}
+
+function ralphStateFromDriverTransition(
+  transition: unknown,
+): RalphStateMap | undefined {
+  const payload =
+    transition &&
+    typeof transition === "object" &&
+    "statePayload" in transition
+      ? (transition as { statePayload?: unknown }).statePayload
+      : undefined;
+  const raw =
+    payload &&
+    typeof payload === "object" &&
+    "ralphState" in payload
+      ? (payload as { ralphState?: unknown }).ralphState
+      : undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+  const state: RalphStateMap = new Map();
+  for (const [ralphId, value] of Object.entries(raw)) {
+    if (!value || typeof value !== "object") continue;
+    const iteration = Number((value as any).iteration);
+    state.set(ralphId, {
+      iteration: Number.isFinite(iteration) ? iteration : 0,
+      done: Boolean((value as any).done),
+    });
+  }
+  return state;
+}
+
+async function runWorkflowBodyDriver<Schema>(
+  workflow: SmithersWorkflow<Schema>,
+  opts: RunOptions,
+): Promise<RunBodyResult> {
   const db = workflow.db as any;
   ensureSmithersTables(db);
   const adapter = new SmithersDb(db);
@@ -4531,14 +4737,11 @@ async function runWorkflowBody<Schema>(
     eventBus.on("event", (e: SmithersEvent) => opts.onProgress?.(e));
   }
 
-  const hotOpts = normalizeHotOptions(opts.hot);
-  let hotController: HotWorkflowController | null = null;
-  let hotPendingFiles: string[] | null = null;
-  let workflowRef = workflow;
-  let onAbortWake = () => {};
-  let armHotReloadWakeup = () => {};
-  let waitForAbortedTasksToSettle = async () => {};
+  const wakeLock = acquireCaffeinate();
+  let alertRuntime: AlertRuntime | null = null;
   let runOwnedByCurrentProcess = false;
+  let driverTaskError: unknown = null;
+  const activeDriverTaskKeys = new Set<string>();
   const annotateRunSpan = (
     attributes: Readonly<Record<string, unknown>>,
   ) =>
@@ -4549,7 +4752,658 @@ async function runWorkflowBody<Schema>(
       }),
     );
 
-  const wakeLock = acquireCaffeinate();
+  let workflowSession: ReturnType<typeof makeWorkflowSession>;
+  const renderer = new SmithersRenderer();
+  const disabledAgents = new Set<any>();
+  const toolConfig = {
+    rootDir,
+    allowNetwork,
+    maxOutputBytes,
+    toolTimeoutMs,
+  };
+  let frameNo = (await adapter.getLastFrame(runId))?.frameNo ?? 0;
+  let defaultIteration = 0;
+  let workflowRef = workflow;
+  let lastGraph: WorkflowGraph | null = null;
+  let descriptorMap = new Map<string, TaskDescriptor>();
+  let workflowName = "workflow";
+  let cacheEnabled = Boolean(workflow.opts.cache);
+  let ralphState: RalphStateMap = new Map();
+
+  let activeTaskCount = 0;
+  const taskWaiters: Array<() => void> = [];
+  const acquireTaskSlot = async () => {
+    if (activeTaskCount < maxConcurrency) {
+      activeTaskCount += 1;
+      return;
+    }
+    await new Promise<void>((resolveWaiter) => {
+      taskWaiters.push(resolveWaiter);
+    });
+    activeTaskCount += 1;
+  };
+  const releaseTaskSlot = () => {
+    activeTaskCount = Math.max(0, activeTaskCount - 1);
+    const next = taskWaiters.shift();
+    next?.();
+  };
+  const withTaskSlot = async <A>(execute: () => Promise<A>): Promise<A> => {
+    await acquireTaskSlot();
+    try {
+      return await execute();
+    } finally {
+      releaseTaskSlot();
+    }
+  };
+
+  const waitForAbortedTasksToSettle = async () => {
+    const deadlineAt = nowMs() + RUN_ABORT_SETTLE_TIMEOUT_MS;
+    while (true) {
+      const inProgress = await adapter.listInProgressAttempts(runId);
+      if (activeDriverTaskKeys.size === 0 && inProgress.length === 0) {
+        return;
+      }
+      if (nowMs() >= deadlineAt) {
+        logWarning("timed out waiting for aborted tasks to settle", {
+          runId,
+          activeTaskCount: activeDriverTaskKeys.size,
+          inProgressAttemptCount: inProgress.length,
+        }, "engine:run");
+        return;
+      }
+      await Bun.sleep(RUN_ABORT_SETTLE_POLL_MS);
+    }
+  };
+
+  const readTaskOutput = async (task: TaskDescriptor): Promise<unknown> => {
+    if (!task.outputTable) return undefined;
+    const outputRow = await selectOutputRow<any>(db, task.outputTable as any, {
+      runId,
+      nodeId: task.nodeId,
+      iteration: task.iteration,
+    });
+    return outputRow ? stripAutoColumns(outputRow) : undefined;
+  };
+
+  const readTaskFailure = async (task: TaskDescriptor): Promise<unknown> => {
+    const attempts = await adapter.listAttempts(
+      runId,
+      task.nodeId,
+      task.iteration,
+    );
+    const latest = attempts[0] as { errorJson?: string | null } | undefined;
+    if (latest?.errorJson) {
+      try {
+        return JSON.parse(latest.errorJson);
+      } catch {
+        return latest.errorJson;
+      }
+    }
+    return new SmithersError(
+      "TASK_FAILED",
+      `Task ${task.nodeId} failed.`,
+      { nodeId: task.nodeId, iteration: task.iteration },
+    );
+  };
+
+  const completeSessionTask = async (task: TaskDescriptor) =>
+    runPromise(
+      workflowSession.taskCompleted({
+        nodeId: task.nodeId,
+        iteration: task.iteration,
+        output: await readTaskOutput(task),
+      }),
+    );
+
+  const failSessionTask = async (task: TaskDescriptor) =>
+    runPromise(
+      workflowSession.taskFailed({
+        nodeId: task.nodeId,
+        iteration: task.iteration,
+        error: await readTaskFailure(task),
+      }),
+    );
+
+  const submitLastGraph = async () => {
+    if (!lastGraph) {
+      return {
+        _tag: "Wait",
+        reason: { _tag: "ExternalTrigger" },
+      } satisfies EngineDecision;
+    }
+    return runPromise(workflowSession.submitGraph(lastGraph));
+  };
+
+  const markRunWaiting = async (
+    status: "waiting-approval" | "waiting-event" | "waiting-timer",
+    waitReason: "approval" | "event" | "timer",
+  ): Promise<RunResult> => {
+    await adapter.updateRun(runId, {
+      status,
+      heartbeatAtMs: null,
+      runtimeOwnerId: null,
+      cancelRequestedAtMs: null,
+      hijackRequestedAtMs: null,
+      hijackTarget: null,
+    });
+    await eventBus.emitEventWithPersist({
+      type: "RunStatusChanged",
+      runId,
+      status,
+      timestampMs: nowMs(),
+    });
+    await annotateRunSpan({
+      status,
+      waitReason,
+    });
+    return { runId, status };
+  };
+
+  const reconcileApprovalWait = async (nodeId: string) => {
+    const task = lastGraph?.tasks.find((candidate) => candidate.nodeId === nodeId);
+    if (!task) {
+      return markRunWaiting("waiting-approval", "approval");
+    }
+    const resolved = await resolveDeferredTaskStateBridge(
+      adapter,
+      db,
+      runId,
+      task as TaskDescriptor,
+      eventBus,
+    );
+    if (resolved.handled) {
+      if (resolved.state === "finished" || resolved.state === "skipped") {
+        return completeSessionTask(task as TaskDescriptor);
+      }
+      if (resolved.state === "failed") {
+        const approval = await adapter.getApproval(
+          runId,
+          task.nodeId,
+          task.iteration,
+        );
+        if (approval?.status === "denied") {
+          return runPromise(
+            workflowSession.approvalResolved(task.nodeId, {
+              approved: false,
+              note: approval.note ?? undefined,
+              decidedBy: approval.decidedBy ?? undefined,
+              payload: approval.decisionJson
+                ? JSON.parse(approval.decisionJson)
+                : undefined,
+            }),
+          );
+        }
+        return failSessionTask(task as TaskDescriptor);
+      }
+      if (resolved.state === "pending") {
+        return submitLastGraph();
+      }
+      return markRunWaiting("waiting-approval", "approval");
+    }
+
+    const approval = await adapter.getApproval(runId, task.nodeId, task.iteration);
+    if (approval?.status === "approved" || approval?.status === "denied") {
+      return runPromise(
+        workflowSession.approvalResolved(task.nodeId, {
+          approved: approval.status === "approved",
+          note: approval.note ?? undefined,
+          decidedBy: approval.decidedBy ?? undefined,
+          payload: approval.decisionJson
+            ? JSON.parse(approval.decisionJson)
+            : undefined,
+        }),
+      );
+    }
+    return markRunWaiting("waiting-approval", "approval");
+  };
+
+  const reconcileEventWait = async (eventName: string) => {
+    const tasks =
+      lastGraph?.tasks.filter(
+        (candidate) =>
+          candidate.meta?.__waitForEvent &&
+          (eventName.length === 0 ||
+            candidate.meta?.__eventName === eventName),
+      ) ?? [];
+    for (const task of tasks) {
+      const resolved = await resolveDeferredTaskStateBridge(
+        adapter,
+        db,
+        runId,
+        task as TaskDescriptor,
+        eventBus,
+      );
+      if (!resolved.handled) continue;
+      if (resolved.state === "finished" || resolved.state === "skipped") {
+        return completeSessionTask(task as TaskDescriptor);
+      }
+      if (resolved.state === "failed") {
+        return failSessionTask(task as TaskDescriptor);
+      }
+      if (resolved.state === "pending") {
+        return submitLastGraph();
+      }
+    }
+    return markRunWaiting("waiting-event", "event");
+  };
+
+  const reconcileTimerWait = async (resumeAtMs: number) => {
+    const sessionStates = await runPromise(workflowSession.getTaskStates());
+    const tasks =
+      lastGraph?.tasks.filter((candidate) => {
+        if (!candidate.meta?.__timer) return false;
+        const state = sessionStates.get(
+          buildStateKey(candidate.nodeId, candidate.iteration),
+        );
+        return (
+          state !== "finished" &&
+          state !== "skipped" &&
+          state !== "failed" &&
+          state !== "cancelled"
+        );
+      }) ?? [];
+    for (const task of tasks) {
+      const resolved = await resolveDeferredTaskStateBridge(
+        adapter,
+        db,
+        runId,
+        task as TaskDescriptor,
+        eventBus,
+      );
+      if (!resolved.handled) continue;
+      if (resolved.state === "finished") {
+        return runPromise(workflowSession.timerFired(task.nodeId, nowMs()));
+      }
+      if (resolved.state === "failed") {
+        return failSessionTask(task as TaskDescriptor);
+      }
+      if (resolved.state === "skipped") {
+        return completeSessionTask(task as TaskDescriptor);
+      }
+    }
+    const waitMs = Math.max(0, resumeAtMs - nowMs());
+    if (waitMs <= 0) {
+      return submitLastGraph();
+    }
+    return markRunWaiting("waiting-timer", "timer");
+  };
+
+  const handleDriverWait = async (
+    reason: WaitReason,
+  ): Promise<EngineDecision | RunResult> => {
+    if (runAbortController.signal.aborted) {
+      return { runId, status: "cancelled" };
+    }
+    switch (reason._tag) {
+      case "Approval":
+        return reconcileApprovalWait(reason.nodeId);
+      case "Event":
+        return reconcileEventWait(reason.eventName);
+      case "Timer":
+        return reconcileTimerWait(reason.resumeAtMs);
+      case "RetryBackoff":
+        await Bun.sleep(Math.max(0, reason.waitMs));
+        return submitLastGraph();
+      case "HotReload":
+      case "OrphanRecovery":
+      case "ExternalTrigger":
+      default:
+        return markRunWaiting("waiting-event", "event");
+    }
+  };
+
+  const executeDriverTask = async (task: TaskDescriptor): Promise<unknown> =>
+    withTaskSlot(async () => {
+      const taskKey = buildStateKey(task.nodeId, task.iteration);
+      activeDriverTaskKeys.add(taskKey);
+      try {
+        const existingOutput = await readTaskOutput(task);
+        if (existingOutput !== undefined) {
+          await adapter.insertNode({
+            runId,
+            nodeId: task.nodeId,
+            iteration: task.iteration,
+            state: "finished",
+            lastAttempt: null,
+            updatedAtMs: nowMs(),
+            outputTable: task.outputTableName,
+            label: task.label ?? null,
+          });
+          return existingOutput;
+        }
+
+        const attempts = await adapter.listAttempts(
+          runId,
+          task.nodeId,
+          task.iteration,
+        );
+        const failedAttempts = attempts.filter((attempt: any) => attempt.state === "failed");
+        const hasNonRetryableFailure = failedAttempts.some(
+          (attempt) => !isRetryableTaskFailure(attempt),
+        );
+        if (
+          hasNonRetryableFailure ||
+          failedAttempts.length >= task.retries + 1
+        ) {
+          await adapter.insertNode({
+            runId,
+            nodeId: task.nodeId,
+            iteration: task.iteration,
+            state: "failed",
+            lastAttempt: attempts[0]?.attempt ?? null,
+            updatedAtMs: nowMs(),
+            outputTable: task.outputTableName,
+            label: task.label ?? null,
+          });
+          throw await readTaskFailure(task);
+        }
+
+        await runPromise(
+          withCorrelationContext(
+            withSmithersSpan(
+              smithersSpanNames.task,
+              executeTaskBridgeEffect(
+                adapter,
+                db,
+                runId,
+                task,
+                descriptorMap,
+                inputTable,
+                eventBus,
+                toolConfig,
+                workflowName,
+                cacheEnabled,
+                runAbortController.signal,
+                disabledAgents,
+                runAbortController,
+                hijackState,
+                legacyExecuteTask,
+              ),
+              {
+                runId,
+                workflowName,
+                nodeId: task.nodeId,
+                iteration: task.iteration,
+                nodeLabel: task.label ?? null,
+                status: "running",
+              },
+            ),
+            {
+              workflowName,
+              nodeId: task.nodeId,
+              iteration: task.iteration,
+            },
+          ),
+        );
+
+        const node = await adapter.getNode(runId, task.nodeId, task.iteration);
+        if (node?.state === "failed") {
+          throw await readTaskFailure(task);
+        }
+        if (node?.state === "cancelled") {
+          throw makeAbortError();
+        }
+        return readTaskOutput(task);
+      } catch (error) {
+        if (driverTaskError == null) {
+          driverTaskError = error;
+        }
+        throw error;
+      } finally {
+        activeDriverTaskKeys.delete(taskKey);
+      }
+    });
+
+  const persistDriverFrame = async (graph: WorkflowGraph) => {
+    const xmlJson = canonicalizeXml(graph.xml);
+    const xmlHash = sha256Hex(xmlJson);
+    frameNo += 1;
+    const frameCreatedAtMs = nowMs();
+    const frameRow = {
+      runId,
+      frameNo,
+      createdAtMs: frameCreatedAtMs,
+      xmlJson,
+      xmlHash,
+      mountedTaskIdsJson: JSON.stringify(graph.mountedTaskIds),
+      taskIndexJson: JSON.stringify(
+        graph.tasks.map((task) => ({
+          nodeId: task.nodeId,
+          ordinal: task.ordinal,
+          iteration: task.iteration,
+        })),
+      ),
+      note: "react-driver",
+    };
+
+    const snapNodes = await adapter.listNodes(runId);
+    const snapRalph = await adapter.listRalph(runId);
+    const snapInputRow = await loadInput(db, inputTable, runId);
+    const snapOutputs = await loadOutputs(db, schema, runId);
+    const snapshotData = {
+      nodes: (snapNodes as any[]).map((node: any) => ({
+        nodeId: node.nodeId,
+        iteration: node.iteration ?? 0,
+        state: node.state,
+        lastAttempt: node.lastAttempt ?? null,
+        outputTable: node.outputTable ?? "",
+        label: node.label ?? null,
+      })),
+      outputs: snapOutputs,
+      ralph: (snapRalph as any[]).map((row: any) => ({
+        ralphId: row.ralphId,
+        iteration: row.iteration ?? 0,
+        done: Boolean(row.done),
+      })),
+      input: snapInputRow ?? {},
+      vcsPointer: runMetadata?.vcsRevision ?? null,
+      workflowHash: workflowRef.opts.workflowHash ?? null,
+    };
+
+    try {
+      const snap = await adapter.withTransaction(
+        "frame-commit",
+        Effect.gen(function* () {
+          yield* adapter.insertFrameEffect(frameRow);
+          return yield* captureSnapshotEffect(
+            adapter,
+            runId,
+            frameNo,
+            snapshotData,
+          ) as any;
+        }) as any,
+      );
+      const frameCommittedAtMs = nowMs();
+      await eventBus.emitEventWithPersist({
+        type: "FrameCommitted",
+        runId,
+        frameNo,
+        xmlHash,
+        timestampMs: frameCommittedAtMs,
+      });
+      await eventBus.emitEventWithPersist({
+        type: "SnapshotCaptured",
+        runId,
+        frameNo,
+        contentHash: (snap as any).contentHash,
+        timestampMs: frameCommittedAtMs,
+      });
+    } catch (snapErr) {
+      logWarning("snapshot capture failed", {
+        runId,
+        frameNo,
+        error: snapErr instanceof Error ? snapErr.message : String(snapErr),
+      }, "engine:snapshot");
+    }
+  };
+
+  const persistDriverGraphTaskStates = async (graph: WorkflowGraph) => {
+    const existingRows = await adapter.listNodes(runId);
+    const existingState = new Map<string, TaskState>();
+    for (const node of existingRows) {
+      existingState.set(
+        buildStateKey(node.nodeId, node.iteration ?? 0),
+        node.state as TaskState,
+      );
+    }
+
+    for (const task of graph.tasks as TaskDescriptor[]) {
+      if (task.meta?.__timer || task.needsApproval || task.meta?.__waitForEvent) {
+        continue;
+      }
+      const key = buildStateKey(task.nodeId, task.iteration);
+      const previous = existingState.get(key);
+
+      if (task.skipIf) {
+        if (previous === "skipped") continue;
+        await adapter.insertNode({
+          runId,
+          nodeId: task.nodeId,
+          iteration: task.iteration,
+          state: "skipped",
+          lastAttempt: null,
+          updatedAtMs: nowMs(),
+          outputTable: task.outputTableName,
+          label: task.label ?? null,
+        });
+        await eventBus.emitEventWithPersist({
+          type: "NodeSkipped",
+          runId,
+          nodeId: task.nodeId,
+          iteration: task.iteration,
+          timestampMs: nowMs(),
+        });
+        existingState.set(key, "skipped");
+        continue;
+      }
+
+      if (previous != null) continue;
+      await adapter.insertNode({
+        runId,
+        nodeId: task.nodeId,
+        iteration: task.iteration,
+        state: "pending",
+        lastAttempt: null,
+        updatedAtMs: nowMs(),
+        outputTable: task.outputTableName,
+        label: task.label ?? null,
+      });
+      await eventBus.emitEventWithPersist({
+        type: "NodePending",
+        runId,
+        nodeId: task.nodeId,
+        iteration: task.iteration,
+        timestampMs: nowMs(),
+      });
+      existingState.set(key, "pending");
+    }
+  };
+
+  const finalizeDriverResult = async (
+    result: RunResult,
+    runStartPerformanceMs: number,
+  ): Promise<RunBodyResult> => {
+    if (result.status === "continued") {
+      return result as RunBodyResult;
+    }
+    if (
+      result.status === "waiting-approval" ||
+      result.status === "waiting-event" ||
+      result.status === "waiting-timer"
+    ) {
+      return result;
+    }
+    if (result.status === "cancelled") {
+      const hijackError =
+        hijackState.completion
+          ? {
+              code: "RUN_HIJACKED",
+              ...hijackState.completion,
+            }
+          : null;
+      await waitForAbortedTasksToSettle();
+      await cancelPendingTimers(adapter, runId, eventBus, "run-cancelled");
+      await adapter.updateRun(runId, {
+        status: "cancelled",
+        finishedAtMs: nowMs(),
+        heartbeatAtMs: null,
+        runtimeOwnerId: null,
+        cancelRequestedAtMs: null,
+        hijackRequestedAtMs: null,
+        hijackTarget: null,
+        errorJson: hijackError ? JSON.stringify(hijackError) : null,
+      });
+      await eventBus.emitEventWithPersist({
+        type: "RunCancelled",
+        runId,
+        timestampMs: nowMs(),
+      });
+      await annotateRunSpan({ status: "cancelled" });
+      return { runId, status: "cancelled" };
+    }
+    if (result.status === "failed") {
+      const errorInfo = errorToJson(result.error ?? driverTaskError);
+      if (runOwnedByCurrentProcess) {
+        await cancelPendingTimers(adapter, runId, eventBus, "run-failed");
+        await adapter.updateRun(runId, {
+          status: "failed",
+          finishedAtMs: nowMs(),
+          heartbeatAtMs: null,
+          runtimeOwnerId: null,
+          cancelRequestedAtMs: null,
+          hijackRequestedAtMs: null,
+          hijackTarget: null,
+          errorJson: JSON.stringify(errorInfo),
+        });
+        await eventBus.emitEventWithPersist({
+          type: "RunFailed",
+          runId,
+          error: errorInfo,
+          timestampMs: nowMs(),
+        });
+      }
+      await annotateRunSpan({ status: "failed" });
+      return { runId, status: "failed", error: errorInfo };
+    }
+
+    await adapter.updateRun(runId, {
+      status: "finished",
+      finishedAtMs: nowMs(),
+      heartbeatAtMs: null,
+      runtimeOwnerId: null,
+      cancelRequestedAtMs: null,
+      hijackRequestedAtMs: null,
+      hijackTarget: null,
+    });
+    await eventBus.emitEventWithPersist({
+      type: "RunFinished",
+      runId,
+      timestampMs: nowMs(),
+    });
+    void runPromise(Metric.update(runDuration, performance.now() - runStartPerformanceMs));
+    logInfo("workflow run finished", {
+      runId,
+    }, "engine:run");
+    await annotateRunSpan({ status: "finished" });
+
+    const outputTable = schema.output;
+    let output: unknown = undefined;
+    if (outputTable) {
+      const cols = getTableColumns(outputTable as any) as Record<string, any>;
+      const runIdCol = cols.runId;
+      if (runIdCol) {
+        const rows = await db
+          .select()
+          .from(outputTable)
+          .where(eq(runIdCol, runId));
+        output = rows;
+      } else {
+        output = await db.select().from(outputTable);
+      }
+    }
+    return { runId, status: "finished", output };
+  };
+
   try {
     const existingRun = await adapter.getRun(runId);
     updateCurrentCorrelationContext({
@@ -4562,15 +5416,18 @@ async function runWorkflowBody<Schema>(
       rootDir,
       maxConcurrency,
       allowNetwork,
-      hotReload: hotOpts.enabled,
+      hotReload: Boolean(opts.hot),
       resume: Boolean(opts.resume),
+      engine: "react-driver",
     }, "engine:run");
     await annotateRunSpan({
       status: "running",
       workflowPath: resolvedWorkflowPath ?? null,
+      engine: "react-driver",
     });
     const existingConfig = parseRunConfigJson(existingRun?.configJson);
     const runAuth = opts.auth ?? parseRunAuthContext(existingConfig.auth);
+    const effectiveAlertPolicy = workflowRef.opts.alertPolicy ?? (existingConfig as any).alertPolicy ?? undefined;
     const runConfig = buildDurabilityConfig({
       ...existingConfig,
       ...opts.config,
@@ -4583,6 +5440,7 @@ async function runWorkflowBody<Schema>(
         ? { cliAgentToolsDefault: opts.cliAgentToolsDefault }
         : {}),
       ...(runAuth ? { auth: runAuth } : {}),
+      ...(effectiveAlertPolicy ? { alertPolicy: effectiveAlertPolicy } : {}),
     }, runMetadata);
     const runConfigJson = JSON.stringify(runConfig);
     const workflowVersioning = createWorkflowVersioningRuntime({
@@ -4747,6 +5605,689 @@ async function runWorkflowBody<Schema>(
       timestampMs: nowMs(),
     });
 
+    if (effectiveAlertPolicy && (effectiveAlertPolicy as any).rules && Object.keys((effectiveAlertPolicy as any).rules).length > 0) {
+      alertRuntime = new AlertRuntime(effectiveAlertPolicy, {
+        runId,
+        adapter,
+        eventBus,
+        requestCancel: () => runAbortController.abort(),
+        createHumanRequest: async (reqOpts) => {
+          await adapter.insertHumanRequest({
+            requestId: `human:${reqOpts.runId}:${reqOpts.nodeId}:${reqOpts.iteration}`,
+            runId: reqOpts.runId,
+            nodeId: reqOpts.nodeId,
+            iteration: reqOpts.iteration,
+            kind: reqOpts.kind,
+            status: "pending",
+            prompt: reqOpts.prompt,
+            schemaJson: null,
+            optionsJson: reqOpts.linkedAlertId ? JSON.stringify({ linkedAlertId: reqOpts.linkedAlertId }) : null,
+            responseJson: null,
+            requestedAtMs: Date.now(),
+            answeredAtMs: null,
+            answeredBy: null,
+            timeoutAtMs: null,
+          });
+        },
+        pauseScheduler: (_reason: string) => {},
+      });
+      alertRuntime.start();
+    }
+
+    const runStartPerformanceMs = performance.now();
+    await cancelStaleAttempts(adapter, runId);
+
+    if (opts.resume) {
+      void runPromise(Metric.increment(runsResumedTotal));
+      const staleInProgress = await adapter.listInProgressAttempts(runId);
+      const now = nowMs();
+      for (const attempt of staleInProgress) {
+        const existingNode = await adapter.getNode(
+          runId,
+          attempt.nodeId,
+          attempt.iteration,
+        );
+        await adapter.withTransaction(
+          "resume-cancel-stale-attempt",
+          Effect.gen(function* () {
+            yield* adapter.updateAttemptEffect(
+              runId,
+              attempt.nodeId,
+              attempt.iteration,
+              attempt.attempt,
+              {
+                state: "cancelled",
+                finishedAtMs: now,
+              },
+            );
+            yield* adapter.insertNodeEffect({
+              runId,
+              nodeId: attempt.nodeId,
+              iteration: attempt.iteration,
+              state: "pending",
+              lastAttempt: attempt.attempt,
+              updatedAtMs: now,
+              outputTable: existingNode?.outputTable ?? "",
+              label: existingNode?.label ?? null,
+            });
+          }),
+        );
+      }
+    }
+
+    if (opts.resume) {
+      const nodes = await adapter.listNodes(runId);
+      defaultIteration = nodes.reduce(
+        (max, node) => Math.max(max, node.iteration ?? 0),
+        0,
+      );
+    }
+    ralphState = buildRalphStateMap(await adapter.listRalph(runId));
+    if (opts.resume && ralphState.size > 0) {
+      const maxRalphIteration = [...ralphState.values()].reduce(
+        (max, state) => Math.max(max, state.iteration),
+        0,
+      );
+      defaultIteration = Math.max(defaultIteration, maxRalphIteration);
+    }
+    workflowSession = makeWorkflowSession({
+      runId,
+      nowMs,
+      requireStableFinish: true,
+      requireRerenderOnOutputChange: true,
+      initialRalphState: ralphState,
+    });
+
+    const driverRenderer = {
+      render: async (element: any, renderOpts?: any) => {
+        const graph = await withWorkflowVersioningRuntime(workflowVersioning, () =>
+          renderer.render(element, renderOpts),
+        );
+        await workflowVersioning.flush();
+        resolveTaskOutputs(graph.tasks as TaskDescriptor[], workflowRef);
+        attachSubflowComputeFns(graph.tasks as TaskDescriptor[], workflowRef, {
+          rootDir,
+          workflowPath: resolvedWorkflowPath ?? opts.workflowPath,
+        });
+        lastGraph = graph as unknown as WorkflowGraph;
+        descriptorMap = buildDescriptorMap(graph.tasks as TaskDescriptor[]);
+        workflowName = getWorkflowNameFromXml(graph.xml);
+        updateCurrentCorrelationContext({ workflowName });
+        cacheEnabled =
+          workflowRef.opts.cache ??
+          Boolean(
+            graph.xml &&
+            graph.xml.kind === "element" &&
+            (graph.xml.props.cache === "true" || graph.xml.props.cache === "1"),
+          );
+        await adapter.updateRun(runId, { workflowName });
+        await annotateRunSpan({ workflowName });
+
+        const renderIterations = iterationsToMap(renderOpts?.ralphIterations);
+        for (const [ralphId, iteration] of renderIterations.entries()) {
+          const existing = ralphState.get(ralphId);
+          const nextState = {
+            iteration,
+            done: existing?.done ?? false,
+          };
+          ralphState.set(ralphId, nextState);
+          if (
+            existing?.iteration !== nextState.iteration ||
+            existing?.done !== nextState.done
+          ) {
+            await adapter.insertOrUpdateRalph({
+              runId,
+              ralphId,
+              iteration: nextState.iteration,
+              done: nextState.done,
+              updatedAtMs: nowMs(),
+            });
+          }
+        }
+        if (typeof renderOpts?.defaultIteration === "number") {
+          defaultIteration = renderOpts.defaultIteration;
+        }
+        const { ralphs } = buildPlanTree(graph.xml, ralphState);
+        for (const ralph of ralphs) {
+          if (!ralphState.has(ralph.id)) {
+            const iteration = renderIterations.get(ralph.id) ?? 0;
+            ralphState.set(ralph.id, { iteration, done: false });
+            await adapter.insertOrUpdateRalph({
+              runId,
+              ralphId: ralph.id,
+              iteration,
+              done: false,
+              updatedAtMs: nowMs(),
+            });
+          }
+        }
+        if (ralphs.length === 1) {
+          defaultIteration = ralphState.get(ralphs[0]!.id)?.iteration ?? 0;
+        } else if (ralphs.length === 0) {
+          defaultIteration = 0;
+        }
+
+        await persistDriverGraphTaskStates(lastGraph);
+        await persistDriverFrame(lastGraph);
+        return lastGraph;
+      },
+    };
+
+    const driverWorkflow = {
+      ...workflowRef,
+      build: (ctx: any) =>
+        withWorkflowVersioningRuntime(workflowVersioning, () =>
+          workflowRef.build(ctx),
+        ),
+    };
+
+    const activeInput = await loadInput(db, inputTable, runId);
+    const driver = new ReactWorkflowDriver<Schema>({
+      workflow: driverWorkflow as any,
+      runtime: { runPromise: runPromise as any },
+      session: workflowSession as any,
+      db,
+      runId,
+      rootDir,
+      workflowPath: resolvedWorkflowPath,
+      executeTask: (task) => executeDriverTask(task as TaskDescriptor),
+      onSchedulerWait: (durationMs) =>
+        runPromise(Metric.update(schedulerWaitDuration, durationMs)),
+      onWait: (reason) => handleDriverWait(reason as WaitReason) as any,
+      continueAsNew: async (transition) => {
+        let statePayload: unknown = (transition as any)?.statePayload;
+        if ((transition as any)?.stateJson) {
+          try {
+            statePayload = JSON.parse((transition as any).stateJson);
+          } catch (error) {
+            throw new SmithersError(
+              "INVALID_CONTINUATION_STATE",
+              "Invalid JSON passed to continue-as-new state",
+              {
+                stateJson: (transition as any).stateJson,
+                error: error instanceof Error ? error.message : String(error),
+              },
+            );
+          }
+        }
+        if (runAbortController.signal.aborted) {
+          return { runId, status: "cancelled" };
+        }
+        const latestRun = await adapter.getRun(runId);
+        if (latestRun?.cancelRequestedAtMs) {
+          runAbortController.abort();
+          return { runId, status: "cancelled" };
+        }
+
+        const nextRalphState = ralphStateFromDriverTransition(transition);
+        const continuationIteration =
+          typeof (transition as any)?.iteration === "number"
+            ? (transition as any).iteration
+            : defaultIteration;
+        const driverTransition = await continueRunAsNew({
+          db,
+          adapter,
+          schema,
+          inputTable,
+          runId,
+          workflowPath:
+            resolvedWorkflowPath ??
+            opts.workflowPath ??
+            latestRun?.workflowPath ??
+            null,
+          runMetadata,
+          currentFrameNo: frameNo,
+          continuation: {
+            reason:
+              (transition as any)?.reason === "loop-threshold"
+                ? "loop-threshold"
+                : "explicit",
+            iteration: continuationIteration,
+            statePayload,
+            nextRalphState,
+          },
+          ralphState,
+        });
+        const continuationEvent: SmithersEvent = {
+          type: "RunContinuedAsNew",
+          runId,
+          newRunId: driverTransition.newRunId,
+          iteration: continuationIteration,
+          carriedStateSize: driverTransition.carriedStateBytes,
+          ancestryDepth: driverTransition.ancestryDepth,
+          timestampMs: nowMs(),
+        };
+        eventBus.emit("event", continuationEvent);
+        runSync(trackEvent(continuationEvent));
+        logInfo(
+          `Continuing run ${runId} as ${driverTransition.newRunId} at iteration ${continuationIteration}`,
+          {
+            runId,
+            newRunId: driverTransition.newRunId,
+            iteration: continuationIteration,
+            carriedStateBytes: driverTransition.carriedStateBytes,
+            engine: "react-driver",
+          },
+          "engine:continue-as-new",
+        );
+        void runPromise(
+          Metric.update(runDuration, performance.now() - runStartPerformanceMs),
+        );
+        await annotateRunSpan({ status: "continued" });
+        return {
+          runId,
+          status: "continued",
+          nextRunId: driverTransition.newRunId,
+        };
+      },
+      renderer: driverRenderer,
+    });
+
+    const result = await driver.run({
+      ...opts,
+      runId,
+      input: (activeInput ?? opts.input) as Record<string, unknown>,
+      initialOutputs: await loadOutputs(db, schema, runId),
+      initialIteration: defaultIteration,
+      initialIterations: ralphIterationsObject(ralphState),
+      rootDir,
+      workflowPath: resolvedWorkflowPath ?? opts.workflowPath,
+      auth: runAuth,
+      signal: runAbortController.signal,
+    } as any);
+    return finalizeDriverResult(result as RunResult, runStartPerformanceMs);
+  } catch (err) {
+    if (runAbortController.signal.aborted || isAbortError(err)) {
+      logInfo("workflow run cancelled while handling error", {
+        runId,
+        error: err instanceof Error ? err.message : String(err),
+      }, "engine:run");
+      const hijackError =
+        hijackState.completion
+          ? {
+              code: "RUN_HIJACKED",
+              ...hijackState.completion,
+            }
+          : errorToJson(err);
+      await waitForAbortedTasksToSettle();
+      await cancelPendingTimers(adapter, runId, eventBus, "run-cancelled");
+      await adapter.updateRun(runId, {
+        status: "cancelled",
+        finishedAtMs: nowMs(),
+        heartbeatAtMs: null,
+        runtimeOwnerId: null,
+        cancelRequestedAtMs: null,
+        hijackRequestedAtMs: null,
+        hijackTarget: null,
+        errorJson: JSON.stringify(hijackError),
+      });
+      await eventBus.emitEventWithPersist({
+        type: "RunCancelled",
+        runId,
+        timestampMs: nowMs(),
+      });
+      await annotateRunSpan({ status: "cancelled" });
+      return { runId, status: "cancelled" };
+    }
+    logError("workflow run failed with unhandled error", {
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    }, "engine:run");
+    const errorInfo = errorToJson(err);
+    if (runOwnedByCurrentProcess) {
+      await cancelPendingTimers(adapter, runId, eventBus, "run-failed");
+      await adapter.updateRun(runId, {
+        status: "failed",
+        finishedAtMs: nowMs(),
+        heartbeatAtMs: null,
+        runtimeOwnerId: null,
+        cancelRequestedAtMs: null,
+        hijackRequestedAtMs: null,
+        hijackTarget: null,
+        errorJson: JSON.stringify(errorInfo),
+      });
+      await eventBus.emitEventWithPersist({
+        type: "RunFailed",
+        runId,
+        error: errorInfo,
+        timestampMs: nowMs(),
+      });
+    }
+    await annotateRunSpan({ status: "failed" });
+    return { runId, status: "failed", error: errorInfo };
+  } finally {
+    alertRuntime?.stop();
+    await stopSupervisor();
+    detachAbort();
+    wakeLock.release();
+  }
+}
+
+async function runWorkflowBodyLegacy<Schema>(
+  workflow: SmithersWorkflow<Schema>,
+  opts: RunOptions,
+): Promise<RunBodyResult> {
+  const db = workflow.db as any;
+  ensureSmithersTables(db);
+  const adapter = new SmithersDb(db);
+  const runId = opts.runId ?? newRunId();
+  let workflowSessionShadow: ReturnType<typeof makeWorkflowSession> | null = null;
+  try {
+    workflowSessionShadow = makeWorkflowSession({
+      runId,
+      nowMs,
+      requireStableFinish: true,
+    });
+  } catch (error) {
+    logWarning("workflow session shadow initialization failed", {
+      runId,
+      error: error instanceof Error ? error.message : String(error),
+    }, "engine:workflow-session");
+  }
+  const schema = resolveSchema(db);
+  const inputTable = schema.input;
+  if (!inputTable) {
+    throw new SmithersError(
+      "MISSING_INPUT_TABLE",
+      "Schema must include input table",
+    );
+  }
+
+  const resolvedWorkflowPath = opts.workflowPath
+    ? resolve(opts.workflowPath)
+    : null;
+  const rootDir = resolveRootDir(opts, resolvedWorkflowPath);
+  const logDir = resolveLogDir(rootDir, runId, opts.logDir);
+  const maxConcurrency = coercePositiveInt(
+    "maxConcurrency",
+    opts.maxConcurrency,
+    DEFAULT_MAX_CONCURRENCY,
+  );
+  const maxOutputBytes = coercePositiveInt(
+    "maxOutputBytes",
+    opts.maxOutputBytes,
+    DEFAULT_MAX_OUTPUT_BYTES,
+  );
+  const toolTimeoutMs = coercePositiveInt(
+    "toolTimeoutMs",
+    opts.toolTimeoutMs,
+    DEFAULT_TOOL_TIMEOUT_MS,
+  );
+  const allowNetwork = Boolean(opts.allowNetwork);
+  const runtimeOwnerId = buildRuntimeOwnerId();
+  const runAbortController = new AbortController();
+  const hijackState: HijackState = {
+    request: null,
+    completion: null,
+  };
+  const detachAbort = wireAbortSignal(runAbortController, opts.signal);
+  let stopSupervisor = async () => {};
+  const runMetadata = await getRunDurabilityMetadata(
+    resolvedWorkflowPath,
+    rootDir,
+  );
+
+  const lastSeq = await adapter.getLastEventSeq(runId);
+  const eventBus = new EventBus({
+    db: adapter,
+    logDir,
+    startSeq: (lastSeq ?? -1) + 1,
+  });
+  if (opts.onProgress) {
+    eventBus.on("event", (e: SmithersEvent) => opts.onProgress?.(e));
+  }
+
+  const hotOpts = normalizeHotOptions(opts.hot);
+  let hotController: HotWorkflowController | null = null;
+  let hotPendingFiles: string[] | null = null;
+  let workflowRef = workflow;
+  let onAbortWake = () => {};
+  let armHotReloadWakeup = () => {};
+  let waitForAbortedTasksToSettle = async () => {};
+  let runOwnedByCurrentProcess = false;
+  const annotateRunSpan = (
+    attributes: Readonly<Record<string, unknown>>,
+  ) =>
+    runPromise(
+      annotateSmithersTrace({
+        runId,
+        ...attributes,
+      }),
+    );
+
+  const wakeLock = acquireCaffeinate();
+  let alertRuntime: AlertRuntime | null = null;
+  try {
+    const existingRun = await adapter.getRun(runId);
+    updateCurrentCorrelationContext({
+      parentRunId: opts.parentRunId ?? existingRun?.parentRunId ?? undefined,
+      workflowName: existingRun?.workflowName ?? "workflow",
+    });
+    logInfo("starting workflow run", {
+      runId,
+      workflowPath: resolvedWorkflowPath ?? null,
+      rootDir,
+      maxConcurrency,
+      allowNetwork,
+      hotReload: hotOpts.enabled,
+      resume: Boolean(opts.resume),
+    }, "engine:run");
+    await annotateRunSpan({
+      status: "running",
+      workflowPath: resolvedWorkflowPath ?? null,
+    });
+    const existingConfig = parseRunConfigJson(existingRun?.configJson);
+    const runAuth = opts.auth ?? parseRunAuthContext(existingConfig.auth);
+    const effectiveAlertPolicy = workflowRef.opts.alertPolicy ?? (existingConfig as any).alertPolicy ?? undefined;
+    const runConfig = buildDurabilityConfig({
+      ...existingConfig,
+      ...opts.config,
+      maxConcurrency,
+      rootDir,
+      allowNetwork,
+      maxOutputBytes,
+      toolTimeoutMs,
+      ...(opts.cliAgentToolsDefault
+        ? { cliAgentToolsDefault: opts.cliAgentToolsDefault }
+        : {}),
+      ...(runAuth ? { auth: runAuth } : {}),
+      ...(effectiveAlertPolicy ? { alertPolicy: effectiveAlertPolicy } : {}),
+    }, runMetadata);
+    const runConfigJson = JSON.stringify(runConfig);
+    const workflowVersioning = createWorkflowVersioningRuntime({
+      baseConfig: runConfig,
+      initialDecisions: getWorkflowPatchDecisions(existingConfig),
+      isNewRun: !existingRun,
+      persist: async (config) => {
+        await adapter.updateRun(runId, {
+          configJson: JSON.stringify(config),
+        });
+      },
+      recordDecision: async (record) => {
+        const timestampMs = nowMs();
+        await adapter.insertEventWithNextSeq({
+          runId,
+          timestampMs,
+          type: "WorkflowPatchRecorded",
+          payloadJson: JSON.stringify({
+            runId,
+            patchId: record.patchId,
+            decision: record.decision,
+            timestampMs,
+          }),
+        });
+      },
+    });
+    if (opts.resume && existingRun) {
+      assertResumeDurabilityMetadata(
+        existingRun,
+        existingConfig,
+        runMetadata,
+        resolvedWorkflowPath,
+      );
+    } else if (opts.resume && !existingRun) {
+      throw new SmithersError(
+        "RUN_NOT_FOUND",
+        `Cannot resume run ${runId} because it does not exist.`,
+        { runId },
+      );
+    }
+    if (!opts.resume) {
+      assertInputObject(opts.input);
+      if ("runId" in opts.input && (opts.input as any).runId !== runId) {
+        throw new SmithersError(
+          "INVALID_INPUT",
+          "Input runId does not match provided runId",
+        );
+      }
+      const inputRow = buildInputRow(inputTable as any, runId, opts.input);
+      const validation = validateInput(inputTable as any, inputRow);
+      if (!validation.ok) {
+        throw new SmithersError(
+          "INVALID_INPUT",
+          "Input does not match schema",
+          {
+            issues: validation.error?.issues,
+          },
+        );
+      }
+      const insertQuery = db.insert(inputTable).values(inputRow);
+      if (typeof insertQuery.onConflictDoNothing === "function") {
+        await withSqliteWriteRetry(
+          () => db.insert(inputTable).values(inputRow).onConflictDoNothing(),
+          { label: "insert input row" },
+        );
+      } else {
+        await withSqliteWriteRetry(() => db.insert(inputTable).values(inputRow), {
+          label: "insert input row",
+        });
+      }
+    } else {
+      let existingInput = await loadInput(db, inputTable, runId);
+      if (!existingInput) {
+        const restored = await restoreDurableStateFromSnapshot(
+          adapter,
+          db,
+          schema,
+          inputTable,
+          runId,
+        );
+        if (restored) {
+          existingInput = await loadInput(db, inputTable, runId);
+        }
+      }
+      if (!existingInput) {
+        throw new SmithersError(
+          "MISSING_INPUT",
+          "Cannot resume without an existing input row",
+        );
+      }
+    }
+
+    if (!existingRun) {
+      await adapter.insertRun({
+        runId,
+        parentRunId: opts.parentRunId ?? null,
+        workflowName: "workflow",
+        workflowPath: resolvedWorkflowPath ?? opts.workflowPath ?? null,
+        workflowHash: runMetadata.workflowHash,
+        status: "running",
+        createdAtMs: nowMs(),
+        startedAtMs: nowMs(),
+        finishedAtMs: null,
+        heartbeatAtMs: nowMs(),
+        runtimeOwnerId,
+        cancelRequestedAtMs: null,
+        hijackRequestedAtMs: null,
+        hijackTarget: null,
+        vcsType: runMetadata.vcsType,
+        vcsRoot: runMetadata.vcsRoot,
+        vcsRevision: runMetadata.vcsRevision,
+        errorJson: null,
+        configJson: runConfigJson,
+      });
+      runOwnedByCurrentProcess = true;
+    } else if (opts.resume) {
+      await activateRunForResume(
+        adapter,
+        existingRun,
+        opts,
+        runtimeOwnerId,
+        runConfigJson,
+        runMetadata,
+        resolvedWorkflowPath,
+      );
+      runOwnedByCurrentProcess = true;
+    } else {
+      await adapter.updateRun(runId, {
+        status: "running",
+        startedAtMs: existingRun.startedAtMs ?? nowMs(),
+        finishedAtMs: null,
+        heartbeatAtMs: nowMs(),
+        runtimeOwnerId,
+        cancelRequestedAtMs: null,
+        hijackRequestedAtMs: null,
+        hijackTarget: null,
+        workflowPath:
+          resolvedWorkflowPath ??
+          opts.workflowPath ??
+          existingRun.workflowPath ??
+          null,
+        workflowHash: runMetadata.workflowHash ?? existingRun.workflowHash ?? null,
+        vcsType: runMetadata.vcsType ?? existingRun.vcsType ?? null,
+        vcsRoot: runMetadata.vcsRoot ?? existingRun.vcsRoot ?? null,
+        vcsRevision: runMetadata.vcsRevision ?? existingRun.vcsRevision ?? null,
+        errorJson: null,
+        configJson: runConfigJson,
+      });
+      runOwnedByCurrentProcess = true;
+    }
+    stopSupervisor = startRunSupervisor(
+      adapter,
+      runId,
+      runtimeOwnerId,
+      runAbortController,
+      hijackState,
+    );
+
+    await eventBus.emitEventWithPersist({
+      type: "RunStarted",
+      runId,
+      timestampMs: nowMs(),
+    });
+
+    // Start alert runtime if alertPolicy is configured
+    if (effectiveAlertPolicy && (effectiveAlertPolicy as any).rules && Object.keys((effectiveAlertPolicy as any).rules).length > 0) {
+      alertRuntime = new AlertRuntime(effectiveAlertPolicy, {
+        runId,
+        adapter,
+        eventBus,
+        requestCancel: () => runAbortController.abort(),
+        createHumanRequest: async (reqOpts) => {
+          await adapter.insertHumanRequest({
+            requestId: `human:${reqOpts.runId}:${reqOpts.nodeId}:${reqOpts.iteration}`,
+            runId: reqOpts.runId,
+            nodeId: reqOpts.nodeId,
+            iteration: reqOpts.iteration,
+            kind: reqOpts.kind,
+            status: "pending",
+            prompt: reqOpts.prompt,
+            schemaJson: null,
+            optionsJson: reqOpts.linkedAlertId ? JSON.stringify({ linkedAlertId: reqOpts.linkedAlertId }) : null,
+            responseJson: null,
+            requestedAtMs: Date.now(),
+            answeredAtMs: null,
+            answeredBy: null,
+            timeoutAtMs: null,
+          });
+        },
+        pauseScheduler: (_reason: string) => {
+          // The human request will cause the scheduler to enter waiting-event state
+        },
+      });
+      alertRuntime.start();
+    }
+
     const runStartPerformanceMs = performance.now();
 
     await cancelStaleAttempts(adapter, runId);
@@ -4835,6 +6376,144 @@ async function runWorkflowBody<Schema>(
     const makeSchedulerTaskKey = (
       task: Pick<TaskDescriptor, "nodeId" | "iteration">,
     ) => buildStateKey(task.nodeId, task.iteration);
+    const workflowSessionTaskNotifications = new Set<string>();
+    const runWorkflowSessionShadow = async (
+      operation: string,
+      makeEffect: () => Effect.Effect<EngineDecision, unknown, unknown>,
+      context: Readonly<Record<string, unknown>> = {},
+    ): Promise<EngineDecision | null> => {
+      if (!workflowSessionShadow) {
+        return null;
+      }
+      try {
+        return await runPromise(makeEffect());
+      } catch (error) {
+        logWarning("workflow session shadow call failed", {
+          runId,
+          operation,
+          ...context,
+          error: error instanceof Error ? error.message : String(error),
+        }, "engine:workflow-session");
+        return null;
+      }
+    };
+    const compareWorkflowSessionShadow = (
+      operation: string,
+      sessionDecision: EngineDecision | null,
+      legacyDecision: WorkflowSessionShadowDecisionSummary,
+      context: Readonly<Record<string, unknown>> = {},
+    ) => {
+      if (!sessionDecision) {
+        return;
+      }
+      try {
+        const sessionSummary = summarizeWorkflowSessionDecision(sessionDecision);
+        if (
+          workflowSessionSummaryKey(sessionSummary) ===
+          workflowSessionSummaryKey(legacyDecision)
+        ) {
+          return;
+        }
+        logWarning("workflow session shadow divergence", {
+          runId,
+          operation,
+          sessionDecision: sessionSummary,
+          legacyDecision,
+          ...context,
+        }, "engine:workflow-session");
+      } catch (error) {
+        logWarning("workflow session shadow comparison failed", {
+          runId,
+          operation,
+          ...context,
+          error: error instanceof Error ? error.message : String(error),
+        }, "engine:workflow-session");
+      }
+    };
+    const notifyWorkflowSessionTaskSettled = async (
+      task: TaskDescriptor,
+      fallbackError?: unknown,
+    ) => {
+      if (!workflowSessionShadow) {
+        return;
+      }
+      try {
+        const node = await adapter.getNode(runId, task.nodeId, task.iteration);
+        const attempts = await adapter.listAttempts(
+          runId,
+          task.nodeId,
+          task.iteration,
+        );
+        const latestAttempt = attempts[0] as
+          | { attempt?: number | null; errorJson?: string | null }
+          | undefined;
+        const state = node?.state ?? (fallbackError == null ? null : "failed");
+        const notificationKey = [
+          task.nodeId,
+          task.iteration,
+          state ?? "unknown",
+          latestAttempt?.attempt ?? "unknown",
+        ].join("::");
+        if (workflowSessionTaskNotifications.has(notificationKey)) {
+          return;
+        }
+        if (state === "finished") {
+          workflowSessionTaskNotifications.add(notificationKey);
+          const outputRow = task.outputTable
+            ? await selectOutputRow<any>(db, task.outputTable as any, {
+                runId,
+                nodeId: task.nodeId,
+                iteration: task.iteration,
+              })
+            : undefined;
+          await runWorkflowSessionShadow(
+            "taskCompleted",
+            () =>
+              workflowSessionShadow!.taskCompleted({
+                nodeId: task.nodeId,
+                iteration: task.iteration,
+                output: outputRow ? stripAutoColumns(outputRow) : undefined,
+              }),
+            {
+              nodeId: task.nodeId,
+              iteration: task.iteration,
+            },
+          );
+          return;
+        }
+        if (state === "failed") {
+          workflowSessionTaskNotifications.add(notificationKey);
+          let errorPayload = fallbackError ?? "Task failed";
+          if (latestAttempt?.errorJson) {
+            try {
+              errorPayload = JSON.parse(latestAttempt.errorJson);
+            } catch {
+              errorPayload = latestAttempt.errorJson;
+            }
+          }
+          await runWorkflowSessionShadow(
+            "taskFailed",
+            () =>
+              workflowSessionShadow!.taskFailed({
+                nodeId: task.nodeId,
+                iteration: task.iteration,
+                error: errorPayload,
+              }),
+            {
+              nodeId: task.nodeId,
+              iteration: task.iteration,
+            },
+          );
+        }
+      } catch (error) {
+        logWarning("workflow session shadow task settlement failed", {
+          runId,
+          nodeId: task.nodeId,
+          iteration: task.iteration,
+          error: error instanceof Error ? error.message : String(error),
+        }, "engine:workflow-session");
+      }
+    };
     waitForAbortedTasksToSettle = async () => {
       const deadlineAt = nowMs() + RUN_ABORT_SETTLE_TIMEOUT_MS;
       while (true) {
@@ -5235,7 +6914,7 @@ async function runWorkflowBody<Schema>(
           : undefined,
       });
 
-      const { xml, tasks, mountedTaskIds } =
+      const renderedGraph =
         await withWorkflowVersioningRuntime(workflowVersioning, () =>
           renderer.render(workflowRef.build(ctx), {
             ralphIterations,
@@ -5244,12 +6923,31 @@ async function runWorkflowBody<Schema>(
             workflowPath: resolvedWorkflowPath,
           }),
         );
+      const { xml, mountedTaskIds } = renderedGraph;
+      const tasks = renderedGraph.tasks as unknown as TaskDescriptor[];
       await workflowVersioning.flush();
+      const sessionGraphDecision = await runWorkflowSessionShadow(
+        "submitGraph",
+        () =>
+          workflowSessionShadow!.submitGraph({
+            xml,
+            tasks,
+            mountedTaskIds,
+          } as unknown as WorkflowGraph),
+        {
+          frameNo: frameNo + 1,
+          taskCount: tasks.length,
+        },
+      );
       const xmlJson = canonicalizeXml(xml);
       const xmlHash = sha256Hex(xmlJson);
 
       // Resolve output tasks: ZodObject references via zodToKeyName, string keys via schemaRegistry
       resolveTaskOutputs(tasks, workflow);
+      attachSubflowComputeFns(tasks, workflow, {
+        rootDir,
+        workflowPath: resolvedWorkflowPath ?? opts.workflowPath,
+      });
 
       const workflowName = getWorkflowNameFromXml(xml);
       updateCurrentCorrelationContext({ workflowName });
@@ -5397,6 +7095,21 @@ async function runWorkflowBody<Schema>(
         ralphState,
         retryWait,
         nowMs(),
+      );
+      compareWorkflowSessionShadow(
+        "submitGraph",
+        sessionGraphDecision,
+        summarizeLegacySchedulerDecision(
+          schedule,
+          stateMap,
+          tasks,
+          schedulerTaskKeys,
+        ),
+        {
+          frameNo,
+          taskCount: tasks.length,
+          schedulerRunnableCount: schedule.runnable.length,
+        },
       );
 
       let dbInProgressCount = 0;
@@ -6136,6 +7849,13 @@ async function runWorkflowBody<Schema>(
                       runAbortController,
                       hijackState,
                       legacyExecuteTask,
+                    ).pipe(
+                      Effect.tap(() =>
+                        fromPromise(
+                          "workflow session shadow task settled",
+                          () => notifyWorkflowSessionTaskSettled(task),
+                        ),
+                      ),
                     ),
                     {
                       runId,
@@ -6153,7 +7873,11 @@ async function runWorkflowBody<Schema>(
                   },
                 ).pipe(
                   Effect.catchAll((error) =>
-                    Effect.sync(() => {
+                    Effect.gen(function* () {
+                      yield* fromPromise(
+                        "workflow session shadow task failed",
+                        () => notifyWorkflowSessionTaskSettled(task, error),
+                      );
                       if (schedulerTaskError == null) {
                         schedulerTaskError = error;
                       }
@@ -6255,6 +7979,7 @@ async function runWorkflowBody<Schema>(
     });
     return { runId, status: "failed", error: errorInfo };
   } finally {
+    alertRuntime?.stop();
     await stopSupervisor();
     detachAbort();
     runAbortController.signal.removeEventListener("abort", onAbortWake);

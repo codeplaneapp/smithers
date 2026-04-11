@@ -2,9 +2,10 @@ import * as DurableDeferred from "@effect/workflow/DurableDeferred";
 import * as Workflow from "@effect/workflow/Workflow";
 import * as WorkflowEngine from "@effect/workflow/WorkflowEngine";
 import { resolve as resolvePath } from "node:path";
-import { Effect, Exit, Layer, ManagedRuntime, Schema } from "effect";
+import { Cause, Effect, Exit, Layer, Schema } from "effect";
 import type { SmithersDb } from "../db/adapter";
 import { updateAsyncExternalWaitPending } from "./metrics";
+import { runPromiseExit } from "./runtime";
 
 export const DurableDeferredBridgeWorkflow = Workflow.make({
   name: "SmithersDurableDeferredBridge",
@@ -15,12 +16,6 @@ export const DurableDeferredBridgeWorkflow = Workflow.make({
 
 const adapterNamespaces = new WeakMap<object, string>();
 let nextAdapterNamespace = 0;
-const DurableDeferredBridgeWorkflowEngineLive = Layer.suspend(
-  () => WorkflowEngine.layerMemory,
-);
-const durableDeferredBridgeRuntime = ManagedRuntime.make(
-  DurableDeferredBridgeWorkflowEngineLive,
-);
 
 const getAdapterNamespace = (adapter: SmithersDb): string => {
   const filename = (adapter as any)?.db?.$client?.filename;
@@ -191,6 +186,20 @@ const makeWorkflowInstance = (executionId: string) =>
     executionId,
   );
 
+async function runBridgeEffect<A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Promise<A> {
+  const exit = await runPromiseExit(effect);
+  if (Exit.isSuccess(exit)) {
+    return exit.value;
+  }
+  const failure = Cause.failureOption(exit.cause);
+  if (failure._tag === "Some") {
+    throw failure.value;
+  }
+  throw Cause.squash(exit.cause);
+}
+
 const awaitBridgeDeferred = async <
   Success extends Schema.Schema.Any,
   Error extends Schema.Schema.All,
@@ -198,7 +207,7 @@ const awaitBridgeDeferred = async <
   executionId: string,
   deferred: DurableDeferred.DurableDeferred<Success, Error>,
 ): Promise<any> => {
-  return durableDeferredBridgeRuntime.runPromise(
+  return runBridgeEffect(
     DurableDeferred.await(deferred).pipe(
       Workflow.intoResult,
       Effect.provide(
@@ -224,7 +233,7 @@ const resolveBridgeDeferred = async <
     executionId,
   });
 
-  await durableDeferredBridgeRuntime.runPromise(
+  await runBridgeEffect(
     DurableDeferred.done(deferred, {
       token,
       exit,

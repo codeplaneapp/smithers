@@ -2664,7 +2664,7 @@ bunx smithers-orchestrator skills list
 
 | Option | Description |
 |---|---|
-| `--format <toon\|json\|yaml\|md\|jsonl>` | Output format. |
+| `--format <json\|yaml\|md\|jsonl>` | Output format. |
 | `--verbose` | Full output envelope. |
 | `--filter-output <keys>` | Filter JSON by key path (e.g. `runs[0].id`). |
 | `--schema` | Print JSON schema for the command. |
@@ -11132,6 +11132,7 @@ Notifications appear as in-app badges on the workspace rail. Terminal bell, OSC 
 | `/run` | Launch a workflow |
 | `/runs` | Show live runs |
 | `/approvals` | Show pending approvals |
+| `/inbox` | Unified attention queue (alerts + approvals + human requests) |
 | `/telemetry` | Telemetry board |
 | `/triggers` | Trigger manager |
 | `/datagrid` | SQL query browser |
@@ -26093,6 +26094,15 @@ See [Evals & Scorers](/concepts/evals) for the full scoring system documentation
 | `ScorerFinished` | Scorer | `nodeId`, `scorerId`, `scorerName`, `score` |
 | `ScorerFailed` | Scorer | `nodeId`, `scorerId`, `scorerName`, `error` |
 | `TokenUsageReported` | Output | `nodeId`, `iteration`, `attempt`, `model`, `agent`, `inputTokens`, `outputTokens`, `cacheReadTokens?`, `cacheWriteTokens?`, `reasoningTokens?` |
+| `AlertFired` | Alert Lifecycle | `alertId`, `policyName`, `severity`, `fingerprint`, `nodeId?`, `iteration?`, `message` |
+| `AlertAcknowledged` | Alert Lifecycle | `alertId`, `acknowledgedBy?` |
+| `AlertSilenced` | Alert Lifecycle | `alertId`, `silencedUntilMs?` |
+| `AlertResolved` | Alert Lifecycle | `alertId`, `resolvedBy?` |
+| `AlertReopened` | Alert Lifecycle | `alertId`, `fingerprint`, `occurrenceCount` |
+| `AlertEscalated` | Alert Lifecycle | `alertId`, `fromSeverity`, `toSeverity` |
+| `BudgetExceeded` | Normalized Input | `nodeId`, `iteration`, `budgetType`, `limit`, `actual` |
+| `ProviderDisconnected` | Normalized Input | `nodeId`, `iteration`, `attempt`, `engine` |
+| `ProviderReconnected` | Normalized Input | `nodeId`, `iteration`, `attempt`, `engine` |
 
 ## Persistence
 
@@ -29735,7 +29745,7 @@ These are JSON response codes, not `SmithersErrorInstance` objects.
 > Low-level Effect-ts integration layer for power users who need direct access to Smithers internals.
 > Source: https://smithers.sh/api/effect
 
-The Effect integration layer is Smithers' third and lowest API tier. The TOON builder API and JSX mirror it, and most workflows never need to reach this far. You reach for it when you need direct control over execution boundaries, custom bridging logic, or the full expressiveness of the Effect type system against Smithers internals.
+The Effect integration layer is Smithers' lowest API tier. JSX is the primary API and most workflows never need to reach this far. You reach for it when you need direct control over execution boundaries, custom bridging logic, or the full expressiveness of the Effect type system against Smithers internals.
 
 All modules live under `src/effect/` and are imported from `smithers-orchestrator/effect/*`. They assume familiarity with the [Effect](https://effect.website) library.
 
@@ -30630,7 +30640,7 @@ const result = withWorkflowVersioningRuntime(versioningRuntime, () =>
 await versioningRuntime.flush();
 ```
 
-Inside a workflow (JSX or TOON), use the `usePatched` hook to branch on a patch:
+Inside a workflow, use the `usePatched` hook to branch on a patch:
 
 ```ts
 import { usePatched } from "smithers-orchestrator/effect/versioning";

@@ -1,9 +1,10 @@
 import * as Activity from "@effect/workflow/Activity";
 import * as Workflow from "@effect/workflow/Workflow";
 import * as WorkflowEngine from "@effect/workflow/WorkflowEngine";
-import { Cause, Effect, Exit, Layer, ManagedRuntime, Schema } from "effect";
+import { Cause, Effect, Exit, Layer, Schema } from "effect";
 import type { SmithersDb } from "../db/adapter";
 import type { TaskDescriptor } from "../TaskDescriptor";
+import { runPromiseExit } from "./runtime";
 
 const TaskBridgeWorkflow = Workflow.make({
   name: "SmithersTaskBridge",
@@ -14,8 +15,6 @@ const TaskBridgeWorkflow = Workflow.make({
 
 const adapterNamespaces = new WeakMap<object, string>();
 let nextAdapterNamespace = 0;
-const ActivityBridgeWorkflowEngineLive = Layer.suspend(() => WorkflowEngine.layerMemory);
-const activityBridgeRuntime = ManagedRuntime.make(ActivityBridgeWorkflowEngineLive);
 
 const getAdapterNamespace = (adapter: SmithersDb): string => {
   const existing = adapterNamespaces.get(adapter);
@@ -100,7 +99,7 @@ const runTaskActivityAttempt = async <A>(
   instance: WorkflowEngine.WorkflowInstance["Type"],
   attempt: number,
 ): Promise<A> => {
-  const exit = await activityBridgeRuntime.runPromiseExit(
+  const exit = await runPromiseExit(
     activity.pipe(
       Effect.provide(
         Layer.mergeAll(
