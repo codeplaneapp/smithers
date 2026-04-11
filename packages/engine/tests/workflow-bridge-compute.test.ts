@@ -3,7 +3,7 @@ import { z } from "zod";
 import { SmithersDb } from "@smithers/db/adapter";
 import { ensureSmithersTables } from "@smithers/db/ensure";
 import { EventBus } from "../src/events";
-import { requireTaskRuntime } from "@smithers/runtime/task-runtime";
+import { requireTaskRuntime } from "@smithers/driver/task-runtime";
 import { executeTaskBridge } from "../src/effect/workflow-bridge";
 import type { TaskDescriptor } from "@smithers/graph/TaskDescriptor";
 import { createTestSmithers } from "../../smithers/tests/helpers";

@@ -1,7 +1,7 @@
 /** @jsxImportSource smithers */
 import { describe, expect, test } from "bun:test";
 import { Task, Workflow, runWorkflow } from "smithers";
-import { requireTaskRuntime } from "@smithers/runtime/task-runtime";
+import { requireTaskRuntime } from "@smithers/driver/task-runtime";
 import { SmithersDb } from "@smithers/db/adapter";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { outputSchemas } from "../../smithers/tests/schema";
