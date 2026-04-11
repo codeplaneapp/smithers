@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import type { SandboxHandle, SandboxTransportConfig } from "../transport";
 import { SmithersError } from "@smithers/errors/SmithersError";
-import { fromPromise } from "@smithers/runtime/interop";
+import { fromPromise } from "@smithers/driver/interop";
 import { SandboxEntityExecutor } from "./sandbox-entity";
 
 function baseHandle(config: SandboxTransportConfig): SandboxHandle {

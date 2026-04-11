@@ -5,11 +5,11 @@ import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
 import type { SmithersEvent } from "@smithers/observability/SmithersEvent";
 import { SmithersDb } from "@smithers/db/adapter";
 import { trackEvent, sandboxTransportDurationMs } from "@smithers/observability/metrics";
-import { runPromise } from "@smithers/runtime/runtime";
 import { nowMs } from "@smithers/scheduler/nowMs";
 import { SmithersError } from "@smithers/errors/SmithersError";
 import { errorToJson } from "@smithers/errors/errorToJson";
-import { requireTaskRuntime } from "@smithers/runtime/task-runtime";
+// TODO: verify @smithers/driver/task-runtime resolves correctly
+import { requireTaskRuntime } from "@smithers/driver/task-runtime";
 import { executeChildWorkflow, type ChildWorkflowDefinition } from "@smithers/engine/child-workflow";
 import { validateSandboxBundle, writeSandboxBundle } from "./bundle";
 import {
@@ -47,7 +47,7 @@ async function emitSandboxEvent(db: any, event: SmithersEvent) {
     type: event.type,
     payloadJson: JSON.stringify(event),
   });
-  await runPromise(trackEvent(event));
+  await Effect.runPromise(trackEvent(event));
 }
 
 async function directorySize(path: string): Promise<number> {
@@ -69,8 +69,8 @@ async function transportCall<A>(
   effect: Effect.Effect<A, SmithersError, SandboxTransport>,
 ) {
   const started = performance.now();
-  const value = await runPromise(runtimeServiceEffect(runtime, effect));
-  await runPromise(
+  const value = await Effect.runPromise(runtimeServiceEffect(runtime, effect));
+  await Effect.runPromise(
     Metric.update(sandboxTransportDurationMs, performance.now() - started),
   );
   return value;

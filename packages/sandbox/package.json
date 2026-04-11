@@ -23,10 +23,10 @@
   },
   "dependencies": {
     "@smithers/db": "workspace:*",
+    "@smithers/driver": "workspace:*",
     "@smithers/errors": "workspace:*",
     "@smithers/graph": "workspace:*",
     "@smithers/observability": "workspace:*",
-    "@smithers/runtime": "workspace:*",
     "@smithers/scheduler": "workspace:*",
     "@smithers/tools": "workspace:*"
   },
