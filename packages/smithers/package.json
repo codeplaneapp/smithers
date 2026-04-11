@@ -38,7 +38,6 @@
     "@smithers/rag": "workspace:*",
     "@smithers/react": "workspace:*",
     "@smithers/react-reconciler": "workspace:*",
-    "@smithers/runtime": "workspace:*",
     "@smithers/sandbox": "workspace:*",
     "@smithers/scheduler": "workspace:*",
     "@smithers/scorers": "workspace:*",

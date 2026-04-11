@@ -39,7 +39,7 @@ import {
   bashToolEffect,
 } from "@smithers/tools/bash";
 import { ensureSmithersTables } from "@smithers/db/ensure";
-import { runPromise } from "@smithers/runtime/runtime";
+import { Effect } from "effect";
 import { runWithToolContext } from "@smithers/tools/context";
 import { createTestDb, createTestSmithers } from "./helpers";
 import { ddl, schema } from "./schema";
@@ -394,7 +394,7 @@ describe("bash tool bounds", () => {
     try {
       await expectAsyncSmithersError(
         withBashContext(root, {}, () =>
-          runPromise(
+          Effect.runPromise(
             bashToolEffect("x".repeat(BASH_TOOL_MAX_COMMAND_LENGTH + 1)),
           ),
         ),
@@ -409,7 +409,7 @@ describe("bash tool bounds", () => {
     try {
       await expectAsyncSmithersError(
         withBashContext(root, {}, () =>
-          runPromise(
+          Effect.runPromise(
             bashToolEffect(
               "echo",
               Array.from({ length: BASH_TOOL_MAX_ARGS + 1 }, () => "x"),
@@ -428,7 +428,7 @@ describe("bash tool bounds", () => {
       for (const maxOutputBytes of [0, -1, Number.POSITIVE_INFINITY]) {
         await expectAsyncSmithersError(
           withBashContext(root, { maxOutputBytes }, () =>
-            runPromise(bashToolEffect("echo", ["ok"])),
+            Effect.runPromise(bashToolEffect("echo", ["ok"])),
           ),
         );
       }

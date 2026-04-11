@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Cli } from "incur";
-import { runPromise } from "@smithers/runtime/runtime";
+import { Effect } from "effect";
 import {
   createAvailableSmithersIdeCli,
   createSmithersIdeCli,
@@ -364,7 +364,7 @@ describe("Smithers IDE tools", () => {
     });
 
     await expect(
-      runPromise(service.openWebview("https://example.com")),
+      Effect.runPromise(service.openWebview("https://example.com")),
     ).rejects.toMatchObject({
       code: "PROCESS_TIMEOUT",
     });
