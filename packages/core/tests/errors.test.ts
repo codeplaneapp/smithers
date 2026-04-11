@@ -8,7 +8,7 @@ import {
   knownSmithersErrorCodes,
   smithersErrorDefinitions,
   toSmithersError,
-} from "../src/errors/index.ts";
+} from "../src/errors.ts";
 
 describe("Smithers errors", () => {
   test("exports the reference error catalog", () => {

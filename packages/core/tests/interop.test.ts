@@ -5,8 +5,8 @@ import {
   fromSync,
   ignoreSyncError,
   toError,
-} from "../src/interop/index.ts";
-import { SmithersError } from "../src/errors/index.ts";
+} from "../src/interop.ts";
+import { SmithersError } from "../src/errors.ts";
 
 describe("interop", () => {
   test("wraps promise failures as SmithersError", async () => {

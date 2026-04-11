@@ -71,9 +71,27 @@ There are six possible decisions:
 | `Finished` | All tasks complete, here's the result |
 | `Failed` | Unrecoverable error |
 
-## Realistic Example
+## Using WorkflowDriver
 
-Here's a complete driver that runs a three-task pipeline: fetch data, get human approval, then process.
+The `WorkflowDriver` class handles the full decision loop for you. Provide a workflow definition, a renderer, and a runtime — it does the rest:
+
+```ts
+import { WorkflowDriver, defaultTaskExecutor } from "@smithers/core/driver";
+
+const driver = new WorkflowDriver({
+  workflow: { build: (ctx) => myWorkflowTree(ctx) },
+  renderer: myRenderer,
+  runtime: { runPromise: (effect) => runPromise(effect) },
+});
+
+const result = await driver.run({ input: { url: "https://example.com" } });
+```
+
+The driver handles `Execute`, `ReRender`, `Wait` (including retry backoff sleep), `ContinueAsNew`, `Finished`, and `Failed` decisions automatically. Override specific behaviors with `executeTask`, `onWait`, `onSchedulerWait`, and `continueAsNew` callbacks.
+
+## Manual Driver Example
+
+Here's a complete driver that runs a three-task pipeline by hand: fetch data, get human approval, then process.
 
 ```ts
 import {
@@ -222,19 +240,22 @@ bun add @smithers/core
 
 **Peer dependency:** `effect@^3.21.0`
 
+**Workspace dependency:** `@smithers/graph` (graph extraction and types)
+
 ---
 
 ## Architecture
 
 ```text
 SmithersCoreLayer
-├── CorrelationContextLive     ← request-scoped tracing context
-├── MetricsServiceLive         ← counters, histograms, Prometheus export
-├── TracingServiceLive         ← spans and log annotations
-├── SchedulerLive              ← plan tree + task scheduling (depends on metrics, tracing)
-├── DurablePrimitivesLive      ← approval, event, timer, continue-as-new primitives
-├── ExecutionServiceLive       ← runs computeFn / returns staticPayload
-└── WorkflowSessionLive        ← the call-in API that ties it all together
+├── ObservabilityLayer
+│   ├── CorrelationContextLive     ← request-scoped tracing context
+│   ├── MetricsServiceLive         ← counters, histograms, Prometheus export
+│   └── TracingServiceLive         ← spans and log annotations
+├── SchedulerLive                  ← plan tree + task scheduling (depends on observability)
+├── DurablePrimitivesLive          ← approval, event, timer, continue-as-new primitives
+├── ExecutionServiceLive           ← runs computeFn / returns staticPayload
+└── WorkflowSessionLive            ← the call-in API that ties it all together
 ```
 
 Drivers can swap any layer. For example, replace in-memory storage with SQLite and in-memory durables with Temporal:
@@ -258,13 +279,13 @@ const DriverLayer = Layer.mergeAll(
 
 ### WorkflowGraph
 
-`extractGraph(hostTree)` turns a `HostNode` tree into a `WorkflowGraph`:
+`extractGraph(hostTree)` turns a `HostNode` tree into a `WorkflowGraph` (types from `@smithers/graph`, re-exported here):
 
 ```ts
 type WorkflowGraph = {
-  xml: XmlElement | null;      // normalized tree structure (serializable, no functions)
-  tasks: TaskDescriptor[];     // flat list of executable units of work
-  mountedTaskIds: string[];    // "nodeId::iteration" keys for currently mounted tasks
+  xml: XmlNode | null;          // normalized tree structure (serializable, no functions)
+  tasks: TaskDescriptor[];       // flat list of executable units of work
+  mountedTaskIds: string[];      // "nodeId::iteration" keys for currently mounted tasks
 };
 ```
 
@@ -278,21 +299,33 @@ One session per workflow run. The driver submits facts, the session returns deci
 const session = makeWorkflowSession({ runId: "run_001" });
 
 // Submit a graph → get first decision
-session.submitGraph(graph)        // → EngineDecision
+session.submitGraph(graph)            // → EngineDecision
 
 // Report task outcomes → get next decision
-session.taskCompleted(output)     // → EngineDecision
-session.taskFailed(failure)       // → EngineDecision
+session.taskCompleted(output)         // → EngineDecision
+session.taskFailed(failure)           // → EngineDecision
 
 // Report external events → get next decision
-session.approvalResolved(id, res) // → EngineDecision
-session.eventReceived(name, data) // → EngineDecision
-session.timerFired(id)            // → EngineDecision
-session.signalReceived(name, data)// → EngineDecision
+session.approvalResolved(id, res)     // → EngineDecision
+session.approvalTimedOut(id)          // → EngineDecision
+session.eventReceived(name, data)     // → EngineDecision
+session.signalReceived(name, data)    // → EngineDecision
+session.timerFired(id)                // → EngineDecision
+
+// Hot reload and recovery
+session.hotReloaded(graph)            // → EngineDecision
+session.heartbeatTimedOut(id)         // → EngineDecision
+session.recoverOrphanedTasks()        // → EngineDecision
+session.cancelRequested()             // → EngineDecision
+
+// Cache integration
+session.cacheResolved(output, cached) // → EngineDecision
+session.cacheMissed(nodeId)           // → EngineDecision
 
 // Introspect
-session.getTaskStates()           // → TaskStateMap
-session.getSchedule()             // → ScheduleSnapshot | null
+session.getTaskStates()               // → TaskStateMap
+session.getSchedule()                 // → ScheduleSnapshot | null
+session.getCurrentGraph()             // → WorkflowGraph | null
 ```
 
 ### Scheduler
@@ -300,11 +333,12 @@ session.getSchedule()             // → ScheduleSnapshot | null
 The scheduler is pure — no side effects, no I/O. Given a plan tree and current task states, it returns which tasks are runnable:
 
 ```ts
-const plan = buildPlanTree(graph.xml);
+const { plan } = buildPlanTree(graph.xml, ralphState);
 const result = scheduleTasks(plan, taskStates, descriptors, ralphState, retryWait, nowMs);
 // result.runnable: TaskDescriptor[]  — ready to execute
 // result.pendingExists: boolean      — more work remains
-// result.waitingApprovalExists       — blocked on human
+// result.readyRalphs                 — loops ready to advance
+// result.nextRetryAtMs               — earliest retry backoff deadline
 ```
 
 ### Task States
@@ -321,26 +355,90 @@ pending → in-progress → finished
        → cancelled
 ```
 
+### Context
+
+`buildContext()` constructs the `SmithersCtx` passed to workflow build functions. It provides typed output access, iteration tracking, and authentication context:
+
+```ts
+import { buildContext } from "@smithers/core/context";
+
+const ctx = buildContext({
+  runId: "run_001",
+  iteration: 0,
+  input: { url: "https://example.com" },
+  auth: null,
+  outputs: {},
+});
+
+// ctx.output(table, key)      — get output row (throws if missing)
+// ctx.outputMaybe(table, key) — get output row (returns undefined)
+// ctx.latest(table, nodeId)   — latest iteration output for a node
+// ctx.iterationCount(table, nodeId) — number of completed iterations
+```
+
+### DevTools
+
+`SmithersDevToolsCore` and `DevToolsRunStore` provide renderer-agnostic tree inspection and execution state tracking:
+
+```ts
+import { SmithersDevToolsCore, DevToolsRunStore } from "@smithers/core/devtools";
+
+const devtools = new SmithersDevToolsCore({ verbose: true });
+devtools.attachEventBus(eventBus);
+
+// Tree inspection
+devtools.printTree();            // pretty-print the workflow tree
+devtools.listTasks();            // all task nodes
+devtools.findTask("my-task");    // find by nodeId
+
+// Execution tracking
+devtools.getRun("run_001");      // RunExecutionState
+devtools.getTaskState("run_001", "my-task"); // TaskExecutionState
+```
+
+### Persistence
+
+`StorageService` defines the contract for durable storage. The core ships with `makeInMemoryStorageService()` for testing; the `@smithers/db` package provides SQLite-backed storage.
+
+Storage covers runs, nodes, attempts, frames, approvals, human requests, alerts, signals, events, caches, crons, sandboxes, tool calls, and scorer results.
+
 ---
 
 ## Import Paths
 
 ```ts
-import { … } from "@smithers/core";             // everything
+// Core barrel — everything
+import { … } from "@smithers/core";
+
+// Submodule exports
 import { … } from "@smithers/core/graph";        // extractGraph, HostNode, WorkflowGraph, TaskDescriptor
-import { … } from "@smithers/core/session";      // WorkflowSession, EngineDecision, makeWorkflowSession
-import { … } from "@smithers/core/scheduler";    // buildPlanTree, scheduleTasks, PlanNode
-import { … } from "@smithers/core/state";        // TaskState, TaskStateMap, buildStateKey
-import { … } from "@smithers/core/persistence";  // StorageService, makeInMemoryStorageService
-import { … } from "@smithers/core/observability"; // MetricsService, TracingService, CorrelationContext
+import { … } from "@smithers/core/session";       // WorkflowSession, EngineDecision, makeWorkflowSession
+import { … } from "@smithers/core/scheduler";     // buildPlanTree, scheduleTasks, PlanNode
+import { … } from "@smithers/core/state";         // TaskState, TaskStateMap, buildStateKey
+import { … } from "@smithers/core/context";       // buildContext, SmithersCtx, OutputSnapshot
+import { … } from "@smithers/core/driver";        // WorkflowDriver, defaultTaskExecutor, withAbort
+import { … } from "@smithers/core/devtools";      // SmithersDevToolsCore, DevToolsRunStore, printTree
+import { … } from "@smithers/core/persistence";   // StorageService, makeInMemoryStorageService
 import { … } from "@smithers/core/durables";      // DurablePrimitives, ApprovalResolution
 import { … } from "@smithers/core/execution";     // ExecutionService
 import { … } from "@smithers/core/interop";       // fromPromise, fromSync (Effect ↔ Promise helpers)
 import { … } from "@smithers/core/runtime";       // SmithersCoreLayer, runPromise, runSync, runFork
-import { … } from "@smithers/core/errors";        // SmithersError, EngineError, error codes
-```
+import { … } from "@smithers/core/errors";        // SmithersError, error codes
 
-> For the full API reference with every export, see [`docs/README.md`](./docs/README.md).
+// Protocol types (individual exports for tree-shaking)
+import type { AgentLike } from "@smithers/core/AgentLike";
+import type { CachePolicy } from "@smithers/core/CachePolicy";
+import type { OutputAccessor } from "@smithers/core/OutputAccessor";
+import type { OutputKey } from "@smithers/core/OutputKey";
+import type { RetryPolicy } from "@smithers/core/RetryPolicy";
+import type { RunAuthContext } from "@smithers/core/RunAuthContext";
+import type { RunOptions } from "@smithers/core/RunOptions";
+import type { RunResult } from "@smithers/core/RunResult";
+import type { RunStatus } from "@smithers/core/RunStatus";
+import type { SmithersCtx } from "@smithers/core/SmithersCtx";
+import type { SmithersEvent } from "@smithers/core/SmithersEvent";
+import type { SmithersWorkflowOptions } from "@smithers/core/SmithersWorkflowOptions";
+```
 
 ---
 

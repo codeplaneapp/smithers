@@ -5,7 +5,7 @@ import {
   scheduleTasks,
   type PlanNode,
   type TaskStateMap,
-} from "../src/scheduler/index.ts";
+} from "../src/scheduler.ts";
 import type { TaskDescriptor, XmlElement } from "../src/graph/index.ts";
 
 function el(
