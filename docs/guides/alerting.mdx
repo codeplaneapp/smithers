@@ -102,6 +102,76 @@ The merged policy is stored on `workflow.opts.alertPolicy`.
 
 You can reference a named reaction from `rules` or inline a reaction object directly.
 
+## Built-In Rules
+
+The following rule names have built-in runtime evaluators. When configured in `alertPolicy.rules`, the engine automatically evaluates them against live events and persisted state.
+
+| Rule Name | Fires When | Default Severity |
+| --- | --- | --- |
+| `runFailed` | Run status becomes `failed` | `critical` |
+| `approvalWaitExceeded` | An approval has been pending longer than `afterMs` | `warning` |
+| `retryStorm` | A node retries more than `threshold` times within `windowMs` | `warning` |
+| `taskHeartbeatTimeout` | A task heartbeat timeout event is emitted | `warning` |
+| `tokenBudgetExceeded` | A `BudgetExceeded` event fires for token, cost, or time | `critical` |
+| `workflowReloadFailed` | Hot reload fails to apply | `warning` |
+| `workflowReloadUnsafe` | Hot reload is skipped as unsafe | `info` |
+| `providerDisconnected` | An agent provider disconnects without reconnecting | `warning` |
+
+### Extended Rule Fields
+
+Rules accept optional fields for threshold and escalation control:
+
+```ts
+rules: {
+  retryStorm: {
+    threshold: 10,         // fire after this many retries
+    windowMs: 120_000,     // within this time window
+    escalateAfterMs: 600_000, // escalate severity after this age
+    escalateTo: "critical",   // target severity on escalation
+    silenceForMs: 300_000,    // suppress delivery for this duration after silencing
+  },
+}
+```
+
+## Runtime Behavior
+
+Alert policy rules are evaluated at runtime inside the workflow engine:
+
+1. The effective merged `alertPolicy` is persisted in the run's `configJson` at start and resume, making evaluation deterministic and inspectable.
+2. Built-in rules subscribe to the `EventBus` and poll time-based conditions (e.g., approval wait age) every 10 seconds.
+3. Alerts are persisted to `_smithers_alerts` with fingerprint-based dedupe. Recurring identical conditions reopen resolved alerts instead of creating duplicates.
+4. Reactions execute when an alert first fires: `pause` creates a linked human request, `cancel` aborts the run, `open-approval` creates an operator decision request.
+5. All reactions are idempotent across resume and replay.
+
+## Alert Lifecycle Events
+
+The following events are emitted during the alert lifecycle and persisted like other `SmithersEvent` records:
+
+- `AlertFired` — A new alert fires or an existing one reopens.
+- `AlertAcknowledged` — An operator acknowledges an alert.
+- `AlertSilenced` — An alert is silenced with an optional TTL.
+- `AlertResolved` — An alert is resolved (manually or by system).
+- `AlertReopened` — A previously resolved alert recurs.
+- `AlertEscalated` — An alert's severity increases due to escalation rules.
+
+## Unified Attention Model
+
+Alerts, pending approvals, and alert-generated human requests are surfaced through a unified attention API:
+
+- **Gateway**: `attention.list` and `attention.act` RPCs, plus real-time websocket events.
+- **REST**: `GET /v1/attention` returns a combined list sorted by severity and age.
+- **Web**: `/inbox` shows all attention items with filters, actions, and deep links.
+- **CLI**: `smithers inbox` lists and acts on all attention items.
+- **TUI**: The `AttentionPane` component shows live attention items with hotkeys.
+- **PI**: Status bar shows total attention count; `ctx.ui.notify()` fires for critical alerts.
+
+## Delivery and Suppression
+
+- One active alert per fingerprint. Recurrence increments `occurrenceCount` and reopens.
+- Silence expires automatically after `silencedUntilMs`.
+- Focus suppression: toast, bell, and PI notifications are suppressed when the relevant run or inbox is already visible. Badge and inbox state always update.
+- Severity escalation is time-based and configurable per rule.
+
 ## Recommended Usage
 
 - Use alert policy for operational conditions such as failed runs, approval timeouts, or budget breaches.

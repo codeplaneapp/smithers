@@ -1209,6 +1209,15 @@ See [Evals & Scorers](/concepts/evals) for the full scoring system documentation
 | `ScorerFinished` | Scorer | `nodeId`, `scorerId`, `scorerName`, `score` |
 | `ScorerFailed` | Scorer | `nodeId`, `scorerId`, `scorerName`, `error` |
 | `TokenUsageReported` | Output | `nodeId`, `iteration`, `attempt`, `model`, `agent`, `inputTokens`, `outputTokens`, `cacheReadTokens?`, `cacheWriteTokens?`, `reasoningTokens?` |
+| `AlertFired` | Alert Lifecycle | `alertId`, `policyName`, `severity`, `fingerprint`, `nodeId?`, `iteration?`, `message` |
+| `AlertAcknowledged` | Alert Lifecycle | `alertId`, `acknowledgedBy?` |
+| `AlertSilenced` | Alert Lifecycle | `alertId`, `silencedUntilMs?` |
+| `AlertResolved` | Alert Lifecycle | `alertId`, `resolvedBy?` |
+| `AlertReopened` | Alert Lifecycle | `alertId`, `fingerprint`, `occurrenceCount` |
+| `AlertEscalated` | Alert Lifecycle | `alertId`, `fromSeverity`, `toSeverity` |
+| `BudgetExceeded` | Normalized Input | `nodeId`, `iteration`, `budgetType`, `limit`, `actual` |
+| `ProviderDisconnected` | Normalized Input | `nodeId`, `iteration`, `attempt`, `engine` |
+| `ProviderReconnected` | Normalized Input | `nodeId`, `iteration`, `attempt`, `engine` |
 
 ## Persistence
 
