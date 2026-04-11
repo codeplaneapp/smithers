@@ -6,7 +6,7 @@ import { Effect } from "effect";
 import { z } from "zod";
 import { fromPromise } from "@smithers/driver/interop";
 import { SmithersError } from "@smithers/errors/SmithersError";
-import { withSqliteWriteRetry } from "./write-retry";
+import { withSqliteWriteRetryEffect } from "./write-retry";
 
 export type OutputKey = { runId: string; nodeId: string; iteration?: number };
 
@@ -129,7 +129,7 @@ export function upsertOutputRow(
     ? [cols.runId, cols.nodeId, cols.iteration]
     : [cols.runId, cols.nodeId];
 
-  return withSqliteWriteRetry(
+  return withSqliteWriteRetryEffect(
     () =>
       fromPromise<any[]>(
         `upsert output ${(table as any)["_"]?.name ?? "output"}`,

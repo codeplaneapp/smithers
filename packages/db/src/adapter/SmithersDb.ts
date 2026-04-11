@@ -30,7 +30,7 @@ import {
   type FrameEncoding,
 } from "../frame-codec";
 import { getKeyColumns, type OutputKey } from "../output";
-import { withSqliteWriteRetry } from "../write-retry";
+import { withSqliteWriteRetryEffect } from "../write-retry";
 import { camelToSnake } from "../utils/camelToSnake";
 import type { RunRow } from "./RunRow";
 import type { StaleRunRecord } from "./StaleRunRecord";
@@ -517,7 +517,7 @@ export class SmithersDb {
         result = yield* writeOperation;
       } else {
         const releaseTurn = yield* self.acquireTransactionTurn();
-        result = yield* withSqliteWriteRetry(
+        result = yield* withSqliteWriteRetryEffect(
           () => writeOperation,
           { label },
         ).pipe(
@@ -574,7 +574,7 @@ export class SmithersDb {
     const self = this;
     const label = `sqlite transaction ${writeGroup}`;
 
-    return withSqliteWriteRetry(
+    return withSqliteWriteRetryEffect(
       () =>
         Effect.gen(function* () {
           const currentFiberId = yield* Effect.fiberId;
@@ -1744,7 +1744,7 @@ export class SmithersDb {
   }) {
     const label = `insert signal ${row.signalName}`;
     const self = this;
-    return withSqliteWriteRetry(
+    return withSqliteWriteRetryEffect(
       () =>
         Effect.gen(function* () {
           const existing = yield* self.read(label, () =>
@@ -1939,7 +1939,7 @@ export class SmithersDb {
   }) {
     const label = `insert event ${row.type}`;
     const self = this;
-    return withSqliteWriteRetry(
+    return withSqliteWriteRetryEffect(
       () =>
         Effect.gen(function* () {
           const existing = yield* self.read(label, () =>
