@@ -8,7 +8,7 @@ import {
   DEFAULT_MERGE_QUEUE_CONCURRENCY,
   WORKTREE_EMPTY_PATH_ERROR,
 } from "@smithers/graph/constants";
-import { SmithersError } from "@smithers/core/errors";
+import { SmithersError } from "@smithers/errors/SmithersError";
 
 // TODO(migration): Delegate extractFromHost to
 // @smithers/core/graph.extractGraph once core extraction reaches full

@@ -1,5 +1,5 @@
 import { isAbsolute, resolve as resolvePath } from "node:path";
-import { SmithersError } from "@smithers/core/errors";
+import { SmithersError } from "@smithers/errors/SmithersError";
 import type {
   ExtractOptions,
   HostNode,
