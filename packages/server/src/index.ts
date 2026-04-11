@@ -7,7 +7,7 @@ import { Effect } from "effect";
 import { isRunHeartbeatFresh, runWorkflow } from "@smithers/engine";
 import { newRunId } from "@smithers/driver/newRunId";
 import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
-import type { SmithersEvent } from "@smithers/core/SmithersEvent";
+import type { SmithersEvent } from "@smithers/observability/SmithersEvent";
 import { SmithersDb } from "@smithers/db/adapter";
 import { ensureSmithersTables } from "@smithers/db/ensure";
 import { Metric } from "effect";

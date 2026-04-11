@@ -7,7 +7,7 @@ import { runWorkflow } from "@smithers/engine";
 import { approveNode, denyNode } from "@smithers/engine/approvals";
 import { signalRun } from "@smithers/engine/signals";
 import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
-import type { SmithersEvent } from "@smithers/core/SmithersEvent";
+import type { SmithersEvent } from "@smithers/observability/SmithersEvent";
 import { SmithersDb } from "@smithers/db/adapter";
 import { ensureSmithersTables } from "@smithers/db/ensure";
 import {
