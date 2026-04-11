@@ -2,8 +2,7 @@ import { readdir, mkdir, link, copyFile, rm } from "node:fs/promises";
 import { resolve, relative, join, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import { Effect } from "effect";
-import { fromPromise } from "@smithers/runtime/interop";
-import { runPromise } from "@smithers/runtime/runtime";
+import { fromPromise } from "@smithers/driver/interop";
 import type { SmithersError } from "@smithers/errors/SmithersError";
 
 const DEFAULT_EXCLUDE = [
@@ -60,7 +59,7 @@ export async function buildOverlay(
   generation: number,
   opts?: OverlayOptions,
 ): Promise<string> {
-  return runPromise(buildOverlayEffect(hotRoot, outDir, generation, opts));
+  return Effect.runPromise(buildOverlayEffect(hotRoot, outDir, generation, opts));
 }
 
 /**
@@ -176,7 +175,7 @@ export async function cleanupGenerations(
   outDir: string,
   keepLast: number,
 ): Promise<void> {
-  await runPromise(cleanupGenerationsEffect(outDir, keepLast));
+  await Effect.runPromise(cleanupGenerationsEffect(outDir, keepLast));
 }
 
 /**

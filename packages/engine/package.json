@@ -31,14 +31,14 @@
     "@smithers/observability": "workspace:*",
     "@smithers/react": "workspace:*",
     "@smithers/react-reconciler": "workspace:*",
-    "@smithers/runtime": "workspace:*",
     "@smithers/sandbox": "workspace:*",
     "@smithers/scheduler": "workspace:*",
     "@smithers/scorers": "workspace:*",
     "@smithers/time-travel": "workspace:*",
     "@smithers/tools": "workspace:*",
     "@smithers/vcs": "workspace:*",
-    "@smithers/voice": "workspace:*"
+    "@smithers/voice": "workspace:*",
+    "effect": "^3.21.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

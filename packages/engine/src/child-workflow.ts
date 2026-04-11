@@ -2,8 +2,8 @@ import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
 import type { RunResult } from "@smithers/driver/RunResult";
 import { SmithersError } from "@smithers/errors/SmithersError";
 import { SmithersDb } from "@smithers/db/adapter";
-// TODO: move task-runtime to @smithers/driver/task-runtime
-import { requireTaskRuntime } from "@smithers/runtime/task-runtime";
+// TODO: task-runtime needs to be created in @smithers/driver
+import { requireTaskRuntime } from "@smithers/driver/task-runtime";
 import { getWorkflowMakeBridgeRuntime } from "./effect/workflow-make-bridge";
 
 export type ChildWorkflowDefinition =

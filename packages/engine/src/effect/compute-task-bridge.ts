@@ -7,8 +7,8 @@ import { TaskHeartbeatTimeout } from "@smithers/errors/TaskHeartbeatTimeout";
 import { TaskTimeout } from "@smithers/errors/TaskTimeout";
 import { EventBus } from "../events";
 import { makeAbortError, wireAbortSignal } from "./bridge-utils";
-// TODO: move task-runtime to @smithers/driver/task-runtime
-import { withTaskRuntime } from "@smithers/runtime/task-runtime";
+// TODO: task-runtime needs to be created in @smithers/driver
+import { withTaskRuntime } from "@smithers/driver/task-runtime";
 import { logDebug, logError, logInfo, logWarning } from "@smithers/observability/logging";
 import { attemptDuration, nodeDuration } from "@smithers/observability/metrics";
 import { errorToJson } from "@smithers/errors/errorToJson";

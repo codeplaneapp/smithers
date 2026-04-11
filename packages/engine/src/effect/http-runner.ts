@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import type { SandboxHandle, SandboxTransportConfig } from "@smithers/sandbox/transport";
 import { SmithersError } from "@smithers/errors/SmithersError";
-// TODO: move child-process to @smithers/driver/child-process
-import { spawnCaptureEffect } from "@smithers/runtime/child-process";
+// TODO: child-process needs to be created in @smithers/driver
+import { spawnCaptureEffect } from "@smithers/driver/child-process";
 import { fromPromise } from "@smithers/driver/interop";
 import { SandboxEntityExecutor } from "@smithers/sandbox/effect/sandbox-entity";
 

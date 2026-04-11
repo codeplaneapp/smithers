@@ -84,10 +84,9 @@ import type { ScorersMap as RuntimeScorersMap } from "@smithers/scorers/types";
 import { dirname, resolve } from "node:path";
 import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { fromPromise } from "@smithers/runtime/interop";
+import { fromPromise } from "@smithers/driver/interop";
 import { logDebug, logError, logInfo, logWarning } from "@smithers/observability/logging";
 import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner";
-import { runFork, runPromise, runSync } from "@smithers/runtime/runtime";
 import { HotWorkflowController } from "./hot";
 import type { HotReloadOptions } from "@smithers/driver/RunOptions";
 import { spawn as nodeSpawn } from "node:child_process";
@@ -98,7 +97,8 @@ import {
   smithersSpanNames,
   withSmithersSpan,
 } from "@smithers/observability";
-import { withTaskRuntime } from "@smithers/runtime/task-runtime";
+// TODO: task-runtime needs to be created in @smithers/driver
+import { withTaskRuntime } from "@smithers/driver/task-runtime";
 import { hashCapabilityRegistry } from "@smithers/agents/capability-registry";
 import {
   cancelPendingTimersBridge,
@@ -2586,7 +2586,7 @@ export function applyConcurrencyLimits(
       inProgressTotal += 1;
     }
   }
-  void runPromise(Metric.set(schedulerConcurrencyUtilization, maxConcurrency > 0 ? inProgressTotal / maxConcurrency : 0));
+  void Effect.runPromise(Metric.set(schedulerConcurrencyUtilization, maxConcurrency > 0 ? inProgressTotal / maxConcurrency : 0));
 
   const capacity = Math.max(0, maxConcurrency - inProgressTotal);
   for (const desc of runnable) {
@@ -2742,7 +2742,7 @@ export async function legacyExecuteTask(
   const annotateTaskSpan = (
     attributes: Readonly<Record<string, unknown>>,
   ) =>
-    runPromise(
+    Effect.runPromise(
       annotateSmithersTrace({
         ...taskSpanContext,
         ...attributes,
@@ -2965,7 +2965,7 @@ export async function legacyExecuteTask(
   const stepCacheEnabled = cacheEnabled || Boolean(desc.cachePolicy);
 
   const cacheAgent = Array.isArray(desc.agent) ? desc.agent[0] : desc.agent;
-  let heartbeatWatchdogFiber: ReturnType<typeof runFork> | null = null;
+  let heartbeatWatchdogFiber: ReturnType<typeof Effect.runFork> | null = null;
 
   try {
     if (taskSignal.aborted) {
@@ -2983,7 +2983,7 @@ export async function legacyExecuteTask(
     }, "engine:task");
     await annotateTaskSpan({ status: "running" });
     if (desc.heartbeatTimeoutMs) {
-      heartbeatWatchdogFiber = runFork(
+      heartbeatWatchdogFiber = Effect.runFork(
         Effect.repeat(
           Effect.suspend(() => {
             const lastHeartbeatAtMs = Math.max(startedAtMs, heartbeatPendingAtMs);
@@ -3129,7 +3129,7 @@ export async function legacyExecuteTask(
           if (valid.ok) {
             payload = valid.data;
             cached = true;
-            void runPromise(Metric.increment(cacheHits));
+            void Effect.runPromise(Metric.increment(cacheHits));
             logInfo("cache hit for task output", {
               runId,
               nodeId: desc.nodeId,
@@ -3138,10 +3138,10 @@ export async function legacyExecuteTask(
               cacheKey,
             }, "engine:task-cache");
           } else {
-            void runPromise(Metric.increment(cacheMisses));
+            void Effect.runPromise(Metric.increment(cacheMisses));
           }
         } else {
-          void runPromise(Metric.increment(cacheMisses));
+          void Effect.runPromise(Metric.increment(cacheMisses));
         }
       }
     }
@@ -3428,7 +3428,7 @@ export async function legacyExecuteTask(
         // Use fallback agent on retry attempts when available
         let result: any;
         try {
-          result = await runPromise(
+          result = await Effect.runPromise(
             withSmithersSpan(
               smithersSpanNames.agent,
               Effect.promise(() =>
@@ -3512,11 +3512,11 @@ export async function legacyExecuteTask(
 
         // --- Track prompt/response sizes ---
         const promptBytes = Buffer.byteLength(desc.prompt ?? "", "utf8");
-        void runPromise(Metric.update(promptSizeBytes, promptBytes));
+        void Effect.runPromise(Metric.update(promptSizeBytes, promptBytes));
 
         responseText = (result as any).text ?? null;
         if (responseText) {
-          void runPromise(Metric.update(responseSizeBytes, Buffer.byteLength(responseText, "utf8")));
+          void Effect.runPromise(Metric.update(responseSizeBytes, Buffer.byteLength(responseText, "utf8")));
         }
 
         // --- Track token usage ---
@@ -4158,7 +4158,7 @@ export async function legacyExecuteTask(
       timestampMs: nowMs(),
     });
     const taskElapsedMs = performance.now() - taskStartMs;
-    void runPromise(Effect.all([
+    void Effect.runPromise(Effect.all([
       Metric.update(nodeDuration, taskElapsedMs),
       Metric.update(attemptDuration, taskElapsedMs),
     ], { discard: true }));
@@ -4381,7 +4381,7 @@ export async function legacyExecuteTask(
     taskCompleted = true;
     heartbeatClosed = true;
     if (heartbeatWatchdogFiber) {
-      await runPromise(Fiber.interrupt(heartbeatWatchdogFiber)).catch(() => {});
+      await Effect.runPromise(Fiber.interrupt(heartbeatWatchdogFiber)).catch(() => {});
       heartbeatWatchdogFiber = null;
     }
     if (heartbeatWriteTimer) {
@@ -4435,7 +4435,7 @@ export async function renderFrame<Schema>(
   ctx: any,
   opts?: { baseRootDir?: string; workflowPath?: string | null },
 ): Promise<GraphSnapshot> {
-  return runPromise(renderFrameEffect(workflow, ctx, opts));
+  return Effect.runPromise(renderFrameEffect(workflow, ctx, opts));
 }
 
 async function releaseResumeClaimQuietly(
@@ -4758,7 +4758,7 @@ async function runWorkflowBodyDriver<Schema>(
   const annotateRunSpan = (
     attributes: Readonly<Record<string, unknown>>,
   ) =>
-    runPromise(
+    Effect.runPromise(
       annotateSmithersTrace({
         runId,
         ...attributes,
@@ -4860,7 +4860,7 @@ async function runWorkflowBodyDriver<Schema>(
   };
 
   const completeSessionTask = async (task: TaskDescriptor) =>
-    runPromise(
+    Effect.runPromise(
       workflowSession.taskCompleted({
         nodeId: task.nodeId,
         iteration: task.iteration,
@@ -4869,7 +4869,7 @@ async function runWorkflowBodyDriver<Schema>(
     );
 
   const failSessionTask = async (task: TaskDescriptor) =>
-    runPromise(
+    Effect.runPromise(
       workflowSession.taskFailed({
         nodeId: task.nodeId,
         iteration: task.iteration,
@@ -4884,7 +4884,7 @@ async function runWorkflowBodyDriver<Schema>(
         reason: { _tag: "ExternalTrigger" },
       } satisfies EngineDecision;
     }
-    return runPromise(workflowSession.submitGraph(lastGraph));
+    return Effect.runPromise(workflowSession.submitGraph(lastGraph));
   };
 
   const markRunWaiting = async (
@@ -4937,7 +4937,7 @@ async function runWorkflowBodyDriver<Schema>(
       },
       approved: boolean,
     ) =>
-      runPromise(
+      Effect.runPromise(
         workflowSession.approvalResolved(task.nodeId, {
           approved,
           ...approvalResolutionPayload(approval),
@@ -5021,7 +5021,7 @@ async function runWorkflowBodyDriver<Schema>(
   };
 
   const reconcileTimerWait = async (resumeAtMs: number) => {
-    const sessionStates = await runPromise(workflowSession.getTaskStates());
+    const sessionStates = await Effect.runPromise(workflowSession.getTaskStates());
     const tasks =
       lastGraph?.tasks.filter((candidate) => {
         if (!candidate.meta?.__timer) return false;
@@ -5045,7 +5045,7 @@ async function runWorkflowBodyDriver<Schema>(
       );
       if (!resolved.handled) continue;
       if (resolved.state === "finished") {
-        return runPromise(workflowSession.timerFired(task.nodeId, nowMs()));
+        return Effect.runPromise(workflowSession.timerFired(task.nodeId, nowMs()));
       }
       if (resolved.state === "failed") {
         return failSessionTask(task as TaskDescriptor);
@@ -5131,7 +5131,7 @@ async function runWorkflowBodyDriver<Schema>(
           throw await readTaskFailure(task);
         }
 
-        await runPromise(
+        await Effect.runPromise(
           withCorrelationContext(
             withSmithersSpan(
               smithersSpanNames.task,
@@ -5413,7 +5413,7 @@ async function runWorkflowBodyDriver<Schema>(
       runId,
       timestampMs: nowMs(),
     });
-    void runPromise(Metric.update(runDuration, performance.now() - runStartPerformanceMs));
+    void Effect.runPromise(Metric.update(runDuration, performance.now() - runStartPerformanceMs));
     logInfo("workflow run finished", {
       runId,
     }, "engine:run");
@@ -5671,7 +5671,7 @@ async function runWorkflowBodyDriver<Schema>(
     await cancelStaleAttempts(adapter, runId);
 
     if (opts.resume) {
-      void runPromise(Metric.increment(runsResumedTotal));
+      void Effect.runPromise(Metric.increment(runsResumedTotal));
       const staleInProgress = await adapter.listInProgressAttempts(runId);
       const now = nowMs();
       for (const attempt of staleInProgress) {
@@ -5817,7 +5817,7 @@ async function runWorkflowBodyDriver<Schema>(
     const activeInput = await loadInput(db, inputTable, runId);
     const driver = new ReactWorkflowDriver<Schema>({
       workflow: driverWorkflow as any,
-      runtime: { runPromise: runPromise as any },
+      runtime: { runPromise: Effect.runPromise as any },
       session: workflowSession as any,
       db,
       runId,
@@ -5825,7 +5825,7 @@ async function runWorkflowBodyDriver<Schema>(
       workflowPath: resolvedWorkflowPath,
       executeTask: (task) => executeDriverTask(task as TaskDescriptor),
       onSchedulerWait: (durationMs) =>
-        runPromise(Metric.update(schedulerWaitDuration, durationMs)),
+        Effect.runPromise(Metric.update(schedulerWaitDuration, durationMs)),
       onWait: (reason) => handleDriverWait(reason as WaitReason) as any,
       continueAsNew: async (transition) => {
         let statePayload: unknown = (transition as any)?.statePayload;
@@ -5891,7 +5891,7 @@ async function runWorkflowBodyDriver<Schema>(
           timestampMs: nowMs(),
         };
         eventBus.emit("event", continuationEvent);
-        runSync(trackEvent(continuationEvent));
+        Effect.runSync(trackEvent(continuationEvent));
         logInfo(
           `Continuing run ${runId} as ${driverTransition.newRunId} at iteration ${continuationIteration}`,
           {
@@ -5903,7 +5903,7 @@ async function runWorkflowBodyDriver<Schema>(
           },
           "engine:continue-as-new",
         );
-        void runPromise(
+        void Effect.runPromise(
           Metric.update(runDuration, performance.now() - runStartPerformanceMs),
         );
         await annotateRunSpan({ status: "continued" });
@@ -6081,7 +6081,7 @@ async function runWorkflowBodyLegacy<Schema>(
   const annotateRunSpan = (
     attributes: Readonly<Record<string, unknown>>,
   ) =>
-    runPromise(
+    Effect.runPromise(
       annotateSmithersTrace({
         runId,
         ...attributes,
@@ -6326,7 +6326,7 @@ async function runWorkflowBodyLegacy<Schema>(
     await cancelStaleAttempts(adapter, runId);
 
     if (opts.resume) {
-      void runPromise(Metric.increment(runsResumedTotal));
+      void Effect.runPromise(Metric.increment(runsResumedTotal));
       // On resume, cancel ALL in-progress attempts since the previous process is dead
       const staleInProgress = await adapter.listInProgressAttempts(runId);
       const now = nowMs();
@@ -6419,7 +6419,7 @@ async function runWorkflowBodyLegacy<Schema>(
         return null;
       }
       try {
-        return await runPromise(makeEffect());
+        return await Effect.runPromise(makeEffect());
       } catch (error) {
         logWarning("workflow session shadow call failed", {
           runId,
@@ -7164,7 +7164,7 @@ async function runWorkflowBodyLegacy<Schema>(
       )
         .filter((task) => !schedulerTaskKeys.has(makeSchedulerTaskKey(task)))
         .slice(0, localCapacity);
-      void runPromise(
+      void Effect.runPromise(
         Metric.set(
           schedulerQueueDepth,
           schedule.runnable.length - runnable.length,
@@ -7399,7 +7399,7 @@ async function runWorkflowBodyLegacy<Schema>(
           const continuationIteration = defaultIteration;
           let transition: ContinueAsNewTransition;
           try {
-            transition = await runPromise(
+            transition = await Effect.runPromise(
               fromPromise(
                 "continue-as-new explicit transition",
                 () =>
@@ -7449,7 +7449,7 @@ async function runWorkflowBodyLegacy<Schema>(
             timestampMs: nowMs(),
           };
           eventBus.emit("event", continuationEvent);
-          runSync(trackEvent(continuationEvent));
+          Effect.runSync(trackEvent(continuationEvent));
           logInfo(
             `Continuing run ${runId} as ${transition.newRunId} at iteration ${continuationIteration}`,
             {
@@ -7460,7 +7460,7 @@ async function runWorkflowBodyLegacy<Schema>(
             },
             "engine:continue-as-new",
           );
-          void runPromise(
+          void Effect.runPromise(
             Metric.update(runDuration, performance.now() - runStartPerformanceMs),
           );
           await annotateRunSpan({
@@ -7581,7 +7581,7 @@ async function runWorkflowBodyLegacy<Schema>(
               const continuationIteration = state.iteration;
               let transition: ContinueAsNewTransition;
               try {
-                transition = await runPromise(
+                transition = await Effect.runPromise(
                   fromPromise(
                     "continue-as-new loop transition",
                     () =>
@@ -7640,7 +7640,7 @@ async function runWorkflowBodyLegacy<Schema>(
                 timestampMs: nowMs(),
               };
               eventBus.emit("event", continuationEvent);
-              runSync(trackEvent(continuationEvent));
+              Effect.runSync(trackEvent(continuationEvent));
               logInfo(
                 `Continuing run ${runId} as ${transition.newRunId} at iteration ${continuationIteration}`,
                 {
@@ -7651,7 +7651,7 @@ async function runWorkflowBodyLegacy<Schema>(
                 },
                 "engine:continue-as-new",
               );
-              void runPromise(
+              void Effect.runPromise(
                 Metric.update(runDuration, performance.now() - runStartPerformanceMs),
               );
               await annotateRunSpan({
@@ -7767,7 +7767,7 @@ async function runWorkflowBodyLegacy<Schema>(
           runId,
           timestampMs: nowMs(),
         });
-        void runPromise(Metric.update(runDuration, performance.now() - runStartPerformanceMs));
+        void Effect.runPromise(Metric.update(runDuration, performance.now() - runStartPerformanceMs));
         logInfo("workflow run finished", {
           runId,
         }, "engine:run");
@@ -7947,7 +7947,7 @@ async function runWorkflowBodyLegacy<Schema>(
       }).pipe(Effect.interruptible),
     );
 
-    return await runPromise(schedulerLoopEffect);
+    return await Effect.runPromise(schedulerLoopEffect);
   } catch (err) {
     if (runAbortController.signal.aborted || isAbortError(err)) {
       logInfo("workflow run cancelled while handling error", {
@@ -8052,5 +8052,5 @@ export async function runWorkflow<Schema>(
   workflow: SmithersWorkflow<Schema>,
   opts: RunOptions,
 ): Promise<RunResult> {
-  return runPromise(runWorkflowEffect(workflow, opts));
+  return Effect.runPromise(runWorkflowEffect(workflow, opts));
 }

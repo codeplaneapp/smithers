@@ -11,9 +11,8 @@ import {
 import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
 import type { HotReloadOptions } from "@smithers/driver/RunOptions";
 import { Metric } from "effect";
-import { fromPromise } from "@smithers/runtime/interop";
+import { fromPromise } from "@smithers/driver/interop";
 import { logInfo, logWarning } from "@smithers/observability/logging";
-import { runPromise } from "@smithers/runtime/runtime";
 import { hotReloads, hotReloadFailures, hotReloadDuration } from "@smithers/observability/metrics";
 import { SmithersError } from "@smithers/errors/SmithersError";
 
@@ -50,7 +49,7 @@ export class HotWorkflowController {
 
   /** Initialize: start file watchers. Call once before using wait/reload. */
   async init(): Promise<void> {
-    await runPromise(this.initEffect());
+    await Effect.runPromise(this.initEffect());
   }
 
   /** Current generation number. */
@@ -64,7 +63,7 @@ export class HotWorkflowController {
    * Use this in Promise.race with inflight tasks to wake the engine loop.
    */
   async wait(): Promise<string[]> {
-    return runPromise(this.waitEffect());
+    return Effect.runPromise(this.waitEffect());
   }
 
   /**
@@ -77,7 +76,7 @@ export class HotWorkflowController {
    * The caller is responsible for swapping workflow.build on success.
    */
   async reload(changedFiles: string[]): Promise<HotReloadEvent> {
-    return runPromise(this.reloadEffect(changedFiles));
+    return Effect.runPromise(this.reloadEffect(changedFiles));
   }
 
   initEffect() {
@@ -228,7 +227,7 @@ export class HotWorkflowController {
 
   /** Stop watchers and clean up overlay directory. */
   async close(): Promise<void> {
-    await runPromise(this.closeEffect());
+    await Effect.runPromise(this.closeEffect());
   }
 
   closeEffect() {
