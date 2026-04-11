@@ -1,9 +1,9 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { createSqliteVectorStore } from "../../src/rag/vector-store";
-import { createRagPipeline } from "../../src/rag/pipeline";
-import { createDocument } from "../../src/rag/document";
+import { createSqliteVectorStore } from "../src/vector-store";
+import { createRagPipeline } from "../src/pipeline";
+import { createDocument } from "../src/document";
 import type { EmbeddingModel } from "ai";
 import { createMockEmbeddingModel } from "./helpers";
 

@@ -1,6 +1,6 @@
 import { Effect, Metric } from "effect";
-import { fromPromise } from "../effect/interop";
-import { runPromise } from "../effect/runtime";
+import { fromPromise } from "@smithers/runtime/interop";
+import { runPromise } from "@smithers/runtime/runtime";
 import { chunk } from "./chunker";
 import { loadDocument } from "./document";
 import { embedChunksEffect, embedQueryEffect } from "./embedder";

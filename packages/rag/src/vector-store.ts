@@ -1,7 +1,7 @@
 import { cosineSimilarity } from "ai";
 import { Effect, Metric } from "effect";
-import { fromPromise } from "../effect/interop";
-import { nowMs } from "../utils/time";
+import { fromPromise } from "@smithers/runtime/interop";
+import { nowMs } from "@smithers/core/utils/time";
 import { ragRetrieveDuration } from "./metrics";
 import type {
   Chunk,

@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { createDocument, loadDocument } from "../../src/rag/document";
-import { chunk } from "../../src/rag/chunker";
-import { createSqliteVectorStore } from "../../src/rag/vector-store";
-import { createRagPipeline } from "../../src/rag/pipeline";
-import { createRagTool } from "../../src/rag/tool";
+import { createDocument, loadDocument } from "../src/document";
+import { chunk } from "../src/chunker";
+import { createSqliteVectorStore } from "../src/vector-store";
+import { createRagPipeline } from "../src/pipeline";
+import { createRagTool } from "../src/tool";
 import { createMockEmbeddingModel } from "./helpers";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";

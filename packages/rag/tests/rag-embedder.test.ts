@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { embedChunks, embedChunksEffect } from "../src/rag/embedder";
+import { embedChunks, embedChunksEffect } from "../src/embedder";
 import { Effect } from "effect";
-import type { Chunk, EmbeddedChunk } from "../src/rag/types";
+import type { Chunk, EmbeddedChunk } from "../src/types";
 
 // Mock embedding model that returns deterministic embeddings.
 // Must satisfy the AI SDK EmbeddingModelV2 interface.

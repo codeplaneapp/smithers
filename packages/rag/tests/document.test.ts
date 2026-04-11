@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createDocument, loadDocument } from "../../src/rag/document";
+import { createDocument, loadDocument } from "../src/document";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 

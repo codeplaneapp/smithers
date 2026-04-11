@@ -1,10 +1,10 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { createSqliteVectorStore } from "../../src/rag/vector-store";
-import { createRagPipeline } from "../../src/rag/pipeline";
-import { createRagTool } from "../../src/rag/tool";
-import { createDocument } from "../../src/rag/document";
+import { createSqliteVectorStore } from "../src/vector-store";
+import { createRagPipeline } from "../src/pipeline";
+import { createRagTool } from "../src/tool";
+import { createDocument } from "../src/document";
 import { createMockEmbeddingModel } from "./helpers";
 
 describe("createRagTool", () => {

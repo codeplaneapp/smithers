@@ -1,8 +1,8 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { createSqliteVectorStore } from "../../src/rag/vector-store";
-import type { EmbeddedChunk } from "../../src/rag/types";
+import { createSqliteVectorStore } from "../src/vector-store";
+import type { EmbeddedChunk } from "../src/types";
 
 function makeDb() {
   const sqlite = new Database(":memory:");

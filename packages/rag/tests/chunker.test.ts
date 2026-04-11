@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { chunk } from "../../src/rag/chunker";
-import { createDocument } from "../../src/rag/document";
+import { chunk } from "../src/chunker";
+import { createDocument } from "../src/document";
 
 function doc(content: string) {
   return createDocument(content, { id: "test-doc" });
