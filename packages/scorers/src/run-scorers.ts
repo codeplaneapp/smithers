@@ -138,7 +138,7 @@ function runSingleScorerEffect(
         scoredAtMs: nowMs(),
         durationMs,
       };
-      yield* adapter.insertScorerResultEffect(row);
+      yield* adapter.insertScorerResult(row);
     }
 
     return result;
