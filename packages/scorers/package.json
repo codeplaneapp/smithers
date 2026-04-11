@@ -22,11 +22,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@smithers/core": "workspace:*",
-    "@smithers/runtime": "workspace:*",
-    "@smithers/observability": "workspace:*",
-    "@smithers/db": "workspace:*",
     "@smithers/agents": "workspace:*",
+    "@smithers/core": "workspace:*",
+    "@smithers/db": "workspace:*",
+    "@smithers/errors": "workspace:*",
+    "@smithers/observability": "workspace:*",
+    "@smithers/runtime": "workspace:*",
+    "@smithers/scheduler": "workspace:*",
     "zod": "^4.3.6"
   },
   "devDependencies": {
