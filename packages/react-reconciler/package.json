@@ -9,6 +9,18 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./context": {
+      "types": "./src/context.ts",
+      "default": "./src/context.ts"
+    },
+    "./driver": {
+      "types": "./src/driver.ts",
+      "default": "./src/driver.ts"
+    },
+    "./jsx-runtime": {
+      "types": "./src/jsx-runtime.ts",
+      "default": "./src/jsx-runtime.ts"
+    },
     "./*": {
       "types": "./src/*.ts",
       "default": "./src/*.ts"
@@ -22,6 +34,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@smithers/driver": "workspace:*",
+    "@smithers/errors": "workspace:*",
     "@smithers/graph": "workspace:*",
     "react": "^18.3.0 || ^19.0.0",
     "react-reconciler": "^0.31.0",
