@@ -5,9 +5,18 @@ import { Parallel, Ralph, Sequence, Task, Timer, Workflow, runWorkflow } from "s
 import { SmithersDb } from "@smithers/db/adapter";
 import { createTestSmithers, sleep } from "./helpers";
 import { z } from "zod";
+import { dirname } from "node:path";
+
+function runInTestRoot(workflow: any, dbPath: string, opts: any) {
+  return runWorkflow(workflow, {
+    ...opts,
+    rootDir: dirname(dbPath),
+  });
+}
 
 async function resumeUntilDone(
   workflow: any,
+  dbPath: string,
   runId: string,
   options?: { maxAttempts?: number; intervalMs?: number },
 ) {
@@ -16,7 +25,7 @@ async function resumeUntilDone(
   let result: any = { runId, status: "waiting-timer" };
   for (let i = 0; i < maxAttempts; i++) {
     await sleep(intervalMs);
-    result = await runWorkflow(workflow, { input: {}, runId, resume: true });
+    result = await runInTestRoot(workflow, dbPath, { input: {}, runId, resume: true });
     if (result.status !== "waiting-timer") return result;
   }
   return result;
@@ -24,7 +33,7 @@ async function resumeUntilDone(
 
 describe("timer runtime", () => {
   test("duration timer waits, then resumes and finishes", async () => {
-    const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+    const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers({
       out: z.object({ v: z.number() }),
     });
 
@@ -37,11 +46,11 @@ describe("timer runtime", () => {
       </Workflow>
     ));
 
-    const first = await runWorkflow(workflow, { input: {} });
+    const first = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(first.status).toBe("waiting-timer");
 
     await sleep(180);
-    const resumed = await runWorkflow(workflow, {
+    const resumed = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: first.runId,
       resume: true,
@@ -61,7 +70,7 @@ describe("timer runtime", () => {
   });
 
   test("absolute timer waits, then resumes", async () => {
-    const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+    const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers({
       out: z.object({ v: z.number() }),
     });
     // Leave enough slack for engine startup so the first run still observes a
@@ -77,11 +86,11 @@ describe("timer runtime", () => {
       </Workflow>
     ));
 
-    const first = await runWorkflow(workflow, { input: {} });
+    const first = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(first.status).toBe("waiting-timer");
 
     await sleep(980);
-    const resumed = await runWorkflow(workflow, {
+    const resumed = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: first.runId,
       resume: true,
@@ -94,7 +103,7 @@ describe("timer runtime", () => {
   });
 
   test("zero duration and past-until timers fire immediately", async () => {
-    const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+    const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers({
       out: z.object({ v: z.number() }),
     });
 
@@ -108,7 +117,7 @@ describe("timer runtime", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(result.status).toBe("finished");
     const rows = await (db as any).select().from(tables.out);
     expect(rows).toHaveLength(1);
@@ -116,7 +125,7 @@ describe("timer runtime", () => {
   });
 
   test("timer cancellation marks pending timer attempt cancelled", async () => {
-    const { smithers, outputs, db, cleanup } = createTestSmithers({
+    const { smithers, outputs, db, dbPath, cleanup } = createTestSmithers({
       out: z.object({ v: z.number() }),
     });
     const workflow = smithers(() => (
@@ -128,12 +137,12 @@ describe("timer runtime", () => {
       </Workflow>
     ));
 
-    const first = await runWorkflow(workflow, { input: {} });
+    const first = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(first.status).toBe("waiting-timer");
 
     const controller = new AbortController();
     controller.abort();
-    const cancelled = await runWorkflow(workflow, {
+    const cancelled = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: first.runId,
       resume: true,
@@ -148,7 +157,7 @@ describe("timer runtime", () => {
   });
 
   test("timer in loop gates each iteration", async () => {
-    const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+    const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers({
       out: z.object({ v: z.number() }),
     });
     const workflow = smithers((ctx) => (
@@ -164,9 +173,9 @@ describe("timer runtime", () => {
       </Workflow>
     ));
 
-    const first = await runWorkflow(workflow, { input: {} });
+    const first = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(first.status).toBe("waiting-timer");
-    const done = await resumeUntilDone(workflow, first.runId, {
+    const done = await resumeUntilDone(workflow, dbPath, first.runId, {
       maxAttempts: 16,
       intervalMs: 70,
     });
@@ -185,7 +194,7 @@ describe("timer runtime", () => {
   });
 
   test("multiple timers in parallel fire independently", async () => {
-    const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+    const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers({
       left: z.object({ v: z.number() }),
       right: z.object({ v: z.number() }),
     });
@@ -205,11 +214,11 @@ describe("timer runtime", () => {
       </Workflow>
     ));
 
-    const first = await runWorkflow(workflow, { input: {} });
+    const first = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(first.status).toBe("waiting-timer");
 
     await sleep(140);
-    const second = await runWorkflow(workflow, {
+    const second = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: first.runId,
       resume: true,
@@ -221,7 +230,7 @@ describe("timer runtime", () => {
     expect(leftRowsAfterSecond).toHaveLength(1);
     expect(rightRowsAfterSecond).toHaveLength(0);
 
-    const third = await resumeUntilDone(workflow, first.runId, {
+    const third = await resumeUntilDone(workflow, dbPath, first.runId, {
       maxAttempts: 20,
       intervalMs: 120,
     });
@@ -237,7 +246,7 @@ describe("timer runtime", () => {
 
 describe("timer validation", () => {
   test("duplicate timer ids fail extraction", async () => {
-    const { smithers, cleanup } = createTestSmithers({
+    const { smithers, dbPath, cleanup } = createTestSmithers({
       out: z.object({ v: z.number() }),
     });
     const workflow = smithers(() => (
@@ -249,13 +258,13 @@ describe("timer validation", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(result.status).toBe("failed");
     cleanup();
   });
 
   test("timer id longer than 256 chars is rejected", async () => {
-    const { smithers, cleanup } = createTestSmithers({
+    const { smithers, dbPath, cleanup } = createTestSmithers({
       out: z.object({ v: z.number() }),
     });
     const id = "t".repeat(257);
@@ -265,7 +274,7 @@ describe("timer validation", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(result.status).toBe("failed");
     cleanup();
   });
