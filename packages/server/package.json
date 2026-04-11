@@ -22,15 +22,18 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@effect/workflow": "^0.18.0",
     "@smithers/db": "workspace:*",
     "@smithers/driver": "workspace:*",
+    "@smithers/durables": "workspace:*",
     "@smithers/engine": "workspace:*",
     "@smithers/errors": "workspace:*",
     "@smithers/observability": "workspace:*",
-    "@smithers/runtime": "workspace:*",
     "@smithers/scheduler": "workspace:*",
     "@smithers/time-travel": "workspace:*",
+    "@smithers/tools": "workspace:*",
     "cron-parser": "^5.5.0",
+    "effect": "^3.21.0",
     "hono": "^4.12.8",
     "ws": "^8.18.0"
   },

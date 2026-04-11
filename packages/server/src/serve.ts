@@ -11,7 +11,7 @@ import {
   renderPrometheusMetrics,
 } from "@smithers/observability";
 import { logWarning } from "@smithers/observability/logging";
-import { runPromise } from "@smithers/runtime/runtime";
+import { runPromise } from "./smithersRuntime";
 import { httpRequests, httpRequestDuration, trackEvent } from "@smithers/observability/metrics";
 
 export type ServeOptions = {

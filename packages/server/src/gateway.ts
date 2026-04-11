@@ -30,7 +30,7 @@ import {
   gatewayWebhooksRejectedTotal,
   gatewayWebhooksVerifiedTotal,
 } from "@smithers/observability/metrics";
-import { runFork, runPromise } from "@smithers/runtime/runtime";
+import { runFork, runPromise } from "./smithersRuntime";
 import { prometheusContentType, renderPrometheusMetrics } from "@smithers/observability";
 import { nowMs } from "@smithers/scheduler/nowMs";
 import { newRunId } from "@smithers/driver/newRunId";
