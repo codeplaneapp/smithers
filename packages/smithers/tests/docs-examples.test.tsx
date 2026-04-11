@@ -1,5 +1,6 @@
 /** @jsxImportSource smithers */
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
 import {
   Branch,
   Parallel,
@@ -189,7 +190,7 @@ describe("docs examples (engine)", () => {
       expect(calls).toBe(2);
 
       const adapter = new SmithersDb(workflow.db as any);
-      const attempts = await adapter.listAttempts(result.runId, "flaky", 0);
+      const attempts = await Effect.runPromise(adapter.listAttempts(result.runId, "flaky", 0));
       expect(attempts.length).toBe(2);
     } finally {
       cleanup();
