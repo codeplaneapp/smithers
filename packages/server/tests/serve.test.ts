@@ -98,6 +98,7 @@ describe("Hono Serve Mode", () => {
   let port: number;
   let request: ReturnType<typeof makeRequest>;
   let abort: AbortController;
+  let runPromises: Promise<unknown>[];
 
   beforeEach(() => {
     testDir = resolve(
@@ -107,6 +108,7 @@ describe("Hono Serve Mode", () => {
     );
     mkdirSync(testDir, { recursive: true });
     abort = new AbortController();
+    runPromises = [];
   });
 
   afterEach(async () => {
@@ -115,6 +117,7 @@ describe("Hono Serve Mode", () => {
       server.stop(true);
       server = null;
     }
+    await Promise.race([Promise.allSettled(runPromises), sleep(5_000)]);
     await sleep(50);
     try {
       rmSync(testDir, { recursive: true, force: true });
@@ -190,12 +193,13 @@ export default smithers((ctx) => (
 
     const startRun = opts.startRun !== false;
     if (startRun) {
-      void runWorkflow(workflow, {
+      const runPromise = runWorkflow(workflow, {
         runId,
         input: {},
         workflowPath: resolve(process.cwd(), workflowPath),
         signal: abort.signal,
       }).catch(() => {});
+      runPromises.push(runPromise);
       // Wait for the run row to exist instead of relying on a fixed startup delay.
       for (let i = 0; i < 40; i++) {
         const run = await adapter.getRun(runId);
