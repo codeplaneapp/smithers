@@ -1,6 +1,5 @@
 import { Effect, Metric } from "effect";
-import { fromPromise } from "@smithers/runtime/interop";
-import { runFork, runPromise } from "@smithers/runtime/runtime";
+import { fromPromise } from "@smithers/driver/interop";
 import { scorerDuration, scorersFinished, scorersFailed, scorersStarted } from "./metrics";
 import type { SmithersDb } from "@smithers/db/adapter";
 import type { EventBus } from "@smithers/engine/events";
@@ -190,7 +189,7 @@ export function runScorersAsync(
     Effect.withLogSpan("scorers:async"),
   );
 
-  runFork(program);
+  Effect.runFork(program);
 }
 
 /**
@@ -218,7 +217,7 @@ export async function runScorersBatch(
     ),
   );
 
-  const results = await runPromise(
+  const results = await Effect.runPromise(
     Effect.all(effects, { concurrency: "unbounded" }).pipe(
       Effect.withLogSpan("scorers:batch"),
     ),
