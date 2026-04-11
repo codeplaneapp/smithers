@@ -33,14 +33,6 @@
       "@smithers/agents/*": ["./packages/agents/src/*.ts", "./packages/agents/src/*/index.ts"],
       "@smithers/cli": ["./apps/cli/src/index.ts"],
       "@smithers/cli/*": ["./apps/cli/src/*.ts", "./apps/cli/src/*/index.ts"],
-      "@smithers/core": ["./packages/core/src/index.ts"],
-      "@smithers/core/*": [
-        "./packages/core/src/*.ts",
-        "./packages/core/src/*/index.ts",
-        "./packages/core/src/protocol/*.ts",
-        "./packages/core/src/protocol/*/index.ts"
-      ],
-      "@smithers/core/utils/*": ["./packages/core/src/utils/*.ts"],
       "@smithers/core-react": ["./packages/react/src/index.ts"],
       "@smithers/core-react/*": ["./packages/react/src/*.ts", "./packages/react/src/*/index.ts"],
       "@smithers/db": ["./packages/db/src/index.ts"],
@@ -82,8 +74,6 @@
     "packages/smithers/src/**/*",
     "packages/smithers/tests/**/*",
     "packages/smithers-cli/src/**/*",
-    "packages/core/src/**/*",
-    "packages/core/tests/**/*",
     "packages/react/src/**/*",
     "packages/react/tests/**/*"
   ]
