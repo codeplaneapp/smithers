@@ -1,7 +1,7 @@
 import type { ExtractGraph } from "@smithers/graph/types";
 
-const CORE_SPECIFIER = "@smithers/core";
-const LOCAL_CORE_SPECIFIER = "../../core/src/index.ts";
+const GRAPH_SPECIFIER = "@smithers/graph";
+const LOCAL_GRAPH_SPECIFIER = "../../graph/src/index.ts";
 
 type CoreModule = {
   extractGraph?: ExtractGraph;
@@ -17,8 +17,8 @@ async function importCoreModule(specifier: string): Promise<CoreModule | null> {
 
 export async function resolveExtractGraph(): Promise<ExtractGraph> {
   const modules = [
-    await importCoreModule(CORE_SPECIFIER),
-    await importCoreModule(LOCAL_CORE_SPECIFIER),
+    await importCoreModule(GRAPH_SPECIFIER),
+    await importCoreModule(LOCAL_GRAPH_SPECIFIER),
   ];
   for (const mod of modules) {
     const fn = mod?.extractGraph;
@@ -27,7 +27,7 @@ export async function resolveExtractGraph(): Promise<ExtractGraph> {
     }
   }
   throw new Error(
-    "Unable to load extractGraph from @smithers/core. " +
-      "Install @smithers/core and ensure it exports extractGraph.",
+    "Unable to load extractGraph from @smithers/graph. " +
+      "Install @smithers/graph and ensure it exports extractGraph.",
   );
 }
