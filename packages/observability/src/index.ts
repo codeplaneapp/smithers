@@ -1,13 +1,13 @@
 export {
   MetricsService,
+  type MetricLabels,
+  type MetricsServiceShape,
+  type MetricsSnapshot,
+} from "./_coreMetrics";
+export {
   TracingService,
   TracingServiceLive,
-} from "@smithers/core/observability";
-export type {
-  MetricLabels,
-  MetricsServiceShape,
-  MetricsSnapshot,
-} from "@smithers/core/observability";
+} from "./_coreTracing";
 
 export type { SmithersEvent } from "./SmithersEvent";
 export type { SmithersLogFormat } from "./SmithersLogFormat";

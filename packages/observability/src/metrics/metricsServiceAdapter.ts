@@ -1,10 +1,12 @@
 import {
-  renderPrometheusSamples,
   type MetricLabels,
   type MetricsServiceShape,
   type MetricsSnapshot,
+} from "../_coreMetrics";
+import {
+  renderPrometheusSamples,
   type PrometheusSample,
-} from "@smithers/core/observability";
+} from "../_corePrometheus";
 import { Effect, Metric, MetricState } from "effect";
 import type { SmithersEvent } from "@smithers/observability/SmithersEvent";
 import type { SmithersMetricDefinition } from "./SmithersMetricDefinition";

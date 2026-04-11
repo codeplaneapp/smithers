@@ -1,7 +1,7 @@
 import {
   TracingService,
   withSmithersSpan as withCoreSmithersSpan,
-} from "@smithers/core/observability";
+} from "./_coreTracing";
 import { Effect } from "effect";
 import type * as Tracer from "effect/Tracer";
 

@@ -1,7 +1,7 @@
 import {
   TracingService,
   annotateSmithersTrace as annotateCoreSmithersTrace,
-} from "@smithers/core/observability";
+} from "./_coreTracing";
 import { Effect } from "effect";
 
 export function annotateSmithersTrace(

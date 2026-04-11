@@ -1,16 +1,16 @@
 import {
   getCurrentCorrelationContext as getCoreCurrentCorrelationContext,
   mergeCorrelationContext as mergeCoreCorrelationContext,
-} from "@smithers/core/observability";
+} from "./_coreCorrelation/index.ts";
 import type {
   CorrelationContext,
   CorrelationPatch,
-} from "@smithers/core/observability";
+} from "./_coreCorrelation/index.ts";
 
 export type {
   CorrelationContext,
   CorrelationPatch,
-} from "@smithers/core/observability";
+} from "./_coreCorrelation/index.ts";
 
 export {
   correlationContextFiberRef,
@@ -23,7 +23,7 @@ export {
   runWithCorrelationContext,
   withCorrelationContext,
   withCurrentCorrelationContext,
-} from "@smithers/core/observability";
+} from "./_coreCorrelation/index.ts";
 
 export type CorrelationContextPatch = CorrelationPatch;
 

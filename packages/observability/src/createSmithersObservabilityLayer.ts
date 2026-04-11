@@ -1,5 +1,5 @@
 import * as BunContext from "@effect/platform-bun/BunContext";
-import { TracingServiceLive } from "@smithers/core/observability";
+import { TracingServiceLive } from "./_coreTracing";
 import { Effect, Layer, Logger } from "effect";
 import type { SmithersLogFormat } from "./SmithersLogFormat";
 import { SmithersObservability } from "./SmithersObservability";
