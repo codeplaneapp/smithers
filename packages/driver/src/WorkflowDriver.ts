@@ -6,16 +6,14 @@ import type {
   TaskOutput,
   WaitReason,
 } from "@smithers/scheduler";
-import type {
-  CreateWorkflowSession,
-  SchedulerWaitHandler,
-  TaskExecutor,
-  TaskExecutorContext,
-  WaitHandler,
-  ContinueAsNewHandler,
-  WorkflowRuntime,
-  WorkflowSession,
-} from "@smithers/core/workflow-types";
+import type { CreateWorkflowSession } from "./CreateWorkflowSession.ts";
+import type { SchedulerWaitHandler } from "./SchedulerWaitHandler.ts";
+import type { TaskExecutor } from "./TaskExecutor.ts";
+import type { TaskExecutorContext } from "./TaskExecutorContext.ts";
+import type { WaitHandler } from "./WaitHandler.ts";
+import type { ContinueAsNewHandler } from "./ContinueAsNewHandler.ts";
+import type { WorkflowRuntime } from "./WorkflowRuntime.ts";
+import type { WorkflowSession } from "./WorkflowSession.ts";
 import type { WorkflowGraph, TaskDescriptor } from "@smithers/graph";
 import { buildContext } from "./buildContext.ts";
 import type { OutputSnapshot } from "./OutputSnapshot.ts";
