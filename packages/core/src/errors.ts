@@ -1,1 +1,1 @@
-export * from "./protocol/errors/index";
+export * from "@smithers/errors";

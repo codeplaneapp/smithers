@@ -1,7 +1,7 @@
 {
   "name": "@smithers/core",
   "version": "0.0.0",
-  "description": "React-free Effect core for Smithers workflow execution",
+  "description": "Compatibility exports for split Smithers core packages",
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -13,145 +13,33 @@
       "types": "./src/context.ts",
       "default": "./src/context.ts"
     },
-    "./durables": {
-      "types": "./src/durables.ts",
-      "default": "./src/durables.ts"
-    },
-    "./devtools": {
-      "types": "./src/devtools.ts",
-      "default": "./src/devtools.ts"
-    },
-    "./driver": {
-      "types": "./src/driver.ts",
-      "default": "./src/driver.ts"
-    },
     "./errors": {
       "types": "./src/errors.ts",
       "default": "./src/errors.ts"
     },
-    "./execution": {
-      "types": "./src/execution.ts",
-      "default": "./src/execution.ts"
+    "./errors/index": {
+      "types": "./src/errors.ts",
+      "default": "./src/errors.ts"
+    },
+    "./errors/tagged": {
+      "types": "./src/errors-tagged.ts",
+      "default": "./src/errors-tagged.ts"
     },
     "./graph": {
       "types": "./src/graph.ts",
       "default": "./src/graph.ts"
     },
-    "./interop": {
-      "types": "./src/interop.ts",
-      "default": "./src/interop.ts"
-    },
-    "./observability": {
-      "types": "./src/observability/index.ts",
-      "default": "./src/observability/index.ts"
-    },
-    "./persistence": {
-      "types": "./src/persistence/index.ts",
-      "default": "./src/persistence/index.ts"
-    },
-    "./runtime": {
-      "types": "./src/runtime.ts",
-      "default": "./src/runtime.ts"
-    },
-    "./scheduler": {
-      "types": "./src/scheduler.ts",
-      "default": "./src/scheduler.ts"
-    },
-    "./session": {
-      "types": "./src/session.ts",
-      "default": "./src/session.ts"
-    },
-    "./state": {
-      "types": "./src/TaskState.ts",
-      "default": "./src/TaskState.ts"
-    },
-    "./TaskState": {
-      "types": "./src/TaskState.ts",
-      "default": "./src/TaskState.ts"
-    },
-    "./AgentLike": {
-      "types": "./src/protocol/AgentLike.ts",
-      "default": "./src/protocol/AgentLike.ts"
+    "./RetryPolicy": {
+      "types": "./src/RetryPolicy.ts",
+      "default": "./src/RetryPolicy.ts"
     },
     "./CachePolicy": {
-      "types": "./src/protocol/CachePolicy.ts",
-      "default": "./src/protocol/CachePolicy.ts"
-    },
-    "./OutputAccessor": {
-      "types": "./src/protocol/OutputAccessor.ts",
-      "default": "./src/protocol/OutputAccessor.ts"
-    },
-    "./OutputKey": {
-      "types": "./src/protocol/OutputKey.ts",
-      "default": "./src/protocol/OutputKey.ts"
-    },
-    "./RetryPolicy": {
-      "types": "./src/protocol/RetryPolicy.ts",
-      "default": "./src/protocol/RetryPolicy.ts"
-    },
-    "./RunAuthContext": {
-      "types": "./src/protocol/RunAuthContext.ts",
-      "default": "./src/protocol/RunAuthContext.ts"
-    },
-    "./RunOptions": {
-      "types": "./src/protocol/RunOptions.ts",
-      "default": "./src/protocol/RunOptions.ts"
-    },
-    "./RunResult": {
-      "types": "./src/protocol/RunResult.ts",
-      "default": "./src/protocol/RunResult.ts"
-    },
-    "./RunStatus": {
-      "types": "./src/protocol/RunStatus.ts",
-      "default": "./src/protocol/RunStatus.ts"
-    },
-    "./SchemaRegistryEntry": {
-      "types": "./src/protocol/SchemaRegistryEntry.ts",
-      "default": "./src/protocol/SchemaRegistryEntry.ts"
-    },
-    "./SmithersCtx": {
-      "types": "./src/protocol/SmithersCtx.ts",
-      "default": "./src/protocol/SmithersCtx.ts"
-    },
-    "./SmithersError": {
-      "types": "./src/protocol/SmithersError.ts",
-      "default": "./src/protocol/SmithersError.ts"
-    },
-    "./SmithersEvent": {
-      "types": "./src/protocol/SmithersEvent.ts",
-      "default": "./src/protocol/SmithersEvent.ts"
-    },
-    "./SmithersWorkflowOptions": {
-      "types": "./src/protocol/SmithersWorkflowOptions.ts",
-      "default": "./src/protocol/SmithersWorkflowOptions.ts"
-    },
-    "./workflow-types": {
-      "types": "./src/protocol/workflow-types/index.ts",
-      "default": "./src/protocol/workflow-types/index.ts"
-    },
-    "./human-requests": {
-      "types": "./src/protocol/human-requests.ts",
-      "default": "./src/protocol/human-requests.ts"
-    },
-    "./react-utils-errors": {
-      "types": "./src/protocol/react-utils-errors.ts",
-      "default": "./src/protocol/react-utils-errors.ts"
-    },
-    "./errors/index": {
-      "types": "./src/protocol/errors/index.ts",
-      "default": "./src/protocol/errors/index.ts"
-    },
-    "./errors/tagged": {
-      "types": "./src/protocol/errors/tagged.ts",
-      "default": "./src/protocol/errors/tagged.ts"
-    },
-    "./agents/*": {
-      "types": "./src/protocol/agents/*.ts",
-      "default": "./src/protocol/agents/*.ts"
+      "types": "./src/CachePolicy.ts",
+      "default": "./src/CachePolicy.ts"
     },
     "./utils/*": {
-      "types": "./src/protocol/utils/*.ts",
-      "default": "./src/protocol/utils/*.ts"
+      "types": "./src/utils/*.ts",
+      "default": "./src/utils/*.ts"
     },
     "./*": {
       "types": "./src/*.ts",
@@ -162,11 +50,13 @@
     "src/"
   ],
   "scripts": {
-    "test": "bun test tests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@smithers/driver": "workspace:*",
+    "@smithers/errors": "workspace:*",
     "@smithers/graph": "workspace:*",
+    "@smithers/scheduler": "workspace:*",
     "effect": "^3.21.0",
     "zod": "^4.3.6"
   },
