@@ -1,4 +1,4 @@
-import type { SmithersDb } from "../db/adapter";
+import type { SmithersDb } from "@smithers/db/adapter";
 import type { AggregateScore } from "./types";
 
 export type AggregateOptions = {

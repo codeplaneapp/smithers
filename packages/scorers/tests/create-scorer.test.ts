@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
-import { createScorer, llmJudge } from "../../src/scorers/create-scorer";
-import type { Scorer, ScorerInput } from "../../src/scorers/types";
+import { createScorer, llmJudge } from "../src/create-scorer";
+import type { Scorer, ScorerInput } from "../src/types";
 
 describe("createScorer", () => {
   it("creates a scorer from a config object", () => {

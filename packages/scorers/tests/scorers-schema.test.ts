@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { sql } from "drizzle-orm";
-import { smithersScorers } from "../src/scorers/schema";
+import { smithersScorers } from "../src/schema";
 
 describe("smithersScorers schema", () => {
   test("table can be created and queried", () => {

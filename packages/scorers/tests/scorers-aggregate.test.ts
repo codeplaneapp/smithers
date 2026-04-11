@@ -8,12 +8,12 @@ describe("scorers aggregate", () => {
   // but we can also verify the module exports correctly
 
   test("aggregateScores is exported", async () => {
-    const mod = await import("../src/scorers/aggregate");
+    const mod = await import("../src/aggregate");
     expect(typeof mod.aggregateScores).toBe("function");
   });
 
   test("AggregateOptions type allows optional filters", async () => {
-    const mod = await import("../src/scorers/aggregate");
+    const mod = await import("../src/aggregate");
     // Verify the function accepts an adapter and optional options
     expect(mod.aggregateScores.length).toBeGreaterThanOrEqual(1);
   });
@@ -22,7 +22,7 @@ describe("scorers aggregate", () => {
 // We can test the SQL escaping by examining the behavior through a mock adapter
 describe("aggregateScores with mock adapter", () => {
   test("returns empty array when no scores exist", async () => {
-    const { aggregateScores } = await import("../src/scorers/aggregate");
+    const { aggregateScores } = await import("../src/aggregate");
     const capturedQueries: string[] = [];
     const mockAdapter = {
       rawQuery: async (sql: string) => {
@@ -38,7 +38,7 @@ describe("aggregateScores with mock adapter", () => {
   });
 
   test("applies runId filter", async () => {
-    const { aggregateScores } = await import("../src/scorers/aggregate");
+    const { aggregateScores } = await import("../src/aggregate");
     const capturedQueries: string[] = [];
     const mockAdapter = {
       rawQuery: async (sql: string) => {
@@ -51,7 +51,7 @@ describe("aggregateScores with mock adapter", () => {
   });
 
   test("applies nodeId filter", async () => {
-    const { aggregateScores } = await import("../src/scorers/aggregate");
+    const { aggregateScores } = await import("../src/aggregate");
     const capturedQueries: string[] = [];
     const mockAdapter = {
       rawQuery: async (sql: string) => {
@@ -64,7 +64,7 @@ describe("aggregateScores with mock adapter", () => {
   });
 
   test("applies scorerId filter", async () => {
-    const { aggregateScores } = await import("../src/scorers/aggregate");
+    const { aggregateScores } = await import("../src/aggregate");
     const capturedQueries: string[] = [];
     const mockAdapter = {
       rawQuery: async (sql: string) => {
@@ -77,7 +77,7 @@ describe("aggregateScores with mock adapter", () => {
   });
 
   test("combines multiple filters with AND", async () => {
-    const { aggregateScores } = await import("../src/scorers/aggregate");
+    const { aggregateScores } = await import("../src/aggregate");
     const capturedQueries: string[] = [];
     const mockAdapter = {
       rawQuery: async (sql: string) => {
@@ -90,7 +90,7 @@ describe("aggregateScores with mock adapter", () => {
   });
 
   test("escapes single quotes in filter values", async () => {
-    const { aggregateScores } = await import("../src/scorers/aggregate");
+    const { aggregateScores } = await import("../src/aggregate");
     const capturedQueries: string[] = [];
     const mockAdapter = {
       rawQuery: async (sql: string) => {
@@ -103,7 +103,7 @@ describe("aggregateScores with mock adapter", () => {
   });
 
   test("maps result rows correctly", async () => {
-    const { aggregateScores } = await import("../src/scorers/aggregate");
+    const { aggregateScores } = await import("../src/aggregate");
     let callCount = 0;
     const mockAdapter = {
       rawQuery: async () => {
@@ -142,7 +142,7 @@ describe("aggregateScores with mock adapter", () => {
   });
 
   test("handles snake_case column names", async () => {
-    const { aggregateScores } = await import("../src/scorers/aggregate");
+    const { aggregateScores } = await import("../src/aggregate");
     let callCount = 0;
     const mockAdapter = {
       rawQuery: async () => {
@@ -172,7 +172,7 @@ describe("aggregateScores with mock adapter", () => {
   });
 
   test("defaults null values to 0", async () => {
-    const { aggregateScores } = await import("../src/scorers/aggregate");
+    const { aggregateScores } = await import("../src/aggregate");
     let callCount = 0;
     const mockAdapter = {
       rawQuery: async () => {

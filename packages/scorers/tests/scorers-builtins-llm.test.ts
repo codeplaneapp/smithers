@@ -3,7 +3,7 @@ import {
   relevancyScorer,
   toxicityScorer,
   faithfulnessScorer,
-} from "../src/scorers";
+} from "../src";
 
 function mockJudge(responseText: string) {
   return {

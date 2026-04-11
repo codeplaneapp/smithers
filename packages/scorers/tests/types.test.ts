@@ -10,7 +10,7 @@ import type {
   ScoreRow,
   AggregateScore,
   ScorerContext,
-} from "../../src/scorers/types";
+} from "../src/types";
 
 describe("scorers/types", () => {
   it("ScoreResult accepts valid shapes", () => {

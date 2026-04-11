@@ -6,7 +6,7 @@ import {
   relevancyScorer,
   toxicityScorer,
   faithfulnessScorer,
-} from "../../src/scorers/builtins";
+} from "../src/builtins";
 
 describe("schemaAdherenceScorer", () => {
   const scorer = schemaAdherenceScorer();

@@ -1,13 +1,13 @@
 import { describe, expect, it, beforeEach, mock } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { ensureSmithersTables } from "../../src/db/ensure";
-import { SmithersDb } from "../../src/db/adapter";
-import { createScorer } from "../../src/scorers/create-scorer";
-import { schemaAdherenceScorer, latencyScorer } from "../../src/scorers/builtins";
-import { runScorersBatch } from "../../src/scorers/run-scorers";
-import { aggregateScores } from "../../src/scorers/aggregate";
-import type { ScorersMap, ScorerContext } from "../../src/scorers/types";
+import { ensureSmithersTables } from "@smithers/db/ensure";
+import { SmithersDb } from "@smithers/db/adapter";
+import { createScorer } from "../src/create-scorer";
+import { schemaAdherenceScorer, latencyScorer } from "../src/builtins";
+import { runScorersBatch } from "../src/run-scorers";
+import { aggregateScores } from "../src/aggregate";
+import type { ScorersMap, ScorerContext } from "../src/types";
 import { z } from "zod";
 
 describe("scorers e2e", () => {

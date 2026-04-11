@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { createScorer, runScorersBatch } from "../src/scorers";
-import type { ScorerContext, ScorersMap } from "../src/scorers";
+import { createScorer, runScorersBatch } from "../src";
+import type { ScorerContext, ScorersMap } from "../src";
 
 function makeCtx(overrides?: Partial<ScorerContext>): ScorerContext {
   return {

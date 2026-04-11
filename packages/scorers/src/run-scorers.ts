@@ -1,12 +1,12 @@
 import { Effect, Metric } from "effect";
-import { fromPromise } from "../effect/interop";
-import { runFork, runPromise } from "../effect/runtime";
+import { fromPromise } from "@smithers/runtime/interop";
+import { runFork, runPromise } from "@smithers/runtime/runtime";
 import { scorerDuration, scorersFinished, scorersFailed, scorersStarted } from "./metrics";
-import type { SmithersDb } from "../db/adapter";
-import type { EventBus } from "../events";
+import type { SmithersDb } from "@smithers/db/adapter";
+import type { EventBus } from "@smithers/engine/events";
 import type { ScoreResult, ScorerBinding, ScorerContext, ScorersMap } from "./types";
-import { nowMs } from "../utils/time";
-import type { SmithersError } from "../utils/errors";
+import { nowMs } from "@smithers/core/utils/time";
+import type { SmithersError } from "@smithers/core/errors";
 import crypto from "node:crypto";
 
 // ---------------------------------------------------------------------------

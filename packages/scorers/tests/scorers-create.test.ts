@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createScorer, llmJudge } from "../src/scorers";
+import { createScorer, llmJudge } from "../src";
 
 describe("createScorer", () => {
   test("creates scorer with correct shape", () => {

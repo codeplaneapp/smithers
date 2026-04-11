@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { schemaAdherenceScorer, latencyScorer } from "../src/scorers";
+import { schemaAdherenceScorer, latencyScorer } from "../src";
 
 describe("schemaAdherenceScorer", () => {
   const scorer = schemaAdherenceScorer();

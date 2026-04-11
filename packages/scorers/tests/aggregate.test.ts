@@ -1,9 +1,9 @@
 import { describe, expect, it, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { ensureSmithersTables } from "../../src/db/ensure";
-import { SmithersDb } from "../../src/db/adapter";
-import { aggregateScores } from "../../src/scorers/aggregate";
+import { ensureSmithersTables } from "@smithers/db/ensure";
+import { SmithersDb } from "@smithers/db/adapter";
+import { aggregateScores } from "../src/aggregate";
 import crypto from "node:crypto";
 
 describe("aggregateScores", () => {

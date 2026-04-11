@@ -4,7 +4,7 @@ import {
   scorersFinished,
   scorersFailed,
   scorerDuration,
-} from "../src/scorers/metrics";
+} from "../src/metrics";
 
 describe("scorer metrics", () => {
   test("scorersStarted is a counter", () => {

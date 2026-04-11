@@ -1,7 +1,7 @@
 import { describe, expect, it, mock, beforeEach } from "bun:test";
-import { createScorer } from "../../src/scorers/create-scorer";
-import { runScorersBatch } from "../../src/scorers/run-scorers";
-import type { ScorersMap, ScorerContext } from "../../src/scorers/types";
+import { createScorer } from "../src/create-scorer";
+import { runScorersBatch } from "../src/run-scorers";
+import type { ScorersMap, ScorerContext } from "../src/types";
 
 // Mock DB adapter — only needs insertScorerResultEffect for our tests
 function createMockAdapter() {
