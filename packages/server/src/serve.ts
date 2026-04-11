@@ -5,7 +5,7 @@ import type { SmithersWorkflow } from "@smithers/react/SmithersWorkflow";
 import { SmithersDb } from "@smithers/db/adapter";
 import { approveNode, denyNode } from "@smithers/engine/approvals";
 import { isRunHeartbeatFresh } from "@smithers/engine";
-import { nowMs } from "@smithers/core/utils/time";
+import { nowMs } from "@smithers/scheduler/nowMs";
 import {
   prometheusContentType,
   renderPrometheusMetrics,

@@ -23,14 +23,17 @@
   },
   "dependencies": {
     "@smithers/core": "workspace:*",
-    "@smithers/engine": "workspace:*",
     "@smithers/db": "workspace:*",
-    "@smithers/time-travel": "workspace:*",
-    "@smithers/runtime": "workspace:*",
+    "@smithers/driver": "workspace:*",
+    "@smithers/engine": "workspace:*",
+    "@smithers/errors": "workspace:*",
     "@smithers/observability": "workspace:*",
+    "@smithers/runtime": "workspace:*",
+    "@smithers/scheduler": "workspace:*",
+    "@smithers/time-travel": "workspace:*",
+    "cron-parser": "^5.5.0",
     "hono": "^4.12.8",
-    "ws": "^8.18.0",
-    "cron-parser": "^5.5.0"
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
