@@ -1,6 +1,6 @@
 import { describe, expect, test, mock, beforeEach } from "bun:test";
 import { PassThrough } from "node:stream";
-import { createAiSdkVoice } from "../../src/voice/ai-sdk-voice";
+import { createAiSdkVoice } from "../src/ai-sdk-voice";
 
 // ---------------------------------------------------------------------------
 // Mock AI SDK experimental functions

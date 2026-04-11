@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import { PassThrough } from "node:stream";
-import { Voice } from "../../src/components/Voice";
-import { Task } from "../../src/components/Task";
-import { Workflow } from "../../src/components/Workflow";
-import { Parallel } from "../../src/components/Parallel";
-import { SmithersRenderer } from "../../src/dom/renderer";
-import type { VoiceProvider } from "../../src/voice/types";
-import { createCompositeVoice } from "../../src/voice/composite";
-import type { SmithersEvent } from "../../src/SmithersEvent";
+import { Voice } from "@smithers/react/components/Voice";
+import { Task } from "@smithers/react/components/Task";
+import { Workflow } from "@smithers/react/components/Workflow";
+import { Parallel } from "@smithers/react/components/Parallel";
+import { SmithersRenderer } from "@smithers/react/dom/renderer";
+import type { VoiceProvider } from "../src/types";
+import { createCompositeVoice } from "../src/composite";
+import type { SmithersEvent } from "@smithers/core/SmithersEvent";
 
 // ---------------------------------------------------------------------------
 // Helpers

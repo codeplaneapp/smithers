@@ -1,5 +1,5 @@
 import { describe, expect, test, mock } from "bun:test";
-import { createOpenAIRealtimeVoice } from "../../src/voice/realtime";
+import { createOpenAIRealtimeVoice } from "../src/realtime";
 
 describe("voice: openai-realtime", () => {
   test("creates a provider with correct name", () => {

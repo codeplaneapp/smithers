@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
-import { createCompositeVoice } from "../../src/voice/composite";
-import type { VoiceProvider } from "../../src/voice/types";
+import { createCompositeVoice } from "../src/composite";
+import type { VoiceProvider } from "../src/types";
 
 // ---------------------------------------------------------------------------
 // Helper providers

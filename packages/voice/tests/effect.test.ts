@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit } from "effect";
 import { PassThrough } from "node:stream";
-import { VoiceService, speak, listen } from "../../src/voice/effect";
-import type { VoiceProvider } from "../../src/voice/types";
+import { VoiceService, speak, listen } from "../src/effect";
+import type { VoiceProvider } from "../src/types";
 
 // ---------------------------------------------------------------------------
 // Helpers

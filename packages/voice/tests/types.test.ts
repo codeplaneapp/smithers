@@ -10,7 +10,7 @@ import type {
   VoiceEventMap,
   VoiceEventType,
   VoiceEventCallback,
-} from "../../src/voice/types";
+} from "../src/types";
 
 describe("voice: types", () => {
   test("VoiceProvider can be defined with minimal fields", () => {
