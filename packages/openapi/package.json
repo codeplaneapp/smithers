@@ -22,8 +22,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@smithers/driver": "workspace:*",
     "@smithers/observability": "workspace:*",
-    "@smithers/runtime": "workspace:*",
     "@smithers/scheduler": "workspace:*",
     "@smithers/tools": "workspace:*",
     "ai": "^6.0.69",

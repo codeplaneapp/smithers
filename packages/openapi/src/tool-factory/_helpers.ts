@@ -4,7 +4,6 @@
 
 import { tool, zodSchema } from "ai";
 import { Effect, Metric } from "effect";
-import { runPromise } from "@smithers/runtime/runtime";
 import { nowMs } from "@smithers/scheduler/nowMs";
 import {
   openApiToolCallsTotal,
@@ -196,7 +195,7 @@ export function createToolFromOperation(
       inputSchema: zodSchema(inputSchema as any),
       execute: async (args: Record<string, any>) => {
         try {
-          return await runPromise(
+          return await Effect.runPromise(
             executeToolEffect(operation, args, baseUrl, options),
           );
         } catch (error: any) {

@@ -2,7 +2,7 @@
 // createOpenApiTools — async tool creation from OpenAPI spec
 // ---------------------------------------------------------------------------
 
-import { runPromise } from "@smithers/runtime/runtime";
+import { Effect } from "effect";
 import { loadSpecEffect } from "../spec-parser";
 import type { OpenApiSpec, OpenApiToolsOptions } from "../types";
 import { createOpenApiToolsFromSpec } from "./_helpers";
@@ -18,6 +18,6 @@ export async function createOpenApiTools(
   input: string | OpenApiSpec,
   options: OpenApiToolsOptions = {},
 ): Promise<Record<string, any>> {
-  const spec = await runPromise(loadSpecEffect(input));
+  const spec = await Effect.runPromise(loadSpecEffect(input));
   return createOpenApiToolsFromSpec(spec, options);
 }

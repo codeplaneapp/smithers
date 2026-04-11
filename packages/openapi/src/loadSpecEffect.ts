@@ -4,7 +4,7 @@
 
 import { readFileSync } from "node:fs";
 import { Effect } from "effect";
-import { fromPromise, fromSync } from "@smithers/runtime/interop";
+import { fromPromise, fromSync } from "@smithers/driver/interop";
 import type { OpenApiSpec } from "./types";
 import { parseSpecText } from "./_specHelpers";
 
