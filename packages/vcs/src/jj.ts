@@ -1,5 +1,5 @@
 import * as Command from "@effect/platform/Command";
-import { Effect, Fiber, Metric, Stream } from "effect";
+import { Duration, Effect, Fiber, Metric, Stream } from "effect";
 import { runPromise } from "@smithers/runtime/runtime";
 import { vcsDuration } from "@smithers/observability/metrics";
 
@@ -21,6 +21,8 @@ export type RunJjResult = {
   stdout: string;
   stderr: string;
 };
+
+const JJ_POINTER_TIMEOUT_MS = 1_500;
 
 function collectUtf8(stream: Stream.Stream<Uint8Array, unknown, never>) {
   const decoder = new TextDecoder("utf-8");
@@ -96,6 +98,15 @@ export function getJjPointerEffect(cwd?: string) {
     ["log", "-r", "@", "--no-graph", "--template", "change_id"],
     { cwd },
   ).pipe(
+    Effect.timeoutTo({
+      duration: Duration.millis(JJ_POINTER_TIMEOUT_MS),
+      onSuccess: (res) => res,
+      onTimeout: () => ({
+        code: 124,
+        stdout: "",
+        stderr: `jj pointer timed out after ${JJ_POINTER_TIMEOUT_MS}ms`,
+      }),
+    }),
     Effect.map((res) => {
       if (res.code !== 0) return null;
       const out = res.stdout.trim();
