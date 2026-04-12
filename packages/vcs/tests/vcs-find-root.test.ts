@@ -2,7 +2,12 @@ import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { findVcsRoot } from "../src/find-root";
+import { Effect } from "effect";
+import { findVcsRoot as findVcsRootEffect } from "../src/find-root";
+
+function findVcsRoot(startDir: string) {
+  return Effect.runSync(findVcsRootEffect(startDir));
+}
 
 const TMP = join(tmpdir(), `smithers-vcs-root-test-${Date.now()}`);
 

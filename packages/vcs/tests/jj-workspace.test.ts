@@ -2,7 +2,30 @@ import { describe, test, expect } from "bun:test";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
-import * as vcs from "../src/jj";
+import { Effect } from "effect";
+import * as BunContext from "@effect/platform-bun/BunContext";
+import * as vcsEffects from "../src/jj";
+
+function runVcs<A, E>(effect: Effect.Effect<A, E, any>) {
+  return Effect.runPromise(effect.pipe(Effect.provide(BunContext.layer)));
+}
+
+const vcs = {
+  runJj: (args: string[], opts?: vcsEffects.RunJjOptions) =>
+    runVcs(vcsEffects.runJj(args, opts)),
+  isJjRepo: (cwd?: string) => runVcs(vcsEffects.isJjRepo(cwd)),
+  workspaceAdd: (
+    name: string,
+    workspacePath: string,
+    opts?: vcsEffects.WorkspaceAddOptions,
+  ) => runVcs(vcsEffects.workspaceAdd(name, workspacePath, opts)),
+  workspaceList: (cwd?: string) => runVcs(vcsEffects.workspaceList(cwd)),
+  workspaceClose: (name: string, opts?: { cwd?: string }) =>
+    runVcs(vcsEffects.workspaceClose(name, opts)),
+  getJjPointer: (cwd?: string) => runVcs(vcsEffects.getJjPointer(cwd)),
+  revertToJjPointer: (pointer: string, cwd?: string) =>
+    runVcs(vcsEffects.revertToJjPointer(pointer, cwd)),
+};
 
 async function withFakeJj(script: string, fn: () => Promise<void>) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "jj-bin-"));
