@@ -1,8 +1,7 @@
 /**
- * Convert Pydantic-style JSON Schema to Zod schemas.
+ * Convert JSON Schema to Zod schemas.
  *
- * Adapted from src/openapi/schema-converter.ts but works with standalone
- * JSON Schema (no OpenAPI spec wrapper). Handles Pydantic v2's patterns:
+ * Handles standard JSON Schema patterns:
  * - $defs for nested model references
  * - anyOf + null for Optional fields → .nullable()
  */
@@ -12,13 +11,11 @@ import { z } from "zod";
 type JsonSchema = Record<string, any>;
 
 /**
- * Convert a Pydantic JSON Schema (from model_json_schema()) to a Zod object schema.
+ * Convert a JSON Schema to a Zod object schema.
  */
-export function pydanticSchemaToZod(rootSchema: JsonSchema): z.ZodObject<any> {
+export function jsonSchemaToZod(rootSchema: JsonSchema): z.ZodObject<any> {
   const result = convertNode(rootSchema, rootSchema, new Set());
-  // Ensure we return a ZodObject — Pydantic root schemas are always objects
   if (result instanceof z.ZodObject) return result;
-  // Fallback: wrap in a loose object that passes through unknown keys
   return z.object({}).catchall(z.unknown());
 }
 
@@ -29,7 +26,6 @@ function convertNode(
 ): z.ZodType {
   if (!node) return z.any();
 
-  // Resolve $ref (Pydantic uses #/$defs/ModelName)
   if (node.$ref && typeof node.$ref === "string") {
     const ref = node.$ref as string;
     if (visited.has(ref)) {
@@ -42,7 +38,6 @@ function convertNode(
     return result;
   }
 
-  // allOf — intersection
   if (node.allOf && Array.isArray(node.allOf) && node.allOf.length > 0) {
     const schemas = node.allOf.map((sub: JsonSchema) => convertNode(sub, root, visited));
     if (schemas.length === 1) return maybeDescribe(schemas[0]!, node);
@@ -53,12 +48,10 @@ function convertNode(
     return maybeDescribe(result, node);
   }
 
-  // anyOf — check for Pydantic Optional pattern: anyOf[type, null]
   if (node.anyOf && Array.isArray(node.anyOf) && node.anyOf.length > 0) {
     return buildAnyOf(node.anyOf, root, visited, node);
   }
 
-  // oneOf — union
   if (node.oneOf && Array.isArray(node.oneOf) && node.oneOf.length > 0) {
     return buildUnion(node.oneOf, root, visited, node);
   }
@@ -83,18 +76,12 @@ function convertNode(
   return z.any();
 }
 
-// ---------------------------------------------------------------------------
-// anyOf handling with Pydantic nullable collapse
-// ---------------------------------------------------------------------------
-
 function buildAnyOf(
   variants: JsonSchema[],
   root: JsonSchema,
   visited: Set<string>,
   parent: JsonSchema,
 ): z.ZodType {
-  // Pydantic Optional pattern: anyOf: [{type: "string"}, {type: "null"}]
-  // Collapse to .nullable() for better column mapping
   const nullIdx = variants.findIndex((v) => v.type === "null");
   if (nullIdx !== -1 && variants.length === 2) {
     const other = variants[1 - nullIdx]!;
@@ -104,10 +91,6 @@ function buildAnyOf(
   }
   return buildUnion(variants, root, visited, parent);
 }
-
-// ---------------------------------------------------------------------------
-// Type builders
-// ---------------------------------------------------------------------------
 
 function buildString(s: JsonSchema): z.ZodType {
   let schema: z.ZodType;
@@ -162,10 +145,6 @@ function buildUnion(
   if (schemas.length === 1) return maybeDescribe(schemas[0]!, parent);
   return maybeDescribe(z.union(schemas as [z.ZodType, z.ZodType, ...z.ZodType[]]), parent);
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function maybeDescribe(schema: z.ZodType, s: JsonSchema): z.ZodType {
   if (s.description) return schema.describe(s.description);

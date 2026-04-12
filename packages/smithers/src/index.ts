@@ -68,7 +68,7 @@ export {
   continueAsNew,
   Worktree,
   Sandbox,
-  Voice,
+
   Kanban,
   Poller,
   Saga,
@@ -247,7 +247,7 @@ export { SmithersRenderer } from "@smithers/react-reconciler/dom/renderer";
 export type { HostContainer } from "@smithers/react-reconciler/dom/renderer";
 
 // External / multi-language
-export { createExternalSmithers, createPythonWorkflow, createPythonBuildFn } from "./external";
+export { createExternalSmithers } from "./external";
 export type { ExternalSmithersConfig, SerializedCtx, HostNodeJson } from "./external";
 
 // Revert
@@ -287,30 +287,6 @@ export type {
   AggregateOptions,
 } from "@smithers/scorers";
 
-// Voice
-export {
-  createAiSdkVoice,
-  createCompositeVoice,
-  createOpenAIRealtimeVoice,
-  VoiceService,
-  speak,
-  listen,
-} from "@smithers/voice";
-export type {
-  VoiceProvider,
-  SpeakOptions,
-  ListenOptions,
-  SendOptions,
-  AudioFormat,
-  TranscriptionResult,
-  TranscriptionSegment,
-  VoiceEventMap,
-  VoiceEventType,
-  VoiceEventCallback,
-  AiSdkVoiceConfig,
-  CompositeVoiceConfig,
-  OpenAIRealtimeVoiceConfig,
-} from "@smithers/voice";
 
 // RAG
 export {

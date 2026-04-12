@@ -1,4 +1,4 @@
-import { pydanticSchemaToZod } from "./external/json-schema-to-zod";
+import { jsonSchemaToZod } from "./external/json-schema-to-zod";
 
 export const HUMAN_REQUEST_KINDS = ["ask", "confirm", "select", "json"] as const;
 export type HumanRequestKind = (typeof HUMAN_REQUEST_KINDS)[number];
@@ -98,7 +98,7 @@ export function validateHumanRequestValue(
 
   let validator;
   try {
-    validator = pydanticSchemaToZod(schema as Record<string, unknown>);
+    validator = jsonSchemaToZod(schema as Record<string, unknown>);
   } catch (err: any) {
     return {
       ok: false,

@@ -54,7 +54,7 @@
           "concepts/evals",
           "concepts/memory",
           "concepts/rag",
-          "concepts/voice",
+
           "concepts/openapi-tools",
           "concepts/planner-internals"
         ]
@@ -79,7 +79,7 @@
           "guides/monitoring-logs",
           "guides/time-travel-quickstart",
           "guides/evals-quickstart",
-          "guides/voice-quickstart",
+
           "guides/memory-quickstart",
           "guides/rag-quickstart",
           "guides/openapi-tools-quickstart",
@@ -98,7 +98,7 @@
           "components/approval",
           "components/merge-queue",
           "components/worktree",
-          "components/voice",
+
           {
             "group": "Composite Components",
             "pages": [
@@ -156,7 +156,6 @@
           "integrations/mcp-server",
           "integrations/serve",
           "integrations/gateway",
-          "integrations/external-workflows",
           "integrations/ide",
           "integrations/github-bot",
           "integrations/pi-plugin",

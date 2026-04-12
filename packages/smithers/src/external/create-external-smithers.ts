@@ -87,7 +87,7 @@ export function hostNodeToReact(
 }
 
 /**
- * Create a SmithersWorkflow from an external build function (e.g. Python subprocess).
+ * Create a SmithersWorkflow from an external build function.
  *
  * Schemas and agents are defined in TS. The build function produces a HostNode JSON tree
  * that maps 1:1 to what the JSX renderer would produce.
