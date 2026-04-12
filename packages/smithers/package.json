@@ -6,16 +6,19 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "import": "./src/index.js",
+      "default": "./src/index.js",
+      "types": "./src/index.ts"
     },
     "./*": {
-      "types": "./src/*.ts",
-      "default": "./src/*.ts"
+      "import": "./src/*.js",
+      "default": "./src/*.js",
+      "types": "./src/*.ts"
     },
     "./jsx-dev-runtime": {
-      "types": "./src/jsx-runtime.ts",
-      "default": "./src/jsx-runtime.ts"
+      "import": "./src/jsx-runtime.js",
+      "default": "./src/jsx-runtime.js",
+      "types": "./src/jsx-runtime.ts"
     }
   },
   "files": [
@@ -42,7 +45,6 @@
     "@smithers/server": "workspace:*",
     "@smithers/time-travel": "workspace:*",
     "@smithers/vcs": "workspace:*",
-
     "zod": "^4.3.6"
   },
   "devDependencies": {

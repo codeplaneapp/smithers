@@ -1,63 +1,44 @@
 import { z } from "zod";
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
-
 export const outputSchemas = {
-  outputA: z.object({ value: z.number() }),
-  outputB: z.object({ value: z.number() }),
-  outputC: z.object({ value: z.number() }),
+    outputA: z.object({ value: z.number() }),
+    outputB: z.object({ value: z.number() }),
+    outputC: z.object({ value: z.number() }),
 };
-
 export const input = sqliteTable("input", {
-  runId: text("run_id").primaryKey(),
-  description: text("description"),
+    runId: text("run_id").primaryKey(),
+    description: text("description"),
 });
-
-export const outputA = sqliteTable(
-  "output_a",
-  {
+export const outputA = sqliteTable("output_a", {
     runId: text("run_id").notNull(),
     nodeId: text("node_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
     value: integer("value"),
-  },
-  (t) => ({
+}, (t) => ({
     pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration] }),
-  }),
-);
-
-export const outputB = sqliteTable(
-  "output_b",
-  {
+}));
+export const outputB = sqliteTable("output_b", {
     runId: text("run_id").notNull(),
     nodeId: text("node_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
     value: integer("value"),
-  },
-  (t) => ({
+}, (t) => ({
     pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration] }),
-  }),
-);
-
-export const outputC = sqliteTable(
-  "output_c",
-  {
+}));
+export const outputC = sqliteTable("output_c", {
     runId: text("run_id").notNull(),
     nodeId: text("node_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
     value: integer("value"),
-  },
-  (t) => ({
+}, (t) => ({
     pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration] }),
-  }),
-);
-
+}));
 export const schema = {
-  input,
-  outputA,
-  outputB,
-  outputC,
+    input,
+    outputA,
+    outputB,
+    outputC,
 };
-
 export const ddl = `
   CREATE TABLE IF NOT EXISTS input (
     run_id TEXT PRIMARY KEY,
