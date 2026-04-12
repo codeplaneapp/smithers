@@ -1,15 +1,2 @@
-import {
-  TracingService,
-  annotateSmithersTrace as annotateCoreSmithersTrace,
-} from "./_coreTracing";
 import { Effect } from "effect";
-
-export function annotateSmithersTrace(
-  attributes: Readonly<Record<string, unknown>> = {},
-): Effect.Effect<void> {
-  return Effect.flatMap(Effect.serviceOption(TracingService), (service) =>
-    service._tag === "Some"
-      ? service.value.annotate({ ...attributes })
-      : annotateCoreSmithersTrace(attributes),
-  );
-}
+export declare function annotateSmithersTrace(attributes?: Readonly<Record<string, unknown>>): Effect.Effect<void>;

@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const agentSessionsTotal = Metric.counter("smithers.agent_sessions_total");
+export declare const agentSessionsTotal: Metric.Metric.Counter<number>;

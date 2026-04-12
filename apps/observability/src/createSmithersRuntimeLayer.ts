@@ -1,3 +1,2 @@
 import { createSmithersObservabilityLayer } from "./createSmithersObservabilityLayer";
-
-export const createSmithersRuntimeLayer = createSmithersObservabilityLayer;
+export declare const createSmithersRuntimeLayer: typeof createSmithersObservabilityLayer;

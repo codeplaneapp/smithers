@@ -1,24 +1,15 @@
-// Types
 export type { SmithersMetricType } from "./SmithersMetricType";
 export type { SmithersMetricUnit } from "./SmithersMetricUnit";
 export type { SmithersMetricDefinition } from "./SmithersMetricDefinition";
-
-// Functions
 export { toPrometheusMetricName } from "./toPrometheusMetricName";
 export { updateProcessMetrics } from "./updateProcessMetrics";
 export { updateAsyncExternalWaitPending } from "./updateAsyncExternalWaitPending";
 export { trackEvent } from "./trackEvent";
-
-// Catalog
 export { smithersMetricCatalog } from "./smithersMetricCatalog";
 export { smithersMetricCatalogByKey } from "./smithersMetricCatalogByKey";
 export { smithersMetricCatalogByName } from "./smithersMetricCatalogByName";
 export { smithersMetricCatalogByPrometheusName } from "./smithersMetricCatalogByPrometheusName";
-
-// Service adapter
 export { metricsServiceAdapter } from "./metricsServiceAdapter";
-
-// Counters
 export { runsTotal } from "./runsTotal";
 export { nodesStarted } from "./nodesStarted";
 export { nodesFinished } from "./nodesFinished";
@@ -77,7 +68,6 @@ export { agentRetriesTotal } from "./agentRetriesTotal";
 export { agentEventsTotal } from "./agentEventsTotal";
 export { agentSessionsTotal } from "./agentSessionsTotal";
 export { agentActionsTotal } from "./agentActionsTotal";
-
 export { gatewayConnectionsTotal } from "./gatewayConnectionsTotal";
 export { gatewayConnectionsClosedTotal } from "./gatewayConnectionsClosedTotal";
 export { gatewayMessagesReceivedTotal } from "./gatewayMessagesReceivedTotal";
@@ -97,8 +87,6 @@ export { gatewayWebhooksRejectedTotal } from "./gatewayWebhooksRejectedTotal";
 export { eventsEmittedTotal } from "./eventsEmittedTotal";
 export { taskHeartbeatsTotal } from "./taskHeartbeatsTotal";
 export { taskHeartbeatTimeoutTotal } from "./taskHeartbeatTimeoutTotal";
-
-// Gauges
 export { activeRuns } from "./activeRuns";
 export { activeNodes } from "./activeNodes";
 export { schedulerQueueDepth } from "./schedulerQueueDepth";
@@ -113,8 +101,6 @@ export { schedulerConcurrencyUtilization } from "./schedulerConcurrencyUtilizati
 export { processUptimeSeconds } from "./processUptimeSeconds";
 export { processMemoryRssBytes } from "./processMemoryRssBytes";
 export { processHeapUsedBytes } from "./processHeapUsedBytes";
-
-// Histograms
 export { nodeDuration } from "./nodeDuration";
 export { attemptDuration } from "./attemptDuration";
 export { toolDuration } from "./toolDuration";
@@ -132,7 +118,6 @@ export { promptSizeBytes } from "./promptSizeBytes";
 export { responseSizeBytes } from "./responseSizeBytes";
 export { approvalWaitDuration } from "./approvalWaitDuration";
 export { timerDelayDuration } from "./timerDelayDuration";
-
 export { gatewayRpcDuration } from "./gatewayRpcDuration";
 export { schedulerWaitDuration } from "./schedulerWaitDuration";
 export { supervisorPollDuration } from "./supervisorPollDuration";

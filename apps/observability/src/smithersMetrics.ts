@@ -1,5 +1,3 @@
-import { smithersMetricCatalog } from "./metrics";
-
-export const smithersMetrics = Object.fromEntries(
-  smithersMetricCatalog.map((metric) => [metric.key, metric.metric] as const),
-);
+export declare const smithersMetrics: {
+    [k: string]: import("effect/Metric").Metric<any, any, any>;
+};

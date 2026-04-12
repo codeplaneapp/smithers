@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const tokensCacheWriteTotal = Metric.counter("smithers.tokens.cache_write_total");
+export declare const tokensCacheWriteTotal: Metric.Metric.Counter<number>;

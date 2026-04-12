@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const timersCreated = Metric.counter("smithers.timers.created");
+export declare const timersCreated: Metric.Metric.Counter<number>;

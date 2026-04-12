@@ -1,7 +1,2 @@
 import { Metric } from "effect";
-import { tokenBuckets } from "./_buckets";
-
-export const tokensOutputPerCall = Metric.histogram(
-  "smithers.tokens.output_per_call",
-  tokenBuckets,
-);
+export declare const tokensOutputPerCall: Metric.Metric<import("effect/MetricKeyType").MetricKeyType.Histogram, number, import("effect/MetricState").MetricState.Histogram>;

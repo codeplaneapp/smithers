@@ -1,5 +1,2 @@
 import { Metric } from "effect";
-
-export const externalWaitAsyncPending = Metric.gauge(
-  "smithers.external_wait.async_pending",
-);
+export declare const externalWaitAsyncPending: Metric.Metric.Gauge<number>;

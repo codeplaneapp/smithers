@@ -1,5 +1,2 @@
 import { Metric } from "effect";
-
-export const gatewayConnectionsActive = Metric.gauge(
-  "smithers.gateway.connections_active",
-);
+export declare const gatewayConnectionsActive: Metric.Metric.Gauge<number>;

@@ -1,6 +1,6 @@
-export const smithersSpanNames = {
-  run: "smithers.run",
-  task: "smithers.task",
-  agent: "smithers.agent",
-  tool: "smithers.tool",
-} as const;
+export declare const smithersSpanNames: {
+    readonly run: "smithers.run";
+    readonly task: "smithers.task";
+    readonly agent: "smithers.agent";
+    readonly tool: "smithers.tool";
+};

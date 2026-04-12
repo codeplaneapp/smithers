@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const toolCallErrorsTotal = Metric.counter("smithers.tool_calls.errors_total");
+export declare const toolCallErrorsTotal: Metric.Metric.Counter<number>;

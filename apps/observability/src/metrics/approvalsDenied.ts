@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const approvalsDenied = Metric.counter("smithers.approvals.denied");
+export declare const approvalsDenied: Metric.Metric.Counter<number>;

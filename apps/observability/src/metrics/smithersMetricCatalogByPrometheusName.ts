@@ -1,5 +1,1 @@
-import { smithersMetricCatalog } from "./smithersMetricCatalog";
-
-export const smithersMetricCatalogByPrometheusName = new Map(
-  smithersMetricCatalog.map((metric) => [metric.prometheusName, metric] as const),
-);
+export declare const smithersMetricCatalogByPrometheusName: Map<string, import("./SmithersMetricDefinition").SmithersMetricDefinition>;

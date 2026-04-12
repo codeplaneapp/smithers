@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const processHeapUsedBytes = Metric.gauge("smithers.process.heap_used_bytes");
+export declare const processHeapUsedBytes: Metric.Metric.Gauge<number>;

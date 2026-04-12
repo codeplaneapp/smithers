@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const httpRequests = Metric.counter("smithers.http.requests");
+export declare const httpRequests: Metric.Metric.Counter<number>;

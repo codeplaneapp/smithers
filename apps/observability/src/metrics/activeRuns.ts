@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const activeRuns = Metric.gauge("smithers.runs.active");
+export declare const activeRuns: Metric.Metric.Gauge<number>;

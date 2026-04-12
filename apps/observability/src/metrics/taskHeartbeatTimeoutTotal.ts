@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const taskHeartbeatTimeoutTotal = Metric.counter("smithers.heartbeats.timeout_total");
+export declare const taskHeartbeatTimeoutTotal: Metric.Metric.Counter<number>;

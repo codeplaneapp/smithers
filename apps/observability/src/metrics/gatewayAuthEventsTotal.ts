@@ -1,5 +1,2 @@
 import { Metric } from "effect";
-
-export const gatewayAuthEventsTotal = Metric.counter(
-  "smithers.gateway.auth_events_total",
-);
+export declare const gatewayAuthEventsTotal: Metric.Metric.Counter<number>;

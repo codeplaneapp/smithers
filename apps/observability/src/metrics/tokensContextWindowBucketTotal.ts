@@ -1,5 +1,2 @@
 import { Metric } from "effect";
-
-export const tokensContextWindowBucketTotal = Metric.counter(
-  "smithers.tokens.context_window_bucket_total",
-);
+export declare const tokensContextWindowBucketTotal: Metric.Metric.Counter<number>;

@@ -1,7 +1,2 @@
 import { Metric } from "effect";
-import { fastBuckets } from "./_buckets";
-
-export const supervisorPollDuration = Metric.histogram(
-  "smithers.supervisor.poll_duration_ms",
-  fastBuckets,
-);
+export declare const supervisorPollDuration: Metric.Metric<import("effect/MetricKeyType").MetricKeyType.Histogram, number, import("effect/MetricState").MetricState.Histogram>;

@@ -1,5 +1,2 @@
 import { Metric } from "effect";
-
-export const gatewayRpcCallsTotal = Metric.counter(
-  "smithers.gateway.rpc_calls_total",
-);
+export declare const gatewayRpcCallsTotal: Metric.Metric.Counter<number>;

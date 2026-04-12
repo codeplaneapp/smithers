@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const supervisorStaleDetected = Metric.counter("smithers.supervisor.stale_detected");
+export declare const supervisorStaleDetected: Metric.Metric.Counter<number>;

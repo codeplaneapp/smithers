@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const alertDeliveriesAttempted = Metric.counter("smithers.alerts.deliveries_attempted");
+export declare const alertDeliveriesAttempted: Metric.Metric.Counter<number>;

@@ -1,4 +1,1 @@
-export const asyncExternalWaitCounts: Record<"approval" | "event", number> = {
-  approval: 0,
-  event: 0,
-};
+export declare const asyncExternalWaitCounts: Record<"approval" | "event", number>;

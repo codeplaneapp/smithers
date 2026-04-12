@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const processUptimeSeconds = Metric.gauge("smithers.process.uptime_seconds");
+export declare const processUptimeSeconds: Metric.Metric.Gauge<number>;

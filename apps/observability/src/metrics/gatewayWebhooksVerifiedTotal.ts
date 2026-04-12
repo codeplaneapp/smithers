@@ -1,5 +1,2 @@
 import { Metric } from "effect";
-
-export const gatewayWebhooksVerifiedTotal = Metric.counter(
-  "smithers.gateway.webhooks_verified_total",
-);
+export declare const gatewayWebhooksVerifiedTotal: Metric.Metric.Counter<number>;

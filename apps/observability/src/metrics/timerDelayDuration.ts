@@ -1,7 +1,2 @@
 import { Metric } from "effect";
-import { durationBuckets } from "./_buckets";
-
-export const timerDelayDuration = Metric.histogram(
-  "smithers.timers.delay_ms",
-  durationBuckets,
-);
+export declare const timerDelayDuration: Metric.Metric<import("effect/MetricKeyType").MetricKeyType.Histogram, number, import("effect/MetricState").MetricState.Histogram>;

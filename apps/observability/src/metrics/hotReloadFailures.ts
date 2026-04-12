@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const hotReloadFailures = Metric.counter("smithers.hot.reload_failures");
+export declare const hotReloadFailures: Metric.Metric.Counter<number>;

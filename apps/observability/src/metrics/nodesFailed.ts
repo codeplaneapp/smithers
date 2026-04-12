@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const nodesFailed = Metric.counter("smithers.nodes.failed");
+export declare const nodesFailed: Metric.Metric.Counter<number>;

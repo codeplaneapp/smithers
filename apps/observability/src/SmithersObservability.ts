@@ -1,7 +1,6 @@
 import { Context } from "effect";
 import type { SmithersObservabilityService } from "./SmithersObservabilityService";
-
-export class SmithersObservability extends Context.Tag("SmithersObservability")<
-  SmithersObservability,
-  SmithersObservabilityService
->() {}
+declare const SmithersObservability_base: Context.TagClass<SmithersObservability, "SmithersObservability", SmithersObservabilityService>;
+export declare class SmithersObservability extends SmithersObservability_base {
+}
+export {};

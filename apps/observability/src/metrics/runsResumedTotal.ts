@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const runsResumedTotal = Metric.counter("smithers.runs.resumed_total");
+export declare const runsResumedTotal: Metric.Metric.Counter<number>;

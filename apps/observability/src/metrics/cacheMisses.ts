@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const cacheMisses = Metric.counter("smithers.cache.misses");
+export declare const cacheMisses: Metric.Metric.Counter<number>;

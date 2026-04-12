@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const dbTransactionRollbacks = Metric.counter("smithers.db.transaction_rollbacks");
+export declare const dbTransactionRollbacks: Metric.Metric.Counter<number>;

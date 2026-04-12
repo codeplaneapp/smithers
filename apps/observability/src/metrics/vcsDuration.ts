@@ -1,7 +1,2 @@
 import { Metric } from "effect";
-import { fastBuckets } from "./_buckets";
-
-export const vcsDuration = Metric.histogram(
-  "smithers.vcs.duration_ms",
-  fastBuckets,
-);
+export declare const vcsDuration: Metric.Metric<import("effect/MetricKeyType").MetricKeyType.Histogram, number, import("effect/MetricState").MetricState.Histogram>;

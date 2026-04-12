@@ -1,7 +1,2 @@
 import { Metric } from "effect";
-import { durationBuckets } from "./_buckets";
-
-export const supervisorResumeLag = Metric.histogram(
-  "smithers.supervisor.resume_lag_ms",
-  durationBuckets,
-);
+export declare const supervisorResumeLag: Metric.Metric<import("effect/MetricKeyType").MetricKeyType.Histogram, number, import("effect/MetricState").MetricState.Histogram>;

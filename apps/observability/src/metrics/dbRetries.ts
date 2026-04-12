@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const dbRetries = Metric.counter("smithers.db.retries");
+export declare const dbRetries: Metric.Metric.Counter<number>;

@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const timersPending = Metric.gauge("smithers.timers.pending");
+export declare const timersPending: Metric.Metric.Gauge<number>;

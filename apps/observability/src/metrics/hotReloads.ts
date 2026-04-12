@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const hotReloads = Metric.counter("smithers.hot.reloads");
+export declare const hotReloads: Metric.Metric.Counter<number>;

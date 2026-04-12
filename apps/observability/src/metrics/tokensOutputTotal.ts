@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const tokensOutputTotal = Metric.counter("smithers.tokens.output_total");
+export declare const tokensOutputTotal: Metric.Metric.Counter<number>;

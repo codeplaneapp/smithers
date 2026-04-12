@@ -1,3 +1,2 @@
 import { Metric } from "effect";
-
-export const sandboxActive = Metric.gauge("smithers.sandbox.active");
+export declare const sandboxActive: Metric.Metric.Gauge<number>;

@@ -1,7 +1,2 @@
 import { Metric } from "effect";
-import { durationBuckets } from "./_buckets";
-
-export const runDuration = Metric.histogram(
-  "smithers.run.duration_ms",
-  durationBuckets,
-);
+export declare const runDuration: Metric.Metric<import("effect/MetricKeyType").MetricKeyType.Histogram, number, import("effect/MetricState").MetricState.Histogram>;

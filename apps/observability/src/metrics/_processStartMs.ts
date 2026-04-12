@@ -1,1 +1,1 @@
-export const processStartMs = Date.now();
+export declare const processStartMs: number;

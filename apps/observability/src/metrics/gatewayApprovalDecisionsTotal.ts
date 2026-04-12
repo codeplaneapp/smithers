@@ -1,5 +1,2 @@
 import { Metric } from "effect";
-
-export const gatewayApprovalDecisionsTotal = Metric.counter(
-  "smithers.gateway.approval_decisions_total",
-);
+export declare const gatewayApprovalDecisionsTotal: Metric.Metric.Counter<number>;
