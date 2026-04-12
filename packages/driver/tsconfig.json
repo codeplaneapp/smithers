@@ -23,16 +23,35 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "paths": {
-      "smithers/jsx-runtime": ["../smithers/src/jsx-runtime.ts"],
-      "smithers/jsx-dev-runtime": ["../smithers/src/jsx-runtime.ts"],
-      "@smithers/react-reconciler/*": ["../react-reconciler/src/*.ts"],
-      "@smithers/scheduler/*": ["../scheduler/src/*.ts"],
-      "@smithers/graph": ["../graph/src/index.ts"],
-      "@smithers/graph/*": ["../graph/src/*.ts"],
-      "@smithers/errors/*": ["../errors/src/*.ts"],
-      "@smithers/db/*": ["../db/src/*.ts"],
-      "@smithers/observability/*": ["../../apps/observability/src/*.ts"]
-    }
+      "smithers/jsx-runtime": [
+        "../smithers/src/jsx-runtime.js"
+      ],
+      "smithers/jsx-dev-runtime": [
+        "../smithers/src/jsx-runtime.js"
+      ],
+      "@smithers/react-reconciler/*": [
+        "../react-reconciler/src/*.js"
+      ],
+      "@smithers/scheduler/*": [
+        "../scheduler/src/*.js"
+      ],
+      "@smithers/graph": [
+        "../graph/src/index.js"
+      ],
+      "@smithers/graph/*": [
+        "../graph/src/*.js"
+      ],
+      "@smithers/errors/*": [
+        "../errors/src/*.js"
+      ],
+      "@smithers/db/*": [
+        "../db/src/*.js"
+      ],
+      "@smithers/observability/*": [
+        "../../apps/observability/src/*.js"
+      ]
+    },
+    "allowJs": true
   },
   "include": [
     "src/**/*"

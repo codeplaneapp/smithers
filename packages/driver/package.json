@@ -6,76 +6,80 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "import": "./src/index.js",
+      "default": "./src/index.js",
+      "types": "./src/index.ts"
     },
     "./driver": {
-      "types": "./src/driver.ts",
-      "default": "./src/driver.ts"
+      "import": "./src/driver.js",
+      "default": "./src/driver.js",
+      "types": "./src/driver.ts"
     },
     "./execution": {
-      "types": "./src/execution.ts",
-      "default": "./src/execution.ts"
+      "import": "./src/execution.js",
+      "default": "./src/execution.js",
+      "types": "./src/execution.ts"
     },
     "./context": {
-      "types": "./src/context.ts",
-      "default": "./src/context.ts"
+      "import": "./src/context.js",
+      "default": "./src/context.js",
+      "types": "./src/context.ts"
     },
     "./interop": {
-      "types": "./src/interop.ts",
-      "default": "./src/interop.ts"
+      "import": "./src/interop.js",
+      "default": "./src/interop.js",
+      "types": "./src/interop.ts"
     },
     "./RunOptions": {
-      "types": "./src/RunOptions.ts",
-      "default": "./src/RunOptions.ts"
+      "types": "./src/RunOptions.ts"
     },
     "./RunResult": {
-      "types": "./src/RunResult.ts",
-      "default": "./src/RunResult.ts"
+      "types": "./src/RunResult.ts"
     },
     "./RunStatus": {
-      "types": "./src/RunStatus.ts",
-      "default": "./src/RunStatus.ts"
+      "types": "./src/RunStatus.ts"
     },
     "./RunAuthContext": {
-      "types": "./src/RunAuthContext.ts",
-      "default": "./src/RunAuthContext.ts"
+      "types": "./src/RunAuthContext.ts"
     },
     "./SmithersCtx": {
-      "types": "./src/SmithersCtx.ts",
-      "default": "./src/SmithersCtx.ts"
+      "import": "./src/SmithersCtx.js",
+      "default": "./src/SmithersCtx.js",
+      "types": "./src/SmithersCtx.ts"
     },
     "./OutputAccessor": {
-      "types": "./src/OutputAccessor.ts",
-      "default": "./src/OutputAccessor.ts"
+      "types": "./src/OutputAccessor.ts"
     },
     "./OutputKey": {
-      "types": "./src/OutputKey.ts",
-      "default": "./src/OutputKey.ts"
+      "types": "./src/OutputKey.ts"
     },
     "./workflow-types": {
-      "types": "./src/workflow-types.ts",
-      "default": "./src/workflow-types.ts"
+      "types": "./src/workflow-types.ts"
     },
     "./sha256Hex": {
-      "types": "./src/sha256Hex.ts",
-      "default": "./src/sha256Hex.ts"
+      "import": "./src/sha256Hex.js",
+      "default": "./src/sha256Hex.js",
+      "types": "./src/sha256Hex.ts"
     },
     "./newRunId": {
-      "types": "./src/newRunId.ts",
-      "default": "./src/newRunId.ts"
+      "import": "./src/newRunId.js",
+      "default": "./src/newRunId.js",
+      "types": "./src/newRunId.ts"
     },
     "./task-runtime": {
-      "types": "./src/task-runtime.ts",
-      "default": "./src/task-runtime.ts"
+      "import": "./src/task-runtime.js",
+      "default": "./src/task-runtime.js",
+      "types": "./src/task-runtime.ts"
     },
     "./child-process": {
-      "types": "./src/child-process.ts",
-      "default": "./src/child-process.ts"
+      "import": "./src/child-process.js",
+      "default": "./src/child-process.js",
+      "types": "./src/child-process.ts"
     },
     "./*": {
-      "types": "./src/*.ts",
-      "default": "./src/*.ts"
+      "import": "./src/*.js",
+      "default": "./src/*.js",
+      "types": "./src/*.ts"
     }
   },
   "files": [

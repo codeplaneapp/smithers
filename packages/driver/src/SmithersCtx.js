@@ -1,0 +1,173 @@
+import { SmithersError } from "@smithers/errors/SmithersError";
+import { buildCurrentScopes } from "./buildCurrentScopes.js";
+import { filterRowsByNodeId } from "./filterRowsByNodeId.js";
+import { normalizeInputRow } from "./normalizeInputRow.js";
+import { withLogicalIterationShortcuts } from "./withLogicalIterationShortcuts.js";
+/** @typedef {import("./OutputKey.ts").OutputKey} OutputKey */
+/**
+ * @typedef {{ safeParse(value: unknown): { success: true; data: unknown; } | { success: false; error?: unknown; }; }} SafeParser
+ */
+/** @typedef {import("./SmithersCtx.ts").SmithersCtxOptions} SmithersCtxOptions */
+
+/**
+ * @param {any} table
+ * @returns {string | undefined}
+ */
+function resolveDrizzleName(table) {
+    if (!table || typeof table !== "object")
+        return undefined;
+    const tableMeta = table._;
+    if (tableMeta &&
+        typeof tableMeta === "object" &&
+        typeof tableMeta.name === "string") {
+        return tableMeta.name;
+    }
+    if (typeof table.name === "string")
+        return table.name;
+    return undefined;
+}
+export class SmithersCtx {
+    runId;
+    iteration;
+    iterations;
+    input;
+    auth;
+    __smithersRuntime;
+    outputs;
+    _outputs;
+    _zodToKeyName;
+    _currentScopes;
+    /**
+   * @param {SmithersCtxOptions} opts
+   */
+    constructor(opts) {
+        this.runId = opts.runId;
+        this.iteration = opts.iteration;
+        this.iterations = withLogicalIterationShortcuts(opts.iterations);
+        this.input = normalizeInputRow(opts.input);
+        this.auth = opts.auth ?? null;
+        this.__smithersRuntime = opts.runtimeConfig ?? null;
+        this._outputs = opts.outputs;
+        this._zodToKeyName = opts.zodToKeyName;
+        this._currentScopes = buildCurrentScopes(this.iterations);
+        /**
+     * @param {string} table
+     */
+        const outputsFn = (table) => opts.outputs[table] ?? [];
+        for (const [name, rows] of Object.entries(opts.outputs)) {
+            outputsFn[name] = rows;
+        }
+        this.outputs = outputsFn;
+    }
+    /**
+   * @param {any} table
+   * @param {OutputKey} key
+   * @returns {any}
+   */
+    output(table, key) {
+        const row = this.resolveRow(table, key);
+        if (!row) {
+            throw new SmithersError("MISSING_OUTPUT", `Missing output for nodeId=${key.nodeId} iteration=${key.iteration ?? 0}`, { nodeId: key.nodeId, iteration: key.iteration ?? 0 });
+        }
+        return row;
+    }
+    /**
+   * @param {any} table
+   * @param {OutputKey} key
+   * @returns {any}
+   */
+    outputMaybe(table, key) {
+        return this.resolveRow(table, key);
+    }
+    /**
+   * @param {any} table
+   * @param {string} nodeId
+   * @returns {any}
+   */
+    latest(table, nodeId) {
+        const tableName = this.resolveTableName(table);
+        const rows = this._outputs[tableName] ?? [];
+        const matching = filterRowsByNodeId(rows, nodeId, this._currentScopes);
+        let best = undefined;
+        let bestIteration = -Infinity;
+        for (const row of matching) {
+            const iter = Number.isFinite(Number(row.iteration))
+                ? Number(row.iteration)
+                : 0;
+            if (!best || iter >= bestIteration) {
+                best = row;
+                bestIteration = iter;
+            }
+        }
+        return best;
+    }
+    /**
+   * @param {unknown} value
+   * @param {SafeParser} schema
+   * @returns {unknown[]}
+   */
+    latestArray(value, schema) {
+        if (value == null)
+            return [];
+        let arr;
+        if (typeof value === "string") {
+            try {
+                const parsed = JSON.parse(value);
+                arr = Array.isArray(parsed) ? parsed : [parsed];
+            }
+            catch {
+                return [];
+            }
+        }
+        else {
+            arr = Array.isArray(value) ? value : [value];
+        }
+        return arr.flatMap((item) => {
+            const parsed = schema.safeParse(item);
+            return parsed.success ? [parsed.data] : [];
+        });
+    }
+    /**
+   * @param {any} table
+   * @param {string} nodeId
+   * @returns {number}
+   */
+    iterationCount(table, nodeId) {
+        const tableName = this.resolveTableName(table);
+        const rows = this._outputs[tableName] ?? [];
+        const matching = filterRowsByNodeId(rows, nodeId, this._currentScopes);
+        const seen = new Set();
+        for (const row of matching) {
+            const iter = Number.isFinite(Number(row.iteration))
+                ? Number(row.iteration)
+                : 0;
+            seen.add(iter);
+        }
+        return seen.size;
+    }
+    /**
+   * @param {any} table
+   * @returns {string}
+   */
+    resolveTableName(table) {
+        if (typeof table === "string")
+            return table;
+        const zodKey = this._zodToKeyName?.get(table);
+        if (zodKey)
+            return zodKey;
+        return resolveDrizzleName(table) ?? String(table);
+    }
+    /**
+   * @param {any} table
+   * @param {OutputKey} key
+   * @returns {any | undefined}
+   */
+    resolveRow(table, key) {
+        const tableName = this.resolveTableName(table);
+        const rows = this._outputs[tableName] ?? [];
+        const matching = filterRowsByNodeId(rows, key.nodeId, this._currentScopes);
+        return matching.find((row) => {
+            return (row.iteration ?? 0) === (key.iteration ?? this.iteration);
+        });
+    }
+}
