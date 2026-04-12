@@ -6,32 +6,39 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "import": "./src/index.js",
+      "default": "./src/index.js",
+      "types": "./src/index.ts"
     },
     "./snapshot": {
-      "types": "./src/snapshot/index.ts",
-      "default": "./src/snapshot/index.ts"
+      "import": "./src/snapshot/index.js",
+      "default": "./src/snapshot/index.js",
+      "types": "./src/snapshot/index.ts"
     },
     "./fork": {
-      "types": "./src/fork/index.ts",
-      "default": "./src/fork/index.ts"
+      "import": "./src/fork/index.js",
+      "default": "./src/fork/index.js",
+      "types": "./src/fork/index.ts"
     },
     "./timeline": {
-      "types": "./src/timeline/index.ts",
-      "default": "./src/timeline/index.ts"
+      "import": "./src/timeline/index.js",
+      "default": "./src/timeline/index.js",
+      "types": "./src/timeline/index.ts"
     },
     "./vcs-version": {
-      "types": "./src/vcs-version/index.ts",
-      "default": "./src/vcs-version/index.ts"
+      "import": "./src/vcs-version/index.js",
+      "default": "./src/vcs-version/index.js",
+      "types": "./src/vcs-version/index.ts"
     },
     "./metrics": {
-      "types": "./src/metrics.ts",
-      "default": "./src/metrics.ts"
+      "import": "./src/metrics.js",
+      "default": "./src/metrics.js",
+      "types": "./src/metrics.ts"
     },
     "./*": {
-      "types": "./src/*.ts",
-      "default": "./src/*.ts"
+      "import": "./src/*.js",
+      "default": "./src/*.js",
+      "types": "./src/*.ts"
     }
   },
   "files": [
