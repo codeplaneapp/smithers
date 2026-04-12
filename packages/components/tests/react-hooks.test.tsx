@@ -5,6 +5,7 @@ import { Workflow, Task, Ralph, runWorkflow } from "smithers";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { createTestSmithers } from "./helpers";
 import { outputSchemas } from "./schema";
+import { Effect } from "effect";
 
 describe("React hooks e2e", () => {
   test("useState setter triggers re-render with updated state", async () => {
@@ -49,7 +50,7 @@ describe("React hooks e2e", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     // The effect should have set label to "updated-by-effect".
@@ -94,7 +95,7 @@ describe("React hooks e2e", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     // The effect must have fired
@@ -135,7 +136,7 @@ describe("React hooks e2e", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     // useRef value persists across renders — later values must be > first
@@ -179,7 +180,7 @@ describe("React hooks e2e", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     // useEffect should have fired for multiple distinct iteration values
@@ -242,7 +243,7 @@ describe("TanStack Query e2e", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
     // The agent must have received the query data (initialData=42 or fetched=999)
     expect(capturedValue).toBeDefined();

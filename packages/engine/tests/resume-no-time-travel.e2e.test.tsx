@@ -56,6 +56,7 @@ import React from "react";
 import { createSmithers, Task, Workflow, runWorkflow } from ${JSON.stringify(smithersPath)};
 import { outputSchemas } from ${JSON.stringify(schemaPath)};
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { Effect } from "effect";
 
 function readCounter(path) {
   if (!existsSync(path)) return 0;
@@ -101,10 +102,10 @@ const workflow = api.smithers(() =>
   ),
 );
 
-await runWorkflow(workflow, {
+await Effect.runPromise(runWorkflow(workflow, {
   input: {},
   runId: ${JSON.stringify(params.runId)},
-});
+}));
 `;
 
   const child = spawn(process.execPath, ["-e", script], {
@@ -175,21 +176,21 @@ describe("resume without time travel", () => {
         </Workflow>
       ));
 
-      const first = await runWorkflow(workflow, {
+      const first = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: "resume-no-time-travel-retry",
-      });
+      }));
       expect(first.status).toBe("failed");
 
       const firstNodes = await adapter.listNodes(first.runId);
       expect(nodeState(firstNodes as any[], "analyze")).toBe("finished");
       expect(nodeState(firstNodes as any[], "implement")).toBe("failed");
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(resumed.status).toBe("failed");
 
       const analyzeAttempts = await adapter.listAttempts(first.runId, "analyze", 0);
@@ -263,17 +264,17 @@ describe("resume without time travel", () => {
         </Workflow>
       ));
 
-      const first = await runWorkflow(originalWorkflow, {
+      const first = await Effect.runPromise(runWorkflow(originalWorkflow, {
         input: {},
         runId: "resume-no-time-travel-retry-upgraded",
-      });
+      }));
       expect(first.status).toBe("failed");
 
-      const resumed = await runWorkflow(upgradedWorkflow, {
+      const resumed = await Effect.runPromise(runWorkflow(upgradedWorkflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(resumed.status).toBe("finished");
 
       const analyzeAttempts = await adapter.listAttempts(first.runId, "analyze", 0);
@@ -317,18 +318,18 @@ describe("resume without time travel", () => {
         </Workflow>
       ));
 
-      const first = await runWorkflow(workflow, {
+      const first = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: "resume-no-time-travel-idempotent",
-      });
+      }));
       expect(first.status).toBe("finished");
       expect(callCount).toBe(1);
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(resumed.status).toBe("finished");
       expect(callCount).toBe(1);
 
@@ -380,12 +381,12 @@ describe("resume without time travel", () => {
         </Workflow>
       ));
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId,
         resume: true,
         force: true,
-      });
+      }));
       expect(resumed.status).toBe("failed");
       expect((resumed as any).error?.code).toBe("RUN_OWNER_ALIVE");
       expect(readCounter(counterPath)).toBe(1);
@@ -460,12 +461,12 @@ describe("resume without time travel", () => {
         </Workflow>
       ));
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId,
         resume: true,
         force: true,
-      });
+      }));
       expect(resumed.status).toBe("finished");
       expect(readCounter(counterPath)).toBe(2);
 

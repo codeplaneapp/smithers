@@ -16,6 +16,7 @@ import { SmithersDb } from "@smithers/db/adapter";
 import { renderPrometheusMetrics } from "@smithers/observability";
 import { createTestSmithers } from "../../smithers/tests/helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 const schemas = {
   a: z.object({ v: z.number() }),
@@ -23,10 +24,10 @@ const schemas = {
 };
 
 function runInTestRoot(workflow: any, dbPath: string, opts: any) {
-  return runWorkflow(workflow, {
+  return Effect.runPromise(runWorkflow(workflow, {
     ...opts,
     rootDir: dirname(dbPath),
-  });
+  }));
 }
 
 function asyncPendingMetric(kind: "approval" | "event"): number {

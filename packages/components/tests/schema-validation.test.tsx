@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { Workflow, Task, runWorkflow } from "smithers";
 import { createTestSmithers } from "./helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 describe("schema validation", () => {
   test("static payload with wrong type fails validation", async () => {
@@ -18,7 +19,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("failed");
     cleanup();
   });
@@ -36,7 +37,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("failed");
     cleanup();
   });
@@ -54,7 +55,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.out).all();
     expect(rows[0].name).toBe("test");
@@ -86,7 +87,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     expect(calls).toBe(2);
     const rows = (db as any).select().from(tables.out).all();
@@ -110,7 +111,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.out).all();
     expect(rows[0].required).toBe("yes");
@@ -130,7 +131,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.out).all();
     expect(rows[0].tags).toEqual(["a", "b", "c"]);
@@ -150,7 +151,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.out).all();
     expect(rows[0].meta).toEqual({ key: "x", val: 42 });
@@ -170,7 +171,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.out).all();
     expect(rows[0].active).toBeTruthy();
@@ -202,7 +203,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     // The initial generate call (1) + 3 schema fix attempts = 4 total
     expect(calls).toBe(4);
     expect(r.status).toBe("failed");
@@ -237,7 +238,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     // 1 initial + 3 schema retries (3rd succeeds) = 4 total
     expect(calls).toBe(4);
@@ -276,7 +277,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     // First attempt: 1 initial + 3 schema retries = 4 calls (all fail)
     // Second attempt (retry): 1 call succeeds = 5 total
@@ -323,7 +324,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     expect(calls).toBe(2);
     // The second call (schema retry) should receive messages, not just a prompt
@@ -368,7 +369,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     expect(calls).toBe(2);
     const rows = (db as any).select().from(tables.out).all();
@@ -407,7 +408,7 @@ describe("schema validation", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     expect(calls).toBe(2);
     const rows = (db as any).select().from(tables.out).all();

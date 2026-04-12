@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
+import { Effect } from "effect";
 
 function withSuppressedReactPropWarnings<T>(render: () => T): T {
   const originalConsoleError = console.error;
@@ -110,7 +111,7 @@ describe("Task deps", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const summaryRows = (db as any).select().from(tables.summary).all();

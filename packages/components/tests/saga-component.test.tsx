@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { Saga, TryCatchFinally, runWorkflow } from "smithers";
 import { createTestSmithers } from "./helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 const COMPONENT_TIMEOUT_MS = 30_000;
 
@@ -51,7 +52,7 @@ describe("TryCatchFinally", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const tryRows = (db as any).select().from(tables.tryResult).all();
@@ -108,7 +109,7 @@ describe("TryCatchFinally", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const tryRows = (db as any).select().from(tables.tryResult).all();
@@ -176,7 +177,7 @@ describe("Saga", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const reservationRows = (db as any).select().from(tables.reservation).all();
@@ -241,7 +242,7 @@ describe("Saga", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const reservationRows = (db as any).select().from(tables.reservation).all();

@@ -12,6 +12,7 @@ import {
 } from "smithers";
 import { createTestSmithers } from "../../smithers/tests/helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 const schemas = {
   outputA: z.object({ value: z.number() }),
@@ -37,7 +38,7 @@ describe("runWorkflow end-to-end", () => {
           </Task>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("finished");
       cleanup();
     },
@@ -60,7 +61,7 @@ describe("runWorkflow end-to-end", () => {
           </Sequence>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("finished");
 
       const rowsA = await (db as any).select().from(tables.outputA);
@@ -90,7 +91,7 @@ describe("runWorkflow end-to-end", () => {
           </Parallel>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("finished");
 
       const rowsA = await (db as any).select().from(tables.outputA);
@@ -123,7 +124,7 @@ describe("runWorkflow end-to-end", () => {
           />
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("finished");
 
       const rowsA = await (db as any).select().from(tables.outputA);
@@ -145,7 +146,7 @@ describe("runWorkflow end-to-end", () => {
           </Task>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("finished");
 
       const rows = await (db as any).select().from(tables.outputA);
@@ -169,7 +170,7 @@ describe("runWorkflow end-to-end", () => {
           </Task>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("finished");
 
       const rows = await (db as any).select().from(tables.outputA);
@@ -190,7 +191,7 @@ describe("runWorkflow end-to-end", () => {
           </Task>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("finished");
 
       const rows = await (db as any).select().from(tables.outputA);
@@ -218,7 +219,7 @@ describe("runWorkflow end-to-end", () => {
           </Sequence>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("finished");
 
       const rowsB = await (db as any).select().from(tables.outputB);
@@ -247,7 +248,7 @@ describe("runWorkflow end-to-end", () => {
           </Sequence>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("finished");
 
       const rows = await (db as any).select().from(tables.outputB);
@@ -270,7 +271,7 @@ describe("runWorkflow end-to-end", () => {
           </Loop>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("finished");
 
       const rows = await (db as any).select().from(tables.outputA);
@@ -311,7 +312,7 @@ describe("runWorkflow end-to-end", () => {
           </MergeQueue>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("finished");
       // Concurrency should never exceed 1
       expect(Math.max(...concurrentCount)).toBeLessThanOrEqual(1);
@@ -325,7 +326,7 @@ describe("runWorkflow end-to-end", () => {
     async () => {
       const { smithers, cleanup } = build();
       const wf = smithers((_ctx) => <Workflow name="empty" />);
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("finished");
       cleanup();
     },
@@ -343,9 +344,9 @@ describe("runWorkflow end-to-end", () => {
           </Task>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, {
+      const result = await Effect.runPromise(runWorkflow(wf, {
         input: { multiplier: 7 },
-      });
+      }));
       expect(result.status).toBe("finished");
 
       const rows = await (db as any).select().from(tables.outputA);
@@ -369,7 +370,7 @@ describe("runWorkflow end-to-end", () => {
           </Task>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("failed");
       cleanup();
     },
@@ -389,7 +390,7 @@ describe("runWorkflow end-to-end", () => {
           </Task>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("failed");
       cleanup();
     },
@@ -412,7 +413,7 @@ describe("runWorkflow end-to-end", () => {
           </Task>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
       expect(result.status).toBe("finished");
       expect(attempts).toBe(3);
       cleanup();
@@ -432,10 +433,10 @@ describe("runWorkflow end-to-end", () => {
           </Task>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, {
+      const result = await Effect.runPromise(runWorkflow(wf, {
         input: {},
         onProgress: (e) => events.push(e.type),
-      });
+      }));
       expect(result.status).toBe("finished");
       expect(events).toContain("RunStarted");
       expect(events).toContain("NodeStarted");
@@ -463,10 +464,10 @@ describe("runWorkflow end-to-end", () => {
       ));
       // Abort after a short delay
       setTimeout(() => controller.abort(), 50);
-      const result = await runWorkflow(wf, {
+      const result = await Effect.runPromise(runWorkflow(wf, {
         input: {},
         signal: controller.signal,
-      });
+      }));
       expect(["cancelled", "failed"]).toContain(result.status);
       cleanup();
     },

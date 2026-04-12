@@ -4,6 +4,7 @@ import { SmithersDb } from "@smithers/db/adapter";
 import { Task, Workflow, runWorkflow } from "smithers";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { outputSchemas } from "../../smithers/tests/schema";
+import { Effect } from "effect";
 
 test("a hijacked conversation-mode agent can be resumed by Smithers on the next attempt", async () => {
   const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
@@ -63,10 +64,10 @@ test("a hijacked conversation-mode agent can be resumed by Smithers on the next 
     </Workflow>
   ));
 
-  const runPromise = runWorkflow(workflow, {
+  const runPromise = Effect.runPromise(runWorkflow(workflow, {
     input: {},
     runId: "run-sdk-hijack-runtime",
-  });
+  }));
 
   await started;
   await adapter.requestRunHijack("run-sdk-hijack-runtime", Date.now(), "openai-sdk");
@@ -88,11 +89,11 @@ test("a hijacked conversation-mode agent can be resumed by Smithers on the next 
     { role: "assistant", content: "I have inspected the repo." },
   ]);
 
-  const resumed = await runWorkflow(workflow, {
+  const resumed = await Effect.runPromise(runWorkflow(workflow, {
     input: {},
     runId: "run-sdk-hijack-runtime",
     resume: true,
-  });
+  }));
 
   expect(resumed.status).toBe("finished");
   expect(messageHistory).toHaveLength(2);

@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { buildContext, createSmithersContext } from "@smithers/react-reconciler/context";
+import { SmithersCtx, createSmithersContext } from "@smithers/react-reconciler/context";
 import { z } from "zod";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-describe("buildContext edge cases", () => {
+describe("SmithersCtx edge cases", () => {
   test("output with iteration=0 matches when ctx iteration=0", () => {
     const row = { nodeId: "n", iteration: 0, v: 1 };
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -18,7 +18,7 @@ describe("buildContext edge cases", () => {
 
   test("output falls back to ctx.iteration when key.iteration is undefined", () => {
     const row = { nodeId: "n", iteration: 2, v: "val" };
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 2,
       input: {},
@@ -28,7 +28,7 @@ describe("buildContext edge cases", () => {
   });
 
   test("output throws descriptive error on missing row", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -45,7 +45,7 @@ describe("buildContext edge cases", () => {
       { nodeId: "b", iteration: 1, v: 2 },
       { nodeId: "a", iteration: 1, v: 3 },
     ];
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -57,7 +57,7 @@ describe("buildContext edge cases", () => {
 
   test("latest handles non-numeric iteration gracefully", () => {
     const rows = [{ nodeId: "n", iteration: undefined as any, v: 1 }];
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -73,7 +73,7 @@ describe("buildContext edge cases", () => {
       { nodeId: "n", iteration: 0 },
       { nodeId: "n", iteration: 1 },
     ];
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -83,7 +83,7 @@ describe("buildContext edge cases", () => {
   });
 
   test("latestArray with JSON string containing single value", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -94,7 +94,7 @@ describe("buildContext edge cases", () => {
   });
 
   test("latestArray with undefined returns empty", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -105,7 +105,7 @@ describe("buildContext edge cases", () => {
 
   test("latestArray with object schema", () => {
     const schema = z.object({ name: z.string(), age: z.number() });
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -123,7 +123,7 @@ describe("buildContext edge cases", () => {
   });
 
   test("input normalization with extra non-payload keys preserves raw", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: { runId: "r1", payload: { x: 1 }, extra: "val" },
@@ -138,7 +138,7 @@ describe("buildContext edge cases", () => {
   });
 
   test("input normalization with non-object returns as-is", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: "just a string",
@@ -148,7 +148,7 @@ describe("buildContext edge cases", () => {
   });
 
   test("input normalization with null returns null", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: null,
@@ -158,7 +158,7 @@ describe("buildContext edge cases", () => {
   });
 
   test("input returns string payload as-is if not valid JSON", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: { runId: "r1", payload: "not-json{" },
@@ -168,7 +168,7 @@ describe("buildContext edge cases", () => {
   });
 
   test("outputs function with nonexistent table returns empty array", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -180,7 +180,7 @@ describe("buildContext edge cases", () => {
   test("resolves Drizzle table name via getTableName fallback", () => {
     // String table names are resolved directly
     const row = { nodeId: "n", iteration: 0 };
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -207,7 +207,7 @@ describe("createSmithersContext", () => {
   test("useCtx reads only from its matching provider", () => {
     const ctx1 = createSmithersContext();
     const ctx2 = createSmithersContext();
-    const value = buildContext({
+    const value = new SmithersCtx({
       runId: "ctx-run",
       iteration: 0,
       input: {},

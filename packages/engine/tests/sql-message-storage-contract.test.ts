@@ -7,6 +7,7 @@ import { SmithersDb, Task, Workflow, runWorkflow } from "smithers";
 import { jsx } from "smithers/jsx-runtime";
 import { createTestDb, createTestSmithers } from "../../smithers/tests/helpers";
 import { ddl, schema } from "../../smithers/tests/schema";
+import { Effect } from "effect";
 
 const contractSchemas = {
   activity: z.object({ value: z.number() }),
@@ -79,10 +80,10 @@ describe("sql message storage contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, {
+      const first = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: "sql-storage-replay",
-      });
+      }));
       expect(first.status).toBe("finished");
 
       const adapter = new SmithersDb(db as any);
@@ -93,11 +94,11 @@ describe("sql message storage contract", () => {
       const beforeEvents = await getSqlMessageStorage(db as any).listEventHistory(first.runId);
       const beforeNodeFinished = beforeEvents.filter((event) => event.type === "NodeFinished");
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(resumed.status).toBe("finished");
       expect(calls).toBe(1);
 

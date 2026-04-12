@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { Kanban, runWorkflow } from "smithers";
 import { createTestSmithers } from "./helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 const COMPONENT_TIMEOUT_MS = 30_000;
 
@@ -122,7 +123,7 @@ describe("Kanban", () => {
       );
     });
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const triageRows = (db as any).select().from(tables.triage).all();
@@ -189,7 +190,7 @@ describe("Kanban", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const triageRows = (db as any).select().from(tables.triage).all();
@@ -320,7 +321,7 @@ describe("Kanban", () => {
       );
     });
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
     expect(workCalls.t1).toBe(2);
 

@@ -15,6 +15,7 @@ import {
 } from "smithers";
 import { approveNode, denyNode } from "../src/approvals";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
+import { Effect } from "effect";
 
 const contractSchemas = {
   out: z.object({ v: z.number() }),
@@ -56,7 +57,7 @@ describe("deferred contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-approval");
 
       const beforeRows = await (db as any).select().from(tables.out);
@@ -64,11 +65,11 @@ describe("deferred contract", () => {
 
       await approveNode(new SmithersDb(db as any), first.runId, "gate", 0);
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
 
       expect(resumed.status).toBe("finished");
 
@@ -109,16 +110,16 @@ describe("deferred contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-approval");
 
       await approveNode(new SmithersDb(db as any), first.runId, "gate", 0);
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
 
       expect(resumed.status).toBe("finished");
 
@@ -151,16 +152,16 @@ describe("deferred contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-approval");
 
       await denyNode(new SmithersDb(db as any), first.runId, "gate", 0);
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
 
       expect(resumed.status).toBe("failed");
 
@@ -196,16 +197,16 @@ describe("deferred contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-approval");
 
       await denyNode(new SmithersDb(db as any), first.runId, "gate", 0);
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
 
       expect(resumed.status).toBe("finished");
 
@@ -251,16 +252,16 @@ describe("deferred contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-timer");
 
       await sleep(180);
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
 
       expect(resumed.status).toBe("finished");
 
@@ -297,23 +298,23 @@ describe("deferred contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-timer");
 
-      const second = await runWorkflow(workflow, {
+      const second = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(second.status).toBe("waiting-timer");
 
       await sleep(1700);
 
-      const third = await runWorkflow(workflow, {
+      const third = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(third.status).toBe("finished");
 
       const rows = await (db as any).select().from(tables.out);
@@ -344,7 +345,7 @@ describe("deferred contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-event");
 
       await signalRun(
@@ -354,11 +355,11 @@ describe("deferred contract", () => {
         { ok: true },
       );
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(resumed.status).toBe("finished");
 
       const rows = await (db as any).select().from(tables.eventOut);

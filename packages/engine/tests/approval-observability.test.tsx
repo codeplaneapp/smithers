@@ -6,6 +6,7 @@ import { SmithersDb } from "@smithers/db/adapter";
 import { renderPrometheusMetrics } from "@smithers/observability";
 import { createTestSmithers } from "../../smithers/tests/helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 const schemas = {
   a: z.object({ v: z.number() }),
@@ -35,7 +36,7 @@ describe("approval observability", () => {
         </Workflow>
       ));
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-approval");
 
       const adapter = new SmithersDb(db as any);
@@ -61,7 +62,7 @@ describe("approval observability", () => {
         </Workflow>
       ));
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-approval");
 
       const adapter = new SmithersDb(db as any);

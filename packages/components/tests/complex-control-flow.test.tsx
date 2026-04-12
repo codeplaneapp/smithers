@@ -12,6 +12,7 @@ import {
 } from "smithers";
 import { createTestSmithers, sleep } from "./helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 describe("nested control flow", () => {
   test("sequence inside parallel executes each sequence independently", async () => {
@@ -43,7 +44,7 @@ describe("nested control flow", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {}, maxConcurrency: 4 });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {}, maxConcurrency: 4 }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.out).all();
     expect(rows.length).toBe(4);
@@ -76,7 +77,7 @@ describe("nested control flow", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {}, maxConcurrency: 4 });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {}, maxConcurrency: 4 }));
     expect(r.status).toBe("finished");
     expect(order.indexOf("after")).toBeGreaterThan(order.indexOf("p1"));
     expect(order.indexOf("after")).toBeGreaterThan(order.indexOf("p2"));
@@ -109,7 +110,7 @@ describe("nested control flow", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     const evenRows = (db as any).select().from(tables.even).all();
     const oddRows = (db as any).select().from(tables.odd).all();
@@ -139,7 +140,7 @@ describe("nested control flow", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     const afterRows = (db as any).select().from(tables.after).all();
     expect(afterRows[0].count).toBe(3);
@@ -161,7 +162,7 @@ describe("nested control flow", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.out).all();
     const nodeIds = rows.map((r: any) => r.nodeId).sort();
@@ -185,7 +186,7 @@ describe("nested control flow", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     cleanup();
   });
@@ -199,7 +200,7 @@ describe("nested control flow", () => {
       <Workflow name="empty" />
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     cleanup();
   });

@@ -14,6 +14,7 @@ import { describe, expect, test } from "bun:test";
 import { Loop, Sequence, Task, Workflow, runWorkflow } from "smithers";
 import { createTestSmithers } from "../../smithers/tests/helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 describe("Loop until re-evaluation", () => {
   test("Loop exits when until becomes true after iteration", async () => {
@@ -50,10 +51,10 @@ describe("Loop until re-evaluation", () => {
       );
     });
 
-    const result = await runWorkflow(workflow, {
+    const result = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       runId: "loop-until-reeval",
-    });
+    }));
 
     expect(result.status).toBe("finished");
     // Agent should be called exactly twice: once for iteration 0, once for iteration 1
@@ -109,10 +110,10 @@ describe("Loop until re-evaluation", () => {
       );
     });
 
-    const result = await runWorkflow(workflow, {
+    const result = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       runId: "loop-until-reeval-2",
-    });
+    }));
 
     expect(result.status).toBe("finished");
     expect(callCount).toBe(2);
@@ -168,10 +169,10 @@ describe("Loop until re-evaluation", () => {
       );
     });
 
-    const result = await runWorkflow(workflow, {
+    const result = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       runId: "parallel-loops",
-    });
+    }));
 
     expect(result.status).toBe("finished");
     expect(callCounts["task-1"]).toBe(2);
@@ -230,10 +231,10 @@ describe("Loop until re-evaluation", () => {
       );
     });
 
-    const result = await runWorkflow(workflow, {
+    const result = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       runId: "parallel-loops-outputMaybe",
-    });
+    }));
 
     expect(result.status).toBe("finished");
     expect(callCounts["task-a"]).toBe(2);
@@ -277,10 +278,10 @@ describe("Loop until re-evaluation", () => {
       );
     });
 
-    const result = await runWorkflow(workflow, {
+    const result = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       runId: "loop-outputMaybe",
-    });
+    }));
 
     expect(result.status).toBe("finished");
     expect(callCount).toBe(2);

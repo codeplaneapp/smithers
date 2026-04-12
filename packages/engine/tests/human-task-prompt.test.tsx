@@ -9,6 +9,7 @@ import {
 import { HumanTask } from "@smithers/components/components/index";
 import { buildHumanRequestId } from "../src/human-requests";
 import { createTestSmithers } from "../../smithers/tests/helpers";
+import { Effect } from "effect";
 
 function ReviewPrompt() {
   return (
@@ -37,10 +38,10 @@ describe("HumanTask prompt rendering", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, {
+      const result = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: "human-task-jsx-prompt",
-      });
+      }));
 
       expect(result.status).toBe("waiting-approval");
 

@@ -4,6 +4,7 @@ import { SmithersDb } from "@smithers/db/adapter";
 import { Task, Workflow, runWorkflow } from "smithers";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { outputSchemas } from "../../smithers/tests/schema";
+import { Effect } from "effect";
 
 const HIJACK_E2E_TIMEOUT_MS = 15_000;
 
@@ -70,10 +71,10 @@ describe("hijack e2e", () => {
 
       try {
         const runId = "run-hijack-e2e-cli";
-        const runPromise = runWorkflow(workflow, {
+        const runPromise = Effect.runPromise(runWorkflow(workflow, {
           input: {},
           runId,
-        });
+        }));
 
         await started;
         await adapter.requestRunHijack(runId, Date.now(), "claude-code");
@@ -99,11 +100,11 @@ describe("hijack e2e", () => {
         const followupAttemptsBeforeResume = await adapter.listAttempts(runId, "finish", 0);
         expect(followupAttemptsBeforeResume).toHaveLength(0);
 
-        const resumed = await runWorkflow(workflow, {
+        const resumed = await Effect.runPromise(runWorkflow(workflow, {
           input: {},
           runId,
           resume: true,
-        });
+        }));
 
         expect(resumed.status).toBe("finished");
         expect(resumeSessions).toEqual([undefined, "session-e2e-1"]);
@@ -193,10 +194,10 @@ describe("hijack e2e", () => {
 
       try {
         const runId = "run-hijack-e2e-sdk";
-        const runPromise = runWorkflow(workflow, {
+        const runPromise = Effect.runPromise(runWorkflow(workflow, {
           input: {},
           runId,
-        });
+        }));
 
         await started;
         await adapter.requestRunHijack(runId, Date.now(), "openai-sdk");
@@ -225,11 +226,11 @@ describe("hijack e2e", () => {
           { role: "assistant", content: "I have inspected the repo." },
         ]);
 
-        const resumed = await runWorkflow(workflow, {
+        const resumed = await Effect.runPromise(runWorkflow(workflow, {
           input: {},
           runId,
           resume: true,
-        });
+        }));
 
         expect(resumed.status).toBe("finished");
         expect(messageHistory).toHaveLength(2);
@@ -268,10 +269,10 @@ describe("hijack e2e", () => {
 
       try {
         const runId = "run-hijack-e2e-finished-run";
-        const finished = await runWorkflow(workflow, {
+        const finished = await Effect.runPromise(runWorkflow(workflow, {
           input: {},
           runId,
-        });
+        }));
 
         expect(finished.status).toBe("finished");
 
@@ -285,11 +286,11 @@ describe("hijack e2e", () => {
         const afterRequest = await adapter.getRun(runId);
         expect(afterRequest?.status).toBe("finished");
 
-        const resumed = await runWorkflow(workflow, {
+        const resumed = await Effect.runPromise(runWorkflow(workflow, {
           input: {},
           runId,
           resume: true,
-        });
+        }));
 
         expect(resumed.status).toBe("finished");
 

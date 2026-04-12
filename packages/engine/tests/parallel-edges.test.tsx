@@ -4,6 +4,7 @@ import { SmithersRenderer } from "@smithers/react-reconciler/dom/renderer";
 import { Parallel, Task, Workflow, runWorkflow } from "smithers";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { outputSchemas } from "../../smithers/tests/schema";
+import { Effect } from "effect";
 
 function buildSmithers() {
   return createTestSmithers(outputSchemas);
@@ -78,7 +79,7 @@ describe("<Parallel> edge maxConcurrency semantics", () => {
           </Parallel>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {}, maxConcurrency: 3 });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {}, maxConcurrency: 3 }));
       expect(result.status).toBe("finished");
       // Should not be capped by group; should reach global 3
       expect(peak).toBeGreaterThanOrEqual(3);
@@ -115,7 +116,7 @@ describe("<Parallel> edge maxConcurrency semantics", () => {
         </Parallel>
       </Workflow>
     ));
-    const result = await runWorkflow(wf, { input: {}, maxConcurrency: 4 });
+    const result = await Effect.runPromise(runWorkflow(wf, { input: {}, maxConcurrency: 4 }));
     expect(result.status).toBe("finished");
     expect(peak).toBeLessThanOrEqual(2);
     cleanup();

@@ -47,7 +47,7 @@ describe("continue-as-new", () => {
       );
     });
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const adapter = new SmithersDb(db as any);
@@ -148,7 +148,7 @@ describe("continue-as-new", () => {
       );
     });
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const adapter = new SmithersDb(db as any);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildContext } from "@smithers/react-reconciler/context";
+import { SmithersCtx } from "@smithers/react-reconciler/context";
 
 describe("context loop scoping", () => {
   test("resolves scoped nodeId via current loop iteration", () => {
@@ -11,7 +11,7 @@ describe("context loop scoping", () => {
       { nodeId: "innerTask@@outer=1", iteration: 0, value: "v1" },
       { nodeId: "innerTask@@outer=2", iteration: 0, value: "v2" },
     ];
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       iterations: {
@@ -31,7 +31,7 @@ describe("context loop scoping", () => {
   test("exact nodeId match takes priority", () => {
     const exactRow = { nodeId: "task1", iteration: 0, value: "exact" };
     const scopedRow = { nodeId: "task1@@loop=0", iteration: 0, value: "scoped" };
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       iterations: { loop: 0 },
@@ -45,7 +45,7 @@ describe("context loop scoping", () => {
     const rows = [
       { nodeId: "task@@loop=0", iteration: 0, value: "old" },
     ];
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       iterations: { loop: 5 }, // Current iteration is 5, no row for loop=5
@@ -61,7 +61,7 @@ describe("context loop scoping", () => {
       { nodeId: "task@@loop=1", iteration: 1, value: "iter1" },
       { nodeId: "task@@loop=1", iteration: 2, value: "iter2" },
     ];
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       iterations: {
@@ -83,7 +83,7 @@ describe("context loop scoping", () => {
       { nodeId: "task@@outer=1", iteration: 1 },
       { nodeId: "task@@outer=0", iteration: 0 },
     ];
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       iterations: {
@@ -101,7 +101,7 @@ describe("context loop scoping", () => {
     const rows = [
       { nodeId: "task@@scope=0", iteration: 0, value: "scoped" },
     ];
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -116,7 +116,7 @@ describe("context loop scoping", () => {
       { nodeId: "task@@loop=0", iteration: 0, value: "v0" },
       { nodeId: "task@@loop=1", iteration: 0, value: "v1" },
     ];
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       iterations: { loop: 1, "task@@loop=0": 0, "task@@loop=1": 0 },
@@ -131,7 +131,7 @@ describe("context loop scoping", () => {
 
 describe("context input normalization edge cases", () => {
   test("non-object input returned as-is", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: "just a string",
@@ -141,7 +141,7 @@ describe("context input normalization edge cases", () => {
   });
 
   test("null input returned as-is", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: null,
@@ -152,7 +152,7 @@ describe("context input normalization edge cases", () => {
 
   test("object with payload and extra keys not normalized", () => {
     const input = { runId: "r1", payload: { x: 1 }, extraKey: "y" };
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input,
@@ -163,7 +163,7 @@ describe("context input normalization edge cases", () => {
   });
 
   test("invalid JSON string payload returned as-is", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: { runId: "r1", payload: "not valid json {" },
@@ -173,7 +173,7 @@ describe("context input normalization edge cases", () => {
   });
 
   test("undefined payload returns empty object", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: { runId: "r1", payload: undefined },

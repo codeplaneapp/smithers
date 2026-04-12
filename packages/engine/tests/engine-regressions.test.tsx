@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { Task, Workflow, runWorkflow } from "smithers";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { outputSchemas } from "../../smithers/tests/schema";
+import { Effect } from "effect";
 
 function buildSmithers() {
   return createTestSmithers(outputSchemas);
@@ -45,7 +46,7 @@ describe("Engine regressions", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
     expect(primaryCalls).toBe(1);
     expect(fallbackCalls).toBe(1);
@@ -87,10 +88,10 @@ describe("Engine regressions", () => {
 
     const controller = new AbortController();
     const startedAt = Date.now();
-    const runPromise = runWorkflow(workflow, {
+    const runPromise = Effect.runPromise(runWorkflow(workflow, {
       input: {},
       signal: controller.signal,
-    });
+    }));
     await sleep(100);
     controller.abort();
 

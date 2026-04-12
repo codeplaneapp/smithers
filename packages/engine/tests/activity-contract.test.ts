@@ -5,6 +5,7 @@ import { SmithersDb, Task, Workflow, runWorkflow } from "smithers";
 import { smithersCache } from "@smithers/db/internal-schema";
 import { jsx } from "smithers/jsx-runtime";
 import { createTestSmithers } from "../../smithers/tests/helpers";
+import { Effect } from "effect";
 
 const contractSchemas = {
   activity: z.object({ value: z.number() }),
@@ -31,7 +32,7 @@ describe("legacy executeTask contract", () => {
         }),
       );
 
-      const result = await runWorkflow(workflow, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(result.status).toBe("finished");
 
       const rows = await (db as any).select().from(tables.activity);
@@ -85,7 +86,7 @@ describe("legacy executeTask contract", () => {
         }),
       );
 
-      const result = await runWorkflow(workflow, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(result.status).toBe("finished");
       expect(calls).toBe(retries + 1);
 
@@ -130,8 +131,8 @@ describe("legacy executeTask contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {}, runId: "contract-cache-r1" });
-      const second = await runWorkflow(workflow, { input: {}, runId: "contract-cache-r2" });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "contract-cache-r1" }));
+      const second = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "contract-cache-r2" }));
 
       expect(first.status).toBe("finished");
       expect(second.status).toBe("finished");
@@ -171,7 +172,7 @@ describe("legacy executeTask contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {}, runId: "contract-key-r1" });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "contract-key-r1" }));
       expect(first.status).toBe("finished");
 
       const rowsAfterFirstRun = await (db as any).select().from(smithersCache);
@@ -179,7 +180,7 @@ describe("legacy executeTask contract", () => {
       const firstCacheKey = rowsAfterFirstRun[0]?.cacheKey;
       expect(typeof firstCacheKey).toBe("string");
 
-      const second = await runWorkflow(workflow, { input: {}, runId: "contract-key-r2" });
+      const second = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "contract-key-r2" }));
       expect(second.status).toBe("finished");
 
       const rowsAfterSecondRun = await (db as any).select().from(smithersCache);
@@ -220,7 +221,7 @@ describe("legacy executeTask contract", () => {
         }),
       );
 
-      const result = await runWorkflow(workflow, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(result.status).toBe("finished");
 
       const attempts = await new SmithersDb(db as any).listAttempts(
@@ -251,7 +252,7 @@ describe("legacy executeTask contract", () => {
         }),
       );
 
-      const result = await runWorkflow(workflow, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(result.status).toBe("finished");
 
       const rows = await (db as any).select().from(tables.activity);
@@ -298,7 +299,7 @@ describe("legacy executeTask contract", () => {
         }),
       );
 
-      const result = await runWorkflow(workflow, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(result.status).toBe("finished");
       expect(generateCalls).toBe(1);
 

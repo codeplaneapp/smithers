@@ -12,6 +12,7 @@ import { approveNode } from "../src/approvals";
 import { SmithersDb } from "@smithers/db/adapter";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { outputSchemas } from "../../smithers/tests/schema";
+import { Effect } from "effect";
 
 function buildSmithers() {
   return createTestSmithers(outputSchemas);
@@ -30,7 +31,7 @@ describe("Ralph iteration", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const rows = await (db as any).select().from(tables.outputA);
@@ -60,7 +61,7 @@ describe("Ralph iteration", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const rowsA = await (db as any).select().from(tables.outputA);
@@ -90,7 +91,7 @@ describe("Ralph iteration", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("failed");
     cleanup();
   });
@@ -126,10 +127,10 @@ describe("Parallel concurrency", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, {
+    const result = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       maxConcurrency: 4,
-    });
+    }));
     expect(result.status).toBe("finished");
     expect(max).toBeLessThanOrEqual(2);
     cleanup();
@@ -152,17 +153,17 @@ describe("Approvals", () => {
       </Workflow>
     ));
 
-    const first = await runWorkflow(workflow, { input: {} });
+    const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(first.status).toBe("waiting-approval");
 
     const adapter = new SmithersDb(db as any);
     await approveNode(adapter, first.runId, "gate", 0, "ok", "test");
 
-    const resumed = await runWorkflow(workflow, {
+    const resumed = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       runId: first.runId,
       resume: true,
-    });
+    }));
     expect(resumed.status).toBe("finished");
 
     const rowsB = await (db as any).select().from(tables.outputB);
@@ -182,7 +183,7 @@ describe("Compute callback children", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const rows = await (db as any).select().from(tables.outputA);
@@ -204,7 +205,7 @@ describe("Compute callback children", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const rows = await (db as any).select().from(tables.outputA);
@@ -223,7 +224,7 @@ describe("Compute callback children", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("failed");
     cleanup();
   });
@@ -241,7 +242,7 @@ describe("Compute callback children", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("failed");
     cleanup();
   });
@@ -263,7 +264,7 @@ describe("Compute callback children", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
     expect(calls).toBe(3);
 
@@ -288,7 +289,7 @@ describe("Compute callback children", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const rowsB = await (db as any).select().from(tables.outputB);
@@ -312,7 +313,7 @@ describe("Compute callback children", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
 
     const rowsA = await (db as any).select().from(tables.outputA);
@@ -339,7 +340,7 @@ describe("Renderer safeguards", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("failed");
     cleanup();
   });

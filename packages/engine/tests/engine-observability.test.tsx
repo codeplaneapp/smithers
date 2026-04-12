@@ -4,6 +4,7 @@ import { Workflow, Task, runWorkflow } from "smithers";
 import { renderPrometheusMetrics } from "@smithers/observability";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 const schemas = {
   a: z.object({ v: z.number() }),
@@ -47,7 +48,7 @@ describe("engine observability", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(result.status).toBe("finished");
       expect(metricValue("smithers_scheduler_wait_duration_ms_count")).toBeGreaterThan(before);
     } finally {

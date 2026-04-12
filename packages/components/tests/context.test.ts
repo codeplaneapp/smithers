@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { buildContext } from "@smithers/react-reconciler/context";
+import { SmithersCtx } from "@smithers/react-reconciler/context";
 import { z } from "zod";
 
-describe("buildContext", () => {
+describe("SmithersCtx", () => {
   test("output throws when row is missing", () => {
-    const ctx = buildContext({ runId: "r1", iteration: 0, input: {}, outputs: {} });
+    const ctx = new SmithersCtx({ runId: "r1", iteration: 0, input: {}, outputs: {} });
     expect(() => ctx.output("tbl", { nodeId: "x" })).toThrow("Missing output");
   });
 
   test("output returns matching row", () => {
     const row = { nodeId: "a", iteration: 0, value: 42 };
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -22,7 +22,7 @@ describe("buildContext", () => {
   test("output matches explicit iteration over default", () => {
     const row0 = { nodeId: "a", iteration: 0, v: 1 };
     const row1 = { nodeId: "a", iteration: 1, v: 2 };
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -32,13 +32,13 @@ describe("buildContext", () => {
   });
 
   test("outputMaybe returns undefined for missing row", () => {
-    const ctx = buildContext({ runId: "r1", iteration: 0, input: {}, outputs: {} });
+    const ctx = new SmithersCtx({ runId: "r1", iteration: 0, input: {}, outputs: {} });
     expect(ctx.outputMaybe("tbl", { nodeId: "x" })).toBeUndefined();
   });
 
   test("outputMaybe returns row when present", () => {
     const row = { nodeId: "n", iteration: 0 };
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -53,7 +53,7 @@ describe("buildContext", () => {
       { nodeId: "n", iteration: 2, v: "third" },
       { nodeId: "n", iteration: 1, v: "second" },
     ];
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -63,7 +63,7 @@ describe("buildContext", () => {
   });
 
   test("latest returns undefined for missing nodeId", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -73,7 +73,7 @@ describe("buildContext", () => {
   });
 
   test("latest returns undefined for empty table", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -89,7 +89,7 @@ describe("buildContext", () => {
       { nodeId: "n", iteration: 2 },
       { nodeId: "other", iteration: 0 },
     ];
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -99,12 +99,12 @@ describe("buildContext", () => {
   });
 
   test("iterationCount returns 0 for missing table", () => {
-    const ctx = buildContext({ runId: "r1", iteration: 0, input: {}, outputs: {} });
+    const ctx = new SmithersCtx({ runId: "r1", iteration: 0, input: {}, outputs: {} });
     expect(ctx.iterationCount("missing", "n")).toBe(0);
   });
 
   test("iterationCount returns 0 for missing nodeId", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -115,7 +115,7 @@ describe("buildContext", () => {
 
   test("outputs function returns rows for table key", () => {
     const rows = [{ nodeId: "a", iteration: 0 }];
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -125,13 +125,13 @@ describe("buildContext", () => {
   });
 
   test("outputs function returns empty array for missing table", () => {
-    const ctx = buildContext({ runId: "r1", iteration: 0, input: {}, outputs: {} });
+    const ctx = new SmithersCtx({ runId: "r1", iteration: 0, input: {}, outputs: {} });
     expect(ctx.outputs("missing")).toEqual([]);
   });
 
   test("outputs has named accessors for each table", () => {
     const rows = [{ nodeId: "a", iteration: 0 }];
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},
@@ -141,7 +141,7 @@ describe("buildContext", () => {
   });
 
   test("input normalizes payload-only rows", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: { runId: "r1", payload: { topic: "ai" } },
@@ -151,7 +151,7 @@ describe("buildContext", () => {
   });
 
   test("input normalizes JSON string payload", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: { runId: "r1", payload: '{"topic":"ai"}' },
@@ -161,7 +161,7 @@ describe("buildContext", () => {
   });
 
   test("input returns raw input when no payload key", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: { topic: "ai" },
@@ -171,7 +171,7 @@ describe("buildContext", () => {
   });
 
   test("input returns empty object for null payload", () => {
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: { runId: "r1", payload: null },
@@ -181,52 +181,52 @@ describe("buildContext", () => {
   });
 
   test("latestArray parses JSON string into array", () => {
-    const ctx = buildContext({ runId: "r1", iteration: 0, input: {}, outputs: {} });
+    const ctx = new SmithersCtx({ runId: "r1", iteration: 0, input: {}, outputs: {} });
     const result = ctx.latestArray('[1,2,3]', z.number());
     expect(result).toEqual([1, 2, 3]);
   });
 
   test("latestArray wraps non-array value", () => {
-    const ctx = buildContext({ runId: "r1", iteration: 0, input: {}, outputs: {} });
+    const ctx = new SmithersCtx({ runId: "r1", iteration: 0, input: {}, outputs: {} });
     const result = ctx.latestArray(42, z.number());
     expect(result).toEqual([42]);
   });
 
   test("latestArray returns empty for null", () => {
-    const ctx = buildContext({ runId: "r1", iteration: 0, input: {}, outputs: {} });
+    const ctx = new SmithersCtx({ runId: "r1", iteration: 0, input: {}, outputs: {} });
     expect(ctx.latestArray(null, z.number())).toEqual([]);
   });
 
   test("latestArray filters invalid items", () => {
-    const ctx = buildContext({ runId: "r1", iteration: 0, input: {}, outputs: {} });
+    const ctx = new SmithersCtx({ runId: "r1", iteration: 0, input: {}, outputs: {} });
     const result = ctx.latestArray([1, "bad", 3], z.number());
     expect(result).toEqual([1, 3]);
   });
 
   test("latestArray returns empty for invalid JSON string", () => {
-    const ctx = buildContext({ runId: "r1", iteration: 0, input: {}, outputs: {} });
+    const ctx = new SmithersCtx({ runId: "r1", iteration: 0, input: {}, outputs: {} });
     expect(ctx.latestArray("not json", z.number())).toEqual([]);
   });
 
   test("latestArray handles array value directly", () => {
-    const ctx = buildContext({ runId: "r1", iteration: 0, input: {}, outputs: {} });
+    const ctx = new SmithersCtx({ runId: "r1", iteration: 0, input: {}, outputs: {} });
     const result = ctx.latestArray([{ a: 1 }, { a: 2 }], z.object({ a: z.number() }));
     expect(result).toEqual([{ a: 1 }, { a: 2 }]);
   });
 
   test("ctx exposes runId", () => {
-    const ctx = buildContext({ runId: "test-run", iteration: 0, input: {}, outputs: {} });
+    const ctx = new SmithersCtx({ runId: "test-run", iteration: 0, input: {}, outputs: {} });
     expect(ctx.runId).toBe("test-run");
   });
 
   test("ctx exposes iteration", () => {
-    const ctx = buildContext({ runId: "r1", iteration: 3, input: {}, outputs: {} });
+    const ctx = new SmithersCtx({ runId: "r1", iteration: 3, input: {}, outputs: {} });
     expect(ctx.iteration).toBe(3);
   });
 
   test("ctx exposes iterations map", () => {
     const iterations = { "loop-1": 5 };
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       iterations,
@@ -240,7 +240,7 @@ describe("buildContext", () => {
     const schema = z.object({ v: z.number() });
     const zodToKeyName = new Map([[schema, "myOutput"]]);
     const row = { nodeId: "n", iteration: 0, v: 1 };
-    const ctx = buildContext({
+    const ctx = new SmithersCtx({
       runId: "r1",
       iteration: 0,
       input: {},

@@ -13,6 +13,7 @@ import {
   runWorkflow,
 } from "smithers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 /**
  * Tests for https://github.com/jjhub-ai/smithers/issues/110
@@ -90,7 +91,7 @@ describe("Issue #110: ensureWorktree baseBranch support", () => {
 
     try {
       // First run: creates the worktree (from release via fallback chain)
-      const first = await runWorkflow(workflow, { input: {}, rootDir: repoDir });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
       expect(first.status).toBe("finished");
       expect(existsSync(worktreePath)).toBe(true);
 
@@ -108,7 +109,7 @@ describe("Issue #110: ensureWorktree baseBranch support", () => {
       let second;
       try {
         // Second run: should sync against origin/release, not origin/main
-        second = await runWorkflow(workflow, { input: {}, rootDir: repoDir });
+        second = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
       } finally {
         process.env.PATH = previousPath;
       }
@@ -149,13 +150,13 @@ describe("Issue #110: ensureWorktree baseBranch support", () => {
     ));
 
     try {
-      const first = await runWorkflow(workflow, { input: {}, rootDir: repoDir });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
       expect(first.status).toBe("finished");
       expect(existsSync(worktreePath)).toBe(true);
 
       // Second run — sync path. Without baseBranch, origin/main doesn't exist,
       // but the engine should still not crash (best-effort sync with warning)
-      const second = await runWorkflow(workflow, { input: {}, rootDir: repoDir });
+      const second = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
       expect(second.status).toBe("finished");
     } finally {
       try {

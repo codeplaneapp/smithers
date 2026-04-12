@@ -13,6 +13,7 @@ import {
 } from "../src/capability-registry";
 import { createTestSmithers } from "../../smithers/tests/helpers";
 import { createTempRepo, runSmithers } from "../../smithers/tests/e2e-helpers";
+import { Effect } from "effect";
 
 function withMutedWarn<T>(fn: () => T): T {
   const originalWarn = console.warn;
@@ -214,8 +215,8 @@ describe("engine cache capability fingerprint", () => {
         ),
       );
 
-    await runWorkflow(makeWorkflow(capabilityA), { input: {}, runId: "r1" });
-    await runWorkflow(makeWorkflow(capabilityB), { input: {}, runId: "r2" });
+    await Effect.runPromise(runWorkflow(makeWorkflow(capabilityA), { input: {}, runId: "r1" }));
+    await Effect.runPromise(runWorkflow(makeWorkflow(capabilityB), { input: {}, runId: "r2" }));
 
     expect(calls).toBe(2);
     cleanup();
@@ -254,8 +255,8 @@ describe("engine cache capability fingerprint", () => {
       ),
     );
 
-    await runWorkflow(workflow, { input: {}, runId: "legacy-r1" });
-    await runWorkflow(workflow, { input: {}, runId: "legacy-r2" });
+    await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "legacy-r1" }));
+    await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "legacy-r2" }));
 
     expect(calls).toBe(1);
     cleanup();

@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { Workflow, Task, Parallel, runWorkflow } from "smithers";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 describe("concurrent workflow safety", () => {
   test("two independent runs complete without interference", async () => {
@@ -22,8 +23,8 @@ describe("concurrent workflow safety", () => {
     ));
 
     const [r1, r2] = await Promise.all([
-      runWorkflow(workflow, { input: {}, runId: "run-1" }),
-      runWorkflow(workflow, { input: {}, runId: "run-2" }),
+      Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "run-1" })),
+      Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "run-2" })),
     ]);
 
     expect(r1.status).toBe("finished");
@@ -65,10 +66,10 @@ describe("concurrent workflow safety", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, {
+    const r = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       maxConcurrency: maxC,
-    });
+    }));
     expect(r.status).toBe("finished");
     expect(peak).toBeLessThanOrEqual(maxC);
     cleanup();
@@ -100,7 +101,7 @@ describe("concurrent workflow safety", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {}, maxConcurrency: 1 });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {}, maxConcurrency: 1 }));
     expect(r.status).toBe("finished");
     expect(maxConcurrent).toBe(1);
     cleanup();

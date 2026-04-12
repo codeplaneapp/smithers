@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { Workflow, Task, runWorkflow } from "smithers";
 import { createTestSmithers } from "../../smithers/tests/helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 describe("workflow caching", () => {
   test("cache=true reuses output across runs with same prompt", async () => {
@@ -25,8 +26,8 @@ describe("workflow caching", () => {
       </Workflow>
     ));
 
-    await runWorkflow(workflow, { input: {}, runId: "r1" });
-    await runWorkflow(workflow, { input: {}, runId: "r2" });
+    await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "r1" }));
+    await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "r2" }));
     expect(calls).toBe(1);
     cleanup();
   });
@@ -51,8 +52,8 @@ describe("workflow caching", () => {
       </Workflow>
     ));
 
-    await runWorkflow(workflow, { input: {}, runId: "r1" });
-    await runWorkflow(workflow, { input: {}, runId: "r2" });
+    await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "r1" }));
+    await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "r2" }));
     expect(calls).toBe(2);
     cleanup();
   });
@@ -78,8 +79,8 @@ describe("workflow caching", () => {
         </Workflow>
       ));
 
-    await runWorkflow(makeWorkflow("prompt A"), { input: {}, runId: "r1" });
-    await runWorkflow(makeWorkflow("prompt B"), { input: {}, runId: "r2" });
+    await Effect.runPromise(runWorkflow(makeWorkflow("prompt A"), { input: {}, runId: "r1" }));
+    await Effect.runPromise(runWorkflow(makeWorkflow("prompt B"), { input: {}, runId: "r2" }));
     expect(calls).toBe(2);
     cleanup();
   });
@@ -97,8 +98,8 @@ describe("workflow caching", () => {
       </Workflow>
     ));
 
-    const r1 = await runWorkflow(workflow, { input: {}, runId: "r1" });
-    const r2 = await runWorkflow(workflow, { input: {}, runId: "r2" });
+    const r1 = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "r1" }));
+    const r2 = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "r2" }));
     expect(r1.status).toBe("finished");
     expect(r2.status).toBe("finished");
     cleanup();

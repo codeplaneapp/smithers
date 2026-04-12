@@ -10,6 +10,7 @@ import {
 } from "smithers";
 import { createTestSmithers, sleep } from "./helpers";
 import { outputSchemas } from "./schema";
+import { Effect } from "effect";
 
 function buildSmithers() {
   return createTestSmithers(outputSchemas);
@@ -100,7 +101,7 @@ describe("<MergeQueue>", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(wf, { input: {}, maxConcurrency: 4 });
+    const result = await Effect.runPromise(runWorkflow(wf, { input: {}, maxConcurrency: 4 }));
     expect(result.status).toBe("finished");
     expect(max).toBeLessThanOrEqual(1);
     cleanup();
@@ -133,7 +134,7 @@ describe("<MergeQueue>", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(wf, { input: {}, maxConcurrency: 4 });
+    const result = await Effect.runPromise(runWorkflow(wf, { input: {}, maxConcurrency: 4 }));
     expect(result.status).toBe("finished");
     expect(max).toBeLessThanOrEqual(2);
     cleanup();
@@ -181,7 +182,7 @@ describe("<MergeQueue>", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(wf, { input: {}, maxConcurrency: 4 });
+    const result = await Effect.runPromise(runWorkflow(wf, { input: {}, maxConcurrency: 4 }));
     expect(result.status).toBe("finished");
     expect(queueMax).toBeLessThanOrEqual(1);
     expect(outsideMax).toBeGreaterThanOrEqual(1);
@@ -257,7 +258,7 @@ describe("<MergeQueue>", () => {
           </MergeQueue>
         </Workflow>
       ));
-      const result = await runWorkflow(wf, { input: {}, maxConcurrency: 3 });
+      const result = await Effect.runPromise(runWorkflow(wf, { input: {}, maxConcurrency: 3 }));
       expect(result.status).toBe("finished");
       expect(peak).toBeLessThanOrEqual(1);
     };

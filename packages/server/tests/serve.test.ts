@@ -7,6 +7,7 @@ import { sleep } from "../../smithers/tests/helpers";
 import { createServeApp } from "../src/serve";
 import { SmithersDb } from "@smithers/db/adapter";
 import { ensureSmithersTables } from "@smithers/db/ensure";
+import { Effect } from "effect";
 import { runWorkflow } from "@smithers/engine";
 import type { SmithersWorkflow } from "@smithers/components/SmithersWorkflow";
 import { renderPrometheusMetrics } from "@smithers/observability";
@@ -206,12 +207,12 @@ export default smithers((ctx) => (
 
     const startRun = opts.startRun !== false;
     if (startRun) {
-      const runPromise = runWorkflow(workflow, {
+      const runPromise = Effect.runPromise(runWorkflow(workflow, {
         runId,
         input: {},
         workflowPath: resolve(process.cwd(), workflowPath),
         signal: abort.signal,
-      }).catch(() => {});
+      })).catch(() => {});
       runPromises.push(runPromise);
       // Wait for the run row to exist instead of relying on a fixed startup delay.
       for (let i = 0; i < 40; i++) {

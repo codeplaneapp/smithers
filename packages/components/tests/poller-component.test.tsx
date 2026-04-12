@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { Poller, runWorkflow } from "smithers";
 import { createTestSmithers } from "./helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 const COMPONENT_TIMEOUT_MS = 30_000;
 
@@ -71,7 +72,7 @@ describe("Poller", () => {
       );
     });
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
     expect(calls).toBe(3);
 
@@ -150,7 +151,7 @@ describe("Poller", () => {
       );
     });
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
     expect(calls).toBe(1);
 
@@ -226,7 +227,7 @@ describe("Poller", () => {
       );
     });
 
-    const result = await runWorkflow(workflow, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(result.status).toBe("finished");
     expect(calls).toBe(3);
 

@@ -15,6 +15,7 @@ import {
 } from "smithers";
 import { approveNode, denyNode } from "../src/approvals";
 import { createTestSmithers } from "../../smithers/tests/helpers";
+import { Effect } from "effect";
 
 const contractSchemas = {
   decision: approvalDecisionSchema,
@@ -51,7 +52,7 @@ describe("durable deferred contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-approval");
 
       await approveNode(
@@ -63,11 +64,11 @@ describe("durable deferred contract", () => {
         "reviewer",
       );
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(resumed.status).toBe("finished");
 
       const decisionRows = await (db as any).select().from(tables.decision);
@@ -121,7 +122,7 @@ describe("durable deferred contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-approval");
 
       await denyNode(
@@ -133,11 +134,11 @@ describe("durable deferred contract", () => {
         "reviewer",
       );
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(resumed.status).toBe("finished");
 
       const decisionRows = await (db as any).select().from(tables.decision);
@@ -182,7 +183,7 @@ describe("durable deferred contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-event");
 
       await signalRun(
@@ -193,11 +194,11 @@ describe("durable deferred contract", () => {
         { correlationId: "ticket-42", receivedBy: "tester" },
       );
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(resumed.status).toBe("finished");
 
       const rows = await (db as any).select().from(tables.eventOut);
@@ -230,7 +231,7 @@ describe("durable deferred contract", () => {
         }),
       );
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-event");
 
       const adapter = new SmithersDb(db as any);
@@ -242,11 +243,11 @@ describe("durable deferred contract", () => {
         { correlationId: "ticket-99", receivedBy: "tester" },
       );
 
-      const stillWaiting = await runWorkflow(workflow, {
+      const stillWaiting = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(stillWaiting.status).toBe("waiting-event");
 
       await signalRun(
@@ -257,11 +258,11 @@ describe("durable deferred contract", () => {
         { correlationId: "ticket-42", receivedBy: "tester" },
       );
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(resumed.status).toBe("finished");
     } finally {
       cleanup();

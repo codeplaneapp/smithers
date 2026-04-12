@@ -4,6 +4,7 @@ import { SmithersDb } from "@smithers/db/adapter";
 import { Task, Workflow, runWorkflow } from "smithers";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { outputSchemas } from "../../smithers/tests/schema";
+import { Effect } from "effect";
 
 test("a hijacked CLI session can be resumed by Smithers on the next attempt", async () => {
   const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
@@ -82,10 +83,10 @@ test("a hijacked CLI session can be resumed by Smithers on the next attempt", as
     </Workflow>
   ));
 
-  const runPromise = runWorkflow(workflow, {
+  const runPromise = Effect.runPromise(runWorkflow(workflow, {
     input: {},
     runId: "run-hijack-runtime",
-  });
+  }));
 
   await toolStarted;
   await adapter.requestRunHijack("run-hijack-runtime", Date.now(), "claude-code");
@@ -104,11 +105,11 @@ test("a hijacked CLI session can be resumed by Smithers on the next attempt", as
     resume: "session-1",
   });
 
-  const resumed = await runWorkflow(workflow, {
+  const resumed = await Effect.runPromise(runWorkflow(workflow, {
     input: {},
     runId: "run-hijack-runtime",
     resume: true,
-  });
+  }));
 
   expect(resumed.status).toBe("finished");
   expect(resumeSessions).toEqual([undefined, "session-1"]);

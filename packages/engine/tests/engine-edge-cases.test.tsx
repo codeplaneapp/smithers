@@ -6,6 +6,7 @@ import { approveNode } from "../src/approvals";
 import { createTestDb, createTestSmithers } from "../../smithers/tests/helpers";
 import { ddl, schema } from "../../smithers/tests/schema";
 import { ensureSmithersTables } from "@smithers/db/ensure";
+import { Effect } from "effect";
 
 describe("engine edge cases", () => {
   test("resume rejects runs that were never started", async () => {
@@ -21,11 +22,11 @@ describe("engine edge cases", () => {
     ));
 
     try {
-      const result = await runWorkflow(workflow, {
+      const result = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: "run-never-started",
         resume: true,
-      });
+      }));
       expect(result.status).toBe("failed");
       expect(result.error).toMatchObject({ code: "RUN_NOT_FOUND" });
     } finally {

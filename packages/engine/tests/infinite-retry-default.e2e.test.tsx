@@ -4,6 +4,7 @@ import { SmithersDb } from "@smithers/db/adapter";
 import { Task, Workflow, runWorkflow } from "smithers";
 import { createTestSmithers } from "../../smithers/tests/helpers";
 import { outputSchemas } from "../../smithers/tests/schema";
+import { Effect } from "effect";
 
 describe("default infinite retries e2e", () => {
   test(
@@ -34,7 +35,7 @@ describe("default infinite retries e2e", () => {
           </Workflow>
         ));
 
-        const result = await runWorkflow(workflow, { input: {} });
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
 
         expect(result.status).toBe("finished");
         expect(callCount).toBe(6);
@@ -77,10 +78,10 @@ describe("default infinite retries e2e", () => {
           </Workflow>
         ));
 
-        const result = await runWorkflow(workflow, {
+        const result = await Effect.runPromise(runWorkflow(workflow, {
           input: {},
           signal: controller.signal,
-        });
+        }));
 
         expect(result.status).toBe("cancelled");
 
@@ -129,7 +130,7 @@ describe("default infinite retries e2e", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
 
       expect(result.status).toBe("failed");
       expect(callCount).toBe(1);
@@ -164,7 +165,7 @@ describe("default infinite retries e2e", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
 
       expect(result.status).toBe("failed");
       expect(callCount).toBe(1);
@@ -199,7 +200,7 @@ describe("default infinite retries e2e", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
 
       expect(result.status).toBe("failed");
       expect(callCount).toBe(3);

@@ -75,6 +75,7 @@ import React from "react";
 import { createSmithers, Task, Workflow, runWorkflow } from ${JSON.stringify(smithersPath)};
 import { z } from "zod";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { Effect } from "effect";
 
 function readCounter(path) {
   if (!existsSync(path)) return 0;
@@ -126,10 +127,10 @@ const workflow = api.smithers(() =>
   ),
 );
 
-await runWorkflow(workflow, {
+await Effect.runPromise(runWorkflow(workflow, {
   input: {},
   runId: ${JSON.stringify(params.runId)},
-});
+}));
 `;
 
   const child = spawn(process.execPath, ["-e", script], {
@@ -172,7 +173,7 @@ describe("workflow make contract", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(result.status).toBe("finished");
 
       const rows = await (db as any).select().from(tables.result);
@@ -209,7 +210,7 @@ describe("workflow make contract", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(parentWorkflow, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(parentWorkflow, { input: {} }));
       expect(result.status).toBe("finished");
 
       const adapter = new SmithersDb(db as any);
@@ -250,10 +251,10 @@ describe("workflow make contract", () => {
 
     try {
       const initialWorkflow = buildWorkflow(false);
-      const first = await runWorkflow(initialWorkflow, {
+      const first = await Effect.runPromise(runWorkflow(initialWorkflow, {
         input: {},
         runId: "workflow-make-versioning-old",
-      });
+      }));
       expect(first.status).toBe("waiting-approval");
 
       await approveNode(
@@ -265,11 +266,11 @@ describe("workflow make contract", () => {
         "reviewer",
       );
 
-      const resumed = await runWorkflow(buildWorkflow(true), {
+      const resumed = await Effect.runPromise(runWorkflow(buildWorkflow(true), {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(resumed.status).toBe("finished");
 
       const resumedRows = await (db as any).select().from(tables.result);
@@ -280,10 +281,10 @@ describe("workflow make contract", () => {
       const resumedConfig = JSON.parse(resumedRun?.configJson ?? "{}");
       expect(resumedConfig.workflowPatches?.["add-validation"]).toBe(false);
 
-      const second = await runWorkflow(buildWorkflow(true), {
+      const second = await Effect.runPromise(runWorkflow(buildWorkflow(true), {
         input: {},
         runId: "workflow-make-versioning-new",
-      });
+      }));
       expect(second.status).toBe("waiting-approval");
 
       await approveNode(
@@ -295,11 +296,11 @@ describe("workflow make contract", () => {
         "reviewer",
       );
 
-      const secondResumed = await runWorkflow(buildWorkflow(true), {
+      const secondResumed = await Effect.runPromise(runWorkflow(buildWorkflow(true), {
         input: {},
         runId: second.runId,
         resume: true,
-      });
+      }));
       expect(secondResumed.status).toBe("finished");
 
       const newRunRows = await (db as any).select().from(tables.result);
@@ -359,12 +360,12 @@ describe("workflow make contract", () => {
         </Workflow>
       ));
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId,
         resume: true,
         force: true,
-      });
+      }));
       expect(resumed.status).toBe("finished");
       expect(readCounter(counterPath)).toBe(2);
 

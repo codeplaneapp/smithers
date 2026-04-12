@@ -4,6 +4,7 @@ import { Workflow, Task, Sequence, runWorkflow } from "smithers";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { z } from "zod";
 import type { SmithersEvent } from "@smithers/observability/SmithersEvent";
+import { Effect } from "effect";
 
 const schemas = { out: z.object({ v: z.number() }) };
 
@@ -18,10 +19,10 @@ describe("onProgress events", () => {
       </Workflow>
     ));
 
-    await runWorkflow(workflow, {
+    await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       onProgress: (e: SmithersEvent) => events.push(e),
-    });
+    }));
 
     const types = events.map((e) => e.type);
     expect(types).toContain("RunStarted");
@@ -39,10 +40,10 @@ describe("onProgress events", () => {
       </Workflow>
     ));
 
-    await runWorkflow(workflow, {
+    await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       onProgress: (e: SmithersEvent) => events.push(e),
-    });
+    }));
 
     const nodeStarted = events.filter((e) => e.type === "NodeStarted");
     const nodeFinished = events.filter((e) => e.type === "NodeFinished");
@@ -63,10 +64,10 @@ describe("onProgress events", () => {
       </Workflow>
     ));
 
-    await runWorkflow(workflow, {
+    await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       onProgress: (e: SmithersEvent) => events.push(e),
-    });
+    }));
 
     const types = events.map((e) => e.type);
     expect(types).toContain("NodeFailed");
@@ -86,10 +87,10 @@ describe("onProgress events", () => {
       </Workflow>
     ));
 
-    await runWorkflow(workflow, {
+    await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       onProgress: (e: SmithersEvent) => events.push(e),
-    });
+    }));
 
     const types = events.map((e) => e.type);
     expect(types).toContain("NodeSkipped");
@@ -106,10 +107,10 @@ describe("onProgress events", () => {
       </Workflow>
     ));
 
-    await runWorkflow(workflow, {
+    await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       onProgress: (e: SmithersEvent) => events.push(e),
-    });
+    }));
 
     const types = events.map((e) => e.type);
     const runStartIdx = types.indexOf("RunStarted");
@@ -128,10 +129,10 @@ describe("onProgress events", () => {
       </Workflow>
     ));
 
-    await runWorkflow(workflow, {
+    await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       onProgress: (e: SmithersEvent) => events.push(e),
-    });
+    }));
 
     const types = events.map((e) => e.type);
     const lastNodeFinished = types.lastIndexOf("NodeFinished");
@@ -151,11 +152,11 @@ describe("onProgress events", () => {
       </Workflow>
     ));
 
-    await runWorkflow(workflow, {
+    await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       runId: myRunId,
       onProgress: (e: SmithersEvent) => events.push(e),
-    });
+    }));
 
     for (const e of events) {
       expect((e as any).runId).toBe(myRunId);
@@ -181,10 +182,10 @@ describe("abort signal", () => {
     ));
 
     setTimeout(() => controller.abort(), 50);
-    const r = await runWorkflow(workflow, {
+    const r = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       signal: controller.signal,
-    });
+    }));
     expect(r.status).toBe("cancelled");
     cleanup();
   });
@@ -202,10 +203,10 @@ describe("abort signal", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, {
+    const r = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       signal: controller.signal,
-    });
+    }));
     expect(r.status).toBe("cancelled");
     cleanup();
   });

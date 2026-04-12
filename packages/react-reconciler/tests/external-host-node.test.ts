@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import React from "react";
 import { extractFromHost, type HostElement, type HostText, type HostNode } from "@smithers/graph/dom/extract";
 import { SmithersRenderer } from "../src/dom/renderer";
+import { Effect } from "effect";
 import { runWorkflow } from "@smithers/engine";
 import { createTestSmithers } from "../../smithers/tests/helpers";
 import { z } from "zod";
@@ -180,7 +181,7 @@ describe("extractFromHost with string output keys", () => {
       zodToKeyName,
     };
 
-    const result = await runWorkflow(workflow as any, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow as any, { input: {} }));
     expect(result.status).toBe("finished");
 
     const rows = await (db as any).select().from(tables.outputA);
@@ -220,7 +221,7 @@ describe("extractFromHost with string output keys", () => {
       zodToKeyName,
     };
 
-    const result = await runWorkflow(workflow as any, { input: {} });
+    const result = await Effect.runPromise(runWorkflow(workflow as any, { input: {} }));
     expect(result.status).toBe("finished");
 
     const rowsA = await (db as any).select().from(tables.outputA);

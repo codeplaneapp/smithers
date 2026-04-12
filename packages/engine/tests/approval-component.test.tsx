@@ -15,6 +15,7 @@ import {
 import { createTestSmithers } from "../../smithers/tests/helpers";
 import { SmithersDb } from "@smithers/db/adapter";
 import { denyNode } from "../src/approvals";
+import { Effect } from "effect";
 
 const APPROVAL_TEST_TIMEOUT_MS = 15_000;
 
@@ -188,7 +189,7 @@ describe("<Approval>", () => {
         );
       });
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(first.status).toBe("waiting-approval");
 
       const adapter = new SmithersDb(db as any);
@@ -201,11 +202,11 @@ describe("<Approval>", () => {
         "qa-user",
       );
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: first.runId,
         resume: true,
-      });
+      }));
       expect(resumed.status).toBe("finished");
 
       const approvalRows = await (db as any).select().from(tables.approval);

@@ -104,7 +104,7 @@ describe("entity worker contract", () => {
         }),
       );
 
-      const result = await runWorkflow(workflow, { input: {} });
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
       expect(result.status).toBe("finished");
 
       const runDispatches = dispatched.filter((task) => task.runId === result.runId);

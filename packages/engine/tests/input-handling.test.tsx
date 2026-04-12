@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { Workflow, Task, runWorkflow } from "smithers";
 import { createTestSmithers } from "../../smithers/tests/helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 describe("workflow input handling", () => {
   test("input is accessible via ctx.input", async () => {
@@ -18,7 +19,7 @@ describe("workflow input handling", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: { topic: "testing" } });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: { topic: "testing" } }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.out).all();
     expect(rows[0].topic).toBe("testing");
@@ -38,7 +39,7 @@ describe("workflow input handling", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     cleanup();
   });
@@ -56,9 +57,9 @@ describe("workflow input handling", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, {
+    const r = await Effect.runPromise(runWorkflow(workflow, {
       input: { user: { name: "alice", role: "admin" } },
-    });
+    }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.out).all();
     expect(rows[0].name).toBe("alice");
@@ -78,10 +79,10 @@ describe("workflow input handling", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, {
+    const r = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       runId: "my-custom-run",
-    });
+    }));
     expect(r.status).toBe("finished");
     expect(r.runId).toBe("my-custom-run");
     cleanup();
@@ -100,7 +101,7 @@ describe("workflow input handling", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     expect(typeof r.runId).toBe("string");
     expect(r.runId.length).toBeGreaterThan(0);

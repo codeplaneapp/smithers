@@ -5,6 +5,7 @@ import { SmithersDb } from "@smithers/db/adapter";
 import { ensureSmithersTables } from "@smithers/db/ensure";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { outputSchemas } from "../../smithers/tests/schema";
+import { Effect } from "effect";
 
 describe("Concurrent runs", () => {
   test("starting a second run does not cancel the first run's in-progress attempt", async () => {
@@ -35,7 +36,7 @@ describe("Concurrent runs", () => {
     const firstRunId = "run-a";
     const secondRunId = "run-b";
 
-    const firstPromise = runWorkflow(workflow, { input: {}, runId: firstRunId });
+    const firstPromise = Effect.runPromise(runWorkflow(workflow, { input: {}, runId: firstRunId }));
 
     for (let i = 0; i < 40; i++) {
       const attempts = await adapter.listAttempts(firstRunId, "slow", 0);
@@ -43,7 +44,7 @@ describe("Concurrent runs", () => {
       await sleep(10);
     }
 
-    const secondPromise = runWorkflow(workflow, { input: {}, runId: secondRunId });
+    const secondPromise = Effect.runPromise(runWorkflow(workflow, { input: {}, runId: secondRunId }));
 
     await sleep(25);
 

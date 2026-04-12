@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { Workflow, Task, Sequence, runWorkflow } from "smithers";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 function fakeAgent(response: any, opts?: { delay?: number }) {
   return {
@@ -52,7 +53,7 @@ describe("agent task execution", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.result).all();
     expect(rows[0].answer).toBe("42");
@@ -73,7 +74,7 @@ describe("agent task execution", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.result).all();
     expect(rows[0].value).toBe(99);
@@ -94,7 +95,7 @@ describe("agent task execution", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("failed");
     cleanup();
   });
@@ -113,7 +114,7 @@ describe("agent task execution", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.result).all();
     expect(rows[0].name).toBe("smithers");
@@ -149,7 +150,7 @@ describe("agent task execution", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     expect(receivedPrompt).toContain("testing");
     cleanup();
@@ -177,7 +178,7 @@ describe("agent task execution", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.result).all();
     expect(rows[0].value).toBe(42);
@@ -205,7 +206,7 @@ describe("agent task execution", () => {
     ));
 
     const runId = "strip-run-id";
-    const r = await runWorkflow(workflow, { input: {}, runId });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
     expect(r.status).toBe("finished");
     const rows = (db as any).select().from(tables.result).all();
     expect(rows[0].value).toBe(7);
@@ -238,7 +239,7 @@ describe("agent task execution", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(r.status).toBe("finished");
     expect(capturedPrompt).toContain("Hello world, this is a test prompt.");
     cleanup();

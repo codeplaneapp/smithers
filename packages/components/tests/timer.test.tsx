@@ -8,10 +8,10 @@ import { z } from "zod";
 import { dirname } from "node:path";
 
 function runInTestRoot(workflow: any, dbPath: string, opts: any) {
-  return runWorkflow(workflow, {
+  return Effect.runPromise(runWorkflow(workflow, {
     ...opts,
     rootDir: dirname(dbPath),
-  });
+  }));
 }
 
 async function resumeUntilDone(

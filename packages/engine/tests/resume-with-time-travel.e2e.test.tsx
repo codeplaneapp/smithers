@@ -13,6 +13,7 @@ import {
 import { replayFromCheckpoint } from "@smithers/time-travel/replay";
 import { createTestSmithers } from "../../smithers/tests/helpers";
 import { outputSchemas } from "../../smithers/tests/schema";
+import { Effect } from "effect";
 
 function normalizeSnapshotInput(input: Record<string, unknown>): Record<string, unknown> {
   if (!input || typeof input !== "object") return {};
@@ -105,10 +106,10 @@ describe("resume with time travel", () => {
         </Workflow>
       ));
 
-      const first = await runWorkflow(workflow, {
+      const first = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: parentRunId,
-      });
+      }));
 
       expect(first.status).toBe("finished");
       expect(originalCalls).toEqual(["analyze", "implement", "test"]);
@@ -136,11 +137,11 @@ describe("resume with time travel", () => {
 
       replayCalls.length = 0;
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: replay.runId,
         resume: true,
-      });
+      }));
 
       expect(resumed.status).toBe("finished");
       expect(replayCalls).toEqual(["implement", "test"]);
@@ -215,10 +216,10 @@ describe("resume with time travel", () => {
         </Workflow>
       ));
 
-      const first = await runWorkflow(workflow, {
+      const first = await Effect.runPromise(runWorkflow(workflow, {
         input: { variant: "A" },
         runId: parentRunId,
-      });
+      }));
 
       expect(first.status).toBe("finished");
       expect(seenVariants).toEqual(["A"]);
@@ -246,11 +247,11 @@ describe("resume with time travel", () => {
 
       seenVariants.length = 0;
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: replay.runId,
         resume: true,
-      });
+      }));
 
       expect(resumed.status).toBe("finished");
       expect(seenVariants).toEqual(["B"]);
@@ -295,7 +296,7 @@ describe("resume with time travel", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, {
+      const result = await Effect.runPromise(runWorkflow(workflow, {
         input: {},
         runId: parentRunId,
         onProgress: (event) => {
@@ -311,7 +312,7 @@ describe("resume with time travel", () => {
             ),
           );
         },
-      });
+      }));
 
       expect(result.status).toBe("finished");
       await Promise.all(checkpointCopies);

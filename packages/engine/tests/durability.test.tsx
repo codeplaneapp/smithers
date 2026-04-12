@@ -10,6 +10,7 @@ import { SmithersDb } from "@smithers/db/adapter";
 import { nowMs } from "@smithers/scheduler/nowMs";
 import { createTestDb, createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { ddl, outputSchemas, schema } from "../../smithers/tests/schema";
+import { Effect } from "effect";
 
 describe("Durability", () => {
   async function waitFor(
@@ -54,7 +55,7 @@ describe("Durability", () => {
       </Workflow>
     ));
 
-    const result = await runWorkflow(workflow, { input: {}, runId });
+    const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
     expect(result.status).toBe("finished");
 
     const adapter = new SmithersDb(db as any);
@@ -128,7 +129,7 @@ describe("Durability", () => {
       </Workflow>
     ));
 
-    const runPromise = runWorkflow(workflow, { input: {}, runId });
+    const runPromise = Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
 
     await waitFor(async () => {
       try {
@@ -164,20 +165,20 @@ describe("Durability", () => {
       </Workflow>
     ));
 
-    const first = await runWorkflow(workflow, {
+    const first = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       runId,
       workflowPath,
-    });
+    }));
     expect(first.status).toBe("finished");
 
     writeFileSync(workflowPath, "export default 'v2';\n", "utf8");
-    const resumed = await runWorkflow(workflow, {
+    const resumed = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       runId,
       resume: true,
       workflowPath,
-    });
+    }));
     expect(resumed.status).toBe("failed");
     expect((resumed as any).error?.code).toBe("RESUME_METADATA_MISMATCH");
     const adapter = new SmithersDb(db as any);
@@ -209,20 +210,20 @@ describe("Durability", () => {
       </Workflow>
     ));
 
-    const first = await runWorkflow(workflow, {
+    const first = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       runId,
       workflowPath,
-    });
+    }));
     expect(first.status).toBe("finished");
 
     writeFileSync(helperPath, "export const version = 'v2';\n", "utf8");
-    const resumed = await runWorkflow(workflow, {
+    const resumed = await Effect.runPromise(runWorkflow(workflow, {
       input: {},
       runId,
       resume: true,
       workflowPath,
-    });
+    }));
     expect(resumed.status).toBe("failed");
     expect((resumed as any).error?.code).toBe("RESUME_METADATA_MISMATCH");
 

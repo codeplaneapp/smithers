@@ -6,12 +6,13 @@ import { jsx, jsxs } from "smithers/jsx-runtime";
 import { SmithersDb, runWorkflow, signalRun } from "smithers";
 import { renderPrometheusMetrics } from "@smithers/observability";
 import { createTestSmithers } from "./helpers";
+import { Effect } from "effect";
 
 function runInTestRoot(workflow: any, dbPath: string, opts: any) {
-  return runWorkflow(workflow, {
+  return Effect.runPromise(runWorkflow(workflow, {
     ...opts,
     rootDir: dirname(dbPath),
-  });
+  }));
 }
 
 function asyncPendingMetric(kind: "approval" | "event"): number {

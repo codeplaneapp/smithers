@@ -10,6 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { Loop, Sequence, Task, Workflow, runWorkflow } from "smithers";
 import { createTestSmithers } from "../../smithers/tests/helpers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 describe("issue #117 – nested loop runtime scoping", () => {
   test("inner loop resets for each outer iteration", async () => {
@@ -42,7 +43,7 @@ describe("issue #117 – nested loop runtime scoping", () => {
       );
     });
 
-    await runWorkflow(workflow, { input: {}, runId: "nested-loop-mre" });
+    await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "nested-loop-mre" }));
 
     const innerRows = await (db as any).select().from(tables.outputA);
 
@@ -92,7 +93,7 @@ describe("issue #117 – nested loop runtime scoping", () => {
       </Workflow>
     ));
 
-    await runWorkflow(workflow, { input: {}, runId: "loop-cache-mre" });
+    await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "loop-cache-mre" }));
     expect(calls).toBe(2);
 
     cleanup();

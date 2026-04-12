@@ -11,6 +11,7 @@ import { SmithersDb } from "@smithers/db/adapter";
 import { approveNode } from "../src/approvals";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers";
 import { outputSchemas } from "../../smithers/tests/schema";
+import { Effect } from "effect";
 
 function buildSmithers() {
   return createTestSmithers(outputSchemas);
@@ -32,10 +33,10 @@ describe("transactional state writes", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, {
+      const result = await Effect.runPromise(runWorkflow(workflow, {
         runId: "txn-task-complete",
         input: {},
-      });
+      }));
       expect(result.status).toBe("finished");
 
       const client = queryClient(db);
@@ -87,7 +88,7 @@ describe("transactional state writes", () => {
       ));
 
       const runId = "txn-task-start";
-      const runPromise = runWorkflow(workflow, { runId, input: {} });
+      const runPromise = Effect.runPromise(runWorkflow(workflow, { runId, input: {} }));
 
       const client = queryClient(db);
       const deadline = Date.now() + 3_000;
@@ -150,10 +151,10 @@ describe("transactional state writes", () => {
         </Workflow>
       ));
 
-      const first = await runWorkflow(workflow, {
+      const first = await Effect.runPromise(runWorkflow(workflow, {
         runId: "txn-approval",
         input: {},
-      });
+      }));
       expect(first.status).toBe("waiting-approval");
 
       await approveNode(new SmithersDb(db as any), first.runId, "gate", 0, "ok", "tester");
@@ -200,10 +201,10 @@ describe("transactional state writes", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, {
+      const result = await Effect.runPromise(runWorkflow(workflow, {
         runId: "txn-frame-commit",
         input: {},
-      });
+      }));
       expect(result.status).toBe("finished");
 
       const client = queryClient(db);
@@ -269,10 +270,10 @@ describe("transactional state writes", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, {
+      const result = await Effect.runPromise(runWorkflow(workflow, {
         runId,
         input: {},
-      });
+      }));
       expect(result.status).toBe("finished");
       expect(calls).toBe(2);
 
@@ -335,10 +336,10 @@ describe("transactional state writes", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, {
+      const result = await Effect.runPromise(runWorkflow(workflow, {
         runId,
         input: {},
-      });
+      }));
       expect(result.status).toBe("failed");
 
       const adapter = new SmithersDb(db as any);
@@ -382,18 +383,18 @@ describe("transactional state writes", () => {
         </Workflow>
       ));
 
-      const first = await runWorkflow(workflow, {
+      const first = await Effect.runPromise(runWorkflow(workflow, {
         runId,
         input: {},
-      });
+      }));
       expect(first.status).toBe("waiting-timer");
 
       await sleep(120);
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await Effect.runPromise(runWorkflow(workflow, {
         runId,
         input: {},
         resume: true,
-      });
+      }));
       expect(resumed.status).toBe("failed");
 
       const adapter = new SmithersDb(db as any);
@@ -428,11 +429,11 @@ describe("transactional state writes", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, {
+      const result = await Effect.runPromise(runWorkflow(workflow, {
         runId: "txn-parallel",
         input: {},
         maxConcurrency: 4,
-      });
+      }));
       expect(result.status).toBe("finished");
 
       const client = queryClient(db);

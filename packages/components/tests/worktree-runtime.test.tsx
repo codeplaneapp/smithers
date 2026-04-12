@@ -13,6 +13,7 @@ import {
   runWorkflow,
 } from "smithers";
 import { z } from "zod";
+import { Effect } from "effect";
 
 const tempRoots: string[] = [];
 const WORKTREE_RUNTIME_TIMEOUT_MS = 15_000;
@@ -73,7 +74,7 @@ describe("Worktree runtime", () => {
         </Workflow>
       ));
 
-      const result = await runWorkflow(workflow, { input: {}, rootDir: repoDir });
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
       try {
         expect(result.status).toBe("finished");
         expect(existsSync(linkedPath)).toBe(true);
@@ -108,7 +109,7 @@ describe("Worktree runtime", () => {
       ));
 
       try {
-        const first = await runWorkflow(workflow, { input: {}, rootDir: repoDir });
+        const first = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
         expect(first.status).toBe("finished");
         expect(existsSync(linkedPath)).toBe(true);
 
@@ -116,7 +117,7 @@ describe("Worktree runtime", () => {
         runGit(repoDir, ["worktree", "prune"]);
         expect(existsSync(linkedPath)).toBe(false);
 
-        const second = await runWorkflow(workflow, { input: {}, rootDir: repoDir });
+        const second = await Effect.runPromise(runWorkflow(workflow, { input: {}, rootDir: repoDir }));
         expect(second.status).toBe("finished");
         expect(existsSync(linkedPath)).toBe(true);
       } finally {

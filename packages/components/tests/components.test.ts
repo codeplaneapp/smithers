@@ -38,7 +38,6 @@ import {
   Task,
   Timer,
   TryCatchFinally,
-  Voice,
   WaitForEvent,
   Workflow,
   Worktree,
@@ -103,7 +102,6 @@ describe("components", () => {
       Task,
       Timer,
       TryCatchFinally,
-      Voice,
       WaitForEvent,
       Workflow,
       Worktree,
@@ -116,11 +114,6 @@ describe("components", () => {
     const outputSchema = z.object({ value: z.string() });
     const signalSchema = z.object({ changed: z.boolean() });
     const renderer = new SmithersRenderer({ extractGraph: graphFrom });
-    const voiceProvider = {
-      name: "test-voice",
-      speak: async () => Readable.from([]),
-    };
-
     await renderer.render(
       React.createElement(
         Workflow,
@@ -132,11 +125,8 @@ describe("components", () => {
             Worktree,
             { id: "wt", path: "." },
             React.createElement(
-              Voice,
-              { provider: voiceProvider, speaker: "narrator" },
-              React.createElement(
-                Parallel,
-                { id: "group", maxConcurrency: 2 },
+              Parallel,
+              { id: "group", maxConcurrency: 2 },
                 React.createElement(
                   Task,
                   {
@@ -165,7 +155,6 @@ describe("components", () => {
                   workflow: () => null,
                 }),
               ),
-            ),
           ),
         ),
       ),
@@ -175,7 +164,6 @@ describe("components", () => {
     expect(tags).toContain("smithers:workflow");
     expect(tags).toContain("smithers:sequence");
     expect(tags).toContain("smithers:worktree");
-    expect(tags).toContain("smithers:voice");
     expect(tags).toContain("smithers:parallel");
     expect(tags.filter((tag) => tag === "smithers:task")).toHaveLength(2);
     expect(tags).toContain("smithers:timer");
