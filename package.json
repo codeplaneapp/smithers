@@ -58,7 +58,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "typecheck:examples": "tsc -p tsconfig.examples.json --noEmit",
+    "typecheck:examples": "tsc -p examples/tsconfig.json --noEmit",
     "lint": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore packages/*/src packages/*/tests",
     "lint:fix": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore --fix packages/*/src packages/*/tests",
     "cli": "bun run apps/cli/src/index.ts",
