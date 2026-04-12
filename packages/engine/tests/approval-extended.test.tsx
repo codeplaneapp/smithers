@@ -1,5 +1,6 @@
 /** @jsxImportSource smithers */
 import { describe, expect, test } from "bun:test";
+import { dirname } from "node:path";
 import {
   Approval,
   Workflow,
@@ -21,6 +22,13 @@ const schemas = {
   b: z.object({ v: z.number() }),
 };
 
+function runInTestRoot(workflow: any, dbPath: string, opts: any) {
+  return runWorkflow(workflow, {
+    ...opts,
+    rootDir: dirname(dbPath),
+  });
+}
+
 function asyncPendingMetric(kind: "approval" | "event"): number {
   const text = renderPrometheusMetrics();
   const match = text.match(
@@ -34,7 +42,7 @@ function asyncPendingMetric(kind: "approval" | "event"): number {
 
 describe("approval extended", () => {
   test("denial with onDeny=fail fails the workflow", async () => {
-    const { smithers, outputs, db, cleanup } = createTestSmithers(schemas);
+    const { smithers, outputs, db, dbPath, cleanup } = createTestSmithers(schemas);
 
     const workflow = smithers(() => (
       <Workflow name="deny-fail">
@@ -44,13 +52,13 @@ describe("approval extended", () => {
       </Workflow>
     ));
 
-    const first = await runWorkflow(workflow, { input: {} });
+    const first = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(first.status).toBe("waiting-approval");
 
     const adapter = new SmithersDb(db as any);
     await denyNode(adapter, first.runId, "gate", 0, "rejected", "tester");
 
-    const resumed = await runWorkflow(workflow, {
+    const resumed = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: first.runId,
       resume: true,
@@ -60,7 +68,7 @@ describe("approval extended", () => {
   });
 
   test("denial with onDeny=continue continues workflow", async () => {
-    const { smithers, outputs, tables, db, cleanup } = createTestSmithers(schemas);
+    const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers(schemas);
 
     const workflow = smithers(() => (
       <Workflow name="deny-continue">
@@ -75,13 +83,13 @@ describe("approval extended", () => {
       </Workflow>
     ));
 
-    const first = await runWorkflow(workflow, { input: {} });
+    const first = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(first.status).toBe("waiting-approval");
 
     const adapter = new SmithersDb(db as any);
     await denyNode(adapter, first.runId, "gate", 0, "nope", "tester");
 
-    const resumed = await runWorkflow(workflow, {
+    const resumed = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: first.runId,
       resume: true,
@@ -92,7 +100,7 @@ describe("approval extended", () => {
   });
 
   test("multiple approvals in sequence", async () => {
-    const { smithers, outputs, tables, db, cleanup } = createTestSmithers(schemas);
+    const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers(schemas);
 
     const workflow = smithers(() => (
       <Workflow name="multi-approval">
@@ -108,14 +116,14 @@ describe("approval extended", () => {
     ));
 
     // First run - stops at gate1
-    const r1 = await runWorkflow(workflow, { input: {} });
+    const r1 = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(r1.status).toBe("waiting-approval");
 
     const adapter = new SmithersDb(db as any);
     await approveNode(adapter, r1.runId, "gate1", 0, "ok", "tester");
 
     // Resume - stops at gate2
-    const r2 = await runWorkflow(workflow, {
+    const r2 = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: r1.runId,
       resume: true,
@@ -125,7 +133,7 @@ describe("approval extended", () => {
     await approveNode(adapter, r1.runId, "gate2", 0, "ok", "tester");
 
     // Final resume - finishes
-    const r3 = await runWorkflow(workflow, {
+    const r3 = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: r1.runId,
       resume: true,
@@ -135,7 +143,7 @@ describe("approval extended", () => {
   });
 
   test("approval persists the approver and note", async () => {
-    const { smithers, outputs, db, cleanup } = createTestSmithers(schemas);
+    const { smithers, outputs, db, dbPath, cleanup } = createTestSmithers(schemas);
 
     const workflow = smithers(() => (
       <Workflow name="approval-meta">
@@ -145,7 +153,7 @@ describe("approval extended", () => {
       </Workflow>
     ));
 
-    const r = await runWorkflow(workflow, { input: {} });
+    const r = await runInTestRoot(workflow, dbPath, { input: {} });
     const adapter = new SmithersDb(db as any);
     await approveNode(adapter, r.runId, "gate", 0, "looks good", "alice");
 
@@ -158,7 +166,7 @@ describe("approval extended", () => {
   });
 
   test("async approvals allow unrelated downstream work before approval resolves", async () => {
-    const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+    const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers({
       approval: approvalDecisionSchema,
       result: z.object({ v: z.number() }),
     });
@@ -182,7 +190,7 @@ describe("approval extended", () => {
     try {
       const metricBefore = asyncPendingMetric("approval");
 
-      const first = await runWorkflow(workflow, { input: {} });
+      const first = await runInTestRoot(workflow, dbPath, { input: {} });
       expect(first.status).toBe("waiting-approval");
       expect(asyncPendingMetric("approval") - metricBefore).toBe(1);
 
@@ -200,7 +208,7 @@ describe("approval extended", () => {
       await approveNode(adapter, first.runId, "gate", 0, "ok", "tester");
       expect(asyncPendingMetric("approval")).toBe(metricBefore);
 
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await runInTestRoot(workflow, dbPath, {
         input: {},
         runId: first.runId,
         resume: true,
@@ -212,7 +220,7 @@ describe("approval extended", () => {
   });
 
   test("selection approval persists typed selection output", async () => {
-    const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+    const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers({
       selection: approvalSelectionSchema,
       result: z.object({ selected: z.string() }),
     });
@@ -243,7 +251,7 @@ describe("approval extended", () => {
       );
     });
 
-    const first = await runWorkflow(workflow, { input: {} });
+    const first = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(first.status).toBe("waiting-approval");
 
     const adapter = new SmithersDb(db as any);
@@ -257,7 +265,7 @@ describe("approval extended", () => {
       { selected: "balanced", notes: "balanced is safest" },
     );
 
-    const resumed = await runWorkflow(workflow, {
+    const resumed = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: first.runId,
       resume: true,
@@ -281,7 +289,7 @@ describe("approval extended", () => {
   });
 
   test("ranking approval persists typed ranking output", async () => {
-    const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+    const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers({
       ranking: approvalRankingSchema,
       result: z.object({ first: z.string() }),
     });
@@ -313,7 +321,7 @@ describe("approval extended", () => {
       );
     });
 
-    const first = await runWorkflow(workflow, { input: {} });
+    const first = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(first.status).toBe("waiting-approval");
 
     const adapter = new SmithersDb(db as any);
@@ -327,7 +335,7 @@ describe("approval extended", () => {
       { ranked: ["canary", "regional", "global"], notes: "canary first" },
     );
 
-    const resumed = await runWorkflow(workflow, {
+    const resumed = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: first.runId,
       resume: true,
@@ -351,7 +359,7 @@ describe("approval extended", () => {
   });
 
   test("autoApprove after consecutive manual approvals skips the approval wait", async () => {
-    const { smithers, outputs, db, cleanup } = createTestSmithers({
+    const { smithers, outputs, db, dbPath, cleanup } = createTestSmithers({
       approval: approvalDecisionSchema,
     });
 
@@ -369,10 +377,10 @@ describe("approval extended", () => {
     const adapter = new SmithersDb(db as any);
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const run = await runWorkflow(workflow, { input: {} });
+      const run = await runInTestRoot(workflow, dbPath, { input: {} });
       expect(run.status).toBe("waiting-approval");
       await approveNode(adapter, run.runId, "checkout", 0, "ok", `human-${attempt + 1}`);
-      const resumed = await runWorkflow(workflow, {
+      const resumed = await runInTestRoot(workflow, dbPath, {
         input: {},
         runId: run.runId,
         resume: true,
@@ -380,7 +388,7 @@ describe("approval extended", () => {
       expect(resumed.status).toBe("finished");
     }
 
-    const autoApproved = await runWorkflow(workflow, { input: {} });
+    const autoApproved = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(autoApproved.status).toBe("finished");
 
     const approval = await adapter.getApproval(autoApproved.runId, "checkout", 0);
