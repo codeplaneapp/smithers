@@ -1,1 +1,1 @@
-export const FRAME_KEYFRAME_INTERVAL = 50;
+export declare const FRAME_KEYFRAME_INTERVAL = 50;

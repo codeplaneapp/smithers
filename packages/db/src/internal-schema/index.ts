@@ -12,10 +12,6 @@ export { smithersToolCalls } from "./smithersToolCalls";
 export { smithersEvents } from "./smithersEvents";
 export { smithersRalph } from "./smithersRalph";
 export { smithersScorers } from "@smithers/scorers/schema";
-export {
-  smithersMemoryFacts,
-  smithersMemoryThreads,
-  smithersMemoryMessages,
-} from "@smithers/memory/schema";
+export { smithersMemoryFacts, smithersMemoryThreads, smithersMemoryMessages, } from "@smithers/memory/schema";
 export { smithersVectors } from "./smithersVectors";
 export { smithersCron } from "./smithersCron";

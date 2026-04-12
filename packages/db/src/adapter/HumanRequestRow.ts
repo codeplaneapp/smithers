@@ -1,7 +1,5 @@
-import type {
-  HumanRequestKind,
-  HumanRequestStatus,
-} from "@smithers/durables";
+export type HumanRequestKind = "ask" | "confirm" | "select" | "json";
+export type HumanRequestStatus = "pending" | "answered" | "cancelled" | "expired";
 
 export type HumanRequestRow = {
   requestId: string;

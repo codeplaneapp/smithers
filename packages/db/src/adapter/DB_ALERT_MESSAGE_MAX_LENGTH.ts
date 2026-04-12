@@ -1,1 +1,1 @@
-export const DB_ALERT_MESSAGE_MAX_LENGTH = 4096;
+export declare const DB_ALERT_MESSAGE_MAX_LENGTH = 4096;

@@ -1,23 +1,356 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-
-export const smithersRuns = sqliteTable("_smithers_runs", {
-  runId: text("run_id").primaryKey(),
-  parentRunId: text("parent_run_id"),
-  workflowName: text("workflow_name").notNull(),
-  workflowPath: text("workflow_path"),
-  workflowHash: text("workflow_hash"),
-  status: text("status").notNull(),
-  createdAtMs: integer("created_at_ms").notNull(),
-  startedAtMs: integer("started_at_ms"),
-  finishedAtMs: integer("finished_at_ms"),
-  heartbeatAtMs: integer("heartbeat_at_ms"),
-  runtimeOwnerId: text("runtime_owner_id"),
-  cancelRequestedAtMs: integer("cancel_requested_at_ms"),
-  hijackRequestedAtMs: integer("hijack_requested_at_ms"),
-  hijackTarget: text("hijack_target"),
-  vcsType: text("vcs_type"),
-  vcsRoot: text("vcs_root"),
-  vcsRevision: text("vcs_revision"),
-  errorJson: text("error_json"),
-  configJson: text("config_json"),
-});
+export declare const smithersRuns: import("drizzle-orm/sqlite-core").SQLiteTableWithColumns<{
+    name: "_smithers_runs";
+    schema: undefined;
+    columns: {
+        runId: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "run_id";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        parentRunId: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "parent_run_id";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        workflowName: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "workflow_name";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        workflowPath: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "workflow_path";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        workflowHash: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "workflow_hash";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        status: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "status";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        createdAtMs: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "created_at_ms";
+            tableName: "_smithers_runs";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        startedAtMs: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "started_at_ms";
+            tableName: "_smithers_runs";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        finishedAtMs: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "finished_at_ms";
+            tableName: "_smithers_runs";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        heartbeatAtMs: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "heartbeat_at_ms";
+            tableName: "_smithers_runs";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        runtimeOwnerId: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "runtime_owner_id";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        cancelRequestedAtMs: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "cancel_requested_at_ms";
+            tableName: "_smithers_runs";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        hijackRequestedAtMs: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "hijack_requested_at_ms";
+            tableName: "_smithers_runs";
+            dataType: "number";
+            columnType: "SQLiteInteger";
+            data: number;
+            driverParam: number;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        hijackTarget: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "hijack_target";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        vcsType: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "vcs_type";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        vcsRoot: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "vcs_root";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        vcsRevision: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "vcs_revision";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        errorJson: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "error_json";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+        configJson: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "config_json";
+            tableName: "_smithers_runs";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {
+            length: number | undefined;
+        }>;
+    };
+    dialect: "sqlite";
+}>;

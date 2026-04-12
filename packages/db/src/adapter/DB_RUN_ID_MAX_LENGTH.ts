@@ -1,1 +1,1 @@
-export const DB_RUN_ID_MAX_LENGTH = 256;
+export declare const DB_RUN_ID_MAX_LENGTH = 256;
