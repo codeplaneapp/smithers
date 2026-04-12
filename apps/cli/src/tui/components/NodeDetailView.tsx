@@ -80,7 +80,7 @@ export function NodeDetailView({
 
     if (key.name === "r" && !isGlobal && latestAttempt) {
       Bun.spawn([
-        "bun", "run", "src/cli/index.ts", "revert", 
+        "bun", "run", "src/index.ts", "revert", 
         "--runId", runId, 
         "--nodeId", nodeId!, 
         "--attempt", latestAttempt.attempt.toString(), 

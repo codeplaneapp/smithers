@@ -38,7 +38,7 @@ export function AskModal({ onClose }: { onClose: () => void }) {
     setStatus("streaming");
     setAnswer("");
     try {
-      const proc = Bun.spawn(["bun", "run", "src/cli/index.ts", "ask", question], {
+      const proc = Bun.spawn(["bun", "run", "src/index.ts", "ask", question], {
         stdout: "pipe",
         stderr: "pipe",
       });

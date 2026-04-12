@@ -116,27 +116,27 @@ export function RunsList({
         return;
       }
       if (key.name === "y" && status === "waiting-approval") {
-        Bun.spawn(["bun", "run", "src/cli/index.ts", "approve", runId], { stdout: "ignore", stderr: "ignore" }).unref();
+        Bun.spawn(["bun", "run", "src/index.ts", "approve", runId], { stdout: "ignore", stderr: "ignore" }).unref();
         return;
       }
       if (key.name === "d" && status === "waiting-approval") {
-        Bun.spawn(["bun", "run", "src/cli/index.ts", "deny", runId], { stdout: "ignore", stderr: "ignore" }).unref();
+        Bun.spawn(["bun", "run", "src/index.ts", "deny", runId], { stdout: "ignore", stderr: "ignore" }).unref();
         return;
       }
       if (key.name === "c" && (status === "running" || status === "waiting-timer")) {
-        Bun.spawn(["bun", "run", "src/cli/index.ts", "cancel", runId], { stdout: "ignore", stderr: "ignore" }).unref();
+        Bun.spawn(["bun", "run", "src/index.ts", "cancel", runId], { stdout: "ignore", stderr: "ignore" }).unref();
         return;
       }
       if (key.name === "r" && (status === "failed" || status === "cancelled")) {
         const path = runs[selectedIndex].workflowPath;
         if (path) {
-          Bun.spawn(["bun", "run", "src/cli/index.ts", "up", path, "--resume", "--runId", runId, "-d"], { stdout: "ignore", stderr: "ignore" }).unref();
+          Bun.spawn(["bun", "run", "src/index.ts", "up", path, "--resume", "--runId", runId, "-d"], { stdout: "ignore", stderr: "ignore" }).unref();
         }
         return;
       }
     }
     if (key.name === "k") {
-      Bun.spawn(["bun", "run", "src/cli/index.ts", "down"], { stdout: "ignore", stderr: "ignore" }).unref();
+      Bun.spawn(["bun", "run", "src/index.ts", "down"], { stdout: "ignore", stderr: "ignore" }).unref();
       return;
     }
   });

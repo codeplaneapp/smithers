@@ -83,7 +83,7 @@ export function RunDetailView({
             "--cwd",
             process.cwd(),
             "--command",
-            `bun run src/cli/index.ts hijack ${runId} --target ${targetNode}`,
+            `bun run src/index.ts hijack ${runId} --target ${targetNode}`,
           ],
           { stdout: "ignore", stderr: "ignore" },
         ).unref();

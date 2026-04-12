@@ -41,7 +41,7 @@ function processCronEffect(
       try: () => {
         const proc = spawn(
           "bun",
-          ["run", "src/cli/index.ts", "up", job.workflowPath, "-d"],
+          ["run", "src/index.ts", "up", job.workflowPath, "-d"],
           {
             cwd: process.cwd(),
             detached: true,

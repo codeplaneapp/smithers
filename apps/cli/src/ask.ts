@@ -318,7 +318,7 @@ function buildSystemPrompt(
       ? renderSmithersAgentPromptGuidance(contract, { available: false })
       : contract.promptGuidance,
     "If you need repository documentation, read local files in this checkout, starting with docs/llms-full.txt.",
-    "Use `smithers` or `bun run src/cli/index.ts --help` to inspect the current CLI surface when you need shell fallbacks.",
+    "Use `smithers` or `bun run src/index.ts --help` to inspect the current CLI surface when you need shell fallbacks.",
     "Be concise and act directly.",
   ];
 

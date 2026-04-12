@@ -32,7 +32,7 @@ export function WorkflowLauncher({ onClose }: { onClose: () => void }) {
         // spawn the workflow
         const file = examples[selectedIndex];
         try {
-          const proc = Bun.spawn(["bun", "run", "src/cli/index.ts", "up", `examples/${file}`, "-d"], {
+          const proc = Bun.spawn(["bun", "run", "src/index.ts", "up", `examples/${file}`, "-d"], {
             stdin: "ignore",
             stdout: "ignore",
             stderr: "ignore",
