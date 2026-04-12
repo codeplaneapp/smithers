@@ -1,5 +1,5 @@
 import type { TaskDescriptor } from "@smithers/graph/TaskDescriptor";
-import type { HijackState } from "../index";
+import type { HijackState } from "../engine";
 import { Effect } from "effect";
 import { SmithersDb } from "@smithers/db/adapter";
 import { EventBus } from "../events";

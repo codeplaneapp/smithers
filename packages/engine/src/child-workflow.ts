@@ -159,7 +159,7 @@ export async function executeChildWorkflow(
       output: normalizeChildOutput(result),
     };
   }
-  const { runWorkflow } = await import("./index");
+  const { runWorkflow } = await import("./engine");
   const result = await Effect.runPromise(runWorkflow(childWorkflow, {
     input,
     runId: childRunId,

@@ -15,7 +15,7 @@ import React from "react";
 import type { CachePolicy } from "@smithers/scheduler/CachePolicy";
 import type { RetryPolicy } from "@smithers/scheduler/RetryPolicy";
 import { SmithersDb } from "@smithers/db/adapter";
-import { runWorkflow } from "../index";
+import { runWorkflow } from "../engine";
 import { ignoreSyncError } from "@smithers/driver/interop";
 import { requireTaskRuntime } from "@smithers/driver/task-runtime";
 import {
