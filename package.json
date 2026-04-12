@@ -22,7 +22,7 @@
     "./jsx-dev-runtime": "./packages/smithers/src/jsx-runtime.ts",
     "./tools": "./packages/tools/src/index.ts",
     "./server": "./packages/server/src/index.ts",
-    "./observability": "./packages/observability/src/index.ts",
+    "./observability": "./apps/observability/src/index.ts",
     "./pi-plugin": "./packages/smithers/src/pi-plugin/index.ts",
     "./pi-extension": "./packages/smithers/src/pi-plugin/extension.ts",
     "./mdx-plugin": "./packages/smithers/src/mdx-plugin.ts",
@@ -63,12 +63,10 @@
     "lint:fix": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore --fix packages/*/src packages/*/tests",
     "cli": "bun run apps/cli/src/index.ts",
     "test": "pnpm -r test",
-    "e2e": "playwright test",
     "docs": "cd docs && bunx mintlify dev"
   },
   "devDependencies": {
-    "@playwright/test": "^1.52.0",
-    "@tanstack/react-query": "^5.96.2",
+"@tanstack/react-query": "^5.96.2",
     "@types/bun": "latest",
     "@types/diff": "^5.2.0",
     "@types/react": "^19.2.10",
