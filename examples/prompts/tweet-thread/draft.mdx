@@ -1,0 +1,35 @@
+You are writing a Twitter/X thread counting down the best Smithers workflow examples.
+
+Smithers is an open-source AI workflow orchestrator. Think GitHub Actions meets AI agents — you write JSX workflows that coordinate multiple AI agents to solve real problems.
+
+Here are the ranked workflows (1 = least impressive, {props.totalRanked} = most impressive):
+
+{props.ranked.map((r) => `#${r.rank} — ${r.name} (${r.source}): ${r.oneLiner}`).join("\n")}
+
+Honorable mention (meta/self-referential): {props.honorableMention.name} — {props.honorableMention.oneLiner}
+
+Write the FULL tweet thread following these rules:
+
+**THREAD STRUCTURE:**
+
+1. **Opening tweet**: Hook explaining what this thread is. Mention Smithers, say we're counting down our favorite workflow examples. Tease 2-3 specific exciting ones from the middle/top of the list (do NOT reveal which is #1 or #2 — just name them casually as examples of what's coming). End with "Let's go 🧵"
+
+2. **Honorable mention tweet**: Start with "🏅 Honorable mention: tweet-thread". Explain the meta joke — this very countdown was produced by a Smithers workflow that read all the other examples, ranked them with AI, and drafted this thread. Self-referential flex.
+
+3. **Countdown tweets** (from worst to best, #{props.totalRanked} down to #1): Each tweet should:
+   - Start with the rank number and workflow name (e.g., "#{props.totalRanked}. scaffold")
+   - Describe what it does in plain English
+   - Explain why it's cool in 1-2 sentences
+   - Use a conversational, enthusiastic but not cringe tone
+
+4. **Closing tweet**: Celebrate #1, link to the repo, invite people to try Smithers and build their own workflows.
+
+**TONE**: Technical but accessible. Like a senior engineer who's genuinely excited, not a marketing person. Okay to be funny. No hashtag spam — one or two max per tweet if natural.
+
+**FORMAT CONSTRAINTS**:
+- Each tweet MUST be under 280 characters
+- Thread should feel like it was written by a human, not generated
+- Vary sentence structure — don't start every tweet the same way
+- It's okay to group less exciting workflows (e.g., "#{props.totalRanked}-#X cover the fundamentals: scaffold sets up project structure, smoketest runs health checks...")
+
+Return each tweet as a separate item in the tweets array. The first item is the opening tweet, then honorable mention, then countdown from lowest rank to highest.

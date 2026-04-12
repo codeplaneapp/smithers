@@ -1,0 +1,23 @@
+You are ranking Smithers workflow examples for a Twitter/X countdown thread.
+
+There are {props.totalCount} workflows to rank. Here are the summaries:
+
+{props.summaries.map((s, i) => `--- [${i + 1}] ${s.name} (${s.source}) ---\n${s.summary}`).join("\n\n")}
+
+Rank ALL workflows from least useful to most useful. Consider:
+- **Practical value**: Would a real team actually use this?
+- **Wow factor**: Does it show something surprising an AI workflow can do?
+- **Breadth of appeal**: Is this niche or universally relatable?
+- **Pattern showcase**: Does it teach an important orchestration concept?
+
+IMPORTANT RULES:
+- The workflow named "tweet-thread" MUST be ranked LAST (it becomes the "honorable mention" at the start of the thread, since it's the workflow that produced this very thread — a fun meta moment).
+- Do NOT put tweet-thread anywhere else in the ranking.
+- Return every single workflow with a rank from 1 (worst/least useful) to N-1 (best/most useful), plus tweet-thread as the honorable mention.
+
+For each workflow provide:
+- rank (number, 1 = least impressive, N-1 = most impressive)
+- name (filename without extension)
+- source ("examples" or ".smithers/workflows")
+- oneLiner (a punchy one-line description, max 200 chars)
+- whyThisRank (one sentence on why it ranked here)
