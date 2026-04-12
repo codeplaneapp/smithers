@@ -9,10 +9,11 @@ RUN sed -i \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY package.json bun.lock* ./
+COPY package.json bun.lock ./
+COPY apps ./apps
+COPY packages ./packages
+COPY examples/kubernetes ./examples/kubernetes
 RUN bun install --frozen-lockfile
-
-COPY . .
 
 # --- Orchestrator ---
 FROM base AS orchestrator

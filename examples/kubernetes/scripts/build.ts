@@ -1,11 +1,19 @@
 import { $ } from "bun";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const tag = process.env.IMAGE_TAG ?? "latest";
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const exampleDir = resolve(scriptDir, "..");
+const repoRoot = resolve(exampleDir, "../..");
+const dockerfile = resolve(exampleDir, "Dockerfile");
+const orchestratorTag = `smithers-orchestrator:${tag}`;
+const workerTag = `smithers-worker:${tag}`;
 
-console.log(`Building smithers-orchestrator:${tag}...`);
-await $`docker build --target orchestrator -t smithers-orchestrator:${tag} .`;
+console.log(`Building ${orchestratorTag}...`);
+await $`docker build -f ${dockerfile} --target orchestrator -t ${orchestratorTag} ${repoRoot}`;
 
-console.log(`Building smithers-worker:${tag}...`);
-await $`docker build --target worker -t smithers-worker:${tag} .`;
+console.log(`Building ${workerTag}...`);
+await $`docker build -f ${dockerfile} --target worker -t ${workerTag} ${repoRoot}`;
 
-console.log(`Done. Built smithers-orchestrator:${tag} and smithers-worker:${tag}`);
+console.log(`Done. Built ${orchestratorTag} and ${workerTag}`);

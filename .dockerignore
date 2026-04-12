@@ -1,0 +1,17 @@
+node_modules
+.git
+.jj
+.smithers
+.worktrees
+.cache
+coverage
+dist
+out
+playwright-report
+test-results
+tests/.test-*
+*.db
+*.db-shm
+*.db-wal
+*.tsbuildinfo
+.DS_Store
