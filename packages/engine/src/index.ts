@@ -51,16 +51,17 @@ import {
   type TaskStateMap,
   type RalphStateMap,
 } from "./scheduler";
-import { runWithToolContext } from "@smithers/tools/context";
-import { getDefinedToolMetadata } from "@smithers/tools/defineTool";
+import { runWithToolContext } from "@smithers/driver/toolContext";
+import { getDefinedToolMetadata } from "./getDefinedToolMetadata";
 import {
   captureSnapshotEffect,
   loadLatestSnapshot,
   parseSnapshot,
 } from "@smithers/time-travel/snapshot";
 import { EventBus } from "./events";
-import { getJjPointer } from "@smithers/vcs/jj";
+import { getJjPointer, runJj, workspaceAdd } from "@smithers/vcs/jj";
 import { findVcsRoot } from "@smithers/vcs/find-root";
+import * as BunContext from "@effect/platform-bun/BunContext";
 import { z } from "zod";
 import { eq, getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
@@ -577,12 +578,11 @@ async function ensureWorktree(
 ): Promise<void> {
   if (existsSync(worktreePath)) {
     // Worktree exists — rebase onto the configured base branch so work starts from tip.
-    const vcs = findVcsRoot(rootDir);
+    const vcs = Effect.runSync(findVcsRoot(rootDir));
     const base = baseBranch || "main";
     if (vcs?.type === "jj") {
-      const { runJj } = await import("@smithers/vcs/jj");
-      await runJj(["git", "fetch"], { cwd: worktreePath });
-      const rebaseRes = await runJj(["rebase", "-d", base], { cwd: worktreePath });
+      await Effect.runPromise(runJj(["git", "fetch"], { cwd: worktreePath }).pipe(Effect.provide(BunContext.layer)));
+      const rebaseRes = await Effect.runPromise(runJj(["rebase", "-d", base], { cwd: worktreePath }).pipe(Effect.provide(BunContext.layer)));
       if (rebaseRes.code !== 0) {
         console.warn(
           `[smithers] worktree sync: jj rebase -d ${base} failed (exit ${rebaseRes.code}): ${rebaseRes.stderr || "unknown error"}`,
@@ -605,7 +605,7 @@ async function ensureWorktree(
   }
 
   // Walk up from rootDir to find the actual VCS root
-  const vcs = findVcsRoot(rootDir);
+  const vcs = Effect.runSync(findVcsRoot(rootDir));
   if (!vcs) {
     throw new SmithersError(
       "VCS_NOT_FOUND",
@@ -621,9 +621,8 @@ async function ensureWorktree(
   }
 
   if (vcs.type === "jj") {
-    const { workspaceAdd, runJj } = await import("@smithers/vcs/jj");
     const name = worktreePath.split("/").pop() ?? "worktree";
-    const wsResult = await workspaceAdd(name, worktreePath, { cwd: vcs.root, atRev: baseBranch });
+    const wsResult = await Effect.runPromise(workspaceAdd(name, worktreePath, { cwd: vcs.root, atRev: baseBranch }).pipe(Effect.provide(BunContext.layer)));
     if (!wsResult.success) {
       throw new SmithersError(
         "WORKTREE_CREATE_FAILED",
@@ -633,9 +632,9 @@ async function ensureWorktree(
     }
     // Create a bookmark pointing at the new workspace's working copy
     if (branch) {
-      const setRes = await runJj(["bookmark", "set", branch, "-r", "@", "--allow-backwards"], {
+      const setRes = await Effect.runPromise(runJj(["bookmark", "set", branch, "-r", "@", "--allow-backwards"], {
         cwd: worktreePath,
-      });
+      }).pipe(Effect.provide(BunContext.layer)));
       if (setRes.code !== 0) {
         throw new SmithersError(
           "WORKTREE_CREATE_FAILED",
@@ -1704,7 +1703,7 @@ async function getRunDurabilityMetadata(
 ): Promise<RunDurabilityMetadata> {
   const entryWorkflowHash = await readWorkflowEntryHash(workflowPath);
   const workflowHash = await readWorkflowGraphHash(workflowPath);
-  const vcs = findVcsRoot(rootDir);
+  const vcs = Effect.runSync(findVcsRoot(rootDir));
   if (!vcs) {
     return {
       workflowHash,
@@ -1717,7 +1716,7 @@ async function getRunDurabilityMetadata(
 
   const vcsRevision =
     vcs.type === "jj"
-      ? await getJjPointer(rootDir)
+      ? await Effect.runPromise(getJjPointer(rootDir).pipe(Effect.provide(BunContext.layer)))
       : await getGitPointer(rootDir);
 
   return {
@@ -3045,7 +3044,7 @@ export async function legacyExecuteTask(
       const agentSig = cacheAgent?.id ?? "agent";
       const toolsSig = hashCapabilityRegistry(cacheAgent?.capabilities ?? null);
       // Incorporate JJ state so workspace changes invalidate cache as documented.
-      const jjBase = await getJjPointer(taskRoot);
+      const jjBase = await Effect.runPromise(getJjPointer(taskRoot).pipe(Effect.provide(BunContext.layer)));
       cacheJjBase = jjBase ?? null;
 
       let cacheBase: Record<string, unknown>;
@@ -4088,7 +4087,7 @@ export async function legacyExecuteTask(
     taskExecutionReturned = true;
     await eventBus.flush();
     // Reuse the resolved taskRoot for JJ pointer capture to avoid recomputing.
-    const jjPointer = await getJjPointer(taskRoot);
+    const jjPointer = await Effect.runPromise(getJjPointer(taskRoot).pipe(Effect.provide(BunContext.layer)));
 
     await waitForHeartbeatWriteDrain();
     await flushHeartbeat(true);

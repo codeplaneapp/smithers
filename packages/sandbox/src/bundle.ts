@@ -6,7 +6,7 @@ import {
   assertOptionalArrayMaxLength,
   assertOptionalStringMaxLength,
 } from "@smithers/db/input-bounds";
-import { resolveSandboxPath } from "@smithers/tools/utils";
+import { resolveSandboxPath } from "./sandboxPath";
 
 export const SANDBOX_MAX_BUNDLE_BYTES = 100 * 1024 * 1024; // 100MB
 export const SANDBOX_MAX_README_BYTES = 5 * 1024 * 1024; // 5MB

@@ -27,7 +27,7 @@ import {
   type AgentCapabilityRegistry,
 } from "./capability-registry";
 import { fromPromise } from "@smithers/driver/interop";
-import { getToolContext } from "@smithers/tools/context";
+import { getToolContext } from "@smithers/driver/toolContext";
 import { SmithersError } from "@smithers/errors/SmithersError";
 import { enrichReportWithErrorAnalysis, launchDiagnostics } from "./diagnostics";
 

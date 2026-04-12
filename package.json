@@ -20,7 +20,6 @@
     "./gateway": "./packages/server/src/gateway.ts",
     "./jsx-runtime": "./packages/smithers/src/jsx-runtime.ts",
     "./jsx-dev-runtime": "./packages/smithers/src/jsx-runtime.ts",
-    "./tools": "./packages/tools/src/index.ts",
     "./server": "./packages/server/src/index.ts",
     "./observability": "./apps/observability/src/index.ts",
     "./pi-plugin": "./packages/smithers/src/pi-plugin/index.ts",
@@ -29,7 +28,7 @@
     "./dom/renderer": "./packages/react-reconciler/src/dom/renderer.ts",
     "./serve": "./packages/server/src/serve.ts",
     "./scorers": "./packages/scorers/src/index.ts",
-    "./voice": "./packages/voice/src/index.ts",
+
     "./rag": "./packages/rag/src/index.ts",
     "./memory": "./packages/memory/src/index.ts",
     "./openapi": "./packages/openapi/src/index.ts"

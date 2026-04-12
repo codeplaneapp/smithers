@@ -39,7 +39,6 @@
     "@smithers/scheduler": "workspace:*",
     "@smithers/server": "workspace:*",
     "@smithers/time-travel": "workspace:*",
-    "@smithers/tools": "workspace:*",
     "effect": "^3.21.0",
     "incur": "^0.3.3",
     "picocolors": "^1.1.1",

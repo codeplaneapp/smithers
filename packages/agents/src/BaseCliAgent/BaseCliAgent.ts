@@ -17,7 +17,7 @@ import {
   agentTokensTotal,
   toolOutputTruncatedTotal,
 } from "@smithers/observability/metrics";
-import { getToolContext } from "@smithers/tools/context";
+import { getToolContext } from "@smithers/driver/toolContext";
 import { SmithersError } from "@smithers/errors/SmithersError";
 import { launchDiagnostics, enrichReportWithErrorAnalysis, formatDiagnosticSummary } from "../diagnostics";
 import type { BaseCliAgentOptions } from "./BaseCliAgentOptions";

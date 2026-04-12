@@ -38,7 +38,6 @@ export function assertPathWithinRootEffect(
         }
         return;
       }
-      // Error case - check if it's ENOENT/ENOTDIR (walk up) or something else (fail)
       const err = result.left;
       const cause = (err as any)?.cause ?? err;
       const code = (cause as any)?.code;

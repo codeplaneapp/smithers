@@ -25,7 +25,6 @@
     "@smithers/driver": "workspace:*",
     "@smithers/observability": "workspace:*",
     "@smithers/scheduler": "workspace:*",
-    "@smithers/tools": "workspace:*",
     "ai": "^6.0.69",
     "zod": "^4.3.6"
   },

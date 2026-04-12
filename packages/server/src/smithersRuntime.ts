@@ -13,7 +13,7 @@ import {
   makeSmithersSpanAttributes,
   smithersSpanNames,
 } from "@smithers/observability";
-import { getToolContext } from "@smithers/tools/context";
+import { getToolContext } from "@smithers/driver/toolContext";
 import { toSmithersError } from "@smithers/errors/toSmithersError";
 import type { SmithersError } from "@smithers/errors/SmithersError";
 

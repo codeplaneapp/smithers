@@ -32,7 +32,6 @@
     "@smithers/observability": "workspace:*",
     "@smithers/scheduler": "workspace:*",
     "@smithers/time-travel": "workspace:*",
-    "@smithers/tools": "workspace:*",
     "cron-parser": "^5.5.0",
     "effect": "^3.21.0",
     "hono": "^4.12.8",

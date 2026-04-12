@@ -35,9 +35,9 @@
     "@smithers/scheduler": "workspace:*",
     "@smithers/scorers": "workspace:*",
     "@smithers/time-travel": "workspace:*",
-    "@smithers/tools": "workspace:*",
     "@smithers/vcs": "workspace:*",
-    "@smithers/voice": "workspace:*",
+
+    "@effect/platform-bun": "^0.89.0",
     "effect": "^3.21.0"
   },
   "devDependencies": {

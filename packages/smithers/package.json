@@ -43,9 +43,8 @@
     "@smithers/scorers": "workspace:*",
     "@smithers/server": "workspace:*",
     "@smithers/time-travel": "workspace:*",
-    "@smithers/tools": "workspace:*",
     "@smithers/vcs": "workspace:*",
-    "@smithers/voice": "workspace:*",
+
     "zod": "^4.3.6"
   },
   "devDependencies": {

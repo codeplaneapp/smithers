@@ -21,11 +21,9 @@
       "smithers": ["./packages/smithers/src/index.ts"],
       "smithers/jsx-runtime": ["./packages/smithers/src/jsx-runtime.ts"],
       "smithers/jsx-dev-runtime": ["./packages/smithers/src/jsx-runtime.ts"],
-      "smithers/tools": ["./packages/tools/src/index.ts"],
       "smithers-orchestrator": ["./packages/smithers/src/index.ts"],
       "smithers-orchestrator/jsx-runtime": ["./packages/smithers/src/jsx-runtime.ts"],
       "smithers-orchestrator/jsx-dev-runtime": ["./packages/smithers/src/jsx-runtime.ts"],
-      "smithers-orchestrator/tools": ["./packages/tools/src/index.ts"],
       "smithers-orchestrator/scorers": ["./packages/scorers/src/index.ts"],
       "@smithers/smithers": ["./packages/smithers/src/index.ts"],
       "@smithers/smithers/*": ["./packages/smithers/src/*.ts", "./packages/smithers/src/*/index.ts"],
@@ -61,12 +59,8 @@
       "@smithers/server/*": ["./packages/server/src/*.ts", "./packages/server/src/*/index.ts"],
       "@smithers/time-travel": ["./packages/time-travel/src/index.ts"],
       "@smithers/time-travel/*": ["./packages/time-travel/src/*.ts", "./packages/time-travel/src/*/index.ts"],
-      "@smithers/tools": ["./packages/tools/src/index.ts"],
-      "@smithers/tools/*": ["./packages/tools/src/*.ts", "./packages/tools/src/*/index.ts"],
       "@smithers/vcs": ["./packages/vcs/src/index.ts"],
-      "@smithers/vcs/*": ["./packages/vcs/src/*.ts", "./packages/vcs/src/*/index.ts"],
-      "@smithers/voice": ["./packages/voice/src/index.ts"],
-      "@smithers/voice/*": ["./packages/voice/src/*.ts", "./packages/voice/src/*/index.ts"]
+      "@smithers/vcs/*": ["./packages/vcs/src/*.ts", "./packages/vcs/src/*/index.ts"]
     },
     "typeRoots": ["./packages/smithers/src/types", "./node_modules/@types"]
   },

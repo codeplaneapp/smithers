@@ -154,16 +154,7 @@ export { signalRun } from "@smithers/engine/signals";
 export { usePatched } from "@smithers/engine/effect/versioning";
 
 // Tools
-export {
-  tools,
-  read,
-  write,
-  edit,
-  grep,
-  bash,
-  defineTool,
-  getDefinedToolMetadata,
-} from "@smithers/tools";
+export { getDefinedToolMetadata } from "@smithers/engine/getDefinedToolMetadata";
 
 // Server
 export { startServer } from "@smithers/server";
