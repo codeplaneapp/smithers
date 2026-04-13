@@ -12,11 +12,13 @@
  * Without them the workflow still produces the full thread as structured output
  * so you can copy-paste it manually.
  */
-import { Sequence, Parallel, Timer } from "smithers-orchestrator";
-import { createExampleSmithers, asArray } from "./_example-kit.js";
-import { ToolLoopAgent as Agent } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
-import { read, bash } from "smithers-orchestrator/tools";
+import {
+  Sequence,
+  Parallel,
+  Timer,
+  ClaudeCodeAgent,
+} from "smithers-orchestrator";
+import { createExampleSmithers } from "./_example-kit.js";
 import { z } from "zod";
 import SummarizePrompt from "./prompts/tweet-thread/summarize.mdx";
 import RankPrompt from "./prompts/tweet-thread/rank.mdx";
@@ -32,7 +34,7 @@ const fileScanSchema = z.object({
       name: z.string(),
       source: z.enum(["examples", ".smithers/workflows"]),
       filePath: z.string(),
-    })
+    }),
   ),
 });
 
@@ -64,7 +66,7 @@ const threadSchema = z.object({
       index: z.number(),
       text: z.string(),
       role: z.enum(["opening", "honorable-mention", "countdown", "closing"]),
-    })
+    }),
   ),
   totalTweets: z.number(),
 });
@@ -91,51 +93,47 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 // Agents
 // ---------------------------------------------------------------------------
 
-const fileScanAgent = new Agent({
-  model: anthropic("claude-sonnet-4-20250514"),
-  tools: { bash },
-  instructions: `You list workflow files in a repo. Run shell commands to find
-them, then return structured JSON. Exclude helper/utility files like
-_example-kit.js — only return actual workflow definitions.`,
-});
-
-const scanner = new Agent({
-  model: anthropic("claude-sonnet-4-20250514"),
-  tools: { read },
-  instructions: `You read Smithers workflow source files and produce concise,
+const scanner = new ClaudeCodeAgent({
+  model: "claude-sonnet-4-20250514",
+  systemPrompt: `You read Smithers workflow source files and produce concise,
 punchy summaries. Focus on what makes each workflow interesting and what
 real-world problem it solves. Be concrete, not abstract.`,
 });
 
-const ranker = new Agent({
-  model: anthropic("claude-sonnet-4-20250514"),
-  instructions: `You are a developer advocate ranking workflow examples for a
+const ranker = new ClaudeCodeAgent({
+  model: "claude-sonnet-4-20250514",
+  systemPrompt: `You are a developer advocate ranking workflow examples for a
 social media countdown. You value practical utility, wow factor, and how well
 each example teaches an orchestration concept.`,
 });
 
-const copywriter = new Agent({
-  model: anthropic("claude-sonnet-4-20250514"),
-  instructions: `You are a sharp technical copywriter. You write tweets that
+const copywriter = new ClaudeCodeAgent({
+  model: "claude-sonnet-4-20250514",
+  systemPrompt: `You are a sharp technical copywriter. You write tweets that
 sound like a senior engineer who's genuinely excited — not a marketing person.
 Every tweet must be under 280 characters. You're funny when appropriate and
 never cringe. No hashtag spam.`,
 });
 
-const poster = new Agent({
-  model: anthropic("claude-sonnet-4-20250514"),
-  tools: { bash },
-  instructions: `You post a single tweet to X/Twitter using the twitter-api-v2
-npm package. Write and execute a short Node.js script that:
-1. Creates a TwitterApi client from env vars
-2. Posts the tweet (as a reply if a reply-to ID is provided)
-3. Returns the new tweet ID
-
-If X_API_KEY env var is not set, return posted: false and tweetId: "" with an
-error explaining what credentials are needed.
-
-Install the package first if needed: npm install --no-save twitter-api-v2`,
-});
+/** Post a single tweet. Returns { tweetId, posted, error? }. */
+async function postTweet(text, replyToId) {
+  const apiKey = process.env.X_API_KEY;
+  const apiSecret = process.env.X_API_SECRET;
+  const accessToken = process.env.X_ACCESS_TOKEN;
+  const accessSecret = process.env.X_ACCESS_SECRET;
+  if (!apiKey || !apiSecret || !accessToken || !accessSecret) {
+    return {
+      tweetId: "",
+      posted: false,
+      error: "Missing X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, or X_ACCESS_SECRET env vars.",
+    };
+  }
+  const { TwitterApi } = await import("twitter-api-v2");
+  const client = new TwitterApi({ appKey: apiKey, appSecret: apiSecret, accessToken, accessSecret });
+  const params = replyToId ? { text, reply: { in_reply_to_tweet_id: replyToId } } : { text };
+  const { data } = await client.v2.tweet(params);
+  return { tweetId: data.id, posted: true };
+}
 
 // ---------------------------------------------------------------------------
 // Workflow
@@ -152,14 +150,32 @@ export default smithers((ctx) => {
     <Workflow name="tweet-thread">
       <Sequence>
         {/* Phase 1: Discover all workflow files */}
-        <Task id="scan-files" output={outputs.fileScan} agent={fileScanAgent}>
-          List all Smithers workflow files in these two directories:
-          1. examples/*.jsx (exclude _example-kit.js)
-          2. .smithers/workflows/*.tsx
-
-          Return a JSON object with a "files" array. Each entry needs "name"
-          (filename without extension), "source" ("examples" or
-          ".smithers/workflows"), and "filePath" (relative path from repo root).
+        <Task id="scan-files" output={outputs.fileScan}>
+          {async () => {
+            const examplesGlob = new Bun.Glob("examples/*.jsx");
+            const workflowsGlob = new Bun.Glob(".smithers/workflows/*.tsx");
+            const files = [];
+            for await (const path of examplesGlob.scan(".")) {
+              const name = path
+                .split("/")
+                .pop()
+                .replace(/\.jsx$/, "");
+              if (name.startsWith("_")) continue;
+              files.push({ name, source: "examples", filePath: path });
+            }
+            for await (const path of workflowsGlob.scan(".")) {
+              const name = path
+                .split("/")
+                .pop()
+                .replace(/\.tsx$/, "");
+              files.push({
+                name,
+                source: ".smithers/workflows",
+                filePath: path,
+              });
+            }
+            return { files };
+          }}
         </Task>
 
         {/* Phase 2: Read and summarize each workflow in parallel */}
@@ -172,7 +188,8 @@ export default smithers((ctx) => {
                 output={outputs.summary}
                 agent={scanner}
                 continueOnFail
-                timeoutMs={60_000}
+                timeoutMs={300_000}
+
               >
                 <SummarizePrompt filePath={file.filePath} />
               </Task>
@@ -199,28 +216,21 @@ export default smithers((ctx) => {
         )}
 
         {/* Phase 5: Post each tweet with a 30s Timer between them */}
-        {thread && thread.tweets.map((tweet, i) => {
-          const prev = i > 0
-            ? ctx.outputMaybe("tweetPost", { nodeId: `post-${i - 1}` })
-            : null;
-          return (
-            <Sequence key={tweet.index}>
-              {i > 0 && <Timer id={`tweet-delay-${i}`} duration="30s" />}
-              <Task id={`post-${i}`} output={outputs.tweetPost} agent={poster}>
-                Post this tweet to X/Twitter:
-
-                "{tweet.text}"
-
-                {prev
-                  ? `This is a reply to tweet ID: ${prev.tweetId}`
-                  : "This is the first tweet in the thread (no reply-to)."}
-
-                Use env vars X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN,
-                X_ACCESS_SECRET for OAuth 1.0a auth.
-              </Task>
-            </Sequence>
-          );
-        })}
+        {thread &&
+          thread.tweets.map((tweet, i) => {
+            const prev =
+              i > 0
+                ? ctx.outputMaybe("tweetPost", { nodeId: `post-${i - 1}` })
+                : null;
+            return (
+              <Sequence key={tweet.index}>
+                {i > 0 && <Timer id={`tweet-delay-${i}`} duration="30s" />}
+                <Task id={`post-${i}`} output={outputs.tweetPost}>
+                  {() => postTweet(tweet.text, prev?.tweetId)}
+                </Task>
+              </Sequence>
+            );
+          })}
       </Sequence>
     </Workflow>
   );
