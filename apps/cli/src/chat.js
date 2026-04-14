@@ -59,6 +59,96 @@ export function parseNodeOutputEvent(event) {
     }
 }
 /**
+ * @param {ChatOutputEvent} event
+ * @returns {ParsedNodeOutputEvent | null}
+ */
+export function parseAgentEvent(event) {
+    if (event.type !== "AgentEvent")
+        return null;
+    try {
+        const payload = JSON.parse(event.payloadJson);
+        if (!payload || typeof payload !== "object")
+            return null;
+        const agentEvent = payload.event;
+        if (!agentEvent || typeof agentEvent !== "object")
+            return null;
+        const nodeId = String(payload.nodeId ?? "");
+        const iteration = Number(payload.iteration ?? 0);
+        const attempt = Number(payload.attempt ?? 1);
+        if (agentEvent.type === "action") {
+            const action = agentEvent.action;
+            const phase = agentEvent.phase ?? "";
+            const kind = action?.kind ?? "unknown";
+            const title = action?.title ?? "";
+            const message = agentEvent.message ?? "";
+            const detail = action?.detail ?? {};
+            let text = "";
+            if (kind === "tool" || kind === "command") {
+                if (phase === "started") {
+                    const input = detail.input ? JSON.stringify(detail.input) : "";
+                    text = `[tool] ${title}${input ? `: ${truncate(input, 200)}` : ""}`;
+                }
+                else if (phase === "completed") {
+                    const output = detail.output ? String(detail.output) : message;
+                    text = `[tool] ${title} → ${truncate(output || "done", 200)}`;
+                }
+                else {
+                    return null;
+                }
+            }
+            else if (kind === "file_change") {
+                const changes = detail.changes;
+                if (Array.isArray(changes)) {
+                    text = `[file_change] ${changes.map((c) => `${c.type ?? "change"}: ${c.file ?? c.path ?? "?"}`).join(", ")}`;
+                }
+                else {
+                    text = `[file_change] ${title || message || "files changed"}`;
+                }
+            }
+            else if (kind === "reasoning") {
+                if (!message)
+                    return null;
+                text = `[reasoning] ${truncate(message, 300)}`;
+            }
+            else if (kind === "note" && agentEvent.entryType === "thought") {
+                if (!message)
+                    return null;
+                text = `[thought] ${truncate(message, 300)}`;
+            }
+            else if (kind === "web_search") {
+                text = `[web_search] ${title || message || "searching"}`;
+            }
+            else {
+                // Skip other action kinds (turn, todo_list, generic notes)
+                return null;
+            }
+            if (!text)
+                return null;
+            return {
+                seq: event.seq,
+                timestampMs: event.timestampMs,
+                nodeId,
+                iteration,
+                attempt,
+                stream: "stdout",
+                text,
+            };
+        }
+        return null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * @param {string} str
+ * @param {number} max
+ */
+function truncate(str, max) {
+    if (str.length <= max) return str;
+    return str.slice(0, max) + "…";
+}
+/**
  * @param {ChatAttemptRow} attempt
  * @param {ReadonlySet<string>} outputAttemptKeys
  * @returns {boolean}
