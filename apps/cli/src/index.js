@@ -25,7 +25,7 @@ import { isHumanRequestPastTimeout, validateHumanRequestValue } from "@smithers/
 import { SmithersError } from "@smithers/errors";
 import { assertMaxBytes, assertMaxStringLength } from "@smithers/db/input-bounds";
 import { findAndOpenDb } from "./find-db.js";
-import { chatAttemptKey, formatChatAttemptHeader, formatChatBlock, parseChatAttemptMeta, parseNodeOutputEvent, selectChatAttempts, } from "./chat.js";
+import { chatAttemptKey, formatChatAttemptHeader, formatChatBlock, parseAgentEvent, parseChatAttemptMeta, parseNodeOutputEvent, selectChatAttempts, } from "./chat.js";
 import { buildHijackLaunchSpec, isNativeHijackCandidate, launchHijackSession, resolveHijackCandidate, waitForHijackCandidate, } from "./hijack.js";
 import { launchConversationHijackSession, persistConversationHijackHandoff, } from "./hijack-session.js";
 import { colorizeEventText, formatAge, formatElapsedCompact, formatEventLine, formatRelativeOffset, } from "./format.js";
@@ -1153,7 +1153,7 @@ const upOptions = z.object({
     toolTimeoutMs: z.number().int().min(1).optional().describe("Max wall-clock time per tool call in ms"),
     hot: z.boolean().default(false).describe("Enable hot module replacement for .tsx workflows"),
     input: z.string().optional().describe("Input data as JSON string"),
-    resume: z.boolean().default(false).describe("Resume a previous run instead of starting fresh"),
+    resume: z.union([z.boolean(), z.string()]).default(false).describe("Resume a previous run. Pass true with --run-id, or pass the run ID directly (e.g. --resume <run-id>)"),
     force: z.boolean().default(false).describe("Resume even if still marked running"),
     resumeClaimOwner: z.string().optional().describe("Internal durable resume claim owner"),
     resumeClaimHeartbeat: z.number().int().min(1).optional().describe("Internal durable resume claim heartbeat"),
@@ -1371,7 +1371,8 @@ async function executeUpCommand(c, workflowPath, options, fail) {
     try {
         const resolvedWorkflowPath = resolve(process.cwd(), workflowPath);
         const input = parseJsonInput(options.input, "input", fail) ?? {};
-        const runId = options.runId;
+        const resumeRunId = typeof options.resume === "string" ? options.resume : undefined;
+        const runId = options.runId ?? resumeRunId;
         const resume = Boolean(options.resume);
         // Detached mode: spawn ourselves as a background process
         if (options.detach) {
@@ -2489,7 +2490,7 @@ const cli = Cli.create({
             syncAttempts(initialAttempts);
             const initialEvents = await listAllEvents(adapter, runId);
             const parsedInitialOutputs = initialEvents
-                .map((event) => parseNodeOutputEvent(event))
+                .map((event) => parseNodeOutputEvent(event) ?? parseAgentEvent(event))
                 .filter(Boolean);
             for (const event of parsedInitialOutputs) {
                 knownOutputAttemptKeys.add(chatAttemptKey(event));
@@ -2548,7 +2549,7 @@ const cli = Cli.create({
                 const newBlocks = [];
                 for (const eventRow of newRows) {
                     lastSeq = eventRow.seq;
-                    const parsed = parseNodeOutputEvent(eventRow);
+                    const parsed = parseNodeOutputEvent(eventRow) ?? parseAgentEvent(eventRow);
                     if (!parsed)
                         continue;
                     knownOutputAttemptKeys.add(chatAttemptKey(parsed));
