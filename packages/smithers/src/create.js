@@ -177,7 +177,15 @@ export function createSmithers(schemas, opts) {
     // 2. Create SQLite db
     const sqlite = new Database(dbPath);
     sqlite.run(`PRAGMA journal_mode = ${opts?.journalMode ?? "WAL"}`);
-    sqlite.run("PRAGMA busy_timeout = 5000");
+    // 30s timeout: concurrent worktrees each spawn agent processes that all write
+    // to smithers.db simultaneously. 5s is too short and causes SQLITE_IOERR_VNODE
+    // on macOS when the VFS can't acquire the WAL shared-memory lock in time.
+    sqlite.run("PRAGMA busy_timeout = 30000");
+    // NORMAL is safe in WAL mode (no data loss on crash) and reduces fsync
+    // stalls that contribute to WAL checkpoint contention across processes.
+    sqlite.run("PRAGMA synchronous = NORMAL");
+    // Ensure no exclusive lock is held, allowing multiple readers/writers.
+    sqlite.run("PRAGMA locking_mode = NORMAL");
     sqlite.run("PRAGMA foreign_keys = ON");
     // Register a process-exit hook to explicitly close the Database.
     // bun:sqlite's GC finalizer calls sqlite3_close() which fatally aborts if

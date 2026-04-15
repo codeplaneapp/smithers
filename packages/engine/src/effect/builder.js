@@ -643,7 +643,15 @@ function createInputTable() {
 function createBuilderDb(filename, handles) {
     const sqlite = new Database(filename);
     sqlite.run("PRAGMA journal_mode = WAL");
-    sqlite.run("PRAGMA busy_timeout = 5000");
+    // 30s timeout: concurrent worktrees each spawn agent processes that all write
+    // to smithers.db simultaneously. 5s is too short and causes SQLITE_IOERR_VNODE
+    // on macOS when the VFS can't acquire the WAL shared-memory lock in time.
+    sqlite.run("PRAGMA busy_timeout = 30000");
+    // NORMAL is safe in WAL mode (no data loss on crash) and reduces fsync
+    // stalls that contribute to WAL checkpoint contention across processes.
+    sqlite.run("PRAGMA synchronous = NORMAL");
+    // Ensure no exclusive lock is held, allowing multiple readers/writers.
+    sqlite.run("PRAGMA locking_mode = NORMAL");
     sqlite.run("PRAGMA foreign_keys = ON");
     sqlite.run(`CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`);
     for (const handle of handles) {

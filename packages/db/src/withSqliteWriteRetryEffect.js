@@ -5,9 +5,12 @@ import { isRetryableSqliteWriteError } from "./isRetryableSqliteWriteError.js";
 /** @typedef {import("@smithers/errors/SmithersError").SmithersError} SmithersError */
 /** @typedef {import("./SqliteWriteRetryOptions.ts").SqliteWriteRetryOptions} SqliteWriteRetryOptions */
 
-const DEFAULT_MAX_ATTEMPTS = 6;
+// Raised from 6→10 and 2000→10000: concurrent Worktree tasks can produce
+// short bursts of SQLITE_IOERR_VNODE on macOS; more retries with a wider
+// window gives busy_timeout time to clear the VFS lock.
+const DEFAULT_MAX_ATTEMPTS = 10;
 const DEFAULT_BASE_DELAY_MS = 50;
-const DEFAULT_MAX_DELAY_MS = 2_000;
+const DEFAULT_MAX_DELAY_MS = 10_000;
 /**
  * @param {unknown} error
  * @returns {string}
