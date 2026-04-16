@@ -318,6 +318,8 @@ export function createSmithers(schemas, opts) {
         if (alertPolicy)
             workflowOpts.alertPolicy = alertPolicy;
         return {
+            readableName: opts?.readableName,
+            description: opts?.description,
             db,
             build: (ctx) => {
                 ctxRef.current = ctx;

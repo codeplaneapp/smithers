@@ -4,6 +4,8 @@ import type { SmithersWorkflowOptions } from "@smithers/scheduler/SmithersWorkfl
 import type { SchemaRegistryEntry } from "@smithers/db/SchemaRegistryEntry";
 
 export type WorkflowDefinition<Schema = unknown> = {
+  readableName?: string;
+  description?: string;
   db?: unknown;
   build: (ctx: SmithersCtx<Schema>) => JSX.Element;
   opts: SmithersWorkflowOptions;

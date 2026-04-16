@@ -7,6 +7,8 @@ import { Sequence as BaseSequence, Parallel as BaseParallel, MergeQueue as BaseM
 import type { ApprovalProps, SandboxProps, SignalProps, WorkflowProps, TaskProps, DepsSpec } from "@smithers/components";
 import type { z } from "zod";
 type CreateSmithersOptions = {
+    readableName?: string;
+    description?: string;
     alertPolicy?: SmithersAlertPolicy;
     dbPath?: string;
     journalMode?: string;
