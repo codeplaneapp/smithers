@@ -1,18 +1,18 @@
 import { z } from "zod";
 import { getAgentOutputSchema } from "./getAgentOutputSchema.js";
+/** @typedef {import("drizzle-orm").Table} Table */
+
 /**
- * Describes a schema as a JSON Schema string for agent prompts.
- * Prefers the original Zod schema's `.toJSONSchema()` (Zod 4) which preserves
- * field descriptions. Falls back to deriving from the Drizzle table.
+ * @param {Table | z.ZodObject} tableOrSchema
+ * @param {z.ZodObject} [zodSchema]
+ * @returns {string}
  */
 export function describeSchemaShape(tableOrSchema, zodSchema) {
-    // Prefer the original Zod schema which has .describe() annotations
     const schema = zodSchema ?? (isZodSchema(tableOrSchema) ? tableOrSchema : null);
     if (schema && typeof schema.toJSONSchema === "function") {
         const jsonSchema = schema.toJSONSchema();
         return JSON.stringify(jsonSchema, null, 2);
     }
-    // Fallback: derive from Drizzle table
     if (!isZodSchema(tableOrSchema)) {
         const agentSchema = getAgentOutputSchema(tableOrSchema);
         if (typeof agentSchema.toJSONSchema === "function") {
@@ -20,57 +20,49 @@ export function describeSchemaShape(tableOrSchema, zodSchema) {
             return JSON.stringify(jsonSchema, null, 2);
         }
     }
-    // Last resort: manual description
     const target = schema ?? (isZodSchema(tableOrSchema) ? tableOrSchema : getAgentOutputSchema(tableOrSchema));
     const shape = target.shape;
+    /** @type {Record<string, string>} */
     const fields = {};
     for (const [key, zodType] of Object.entries(shape)) {
-        fields[key] = describeZodType(zodType);
+        fields[key] = describeZodType(/** @type {z.ZodType} */ (zodType));
     }
     return JSON.stringify(fields, null, 2);
 }
 /**
- * @param {any} val
- * @returns {val is z.ZodObject<any>}
+ * @param {unknown} val
+ * @returns {val is z.ZodObject}
  */
 function isZodSchema(val) {
-    return val && typeof val === "object" && "shape" in val && typeof val.shape === "object";
+    return (!!val && typeof val === "object" && "shape" in val && typeof (/** @type {{ shape: unknown }} */ (val)).shape === "object");
 }
 /**
  * @param {z.ZodType} schema
  * @returns {string}
  */
 function describeZodType(schema) {
-    // Zod v4: uses _zod.def
-    if (schema._zod?.def) {
-        const def = schema._zod.def;
-        const typeName = def.type;
+    const internal = /** @type {{ _zod?: { def?: Record<string, unknown> } }} */ (/** @type {unknown} */ (schema));
+    if (internal._zod?.def) {
+        const def = internal._zod.def;
+        const typeName = /** @type {string} */ (def.type);
         if (typeName === "optional" || typeName === "default" || typeName === "nullable") {
-            const inner = def.innerType ? describeZodType(def.innerType) : "unknown";
-            if (typeName === "optional")
-                return `${inner} (optional)`;
-            if (typeName === "nullable")
-                return `${inner} | null`;
+            const inner = def.innerType ? describeZodType(/** @type {z.ZodType} */ (def.innerType)) : "unknown";
+            if (typeName === "optional") return `${inner} (optional)`;
+            if (typeName === "nullable") return `${inner} | null`;
             return inner;
         }
-        if (typeName === "string")
-            return "string";
-        if (typeName === "number" || typeName === "int" || typeName === "float")
-            return "number";
-        if (typeName === "boolean")
-            return "boolean";
+        if (typeName === "string") return "string";
+        if (typeName === "number" || typeName === "int" || typeName === "float") return "number";
+        if (typeName === "boolean") return "boolean";
         if (typeName === "array") {
-            const itemType = def.element ? describeZodType(def.element) : "unknown";
+            const itemType = def.element ? describeZodType(/** @type {z.ZodType} */ (def.element)) : "unknown";
             return `${itemType}[]`;
         }
-        if (typeName === "object")
-            return "object";
-        if (typeName === "enum")
-            return `enum(${(def.values ?? []).join(" | ")})`;
-        if (typeName === "literal")
-            return `literal(${JSON.stringify(def.value)})`;
+        if (typeName === "object") return "object";
+        if (typeName === "enum") return `enum(${(/** @type {unknown[]} */ (def.values ?? [])).join(" | ")})`;
+        if (typeName === "literal") return `literal(${JSON.stringify(def.value)})`;
         if (typeName === "union") {
-            const options = (def.options ?? []).map((o) => describeZodType(o));
+            const options = (/** @type {z.ZodType[]} */ (def.options ?? [])).map((o) => describeZodType(o));
             return options.join(" | ");
         }
     }

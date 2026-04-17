@@ -30,6 +30,38 @@ import { alertsActive } from "@smithers/observability/metrics";
  */
 /** @typedef {import("./SignalQuery.ts").SignalQuery} SignalQuery */
 /** @typedef {import("@smithers/errors/SmithersError").SmithersError} SmithersError */
+/**
+ * @typedef {{ runId: string; frameNo: number; createdAtMs: number; xmlJson: string; xmlHash: string; encoding: string; mountedTaskIdsJson: string | null; taskIndexJson: string | null; note: string | null; }} FrameRow
+ */
+/**
+ * @typedef {{ runId: string; nodeId: string; iteration: number; baseRef: string; diffJson: string; computedAtMs: number; sizeBytes: number; }} NodeDiffCacheRow
+ */
+/**
+ * @typedef {{ count: number }} CountRow
+ */
+/**
+ * @typedef {{ ralphId: string; runId: string; done?: boolean }} RalphRow
+ */
+/**
+ * @typedef {{ cacheKey: string; createdAtMs?: number; nodeId: string; outputTable: string }} CacheRowLike
+ */
+
+/**
+ * @typedef {{ runId: string; frameNo: number; createdAtMs: number; xmlJson: string; xmlHash: string; encoding: string; mountedTaskIdsJson: string | null; taskIndexJson: string | null; note: string | null; }} FrameRow
+ */
+/**
+ * @typedef {{ runId: string; nodeId: string; iteration: number; baseRef: string; diffJson: string; computedAtMs: number; sizeBytes: number; }} NodeDiffCacheRow
+ */
+/**
+ * @typedef {{ count: number }} CountRow
+ */
+/**
+ * @typedef {{ ralphId: string; runId: string; done?: boolean }} RalphRow
+ */
+/**
+ * @typedef {{ cacheKey: string; createdAtMs?: number; nodeId: string; outputTable: string }} CacheRowLike
+ */
+
 
 const FRAME_XML_CACHE_MAX = 512;
 const RUN_HEARTBEAT_STALE_MS = 30_000;
@@ -195,7 +227,8 @@ function validateOptionalPositiveTimestamp(row, field) {
     assertPositiveFiniteNumber(field, Number(value));
 }
 /**
- * @param {any} row
+ * @param {unknown} row
+ * @returns {void}
  */
 function validateRunRow(row) {
     if (!row || typeof row !== "object") {
@@ -203,34 +236,37 @@ function validateRunRow(row) {
             code: "INVALID_INPUT",
         });
     }
-    assertOptionalStringMaxLength("runId", row.runId, DB_RUN_ID_MAX_LENGTH);
-    assertOptionalStringMaxLength("parentRunId", row.parentRunId, DB_RUN_ID_MAX_LENGTH);
-    assertOptionalStringMaxLength("workflowName", row.workflowName, DB_RUN_WORKFLOW_NAME_MAX_LENGTH);
-    validateRunStatus(row.status);
-    validateOptionalPositiveTimestamp(row, "createdAtMs");
-    validateOptionalPositiveTimestamp(row, "startedAtMs");
-    validateOptionalPositiveTimestamp(row, "finishedAtMs");
-    validateOptionalPositiveTimestamp(row, "heartbeatAtMs");
-    validateOptionalPositiveTimestamp(row, "cancelRequestedAtMs");
-    validateOptionalPositiveTimestamp(row, "hijackRequestedAtMs");
+    const r = /** @type {Record<string, unknown>} */ (row);
+    assertOptionalStringMaxLength("runId", r.runId, DB_RUN_ID_MAX_LENGTH);
+    assertOptionalStringMaxLength("parentRunId", r.parentRunId, DB_RUN_ID_MAX_LENGTH);
+    assertOptionalStringMaxLength("workflowName", r.workflowName, DB_RUN_WORKFLOW_NAME_MAX_LENGTH);
+    validateRunStatus(r.status);
+    validateOptionalPositiveTimestamp(r, "createdAtMs");
+    validateOptionalPositiveTimestamp(r, "startedAtMs");
+    validateOptionalPositiveTimestamp(r, "finishedAtMs");
+    validateOptionalPositiveTimestamp(r, "heartbeatAtMs");
+    validateOptionalPositiveTimestamp(r, "cancelRequestedAtMs");
+    validateOptionalPositiveTimestamp(r, "hijackRequestedAtMs");
 }
 /**
- * @param {any} patch
+ * @param {unknown} patch
+ * @returns {void}
  */
 function validateRunPatch(patch) {
     if (!patch || typeof patch !== "object")
         return;
-    if ("workflowName" in patch) {
-        assertOptionalStringMaxLength("workflowName", patch.workflowName, DB_RUN_WORKFLOW_NAME_MAX_LENGTH);
+    const p = /** @type {Record<string, unknown>} */ (patch);
+    if ("workflowName" in p) {
+        assertOptionalStringMaxLength("workflowName", p.workflowName, DB_RUN_WORKFLOW_NAME_MAX_LENGTH);
     }
-    if ("status" in patch) {
-        validateRunStatus(patch.status);
+    if ("status" in p) {
+        validateRunStatus(p.status);
     }
-    validateOptionalPositiveTimestamp(patch, "startedAtMs");
-    validateOptionalPositiveTimestamp(patch, "finishedAtMs");
-    validateOptionalPositiveTimestamp(patch, "heartbeatAtMs");
-    validateOptionalPositiveTimestamp(patch, "cancelRequestedAtMs");
-    validateOptionalPositiveTimestamp(patch, "hijackRequestedAtMs");
+    validateOptionalPositiveTimestamp(p, "startedAtMs");
+    validateOptionalPositiveTimestamp(p, "finishedAtMs");
+    validateOptionalPositiveTimestamp(p, "heartbeatAtMs");
+    validateOptionalPositiveTimestamp(p, "cancelRequestedAtMs");
+    validateOptionalPositiveTimestamp(p, "hijackRequestedAtMs");
 }
 /**
  * @param {AlertRow} row
@@ -302,14 +338,19 @@ function runnableEffect(effect) {
     return runnable;
 }
 export class SmithersDb {
+    /** @type {BunSQLiteDatabase<Record<string, unknown>>} */
     db;
+    /** @type {ReturnType<typeof getSqlMessageStorage>} */
     internalStorage;
+    /** @type {Map<string, string>} */
     reconstructedFrameXmlCache = new Map();
     transactionDepth = 0;
+    /** @type {string | null} */
     transactionOwnerThread = null;
+    /** @type {Promise<unknown>} */
     transactionTail = Promise.resolve();
     /**
-   * @param {BunSQLiteDatabase<any>} db
+   * @param {BunSQLiteDatabase<Record<string, unknown>>} db
    */
     constructor(db) {
         this.db = db;
@@ -368,6 +409,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} queryString
+   * @returns {RunnableEffect<unknown[], SmithersError>}
    */
     rawQuery(queryString) {
         const self = this;
@@ -398,7 +440,7 @@ export class SmithersDb {
    * @template A
    * @param {string} label
    * @param {() => PromiseLike<A>} operation
-   * @returns {RunnableEffect<A>}
+   * @returns {RunnableEffect<A, SmithersError>}
    */
     read(label, operation) {
         const self = this;
@@ -431,7 +473,7 @@ export class SmithersDb {
    * @template A
    * @param {string} label
    * @param {() => PromiseLike<A>} operation
-   * @returns {RunnableEffect<A>}
+   * @returns {RunnableEffect<A, SmithersError>}
    */
     write(label, operation) {
         const self = this;
@@ -460,6 +502,9 @@ export class SmithersDb {
             return result;
         }).pipe(Effect.annotateLogs({ dbOperation: label }), Effect.withLogSpan(`db:${label}`)));
     }
+    /**
+    * @returns {Effect.Effect<{ run: (sql: string) => unknown; query: (sql: string) => { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => Record<string, unknown> | null | undefined; all: () => Array<Record<string, unknown>> }; exec: (sql: string) => unknown; $client?: unknown }, SmithersError, never>}
+    */
     getSqliteTransactionClient() {
         return Effect.try({
             try: () => {
@@ -475,6 +520,9 @@ export class SmithersDb {
             }),
         });
     }
+    /**
+    * @returns {Effect.Effect<() => void, SmithersError, never>}
+    */
     acquireTransactionTurn() {
         return Effect.tryPromise({
             try: async () => {
@@ -497,7 +545,7 @@ export class SmithersDb {
    * @template A
    * @param {string} writeGroup
    * @param {Effect.Effect<A, SmithersError>} operation
-   * @returns {RunnableEffect<A>}
+   * @returns {RunnableEffect<A, SmithersError>}
    */
     withTransactionEffect(writeGroup, operation) {
         const self = this;
@@ -586,7 +634,8 @@ export class SmithersDb {
         return Effect.runPromise(this.withTransactionEffect(writeGroup, operation));
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertRun(row) {
         validateRunRow(row);
@@ -594,7 +643,8 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
-   * @param {any} patch
+   * @param {Record<string, unknown>} patch
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     updateRun(runId, patch) {
         validateRunPatch(patch);
@@ -602,7 +652,8 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
-   * @param {any} patch
+   * @param {Record<string, unknown>} patch
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     updateRunEffect(runId, patch) {
         return this.updateRun(runId, patch);
@@ -611,6 +662,7 @@ export class SmithersDb {
    * @param {string} runId
    * @param {string} runtimeOwnerId
    * @param {number} heartbeatAtMs
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     heartbeatRun(runId, runtimeOwnerId, heartbeatAtMs) {
         return this.write(`heartbeat run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", { heartbeatAtMs }, "run_id = ? AND runtime_owner_id = ?", [runId, runtimeOwnerId]));
@@ -618,6 +670,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {number} cancelRequestedAtMs
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     requestRunCancel(runId, cancelRequestedAtMs) {
         return this.write(`cancel run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", { cancelRequestedAtMs }, "run_id = ?", [runId]));
@@ -626,6 +679,7 @@ export class SmithersDb {
    * @param {string} runId
    * @param {number} hijackRequestedAtMs
    * @param {string | null} [hijackTarget]
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     requestRunHijack(runId, hijackRequestedAtMs, hijackTarget) {
         return this.write(`hijack run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", {
@@ -635,6 +689,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     clearRunHijack(runId) {
         return this.write(`clear hijack run ${runId}`, () => this.internalStorage.updateWhere("_smithers_runs", {
@@ -644,6 +699,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
    */
     getRun(runId) {
         return this.read(`get run ${runId}`, async () => {
@@ -656,6 +712,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<RunAncestryRow[], SmithersError>}
    */
     listRunAncestry(runId, limit = 1000) {
         return this.read(`list run ancestry ${runId}`, () => this.internalStorage.queryAll(`WITH RECURSIVE ancestry(run_id, parent_run_id, depth) AS (
@@ -678,6 +735,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} parentRunId
+   * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
    */
     getLatestChildRun(parentRunId) {
         return this.read(`get latest child run ${parentRunId}`, () => this.internalStorage.queryOne(`SELECT *
@@ -688,6 +746,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} [status]
+   * @returns {RunnableEffect<RunRow[], SmithersError>}
    */
     listRuns(limit = 50, status) {
         return this.read(`list runs ${status ?? "all"}`, async () => {
@@ -712,6 +771,7 @@ export class SmithersDb {
     }
     /**
    * @param {number} staleBeforeMs
+   * @returns {RunnableEffect<StaleRunRecord[], SmithersError>}
    */
     listStaleRunningRuns(staleBeforeMs, limit = 1000) {
         return this.read(`list stale running runs before ${staleBeforeMs}`, () => this.internalStorage.queryAll(`SELECT
@@ -728,6 +788,7 @@ export class SmithersDb {
     }
     /**
    * @param {{ runId: string; expectedStatus?: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; staleBeforeMs: number; claimOwnerId: string; claimHeartbeatAtMs: number; requireStale?: boolean; }} params
+   * @returns {RunnableEffect<boolean, SmithersError>}
    */
     claimRunForResume(params) {
         return this.write(`claim stale run ${params.runId}`, () => {
@@ -750,6 +811,7 @@ export class SmithersDb {
     }
     /**
    * @param {{ runId: string; claimOwnerId: string; restoreRuntimeOwnerId: string | null; restoreHeartbeatAtMs: number | null; }} params
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     releaseRunResumeClaim(params) {
         return this.write(`release stale run claim ${params.runId}`, () => {
@@ -764,7 +826,8 @@ export class SmithersDb {
         });
     }
     /**
-   * @param {{ runId: string; expectedRuntimeOwnerId: string; expectedHeartbeatAtMs: number | null; patch: any; }} params
+   * @param {{ runId: string; expectedRuntimeOwnerId: string; expectedHeartbeatAtMs: number | null; patch: Record<string, unknown>; }} params
+   * @returns {RunnableEffect<boolean, SmithersError>}
    */
     updateClaimedRun(params) {
         validateRunPatch(params.patch);
@@ -788,13 +851,15 @@ export class SmithersDb {
         });
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertNode(row) {
         return this.insertNodeEffect(row);
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertNodeEffect(row) {
         return this.write(`insert node ${row.nodeId}`, () => this.internalStorage.upsert("_smithers_nodes", row, ["runId", "nodeId", "iteration"]));
@@ -803,6 +868,7 @@ export class SmithersDb {
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
+   * @returns {RunnableEffect<NodeRow | undefined, SmithersError>}
    */
     getNode(runId, nodeId, iteration) {
         return this.read(`get node ${nodeId}`, () => this.internalStorage.queryOne(`SELECT *
@@ -813,6 +879,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {string} nodeId
+   * @returns {RunnableEffect<NodeRow[], SmithersError>}
    */
     listNodeIterations(runId, nodeId) {
         return this.read(`list node iterations ${nodeId}`, () => this.internalStorage.queryAll(`SELECT *
@@ -822,6 +889,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<NodeRow[], SmithersError>}
    */
     listNodes(runId) {
         return this.read(`list nodes ${runId}`, () => this.internalStorage.queryAll(`SELECT *
@@ -829,9 +897,10 @@ export class SmithersDb {
          WHERE run_id = ?`, [runId]));
     }
     /**
-   * @param {any} table
+   * @param {Table} table
    * @param {OutputKey} key
    * @param {Record<string, unknown>} payload
+   * @returns {RunnableEffect<unknown, SmithersError>}
    */
     upsertOutputRow(table, key, payload) {
         const cols = getKeyColumns(table);
@@ -854,9 +923,10 @@ export class SmithersDb {
         }));
     }
     /**
-   * @param {any} table
+   * @param {Table} table
    * @param {OutputKey} key
    * @param {Record<string, unknown>} payload
+   * @returns {RunnableEffect<unknown, SmithersError>}
    */
     upsertOutputRowEffect(table, key, payload) {
         return this.upsertOutputRow(table, key, payload);
@@ -864,6 +934,7 @@ export class SmithersDb {
     /**
    * @param {string} tableName
    * @param {OutputKey} key
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     deleteOutputRow(tableName, key) {
         return this.write(`delete output ${tableName}`, () => {
@@ -935,6 +1006,7 @@ export class SmithersDb {
     /**
    * @param {string} tableName
    * @param {OutputKey} key
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     deleteOutputRowEffect(tableName, key) {
         return this.deleteOutputRow(tableName, key);
@@ -943,6 +1015,7 @@ export class SmithersDb {
    * @param {string} tableName
    * @param {string} runId
    * @param {string} nodeId
+   * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
    */
     getRawNodeOutput(tableName, runId, nodeId) {
         return runnableEffect(this.read(`get raw node output ${tableName}`, () => {
@@ -956,6 +1029,7 @@ export class SmithersDb {
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
+   * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
    */
     getRawNodeOutputForIteration(tableName, runId, nodeId, iteration) {
         return runnableEffect(this.read(`get raw node output ${tableName} iteration ${iteration}`, () => {
@@ -967,13 +1041,15 @@ export class SmithersDb {
         }).pipe(Effect.catchAll(() => Effect.succeed(null))));
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertAttempt(row) {
         return this.write(`insert attempt ${row.nodeId}#${row.attempt}`, () => this.internalStorage.upsert("_smithers_attempts", row, ["runId", "nodeId", "iteration", "attempt"]));
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertAttemptEffect(row) {
         return this.insertAttempt(row);
@@ -983,7 +1059,8 @@ export class SmithersDb {
    * @param {string} nodeId
    * @param {number} iteration
    * @param {number} attempt
-   * @param {any} patch
+   * @param {Record<string, unknown>} patch
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     updateAttempt(runId, nodeId, iteration, attempt, patch) {
         return this.write(`update attempt ${nodeId}#${attempt}`, () => this.internalStorage.updateWhere("_smithers_attempts", patch, "run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?", [runId, nodeId, iteration, attempt]));
@@ -993,7 +1070,8 @@ export class SmithersDb {
    * @param {string} nodeId
    * @param {number} iteration
    * @param {number} attempt
-   * @param {any} patch
+   * @param {Record<string, unknown>} patch
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     updateAttemptEffect(runId, nodeId, iteration, attempt, patch) {
         return this.updateAttempt(runId, nodeId, iteration, attempt, patch);
@@ -1005,6 +1083,7 @@ export class SmithersDb {
    * @param {number} attempt
    * @param {number} heartbeatAtMs
    * @param {string | null} heartbeatDataJson
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     heartbeatAttempt(runId, nodeId, iteration, attempt, heartbeatAtMs, heartbeatDataJson) {
         return this.write(`heartbeat attempt ${nodeId}#${attempt}`, () => this.internalStorage.updateWhere("_smithers_attempts", {
@@ -1016,7 +1095,7 @@ export class SmithersDb {
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
-   * @returns {RunnableEffect<AttemptRow[]>}
+   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
    */
     listAttempts(runId, nodeId, iteration) {
         return this.read(`list attempts ${nodeId}`, () => this.internalStorage.queryAll(`SELECT *
@@ -1026,7 +1105,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
-   * @returns {RunnableEffect<AttemptRow[]>}
+   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
    */
     listAttemptsForRun(runId) {
         return this.read(`list attempts for run ${runId}`, () => this.internalStorage.queryAll(`SELECT *
@@ -1039,7 +1118,7 @@ export class SmithersDb {
    * @param {string} nodeId
    * @param {number} iteration
    * @param {number} attempt
-   * @returns {RunnableEffect<AttemptRow | undefined>}
+   * @returns {RunnableEffect<AttemptRow | undefined, SmithersError>}
    */
     getAttempt(runId, nodeId, iteration, attempt) {
         return this.read(`get attempt ${nodeId}#${attempt}`, () => this.internalStorage.queryOne(`SELECT *
@@ -1049,7 +1128,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
-   * @returns {RunnableEffect<AttemptRow[]>}
+   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
    */
     listInProgressAttempts(runId) {
         return this.read(`list in-progress attempts ${runId}`, () => this.internalStorage.queryAll(`SELECT *
@@ -1057,7 +1136,7 @@ export class SmithersDb {
          WHERE run_id = ? AND state = ?`, [runId, "in-progress"], { booleanColumns: ["cached"] }));
     }
     /**
-   * @returns {RunnableEffect<any[]>}
+   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
    */
     listAllInProgressAttempts() {
         return this.read("list all in-progress attempts", () => this.internalStorage.queryAll(`SELECT *
@@ -1068,6 +1147,7 @@ export class SmithersDb {
    * @param {string} runId
    * @param {number} frameNo
    * @param {number} [limit]
+   * @returns {RunnableEffect<FrameRow[], SmithersError>}
    */
     listFrameChainDesc(runId, frameNo, limit) {
         return this.read(`list frame chain ${runId}:${frameNo}`, () => this.internalStorage.queryAll(`SELECT *
@@ -1078,6 +1158,8 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {number} frameNo
+   * @param {Map<number, string>} [localCache]
+   * @returns {Effect.Effect<string | undefined, SmithersError>}
    */
     reconstructFrameXml(runId, frameNo, localCache = new Map()) {
         const self = this;
@@ -1129,7 +1211,9 @@ export class SmithersDb {
         });
     }
     /**
-   * @param {any} row
+   * @param {FrameRow} row
+   * @param {Map<number, string>} [localCache]
+   * @returns {Effect.Effect<FrameRow, SmithersError>}
    */
     inflateFrameRow(row, localCache = new Map()) {
         const self = this;
@@ -1150,7 +1234,8 @@ export class SmithersDb {
         });
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertFrame(row) {
         const self = this;
@@ -1188,13 +1273,15 @@ export class SmithersDb {
         }));
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertFrameEffect(row) {
         return this.insertFrame(row);
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<FrameRow | undefined, SmithersError>}
    */
     getLastFrame(runId) {
         const self = this;
@@ -1210,7 +1297,8 @@ export class SmithersDb {
         }));
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertOrUpdateApproval(row) {
         return this.write(`upsert approval ${row.nodeId}`, () => this.internalStorage.upsert("_smithers_approvals", row, ["runId", "nodeId", "iteration"]));
@@ -1219,6 +1307,7 @@ export class SmithersDb {
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
+   * @returns {RunnableEffect<ApprovalRow | undefined, SmithersError>}
    */
     getApproval(runId, nodeId, iteration) {
         return this.read(`get approval ${nodeId}`, () => this.internalStorage.queryOne(`SELECT *
@@ -1228,12 +1317,14 @@ export class SmithersDb {
     }
     /**
    * @param {HumanRequestRow} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertHumanRequest(row) {
         return this.write(`insert human request ${row.requestId}`, () => this.internalStorage.insertIgnore("_smithers_human_requests", row));
     }
     /**
    * @param {string} requestId
+   * @returns {RunnableEffect<HumanRequestRow | undefined, SmithersError>}
    */
     getHumanRequest(requestId) {
         return this.read(`get human request ${requestId}`, () => this.internalStorage.queryOne(`SELECT *
@@ -1243,6 +1334,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} requestId
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     reopenHumanRequest(requestId) {
         return this.write(`reopen human request ${requestId}`, () => this.internalStorage.updateWhere("_smithers_human_requests", {
@@ -1252,6 +1344,10 @@ export class SmithersDb {
             answeredBy: null,
         }, "request_id = ? AND status = ?", [requestId, "answered"]));
     }
+    /**
+    * @param {number} [nowMs]
+    * @returns {RunnableEffect<void, SmithersError>}
+    */
     expireStaleHumanRequests(nowMs = Date.now()) {
         return this.write(`expire stale human requests before ${nowMs}`, () => this.internalStorage.updateWhere("_smithers_human_requests", {
             status: "expired",
@@ -1260,6 +1356,10 @@ export class SmithersDb {
             answeredBy: null,
         }, "status = ? AND timeout_at_ms IS NOT NULL AND timeout_at_ms <= ?", ["pending", nowMs]));
     }
+    /**
+   * @param {number} [nowMs]
+   * @returns {RunnableEffect<PendingHumanRequestRow[], SmithersError>}
+   */
     listPendingHumanRequests(nowMs = Date.now()) {
         const self = this;
         return runnableEffect(Effect.gen(function* () {
@@ -1297,6 +1397,7 @@ export class SmithersDb {
    * @param {string} responseJson
    * @param {number} answeredAtMs
    * @param {string | null} [answeredBy]
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     answerHumanRequest(requestId, responseJson, answeredAtMs, answeredBy) {
         return this.write(`answer human request ${requestId}`, () => this.internalStorage.updateWhere("_smithers_human_requests", {
@@ -1308,6 +1409,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} requestId
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     cancelHumanRequest(requestId) {
         return this.write(`cancel human request ${requestId}`, () => this.internalStorage.updateWhere("_smithers_human_requests", {
@@ -1316,6 +1418,7 @@ export class SmithersDb {
     }
     /**
    * @param {AlertRow} row
+   * @returns {Promise<AlertRow | undefined>}
    */
     insertAlert(row) {
         validateAlertRow(row);
@@ -1335,6 +1438,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} alertId
+   * @returns {RunnableEffect<AlertRow | undefined, SmithersError>}
    */
     getAlert(alertId) {
         return this.read(`get alert ${alertId}`, () => this.internalStorage.queryOne(`SELECT *
@@ -1344,6 +1448,7 @@ export class SmithersDb {
     }
     /**
    * @param {readonly AlertStatus[]} [statuses]
+   * @returns {RunnableEffect<AlertRow[], SmithersError>}
    */
     listAlerts(limit = 100, statuses) {
         if (statuses) {
@@ -1378,6 +1483,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} alertId
+   * @returns {Promise<AlertRow | undefined>}
    */
     acknowledgeAlert(alertId, acknowledgedAtMs = Date.now()) {
         validateOptionalPositiveTimestamp({ acknowledgedAtMs }, "acknowledgedAtMs");
@@ -1400,6 +1506,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} alertId
+   * @returns {Promise<AlertRow | undefined>}
    */
     resolveAlert(alertId, resolvedAtMs = Date.now()) {
         validateOptionalPositiveTimestamp({ resolvedAtMs }, "resolvedAtMs");
@@ -1424,6 +1531,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} alertId
+   * @returns {Promise<AlertRow | undefined>}
    */
     silenceAlert(alertId) {
         const self = this;
@@ -1443,6 +1551,7 @@ export class SmithersDb {
     }
     /**
    * @param {{ runId: string; signalName: string; correlationId: string | null; payloadJson: string; receivedAtMs: number; receivedBy?: string | null; }} row
+   * @returns {RunnableEffect<number, SmithersError>}
    */
     insertSignalWithNextSeq(row) {
         const label = `insert signal ${row.signalName}`;
@@ -1518,6 +1627,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<number | undefined, SmithersError>}
    */
     getLastSignalSeq(runId) {
         return this.read(`get last signal seq ${runId}`, () => this.internalStorage.getLastSignalSeq(runId));
@@ -1525,6 +1635,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {SignalQuery} [query]
+   * @returns {RunnableEffect<SignalRow[], SmithersError>}
    */
     listSignals(runId, query = {}) {
         const limit = Math.max(1, Math.floor(query.limit ?? 200));
@@ -1556,13 +1667,15 @@ export class SmithersDb {
         });
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertToolCall(row) {
         return this.write(`insert tool call ${row.toolName}`, () => this.internalStorage.insertIgnore("_smithers_tool_calls", row));
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     upsertSandbox(row) {
         return this.write(`upsert sandbox ${row.sandboxId}`, () => this.internalStorage.upsert("_smithers_sandboxes", row, ["runId", "sandboxId"]));
@@ -1570,6 +1683,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {string} sandboxId
+   * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
    */
     getSandbox(runId, sandboxId) {
         return this.read(`get sandbox ${sandboxId}`, () => this.internalStorage.queryOne(`SELECT *
@@ -1579,6 +1693,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listSandboxes(runId) {
         return this.read(`list sandboxes ${runId}`, () => this.internalStorage.queryAll(`SELECT *
@@ -1589,6 +1704,7 @@ export class SmithersDb {
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listToolCalls(runId, nodeId, iteration) {
         return this.read(`list tool calls ${nodeId}`, () => this.internalStorage.queryAll(`SELECT *
@@ -1597,13 +1713,15 @@ export class SmithersDb {
          ORDER BY attempt ASC, seq ASC`, [runId, nodeId, iteration]));
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertEvent(row) {
         return this.write(`insert event ${row.type}`, () => this.internalStorage.insertIgnore("_smithers_events", row));
     }
     /**
    * @param {{ runId: string; timestampMs: number; type: string; payloadJson: string; }} row
+   * @returns {RunnableEffect<number, SmithersError>}
    */
     insertEventWithNextSeq(row) {
         const label = `insert event ${row.type}`;
@@ -1662,6 +1780,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<number | undefined, SmithersError>}
    */
     getLastEventSeq(runId) {
         return this.read(`get last event seq ${runId}`, () => this.internalStorage.getLastEventSeq(runId));
@@ -1694,6 +1813,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {EventHistoryQuery} [query]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listEventHistory(runId, query = {}) {
         return this.read(`list event history ${runId}`, () => this.internalStorage.listEventHistory(runId, query));
@@ -1701,6 +1821,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {EventHistoryQuery} [query]
+   * @returns {RunnableEffect<number, SmithersError>}
    */
     countEventHistory(runId, query = {}) {
         return this.read(`count event history ${runId}`, () => this.internalStorage.countEventHistory(runId, query));
@@ -1708,6 +1829,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {number} afterSeq
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listEvents(runId, afterSeq, limit = 200) {
         return this.listEventHistory(runId, { afterSeq, limit });
@@ -1715,18 +1837,21 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {string} type
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listEventsByType(runId, type) {
         return this.read(`list events by type ${type}`, () => this.internalStorage.listEventsByType(runId, type));
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertOrUpdateRalph(row) {
         return this.write(`upsert ralph ${row.ralphId}`, () => this.internalStorage.upsert("_smithers_ralph", row, ["runId", "ralphId"]));
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listRalph(runId) {
         return this.read(`list ralph ${runId}`, () => this.internalStorage.queryAll(`SELECT *
@@ -1735,12 +1860,16 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
    */
     listPendingApprovals(runId) {
         return this.read(`list pending approvals ${runId}`, () => this.internalStorage.queryAll(`SELECT *
          FROM _smithers_approvals
          WHERE run_id = ? AND status = ?`, [runId, "requested"], { booleanColumns: ["autoApproved"] }));
     }
+    /**
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
     listAllPendingApprovals() {
         return this.read("list all pending approvals", () => this.internalStorage.queryAll(`SELECT
            a.run_id,
@@ -1765,6 +1894,7 @@ export class SmithersDb {
     /**
    * @param {string} workflowName
    * @param {string} nodeId
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listApprovalHistoryForNode(workflowName, nodeId, limit = 50) {
         return this.read(`list approval history ${workflowName}:${nodeId}`, () => this.internalStorage.queryAll(`SELECT
@@ -1790,6 +1920,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {string} ralphId
+   * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
    */
     getRalph(runId, ralphId) {
         return this.read(`get ralph ${ralphId}`, () => this.internalStorage.queryOne(`SELECT *
@@ -1798,19 +1929,22 @@ export class SmithersDb {
          LIMIT 1`, [runId, ralphId], { booleanColumns: ["done"] }));
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertCache(row) {
         return this.write(`insert cache ${row.cacheKey}`, () => this.internalStorage.insertIgnore("_smithers_cache", row));
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertCacheEffect(row) {
         return this.insertCache(row);
     }
     /**
    * @param {string} cacheKey
+   * @returns {RunnableEffect<CacheRow | undefined, SmithersError>}
    */
     getCache(cacheKey) {
         return this.read(`get cache ${cacheKey}`, () => this.internalStorage.queryOne(`SELECT *
@@ -1821,6 +1955,7 @@ export class SmithersDb {
     /**
    * @param {string} nodeId
    * @param {string} [outputTable]
+   * @returns {RunnableEffect<CacheRow[], SmithersError>}
    */
     listCacheByNode(nodeId, outputTable, limit = 20) {
         return this.read(`list cache by node ${nodeId}`, () => this.internalStorage.queryAll(`SELECT *
@@ -1832,6 +1967,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {number} frameNo
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     deleteFramesAfter(runId, frameNo) {
         const self = this;
@@ -1844,6 +1980,7 @@ export class SmithersDb {
    * @param {string} runId
    * @param {number} limit
    * @param {number} [afterFrameNo]
+   * @returns {RunnableEffect<FrameRow[], SmithersError>}
    */
     listFrames(runId, limit, afterFrameNo) {
         const self = this;
@@ -1865,6 +2002,7 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<Array<{ state: string; count: number }>, SmithersError>}
    */
     countNodesByState(runId) {
         return this.read(`count nodes by state ${runId}`, () => this.internalStorage.queryAll(`SELECT state, COUNT(*) AS count
@@ -1873,11 +2011,16 @@ export class SmithersDb {
          GROUP BY state`, [runId]));
     }
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     upsertCron(row) {
         return this.write("upsert cron", () => this.internalStorage.upsert("_smithers_cron", row, ["cronId"], ["pattern", "workflowPath", "enabled", "nextRunAtMs"]));
     }
+    /**
+    * @param {boolean} [enabledOnly]
+    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+    */
     listCrons(enabledOnly = true) {
         return this.read("list crons", () => this.internalStorage.queryAll(`SELECT *
          FROM _smithers_cron${enabledOnly ? " WHERE enabled = ?" : ""}`, enabledOnly ? [true] : [], { booleanColumns: ["enabled"] }));
@@ -1887,12 +2030,14 @@ export class SmithersDb {
    * @param {number} lastRunAtMs
    * @param {number} nextRunAtMs
    * @param {string | null} [errorJson]
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     updateCronRunTime(cronId, lastRunAtMs, nextRunAtMs, errorJson) {
         return this.write(`update cron run time ${cronId}`, () => this.internalStorage.updateWhere("_smithers_cron", { lastRunAtMs, nextRunAtMs, errorJson: errorJson ?? null }, "cron_id = ?", [cronId]));
     }
     /**
    * @param {string} cronId
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     deleteCron(cronId) {
         return this.write(`delete cron ${cronId}`, () => this.internalStorage.deleteWhere("_smithers_cron", "cron_id = ?", [cronId]));
@@ -1901,7 +2046,8 @@ export class SmithersDb {
     // Scorer results
     // ---------------------------------------------------------------------------
     /**
-   * @param {any} row
+   * @param {Record<string, unknown>} row
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     insertScorerResult(row) {
         return this.write(`insert scorer result ${row.scorerId}`, () => this.internalStorage.insertIgnore("_smithers_scorers", row));
@@ -1909,6 +2055,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {string} [nodeId]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listScorerResults(runId, nodeId) {
         return this.read(`list scorer results ${runId}`, () => this.internalStorage.queryAll(`SELECT *
@@ -1918,30 +2065,35 @@ export class SmithersDb {
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
    */
     getRunEffect(runId) {
         return this.getRun(runId);
     }
     /**
    * @param {string} [status]
+   * @returns {RunnableEffect<RunRow[], SmithersError>}
    */
     listRunsEffect(limit = 50, status) {
         return this.listRuns(limit, status);
     }
     /**
    * @param {number} staleBeforeMs
+   * @returns {RunnableEffect<StaleRunRecord[], SmithersError>}
    */
     listStaleRunningRunsEffect(staleBeforeMs, limit = 1000) {
         return this.listStaleRunningRuns(staleBeforeMs, limit);
     }
     /**
    * @param {Parameters<SmithersDb["claimRunForResume"]>[0]} params
+   * @returns {RunnableEffect<boolean, SmithersError>}
    */
     claimRunForResumeEffect(params) {
         return this.claimRunForResume(params);
     }
     /**
    * @param {Parameters<SmithersDb["releaseRunResumeClaim"]>[0]} params
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     releaseRunResumeClaimEffect(params) {
         return this.releaseRunResumeClaim(params);
@@ -1949,12 +2101,14 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {string} nodeId
+   * @returns {RunnableEffect<NodeRow[], SmithersError>}
    */
     listNodeIterationsEffect(runId, nodeId) {
         return this.listNodeIterations(runId, nodeId);
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<NodeRow[], SmithersError>}
    */
     listNodesEffect(runId) {
         return this.listNodes(runId);
@@ -1963,12 +2117,14 @@ export class SmithersDb {
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
+   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
    */
     listAttemptsEffect(runId, nodeId, iteration) {
         return this.listAttempts(runId, nodeId, iteration);
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<AttemptRow[], SmithersError>}
    */
     listAttemptsForRunEffect(runId) {
         return this.listAttemptsForRun(runId);
@@ -1977,6 +2133,7 @@ export class SmithersDb {
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listToolCallsEffect(runId, nodeId, iteration) {
         return this.listToolCalls(runId, nodeId, iteration);
@@ -1986,18 +2143,21 @@ export class SmithersDb {
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
+   * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
    */
     getRawNodeOutputForIterationEffect(tableName, runId, nodeId, iteration) {
         return this.getRawNodeOutputForIteration(tableName, runId, nodeId, iteration);
     }
     /**
    * @param {Parameters<SmithersDb["insertEventWithNextSeq"]>[0]} row
+   * @returns {RunnableEffect<number, SmithersError>}
    */
     insertEventWithNextSeqEffect(row) {
         return this.insertEventWithNextSeq(row);
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<number | undefined, SmithersError>}
    */
     getLastEventSeqEffect(runId) {
         return this.getLastEventSeq(runId);
@@ -2005,6 +2165,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {EventHistoryQuery} [query]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listEventHistoryEffect(runId, query = {}) {
         return this.listEventHistory(runId, query);
@@ -2012,6 +2173,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {EventHistoryQuery} [query]
+   * @returns {RunnableEffect<number, SmithersError>}
    */
     countEventHistoryEffect(runId, query = {}) {
         return this.countEventHistory(runId, query);
@@ -2019,18 +2181,21 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {string} type
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listEventsByTypeEffect(runId, type) {
         return this.listEventsByType(runId, type);
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
    */
     listPendingApprovalsEffect(runId) {
         return this.listPendingApprovals(runId);
     }
     /**
    * @param {string} runId
+   * @returns {RunnableEffect<FrameRow | undefined, SmithersError>}
    */
     getLastFrameEffect(runId) {
         return this.getLastFrame(runId);
@@ -2038,10 +2203,15 @@ export class SmithersDb {
     /**
    * @param {string} nodeId
    * @param {string} [outputTable]
+   * @returns {RunnableEffect<CacheRow[], SmithersError>}
    */
     listCacheByNodeEffect(nodeId, outputTable, limit = 20) {
         return this.listCacheByNode(nodeId, outputTable, limit);
     }
+    /**
+    * @param {boolean} [enabledOnly]
+    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+    */
     listCronsEffect(enabledOnly = true) {
         return this.listCrons(enabledOnly);
     }
@@ -2050,6 +2220,7 @@ export class SmithersDb {
    * @param {number} lastRunAtMs
    * @param {number} nextRunAtMs
    * @param {string | null} [errorJson]
+   * @returns {RunnableEffect<void, SmithersError>}
    */
     updateCronRunTimeEffect(cronId, lastRunAtMs, nextRunAtMs, errorJson) {
         return this.updateCronRunTime(cronId, lastRunAtMs, nextRunAtMs, errorJson);
@@ -2057,6 +2228,7 @@ export class SmithersDb {
     /**
    * @param {string} runId
    * @param {string} [nodeId]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listScorerResultsEffect(runId, nodeId) {
         return this.listScorerResults(runId, nodeId);

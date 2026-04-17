@@ -4,10 +4,11 @@ import { buildKeyWhere } from "./buildKeyWhere.js";
 /** @typedef {import("./OutputKey.ts").OutputKey} OutputKey */
 /** @typedef {import("@smithers/errors/SmithersError").SmithersError} SmithersError */
 /** @typedef {import("drizzle-orm").Table} Table */
+/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
 
 /**
  * @template T
- * @param {any} db
+ * @param {BunSQLiteDatabase<Record<string, unknown>>} db
  * @param {Table} table
  * @param {OutputKey} key
  * @returns {Effect.Effect<T | undefined, SmithersError>}
@@ -15,11 +16,7 @@ import { buildKeyWhere } from "./buildKeyWhere.js";
 export function selectOutputRow(db, table, key) {
     const where = buildKeyWhere(table, key);
     return Effect.tryPromise({
-        try: () => db
-            .select()
-            .from(table)
-            .where(where)
-            .limit(1),
+        try: () => db.select().from(table).where(where).limit(1),
         catch: (cause) => toSmithersError(cause, `select output ${table["_"]?.name ?? "output"}`, {
             code: "DB_QUERY_FAILED",
             details: { outputTable: table["_"]?.name ?? "output" },

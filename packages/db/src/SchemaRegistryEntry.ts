@@ -1,4 +1,6 @@
+import type { Table } from "drizzle-orm";
+
 export type SchemaRegistryEntry = {
-  table: any;
-  zodSchema: import("zod").ZodObject<any>;
+  table: Table;
+  zodSchema: import("zod").ZodObject;
 };
