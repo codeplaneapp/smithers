@@ -1,7 +1,18 @@
+import type { DiffBundle } from "@smithers/engine/effect/DiffBundle";
+import type { DiffSummary } from "./DiffSummary";
+
+export type GetNodeDiffStatPayload = {
+  seq: number;
+  baseRef: string;
+  summary: DiffSummary;
+};
+
+export type GetNodeDiffRoutePayload = DiffBundle | GetNodeDiffStatPayload;
+
 export type GetNodeDiffRouteResult =
   | {
       ok: true;
-      payload: any;
+      payload: GetNodeDiffRoutePayload;
     }
   | {
       ok: false;

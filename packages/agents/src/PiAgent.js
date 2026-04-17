@@ -11,8 +11,25 @@ import { SmithersError } from "@smithers/errors/SmithersError";
 import { enrichReportWithErrorAnalysis, launchDiagnostics } from "./diagnostics/index.js";
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
-/** @typedef {import("ai").GenerateTextResult<any, any>} GenerateTextResult */
+/** @typedef {import("./BaseCliAgent/AgentCliEvent.ts").AgentCliEvent} AgentCliEvent */
+/** @typedef {import("ai").GenerateTextResult<Record<string, never>, unknown>} GenerateTextResult */
 /** @typedef {import("./PiAgentOptions.ts").PiAgentOptions} PiAgentOptions */
+/** @typedef {"text" | "json" | "stream-json" | "rpc"} PiMode */
+/**
+ * @typedef {{
+ *   prompt?: unknown;
+ *   messages?: unknown;
+ *   onEvent?: (event: AgentCliEvent) => unknown;
+ *   resumeSession?: unknown;
+ *   rootDir?: string;
+ *   timeout?: unknown;
+ *   abortSignal?: AbortSignal;
+ *   maxOutputBytes?: number;
+ *   onStdout?: (text: string) => void;
+ *   onStderr?: (text: string) => void;
+ *   [key: string]: unknown;
+ * }} PiGenerateOptions
+ */
 
 /**
  * @param {PiAgentOptions} opts
@@ -65,7 +82,7 @@ export class PiAgent extends BaseCliAgent {
         this.capabilities = createPiCapabilityRegistry(opts);
     }
     /**
-   * @param {any} options
+   * @param {PiGenerateOptions} [options]
    * @returns {PiMode}
    */
     resolveMode(options) {
@@ -76,7 +93,7 @@ export class PiAgent extends BaseCliAgent {
         return this.opts.mode ?? "text";
     }
     /**
-   * @param {{ prompt: string; cwd: string; options: any; mode: PiMode; }} params
+   * @param {{ prompt: string; cwd: string; options?: PiGenerateOptions; mode: PiMode; }} params
    * @returns {string[]}
    */
     buildArgs(params) {
@@ -355,8 +372,8 @@ export class PiAgent extends BaseCliAgent {
         };
     }
     /**
-   * @param {any} options
-   * @returns {Promise<GenerateTextResult<any, any>>}
+   * @param {PiGenerateOptions} [options]
+   * @returns {Promise<GenerateTextResult>}
    */
     async generate(options) {
         const mode = this.resolveMode(options);
@@ -429,7 +446,7 @@ export class PiAgent extends BaseCliAgent {
         return runAgentPromise(rpcProgram);
     }
     /**
-   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options?: PiGenerateOptions; }} params
    * @returns {Promise<{ command: string; args: string[]; stdin?: string; outputFormat?: string; outputFile?: string; cleanup?: () => Promise<void>; }>}
    */
     async buildCommand(params) {

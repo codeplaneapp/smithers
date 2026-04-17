@@ -18,9 +18,48 @@ import { runCommandEffect } from "./runCommandEffect.js";
 
 /** @typedef {import("./BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
-/** @typedef {import("./BaseCliAgent.js").CliUsageInfo} CliUsageInfo */
+/** @typedef {import("./CliUsageInfo.ts").CliUsageInfo} CliUsageInfo */
 /** @typedef {import("ai").GenerateTextResult} GenerateTextResult */
 /** @typedef {import("ai").StreamTextResult} StreamTextResult */
+/** @typedef {import("ai").LanguageModelUsage} LanguageModelUsage */
+/**
+ * @typedef {"generate" | "stream"} AgentInvocationOperation
+ */
+/**
+ * @typedef {Record<string, string | undefined>} AgentInvocationTags
+ */
+/**
+ * @typedef {{
+ *   inputTokens?: number;
+ *   outputTokens?: number;
+ *   cacheReadTokens?: number;
+ *   cacheWriteTokens?: number;
+ *   reasoningTokens?: number;
+ *   totalTokens?: number;
+ * }} AgentTokenTotals
+ */
+/**
+ * Loosely-typed generation options. The AI SDK passes a dynamic shape here
+ * (GenerateTextOptions / StreamTextOptions and provider-specific extensions)
+ * so we keep this permissive but avoid raw `any`.
+ * @typedef {{
+ *   prompt?: unknown;
+ *   messages?: unknown;
+ *   timeout?: unknown;
+ *   abortSignal?: AbortSignal;
+ *   rootDir?: string;
+ *   resumeSession?: string;
+ *   maxOutputBytes?: number;
+ *   onStdout?: (text: string) => void;
+ *   onStderr?: (text: string) => void;
+ *   onEvent?: (event: AgentCliEvent) => unknown;
+ *   retry?: unknown;
+ *   isRetry?: unknown;
+ *   retryAttempt?: unknown;
+ *   schemaRetry?: unknown;
+ *   [key: string]: unknown;
+ * }} AgentGenerateOptions
+ */
 
 /**
  * @template A
@@ -85,30 +124,37 @@ function asFiniteTokenCount(value) {
         : undefined;
 }
 /**
- * @param {any} usage
+ * @param {unknown} usage
  * @returns {AgentTokenTotals}
  */
 function extractAgentTokenTotals(usage) {
     if (!usage || typeof usage !== "object") {
         return {};
     }
-    const inputTokens = asFiniteTokenCount(usage.inputTokens)
-        ?? asFiniteTokenCount(usage.input_tokens)
-        ?? asFiniteTokenCount(usage.prompt_tokens);
-    const outputTokens = asFiniteTokenCount(usage.outputTokens)
-        ?? asFiniteTokenCount(usage.output_tokens)
-        ?? asFiniteTokenCount(usage.completion_tokens);
-    const cacheReadTokens = asFiniteTokenCount(usage.cacheReadTokens)
-        ?? asFiniteTokenCount(usage.cached_input_tokens)
-        ?? asFiniteTokenCount(usage.cache_read_input_tokens)
-        ?? asFiniteTokenCount(usage.inputTokenDetails?.cacheReadTokens);
-    const cacheWriteTokens = asFiniteTokenCount(usage.cacheWriteTokens)
-        ?? asFiniteTokenCount(usage.cache_creation_input_tokens)
-        ?? asFiniteTokenCount(usage.inputTokenDetails?.cacheWriteTokens);
-    const reasoningTokens = asFiniteTokenCount(usage.reasoningTokens)
-        ?? asFiniteTokenCount(usage.reasoning_tokens)
-        ?? asFiniteTokenCount(usage.outputTokenDetails?.reasoningTokens);
-    const totalTokens = asFiniteTokenCount(usage.totalTokens)
+    const u = /** @type {Record<string, unknown>} */ (usage);
+    const inputDetails = /** @type {Record<string, unknown> | undefined} */ (
+        u.inputTokenDetails && typeof u.inputTokenDetails === "object" ? u.inputTokenDetails : undefined
+    );
+    const outputDetails = /** @type {Record<string, unknown> | undefined} */ (
+        u.outputTokenDetails && typeof u.outputTokenDetails === "object" ? u.outputTokenDetails : undefined
+    );
+    const inputTokens = asFiniteTokenCount(u.inputTokens)
+        ?? asFiniteTokenCount(u.input_tokens)
+        ?? asFiniteTokenCount(u.prompt_tokens);
+    const outputTokens = asFiniteTokenCount(u.outputTokens)
+        ?? asFiniteTokenCount(u.output_tokens)
+        ?? asFiniteTokenCount(u.completion_tokens);
+    const cacheReadTokens = asFiniteTokenCount(u.cacheReadTokens)
+        ?? asFiniteTokenCount(u.cached_input_tokens)
+        ?? asFiniteTokenCount(u.cache_read_input_tokens)
+        ?? asFiniteTokenCount(inputDetails?.cacheReadTokens);
+    const cacheWriteTokens = asFiniteTokenCount(u.cacheWriteTokens)
+        ?? asFiniteTokenCount(u.cache_creation_input_tokens)
+        ?? asFiniteTokenCount(inputDetails?.cacheWriteTokens);
+    const reasoningTokens = asFiniteTokenCount(u.reasoningTokens)
+        ?? asFiniteTokenCount(u.reasoning_tokens)
+        ?? asFiniteTokenCount(outputDetails?.reasoningTokens);
+    const totalTokens = asFiniteTokenCount(u.totalTokens)
         ?? asFiniteTokenCount((inputTokens ?? 0)
             + (outputTokens ?? 0)
             + (cacheReadTokens ?? 0)
@@ -151,18 +197,20 @@ function recordAgentTokenMetrics(tags, totals) {
     return effects.length > 0 ? Effect.all(effects, { discard: true }) : Effect.void;
 }
 /**
- * @param {any} options
+ * @param {unknown} options
  * @returns {{ isRetry: boolean; reason?: string }}
  */
 function resolveRetryHint(options) {
-    if (options?.retry === true)
+    if (!options || typeof options !== "object") return { isRetry: false };
+    const o = /** @type {Record<string, unknown>} */ (options);
+    if (o.retry === true)
         return { isRetry: true, reason: "retry" };
-    if (options?.isRetry === true)
+    if (o.isRetry === true)
         return { isRetry: true, reason: "is_retry" };
-    if (typeof options?.retryAttempt === "number" && options.retryAttempt > 0) {
+    if (typeof o.retryAttempt === "number" && o.retryAttempt > 0) {
         return { isRetry: true, reason: "retry_attempt" };
     }
-    if (typeof options?.schemaRetry === "number" && options.schemaRetry > 0) {
+    if (typeof o.schemaRetry === "number" && o.schemaRetry > 0) {
         return { isRetry: true, reason: "schema_retry" };
     }
     return { isRetry: false };
@@ -318,8 +366,8 @@ function asyncIterableToStream(iterable) {
     return stream;
 }
 /**
- * @param {GenerateTextResult<any, any>} result
- * @returns {StreamTextResult<any, any>}
+ * @param {GenerateTextResult<Record<string, never>, unknown>} result
+ * @returns {StreamTextResult<Record<string, never>, unknown>}
  */
 function buildStreamResult(result) {
     const text = result.text ?? "";
@@ -506,9 +554,9 @@ export class BaseCliAgent {
         this.extraArgs = opts.extraArgs;
     }
     /**
-   * @param {any} options
+   * @param {AgentGenerateOptions} [options]
    * @param {AgentInvocationOperation} operation
-   * @returns {Effect.Effect<GenerateTextResult<any, any>, SmithersError>}
+   * @returns {Effect.Effect<GenerateTextResult<Record<string, never>, unknown>, SmithersError>}
    */
     runGenerateEffect(options, operation) {
         const invocationStart = performance.now();
@@ -803,15 +851,15 @@ export class BaseCliAgent {
         return program;
     }
     /**
-   * @param {any} options
-   * @returns {Promise<GenerateTextResult<any, any>>}
+   * @param {AgentGenerateOptions} [options]
+   * @returns {Promise<GenerateTextResult<Record<string, never>, unknown>>}
    */
     async generate(options) {
         return runAgentPromise(this.runGenerateEffect(options, "generate"));
     }
     /**
-   * @param {any} options
-   * @returns {Promise<StreamTextResult<any, any>>}
+   * @param {AgentGenerateOptions} [options]
+   * @returns {Promise<StreamTextResult<Record<string, never>, unknown>>}
    */
     async stream(options) {
         const result = await runAgentPromise(this.runGenerateEffect(options, "stream").pipe(Effect.map((generateResult) => buildStreamResult(generateResult))));

@@ -44,7 +44,7 @@ import { recoverInProgressRewindAudits } from "@smithers/time-travel/recoverInPr
 /** @typedef {import("./RequestFrame.js").RequestFrame} RequestFrame */
 /** @typedef {import("./ResponseFrame.js").ResponseFrame} ResponseFrame */
 /** @typedef {import("node:http").ServerResponse} ServerResponse */
-/** @typedef {import("@smithers/components/SmithersWorkflow").SmithersWorkflow<any>} SmithersWorkflow */
+/** @typedef {import("@smithers/components/SmithersWorkflow").SmithersWorkflow<unknown>} SmithersWorkflow */
 /** @typedef {import("@smithers/observability/SmithersEvent").SmithersEvent} SmithersEvent */
 /** @typedef {Record<string, string | number | null | undefined>} GatewayMetricLabels */
 /** @typedef {"ws" | "http"} GatewayTransport */
@@ -245,8 +245,10 @@ function asWebhookString(value) {
     return undefined;
 }
 /**
- * @param {any} metric
+ * @template M
+ * @param {M} metric
  * @param {GatewayMetricLabels} [labels]
+ * @returns {M}
  */
 function taggedMetric(metric, labels = {}) {
     let tagged = metric;
@@ -259,14 +261,16 @@ function taggedMetric(metric, labels = {}) {
     return tagged;
 }
 /**
- * @param {any} metric
+ * @template M
+ * @param {M} metric
  * @param {GatewayMetricLabels} [labels]
  */
 function incrementMetric(metric, labels = {}) {
     return Metric.increment(taggedMetric(metric, labels));
 }
 /**
- * @param {any} metric
+ * @template M
+ * @param {M} metric
  * @param {number} value
  * @param {GatewayMetricLabels} [labels]
  */
@@ -1606,8 +1610,9 @@ export class Gateway {
     }
     /**
    * @param {string} key
-   * @param {SmithersWorkflow<any>} workflow
+   * @param {SmithersWorkflow} workflow
    * @param {{ schedule?: string; webhook?: GatewayWebhookConfig }} [options]
+   * @returns {this}
    */
     register(key, workflow, options) {
         ensureSmithersTables(workflow.db);
@@ -2438,7 +2443,8 @@ export class Gateway {
         };
     }
     /**
-   * @param {SmithersWorkflow<any>} workflow
+   * @param {SmithersWorkflow} workflow
+   * @returns {SmithersDb}
    */
     adapterForWorkflow(workflow) {
         return new SmithersDb(workflow.db);

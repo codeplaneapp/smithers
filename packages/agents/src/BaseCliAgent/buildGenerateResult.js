@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 /** @typedef {import("ai").GenerateTextResult} GenerateTextResult */
+/** @typedef {import("ai").LanguageModelUsage} LanguageModelUsage */
 
 /**
  * @param {string} text
  * @param {unknown} output
  * @param {string} modelId
- * @param {any} [usage]
- * @returns {GenerateTextResult<any, any>}
+ * @param {LanguageModelUsage} [usage]
+ * @returns {GenerateTextResult<Record<string, never>, unknown>}
  */
 export function buildGenerateResult(text, output, modelId, usage) {
     const finalUsage = usage ?? {

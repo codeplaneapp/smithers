@@ -11,8 +11,8 @@ export type HelloResponse = {
     userId: string | null;
   };
   snapshot: {
-    runs: any[];
-    approvals: any[];
+    runs: unknown[];
+    approvals: unknown[];
     stateVersion: number;
   };
 };

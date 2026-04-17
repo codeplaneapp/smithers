@@ -1,10 +1,11 @@
 import { extractTextFromJsonValue } from "./extractTextFromJsonValue.js";
+/** @typedef {import("ai").ModelMessage} ModelMessage */
 /**
  * @typedef {{ prompt: string; systemFromMessages?: string; }} PromptParts
  */
 
 /**
- * @param {any} content
+ * @param {unknown} content
  * @returns {string}
  */
 function contentToText(content) {
@@ -16,10 +17,11 @@ function contentToText(content) {
             if (typeof part === "string")
                 return part;
             if (part && typeof part === "object") {
-                if (typeof part.text === "string")
-                    return part.text;
-                if (typeof part.content === "string")
-                    return part.content;
+                const partRecord = /** @type {Record<string, unknown>} */ (part);
+                if (typeof partRecord.text === "string")
+                    return partRecord.text;
+                if (typeof partRecord.content === "string")
+                    return partRecord.content;
             }
             return "";
         })
@@ -30,11 +32,13 @@ function contentToText(content) {
     return String(content);
 }
 /**
- * @param {ModelMessage[]} messages
+ * @param {ReadonlyArray<ModelMessage>} messages
  * @returns {PromptParts}
  */
 function messagesToPrompt(messages) {
+    /** @type {string[]} */
     const systemParts = [];
+    /** @type {string[]} */
     const promptParts = [];
     for (const msg of messages) {
         const text = contentToText(msg.content);
@@ -60,24 +64,25 @@ function messagesToPrompt(messages) {
     };
 }
 /**
- * @param {any} options
+ * @param {unknown} options
  * @returns {PromptParts}
  */
 export function extractPrompt(options) {
-    if (!options)
+    if (!options || typeof options !== "object")
         return { prompt: "" };
-    if ("prompt" in options) {
-        const promptInput = options.prompt;
+    const opts = /** @type {Record<string, unknown>} */ (options);
+    if ("prompt" in opts) {
+        const promptInput = opts.prompt;
         if (typeof promptInput === "string") {
             return { prompt: promptInput };
         }
         if (Array.isArray(promptInput)) {
-            return messagesToPrompt(promptInput);
+            return messagesToPrompt(/** @type {ModelMessage[]} */ (promptInput));
         }
         return { prompt: "" };
     }
-    if (Array.isArray(options.messages)) {
-        return messagesToPrompt(options.messages);
+    if (Array.isArray(opts.messages)) {
+        return messagesToPrompt(/** @type {ModelMessage[]} */ (opts.messages));
     }
     return { prompt: "" };
 }

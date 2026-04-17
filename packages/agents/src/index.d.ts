@@ -1,11 +1,35 @@
 import { openai } from '@ai-sdk/openai';
 import * as ai from 'ai';
-import { ToolLoopAgent, ToolSet, ToolLoopAgentSettings } from 'ai';
+import { ToolSet, ToolLoopAgentSettings, ToolLoopAgent } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { Effect } from 'effect';
 import { SmithersError } from '@smithers/errors/SmithersError';
 import * as zod from 'zod';
 import * as zod_v4_core from 'zod/v4/core';
+
+type SmithersToolSurface$2 = "raw" | "semantic";
+
+type SmithersListedTool$2 = {
+    name: string;
+    description?: string | null;
+};
+
+type SmithersAgentToolCategory$1 = "runs" | "approvals" | "workflows" | "debug" | "admin";
+
+type SmithersAgentContractTool$1 = {
+    name: string;
+    description: string;
+    destructive: boolean;
+    category: SmithersAgentToolCategory$1;
+};
+
+type SmithersAgentContract$3 = {
+    toolSurface: SmithersToolSurface$2;
+    serverName: string;
+    tools: SmithersAgentContractTool$1[];
+    promptGuidance: string;
+    docsGuidance: string;
+};
 
 type PiExtensionUiResponse$1 = {
     type: "extension_ui_response";
@@ -125,7 +149,7 @@ type AgentLike$1 = {
     /** Optional unique identifier for the agent */
     id?: string;
     /** Available tools the agent can use */
-    tools?: Record<string, any>;
+    tools?: Record<string, unknown>;
     /** Optional structured capability registry for cache and diagnostics */
     capabilities?: AgentCapabilityRegistry$1;
     /**
@@ -141,7 +165,7 @@ type AgentLike$1 = {
      * @param args.outputSchema - Optional Zod schema defining the expected structured output format
      * @returns A promise resolving to the generated output
      */
-    generate: (args: any) => Promise<any>;
+    generate: (args: unknown) => Promise<unknown>;
 };
 
 type RunCommandResult = {
@@ -187,12 +211,12 @@ type AgentCliCompletedEvent = {
     resume?: string;
     usage?: Record<string, unknown>;
 };
-type AgentCliEvent = AgentCliStartedEvent | AgentCliActionEvent | AgentCliCompletedEvent;
+type AgentCliEvent$2 = AgentCliStartedEvent | AgentCliActionEvent | AgentCliCompletedEvent;
 
 type CliOutputInterpreter$8 = {
-    onStdoutLine?: (line: string) => AgentCliEvent[] | AgentCliEvent | null | undefined;
-    onStderrLine?: (line: string) => AgentCliEvent[] | AgentCliEvent | null | undefined;
-    onExit?: (result: RunCommandResult) => AgentCliEvent[] | AgentCliEvent | null | undefined;
+    onStdoutLine?: (line: string) => AgentCliEvent$2[] | AgentCliEvent$2 | null | undefined;
+    onStderrLine?: (line: string) => AgentCliEvent$2[] | AgentCliEvent$2 | null | undefined;
+    onExit?: (result: RunCommandResult) => AgentCliEvent$2[] | AgentCliEvent$2 | null | undefined;
 };
 
 declare class BaseCliAgent {
@@ -214,30 +238,54 @@ declare class BaseCliAgent {
     maxOutputBytes: number | undefined;
     extraArgs: string[] | undefined;
     /**
-   * @param {any} options
+   * @param {AgentGenerateOptions} [options]
    * @param {AgentInvocationOperation} operation
-   * @returns {Effect.Effect<GenerateTextResult<any, any>, SmithersError>}
+   * @returns {Effect.Effect<GenerateTextResult<Record<string, never>, unknown>, SmithersError>}
    */
-    runGenerateEffect(options: any, operation: AgentInvocationOperation): Effect.Effect<GenerateTextResult$2<any, any>, SmithersError>;
+    runGenerateEffect(options?: AgentGenerateOptions, operation: AgentInvocationOperation): Effect.Effect<GenerateTextResult$3<Record<string, never>, unknown>, SmithersError>;
     /**
-   * @param {any} options
-   * @returns {Promise<GenerateTextResult<any, any>>}
+   * @param {AgentGenerateOptions} [options]
+   * @returns {Promise<GenerateTextResult<Record<string, never>, unknown>>}
    */
-    generate(options: any): Promise<GenerateTextResult$2<any, any>>;
+    generate(options?: AgentGenerateOptions): Promise<GenerateTextResult$3<Record<string, never>, unknown>>;
     /**
-   * @param {any} options
-   * @returns {Promise<StreamTextResult<any, any>>}
+   * @param {AgentGenerateOptions} [options]
+   * @returns {Promise<StreamTextResult<Record<string, never>, unknown>>}
    */
-    stream(options: any): Promise<StreamTextResult<any, any>>;
+    stream(options?: AgentGenerateOptions): Promise<StreamTextResult<Record<string, never>, unknown>>;
     /**
    * @returns {CliOutputInterpreter | undefined}
    */
     createOutputInterpreter(): CliOutputInterpreter$7 | undefined;
 }
+type AgentCliEvent$1 = AgentCliEvent$2;
 type BaseCliAgentOptions = BaseCliAgentOptions$1;
 type CliOutputInterpreter$7 = CliOutputInterpreter$8;
-type GenerateTextResult$2 = ai.GenerateTextResult<any, any>;
+type GenerateTextResult$3 = ai.GenerateTextResult<any, any>;
 type StreamTextResult = ai.StreamTextResult<any, any>;
+type AgentInvocationOperation = "generate" | "stream";
+/**
+ * Loosely-typed generation options. The AI SDK passes a dynamic shape here
+ * (GenerateTextOptions / StreamTextOptions and provider-specific extensions)
+ * so we keep this permissive but avoid raw `any`.
+ */
+type AgentGenerateOptions = {
+    prompt?: unknown;
+    messages?: unknown;
+    timeout?: unknown;
+    abortSignal?: AbortSignal;
+    rootDir?: string;
+    resumeSession?: string;
+    maxOutputBytes?: number;
+    onStdout?: (text: string) => void;
+    onStderr?: (text: string) => void;
+    onEvent?: (event: AgentCliEvent$1) => unknown;
+    retry?: unknown;
+    isRetry?: unknown;
+    retryAttempt?: unknown;
+    schemaRetry?: unknown;
+    [key: string]: unknown;
+};
 
 /** @typedef {import("ai").AgentCallParameters} AgentCallParameters */
 /**
@@ -259,7 +307,7 @@ declare class AnthropicAgent extends ToolLoopAgent<never, any, never> {
    * @param {ExtendedGenerateArgs<CALL_OPTIONS, TOOLS>} args
    * @returns {Promise<GenerateTextResult<TOOLS, never>>}
    */
-    generate(args: ExtendedGenerateArgs$1<CALL_OPTIONS, TOOLS>): Promise<GenerateTextResult$1<TOOLS, never>>;
+    generate(args: ExtendedGenerateArgs$1<CALL_OPTIONS, TOOLS>): Promise<GenerateTextResult$2<TOOLS, never>>;
 }
 type AgentCallParameters$1 = any;
 type AnthropicAgentOptions$1<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = AnthropicAgentOptions$2<CALL_OPTIONS, TOOLS>;
@@ -270,7 +318,7 @@ type ExtendedGenerateArgs$1<CALL_OPTIONS, TOOLS> = AgentCallParameters$1<CALL_OP
     outputSchema?: zod.ZodTypeAny;
     resumeSession?: string;
 };
-type GenerateTextResult$1 = ai.GenerateTextResult<any, any>;
+type GenerateTextResult$2 = ai.GenerateTextResult<any, any>;
 
 /** @typedef {import("ai").AgentCallParameters} AgentCallParameters */
 /**
@@ -292,7 +340,7 @@ declare class OpenAIAgent extends ToolLoopAgent<never, any, never> {
    * @param {ExtendedGenerateArgs<CALL_OPTIONS, TOOLS>} args
    * @returns {Promise<GenerateTextResult<TOOLS, never>>}
    */
-    generate(args: ExtendedGenerateArgs<CALL_OPTIONS, TOOLS>): Promise<GenerateTextResult<TOOLS, never>>;
+    generate(args: ExtendedGenerateArgs<CALL_OPTIONS, TOOLS>): Promise<GenerateTextResult$1<TOOLS, never>>;
 }
 type AgentCallParameters = any;
 type ExtendedGenerateArgs<CALL_OPTIONS, TOOLS> = AgentCallParameters<CALL_OPTIONS, TOOLS> & {
@@ -302,7 +350,7 @@ type ExtendedGenerateArgs<CALL_OPTIONS, TOOLS> = AgentCallParameters<CALL_OPTION
     outputSchema?: zod.ZodTypeAny;
     resumeSession?: string;
 };
-type GenerateTextResult = ai.GenerateTextResult<any, any>;
+type GenerateTextResult$1 = ai.GenerateTextResult<any, any>;
 type OpenAIAgentOptions$1<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = OpenAIAgentOptions$2<CALL_OPTIONS, TOOLS>;
 
 /**
@@ -571,18 +619,18 @@ declare class PiAgent extends BaseCliAgent {
     cliEngine: string;
     issuedSessionRef: any;
     /**
-   * @param {any} options
+   * @param {PiGenerateOptions} [options]
    * @returns {PiMode}
    */
-    resolveMode(options: any): PiMode;
+    resolveMode(options?: PiGenerateOptions): PiMode;
     /**
-   * @param {{ prompt: string; cwd: string; options: any; mode: PiMode; }} params
+   * @param {{ prompt: string; cwd: string; options?: PiGenerateOptions; mode: PiMode; }} params
    * @returns {string[]}
    */
     buildArgs(params: {
         prompt: string;
         cwd: string;
-        options: any;
+        options?: PiGenerateOptions;
         mode: PiMode;
     }): string[];
     /**
@@ -590,14 +638,19 @@ declare class PiAgent extends BaseCliAgent {
    */
     createOutputInterpreter(): CliOutputInterpreter$2;
     /**
-   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+   * @param {PiGenerateOptions} [options]
+   * @returns {Promise<GenerateTextResult>}
+   */
+    generate(options?: PiGenerateOptions): Promise<GenerateTextResult>;
+    /**
+   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options?: PiGenerateOptions; }} params
    * @returns {Promise<{ command: string; args: string[]; stdin?: string; outputFormat?: string; outputFile?: string; cleanup?: () => Promise<void>; }>}
    */
     buildCommand(params: {
         prompt: string;
         systemPrompt?: string;
         cwd: string;
-        options: any;
+        options?: PiGenerateOptions;
     }): Promise<{
         command: string;
         args: string[];
@@ -608,7 +661,23 @@ declare class PiAgent extends BaseCliAgent {
     }>;
 }
 type CliOutputInterpreter$2 = CliOutputInterpreter$8;
+type AgentCliEvent = AgentCliEvent$2;
+type GenerateTextResult = ai.GenerateTextResult<Record<string, never>, unknown>;
 type PiAgentOptions$1 = PiAgentOptions$2;
+type PiMode = "text" | "json" | "stream-json" | "rpc";
+type PiGenerateOptions = {
+    prompt?: unknown;
+    messages?: unknown;
+    onEvent?: (event: AgentCliEvent) => unknown;
+    resumeSession?: unknown;
+    rootDir?: string;
+    timeout?: unknown;
+    abortSignal?: AbortSignal;
+    maxOutputBytes?: number;
+    onStdout?: (text: string) => void;
+    onStderr?: (text: string) => void;
+    [key: string]: unknown;
+};
 
 type KimiAgentOptions$1 = BaseCliAgentOptions$1 & {
     workDir?: string;
@@ -732,6 +801,31 @@ type CliOutputInterpreter = CliOutputInterpreter$8;
 type ForgeAgentOptions = ForgeAgentOptions$1;
 
 /**
+ * @param {CreateSmithersAgentContractOptions} options
+ * @returns {SmithersAgentContract}
+ */
+declare function createSmithersAgentContract(options: CreateSmithersAgentContractOptions): SmithersAgentContract$2;
+type SmithersListedTool$1 = SmithersListedTool$2;
+type SmithersToolSurface$1 = SmithersToolSurface$2;
+type CreateSmithersAgentContractOptions = {
+    toolSurface?: SmithersToolSurface$1;
+    serverName?: string;
+    tools: SmithersListedTool$1[];
+};
+type SmithersAgentContract$2 = SmithersAgentContract$3;
+
+/**
+ * @param {SmithersAgentContract} contract
+ * @param {RenderGuidanceOptions} [options]
+ */
+declare function renderSmithersAgentPromptGuidance(contract: SmithersAgentContract$1, options?: RenderGuidanceOptions): string;
+type RenderGuidanceOptions = {
+    available?: boolean;
+    toolNamePrefix?: string;
+};
+type SmithersAgentContract$1 = SmithersAgentContract$3;
+
+/**
  * Convert a Zod schema to an OpenAI-safe JSON Schema object.
  *
  * Usage:
@@ -761,38 +855,6 @@ declare function zodToOpenAISchema(zodSchema: any): Promise<zod_v4_core.ZodStand
  */
 declare function sanitizeForOpenAI(node: any): void;
 
-type SmithersToolSurface = "raw" | "semantic";
-type SmithersAgentToolCategory = "runs" | "approvals" | "workflows" | "debug" | "admin";
-type SmithersAgentContractTool = {
-    name: string;
-    description: string;
-    destructive: boolean;
-    category: SmithersAgentToolCategory;
-};
-type SmithersListedTool = {
-    name: string;
-    description?: string | null;
-};
-type SmithersAgentContract = {
-    toolSurface: SmithersToolSurface;
-    serverName: string;
-    tools: SmithersAgentContractTool[];
-    promptGuidance: string;
-    docsGuidance: string;
-};
-type CreateSmithersAgentContractOptions = {
-    toolSurface?: SmithersToolSurface;
-    serverName?: string;
-    tools: SmithersListedTool[];
-};
-type RenderSmithersAgentPromptGuidanceOptions = {
-    available?: boolean;
-    toolNamePrefix?: string;
-};
-
-declare function createSmithersAgentContract(options: CreateSmithersAgentContractOptions): SmithersAgentContract;
-declare function renderSmithersAgentPromptGuidance(contract: SmithersAgentContract, options?: RenderSmithersAgentPromptGuidanceOptions): string;
-
 type AgentCapabilityRegistry = AgentCapabilityRegistry$3;
 type AgentLike = AgentLike$1;
 type AgentToolDescriptor = AgentToolDescriptor$1;
@@ -801,5 +863,10 @@ type OpenAIAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = OpenAIAgentO
 type PiAgentOptions = PiAgentOptions$2;
 type PiExtensionUiRequest = PiExtensionUiRequest$1;
 type PiExtensionUiResponse = PiExtensionUiResponse$1;
+type SmithersAgentContract = SmithersAgentContract$3;
+type SmithersAgentContractTool = SmithersAgentContractTool$1;
+type SmithersAgentToolCategory = SmithersAgentToolCategory$1;
+type SmithersListedTool = SmithersListedTool$2;
+type SmithersToolSurface = SmithersToolSurface$2;
 
-export { type AgentCapabilityRegistry, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, BaseCliAgent, ClaudeCodeAgent, CodexAgent, type CreateSmithersAgentContractOptions, ForgeAgent, GeminiAgent, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type RenderSmithersAgentPromptGuidanceOptions, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, createSmithersAgentContract, hashCapabilityRegistry, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, BaseCliAgent, ClaudeCodeAgent, CodexAgent, ForgeAgent, GeminiAgent, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, createSmithersAgentContract, hashCapabilityRegistry, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };

@@ -23,8 +23,10 @@ const nodeDiffCacheRows = Metric.gauge("smithers_node_diff_cache_rows");
 let lastCacheRowGaugeEmitAtMs = 0;
 let cacheRowGaugeInflight = null;
 /**
- * @param {any} metric
+ * @template M
+ * @param {M} metric
  * @param {Record<string, string | number | null | undefined>} [labels]
+ * @returns {M}
  */
 function taggedMetric(metric, labels = {}) {
     let tagged = metric;
@@ -253,8 +255,8 @@ function scheduleCacheRowGauge(cache, emitEffect, nowMs) {
  *   iteration: unknown;
  *   resolveRun: (runId: string) => Promise<{ adapter: SmithersDb } | null>;
  *   emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
- *   computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<any>;
- *   computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<any>;
+ *   computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<import("@smithers/engine/effect/DiffBundle").DiffBundle>;
+ *   computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<import("@smithers/engine/effect/DiffBundle").DiffBundle>;
  *   getCurrentPointerImpl?: (cwd: string) => Promise<string | null>;
  *   resolveCommitPointerImpl?: (pointer: string, cwd: string) => Promise<string | null>;
  *   restorePointerImpl?: (pointer: string, cwd: string) => Promise<{ success: boolean; error?: string }>;

@@ -93,7 +93,7 @@ function parseOptionalInt(value, fallback) {
  * @param {IncomingMessage} req
  * @param {number} maxBytes
  * @param {number} maxDepth
- * @returns {Promise<any>}
+ * @returns {Promise<unknown>}
  */
 async function readBody(req, maxBytes, maxDepth) {
     const chunks = [];
@@ -152,7 +152,7 @@ async function readBody(req, maxBytes, maxDepth) {
 }
 /**
  * @param {string} absPath
- * @returns {Promise<SmithersWorkflow<any>>}
+ * @returns {Promise<SmithersWorkflow<unknown>>}
  */
 async function loadWorkflow(absPath) {
     const source = await readFile(absPath);
@@ -220,7 +220,7 @@ function finalizeRunRecord(runId, status, hasServerDb) {
 /**
  * @param {ServerResponse} res
  * @param {number} status
- * @param {any} payload
+ * @param {unknown} payload
  */
 function sendJson(res, status, payload) {
     res.statusCode = status;
@@ -229,9 +229,12 @@ function sendJson(res, status, payload) {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.end(JSON.stringify(payload));
 }
+/** @typedef {import("@smithers/db/adapter/RunRow").RunRow} RunRow */
+
 /**
  * @param {SmithersDb} adapter
- * @param {any} run
+ * @param {RunRow} run
+ * @returns {Promise<RunRow | (RunRow & { runState: import("@smithers/db/runState/RunStateView").RunStateView })>}
  */
 async function withRunState(adapter, run) {
     const runState = await computeRunStateFromRow(adapter, run).catch(() => undefined);
@@ -375,19 +378,21 @@ function resolveWorkflowPath(workflowPath, rootDir) {
     return resolved;
 }
 /**
- * @param {any} db
+ * @param {unknown} db
  * @returns {string | undefined}
  */
 function getDbIdentity(db) {
-    const client = db?.$client;
-    if (!client)
+    if (!db || typeof db !== "object") return undefined;
+    const client = /** @type {{ $client?: unknown }} */ (db).$client;
+    if (!client || typeof client !== "object")
         return undefined;
-    if (typeof client.filename === "string")
-        return client.filename;
-    if (typeof client.name === "string")
-        return client.name;
-    if (typeof client.dbname === "string")
-        return client.dbname;
+    const c = /** @type {Record<string, unknown>} */ (client);
+    if (typeof c.filename === "string")
+        return c.filename;
+    if (typeof c.name === "string")
+        return c.name;
+    if (typeof c.dbname === "string")
+        return c.dbname;
     return undefined;
 }
 /**

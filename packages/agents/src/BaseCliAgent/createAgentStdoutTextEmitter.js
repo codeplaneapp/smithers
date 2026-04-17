@@ -15,17 +15,20 @@ function extractLastAssistantMessage(messages) {
         return undefined;
     for (let i = messages.length - 1; i >= 0; i--) {
         const message = messages[i];
-        if (message?.role === "assistant")
+        if (message && typeof message === "object"
+            && /** @type {Record<string, unknown>} */ (message).role === "assistant") {
             return message;
+        }
     }
     return undefined;
 }
 /**
- * @param {any} parsed
+ * @param {unknown} parsed
  * @param {{ sawDeltaSinceBoundary: boolean }} state
  * @returns {string[]}
  */
 function extractCliStreamTextChunks(parsed, state) {
+    /** @type {string[]} */
     const chunks = [];
     /**
    * @param {string | undefined} text
@@ -45,57 +48,71 @@ function extractCliStreamTextChunks(parsed, state) {
         }
         state.sawDeltaSinceBoundary = false;
     };
-    const type = typeof parsed?.type === "string" ? parsed.type : "";
+    if (!parsed || typeof parsed !== "object") {
+        return chunks;
+    }
+    const record = /** @type {Record<string, unknown>} */ (parsed);
+    const type = typeof record.type === "string" ? record.type : "";
     const upperType = type.toUpperCase();
-    if (type === "content_block_delta" && parsed?.delta?.type === "text_delta") {
-        emitDelta(typeof parsed.delta.text === "string" ? parsed.delta.text : undefined);
+    const delta = /** @type {Record<string, unknown> | undefined} */ (
+        record.delta && typeof record.delta === "object" ? record.delta : undefined
+    );
+    if (type === "content_block_delta" && delta?.type === "text_delta") {
+        emitDelta(typeof delta.text === "string" ? delta.text : undefined);
     }
     if (type === "message_update") {
-        const assistantEvent = parsed?.assistantMessageEvent;
+        const assistantEvent = /** @type {Record<string, unknown> | undefined} */ (
+            record.assistantMessageEvent && typeof record.assistantMessageEvent === "object"
+                ? record.assistantMessageEvent
+                : undefined
+        );
         if (assistantEvent?.type === "text_delta" &&
             typeof assistantEvent.delta === "string") {
             emitDelta(assistantEvent.delta);
         }
     }
     if (/delta/i.test(type) && type !== "content_block_delta" && type !== "message_update") {
-        if (typeof parsed?.delta === "string") {
-            emitDelta(parsed.delta);
+        if (typeof record.delta === "string") {
+            emitDelta(record.delta);
         }
-        else if (typeof parsed?.delta?.text === "string") {
-            emitDelta(parsed.delta.text);
+        else if (typeof delta?.text === "string") {
+            emitDelta(delta.text);
         }
-        else if (typeof parsed?.text === "string") {
-            emitDelta(parsed.text);
+        else if (typeof record.text === "string") {
+            emitDelta(record.text);
         }
     }
-    if (type === "message" && parsed?.role === "assistant") {
-        emitFinal(extractTextFromJsonValue(parsed.content ?? parsed.message ?? parsed));
+    if (type === "message" && record.role === "assistant") {
+        emitFinal(extractTextFromJsonValue(record.content ?? record.message ?? record));
     }
-    if (upperType === "MESSAGE" && parsed?.role === "assistant") {
-        if (parsed?.delta === true && typeof parsed?.content === "string") {
-            emitDelta(parsed.content);
+    if (upperType === "MESSAGE" && record.role === "assistant") {
+        if (record.delta === true && typeof record.content === "string") {
+            emitDelta(record.content);
         }
         else {
-            emitFinal(extractTextFromJsonValue(parsed.content ?? parsed.message ?? parsed));
+            emitFinal(extractTextFromJsonValue(record.content ?? record.message ?? record));
         }
     }
-    if (parsed?.role === "assistant" && typeof parsed?.content === "string") {
-        emitFinal(parsed.content);
+    if (record.role === "assistant" && typeof record.content === "string") {
+        emitFinal(record.content);
     }
-    if (type === "assistant" && parsed?.message?.role === "assistant") {
-        emitFinal(extractTextFromJsonValue(parsed.message));
+    const message = /** @type {Record<string, unknown> | undefined} */ (
+        record.message && typeof record.message === "object" ? record.message : undefined
+    );
+    if (type === "assistant" && message?.role === "assistant") {
+        emitFinal(extractTextFromJsonValue(message));
     }
     if (type === "result") {
-        emitFinal(extractTextFromJsonValue(parsed.result ?? parsed.response ?? parsed.output ?? parsed));
+        emitFinal(extractTextFromJsonValue(record.result ?? record.response ?? record.output ?? record));
     }
-    if (type === "turn_end" && parsed?.message?.role === "assistant") {
-        emitFinal(extractTextFromJsonValue(parsed.message));
+    if (type === "turn_end" && message?.role === "assistant") {
+        emitFinal(extractTextFromJsonValue(message));
     }
-    if (type === "message_end" && parsed?.message?.role === "assistant") {
-        emitFinal(extractTextFromJsonValue(parsed.message));
+    if (type === "message_end" && message?.role === "assistant") {
+        emitFinal(extractTextFromJsonValue(message));
     }
     if (type === "agent_end") {
-        emitFinal(extractTextFromJsonValue(extractLastAssistantMessage(parsed.messages)));
+        emitFinal(extractTextFromJsonValue(extractLastAssistantMessage(record.messages)));
     }
     if (type === "message_stop" ||
         type === "turn.completed" ||

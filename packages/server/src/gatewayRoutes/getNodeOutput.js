@@ -75,7 +75,7 @@ async function swallow(run) {
  *   runId: unknown;
  *   nodeId: unknown;
  *   iteration: unknown;
- *   resolveRun: (runId: string) => Promise<{ workflow: any; adapter: any } | null>;
+ *   resolveRun: (runId: string) => Promise<{ workflow: import("@smithers/components/SmithersWorkflow").SmithersWorkflow<unknown>; adapter: import("@smithers/db/adapter").SmithersDb } | null>;
  *   selectOutputRowImpl?: typeof selectOutputRow;
  *   emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
  * }} params
@@ -348,11 +348,17 @@ function coerceOptionalInteger(value) {
 }
 
 /**
- * @param {any} workflow
+ * @param {unknown} workflow
  * @param {string} outputTableName
+ * @returns {{ table: unknown; zodSchema?: unknown } | null}
  */
 function resolveOutputDefinition(workflow, outputTableName) {
-    const schemaRegistry = workflow?.schemaRegistry;
+    const wf = /** @type {Record<string, unknown> | null | undefined} */ (
+        workflow && typeof workflow === "object" ? workflow : null
+    );
+    const schemaRegistry = /** @type {{ get?: (key: string) => { table?: unknown; zodSchema?: unknown } | undefined; values?: () => Iterable<{ table?: unknown; zodSchema?: unknown }>; } | undefined} */ (
+        wf?.schemaRegistry
+    );
     if (schemaRegistry && typeof schemaRegistry.get === "function") {
         const hit = schemaRegistry.get(outputTableName);
         if (hit?.table) {
@@ -361,36 +367,45 @@ function resolveOutputDefinition(workflow, outputTableName) {
                 zodSchema: hit.zodSchema,
             };
         }
-        for (const entry of schemaRegistry.values()) {
-            if (!entry?.table) {
-                continue;
-            }
-            try {
-                if (getTableName(entry.table) === outputTableName) {
-                    return {
-                        table: entry.table,
-                        zodSchema: entry.zodSchema,
-                    };
+        if (typeof schemaRegistry.values === "function") {
+            for (const entry of schemaRegistry.values()) {
+                if (!entry?.table) {
+                    continue;
                 }
+                try {
+                    if (getTableName(entry.table) === outputTableName) {
+                        return {
+                            table: entry.table,
+                            zodSchema: entry.zodSchema,
+                        };
+                    }
+                }
+                catch { }
             }
-            catch { }
         }
     }
 
+    const db = /** @type {Record<string, unknown> | undefined} */ (
+        wf?.db && typeof wf.db === "object" ? wf.db : undefined
+    );
+    const dbInternal = /** @type {Record<string, unknown> | undefined} */ (
+        db?._ && typeof db._ === "object" ? db._ : undefined
+    );
     const candidates = [
-        workflow?.db?._?.fullSchema,
-        workflow?.db?._?.schema,
-        workflow?.db?.schema,
+        dbInternal?.fullSchema,
+        dbInternal?.schema,
+        db?.schema,
     ];
     for (const candidate of candidates) {
         if (!candidate || typeof candidate !== "object") {
             continue;
         }
-        const direct = candidate[outputTableName];
+        const candidateRecord = /** @type {Record<string, unknown>} */ (candidate);
+        const direct = candidateRecord[outputTableName];
         if (direct) {
             return { table: direct };
         }
-        for (const table of Object.values(candidate)) {
+        for (const table of Object.values(candidateRecord)) {
             try {
                 if (getTableName(table) === outputTableName) {
                     return { table };
@@ -411,20 +426,22 @@ function isDescriptorSchema(value) {
 }
 
 /**
- * @param {any} row
+ * @param {unknown} row
+ * @returns {unknown}
  */
 function normalizeOutputRow(row) {
     if (!row || typeof row !== "object") {
         return row ?? null;
     }
-    const keys = Object.keys(row);
+    const r = /** @type {Record<string, unknown>} */ (row);
+    const keys = Object.keys(r);
     const payloadOnly =
-        "payload" in row &&
+        "payload" in r &&
             keys.every((key) => key === "runId" || key === "nodeId" || key === "iteration" || key === "payload");
     if (payloadOnly) {
-        return row.payload ?? null;
+        return r.payload ?? null;
     }
-    return stripAutoColumns(row);
+    return stripAutoColumns(r);
 }
 
 /**

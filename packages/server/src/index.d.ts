@@ -1,3 +1,4 @@
+import * as _smithers_db_adapter_RunRow from '@smithers/db/adapter/RunRow';
 import * as node_http from 'node:http';
 import { IncomingMessage as IncomingMessage$1, ServerResponse as ServerResponse$1 } from 'node:http';
 import * as _smithers_observability_SmithersEvent from '@smithers/observability/SmithersEvent';
@@ -12,6 +13,8 @@ import * as effect_Fiber from 'effect/Fiber';
 import * as _smithers_protocol_errors from '@smithers/protocol/errors';
 import * as _smithers_devtools_snapshotSerializer from '@smithers/devtools/snapshotSerializer';
 import * as _smithers_protocol_devtools from '@smithers/protocol/devtools';
+import * as _smithers_engine_effect_DiffBundle from '@smithers/engine/effect/DiffBundle';
+import { DiffBundle } from '@smithers/engine/effect/DiffBundle';
 import { selectOutputRow } from '@smithers/db/output';
 import * as _smithers_time_travel_jumpToFrame from '@smithers/time-travel/jumpToFrame';
 export { JumpToFrameError } from '@smithers/time-travel/jumpToFrame';
@@ -135,8 +138,8 @@ type HelloResponse$1 = {
         userId: string | null;
     };
     snapshot: {
-        runs: any[];
-        approvals: any[];
+        runs: unknown[];
+        approvals: unknown[];
         stateVersion: number;
     };
 };
@@ -327,10 +330,11 @@ declare class Gateway {
     handleWebhook(req: IncomingMessage, res: ServerResponse, workflowKey: string): Promise<void>;
     /**
    * @param {string} key
-   * @param {SmithersWorkflow<any>} workflow
+   * @param {SmithersWorkflow} workflow
    * @param {{ schedule?: string; webhook?: GatewayWebhookConfig }} [options]
+   * @returns {this}
    */
-    register(key: string, workflow: SmithersWorkflow<any>, options?: {
+    register(key: string, workflow: SmithersWorkflow, options?: {
         schedule?: string;
         webhook?: GatewayWebhookConfig;
     }): this;
@@ -451,9 +455,10 @@ declare class Gateway {
         stateVersion: number;
     }>;
     /**
-   * @param {SmithersWorkflow<any>} workflow
+   * @param {SmithersWorkflow} workflow
+   * @returns {SmithersDb}
    */
-    adapterForWorkflow(workflow: SmithersWorkflow<any>): SmithersDb$4;
+    adapterForWorkflow(workflow: SmithersWorkflow): SmithersDb$4;
     /**
    * @param {string} [status]
    */
@@ -518,7 +523,7 @@ type IncomingMessage = node_http.IncomingMessage;
 type RequestFrame = RequestFrame$1;
 type ResponseFrame = ResponseFrame$1;
 type ServerResponse = node_http.ServerResponse;
-type SmithersWorkflow = _smithers_components_SmithersWorkflow.SmithersWorkflow<any>;
+type SmithersWorkflow = _smithers_components_SmithersWorkflow.SmithersWorkflow<unknown>;
 type SmithersEvent$1 = _smithers_observability_SmithersEvent.SmithersEvent;
 type GatewayMetricLabels = Record<string, string | number | null | undefined>;
 type GatewayTransport = "ws" | "http";
@@ -562,7 +567,7 @@ type ResolvedRun = {
 };
 
 type ServeOptions$1 = {
-    workflow: SmithersWorkflow$1<any>;
+    workflow: SmithersWorkflow$1<unknown>;
     adapter: SmithersDb$4;
     runId: string;
     abort: AbortController;
@@ -713,9 +718,15 @@ type DiffSummary$1 = {
     }>;
 };
 
+type GetNodeDiffStatPayload = {
+    seq: number;
+    baseRef: string;
+    summary: DiffSummary$1;
+};
+type GetNodeDiffRoutePayload = DiffBundle | GetNodeDiffStatPayload;
 type GetNodeDiffRouteResult$1 = {
     ok: true;
-    payload: any;
+    payload: GetNodeDiffRoutePayload;
 } | {
     ok: false;
     error: {
@@ -731,8 +742,8 @@ type GetNodeDiffRouteResult$1 = {
  *   iteration: unknown;
  *   resolveRun: (runId: string) => Promise<{ adapter: SmithersDb } | null>;
  *   emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
- *   computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<any>;
- *   computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<any>;
+ *   computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<import("@smithers/engine/effect/DiffBundle").DiffBundle>;
+ *   computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<import("@smithers/engine/effect/DiffBundle").DiffBundle>;
  *   getCurrentPointerImpl?: (cwd: string) => Promise<string | null>;
  *   resolveCommitPointerImpl?: (pointer: string, cwd: string) => Promise<string | null>;
  *   restorePointerImpl?: (pointer: string, cwd: string) => Promise<{ success: boolean; error?: string }>;
@@ -749,8 +760,8 @@ declare function getNodeDiffRoute({ runId: rawRunId, nodeId: rawNodeId, iteratio
         adapter: SmithersDb$2;
     } | null>;
     emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
-    computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<any>;
-    computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<any>;
+    computeDiffBundleImpl?: (baseRef: string, cwd: string, seq?: number) => Promise<_smithers_engine_effect_DiffBundle.DiffBundle>;
+    computeDiffBundleBetweenRefsImpl?: (baseRef: string, targetRef: string, cwd: string, seq?: number) => Promise<_smithers_engine_effect_DiffBundle.DiffBundle>;
     getCurrentPointerImpl?: (cwd: string) => Promise<string | null>;
     resolveCommitPointerImpl?: (pointer: string, cwd: string) => Promise<string | null>;
     restorePointerImpl?: (pointer: string, cwd: string) => Promise<{
@@ -810,7 +821,7 @@ type NodeOutputResponse$1 = {
  *   runId: unknown;
  *   nodeId: unknown;
  *   iteration: unknown;
- *   resolveRun: (runId: string) => Promise<{ workflow: any; adapter: any } | null>;
+ *   resolveRun: (runId: string) => Promise<{ workflow: import("@smithers/components/SmithersWorkflow").SmithersWorkflow<unknown>; adapter: import("@smithers/db/adapter").SmithersDb } | null>;
  *   selectOutputRowImpl?: typeof selectOutputRow;
  *   emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
  * }} params
@@ -821,8 +832,8 @@ declare function getNodeOutputRoute(params: {
     nodeId: unknown;
     iteration: unknown;
     resolveRun: (runId: string) => Promise<{
-        workflow: any;
-        adapter: any;
+        workflow: _smithers_components_SmithersWorkflow.SmithersWorkflow<unknown>;
+        adapter: _smithers_db_adapter.SmithersDb;
     } | null>;
     selectOutputRowImpl?: typeof selectOutputRow;
     emitEffect?: (effect: Effect.Effect<void>) => Promise<unknown>;
@@ -936,6 +947,7 @@ declare function startServerEffect(opts?: ServerOptions): Effect.Effect<node_htt
  */
 declare function startServer(opts?: ServerOptions): node_http.Server<typeof IncomingMessage$1, typeof ServerResponse$1>;
 
+type RunRow = _smithers_db_adapter_RunRow.RunRow;
 type ServerOptions = ServerOptions$1;
 
-export { type AttemptRow, type ConnectRequest, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayMetricLabels, type GatewayOptions, type GatewayRequestContext, type GatewayTokenGrant, type GatewayTransport, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedRun, type ResponseFrame, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, assertGatewayInputDepthWithinBounds, createServeApp, emptyDevToolsRoot, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };
+export { type AttemptRow, type ConnectRequest, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayMetricLabels, type GatewayOptions, type GatewayRequestContext, type GatewayTokenGrant, type GatewayTransport, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedRun, type ResponseFrame, type RunRow, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, assertGatewayInputDepthWithinBounds, createServeApp, emptyDevToolsRoot, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };

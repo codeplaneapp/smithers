@@ -8,7 +8,7 @@ export type AgentLike = {
   /** Optional unique identifier for the agent */
   id?: string;
   /** Available tools the agent can use */
-  tools?: Record<string, any>;
+  tools?: Record<string, unknown>;
   /** Optional structured capability registry for cache and diagnostics */
   capabilities?: AgentCapabilityRegistry;
   /**
@@ -24,5 +24,5 @@ export type AgentLike = {
    * @param args.outputSchema - Optional Zod schema defining the expected structured output format
    * @returns A promise resolving to the generated output
    */
-  generate: (args: any) => Promise<any>;
+  generate: (args: unknown) => Promise<unknown>;
 };
