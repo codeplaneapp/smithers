@@ -5,10 +5,10 @@ import { toSmithersError } from "@smithers/errors/toSmithersError";
 import { SmithersError } from "@smithers/errors/SmithersError";
 /** @typedef {import("@smithers/driver/OutputSnapshot").OutputSnapshot} OutputSnapshot */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
-/** @typedef {import("drizzle-orm").Table} Table */
+/** @typedef {import("drizzle-orm").Table} _Table */
 
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @returns {string[]}
  */
 function getBooleanColumnKeys(table) {
@@ -48,7 +48,7 @@ function coerceBooleanColumns(rows, boolKeys) {
 }
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Table} inputTable
+ * @param {_Table} inputTable
  * @param {string} runId
  * @returns {Effect.Effect<Record<string, unknown> | undefined, SmithersError>}
  */
@@ -68,7 +68,7 @@ export function loadInputEffect(db, inputTable, runId) {
 }
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Table} inputTable
+ * @param {_Table} inputTable
  * @param {string} runId
  * @returns {Promise<Record<string, unknown> | undefined>}
  */
@@ -77,7 +77,7 @@ export function loadInput(db, inputTable, runId) {
 }
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Record<string, Table | unknown>} schema
+ * @param {Record<string, _Table | unknown>} schema
  * @param {string} runId
  * @returns {Effect.Effect<OutputSnapshot, SmithersError>}
  */
@@ -89,7 +89,7 @@ export function loadOutputsEffect(db, schema, runId) {
             if (!table || typeof table !== "object") continue;
             if (key === "input") continue;
             const colsOpt = yield* Effect.try({
-                try: () => getTableColumns(/** @type {Table} */ (table)),
+                try: () => getTableColumns(/** @type {_Table} */ (table)),
                 catch: (cause) => toSmithersError(cause, "get table columns", { code: "DB_QUERY_FAILED", details: { runId, schemaKey: key } }),
             }).pipe(Effect.option);
             if (Option.isNone(colsOpt)) continue;
@@ -97,16 +97,16 @@ export function loadOutputsEffect(db, schema, runId) {
             const runIdCol = cols.runId;
             if (!runIdCol) continue;
             const tableNameOpt = yield* Effect.try({
-                try: () => getTableName(/** @type {Table} */ (table)),
+                try: () => getTableName(/** @type {_Table} */ (table)),
                 catch: (cause) => toSmithersError(cause, "get table name", { code: "DB_QUERY_FAILED", details: { runId, schemaKey: key } }),
             }).pipe(Effect.option);
             if (Option.isNone(tableNameOpt)) continue;
             const tableName = tableNameOpt.value;
             const rawRows = yield* Effect.tryPromise({
-                try: () => db.select().from(/** @type {Table} */ (table)).where(eq(runIdCol, runId)),
+                try: () => db.select().from(/** @type {_Table} */ (table)).where(eq(runIdCol, runId)),
                 catch: (cause) => toSmithersError(cause, `load outputs ${tableName}`, { code: "DB_QUERY_FAILED", details: { runId, tableName } }),
             });
-            const boolKeys = getBooleanColumnKeys(/** @type {Table} */ (table));
+            const boolKeys = getBooleanColumnKeys(/** @type {_Table} */ (table));
             const rows = coerceBooleanColumns(rawRows, boolKeys);
             out[tableName] = rows;
             out[key] = rows;
@@ -116,7 +116,7 @@ export function loadOutputsEffect(db, schema, runId) {
 }
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Record<string, Table | unknown>} schema
+ * @param {Record<string, _Table | unknown>} schema
  * @param {string} runId
  * @returns {Promise<OutputSnapshot>}
  */

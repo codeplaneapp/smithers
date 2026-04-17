@@ -7,12 +7,12 @@ import { SmithersError } from "@smithers/errors/SmithersError";
 import { toSmithersError } from "@smithers/errors/toSmithersError";
 import { withSqliteWriteRetryEffect } from "./write-retry.js";
 /** @typedef {import("drizzle-orm").AnyColumn} AnyColumn */
-/** @typedef {import("./output/OutputKey.ts").OutputKey} OutputKey */
-/** @typedef {import("drizzle-orm").Table} Table */
+/** @typedef {import("./output/OutputKey.ts").OutputKey} _OutputKey */
+/** @typedef {import("drizzle-orm").Table} _Table */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
 
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @param {string} runId
  * @param {string} nodeId
  * @param {number} iteration
@@ -44,7 +44,7 @@ export function stripAutoColumns(payload) {
     return rest;
 }
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @returns {{ runId: AnyColumn; nodeId: AnyColumn; iteration?: AnyColumn; }}
  */
 export function getKeyColumns(table) {
@@ -58,8 +58,8 @@ export function getKeyColumns(table) {
     return { runId, nodeId, iteration };
 }
 /**
- * @param {Table} table
- * @param {OutputKey} key
+ * @param {_Table} table
+ * @param {_OutputKey} key
  * @returns {ReturnType<typeof and>}
  */
 export function buildKeyWhere(table, key) {
@@ -71,8 +71,8 @@ export function buildKeyWhere(table, key) {
 /**
  * @template T
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Table} table
- * @param {OutputKey} key
+ * @param {_Table} table
+ * @param {_OutputKey} key
  * @returns {Effect.Effect<T | undefined, SmithersError>}
  */
 export function selectOutputRowEffect(db, table, key) {
@@ -93,8 +93,8 @@ export function selectOutputRowEffect(db, table, key) {
 /**
  * @template T
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Table} table
- * @param {OutputKey} key
+ * @param {_Table} table
+ * @param {_OutputKey} key
  * @returns {Promise<T | undefined>}
  */
 export function selectOutputRow(db, table, key) {
@@ -102,8 +102,8 @@ export function selectOutputRow(db, table, key) {
 }
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Table} table
- * @param {OutputKey} key
+ * @param {_Table} table
+ * @param {_OutputKey} key
  * @param {Record<string, unknown>} payload
  * @returns {Effect.Effect<void, SmithersError>}
  */
@@ -130,8 +130,8 @@ export function upsertOutputRowEffect(db, table, key, payload) {
 }
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Table} table
- * @param {OutputKey} key
+ * @param {_Table} table
+ * @param {_OutputKey} key
  * @param {Record<string, unknown>} payload
  * @returns {Promise<void>}
  */
@@ -139,7 +139,7 @@ export function upsertOutputRow(db, table, key, payload) {
     return Effect.runPromise(upsertOutputRowEffect(db, table, key, payload));
 }
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @param {unknown} payload
  * @returns {{ ok: boolean; data?: unknown; error?: z.ZodError; }}
  */
@@ -150,7 +150,7 @@ export function validateOutput(table, payload) {
     return { ok: false, error: result.error };
 }
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @param {unknown} payload
  * @returns {{ ok: boolean; data?: unknown; error?: z.ZodError; }}
  */
@@ -161,7 +161,7 @@ export function validateExistingOutput(table, payload) {
     return { ok: false, error: result.error };
 }
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @returns {z.ZodObject}
  */
 export function getAgentOutputSchema(table) {
@@ -173,7 +173,7 @@ export function getAgentOutputSchema(table) {
     return z.object(rest);
 }
 /**
- * @param {Table | z.ZodObject} tableOrSchema
+ * @param {_Table | z.ZodObject} tableOrSchema
  * @param {z.ZodObject} [zodSchema]
  * @returns {string}
  */

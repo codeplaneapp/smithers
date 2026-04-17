@@ -1,5 +1,5 @@
-/** @typedef {import("@smithers/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("../adapter/NodeDiffCacheRow.ts").NodeDiffCacheRow} NodeDiffCacheRow */
+/** @typedef {import("@smithers/db/adapter").SmithersDb} _SmithersDb */
+/** @typedef {import("../adapter/NodeDiffCacheRow.ts").NodeDiffCacheRow} _NodeDiffCacheRow */
 /** @typedef {{ bundle: unknown; sizeBytes: number; cacheResult: "hit" | "miss" }} NodeDiffCacheResult */
 
 const NODE_DIFF_MAX_BYTES = 50 * 1024 * 1024;
@@ -29,12 +29,12 @@ export class NodeDiffTooLargeError extends Error {
     }
 }
 export class NodeDiffCache {
-    /** @type {SmithersDb} */
+    /** @type {_SmithersDb} */
     adapter;
     /** @type {{ warn?: (message: string, details?: Record<string, unknown>) => void }} */
     logger;
     /**
-     * @param {SmithersDb} adapter
+     * @param {_SmithersDb} adapter
      * @param {{ warn?: (message: string, details?: Record<string, unknown>) => void }} [logger]
      */
     constructor(adapter, logger = {}) {
@@ -77,7 +77,7 @@ export class NodeDiffCache {
     async getOrCompute(key, compute) {
         const hit = await this.get(key);
         if (hit) return { bundle: hit.bundle, sizeBytes: hit.sizeBytes, cacheResult: "hit" };
-        const adapterWithDb = /** @type {SmithersDb & { db?: object }} */ (this.adapter);
+        const adapterWithDb = /** @type {_SmithersDb & { db?: object }} */ (this.adapter);
         const inflight = getInflightMap(adapterWithDb.db ?? this.adapter);
         const inflightKey = NodeDiffCache.keyString(key);
         const pending = inflight.get(inflightKey);
@@ -87,7 +87,7 @@ export class NodeDiffCache {
             const diffJson = JSON.stringify(bundle);
             const sizeBytes = Buffer.byteLength(diffJson, "utf8");
             if (sizeBytes > NODE_DIFF_MAX_BYTES) throw new NodeDiffTooLargeError(sizeBytes);
-            /** @type {NodeDiffCacheRow} */
+            /** @type {_NodeDiffCacheRow} */
             const row = {
                 runId: key.runId, nodeId: key.nodeId, iteration: key.iteration, baseRef: key.baseRef,
                 diffJson, computedAtMs: Date.now(), sizeBytes,
@@ -108,14 +108,14 @@ export class NodeDiffCache {
     /**
      * @param {string} runId
      * @param {number} targetFrameNo
-     * @returns {ReturnType<SmithersDb["invalidateNodeDiffsAfterFrame"]>}
+     * @returns {ReturnType<_SmithersDb["invalidateNodeDiffsAfterFrame"]>}
      */
     invalidateAfterFrame(runId, targetFrameNo) {
         return this.adapter.invalidateNodeDiffsAfterFrame(runId, targetFrameNo);
     }
     /**
      * @param {string} [runId]
-     * @returns {ReturnType<SmithersDb["countNodeDiffCacheRows"]>}
+     * @returns {ReturnType<_SmithersDb["countNodeDiffCacheRows"]>}
      */
     countRows(runId) {
         return this.adapter.countNodeDiffCacheRows(runId);

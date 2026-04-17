@@ -1,9 +1,9 @@
 import * as zod from 'zod';
 import { z } from 'zod';
 import * as drizzle_orm from 'drizzle-orm';
-import { Table as Table$5, and } from 'drizzle-orm';
+import { Table as Table$1, and } from 'drizzle-orm';
 import * as _smithers_errors_SmithersError from '@smithers/errors/SmithersError';
-import { SmithersError as SmithersError$3 } from '@smithers/errors/SmithersError';
+import { SmithersError as SmithersError$2 } from '@smithers/errors/SmithersError';
 import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
 import { Database } from 'bun:sqlite';
 import * as SqlClient from '@effect/sql/SqlClient';
@@ -12,7 +12,7 @@ import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
 import * as _smithers_driver_OutputSnapshot from '@smithers/driver/OutputSnapshot';
 
 type SchemaRegistryEntry$1 = {
-    table: Table$5;
+    table: Table$1;
     zodSchema: zod.ZodObject;
 };
 
@@ -23,7 +23,7 @@ type SignalQuery$1 = {
     limit?: number;
 };
 
-type OutputKey$2 = {
+type OutputKey$1 = {
     runId: string;
     nodeId: string;
     iteration?: number;
@@ -211,22 +211,22 @@ type SqlMessageStorageEventHistoryQuery$1 = {
  * @param {BunSQLiteDatabase<any> | Database} db
  * @returns {SqlMessageStorage}
  */
-declare function getSqlMessageStorage(db: BunSQLiteDatabase$4<any> | Database): SqlMessageStorage;
+declare function getSqlMessageStorage(db: BunSQLiteDatabase$3<any> | Database): SqlMessageStorage;
 /**
  * @param {BunSQLiteDatabase<any> | Database} db
  * @returns {Effect.Effect<void, never>}
  */
-declare function ensureSqlMessageStorageEffect(db: BunSQLiteDatabase$4<any> | Database): Effect.Effect<void, never>;
+declare function ensureSqlMessageStorageEffect(db: BunSQLiteDatabase$3<any> | Database): Effect.Effect<void, never>;
 /**
  * @param {BunSQLiteDatabase<any> | Database} db
  * @returns {Promise<void>}
  */
-declare function ensureSqlMessageStorage(db: BunSQLiteDatabase$4<any> | Database): Promise<void>;
+declare function ensureSqlMessageStorage(db: BunSQLiteDatabase$3<any> | Database): Promise<void>;
 declare class SqlMessageStorage {
     /**
    * @param {BunSQLiteDatabase<any> | Database} db
    */
-    constructor(db: BunSQLiteDatabase$4<any> | Database);
+    constructor(db: BunSQLiteDatabase$3<any> | Database);
     sqlite: Database;
     runtime: any;
     tableColumnsCache: Map<any, any>;
@@ -354,7 +354,7 @@ declare class SqlMessageStorage {
    */
     getLastSignalSeq(runId: string): Promise<number | undefined>;
 }
-type BunSQLiteDatabase$4 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
+type BunSQLiteDatabase$3 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
 type SqlMessageStorageEventHistoryQuery = SqlMessageStorageEventHistoryQuery$1;
 type SqliteParam = string | number | bigint | boolean | Uint8Array | null | undefined;
 
@@ -386,21 +386,6 @@ type SqliteParam = string | number | bigint | boolean | Uint8Array | null | unde
 /**
  * @typedef {{ cacheKey: string; createdAtMs?: number; nodeId: string; outputTable: string }} CacheRowLike
  */
-/**
- * @typedef {{ runId: string; frameNo: number; createdAtMs: number; xmlJson: string; xmlHash: string; encoding: string; mountedTaskIdsJson: string | null; taskIndexJson: string | null; note: string | null; }} FrameRow
- */
-/**
- * @typedef {{ runId: string; nodeId: string; iteration: number; baseRef: string; diffJson: string; computedAtMs: number; sizeBytes: number; }} NodeDiffCacheRow
- */
-/**
- * @typedef {{ count: number }} CountRow
- */
-/**
- * @typedef {{ ralphId: string; runId: string; done?: boolean }} RalphRow
- */
-/**
- * @typedef {{ cacheKey: string; createdAtMs?: number; nodeId: string; outputTable: string }} CacheRowLike
- */
 declare const DB_ALERT_ID_MAX_LENGTH: 256;
 declare const DB_ALERT_POLICY_NAME_MAX_LENGTH: 256;
 declare const DB_ALERT_MESSAGE_MAX_LENGTH: 4096;
@@ -409,13 +394,13 @@ declare const DB_ALERT_ALLOWED_STATUSES: string[];
 declare const DB_RUN_ID_MAX_LENGTH: 256;
 declare const DB_RUN_WORKFLOW_NAME_MAX_LENGTH: 256;
 declare const DB_RUN_ALLOWED_STATUSES: string[];
-declare class SmithersDb$1 {
+declare class SmithersDb {
     /**
    * @param {BunSQLiteDatabase<Record<string, unknown>>} db
    */
-    constructor(db: BunSQLiteDatabase$3<Record<string, unknown>>);
+    constructor(db: BunSQLiteDatabase$2<Record<string, unknown>>);
     /** @type {BunSQLiteDatabase<Record<string, unknown>>} */
-    db: BunSQLiteDatabase$3<Record<string, unknown>>;
+    db: BunSQLiteDatabase$2<Record<string, unknown>>;
     /** @type {ReturnType<typeof getSqlMessageStorage>} */
     internalStorage: ReturnType<typeof getSqlMessageStorage>;
     /** @type {Map<string, string>} */
@@ -451,7 +436,7 @@ declare class SmithersDb$1 {
    * @param {string} queryString
    * @returns {RunnableEffect<unknown[], SmithersError>}
    */
-    rawQuery(queryString: string): RunnableEffect<unknown[], SmithersError$2>;
+    rawQuery(queryString: string): RunnableEffect<unknown[], SmithersError$1>;
     /**
    * @param {string} currentFiberThread
    * @returns {boolean}
@@ -463,14 +448,14 @@ declare class SmithersDb$1 {
    * @param {() => PromiseLike<A>} operation
    * @returns {RunnableEffect<A, SmithersError>}
    */
-    read<A>(label: string, operation: () => PromiseLike<A>): RunnableEffect<A, SmithersError$2>;
+    read<A>(label: string, operation: () => PromiseLike<A>): RunnableEffect<A, SmithersError$1>;
     /**
    * @template A
    * @param {string} label
    * @param {() => PromiseLike<A>} operation
    * @returns {RunnableEffect<A, SmithersError>}
    */
-    write<A>(label: string, operation: () => PromiseLike<A>): RunnableEffect<A, SmithersError$2>;
+    write<A>(label: string, operation: () => PromiseLike<A>): RunnableEffect<A, SmithersError$1>;
     /**
     * @returns {Effect.Effect<{ run: (sql: string) => unknown; query: (sql: string) => { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => Record<string, unknown> | null | undefined; all: () => Array<Record<string, unknown>> }; exec: (sql: string) => unknown; $client?: unknown }, SmithersError, never>}
     */
@@ -483,92 +468,92 @@ declare class SmithersDb$1 {
         };
         exec: (sql: string) => unknown;
         $client?: unknown;
-    }, SmithersError$2, never>;
+    }, SmithersError$1, never>;
     /**
     * @returns {Effect.Effect<() => void, SmithersError, never>}
     */
-    acquireTransactionTurn(): Effect.Effect<() => void, SmithersError$2, never>;
+    acquireTransactionTurn(): Effect.Effect<() => void, SmithersError$1, never>;
     /**
    * @template A
    * @param {string} writeGroup
    * @param {Effect.Effect<A, SmithersError>} operation
    * @returns {RunnableEffect<A, SmithersError>}
    */
-    withTransactionEffect<A>(writeGroup: string, operation: Effect.Effect<A, SmithersError$2>): RunnableEffect<A, SmithersError$2>;
+    withTransactionEffect<A>(writeGroup: string, operation: Effect.Effect<A, SmithersError$1>): RunnableEffect<A, SmithersError$1>;
     /**
    * @template A
    * @param {string} writeGroup
    * @param {Effect.Effect<A, SmithersError>} operation
    * @returns {Promise<A>}
    */
-    withTransaction<A>(writeGroup: string, operation: Effect.Effect<A, SmithersError$2>): Promise<A>;
+    withTransaction<A>(writeGroup: string, operation: Effect.Effect<A, SmithersError$1>): Promise<A>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertRun(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertRun(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {Record<string, unknown>} patch
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    updateRun(runId: string, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    updateRun(runId: string, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {Record<string, unknown>} patch
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    updateRunEffect(runId: string, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    updateRunEffect(runId: string, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} runtimeOwnerId
    * @param {number} heartbeatAtMs
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    heartbeatRun(runId: string, runtimeOwnerId: string, heartbeatAtMs: number): RunnableEffect<void, SmithersError$2>;
+    heartbeatRun(runId: string, runtimeOwnerId: string, heartbeatAtMs: number): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {number} cancelRequestedAtMs
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    requestRunCancel(runId: string, cancelRequestedAtMs: number): RunnableEffect<void, SmithersError$2>;
+    requestRunCancel(runId: string, cancelRequestedAtMs: number): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {number} hijackRequestedAtMs
    * @param {string | null} [hijackTarget]
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    requestRunHijack(runId: string, hijackRequestedAtMs: number, hijackTarget?: string | null): RunnableEffect<void, SmithersError$2>;
+    requestRunHijack(runId: string, hijackRequestedAtMs: number, hijackTarget?: string | null): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    clearRunHijack(runId: string): RunnableEffect<void, SmithersError$2>;
+    clearRunHijack(runId: string): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
    */
-    getRun(runId: string): RunnableEffect<RunRow | undefined, SmithersError$2>;
+    getRun(runId: string): RunnableEffect<RunRow | undefined, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<RunAncestryRow[], SmithersError>}
    */
-    listRunAncestry(runId: string, limit?: number): RunnableEffect<RunAncestryRow[], SmithersError$2>;
+    listRunAncestry(runId: string, limit?: number): RunnableEffect<RunAncestryRow[], SmithersError$1>;
     /**
    * @param {string} parentRunId
    * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
    */
-    getLatestChildRun(parentRunId: string): RunnableEffect<RunRow | undefined, SmithersError$2>;
+    getLatestChildRun(parentRunId: string): RunnableEffect<RunRow | undefined, SmithersError$1>;
     /**
    * @param {string} [status]
    * @returns {RunnableEffect<RunRow[], SmithersError>}
    */
-    listRuns(limit?: number, status?: string): RunnableEffect<RunRow[], SmithersError$2>;
+    listRuns(limit?: number, status?: string): RunnableEffect<RunRow[], SmithersError$1>;
     /**
    * @param {number} staleBeforeMs
    * @returns {RunnableEffect<StaleRunRecord[], SmithersError>}
    */
-    listStaleRunningRuns(staleBeforeMs: number, limit?: number): RunnableEffect<StaleRunRecord[], SmithersError$2>;
+    listStaleRunningRuns(staleBeforeMs: number, limit?: number): RunnableEffect<StaleRunRecord[], SmithersError$1>;
     /**
    * @param {{ runId: string; expectedStatus?: string; expectedRuntimeOwnerId: string | null; expectedHeartbeatAtMs: number | null; staleBeforeMs: number; claimOwnerId: string; claimHeartbeatAtMs: number; requireStale?: boolean; }} params
    * @returns {RunnableEffect<boolean, SmithersError>}
@@ -582,7 +567,7 @@ declare class SmithersDb$1 {
         claimOwnerId: string;
         claimHeartbeatAtMs: number;
         requireStale?: boolean;
-    }): RunnableEffect<boolean, SmithersError$2>;
+    }): RunnableEffect<boolean, SmithersError$1>;
     /**
    * @param {{ runId: string; claimOwnerId: string; restoreRuntimeOwnerId: string | null; restoreHeartbeatAtMs: number | null; }} params
    * @returns {RunnableEffect<void, SmithersError>}
@@ -592,7 +577,7 @@ declare class SmithersDb$1 {
         claimOwnerId: string;
         restoreRuntimeOwnerId: string | null;
         restoreHeartbeatAtMs: number | null;
-    }): RunnableEffect<void, SmithersError$2>;
+    }): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {{ runId: string; expectedRuntimeOwnerId: string; expectedHeartbeatAtMs: number | null; patch: Record<string, unknown>; }} params
    * @returns {RunnableEffect<boolean, SmithersError>}
@@ -602,68 +587,68 @@ declare class SmithersDb$1 {
         expectedRuntimeOwnerId: string;
         expectedHeartbeatAtMs: number | null;
         patch: Record<string, unknown>;
-    }): RunnableEffect<boolean, SmithersError$2>;
+    }): RunnableEffect<boolean, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertNode(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertNode(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertNodeEffect(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertNodeEffect(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
    * @returns {RunnableEffect<NodeRow | undefined, SmithersError>}
    */
-    getNode(runId: string, nodeId: string, iteration: number): RunnableEffect<NodeRow | undefined, SmithersError$2>;
+    getNode(runId: string, nodeId: string, iteration: number): RunnableEffect<NodeRow | undefined, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
    * @returns {RunnableEffect<NodeRow[], SmithersError>}
    */
-    listNodeIterations(runId: string, nodeId: string): RunnableEffect<NodeRow[], SmithersError$2>;
+    listNodeIterations(runId: string, nodeId: string): RunnableEffect<NodeRow[], SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<NodeRow[], SmithersError>}
    */
-    listNodes(runId: string): RunnableEffect<NodeRow[], SmithersError$2>;
+    listNodes(runId: string): RunnableEffect<NodeRow[], SmithersError$1>;
     /**
    * @param {Table} table
    * @param {OutputKey} key
    * @param {Record<string, unknown>} payload
    * @returns {RunnableEffect<unknown, SmithersError>}
    */
-    upsertOutputRow(table: Table, key: OutputKey$1, payload: Record<string, unknown>): RunnableEffect<unknown, SmithersError$2>;
+    upsertOutputRow(table: Table, key: OutputKey, payload: Record<string, unknown>): RunnableEffect<unknown, SmithersError$1>;
     /**
    * @param {Table} table
    * @param {OutputKey} key
    * @param {Record<string, unknown>} payload
    * @returns {RunnableEffect<unknown, SmithersError>}
    */
-    upsertOutputRowEffect(table: Table, key: OutputKey$1, payload: Record<string, unknown>): RunnableEffect<unknown, SmithersError$2>;
+    upsertOutputRowEffect(table: Table, key: OutputKey, payload: Record<string, unknown>): RunnableEffect<unknown, SmithersError$1>;
     /**
    * @param {string} tableName
    * @param {OutputKey} key
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    deleteOutputRow(tableName: string, key: OutputKey$1): RunnableEffect<void, SmithersError$2>;
+    deleteOutputRow(tableName: string, key: OutputKey): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} tableName
    * @param {OutputKey} key
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    deleteOutputRowEffect(tableName: string, key: OutputKey$1): RunnableEffect<void, SmithersError$2>;
+    deleteOutputRowEffect(tableName: string, key: OutputKey): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} tableName
    * @param {string} runId
    * @param {string} nodeId
    * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
    */
-    getRawNodeOutput(tableName: string, runId: string, nodeId: string): RunnableEffect<Record<string, unknown> | null, SmithersError$2>;
+    getRawNodeOutput(tableName: string, runId: string, nodeId: string): RunnableEffect<Record<string, unknown> | null, SmithersError$1>;
     /**
    * @param {string} tableName
    * @param {string} runId
@@ -671,17 +656,17 @@ declare class SmithersDb$1 {
    * @param {number} iteration
    * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
    */
-    getRawNodeOutputForIteration(tableName: string, runId: string, nodeId: string, iteration: number): RunnableEffect<Record<string, unknown> | null, SmithersError$2>;
+    getRawNodeOutputForIteration(tableName: string, runId: string, nodeId: string, iteration: number): RunnableEffect<Record<string, unknown> | null, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertAttempt(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertAttempt(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertAttemptEffect(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertAttemptEffect(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
@@ -690,7 +675,7 @@ declare class SmithersDb$1 {
    * @param {Record<string, unknown>} patch
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    updateAttempt(runId: string, nodeId: string, iteration: number, attempt: number, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    updateAttempt(runId: string, nodeId: string, iteration: number, attempt: number, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
@@ -699,7 +684,7 @@ declare class SmithersDb$1 {
    * @param {Record<string, unknown>} patch
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    updateAttemptEffect(runId: string, nodeId: string, iteration: number, attempt: number, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    updateAttemptEffect(runId: string, nodeId: string, iteration: number, attempt: number, patch: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
@@ -709,19 +694,19 @@ declare class SmithersDb$1 {
    * @param {string | null} heartbeatDataJson
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    heartbeatAttempt(runId: string, nodeId: string, iteration: number, attempt: number, heartbeatAtMs: number, heartbeatDataJson: string | null): RunnableEffect<void, SmithersError$2>;
+    heartbeatAttempt(runId: string, nodeId: string, iteration: number, attempt: number, heartbeatAtMs: number, heartbeatDataJson: string | null): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
    * @returns {RunnableEffect<AttemptRow[], SmithersError>}
    */
-    listAttempts(runId: string, nodeId: string, iteration: number): RunnableEffect<AttemptRow[], SmithersError$2>;
+    listAttempts(runId: string, nodeId: string, iteration: number): RunnableEffect<AttemptRow[], SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<AttemptRow[], SmithersError>}
    */
-    listAttemptsForRun(runId: string): RunnableEffect<AttemptRow[], SmithersError$2>;
+    listAttemptsForRun(runId: string): RunnableEffect<AttemptRow[], SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
@@ -729,88 +714,88 @@ declare class SmithersDb$1 {
    * @param {number} attempt
    * @returns {RunnableEffect<AttemptRow | undefined, SmithersError>}
    */
-    getAttempt(runId: string, nodeId: string, iteration: number, attempt: number): RunnableEffect<AttemptRow | undefined, SmithersError$2>;
+    getAttempt(runId: string, nodeId: string, iteration: number, attempt: number): RunnableEffect<AttemptRow | undefined, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<AttemptRow[], SmithersError>}
    */
-    listInProgressAttempts(runId: string): RunnableEffect<AttemptRow[], SmithersError$2>;
+    listInProgressAttempts(runId: string): RunnableEffect<AttemptRow[], SmithersError$1>;
     /**
    * @returns {RunnableEffect<AttemptRow[], SmithersError>}
    */
-    listAllInProgressAttempts(): RunnableEffect<AttemptRow[], SmithersError$2>;
+    listAllInProgressAttempts(): RunnableEffect<AttemptRow[], SmithersError$1>;
     /**
    * @param {string} runId
    * @param {number} frameNo
    * @param {number} [limit]
    * @returns {RunnableEffect<FrameRow[], SmithersError>}
    */
-    listFrameChainDesc(runId: string, frameNo: number, limit?: number): RunnableEffect<FrameRow[], SmithersError$2>;
+    listFrameChainDesc(runId: string, frameNo: number, limit?: number): RunnableEffect<FrameRow[], SmithersError$1>;
     /**
    * @param {string} runId
    * @param {number} frameNo
    * @param {Map<number, string>} [localCache]
    * @returns {Effect.Effect<string | undefined, SmithersError>}
    */
-    reconstructFrameXml(runId: string, frameNo: number, localCache?: Map<number, string>): Effect.Effect<string | undefined, SmithersError$2>;
+    reconstructFrameXml(runId: string, frameNo: number, localCache?: Map<number, string>): Effect.Effect<string | undefined, SmithersError$1>;
     /**
    * @param {FrameRow} row
    * @param {Map<number, string>} [localCache]
    * @returns {Effect.Effect<FrameRow, SmithersError>}
    */
-    inflateFrameRow(row: FrameRow, localCache?: Map<number, string>): Effect.Effect<FrameRow, SmithersError$2>;
+    inflateFrameRow(row: FrameRow, localCache?: Map<number, string>): Effect.Effect<FrameRow, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertFrame(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertFrame(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertFrameEffect(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertFrameEffect(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<FrameRow | undefined, SmithersError>}
    */
-    getLastFrame(runId: string): RunnableEffect<FrameRow | undefined, SmithersError$2>;
+    getLastFrame(runId: string): RunnableEffect<FrameRow | undefined, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertOrUpdateApproval(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertOrUpdateApproval(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
    * @returns {RunnableEffect<ApprovalRow | undefined, SmithersError>}
    */
-    getApproval(runId: string, nodeId: string, iteration: number): RunnableEffect<ApprovalRow | undefined, SmithersError$2>;
+    getApproval(runId: string, nodeId: string, iteration: number): RunnableEffect<ApprovalRow | undefined, SmithersError$1>;
     /**
    * @param {HumanRequestRow} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertHumanRequest(row: HumanRequestRow): RunnableEffect<void, SmithersError$2>;
+    insertHumanRequest(row: HumanRequestRow): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} requestId
    * @returns {RunnableEffect<HumanRequestRow | undefined, SmithersError>}
    */
-    getHumanRequest(requestId: string): RunnableEffect<HumanRequestRow | undefined, SmithersError$2>;
+    getHumanRequest(requestId: string): RunnableEffect<HumanRequestRow | undefined, SmithersError$1>;
     /**
    * @param {string} requestId
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    reopenHumanRequest(requestId: string): RunnableEffect<void, SmithersError$2>;
+    reopenHumanRequest(requestId: string): RunnableEffect<void, SmithersError$1>;
     /**
     * @param {number} [nowMs]
     * @returns {RunnableEffect<void, SmithersError>}
     */
-    expireStaleHumanRequests(nowMs?: number): RunnableEffect<void, SmithersError$2>;
+    expireStaleHumanRequests(nowMs?: number): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {number} [nowMs]
    * @returns {RunnableEffect<PendingHumanRequestRow[], SmithersError>}
    */
-    listPendingHumanRequests(nowMs?: number): RunnableEffect<PendingHumanRequestRow[], SmithersError$2>;
+    listPendingHumanRequests(nowMs?: number): RunnableEffect<PendingHumanRequestRow[], SmithersError$1>;
     /**
    * @param {string} requestId
    * @param {string} responseJson
@@ -818,12 +803,12 @@ declare class SmithersDb$1 {
    * @param {string | null} [answeredBy]
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    answerHumanRequest(requestId: string, responseJson: string, answeredAtMs: number, answeredBy?: string | null): RunnableEffect<void, SmithersError$2>;
+    answerHumanRequest(requestId: string, responseJson: string, answeredAtMs: number, answeredBy?: string | null): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} requestId
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    cancelHumanRequest(requestId: string): RunnableEffect<void, SmithersError$2>;
+    cancelHumanRequest(requestId: string): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {AlertRow} row
    * @returns {Promise<AlertRow | undefined>}
@@ -833,12 +818,12 @@ declare class SmithersDb$1 {
    * @param {string} alertId
    * @returns {RunnableEffect<AlertRow | undefined, SmithersError>}
    */
-    getAlert(alertId: string): RunnableEffect<AlertRow | undefined, SmithersError$2>;
+    getAlert(alertId: string): RunnableEffect<AlertRow | undefined, SmithersError$1>;
     /**
    * @param {readonly AlertStatus[]} [statuses]
    * @returns {RunnableEffect<AlertRow[], SmithersError>}
    */
-    listAlerts(limit?: number, statuses?: readonly AlertStatus[]): RunnableEffect<AlertRow[], SmithersError$2>;
+    listAlerts(limit?: number, statuses?: readonly AlertStatus[]): RunnableEffect<AlertRow[], SmithersError$1>;
     /**
    * @param {string} alertId
    * @returns {Promise<AlertRow | undefined>}
@@ -865,51 +850,51 @@ declare class SmithersDb$1 {
         payloadJson: string;
         receivedAtMs: number;
         receivedBy?: string | null;
-    }): RunnableEffect<number, SmithersError$2>;
+    }): RunnableEffect<number, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<number | undefined, SmithersError>}
    */
-    getLastSignalSeq(runId: string): RunnableEffect<number | undefined, SmithersError$2>;
+    getLastSignalSeq(runId: string): RunnableEffect<number | undefined, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {SignalQuery} [query]
    * @returns {RunnableEffect<SignalRow[], SmithersError>}
    */
-    listSignals(runId: string, query?: SignalQuery): RunnableEffect<SignalRow[], SmithersError$2>;
+    listSignals(runId: string, query?: SignalQuery): RunnableEffect<SignalRow[], SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertToolCall(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertToolCall(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    upsertSandbox(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    upsertSandbox(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} sandboxId
    * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
    */
-    getSandbox(runId: string, sandboxId: string): RunnableEffect<Record<string, unknown> | undefined, SmithersError$2>;
+    getSandbox(runId: string, sandboxId: string): RunnableEffect<Record<string, unknown> | undefined, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
-    listSandboxes(runId: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listSandboxes(runId: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
-    listToolCalls(runId: string, nodeId: string, iteration: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listToolCalls(runId: string, nodeId: string, iteration: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertEvent(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertEvent(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {{ runId: string; timestampMs: number; type: string; payloadJson: string; }} row
    * @returns {RunnableEffect<number, SmithersError>}
@@ -919,12 +904,12 @@ declare class SmithersDb$1 {
         timestampMs: number;
         type: string;
         payloadJson: string;
-    }): RunnableEffect<number, SmithersError$2>;
+    }): RunnableEffect<number, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<number | undefined, SmithersError>}
    */
-    getLastEventSeq(runId: string): RunnableEffect<number | undefined, SmithersError$2>;
+    getLastEventSeq(runId: string): RunnableEffect<number | undefined, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {EventHistoryQuery} [query]
@@ -939,71 +924,71 @@ declare class SmithersDb$1 {
    * @param {EventHistoryQuery} [query]
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
-    listEventHistory(runId: string, query?: EventHistoryQuery): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listEventHistory(runId: string, query?: EventHistoryQuery): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {EventHistoryQuery} [query]
    * @returns {RunnableEffect<number, SmithersError>}
    */
-    countEventHistory(runId: string, query?: EventHistoryQuery): RunnableEffect<number, SmithersError$2>;
+    countEventHistory(runId: string, query?: EventHistoryQuery): RunnableEffect<number, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {number} afterSeq
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
-    listEvents(runId: string, afterSeq: number, limit?: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listEvents(runId: string, afterSeq: number, limit?: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} type
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
-    listEventsByType(runId: string, type: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listEventsByType(runId: string, type: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertOrUpdateRalph(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertOrUpdateRalph(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
-    listRalph(runId: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listRalph(runId: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
    */
-    listPendingApprovals(runId: string): RunnableEffect<ApprovalRow[], SmithersError$2>;
+    listPendingApprovals(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
-    listAllPendingApprovals(): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listAllPendingApprovals(): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {string} workflowName
    * @param {string} nodeId
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
-    listApprovalHistoryForNode(workflowName: string, nodeId: string, limit?: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listApprovalHistoryForNode(workflowName: string, nodeId: string, limit?: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} ralphId
    * @returns {RunnableEffect<Record<string, unknown> | undefined, SmithersError>}
    */
-    getRalph(runId: string, ralphId: string): RunnableEffect<Record<string, unknown> | undefined, SmithersError$2>;
+    getRalph(runId: string, ralphId: string): RunnableEffect<Record<string, unknown> | undefined, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertCache(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertCache(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertCacheEffect(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertCacheEffect(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} cacheKey
    * @returns {RunnableEffect<CacheRow | undefined, SmithersError>}
    */
-    getCache(cacheKey: string): RunnableEffect<CacheRow | undefined, SmithersError$2>;
+    getCache(cacheKey: string): RunnableEffect<CacheRow | undefined, SmithersError$1>;
     /**
    * @param {{ runId: string; nodeId: string; iteration: number; baseRef: string; diffJson: string; computedAtMs: number; sizeBytes: number; }} row
    * @returns {RunnableEffect<void, SmithersError>}
@@ -1016,7 +1001,7 @@ declare class SmithersDb$1 {
         diffJson: string;
         computedAtMs: number;
         sizeBytes: number;
-    }): RunnableEffect<void, SmithersError$2>;
+    }): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
@@ -1024,37 +1009,37 @@ declare class SmithersDb$1 {
    * @param {string} baseRef
    * @returns {RunnableEffect<NodeDiffCacheRow | undefined, SmithersError>}
    */
-    getNodeDiffCache(runId: string, nodeId: string, iteration: number, baseRef: string): RunnableEffect<NodeDiffCacheRow | undefined, SmithersError$2>;
+    getNodeDiffCache(runId: string, nodeId: string, iteration: number, baseRef: string): RunnableEffect<NodeDiffCacheRow$1 | undefined, SmithersError$1>;
     /**
    * @param {string} [runId]
    * @returns {RunnableEffect<number, SmithersError>}
    */
-    countNodeDiffCacheRows(runId?: string): RunnableEffect<number, SmithersError$2>;
+    countNodeDiffCacheRows(runId?: string): RunnableEffect<number, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {number} targetFrameNo
    * @returns {RunnableEffect<number, SmithersError>}
    */
-    invalidateNodeDiffsAfterFrame(runId: string, targetFrameNo: number): RunnableEffect<number, SmithersError$2>;
+    invalidateNodeDiffsAfterFrame(runId: string, targetFrameNo: number): RunnableEffect<number, SmithersError$1>;
     /**
    * @param {string} nodeId
    * @param {string} [outputTable]
    * @returns {RunnableEffect<CacheRow[], SmithersError>}
    */
-    listCacheByNode(nodeId: string, outputTable?: string, limit?: number): RunnableEffect<CacheRow[], SmithersError$2>;
+    listCacheByNode(nodeId: string, outputTable?: string, limit?: number): RunnableEffect<CacheRow[], SmithersError$1>;
     /**
    * @param {string} runId
    * @param {number} frameNo
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    deleteFramesAfter(runId: string, frameNo: number): RunnableEffect<void, SmithersError$2>;
+    deleteFramesAfter(runId: string, frameNo: number): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {number} limit
    * @param {number} [afterFrameNo]
    * @returns {RunnableEffect<FrameRow[], SmithersError>}
    */
-    listFrames(runId: string, limit: number, afterFrameNo?: number): RunnableEffect<FrameRow[], SmithersError$2>;
+    listFrames(runId: string, limit: number, afterFrameNo?: number): RunnableEffect<FrameRow[], SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<Array<{ state: string; count: number }>, SmithersError>}
@@ -1062,17 +1047,17 @@ declare class SmithersDb$1 {
     countNodesByState(runId: string): RunnableEffect<Array<{
         state: string;
         count: number;
-    }>, SmithersError$2>;
+    }>, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    upsertCron(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    upsertCron(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
     * @param {boolean} [enabledOnly]
     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
     */
-    listCrons(enabledOnly?: boolean): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listCrons(enabledOnly?: boolean): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {string} cronId
    * @param {number} lastRunAtMs
@@ -1080,78 +1065,78 @@ declare class SmithersDb$1 {
    * @param {string | null} [errorJson]
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    updateCronRunTime(cronId: string, lastRunAtMs: number, nextRunAtMs: number, errorJson?: string | null): RunnableEffect<void, SmithersError$2>;
+    updateCronRunTime(cronId: string, lastRunAtMs: number, nextRunAtMs: number, errorJson?: string | null): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} cronId
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    deleteCron(cronId: string): RunnableEffect<void, SmithersError$2>;
+    deleteCron(cronId: string): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    insertScorerResult(row: Record<string, unknown>): RunnableEffect<void, SmithersError$2>;
+    insertScorerResult(row: Record<string, unknown>): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} [nodeId]
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
-    listScorerResults(runId: string, nodeId?: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listScorerResults(runId: string, nodeId?: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
    */
-    getRunEffect(runId: string): RunnableEffect<RunRow | undefined, SmithersError$2>;
+    getRunEffect(runId: string): RunnableEffect<RunRow | undefined, SmithersError$1>;
     /**
    * @param {string} [status]
    * @returns {RunnableEffect<RunRow[], SmithersError>}
    */
-    listRunsEffect(limit?: number, status?: string): RunnableEffect<RunRow[], SmithersError$2>;
+    listRunsEffect(limit?: number, status?: string): RunnableEffect<RunRow[], SmithersError$1>;
     /**
    * @param {number} staleBeforeMs
    * @returns {RunnableEffect<StaleRunRecord[], SmithersError>}
    */
-    listStaleRunningRunsEffect(staleBeforeMs: number, limit?: number): RunnableEffect<StaleRunRecord[], SmithersError$2>;
+    listStaleRunningRunsEffect(staleBeforeMs: number, limit?: number): RunnableEffect<StaleRunRecord[], SmithersError$1>;
     /**
    * @param {Parameters<SmithersDb["claimRunForResume"]>[0]} params
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
-    claimRunForResumeEffect(params: Parameters<SmithersDb$1["claimRunForResume"]>[0]): RunnableEffect<boolean, SmithersError$2>;
+    claimRunForResumeEffect(params: Parameters<SmithersDb["claimRunForResume"]>[0]): RunnableEffect<boolean, SmithersError$1>;
     /**
    * @param {Parameters<SmithersDb["releaseRunResumeClaim"]>[0]} params
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    releaseRunResumeClaimEffect(params: Parameters<SmithersDb$1["releaseRunResumeClaim"]>[0]): RunnableEffect<void, SmithersError$2>;
+    releaseRunResumeClaimEffect(params: Parameters<SmithersDb["releaseRunResumeClaim"]>[0]): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
    * @returns {RunnableEffect<NodeRow[], SmithersError>}
    */
-    listNodeIterationsEffect(runId: string, nodeId: string): RunnableEffect<NodeRow[], SmithersError$2>;
+    listNodeIterationsEffect(runId: string, nodeId: string): RunnableEffect<NodeRow[], SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<NodeRow[], SmithersError>}
    */
-    listNodesEffect(runId: string): RunnableEffect<NodeRow[], SmithersError$2>;
+    listNodesEffect(runId: string): RunnableEffect<NodeRow[], SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
    * @returns {RunnableEffect<AttemptRow[], SmithersError>}
    */
-    listAttemptsEffect(runId: string, nodeId: string, iteration: number): RunnableEffect<AttemptRow[], SmithersError$2>;
+    listAttemptsEffect(runId: string, nodeId: string, iteration: number): RunnableEffect<AttemptRow[], SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<AttemptRow[], SmithersError>}
    */
-    listAttemptsForRunEffect(runId: string): RunnableEffect<AttemptRow[], SmithersError$2>;
+    listAttemptsForRunEffect(runId: string): RunnableEffect<AttemptRow[], SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} nodeId
    * @param {number} iteration
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
-    listToolCallsEffect(runId: string, nodeId: string, iteration: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listToolCallsEffect(runId: string, nodeId: string, iteration: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {string} tableName
    * @param {string} runId
@@ -1159,56 +1144,56 @@ declare class SmithersDb$1 {
    * @param {number} iteration
    * @returns {RunnableEffect<Record<string, unknown> | null, SmithersError>}
    */
-    getRawNodeOutputForIterationEffect(tableName: string, runId: string, nodeId: string, iteration: number): RunnableEffect<Record<string, unknown> | null, SmithersError$2>;
+    getRawNodeOutputForIterationEffect(tableName: string, runId: string, nodeId: string, iteration: number): RunnableEffect<Record<string, unknown> | null, SmithersError$1>;
     /**
    * @param {Parameters<SmithersDb["insertEventWithNextSeq"]>[0]} row
    * @returns {RunnableEffect<number, SmithersError>}
    */
-    insertEventWithNextSeqEffect(row: Parameters<SmithersDb$1["insertEventWithNextSeq"]>[0]): RunnableEffect<number, SmithersError$2>;
+    insertEventWithNextSeqEffect(row: Parameters<SmithersDb["insertEventWithNextSeq"]>[0]): RunnableEffect<number, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<number | undefined, SmithersError>}
    */
-    getLastEventSeqEffect(runId: string): RunnableEffect<number | undefined, SmithersError$2>;
+    getLastEventSeqEffect(runId: string): RunnableEffect<number | undefined, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {EventHistoryQuery} [query]
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
-    listEventHistoryEffect(runId: string, query?: EventHistoryQuery): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listEventHistoryEffect(runId: string, query?: EventHistoryQuery): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {EventHistoryQuery} [query]
    * @returns {RunnableEffect<number, SmithersError>}
    */
-    countEventHistoryEffect(runId: string, query?: EventHistoryQuery): RunnableEffect<number, SmithersError$2>;
+    countEventHistoryEffect(runId: string, query?: EventHistoryQuery): RunnableEffect<number, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} type
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
-    listEventsByTypeEffect(runId: string, type: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listEventsByTypeEffect(runId: string, type: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
    */
-    listPendingApprovalsEffect(runId: string): RunnableEffect<ApprovalRow[], SmithersError$2>;
+    listPendingApprovalsEffect(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<FrameRow | undefined, SmithersError>}
    */
-    getLastFrameEffect(runId: string): RunnableEffect<FrameRow | undefined, SmithersError$2>;
+    getLastFrameEffect(runId: string): RunnableEffect<FrameRow | undefined, SmithersError$1>;
     /**
    * @param {string} nodeId
    * @param {string} [outputTable]
    * @returns {RunnableEffect<CacheRow[], SmithersError>}
    */
-    listCacheByNodeEffect(nodeId: string, outputTable?: string, limit?: number): RunnableEffect<CacheRow[], SmithersError$2>;
+    listCacheByNodeEffect(nodeId: string, outputTable?: string, limit?: number): RunnableEffect<CacheRow[], SmithersError$1>;
     /**
     * @param {boolean} [enabledOnly]
     * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
     */
-    listCronsEffect(enabledOnly?: boolean): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listCronsEffect(enabledOnly?: boolean): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
     /**
    * @param {string} cronId
    * @param {number} lastRunAtMs
@@ -1216,13 +1201,13 @@ declare class SmithersDb$1 {
    * @param {string | null} [errorJson]
    * @returns {RunnableEffect<void, SmithersError>}
    */
-    updateCronRunTimeEffect(cronId: string, lastRunAtMs: number, nextRunAtMs: number, errorJson?: string | null): RunnableEffect<void, SmithersError$2>;
+    updateCronRunTimeEffect(cronId: string, lastRunAtMs: number, nextRunAtMs: number, errorJson?: string | null): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} [nodeId]
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
-    listScorerResultsEffect(runId: string, nodeId?: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$2>;
+    listScorerResultsEffect(runId: string, nodeId?: string): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
 }
 type AlertSeverity = AlertSeverity$1;
 type ApprovalRow = ApprovalRow$1;
@@ -1236,13 +1221,13 @@ type StaleRunRecord = StaleRunRecord$1;
 type AlertRow = AlertRow$1;
 type AlertStatus = AlertStatus$1;
 type AttemptRow = AttemptRow$1;
-type BunSQLiteDatabase$3 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
+type BunSQLiteDatabase$2 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
 type EventHistoryQuery = EventHistoryQuery$1;
 type HumanRequestRow = HumanRequestRow$1;
-type OutputKey$1 = OutputKey$2;
+type OutputKey = OutputKey$1;
 type RunnableEffect<A, E> = Effect.Effect<A, E> & PromiseLike<A>;
 type SignalQuery = SignalQuery$1;
-type SmithersError$2 = _smithers_errors_SmithersError.SmithersError;
+type SmithersError$1 = _smithers_errors_SmithersError.SmithersError;
 type FrameRow = {
     runId: string;
     frameNo: number;
@@ -1254,7 +1239,7 @@ type FrameRow = {
     taskIndexJson: string | null;
     note: string | null;
 };
-type NodeDiffCacheRow = {
+type NodeDiffCacheRow$1 = {
     runId: string;
     nodeId: string;
     iteration: number;
@@ -1278,19 +1263,19 @@ type CacheRowLike = {
     outputTable: string;
 };
 
-/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
-/** @typedef {import("@smithers/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} _BunSQLiteDatabase */
+/** @typedef {import("@smithers/errors/SmithersError").SmithersError} _SmithersError */
 /**
- * @param {BunSQLiteDatabase<any>} db
- * @returns {Effect.Effect<void, SmithersError>}
+ * @param {_BunSQLiteDatabase<Record<string, unknown>>} db
+ * @returns {Effect.Effect<void, _SmithersError>}
  */
-declare function ensureSmithersTablesEffect(db: BunSQLiteDatabase$2<any>): Effect.Effect<void, SmithersError$1>;
+declare function ensureSmithersTablesEffect(db: _BunSQLiteDatabase<Record<string, unknown>>): Effect.Effect<void, _SmithersError>;
 /**
- * @param {BunSQLiteDatabase<any>} db
+ * @param {_BunSQLiteDatabase<Record<string, unknown>>} db
  */
-declare function ensureSmithersTables(db: BunSQLiteDatabase$2<any>): void;
-type BunSQLiteDatabase$2 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
-type SmithersError$1 = _smithers_errors_SmithersError.SmithersError;
+declare function ensureSmithersTables(db: _BunSQLiteDatabase<Record<string, unknown>>): void;
+type _BunSQLiteDatabase = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
+type _SmithersError = _smithers_errors_SmithersError.SmithersError;
 
 type JsonBounds$2 = {
     maxArrayLength?: number;
@@ -1433,18 +1418,18 @@ type FrameEncoding = FrameEncoding$1;
 type JsonPath = JsonPath$1;
 type JsonPathSegment = JsonPathSegment$1;
 
-/** @typedef {import("drizzle-orm").Table} Table */
+/** @typedef {import("drizzle-orm").Table} _Table */
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @param {unknown} payload
  * @returns {{ ok: boolean; data?: any; error?: z.ZodError; }}
  */
-declare function validateInput(table: Table$4, payload: unknown): {
+declare function validateInput(table: _Table$3, payload: unknown): {
     ok: boolean;
     data?: any;
     error?: z.ZodError;
 };
-type Table$4 = drizzle_orm.Table;
+type _Table$3 = drizzle_orm.Table;
 
 declare const smithersRuns: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     name: "_smithers_runs";
@@ -4897,145 +4882,155 @@ declare const smithersCron: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
 }>;
 
 /** @typedef {import("drizzle-orm").AnyColumn} AnyColumn */
-/** @typedef {import("./output/OutputKey.ts").OutputKey} OutputKey */
-/** @typedef {import("drizzle-orm").Table} Table */
+/** @typedef {import("./output/OutputKey.ts").OutputKey} _OutputKey */
+/** @typedef {import("drizzle-orm").Table} _Table */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @param {string} runId
  * @param {string} nodeId
  * @param {number} iteration
  * @param {unknown} payload
  * @returns {Record<string, unknown>}
  */
-declare function buildOutputRow(table: Table$3, runId: string, nodeId: string, iteration: number, payload: unknown): Record<string, unknown>;
+declare function buildOutputRow(table: _Table$2, runId: string, nodeId: string, iteration: number, payload: unknown): Record<string, unknown>;
 /**
  * @param {unknown} payload
  * @returns {unknown}
  */
 declare function stripAutoColumns(payload: unknown): unknown;
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @returns {{ runId: AnyColumn; nodeId: AnyColumn; iteration?: AnyColumn; }}
  */
-declare function getKeyColumns(table: Table$3): {
+declare function getKeyColumns(table: _Table$2): {
     runId: AnyColumn;
     nodeId: AnyColumn;
     iteration?: AnyColumn;
 };
 /**
- * @param {Table} table
- * @param {OutputKey} key
+ * @param {_Table} table
+ * @param {_OutputKey} key
  * @returns {ReturnType<typeof and>}
  */
-declare function buildKeyWhere(table: Table$3, key: OutputKey): ReturnType<typeof and>;
+declare function buildKeyWhere(table: _Table$2, key: _OutputKey): ReturnType<typeof and>;
 /**
  * @template T
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Table} table
- * @param {OutputKey} key
+ * @param {_Table} table
+ * @param {_OutputKey} key
  * @returns {Effect.Effect<T | undefined, SmithersError>}
  */
-declare function selectOutputRowEffect<T>(db: BunSQLiteDatabase$1<Record<string, unknown>>, table: Table$3, key: OutputKey): Effect.Effect<T | undefined, SmithersError$3>;
+declare function selectOutputRowEffect<T>(db: BunSQLiteDatabase$1<Record<string, unknown>>, table: _Table$2, key: _OutputKey): Effect.Effect<T | undefined, SmithersError$2>;
 /**
  * @template T
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Table} table
- * @param {OutputKey} key
+ * @param {_Table} table
+ * @param {_OutputKey} key
  * @returns {Promise<T | undefined>}
  */
-declare function selectOutputRow<T>(db: BunSQLiteDatabase$1<Record<string, unknown>>, table: Table$3, key: OutputKey): Promise<T | undefined>;
+declare function selectOutputRow<T>(db: BunSQLiteDatabase$1<Record<string, unknown>>, table: _Table$2, key: _OutputKey): Promise<T | undefined>;
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Table} table
- * @param {OutputKey} key
+ * @param {_Table} table
+ * @param {_OutputKey} key
  * @param {Record<string, unknown>} payload
  * @returns {Effect.Effect<void, SmithersError>}
  */
-declare function upsertOutputRowEffect(db: BunSQLiteDatabase$1<Record<string, unknown>>, table: Table$3, key: OutputKey, payload: Record<string, unknown>): Effect.Effect<void, SmithersError$3>;
+declare function upsertOutputRowEffect(db: BunSQLiteDatabase$1<Record<string, unknown>>, table: _Table$2, key: _OutputKey, payload: Record<string, unknown>): Effect.Effect<void, SmithersError$2>;
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Table} table
- * @param {OutputKey} key
+ * @param {_Table} table
+ * @param {_OutputKey} key
  * @param {Record<string, unknown>} payload
  * @returns {Promise<void>}
  */
-declare function upsertOutputRow(db: BunSQLiteDatabase$1<Record<string, unknown>>, table: Table$3, key: OutputKey, payload: Record<string, unknown>): Promise<void>;
+declare function upsertOutputRow(db: BunSQLiteDatabase$1<Record<string, unknown>>, table: _Table$2, key: _OutputKey, payload: Record<string, unknown>): Promise<void>;
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @param {unknown} payload
  * @returns {{ ok: boolean; data?: unknown; error?: z.ZodError; }}
  */
-declare function validateOutput(table: Table$3, payload: unknown): {
+declare function validateOutput(table: _Table$2, payload: unknown): {
     ok: boolean;
     data?: unknown;
     error?: z.ZodError;
 };
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @param {unknown} payload
  * @returns {{ ok: boolean; data?: unknown; error?: z.ZodError; }}
  */
-declare function validateExistingOutput(table: Table$3, payload: unknown): {
+declare function validateExistingOutput(table: _Table$2, payload: unknown): {
     ok: boolean;
     data?: unknown;
     error?: z.ZodError;
 };
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @returns {z.ZodObject}
  */
-declare function getAgentOutputSchema(table: Table$3): z.ZodObject;
+declare function getAgentOutputSchema(table: _Table$2): z.ZodObject;
 /**
- * @param {Table | z.ZodObject} tableOrSchema
+ * @param {_Table | z.ZodObject} tableOrSchema
  * @param {z.ZodObject} [zodSchema]
  * @returns {string}
  */
-declare function describeSchemaShape(tableOrSchema: Table$3 | z.ZodObject, zodSchema?: z.ZodObject): string;
+declare function describeSchemaShape(tableOrSchema: _Table$2 | z.ZodObject, zodSchema?: z.ZodObject): string;
 type AnyColumn = drizzle_orm.AnyColumn;
-type OutputKey = OutputKey$2;
-type Table$3 = drizzle_orm.Table;
+type _OutputKey = OutputKey$1;
+type _Table$2 = drizzle_orm.Table;
 type BunSQLiteDatabase$1 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
 
-/** @typedef {import("drizzle-orm").Table} Table */
+/** @typedef {import("drizzle-orm").Table} _Table */
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @returns {string}
  */
-declare function schemaSignature(table: Table$2): string;
-type Table$2 = drizzle_orm.Table;
+declare function schemaSignature(table: _Table$1): string;
+type _Table$1 = drizzle_orm.Table;
 
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Table} inputTable
+ * @param {_Table} inputTable
  * @param {string} runId
  * @returns {Effect.Effect<Record<string, unknown> | undefined, SmithersError>}
  */
-declare function loadInputEffect(db: BunSQLiteDatabase<Record<string, unknown>>, inputTable: Table$1, runId: string): Effect.Effect<Record<string, unknown> | undefined, SmithersError$3>;
+declare function loadInputEffect(db: BunSQLiteDatabase<Record<string, unknown>>, inputTable: _Table, runId: string): Effect.Effect<Record<string, unknown> | undefined, SmithersError$2>;
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Table} inputTable
+ * @param {_Table} inputTable
  * @param {string} runId
  * @returns {Promise<Record<string, unknown> | undefined>}
  */
-declare function loadInput(db: BunSQLiteDatabase<Record<string, unknown>>, inputTable: Table$1, runId: string): Promise<Record<string, unknown> | undefined>;
+declare function loadInput(db: BunSQLiteDatabase<Record<string, unknown>>, inputTable: _Table, runId: string): Promise<Record<string, unknown> | undefined>;
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Record<string, Table | unknown>} schema
+ * @param {Record<string, _Table | unknown>} schema
  * @param {string} runId
  * @returns {Effect.Effect<OutputSnapshot, SmithersError>}
  */
-declare function loadOutputsEffect(db: BunSQLiteDatabase<Record<string, unknown>>, schema: Record<string, Table$1 | unknown>, runId: string): Effect.Effect<OutputSnapshot, SmithersError$3>;
+declare function loadOutputsEffect(db: BunSQLiteDatabase<Record<string, unknown>>, schema: Record<string, _Table | unknown>, runId: string): Effect.Effect<OutputSnapshot, SmithersError$2>;
 /**
  * @param {BunSQLiteDatabase<Record<string, unknown>>} db
- * @param {Record<string, Table | unknown>} schema
+ * @param {Record<string, _Table | unknown>} schema
  * @param {string} runId
  * @returns {Promise<OutputSnapshot>}
  */
-declare function loadOutputs(db: BunSQLiteDatabase<Record<string, unknown>>, schema: Record<string, Table$1 | unknown>, runId: string): Promise<OutputSnapshot>;
+declare function loadOutputs(db: BunSQLiteDatabase<Record<string, unknown>>, schema: Record<string, _Table | unknown>, runId: string): Promise<OutputSnapshot>;
 type OutputSnapshot = _smithers_driver_OutputSnapshot.OutputSnapshot;
 type BunSQLiteDatabase = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
-type Table$1 = drizzle_orm.Table;
+type _Table = drizzle_orm.Table;
+
+type NodeDiffCacheRow = {
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    baseRef: string;
+    diffJson: string;
+    computedAtMs: number;
+    sizeBytes: number;
+};
 
 declare class NodeDiffTooLargeError extends Error {
     /** @param {number} sizeBytes */
@@ -5056,14 +5051,14 @@ declare class NodeDiffCache {
         baseRef: string;
     }): string;
     /**
-     * @param {SmithersDb} adapter
+     * @param {_SmithersDb} adapter
      * @param {{ warn?: (message: string, details?: Record<string, unknown>) => void }} [logger]
      */
-    constructor(adapter: SmithersDb, logger?: {
+    constructor(adapter: _SmithersDb, logger?: {
         warn?: (message: string, details?: Record<string, unknown>) => void;
     });
-    /** @type {SmithersDb} */
-    adapter: SmithersDb;
+    /** @type {_SmithersDb} */
+    adapter: _SmithersDb;
     /** @type {{ warn?: (message: string, details?: Record<string, unknown>) => void }} */
     logger: {
         warn?: (message: string, details?: Record<string, unknown>) => void;
@@ -5095,23 +5090,24 @@ declare class NodeDiffCache {
     /**
      * @param {string} runId
      * @param {number} targetFrameNo
-     * @returns {ReturnType<SmithersDb["invalidateNodeDiffsAfterFrame"]>}
+     * @returns {ReturnType<_SmithersDb["invalidateNodeDiffsAfterFrame"]>}
      */
-    invalidateAfterFrame(runId: string, targetFrameNo: number): ReturnType<SmithersDb["invalidateNodeDiffsAfterFrame"]>;
+    invalidateAfterFrame(runId: string, targetFrameNo: number): ReturnType<_SmithersDb["invalidateNodeDiffsAfterFrame"]>;
     /**
      * @param {string} [runId]
-     * @returns {ReturnType<SmithersDb["countNodeDiffCacheRows"]>}
+     * @returns {ReturnType<_SmithersDb["countNodeDiffCacheRows"]>}
      */
-    countRows(runId?: string): ReturnType<SmithersDb["countNodeDiffCacheRows"]>;
+    countRows(runId?: string): ReturnType<_SmithersDb["countNodeDiffCacheRows"]>;
 }
-type SmithersDb = SmithersDb$1;
+type _SmithersDb = SmithersDb;
+type _NodeDiffCacheRow = NodeDiffCacheRow;
 type NodeDiffCacheResult = {
     bundle: unknown;
     sizeBytes: number;
     cacheResult: "hit" | "miss";
 };
-/** @typedef {import("@smithers/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("../adapter/NodeDiffCacheRow.ts").NodeDiffCacheRow} NodeDiffCacheRow */
+/** @typedef {import("@smithers/db/adapter").SmithersDb} _SmithersDb */
+/** @typedef {import("../adapter/NodeDiffCacheRow.ts").NodeDiffCacheRow} _NodeDiffCacheRow */
 /** @typedef {{ bundle: unknown; sizeBytes: number; cacheResult: "hit" | "miss" }} NodeDiffCacheResult */
 declare const NODE_DIFF_MAX_BYTES: number;
 
@@ -5204,4 +5200,4 @@ declare function camelToSnake(str: any): any;
 
 type SchemaRegistryEntry = SchemaRegistryEntry$1;
 
-export { type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type EventHistoryQuery, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, NodeDiffTooLargeError, type NodeRow, type OutputSnapshot, type PendingHumanRequestRow, type RalphRow, type RunAncestryRow, type RunRow, type RunnableEffect, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteWriteRetryOptions, type StaleRunRecord, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, buildKeyWhere, buildOutputRow, camelToSnake, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getAgentOutputSchema, getKeyColumns, getSqlMessageStorage, isRetryableSqliteWriteError, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, normalizeFrameEncoding, parseFrameDelta, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersEvents, smithersFrames, smithersHumanRequests, smithersNodeDiffs, smithersNodes, smithersRalph, smithersRuns, smithersSandboxes, smithersSignals, smithersTimeTravelAudit, smithersToolCalls, smithersVectors, stripAutoColumns, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodToCreateTableSQL, zodToTable };
+export { type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type EventHistoryQuery, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, type OutputKey, type OutputSnapshot, type PendingHumanRequestRow, type RalphRow, type RunAncestryRow, type RunRow, type RunnableEffect, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteWriteRetryOptions, type StaleRunRecord, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, buildKeyWhere, buildOutputRow, camelToSnake, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getAgentOutputSchema, getKeyColumns, getSqlMessageStorage, isRetryableSqliteWriteError, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, normalizeFrameEncoding, parseFrameDelta, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersEvents, smithersFrames, smithersHumanRequests, smithersNodeDiffs, smithersNodes, smithersRalph, smithersRuns, smithersSandboxes, smithersSignals, smithersTimeTravelAudit, smithersToolCalls, smithersVectors, stripAutoColumns, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodToCreateTableSQL, zodToTable };

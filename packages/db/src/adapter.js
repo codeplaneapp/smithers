@@ -49,22 +49,6 @@ import { camelToSnake } from "./utils/camelToSnake.js";
  * @typedef {{ cacheKey: string; createdAtMs?: number; nodeId: string; outputTable: string }} CacheRowLike
  */
 
-/**
- * @typedef {{ runId: string; frameNo: number; createdAtMs: number; xmlJson: string; xmlHash: string; encoding: string; mountedTaskIdsJson: string | null; taskIndexJson: string | null; note: string | null; }} FrameRow
- */
-/**
- * @typedef {{ runId: string; nodeId: string; iteration: number; baseRef: string; diffJson: string; computedAtMs: number; sizeBytes: number; }} NodeDiffCacheRow
- */
-/**
- * @typedef {{ count: number }} CountRow
- */
-/**
- * @typedef {{ ralphId: string; runId: string; done?: boolean }} RalphRow
- */
-/**
- * @typedef {{ cacheKey: string; createdAtMs?: number; nodeId: string; outputTable: string }} CacheRowLike
- */
-
 
 export const DB_ALERT_ID_MAX_LENGTH = 256;
 export const DB_ALERT_POLICY_NAME_MAX_LENGTH = 256;

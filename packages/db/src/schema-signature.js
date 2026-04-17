@@ -1,10 +1,10 @@
 import { getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { createHash } from "node:crypto";
-/** @typedef {import("drizzle-orm").Table} Table */
+/** @typedef {import("drizzle-orm").Table} _Table */
 
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @returns {string}
  */
 export function schemaSignature(table) {

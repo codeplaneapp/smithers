@@ -1,17 +1,17 @@
 import { Effect } from "effect";
 import { ensureSqlMessageStorageEffect } from "./sql-message-storage.js";
-/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
-/** @typedef {import("@smithers/errors/SmithersError").SmithersError} SmithersError */
+/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} _BunSQLiteDatabase */
+/** @typedef {import("@smithers/errors/SmithersError").SmithersError} _SmithersError */
 
 /**
- * @param {BunSQLiteDatabase<any>} db
- * @returns {Effect.Effect<void, SmithersError>}
+ * @param {_BunSQLiteDatabase<Record<string, unknown>>} db
+ * @returns {Effect.Effect<void, _SmithersError>}
  */
 export function ensureSmithersTablesEffect(db) {
     return ensureSqlMessageStorageEffect(db).pipe(Effect.withLogSpan("db:ensure-smithers-tables"));
 }
 /**
- * @param {BunSQLiteDatabase<any>} db
+ * @param {_BunSQLiteDatabase<Record<string, unknown>>} db
  */
 export function ensureSmithersTables(db) {
     Effect.runSync(ensureSmithersTablesEffect(db));

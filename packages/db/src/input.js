@@ -1,9 +1,9 @@
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-/** @typedef {import("drizzle-orm").Table} Table */
+/** @typedef {import("drizzle-orm").Table} _Table */
 
 /**
- * @param {Table} table
+ * @param {_Table} table
  * @param {unknown} payload
  * @returns {{ ok: boolean; data?: any; error?: z.ZodError; }}
  */
