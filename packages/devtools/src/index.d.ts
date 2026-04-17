@@ -86,6 +86,95 @@ type TaskExecutionState$3 = {
     }>;
 };
 
+/**
+ * Discriminated union of Smithers engine events that {@link DevToolsRunStore}
+ * understands when reducing engine state. Any other `type` value flows through
+ * the open-ended tail so future event kinds can be added without changes to
+ * consumers.
+ */
+type DevToolsEngineEvent$2 = RunStartedEvent | RunFinishedEvent | RunFailedEvent | RunCancelledEvent | FrameCommittedEvent | NodePendingEvent | NodeStartedEvent | NodeFinishedEvent | NodeFailedEvent | NodeCancelledEvent | NodeSkippedEvent | NodeRetryingEvent | NodeWaitingApprovalEvent | NodeWaitingEventEvent | NodeWaitingTimerEvent | ToolCallStartedEvent | ToolCallFinishedEvent | UnknownEngineEvent;
+type RunEventBase = {
+    runId: string;
+    timestampMs: number;
+};
+type NodeEventBase = RunEventBase & {
+    nodeId: string;
+    iteration: number;
+};
+type RunStartedEvent = RunEventBase & {
+    type: "RunStarted";
+};
+type RunFinishedEvent = RunEventBase & {
+    type: "RunFinished";
+};
+type RunFailedEvent = RunEventBase & {
+    type: "RunFailed";
+    error?: unknown;
+};
+type RunCancelledEvent = RunEventBase & {
+    type: "RunCancelled";
+};
+type FrameCommittedEvent = RunEventBase & {
+    type: "FrameCommitted";
+    frameNo: number;
+};
+type NodePendingEvent = NodeEventBase & {
+    type: "NodePending";
+};
+type NodeStartedEvent = NodeEventBase & {
+    type: "NodeStarted";
+    attempt: number;
+};
+type NodeFinishedEvent = NodeEventBase & {
+    type: "NodeFinished";
+    attempt: number;
+};
+type NodeFailedEvent = NodeEventBase & {
+    type: "NodeFailed";
+    attempt: number;
+    error?: unknown;
+};
+type NodeCancelledEvent = NodeEventBase & {
+    type: "NodeCancelled";
+};
+type NodeSkippedEvent = NodeEventBase & {
+    type: "NodeSkipped";
+};
+type NodeRetryingEvent = NodeEventBase & {
+    type: "NodeRetrying";
+    attempt: number;
+};
+type NodeWaitingApprovalEvent = NodeEventBase & {
+    type: "NodeWaitingApproval";
+};
+type NodeWaitingEventEvent = NodeEventBase & {
+    type: "NodeWaitingEvent";
+};
+type NodeWaitingTimerEvent = NodeEventBase & {
+    type: "NodeWaitingTimer";
+};
+type ToolCallStartedEvent = NodeEventBase & {
+    type: "ToolCallStarted";
+    toolName: string;
+    seq: number;
+};
+type ToolCallFinishedEvent = NodeEventBase & {
+    type: "ToolCallFinished";
+    toolName: string;
+    seq: number;
+    status?: string;
+};
+/**
+ * Open tail: any future engine event with the minimal shape we require
+ * (`type` + `runId` + `timestampMs`). The store ignores unknown `type`s but
+ * still records them in `run.events`.
+ */
+type UnknownEngineEvent = {
+    type: string;
+    runId: string;
+    timestampMs: number;
+} & Record<string, unknown>;
+
 type RunState = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "recovering" | "stale" | "orphaned" | "failed" | "cancelled" | "succeeded" | "unknown";
 type ReasonBlocked = {
     kind: "approval";
@@ -145,7 +234,7 @@ type SmithersDevToolsOptions$2 = {
     /** Called on every renderer commit that touches the Smithers tree */
     onCommit?: DevToolsEventHandler$1;
     /** Called on every SmithersEvent from an attached EventBus */
-    onEngineEvent?: (event: any) => void;
+    onEngineEvent?: (event: DevToolsEngineEvent$2) => void;
     /** Enable verbose console logging */
     verbose?: boolean;
 };
@@ -168,8 +257,8 @@ type RunExecutionState$3 = {
 type DevToolsRunStoreOptions$2 = Pick<SmithersDevToolsOptions$2, "onEngineEvent" | "verbose">;
 
 type DevToolsEventBus$3 = {
-    on: (event: "event", handler: (e: any) => void) => void;
-    removeListener: (event: "event", handler: (e: any) => void) => void;
+    on: (event: "event", handler: (e: DevToolsEngineEvent$2) => void) => void;
+    removeListener: (event: "event", handler: (e: DevToolsEngineEvent$2) => void) => void;
 };
 
 /** @typedef {import("./DevToolsNode.ts").DevToolsNode} DevToolsNode */
@@ -225,6 +314,7 @@ type DevToolsNode$3 = DevToolsNode$7;
 declare function collectTasks(node: DevToolsNode$2, out?: DevToolsNode$2[]): DevToolsNode$2[];
 type DevToolsNode$2 = DevToolsNode$7;
 
+/** @typedef {import("./DevToolsEngineEvent.ts").DevToolsEngineEvent} DevToolsEngineEvent */
 /** @typedef {import("./DevToolsEventBus.ts").DevToolsEventBus} DevToolsEventBus */
 /** @typedef {import("./DevToolsRunStoreOptions.ts").DevToolsRunStoreOptions} DevToolsRunStoreOptions */
 /** @typedef {import("./RunExecutionState.ts").RunExecutionState} RunExecutionState */
@@ -238,10 +328,10 @@ declare class DevToolsRunStore {
     options: DevToolsRunStoreOptions$1;
     /** @type {Map<string, RunExecutionState>} */
     _runs: Map<string, RunExecutionState$2>;
-    /** @type {Array<{ bus: DevToolsEventBus; handler: (event: any) => void }>} */
+    /** @type {Array<{ bus: DevToolsEventBus; handler: (event: DevToolsEngineEvent) => void }>} */
     _eventBusListeners: Array<{
         bus: DevToolsEventBus$2;
-        handler: (event: any) => void;
+        handler: (event: DevToolsEngineEvent$1) => void;
     }>;
     /**
      * Attach to a Smithers EventBus-like source.
@@ -249,7 +339,10 @@ declare class DevToolsRunStore {
      * @returns {this}
      */
     attachEventBus(bus: DevToolsEventBus$2): this;
-    /** Detach all EventBus listeners registered by this store. */
+    /**
+     * Detach all EventBus listeners registered by this store.
+     * @returns {void}
+     */
     detachEventBuses(): void;
     /**
      * Get execution state for a specific run.
@@ -271,9 +364,10 @@ declare class DevToolsRunStore {
      */
     getTaskState(runId: string, nodeId: string, iteration?: number): TaskExecutionState$2 | undefined;
     /**
-     * @param {any} event
+     * @param {DevToolsEngineEvent} event
+     * @returns {void}
      */
-    processEngineEvent(event: any): void;
+    processEngineEvent(event: DevToolsEngineEvent$1): void;
     /**
      * @param {string} runId
      * @returns {RunExecutionState}
@@ -287,11 +381,13 @@ declare class DevToolsRunStore {
      */
     ensureTask(run: RunExecutionState$2, nodeId: string, iteration: number): TaskExecutionState$2;
 }
+type DevToolsEngineEvent$1 = DevToolsEngineEvent$2;
 type DevToolsEventBus$2 = DevToolsEventBus$3;
 type DevToolsRunStoreOptions$1 = DevToolsRunStoreOptions$2;
 type RunExecutionState$2 = RunExecutionState$3;
 type TaskExecutionState$2 = TaskExecutionState$3;
 
+/** @typedef {import("./DevToolsEngineEvent.ts").DevToolsEngineEvent} DevToolsEngineEvent */
 /** @typedef {import("./DevToolsEventBus.ts").DevToolsEventBus} DevToolsEventBus */
 /** @typedef {import("./DevToolsNode.ts").DevToolsNode} DevToolsNode */
 /** @typedef {import("./DevToolsSnapshot.ts").DevToolsSnapshot} DevToolsSnapshot */
@@ -334,11 +430,13 @@ declare class SmithersDevToolsCore {
      * @returns {this}
      */
     attachEventBus(bus: DevToolsEventBus$1): this;
+    /** @returns {void} */
     detachEventBuses(): void;
     /**
-     * @param {any} event
+     * @param {DevToolsEngineEvent} event
+     * @returns {void}
      */
-    processEngineEvent(event: any): void;
+    processEngineEvent(event: DevToolsEngineEvent): void;
     /**
      * @param {string} runId
      * @returns {RunExecutionState | undefined}
@@ -382,6 +480,7 @@ declare class SmithersDevToolsCore {
      */
     listTasks(): DevToolsNode$1[];
 }
+type DevToolsEngineEvent = DevToolsEngineEvent$2;
 type DevToolsEventBus$1 = DevToolsEventBus$3;
 type DevToolsNode$1 = DevToolsNode$7;
 type DevToolsSnapshot$1 = DevToolsSnapshot$3;

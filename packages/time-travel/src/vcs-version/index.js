@@ -9,27 +9,53 @@ import { rerunAtRevision as rerunAtRevisionEffect } from "./rerunAtRevisionEffec
 import { resolveWorkflowAtRevision as resolveWorkflowAtRevisionEffect } from "./resolveWorkflowAtRevisionEffect.js";
 import { tagSnapshotVcs as tagSnapshotVcsEffect } from "./tagSnapshotVcsEffect.js";
 export { loadVcsTagEffect, rerunAtRevisionEffect, resolveWorkflowAtRevisionEffect, tagSnapshotVcsEffect, };
+
+/** @typedef {import("@smithers/db/adapter").SmithersDb} SmithersDb */
+
 /**
- * @param {Parameters<typeof tagSnapshotVcsEffect>} ...args
+ * Record the current VCS revision for a run/frame pair.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {number} frameNo
+ * @param {{ cwd?: string }} [opts]
+ * @returns {Promise<VcsTag | null>}
  */
-export function tagSnapshotVcs(...args) {
-    return Effect.runPromise(tagSnapshotVcsEffect(...args).pipe(Effect.provide(BunContext.layer)));
+export function tagSnapshotVcs(adapter, runId, frameNo, opts = {}) {
+    return Effect.runPromise(tagSnapshotVcsEffect(adapter, runId, frameNo, opts).pipe(Effect.provide(BunContext.layer)));
 }
 /**
- * @param {Parameters<typeof loadVcsTagEffect>} ...args
+ * Load the VCS revision tag for a run/frame pair, if any.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {number} frameNo
+ * @returns {Promise<VcsTag | undefined>}
  */
-export function loadVcsTag(...args) {
-    return Effect.runPromise(loadVcsTagEffect(...args));
+export function loadVcsTag(adapter, runId, frameNo) {
+    return Effect.runPromise(loadVcsTagEffect(adapter, runId, frameNo));
 }
 /**
- * @param {Parameters<typeof resolveWorkflowAtRevisionEffect>} ...args
+ * Create a jj workspace at the revision recorded for a run/frame pair.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {number} frameNo
+ * @param {string} workspacePath
+ * @returns {Promise<{ workspacePath: string; vcsPointer: string } | null>}
  */
-export function resolveWorkflowAtRevision(...args) {
-    return Effect.runPromise(resolveWorkflowAtRevisionEffect(...args).pipe(Effect.provide(BunContext.layer)));
+export function resolveWorkflowAtRevision(adapter, runId, frameNo, workspacePath) {
+    return Effect.runPromise(resolveWorkflowAtRevisionEffect(adapter, runId, frameNo, workspacePath).pipe(Effect.provide(BunContext.layer)));
 }
 /**
- * @param {Parameters<typeof rerunAtRevisionEffect>} ...args
+ * Revert the working copy to the VCS revision for a run/frame pair.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {number} frameNo
+ * @param {{ cwd?: string }} [opts]
+ * @returns {Promise<{ restored: boolean; vcsPointer: string | null; error?: string }>}
  */
-export function rerunAtRevision(...args) {
-    return Effect.runPromise(rerunAtRevisionEffect(...args).pipe(Effect.provide(BunContext.layer)));
+export function rerunAtRevision(adapter, runId, frameNo, opts = {}) {
+    return Effect.runPromise(rerunAtRevisionEffect(adapter, runId, frameNo, opts).pipe(Effect.provide(BunContext.layer)));
 }

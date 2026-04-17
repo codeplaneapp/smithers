@@ -4,6 +4,7 @@ import { DevToolsRunStore } from "./DevToolsRunStore.js";
 import { findNodeById } from "./findNodeById.js";
 import { printTree } from "./printTree.js";
 
+/** @typedef {import("./DevToolsEngineEvent.ts").DevToolsEngineEvent} DevToolsEngineEvent */
 /** @typedef {import("./DevToolsEventBus.ts").DevToolsEventBus} DevToolsEventBus */
 /** @typedef {import("./DevToolsNode.ts").DevToolsNode} DevToolsNode */
 /** @typedef {import("./DevToolsSnapshot.ts").DevToolsSnapshot} DevToolsSnapshot */
@@ -67,11 +68,13 @@ export class SmithersDevToolsCore {
         this._runStore.attachEventBus(bus);
         return this;
     }
+    /** @returns {void} */
     detachEventBuses() {
         this._runStore.detachEventBuses();
     }
     /**
-     * @param {any} event
+     * @param {DevToolsEngineEvent} event
+     * @returns {void}
      */
     processEngineEvent(event) {
         this._runStore.processEngineEvent(event);

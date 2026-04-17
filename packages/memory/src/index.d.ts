@@ -2,7 +2,7 @@ import * as zod from 'zod';
 import { z } from 'zod';
 import * as zod_v4_core from 'zod/v4/core';
 import { Effect, Context, Layer, Metric } from 'effect';
-import { SmithersError } from '@smithers/errors/SmithersError';
+import { SmithersError } from '@smithers/errors';
 import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
 import { BunSQLiteDatabase as BunSQLiteDatabase$1 } from 'drizzle-orm/bun-sqlite';
 import * as effect_MetricState from 'effect/MetricState';
@@ -16,7 +16,7 @@ type MemoryNamespace$3 = {
     id: string;
 };
 
-type WorkingMemoryConfig$1<T extends z.ZodObject<any> = z.ZodObject<any>> = {
+type WorkingMemoryConfig$1<T extends z.ZodObject<z.ZodRawShape> = z.ZodObject<z.ZodRawShape>> = {
     schema?: T;
     namespace: MemoryNamespace$3;
     ttlMs?: number;
@@ -133,7 +133,7 @@ type MemoryProcessor$4 = {
 };
 
 type MemoryLayerConfig$2 = {
-    db: BunSQLiteDatabase$1<any>;
+    db: BunSQLiteDatabase$1<Record<string, unknown>>;
 };
 
 /** @typedef {import("./MemoryNamespace.ts").MemoryNamespace} MemoryNamespace */

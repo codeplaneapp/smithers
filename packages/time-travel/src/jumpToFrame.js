@@ -41,15 +41,31 @@ function asString(value) {
 }
 
 /**
+ * @typedef {{
+ *   query: (sql: string) => {
+ *     run: (...args: unknown[]) => unknown;
+ *     get: (...args: unknown[]) => Record<string, unknown> | null | undefined;
+ *     all: (...args: unknown[]) => Array<Record<string, unknown>>;
+ *   };
+ * }} JumpSqliteClient
+ */
+
+/**
  * @param {SmithersDb} adapter
+ * @returns {JumpSqliteClient}
  */
 function resolveSqliteClient(adapter) {
-  const db = /** @type {any} */ (adapter)?.db;
-  const client = db?.session?.client ?? db?.$client;
-  if (!client || typeof client.query !== "function") {
+  const db = /** @type {{ session?: { client?: unknown }; $client?: unknown } | null | undefined} */ (
+    /** @type {unknown} */ (adapter?.db)
+  );
+  const candidate = /** @type {unknown} */ (db?.session?.client ?? db?.$client);
+  if (
+    !candidate ||
+    typeof (/** @type {{ query?: unknown }} */ (candidate).query) !== "function"
+  ) {
     throw new TypeError("Could not resolve Bun SQLite client from adapter.");
   }
-  return client;
+  return /** @type {JumpSqliteClient} */ (candidate);
 }
 
 /**
@@ -401,11 +417,14 @@ async function rollbackSandboxPointers(revertedSandboxes, revertToPointerImpl) {
   return failures;
 }
 
+/** @typedef {import("@smithers/db").AttemptRow} AttemptRow */
+
 /**
- * @param {Array<any>} attemptsForRun
- * @param {Array<any>} attemptsToDelete
+ * @param {ReadonlyArray<AttemptRow>} attemptsForRun
+ * @param {ReadonlyArray<AttemptRow>} attemptsToDelete
  * @param {number} cutoffMs
  * @param {(cwd?: string) => Promise<string | null>} getCurrentPointerImpl
+ * @returns {Promise<Array<{ cwd: string; targetPointer: string; previousPointer: string | null }>>}
  */
 async function planSandboxReverts(
   attemptsForRun,

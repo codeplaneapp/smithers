@@ -1,3 +1,4 @@
+/** @typedef {import("./DevToolsEngineEvent.ts").DevToolsEngineEvent} DevToolsEngineEvent */
 /** @typedef {import("./DevToolsEventBus.ts").DevToolsEventBus} DevToolsEventBus */
 /** @typedef {import("./DevToolsRunStoreOptions.ts").DevToolsRunStoreOptions} DevToolsRunStoreOptions */
 /** @typedef {import("./RunExecutionState.ts").RunExecutionState} RunExecutionState */
@@ -8,7 +9,7 @@ export class DevToolsRunStore {
     options;
     /** @type {Map<string, RunExecutionState>} */
     _runs = new Map();
-    /** @type {Array<{ bus: DevToolsEventBus; handler: (event: any) => void }>} */
+    /** @type {Array<{ bus: DevToolsEventBus; handler: (event: DevToolsEngineEvent) => void }>} */
     _eventBusListeners = [];
     /**
      * @param {DevToolsRunStoreOptions} [options]
@@ -23,14 +24,17 @@ export class DevToolsRunStore {
      */
     attachEventBus(bus) {
         /**
-         * @param {any} event
+         * @param {DevToolsEngineEvent} event
          */
         const handler = (event) => this.processEngineEvent(event);
         bus.on("event", handler);
         this._eventBusListeners.push({ bus, handler });
         return this;
     }
-    /** Detach all EventBus listeners registered by this store. */
+    /**
+     * Detach all EventBus listeners registered by this store.
+     * @returns {void}
+     */
     detachEventBuses() {
         for (const { bus, handler } of this._eventBusListeners) {
             bus.removeListener("event", handler);
@@ -73,7 +77,8 @@ export class DevToolsRunStore {
         return undefined;
     }
     /**
-     * @param {any} event
+     * @param {DevToolsEngineEvent} event
+     * @returns {void}
      */
     processEngineEvent(event) {
         if (!event || !event.type || !event.runId)

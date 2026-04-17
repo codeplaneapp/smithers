@@ -9,27 +9,49 @@ import { loadLatestSnapshot as loadLatestSnapshotEffect, loadSnapshot as loadSna
 import { listSnapshots as listSnapshotsEffect } from "./listSnapshotsEffect.js";
 export { parseSnapshot } from "./parseSnapshot.js";
 export { captureSnapshotEffect, listSnapshotsEffect, loadLatestSnapshotEffect, loadSnapshotEffect, };
+
+/** @typedef {import("@smithers/db/adapter").SmithersDb} SmithersDb */
+
 /**
- * @param {Parameters<typeof captureSnapshotEffect>} ...args
+ * Capture a snapshot row for a run at a given frame.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {number} frameNo
+ * @param {SnapshotData} data
+ * @returns {Promise<Snapshot>}
  */
-export function captureSnapshot(...args) {
-    return Effect.runPromise(captureSnapshotEffect(...args));
+export function captureSnapshot(adapter, runId, frameNo, data) {
+    return Effect.runPromise(captureSnapshotEffect(adapter, runId, frameNo, data));
 }
 /**
- * @param {Parameters<typeof loadSnapshotEffect>} ...args
+ * Load a specific snapshot row for a run/frame.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {number} frameNo
+ * @returns {Promise<Snapshot | undefined>}
  */
-export function loadSnapshot(...args) {
-    return Effect.runPromise(loadSnapshotEffect(...args));
+export function loadSnapshot(adapter, runId, frameNo) {
+    return Effect.runPromise(loadSnapshotEffect(adapter, runId, frameNo));
 }
 /**
- * @param {Parameters<typeof loadLatestSnapshotEffect>} ...args
+ * Load the most recent snapshot row for a run.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @returns {Promise<Snapshot | undefined>}
  */
-export function loadLatestSnapshot(...args) {
-    return Effect.runPromise(loadLatestSnapshotEffect(...args));
+export function loadLatestSnapshot(adapter, runId) {
+    return Effect.runPromise(loadLatestSnapshotEffect(adapter, runId));
 }
 /**
- * @param {Parameters<typeof listSnapshotsEffect>} ...args
+ * List lightweight snapshot index rows for a run.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @returns {Promise<Array<Pick<Snapshot, "runId" | "frameNo" | "contentHash" | "createdAtMs" | "vcsPointer">>>}
  */
-export function listSnapshots(...args) {
-    return Effect.runPromise(listSnapshotsEffect(...args));
+export function listSnapshots(adapter, runId) {
+    return Effect.runPromise(listSnapshotsEffect(adapter, runId));
 }

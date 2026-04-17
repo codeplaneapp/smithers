@@ -6,9 +6,17 @@ import { Effect } from "effect";
 import * as BunContext from "@effect/platform-bun/BunContext";
 import { replayFromCheckpoint as replayFromCheckpointEffect } from "./replayFromCheckpointEffect.js";
 export { replayFromCheckpointEffect };
+
+/** @typedef {import("@smithers/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("./ReplayParams.ts").ReplayParams} ReplayParams */
+
 /**
- * @param {Parameters<typeof replayFromCheckpointEffect>} ...args
+ * Fork a run from a checkpoint and optionally restore the VCS working copy.
+ *
+ * @param {SmithersDb} adapter
+ * @param {ReplayParams} params
+ * @returns {Promise<ReplayResult>}
  */
-export function replayFromCheckpoint(...args) {
-    return Effect.runPromise(replayFromCheckpointEffect(...args).pipe(Effect.provide(BunContext.layer)));
+export function replayFromCheckpoint(adapter, params) {
+    return Effect.runPromise(replayFromCheckpointEffect(adapter, params).pipe(Effect.provide(BunContext.layer)));
 }

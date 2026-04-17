@@ -4,15 +4,28 @@ import { buildTimelineTree as buildTimelineTreeEffect } from "./buildTimelineTre
 export { formatTimelineForTui } from "./formatTimelineForTui.js";
 export { formatTimelineAsJson } from "./formatTimelineAsJson.js";
 export { buildTimelineEffect, buildTimelineTreeEffect, };
+
+/** @typedef {import("@smithers/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("../RunTimeline.ts").RunTimeline} RunTimeline */
+/** @typedef {import("../TimelineTree.ts").TimelineTree} TimelineTree */
+
 /**
- * @param {Parameters<typeof buildTimelineEffect>} ...args
+ * Build the flat timeline (snapshots + branches) for a run.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @returns {Promise<RunTimeline>}
  */
-export function buildTimeline(...args) {
-    return Effect.runPromise(buildTimelineEffect(...args));
+export function buildTimeline(adapter, runId) {
+    return Effect.runPromise(buildTimelineEffect(adapter, runId));
 }
 /**
- * @param {Parameters<typeof buildTimelineTreeEffect>} ...args
+ * Build the recursive timeline tree (run + all descendants) for a run.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @returns {Promise<TimelineTree>}
  */
-export function buildTimelineTree(...args) {
-    return Effect.runPromise(buildTimelineTreeEffect(...args));
+export function buildTimelineTree(adapter, runId) {
+    return Effect.runPromise(buildTimelineTreeEffect(adapter, runId));
 }

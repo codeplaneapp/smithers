@@ -1,10 +1,19 @@
 import pc from "picocolors";
 import { parseSnapshot } from "./snapshot/parseSnapshot.js";
+
+/** @typedef {import("./ParsedSnapshot.ts").ParsedSnapshot} ParsedSnapshot */
+/** @typedef {import("./snapshot/Snapshot.ts").Snapshot} Snapshot */
+/** @typedef {import("./SnapshotDiff.ts").SnapshotDiff} SnapshotDiff */
+
 // ---------------------------------------------------------------------------
 // Diffing — pure function, no DB access
 // ---------------------------------------------------------------------------
 /**
  * Compute a structured diff between two parsed snapshots.
+ *
+ * @param {ParsedSnapshot} a
+ * @param {ParsedSnapshot} b
+ * @returns {SnapshotDiff}
  */
 export function diffSnapshots(a, b) {
     // Nodes
@@ -97,6 +106,10 @@ export function diffSnapshots(a, b) {
 }
 /**
  * Convenience: diff two raw Snapshot rows.
+ *
+ * @param {Snapshot} a
+ * @param {Snapshot} b
+ * @returns {SnapshotDiff}
  */
 export function diffRawSnapshots(a, b) {
     return diffSnapshots(parseSnapshot(a), parseSnapshot(b));
@@ -106,6 +119,9 @@ export function diffRawSnapshots(a, b) {
 // ---------------------------------------------------------------------------
 /**
  * Colorized terminal output for a snapshot diff.
+ *
+ * @param {SnapshotDiff} diff
+ * @returns {string}
  */
 export function formatDiffForTui(diff) {
     const lines = [];
@@ -164,6 +180,9 @@ export function formatDiffForTui(diff) {
 }
 /**
  * Structured JSON output for a snapshot diff.
+ *
+ * @param {SnapshotDiff} diff
+ * @returns {SnapshotDiff}
  */
 export function formatDiffAsJson(diff) {
     return { ...diff };
