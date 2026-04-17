@@ -250,7 +250,7 @@ Useful when an experiment leaves the worktree in a bad state.
 
 ```bash
 bunx smithers-orchestrator timeline <run-id> --tree
-bunx smithers-orchestrator diff <run-id>:3 <run-id>:7
+bunx smithers-orchestrator diff <run-id> <node-id>
 bunx smithers-orchestrator fork workflow.tsx --run-id <id> --frame 5 --reset-node analyze --label exp1
 bunx smithers-orchestrator replay workflow.tsx --run-id <id> --frame 5 --restore-vcs
 ```
