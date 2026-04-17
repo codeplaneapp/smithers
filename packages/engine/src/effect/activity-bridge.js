@@ -6,14 +6,14 @@
 
 import * as Activity from "@effect/workflow/Activity";
 import { Effect, Schema } from "effect";
-/** @typedef {import("@smithers/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smithers/db/adapter").SmithersDb} _SmithersDb */
+/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 
 const adapterNamespaces = new WeakMap();
 const completedActivityResults = new Map();
 let nextAdapterNamespace = 0;
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @returns {string}
  */
 const getAdapterNamespace = (adapter) => {
@@ -45,10 +45,10 @@ export class RetriableTaskFailure extends Error {
  */
 const isRetriableTaskFailure = (error) => error instanceof RetriableTaskFailure;
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} workflowName
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @returns {string}
  */
 export const makeTaskBridgeKey = (adapter, workflowName, runId, desc) => [
@@ -60,10 +60,10 @@ export const makeTaskBridgeKey = (adapter, workflowName, runId, desc) => [
     String(desc.iteration),
 ].join(":");
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} workflowName
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {number} attempt
  * @param {boolean} [includeAttempt]
  * @returns {string}
@@ -74,7 +74,7 @@ const makeActivityIdempotencyKey = (adapter, workflowName, runId, desc, attempt,
 };
 /**
  * @template A
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {(context: TaskActivityContext) => Promise<A> | A} executeFn
  * @param {Pick<ExecuteTaskActivityOptions, "includeAttemptInIdempotencyKey">} [options]
  */
@@ -95,10 +95,10 @@ export const makeTaskActivity = (desc, executeFn, options) => Activity.make({
 });
 /**
  * @template A
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} workflowName
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {(context: TaskActivityContext) => Promise<A> | A} executeFn
  * @param {ExecuteTaskActivityOptions} [options]
  * @returns {Promise<A>}

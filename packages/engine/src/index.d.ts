@@ -2,40 +2,35 @@ import * as _smithers_components_SmithersWorkflow from '@smithers/components/Smi
 import { SmithersWorkflow as SmithersWorkflow$2 } from '@smithers/components/SmithersWorkflow';
 import * as _smithers_scheduler_SmithersWorkflowOptions from '@smithers/scheduler/SmithersWorkflowOptions';
 import * as _smithers_db_adapter from '@smithers/db/adapter';
-import { SmithersDb as SmithersDb$5 } from '@smithers/db/adapter';
-import { Schema, Layer, Effect, ManagedRuntime, Exit, Scope } from 'effect';
+import { SmithersDb } from '@smithers/db/adapter';
+import * as effect from 'effect';
+import { Effect, Exit, Scope, ManagedRuntime, Layer, Schema } from 'effect';
 import * as _smithers_errors_SmithersError from '@smithers/errors/SmithersError';
 import { SmithersError } from '@smithers/errors/SmithersError';
 import * as _smithers_driver_RunResult from '@smithers/driver/RunResult';
 import * as _smithers_observability_SmithersEvent from '@smithers/observability/SmithersEvent';
 import * as _smithers_observability_correlation from '@smithers/observability/correlation';
-import * as _smithers_errors_toSmithersError from '@smithers/errors/toSmithersError';
 import { EventEmitter } from 'node:events';
 import * as _smithers_graph_XmlNode from '@smithers/graph/XmlNode';
 import * as _smithers_graph_TaskDescriptor from '@smithers/graph/TaskDescriptor';
-import { TaskDescriptor as TaskDescriptor$7 } from '@smithers/graph/TaskDescriptor';
+import { TaskDescriptor } from '@smithers/graph/TaskDescriptor';
 import * as _smithers_scheduler from '@smithers/scheduler';
 export { Scheduler, SchedulerLive, buildStateKey, cloneTaskStateMap, isTerminalState, parseStateKey } from '@smithers/scheduler';
-import * as Activity from '@effect/workflow/Activity';
+import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
+import { SQLiteTable as SQLiteTable$1 } from 'drizzle-orm/sqlite-core';
+import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
+import { BunSQLiteDatabase as BunSQLiteDatabase$3 } from 'drizzle-orm/bun-sqlite';
 import { TaskAborted } from '@smithers/errors/TaskAborted';
 import * as _smithers_scheduler_RetryPolicy from '@smithers/scheduler/RetryPolicy';
 import { RetryPolicy as RetryPolicy$1 } from '@smithers/scheduler/RetryPolicy';
 import { CachePolicy } from '@smithers/scheduler/CachePolicy';
-import * as Rpc from '@effect/rpc/Rpc';
-import * as RpcGroup from '@effect/rpc/RpcGroup';
-import { z } from 'zod';
 import * as _smithers_driver_RunOptions from '@smithers/driver/RunOptions';
 import * as _smithers_graph_GraphSnapshot from '@smithers/graph/GraphSnapshot';
-import { HttpRunner } from '@effect/cluster';
-import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
+import { SmithersCtx } from '@smithers/driver/SmithersCtx';
+import * as _smithers_errors_toSmithersError from '@smithers/errors/toSmithersError';
 import { Database } from 'bun:sqlite';
-import * as SqlClient from '@effect/sql/SqlClient';
-import { SqlError } from '@effect/sql/SqlError';
-import * as Entity from '@effect/cluster/Entity';
-import * as DurableDeferred from '@effect/workflow/DurableDeferred';
-import * as WorkflowEngine from '@effect/workflow/WorkflowEngine';
 
-type ChildWorkflowDefinition$1 = SmithersWorkflow$2<any> | (() => SmithersWorkflow$2<any> | unknown);
+type ChildWorkflowDefinition$1 = SmithersWorkflow$2<unknown> | (() => SmithersWorkflow$2<unknown> | unknown);
 
 type AlertHumanRequestOptions$1 = {
     runId: string;
@@ -86,7 +81,7 @@ type SmithersAlertPolicy = _smithers_scheduler_SmithersWorkflowOptions.SmithersA
  * @param {boolean} [autoApproved]
  * @returns {Effect.Effect<void, SmithersError, never>}
  */
-declare function approveNode(adapter: SmithersDb$5, runId: string, nodeId: string, iteration: number, note?: string, decidedBy?: string, decision?: unknown, autoApproved?: boolean): Effect.Effect<void, SmithersError, never>;
+declare function approveNode(adapter: SmithersDb, runId: string, nodeId: string, iteration: number, note?: string, decidedBy?: string, decision?: unknown, autoApproved?: boolean): Effect.Effect<void, SmithersError, never>;
 /**
  * @param {SmithersDb} adapter
  * @param {string} runId
@@ -97,7 +92,7 @@ declare function approveNode(adapter: SmithersDb$5, runId: string, nodeId: strin
  * @param {unknown} [decision]
  * @returns {Effect.Effect<void, SmithersError, never>}
  */
-declare function denyNode(adapter: SmithersDb$5, runId: string, nodeId: string, iteration: number, note?: string, decidedBy?: string, decision?: unknown): Effect.Effect<void, SmithersError, never>;
+declare function denyNode(adapter: SmithersDb, runId: string, nodeId: string, iteration: number, note?: string, decidedBy?: string, decision?: unknown): Effect.Effect<void, SmithersError, never>;
 
 type ChildWorkflowExecuteOptions$1 = {
     workflow: ChildWorkflowDefinition$1;
@@ -130,12 +125,13 @@ type RunResult$2 = _smithers_driver_RunResult.RunResult;
  * @typedef {SmithersEvent & { correlation?: CorrelationContext; }} CorrelatedSmithersEvent
  */
 /** @typedef {import("@smithers/observability/SmithersEvent").SmithersEvent} SmithersEvent */
+/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} _BunSQLiteDatabase */
 declare class EventBus extends EventEmitter<any> {
     /**
-   * @param {{ db?: any; logDir?: string; startSeq?: number }} opts
+   * @param {{ db?: BunSQLiteDatabase; logDir?: string; startSeq?: number }} opts
    */
     constructor(opts: {
-        db?: any;
+        db?: BunSQLiteDatabase;
         logDir?: string;
         startSeq?: number;
     });
@@ -146,30 +142,38 @@ declare class EventBus extends EventEmitter<any> {
     persistError: null;
     /**
    * @param {SmithersEvent} event
+   * @returns {Effect.Effect<void, unknown>}
    */
-    emitEvent(event: SmithersEvent): Effect.Effect<void, unknown, unknown>;
+    emitEvent(event: SmithersEvent): Effect.Effect<void, unknown>;
     /**
    * @param {SmithersEvent} event
+   * @returns {Effect.Effect<void, unknown>}
    */
-    emitEventWithPersist(event: SmithersEvent): Effect.Effect<void, unknown, unknown>;
+    emitEventWithPersist(event: SmithersEvent): Effect.Effect<void, unknown>;
     /**
    * @param {SmithersEvent} event
    * @returns {Promise<void>}
    */
     emitEventQueued(event: SmithersEvent): Promise<void>;
-    flush(): Effect.Effect<void, _smithers_errors_toSmithersError.SmithersError, never>;
+    /**
+   * @returns {Effect.Effect<void, unknown>}
+   */
+    flush(): Effect.Effect<void, unknown>;
     /**
    * @param {CorrelatedSmithersEvent} event
+   * @returns {Effect.Effect<void, unknown>}
    */
-    persist(event: CorrelatedSmithersEvent): Effect.Effect<void, unknown, never>;
+    persist(event: CorrelatedSmithersEvent): Effect.Effect<void, unknown>;
     /**
    * @param {CorrelatedSmithersEvent} event
+   * @returns {Effect.Effect<void, unknown>}
    */
-    emitAndTrack(event: CorrelatedSmithersEvent): Effect.Effect<void, unknown, unknown>;
+    emitAndTrack(event: CorrelatedSmithersEvent): Effect.Effect<void, unknown>;
     /**
    * @param {CorrelatedSmithersEvent} event
+   * @returns {Effect.Effect<void, unknown>}
    */
-    enqueuePersist(event: CorrelatedSmithersEvent): Effect.Effect<void, _smithers_errors_toSmithersError.SmithersError, never>;
+    enqueuePersist(event: CorrelatedSmithersEvent): Effect.Effect<void, unknown>;
     /**
    * @param {CorrelatedSmithersEvent} event
    * @returns {Effect.Effect<void, unknown>}
@@ -184,8 +188,9 @@ declare class EventBus extends EventEmitter<any> {
     callDbPersistence(label: string, method: (row: any) => unknown, row: any): Effect.Effect<void, unknown>;
     /**
    * @param {CorrelatedSmithersEvent} event
+   * @returns {Effect.Effect<void, unknown>}
    */
-    persistLog(event: CorrelatedSmithersEvent): Effect.Effect<void, _smithers_errors_toSmithersError.SmithersError, never>;
+    persistLog(event: CorrelatedSmithersEvent): Effect.Effect<void, unknown>;
     /**
    * @param {SmithersEvent} event
    * @returns {CorrelatedSmithersEvent}
@@ -294,7 +299,7 @@ type ContinuationRequest$1 = {
 };
 
 type ScheduleResult$1 = {
-    runnable: TaskDescriptor$7[];
+    runnable: TaskDescriptor[];
     pendingExists: boolean;
     waitingApprovalExists: boolean;
     waitingEventExists: boolean;
@@ -357,9 +362,9 @@ declare const buildPlanTree: (xml: XmlNode | null, ralphState?: RalphStateMap) =
     ralphs: RalphMeta[];
 };
 /**
- * @type {(plan: PlanNode | null, states: TaskStateMap, descriptors: Map<string, TaskDescriptor>, ralphState: RalphStateMap, retryWait: Map<string, number>, nowMs: number) => ScheduleResult}
+ * @type {(plan: PlanNode | null, states: TaskStateMap, descriptors: Map<string, _TaskDescriptor>, ralphState: RalphStateMap, retryWait: Map<string, number>, nowMs: number) => ScheduleResult}
  */
-declare const scheduleTasks: (plan: PlanNode | null, states: TaskStateMap, descriptors: Map<string, TaskDescriptor$6>, ralphState: RalphStateMap, retryWait: Map<string, number>, nowMs: number) => ScheduleResult;
+declare const scheduleTasks: (plan: PlanNode | null, states: TaskStateMap, descriptors: Map<string, _TaskDescriptor$6>, ralphState: RalphStateMap, retryWait: Map<string, number>, nowMs: number) => ScheduleResult;
 type ContinuationRequest = ContinuationRequest$1;
 type PlanNode = PlanNode$1;
 type RalphMeta = RalphMeta$1;
@@ -372,7 +377,7 @@ type ScheduleSnapshot = _smithers_scheduler.ScheduleSnapshot;
 type TaskRecord = _smithers_scheduler.TaskRecord;
 type TaskState = _smithers_scheduler.TaskState;
 type TaskStateMap = _smithers_scheduler.TaskStateMap;
-type TaskDescriptor$6 = _smithers_graph_TaskDescriptor.TaskDescriptor;
+type _TaskDescriptor$6 = _smithers_graph_TaskDescriptor.TaskDescriptor;
 type XmlNode = _smithers_graph_XmlNode.XmlNode;
 
 type SignalRunOptions$1 = {
@@ -389,7 +394,7 @@ type SignalRunOptions$1 = {
  * @param {SignalRunOptions} [options]
  * @returns {Effect.Effect<{ runId: string; seq: number; signalName: string; correlationId: string | null; receivedAtMs: number }, SmithersError, never>}
  */
-declare function signalRun(adapter: SmithersDb$5, runId: string, signalName: string, payload: unknown, options?: SignalRunOptions): Effect.Effect<{
+declare function signalRun(adapter: SmithersDb, runId: string, signalName: string, payload: unknown, options?: SignalRunOptions): Effect.Effect<{
     runId: string;
     seq: number;
     signalName: string;
@@ -414,7 +419,7 @@ type HotReloadEvent$2 = {
     type: "reloaded";
     generation: number;
     changedFiles: string[];
-    newBuild: SmithersWorkflow$2<any>["build"];
+    newBuild: SmithersWorkflow$2<unknown>["build"];
 } | {
     type: "failed";
     generation: number;
@@ -605,41 +610,29 @@ type HijackState$1 = {
     completion: HijackCompletion | null;
 };
 
-type LegacyExecuteTaskFn$1 = (adapter: SmithersDb$5, db: any, runId: string, desc: TaskDescriptor$7, descriptorMap: Map<string, TaskDescriptor$7>, inputTable: any, eventBus: EventBus, toolConfig: TaskBridgeToolConfig$1, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<any>, runAbortController?: AbortController, hijackState?: HijackState$1) => Promise<void>;
+type LegacyExecuteTaskFn$1 = (adapter: SmithersDb, db: BunSQLiteDatabase$3<Record<string, unknown>>, runId: string, desc: TaskDescriptor, descriptorMap: Map<string, TaskDescriptor>, inputTable: SQLiteTable$1, eventBus: EventBus, toolConfig: TaskBridgeToolConfig$1, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<string>, runAbortController?: AbortController, hijackState?: HijackState$1) => Promise<void>;
 
-declare function makeDurableDeferredBridgeExecutionId(adapter: SmithersDb$4, runId: string, nodeId: string, iteration: number): string;
-declare function makeApprovalDurableDeferred(nodeId: string): DurableDeferred.DurableDeferred<Schema.Struct<{
-    approved: typeof Schema.Boolean;
-    note: Schema.NullOr<typeof Schema.String>;
-    decidedBy: Schema.NullOr<typeof Schema.String>;
-    decisionJson: Schema.NullOr<typeof Schema.String>;
-    autoApproved: typeof Schema.Boolean;
-}>, typeof Schema.Never>;
-declare function makeWaitForEventDurableDeferred(nodeId: string): DurableDeferred.DurableDeferred<Schema.Struct<{
-    signalName: typeof Schema.String;
-    correlationId: Schema.NullOr<typeof Schema.String>;
-    payloadJson: typeof Schema.String;
-    seq: typeof Schema.Number;
-    receivedAtMs: typeof Schema.Number;
-}>, typeof Schema.Never>;
-declare function awaitApprovalDurableDeferred(adapter: SmithersDb$4, runId: string, nodeId: string, iteration: number): Promise<BridgeDeferredResult>;
-declare function awaitWaitForEventDurableDeferred(adapter: SmithersDb$4, runId: string, nodeId: string, iteration: number): Promise<BridgeDeferredResult>;
-declare function bridgeApprovalResolve(adapter: SmithersDb$4, runId: string, nodeId: string, iteration: number, resolution: {
+declare function makeDurableDeferredBridgeExecutionId(adapter: _SmithersDb$4, runId: string, nodeId: string, iteration: number): string;
+declare function makeApprovalDurableDeferred(nodeId: string): any;
+declare function makeWaitForEventDurableDeferred(nodeId: string): any;
+declare function awaitApprovalDurableDeferred(adapter: _SmithersDb$4, runId: string, nodeId: string, iteration: number): Promise<BridgeDeferredResult>;
+declare function awaitWaitForEventDurableDeferred(adapter: _SmithersDb$4, runId: string, nodeId: string, iteration: number): Promise<BridgeDeferredResult>;
+declare function bridgeApprovalResolve(adapter: _SmithersDb$4, runId: string, nodeId: string, iteration: number, resolution: {
     approved: boolean;
     note?: string | null;
     decidedBy?: string | null;
     decisionJson?: string | null;
     autoApproved?: boolean;
 }): Promise<void>;
-declare function bridgeWaitForEventResolve(adapter: SmithersDb$4, runId: string, nodeId: string, iteration: number, signal: WaitForEventSignalInput): Promise<void>;
-declare function bridgeSignalResolve(adapter: SmithersDb$4, runId: string, signal: WaitForEventSignalInput): Promise<void>;
+declare function bridgeWaitForEventResolve(adapter: _SmithersDb$4, runId: string, nodeId: string, iteration: number, signal: WaitForEventSignalInput): Promise<void>;
+declare function bridgeSignalResolve(adapter: _SmithersDb$4, runId: string, signal: WaitForEventSignalInput): Promise<void>;
 type BridgeDeferredResult = {
     _tag: "Complete";
     exit: Exit.Exit<any, any>;
 } | {
     _tag: "Pending";
 };
-type SmithersDb$4 = _smithers_db_adapter.SmithersDb;
+type _SmithersDb$4 = _smithers_db_adapter.SmithersDb;
 type WaitForEventSignalInput = {
     signalName: string;
     correlationId: string | null;
@@ -649,32 +642,32 @@ type WaitForEventSignalInput = {
 };
 
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @returns {boolean}
  */
-declare function isBridgeManagedTimerTask(desc: TaskDescriptor$5): boolean;
+declare function isBridgeManagedTimerTask(desc: _TaskDescriptor$5): boolean;
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @returns {boolean}
  */
-declare function isBridgeManagedWaitForEventTask(desc: TaskDescriptor$5): boolean;
+declare function isBridgeManagedWaitForEventTask(desc: _TaskDescriptor$5): boolean;
 /**
- * @param {SmithersDb} adapter
- * @param {any} db
+ * @param {_SmithersDb} adapter
+ * @param {BunSQLiteDatabase} db
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {EventBus} eventBus
  * @param {DeferredBridgeStateEmitter} [emitStateEvent]
  * @returns {Promise<DeferredBridgeResolution>}
  */
-declare function resolveDeferredTaskStateBridge(adapter: SmithersDb$3, db: any, runId: string, desc: TaskDescriptor$5, eventBus: EventBus, emitStateEvent?: DeferredBridgeStateEmitter): Promise<DeferredBridgeResolution>;
+declare function resolveDeferredTaskStateBridge(adapter: _SmithersDb$3, db: BunSQLiteDatabase$2, runId: string, desc: _TaskDescriptor$5, eventBus: EventBus, emitStateEvent?: DeferredBridgeStateEmitter): Promise<DeferredBridgeResolution>;
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
  * @param {EventBus} eventBus
  * @param {string} reason
  */
-declare function cancelPendingTimersBridge(adapter: SmithersDb$3, runId: string, eventBus: EventBus, reason: string): Promise<void>;
+declare function cancelPendingTimersBridge(adapter: _SmithersDb$3, runId: string, eventBus: EventBus, reason: string): Promise<void>;
 type DeferredBridgeState = "pending" | "waiting-approval" | "waiting-event" | "waiting-timer" | "finished" | "failed" | "skipped";
 type DeferredBridgeResolution = {
     handled: false;
@@ -683,8 +676,9 @@ type DeferredBridgeResolution = {
     state: DeferredBridgeState;
 };
 type DeferredBridgeStateEmitter = (state: "pending" | "failed" | "skipped") => Promise<void>;
-type SmithersDb$3 = _smithers_db_adapter.SmithersDb;
-type TaskDescriptor$5 = _smithers_graph_TaskDescriptor.TaskDescriptor;
+type _SmithersDb$3 = _smithers_db_adapter.SmithersDb;
+type _TaskDescriptor$5 = _smithers_graph_TaskDescriptor.TaskDescriptor;
+type BunSQLiteDatabase$2 = drizzle_orm_bun_sqlite.BunSQLiteDatabase<Record<string, unknown>>;
 
 /**
  * @template T
@@ -723,8 +717,9 @@ type SchedulerWakeQueue = {
     wait(): Promise<void>;
 };
 type SmithersWorkflow$1 = any;
+type WorkflowEngineContext = effect.Context.Context<WorkflowEngine.WorkflowEngine>;
 type WorkflowMakeBridgeRuntime = {
-    readonly engineContext: any;
+    readonly engineContext: WorkflowEngineContext;
     readonly scope: Scope.CloseableScope;
     readonly parentInstance: WorkflowEngine.WorkflowInstance["Type"];
     readonly executeBody: RunBodyExecutor;
@@ -745,24 +740,24 @@ type SqlMessageStorageEventHistoryQuery$1 = {
  * @param {BunSQLiteDatabase<any> | Database} db
  * @returns {SqlMessageStorage}
  */
-declare function getSqlMessageStorage(db: BunSQLiteDatabase<any> | Database): SqlMessageStorage;
+declare function getSqlMessageStorage(db: BunSQLiteDatabase$1<any> | Database): SqlMessageStorage;
 /**
  * @param {BunSQLiteDatabase<any> | Database} db
  * @returns {Effect.Effect<void, never>}
  */
-declare function ensureSqlMessageStorageEffect(db: BunSQLiteDatabase<any> | Database): Effect.Effect<void, never>;
+declare function ensureSqlMessageStorageEffect(db: BunSQLiteDatabase$1<any> | Database): Effect.Effect<void, never>;
 /**
  * @param {BunSQLiteDatabase<any> | Database} db
  * @returns {Promise<void>}
  */
-declare function ensureSqlMessageStorage(db: BunSQLiteDatabase<any> | Database): Promise<void>;
+declare function ensureSqlMessageStorage(db: BunSQLiteDatabase$1<any> | Database): Promise<void>;
 declare class SqlMessageStorage {
     /**
    * @param {BunSQLiteDatabase<any> | Database} db
    */
-    constructor(db: BunSQLiteDatabase<any> | Database);
+    constructor(db: BunSQLiteDatabase$1<any> | Database);
     sqlite: Database;
-    runtime: ManagedRuntime.ManagedRuntime<SqlClient.SqlClient, never>;
+    runtime: ManagedRuntime.ManagedRuntime<any, never>;
     tableColumnsCache: Map<any, any>;
     /**
    * @param {string} table
@@ -888,13 +883,13 @@ declare class SqlMessageStorage {
    */
     getLastSignalSeq(runId: string): Promise<number | undefined>;
 }
-type BunSQLiteDatabase = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
+type BunSQLiteDatabase$1 = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
 type SqlMessageStorageEventHistoryQuery = SqlMessageStorageEventHistoryQuery$1;
 type SqliteParam = string | number | bigint | boolean | Uint8Array | null | undefined;
 
 declare const DockerSandboxExecutorLive: Layer.Layer<any, never, never>;
 declare const CodeplaneSandboxExecutorLive: Layer.Layer<any, never, never>;
-declare const SandboxHttpRunner: typeof HttpRunner;
+declare const SandboxHttpRunner: any;
 
 type UnknownWorkerError = {
     _tag: "UnknownWorkerError";
@@ -981,18 +976,18 @@ type WorkerTask$2 = {
  * @param {string} bridgeKey
  * @param {string} workflowName
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {WorkerDispatchKind} dispatchKind
  * @returns {WorkerTask}
  */
-declare function makeWorkerTask(bridgeKey: string, workflowName: string, runId: string, desc: TaskDescriptor$4, dispatchKind: WorkerDispatchKind): WorkerTask$1;
+declare function makeWorkerTask(bridgeKey: string, workflowName: string, runId: string, desc: _TaskDescriptor$4, dispatchKind: WorkerDispatchKind): WorkerTask$1;
 /**
  * @param {TaskResult} result
  * @returns {result is TaskFailure}
  */
 declare function isTaskResultFailure(result: TaskResult): result is TaskFailure;
 type WorkerTaskKind = WorkerTaskKind$1;
-/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 declare const WorkerTaskKind: Schema.Literal<["agent", "compute", "static"]>;
 type WorkerDispatchKind = WorkerDispatchKind$1;
 declare const WorkerDispatchKind: Schema.Literal<["compute", "static", "legacy"]>;
@@ -1063,72 +1058,9 @@ declare const TaskResult: Schema.Union<[Schema.Struct<{
         message: typeof Schema.String;
     }>]>;
 }>]>;
-declare const TaskWorkerEntity: Entity.Entity<"TaskWorker", Rpc.Rpc<"execute", Schema.Struct<{
-    executionId: typeof Schema.String;
-    bridgeKey: typeof Schema.String;
-    workflowName: typeof Schema.String;
-    runId: typeof Schema.String;
-    nodeId: typeof Schema.String;
-    iteration: typeof Schema.Number;
-    retries: typeof Schema.Number;
-    taskKind: Schema.Literal<["agent", "compute", "static"]>;
-    dispatchKind: Schema.Literal<["compute", "static", "legacy"]>;
-}>, Schema.Union<[Schema.Struct<{
-    _tag: Schema.Literal<["Success"]>;
-    executionId: typeof Schema.String;
-    terminal: typeof Schema.Boolean;
-}>, Schema.Struct<{
-    _tag: Schema.Literal<["Failure"]>;
-    executionId: typeof Schema.String;
-    error: Schema.Union<[Schema.Union<[Schema.Struct<{
-        _tag: Schema.Literal<["TaskAborted"]>;
-        message: typeof Schema.String;
-        details: Schema.optional<Schema.Record$<typeof Schema.String, typeof Schema.Unknown>>;
-        name: Schema.optional<typeof Schema.String>;
-    }>, Schema.Struct<{
-        _tag: Schema.Literal<["TaskTimeout"]>;
-        message: typeof Schema.String;
-        nodeId: typeof Schema.String;
-        attempt: typeof Schema.Number;
-        timeoutMs: typeof Schema.Number;
-    }>, Schema.Struct<{
-        _tag: Schema.Literal<["TaskHeartbeatTimeout"]>;
-        message: typeof Schema.String;
-        nodeId: typeof Schema.String;
-        iteration: typeof Schema.Number;
-        attempt: typeof Schema.Number;
-        timeoutMs: typeof Schema.Number;
-        staleForMs: typeof Schema.Number;
-        lastHeartbeatAtMs: typeof Schema.Number;
-    }>, Schema.Struct<{
-        _tag: Schema.Literal<["RunNotFound"]>;
-        message: typeof Schema.String;
-        runId: typeof Schema.String;
-    }>, Schema.Struct<{
-        _tag: Schema.Literal<["InvalidInput"]>;
-        message: typeof Schema.String;
-        details: Schema.optional<Schema.Record$<typeof Schema.String, typeof Schema.Unknown>>;
-    }>, Schema.Struct<{
-        _tag: Schema.Literal<["DbWriteFailed"]>;
-        message: typeof Schema.String;
-        details: Schema.optional<Schema.Record$<typeof Schema.String, typeof Schema.Unknown>>;
-    }>, Schema.Struct<{
-        _tag: Schema.Literal<["AgentCliError"]>;
-        message: typeof Schema.String;
-        details: Schema.optional<Schema.Record$<typeof Schema.String, typeof Schema.Unknown>>;
-    }>, Schema.Struct<{
-        _tag: Schema.Literal<["WorkflowFailed"]>;
-        message: typeof Schema.String;
-        details: Schema.optional<Schema.Record$<typeof Schema.String, typeof Schema.Unknown>>;
-        status: Schema.optional<typeof Schema.Number>;
-    }>]>, Schema.Struct<{
-        _tag: Schema.Literal<["UnknownWorkerError"]>;
-        errorId: typeof Schema.String;
-        message: typeof Schema.String;
-    }>]>;
-}>]>, typeof Schema.Never, never>>;
+declare const TaskWorkerEntity: any;
 type TaskFailure = TaskFailure$1;
-type TaskDescriptor$4 = _smithers_graph_TaskDescriptor.TaskDescriptor;
+type _TaskDescriptor$4 = _smithers_graph_TaskDescriptor.TaskDescriptor;
 
 /**
  * @param {WorkerTask} task
@@ -1147,12 +1079,15 @@ type WorkerExecutionResult = {
 };
 type WorkerTask = WorkerTask$2;
 
-declare function executeTaskBridge(adapter: SmithersDb$5, db: any, runId: string, desc: TaskDescriptor$3, descriptorMap: Map<string, TaskDescriptor$3>, inputTable: any, eventBus: EventBus, toolConfig: TaskBridgeToolConfig, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<any>, runAbortController?: AbortController, hijackState?: HijackState, legacyExecuteTaskFn?: LegacyExecuteTaskFn): Promise<void>;
-declare function executeTaskBridgeEffect(adapter: SmithersDb$5, db: any, runId: string, desc: TaskDescriptor$3, descriptorMap: Map<string, TaskDescriptor$3>, inputTable: any, eventBus: EventBus, toolConfig: TaskBridgeToolConfig, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<any>, runAbortController?: AbortController, hijackState?: HijackState, legacyExecuteTaskFn?: LegacyExecuteTaskFn): Effect.Effect<void, _smithers_errors_SmithersError.SmithersError, never>;
+declare function executeTaskBridge(adapter: SmithersDb, db: _BunSQLiteDatabase$1, runId: string, desc: _TaskDescriptor$3, descriptorMap: Map<string, _TaskDescriptor$3>, inputTable: SQLiteTable, eventBus: EventBus, toolConfig: TaskBridgeToolConfig, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<string>, runAbortController?: AbortController, hijackState?: HijackState, legacyExecuteTaskFn?: LegacyExecuteTaskFn): Promise<void>;
+declare function executeTaskBridgeEffect(adapter: SmithersDb, db: _BunSQLiteDatabase$1, runId: string, desc: _TaskDescriptor$3, descriptorMap: Map<string, _TaskDescriptor$3>, inputTable: SQLiteTable, eventBus: EventBus, toolConfig: TaskBridgeToolConfig, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<string>, runAbortController?: AbortController, hijackState?: HijackState, legacyExecuteTaskFn?: LegacyExecuteTaskFn): Effect.Effect<void, _smithers_errors_SmithersError.SmithersError, never>;
 type HijackState = HijackState$1;
 type LegacyExecuteTaskFn = LegacyExecuteTaskFn$1;
 type TaskBridgeToolConfig = TaskBridgeToolConfig$1;
-type TaskDescriptor$3 = _smithers_graph_TaskDescriptor.TaskDescriptor;
+type _TaskDescriptor$3 = _smithers_graph_TaskDescriptor.TaskDescriptor;
+type _TaskActivityContext = TaskActivityContext$1;
+type _BunSQLiteDatabase$1 = drizzle_orm_bun_sqlite.BunSQLiteDatabase<Record<string, unknown>>;
+type SQLiteTable = drizzle_orm_sqlite_core.SQLiteTable;
 type BridgeManagedTaskKind = "compute" | "static" | "legacy";
 
 type TaskActivityRetryOptions$1 = {
@@ -1175,14 +1110,14 @@ declare class RetriableTaskFailure extends Error {
     nodeId: string;
     attempt: number;
 }
-declare function makeTaskBridgeKey(adapter: SmithersDb$2, workflowName: string, runId: string, desc: TaskDescriptor$2): string;
-declare function makeTaskActivity<A>(desc: TaskDescriptor$2, executeFn: (context: TaskActivityContext) => Promise<A> | A, options?: Pick<ExecuteTaskActivityOptions, "includeAttemptInIdempotencyKey">): Activity.Activity<typeof Schema.Unknown, typeof Schema.Unknown, never>;
-declare function executeTaskActivity<A>(adapter: SmithersDb$2, workflowName: string, runId: string, desc: TaskDescriptor$2, executeFn: (context: TaskActivityContext) => Promise<A> | A, options?: ExecuteTaskActivityOptions): Promise<A>;
+declare function makeTaskBridgeKey(adapter: _SmithersDb$2, workflowName: string, runId: string, desc: _TaskDescriptor$2): string;
+declare function makeTaskActivity<A>(desc: _TaskDescriptor$2, executeFn: (context: TaskActivityContext) => Promise<A> | A, options?: Pick<ExecuteTaskActivityOptions, "includeAttemptInIdempotencyKey">): any;
+declare function executeTaskActivity<A>(adapter: _SmithersDb$2, workflowName: string, runId: string, desc: _TaskDescriptor$2, executeFn: (context: TaskActivityContext) => Promise<A> | A, options?: ExecuteTaskActivityOptions): Promise<A>;
 type TaskActivityRetryOptions = TaskActivityRetryOptions$1;
 type ExecuteTaskActivityOptions = ExecuteTaskActivityOptions$1;
 type TaskActivityContext = TaskActivityContext$1;
-type SmithersDb$2 = _smithers_db_adapter.SmithersDb;
-type TaskDescriptor$2 = _smithers_graph_TaskDescriptor.TaskDescriptor;
+type _SmithersDb$2 = _smithers_db_adapter.SmithersDb;
+type _TaskDescriptor$2 = _smithers_graph_TaskDescriptor.TaskDescriptor;
 
 /**
  * @returns {TaskAborted}
@@ -1203,8 +1138,8 @@ type SmithersSqliteOptions$1 = {
     filename: string;
 };
 
-type AnySchema$1 = any;
-type AnyEffect = any;
+type AnySchema$1 = Schema.Schema<unknown, unknown, never>;
+type AnyEffect = unknown | Promise<unknown> | Effect.Effect<unknown, unknown, unknown>;
 type BuilderStepContext$1 = Record<string, unknown> & {
     input: unknown;
     executionId: string;
@@ -1229,7 +1164,7 @@ type BuilderStepHandle$1 = {
     localId: string;
     tableKey: string;
     tableName: string;
-    table: any;
+    table: SQLiteTable$1;
     output: AnySchema$1;
     needs: Record<string, BuilderStepHandle$1>;
     run?: (ctx: BuilderStepContext$1) => AnyEffect;
@@ -1264,7 +1199,7 @@ type LoopNode = {
 type MatchNode = {
     kind: "match";
     source: BuilderStepHandle$1;
-    when: (value: any) => boolean;
+    when: (value: unknown) => boolean;
     then: BuilderNode$1;
     else?: BuilderNode$1;
 };
@@ -1290,7 +1225,7 @@ type BuilderNode$1 = BuilderStepHandle$1 | SequenceNode | ParallelNode | LoopNod
 declare const Smithers: {
     sqlite: typeof sqlite;
 };
-type AnySchema = any;
+type AnySchema = effect.Schema.Schema<unknown, unknown, never>;
 type ApprovalOptions = {
     needs?: Record<string, BuilderStepHandle>;
     request: (ctx: Record<string, unknown>) => {
@@ -1318,13 +1253,14 @@ type SmithersSqliteOptions = SmithersSqliteOptions$1;
  */
 declare function sqlite(options: SmithersSqliteOptions): Layer.Layer<any, never, never>;
 
-declare function canExecuteBridgeManagedComputeTask(desc: TaskDescriptor$1, cacheEnabled: boolean): boolean;
-declare function executeComputeTaskBridge(adapter: SmithersDb$1, db: any, runId: string, desc: TaskDescriptor$1, eventBus: EventBus, toolConfig: ComputeTaskBridgeToolConfig, workflowName: string, signal?: AbortSignal): Promise<void>;
+declare function canExecuteBridgeManagedComputeTask(desc: _TaskDescriptor$1, cacheEnabled: boolean): boolean;
+declare function executeComputeTaskBridge(adapter: _SmithersDb$1, db: _BunSQLiteDatabase, runId: string, desc: _TaskDescriptor$1, eventBus: EventBus, toolConfig: ComputeTaskBridgeToolConfig, workflowName: string, signal?: AbortSignal): Promise<void>;
 type ComputeTaskBridgeToolConfig = {
     rootDir: string;
 };
-type SmithersDb$1 = _smithers_db_adapter.SmithersDb;
-type TaskDescriptor$1 = _smithers_graph_TaskDescriptor.TaskDescriptor;
+type _SmithersDb$1 = _smithers_db_adapter.SmithersDb;
+type _TaskDescriptor$1 = _smithers_graph_TaskDescriptor.TaskDescriptor;
+type _BunSQLiteDatabase = drizzle_orm_bun_sqlite.BunSQLiteDatabase<Record<string, unknown>>;
 
 type FilePatch$1 = {
     path: string;
@@ -1527,156 +1463,12 @@ declare const GetRunResultSchema: Schema.NullOr<Schema.Struct<{
     errorJson: Schema.NullOr<typeof Schema.String>;
     configJson: Schema.NullOr<typeof Schema.String>;
 }>>;
-declare const approve: Rpc.Rpc<"approve", Schema.Struct<{
-    runId: typeof Schema.String;
-    nodeId: typeof Schema.String;
-    iteration: Schema.optional<typeof Schema.Number>;
-    note: Schema.optional<typeof Schema.String>;
-    decidedBy: Schema.optional<typeof Schema.String>;
-}>, Schema.Struct<{
-    runId: typeof Schema.String;
-    nodeId: typeof Schema.String;
-    iteration: typeof Schema.Number;
-    approved: typeof Schema.Boolean;
-}>, typeof Schema.Never, never>;
-declare const cancel: Rpc.Rpc<"cancel", Schema.Struct<{
-    runId: typeof Schema.String;
-}>, Schema.Struct<{
-    runId: typeof Schema.String;
-    status: Schema.Literal<["cancelling", "cancelled"]>;
-}>, typeof Schema.Never, never>;
-declare const signal: Rpc.Rpc<"signal", Schema.Struct<{
-    runId: typeof Schema.String;
-    signalName: typeof Schema.String;
-    data: Schema.optional<typeof Schema.Unknown>;
-    correlationId: Schema.optional<typeof Schema.String>;
-    sentBy: Schema.optional<typeof Schema.String>;
-}>, Schema.Struct<{
-    runId: typeof Schema.String;
-    signalName: typeof Schema.String;
-    delivered: typeof Schema.Boolean;
-    status: Schema.Literal<["signalled", "ignored"]>;
-}>, typeof Schema.Never, never>;
-declare const listRuns: Rpc.Rpc<"listRuns", Schema.Struct<{
-    limit: Schema.optional<typeof Schema.Number>;
-    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>>;
-}>, Schema.Array$<Schema.Struct<{
-    runId: typeof Schema.String;
-    parentRunId: Schema.NullOr<typeof Schema.String>;
-    workflowName: typeof Schema.String;
-    workflowPath: Schema.NullOr<typeof Schema.String>;
-    workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
-    createdAtMs: typeof Schema.Number;
-    startedAtMs: Schema.NullOr<typeof Schema.Number>;
-    finishedAtMs: Schema.NullOr<typeof Schema.Number>;
-    heartbeatAtMs: Schema.NullOr<typeof Schema.Number>;
-    runtimeOwnerId: Schema.NullOr<typeof Schema.String>;
-    cancelRequestedAtMs: Schema.NullOr<typeof Schema.Number>;
-    hijackRequestedAtMs: Schema.NullOr<typeof Schema.Number>;
-    hijackTarget: Schema.NullOr<typeof Schema.String>;
-    vcsType: Schema.NullOr<typeof Schema.String>;
-    vcsRoot: Schema.NullOr<typeof Schema.String>;
-    vcsRevision: Schema.NullOr<typeof Schema.String>;
-    errorJson: Schema.NullOr<typeof Schema.String>;
-    configJson: Schema.NullOr<typeof Schema.String>;
-}>>, typeof Schema.Never, never>;
-declare const getRun: Rpc.Rpc<"getRun", Schema.Struct<{
-    runId: typeof Schema.String;
-}>, Schema.NullOr<Schema.Struct<{
-    runId: typeof Schema.String;
-    parentRunId: Schema.NullOr<typeof Schema.String>;
-    workflowName: typeof Schema.String;
-    workflowPath: Schema.NullOr<typeof Schema.String>;
-    workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
-    createdAtMs: typeof Schema.Number;
-    startedAtMs: Schema.NullOr<typeof Schema.Number>;
-    finishedAtMs: Schema.NullOr<typeof Schema.Number>;
-    heartbeatAtMs: Schema.NullOr<typeof Schema.Number>;
-    runtimeOwnerId: Schema.NullOr<typeof Schema.String>;
-    cancelRequestedAtMs: Schema.NullOr<typeof Schema.Number>;
-    hijackRequestedAtMs: Schema.NullOr<typeof Schema.Number>;
-    hijackTarget: Schema.NullOr<typeof Schema.String>;
-    vcsType: Schema.NullOr<typeof Schema.String>;
-    vcsRoot: Schema.NullOr<typeof Schema.String>;
-    vcsRevision: Schema.NullOr<typeof Schema.String>;
-    errorJson: Schema.NullOr<typeof Schema.String>;
-    configJson: Schema.NullOr<typeof Schema.String>;
-}>>, typeof Schema.Never, never>;
-declare const SmithersRpcGroup: RpcGroup.RpcGroup<Rpc.Rpc<"approve", Schema.Struct<{
-    runId: typeof Schema.String;
-    nodeId: typeof Schema.String;
-    iteration: Schema.optional<typeof Schema.Number>;
-    note: Schema.optional<typeof Schema.String>;
-    decidedBy: Schema.optional<typeof Schema.String>;
-}>, Schema.Struct<{
-    runId: typeof Schema.String;
-    nodeId: typeof Schema.String;
-    iteration: typeof Schema.Number;
-    approved: typeof Schema.Boolean;
-}>, typeof Schema.Never, never> | Rpc.Rpc<"cancel", Schema.Struct<{
-    runId: typeof Schema.String;
-}>, Schema.Struct<{
-    runId: typeof Schema.String;
-    status: Schema.Literal<["cancelling", "cancelled"]>;
-}>, typeof Schema.Never, never> | Rpc.Rpc<"signal", Schema.Struct<{
-    runId: typeof Schema.String;
-    signalName: typeof Schema.String;
-    data: Schema.optional<typeof Schema.Unknown>;
-    correlationId: Schema.optional<typeof Schema.String>;
-    sentBy: Schema.optional<typeof Schema.String>;
-}>, Schema.Struct<{
-    runId: typeof Schema.String;
-    signalName: typeof Schema.String;
-    delivered: typeof Schema.Boolean;
-    status: Schema.Literal<["signalled", "ignored"]>;
-}>, typeof Schema.Never, never> | Rpc.Rpc<"listRuns", Schema.Struct<{
-    limit: Schema.optional<typeof Schema.Number>;
-    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>>;
-}>, Schema.Array$<Schema.Struct<{
-    runId: typeof Schema.String;
-    parentRunId: Schema.NullOr<typeof Schema.String>;
-    workflowName: typeof Schema.String;
-    workflowPath: Schema.NullOr<typeof Schema.String>;
-    workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
-    createdAtMs: typeof Schema.Number;
-    startedAtMs: Schema.NullOr<typeof Schema.Number>;
-    finishedAtMs: Schema.NullOr<typeof Schema.Number>;
-    heartbeatAtMs: Schema.NullOr<typeof Schema.Number>;
-    runtimeOwnerId: Schema.NullOr<typeof Schema.String>;
-    cancelRequestedAtMs: Schema.NullOr<typeof Schema.Number>;
-    hijackRequestedAtMs: Schema.NullOr<typeof Schema.Number>;
-    hijackTarget: Schema.NullOr<typeof Schema.String>;
-    vcsType: Schema.NullOr<typeof Schema.String>;
-    vcsRoot: Schema.NullOr<typeof Schema.String>;
-    vcsRevision: Schema.NullOr<typeof Schema.String>;
-    errorJson: Schema.NullOr<typeof Schema.String>;
-    configJson: Schema.NullOr<typeof Schema.String>;
-}>>, typeof Schema.Never, never> | Rpc.Rpc<"getRun", Schema.Struct<{
-    runId: typeof Schema.String;
-}>, Schema.NullOr<Schema.Struct<{
-    runId: typeof Schema.String;
-    parentRunId: Schema.NullOr<typeof Schema.String>;
-    workflowName: typeof Schema.String;
-    workflowPath: Schema.NullOr<typeof Schema.String>;
-    workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
-    createdAtMs: typeof Schema.Number;
-    startedAtMs: Schema.NullOr<typeof Schema.Number>;
-    finishedAtMs: Schema.NullOr<typeof Schema.Number>;
-    heartbeatAtMs: Schema.NullOr<typeof Schema.Number>;
-    runtimeOwnerId: Schema.NullOr<typeof Schema.String>;
-    cancelRequestedAtMs: Schema.NullOr<typeof Schema.Number>;
-    hijackRequestedAtMs: Schema.NullOr<typeof Schema.Number>;
-    hijackTarget: Schema.NullOr<typeof Schema.String>;
-    vcsType: Schema.NullOr<typeof Schema.String>;
-    vcsRoot: Schema.NullOr<typeof Schema.String>;
-    vcsRevision: Schema.NullOr<typeof Schema.String>;
-    errorJson: Schema.NullOr<typeof Schema.String>;
-    configJson: Schema.NullOr<typeof Schema.String>;
-}>>, typeof Schema.Never, never>>;
+declare const approve: any;
+declare const cancel: any;
+declare const signal: any;
+declare const listRuns: any;
+declare const getRun: any;
+declare const SmithersRpcGroup: any;
 type ApprovalPayload = ApprovalPayload$1;
 type ApprovalResult = ApprovalResult$1;
 type CancelPayload = CancelPayload$1;
@@ -1688,13 +1480,13 @@ type RunSummary = RunSummary$1;
 type SignalPayload = SignalPayload$1;
 type SignalResult = SignalResult$1;
 
-declare function canExecuteBridgeManagedStaticTask(desc: TaskDescriptor, cacheEnabled: boolean): boolean;
-declare function executeStaticTaskBridge(adapter: SmithersDb, runId: string, desc: TaskDescriptor, eventBus: EventBus, toolConfig: StaticTaskBridgeToolConfig, workflowName: string, signal?: AbortSignal): Promise<void>;
-type SmithersDb = _smithers_db_adapter.SmithersDb;
+declare function canExecuteBridgeManagedStaticTask(desc: _TaskDescriptor, cacheEnabled: boolean): boolean;
+declare function executeStaticTaskBridge(adapter: _SmithersDb, runId: string, desc: _TaskDescriptor, eventBus: EventBus, toolConfig: StaticTaskBridgeToolConfig, workflowName: string, signal?: AbortSignal): Promise<void>;
+type _SmithersDb = _smithers_db_adapter.SmithersDb;
 type StaticTaskBridgeToolConfig = {
     rootDir: string;
 };
-type TaskDescriptor = _smithers_graph_TaskDescriptor.TaskDescriptor;
+type _TaskDescriptor = _smithers_graph_TaskDescriptor.TaskDescriptor;
 
 type WorkflowPatchDecisions$1 = Record<string, boolean>;
 
@@ -1780,11 +1572,11 @@ declare function resolveSchema(db: {
 /**
  * @template Schema
  * @param {SmithersWorkflow<Schema>} workflow
- * @param {any} ctx
+ * @param {SmithersCtx<unknown>} ctx
  * @param {{ baseRootDir?: string; workflowPath?: string | null }} [opts]
  * @returns {Effect.Effect<GraphSnapshot, SmithersError>}
  */
-declare function renderFrame<Schema>(workflow: SmithersWorkflow<Schema>, ctx: any, opts?: {
+declare function renderFrame<Schema>(workflow: SmithersWorkflow<Schema>, ctx: SmithersCtx<unknown>, opts?: {
     baseRootDir?: string;
     workflowPath?: string | null;
 }): Effect.Effect<GraphSnapshot, SmithersError>;
@@ -1802,4 +1594,4 @@ type SmithersWorkflow = any;
 
 type ChildWorkflowDefinition = ChildWorkflowDefinition$1;
 
-export { type AlertHumanRequestOptions, AlertRuntime, type AlertRuntimeServices, type AnySchema, type ApprovalOptions, type ApprovalPayload, ApprovalPayloadSchema, type ApprovalResult, ApprovalResultSchema, type BridgeManagedTaskKind, type BuilderNode, type BuilderStepContext, type BuilderStepHandle, type CancelPayload, CancelPayloadSchema, type CancelResult, CancelResultSchema, type ChildWorkflowDefinition, type ChildWorkflowExecuteOptions, CodeplaneSandboxExecutorLive, type ComputeTaskBridgeToolConfig, type ContinuationRequest, type CorrelatedSmithersEvent, type CorrelationContext, type DiffBundle, DockerSandboxExecutorLive, EventBus, type ExecuteTaskActivityOptions, type FilePatch, type GetRunPayload, GetRunPayloadSchema, type GetRunResult, GetRunResultSchema, HUMAN_REQUEST_KINDS, HUMAN_REQUEST_STATUSES, type HijackState, type HotReloadEvent, HotWorkflowController, type HumanRequestKind, type HumanRequestSchemaValidation, type HumanRequestStatus, type JsonSchema, type LegacyExecuteTaskFn, type ListRunsPayload, ListRunsPayloadSchema, type OverlayOptions, type PlanNode, type RalphMeta, type RalphState, type RalphStateMap, type ReadonlyTaskStateMap, RetriableTaskFailure, type RetryPolicy, type RetryWaitMap, type RunResult$2 as RunResult, RunStatusSchema, type RunSummary, RunSummarySchema, SandboxHttpRunner, type ScheduleResult, type ScheduleSnapshot, type SignalPayload, SignalPayloadSchema, type SignalResult, SignalResultSchema, type SignalRunOptions, Smithers, type SmithersAlertPolicy, type SmithersEvent, SmithersRpcGroup, type SmithersSqliteOptions, SqlMessageStorage, type StaticTaskBridgeToolConfig, type TaskActivityRetryOptions, type TaskBridgeToolConfig, type TaskRecord, TaskResult, type TaskState, type TaskStateMap, TaskWorkerEntity, WatchTree, type WatchTreeOptions, WorkerDispatchKind, WorkerTask$1 as WorkerTask, WorkerTaskKind, type WorkflowPatchDecisionRecord, type WorkflowPatchDecisions, type WorkflowVersioningRuntime, type WorkflowVersioningRuntimeOptions, type XmlNode, applyDiffBundle, approve, approveNode, awaitApprovalDurableDeferred, awaitWaitForEventDurableDeferred, bridgeApprovalResolve, bridgeSignalResolve, bridgeWaitForEventResolve, buildHumanRequestId, buildOverlay, buildPlanTree, canExecuteBridgeManagedComputeTask, canExecuteBridgeManagedStaticTask, cancel, cancelPendingTimersBridge, cleanupGenerations, computeDiffBundle, computeDiffBundleBetweenRefs, createSchedulerWakeQueue, createWorkflowVersioningRuntime, denyNode, dispatchWorkerTask, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, executeChildWorkflow, executeComputeTaskBridge, executeStaticTaskBridge, executeTaskActivity, executeTaskBridge, executeTaskBridgeEffect, getDefinedToolMetadata, getHumanTaskPrompt, getRun, getSqlMessageStorage, getWorkflowMakeBridgeRuntime, getWorkflowPatchDecisions, getWorkflowVersioningRuntime, isBridgeManagedTimerTask, isBridgeManagedWaitForEventTask, isHumanRequestPastTimeout, isHumanTaskMeta, isPidAlive, isRunHeartbeatFresh, isTaskResultFailure, jsonSchemaToZod, listRuns, makeAbortError, makeApprovalDurableDeferred, makeDurableDeferredBridgeExecutionId, makeTaskActivity, makeTaskBridgeKey, makeWaitForEventDurableDeferred, makeWorkerTask, parseAttemptMetaJson, parseRuntimeOwnerPid, renderFrame, resolveDeferredTaskStateBridge, resolveOverlayEntry, resolveSchema, runWorkflow, runWorkflowWithMakeBridge, scheduleTasks, signal, signalRun, subscribeTaskWorkerDispatches, usePatched, validateHumanRequestValue, wireAbortSignal, withWorkflowMakeBridgeRuntime, withWorkflowVersioningRuntime };
+export { type AlertHumanRequestOptions, AlertRuntime, type AlertRuntimeServices, type AnySchema, type ApprovalOptions, type ApprovalPayload, ApprovalPayloadSchema, type ApprovalResult, ApprovalResultSchema, type BridgeManagedTaskKind, type BuilderNode, type BuilderStepContext, type BuilderStepHandle, type CancelPayload, CancelPayloadSchema, type CancelResult, CancelResultSchema, type ChildWorkflowDefinition, type ChildWorkflowExecuteOptions, CodeplaneSandboxExecutorLive, type ComputeTaskBridgeToolConfig, type ContinuationRequest, type CorrelatedSmithersEvent, type CorrelationContext, type DiffBundle, DockerSandboxExecutorLive, EventBus, type ExecuteTaskActivityOptions, type FilePatch, type GetRunPayload, GetRunPayloadSchema, type GetRunResult, GetRunResultSchema, HUMAN_REQUEST_KINDS, HUMAN_REQUEST_STATUSES, type HijackState, type HotReloadEvent, HotWorkflowController, type HumanRequestKind, type HumanRequestSchemaValidation, type HumanRequestStatus, type JsonSchema, type LegacyExecuteTaskFn, type ListRunsPayload, ListRunsPayloadSchema, type OverlayOptions, type PlanNode, type RalphMeta, type RalphState, type RalphStateMap, type ReadonlyTaskStateMap, RetriableTaskFailure, type RetryPolicy, type RetryWaitMap, type RunResult$2 as RunResult, RunStatusSchema, type RunSummary, RunSummarySchema, type SQLiteTable, SandboxHttpRunner, type ScheduleResult, type ScheduleSnapshot, type SignalPayload, SignalPayloadSchema, type SignalResult, SignalResultSchema, type SignalRunOptions, Smithers, type SmithersAlertPolicy, type SmithersEvent, SmithersRpcGroup, type SmithersSqliteOptions, SqlMessageStorage, type StaticTaskBridgeToolConfig, type TaskActivityContext, type TaskActivityRetryOptions, type TaskBridgeToolConfig, type TaskRecord, TaskResult, type TaskState, type TaskStateMap, TaskWorkerEntity, WatchTree, type WatchTreeOptions, WorkerDispatchKind, WorkerTask$1 as WorkerTask, WorkerTaskKind, type WorkflowPatchDecisionRecord, type WorkflowPatchDecisions, type WorkflowVersioningRuntime, type WorkflowVersioningRuntimeOptions, type XmlNode, type _TaskActivityContext, applyDiffBundle, approve, approveNode, awaitApprovalDurableDeferred, awaitWaitForEventDurableDeferred, bridgeApprovalResolve, bridgeSignalResolve, bridgeWaitForEventResolve, buildHumanRequestId, buildOverlay, buildPlanTree, canExecuteBridgeManagedComputeTask, canExecuteBridgeManagedStaticTask, cancel, cancelPendingTimersBridge, cleanupGenerations, computeDiffBundle, computeDiffBundleBetweenRefs, createSchedulerWakeQueue, createWorkflowVersioningRuntime, denyNode, dispatchWorkerTask, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, executeChildWorkflow, executeComputeTaskBridge, executeStaticTaskBridge, executeTaskActivity, executeTaskBridge, executeTaskBridgeEffect, getDefinedToolMetadata, getHumanTaskPrompt, getRun, getSqlMessageStorage, getWorkflowMakeBridgeRuntime, getWorkflowPatchDecisions, getWorkflowVersioningRuntime, isBridgeManagedTimerTask, isBridgeManagedWaitForEventTask, isHumanRequestPastTimeout, isHumanTaskMeta, isPidAlive, isRunHeartbeatFresh, isTaskResultFailure, jsonSchemaToZod, listRuns, makeAbortError, makeApprovalDurableDeferred, makeDurableDeferredBridgeExecutionId, makeTaskActivity, makeTaskBridgeKey, makeWaitForEventDurableDeferred, makeWorkerTask, parseAttemptMetaJson, parseRuntimeOwnerPid, renderFrame, resolveDeferredTaskStateBridge, resolveOverlayEntry, resolveSchema, runWorkflow, runWorkflowWithMakeBridge, scheduleTasks, signal, signalRun, subscribeTaskWorkerDispatches, usePatched, validateHumanRequestValue, wireAbortSignal, withWorkflowMakeBridgeRuntime, withWorkflowVersioningRuntime };

@@ -11,9 +11,9 @@ import { dispatchWorkerTask } from "./single-runner.js";
 /** @typedef {import("../HijackState.ts").HijackState} HijackState */
 /** @typedef {import("./LegacyExecuteTaskFn.ts").LegacyExecuteTaskFn} LegacyExecuteTaskFn */
 /** @typedef {import("./TaskBridgeToolConfig.ts").TaskBridgeToolConfig} TaskBridgeToolConfig */
-/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
-/** @typedef {import("./TaskActivityContext.ts").TaskActivityContext} TaskActivityContext */
-/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} BunSQLiteDatabase */
+/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
+/** @typedef {import("./TaskActivityContext.ts").TaskActivityContext} _TaskActivityContext */
+/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} _BunSQLiteDatabase */
 /** @typedef {import("drizzle-orm/sqlite-core").SQLiteTable} SQLiteTable */
 /**
  * @typedef {"compute" | "static" | "legacy"} BridgeManagedTaskKind
@@ -80,8 +80,8 @@ function isRetryableBridgeTaskFailure(attempt) {
 /**
  * @param {SmithersDb} adapter
  * @param {string} runId
- * @param {TaskDescriptor} desc
- * @param {TaskActivityContext} context
+ * @param {_TaskDescriptor} desc
+ * @param {_TaskActivityContext} context
  */
 const classifyTaskAttempt = async (adapter, runId, desc, context) => {
     const attempts = await runEffectOrPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
@@ -104,7 +104,7 @@ const classifyTaskAttempt = async (adapter, runId, desc, context) => {
 /**
  * @param {SmithersDb} adapter
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  */
 const getNextTaskActivityAttempt = async (adapter, runId, desc) => {
     const attempts = await runEffectOrPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
@@ -113,17 +113,17 @@ const getNextTaskActivityAttempt = async (adapter, runId, desc) => {
 };
 /**
  * @param {SmithersDb} adapter
- * @param {BunSQLiteDatabase} db
+ * @param {_BunSQLiteDatabase} db
  * @param {string} runId
- * @param {TaskDescriptor} desc
- * @param {Map<string, TaskDescriptor>} descriptorMap
+ * @param {_TaskDescriptor} desc
+ * @param {Map<string, _TaskDescriptor>} descriptorMap
  * @param {SQLiteTable} inputTable
  * @param {EventBus} eventBus
  * @param {TaskBridgeToolConfig} toolConfig
  * @param {string} workflowName
  * @param {boolean} cacheEnabled
  * @param {BridgeManagedTaskKind} bridgeManagedExecution
- * @param {TaskActivityContext} context
+ * @param {_TaskActivityContext} context
  * @param {AbortSignal} [signal]
  * @param {Set<string>} [disabledAgents]
  * @param {AbortController} [runAbortController]
@@ -144,10 +144,10 @@ const executeBridgeAttempt = async (adapter, db, runId, desc, descriptorMap, inp
 };
 /**
  * @param {SmithersDb} adapter
- * @param {BunSQLiteDatabase} db
+ * @param {_BunSQLiteDatabase} db
  * @param {string} runId
- * @param {TaskDescriptor} desc
- * @param {Map<string, TaskDescriptor>} descriptorMap
+ * @param {_TaskDescriptor} desc
+ * @param {Map<string, _TaskDescriptor>} descriptorMap
  * @param {SQLiteTable} inputTable
  * @param {EventBus} eventBus
  * @param {TaskBridgeToolConfig} toolConfig
@@ -181,10 +181,10 @@ const runTaskBridgeExecution = async (adapter, db, runId, desc, descriptorMap, i
 };
 /**
  * @param {SmithersDb} adapter
- * @param {BunSQLiteDatabase} db
+ * @param {_BunSQLiteDatabase} db
  * @param {string} runId
- * @param {TaskDescriptor} desc
- * @param {Map<string, TaskDescriptor>} descriptorMap
+ * @param {_TaskDescriptor} desc
+ * @param {Map<string, _TaskDescriptor>} descriptorMap
  * @param {SQLiteTable} inputTable
  * @param {EventBus} eventBus
  * @param {TaskBridgeToolConfig} toolConfig
@@ -238,10 +238,10 @@ export const executeTaskBridge = (adapter, db, runId, desc, descriptorMap, input
 };
 /**
  * @param {SmithersDb} adapter
- * @param {BunSQLiteDatabase} db
+ * @param {_BunSQLiteDatabase} db
  * @param {string} runId
- * @param {TaskDescriptor} desc
- * @param {Map<string, TaskDescriptor>} descriptorMap
+ * @param {_TaskDescriptor} desc
+ * @param {Map<string, _TaskDescriptor>} descriptorMap
  * @param {SQLiteTable} inputTable
  * @param {EventBus} eventBus
  * @param {TaskBridgeToolConfig} toolConfig

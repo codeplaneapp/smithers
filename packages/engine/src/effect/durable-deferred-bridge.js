@@ -11,7 +11,7 @@ import { updateAsyncExternalWaitPending } from "@smithers/observability/metrics"
 /**
  * @typedef {{ _tag: "Complete"; exit: Exit.Exit<any, any>; } | { _tag: "Pending"; }} BridgeDeferredResult
  */
-/** @typedef {import("@smithers/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smithers/db/adapter").SmithersDb} _SmithersDb */
 /**
  * @typedef {{ signalName: string; correlationId: string | null; payloadJson: string; seq: number; receivedAtMs: number; }} WaitForEventSignalInput
  */
@@ -25,7 +25,7 @@ export const DurableDeferredBridgeWorkflow = Workflow.make({
 const adapterNamespaces = new WeakMap();
 let nextAdapterNamespace = 0;
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @returns {string}
  */
 const getAdapterNamespace = (adapter) => {
@@ -136,7 +136,7 @@ function buildResolvedWaitForEventMetaJson(snapshot, signal) {
     });
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
  * @param {string} nodeId
  * @param {number} iteration
@@ -181,7 +181,7 @@ const resolveBridgeDeferred = async (executionId, _deferred, exit) => {
     deferredResolutions.set(executionId, exit);
 };
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
  * @param {string} nodeId
  * @param {number} iteration
@@ -207,21 +207,21 @@ export const makeWaitForEventDurableDeferred = (nodeId) => DurableDeferred.make(
     success: waitForEventDurableDeferredSuccessSchema,
 });
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
  * @param {string} nodeId
  * @param {number} iteration
  */
 export const awaitApprovalDurableDeferred = (adapter, runId, nodeId, iteration) => awaitBridgeDeferred(makeDurableDeferredBridgeExecutionId(adapter, runId, nodeId, iteration), makeApprovalDurableDeferred(nodeId));
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
  * @param {string} nodeId
  * @param {number} iteration
  */
 export const awaitWaitForEventDurableDeferred = (adapter, runId, nodeId, iteration) => awaitBridgeDeferred(makeDurableDeferredBridgeExecutionId(adapter, runId, nodeId, iteration), makeWaitForEventDurableDeferred(nodeId));
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
  * @param {string} nodeId
  * @param {number} iteration
@@ -237,7 +237,7 @@ export const bridgeApprovalResolve = async (adapter, runId, nodeId, iteration, r
     }));
 };
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
  * @param {string} nodeId
  * @param {number} iteration
@@ -254,7 +254,7 @@ export const bridgeWaitForEventResolve = async (adapter, runId, nodeId, iteratio
     }));
 };
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
  * @param {WaitForEventSignalInput} signal
  */

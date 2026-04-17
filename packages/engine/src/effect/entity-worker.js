@@ -12,7 +12,7 @@
 import * as Entity from "@effect/cluster/Entity";
 import * as Rpc from "@effect/rpc/Rpc";
 import { Schema } from "effect";
-/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 
 export const WorkerTaskKind = Schema.Literal("agent", "compute", "static");
 export const WorkerDispatchKind = Schema.Literal("compute", "static", "legacy");
@@ -105,7 +105,7 @@ export const TaskWorkerEntity = Entity.make("TaskWorker", [
     }),
 ]);
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @returns {WorkerTaskKind}
  */
 function getWorkerTaskKind(desc) {
@@ -121,7 +121,7 @@ function getWorkerTaskKind(desc) {
  * @param {string} bridgeKey
  * @param {string} workflowName
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {WorkerDispatchKind} dispatchKind
  * @returns {WorkerTask}
  */

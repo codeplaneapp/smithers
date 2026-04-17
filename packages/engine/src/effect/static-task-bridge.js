@@ -10,11 +10,11 @@ import { SmithersError } from "@smithers/errors/SmithersError";
 import { nowMs } from "@smithers/scheduler/nowMs";
 import { getJjPointer } from "@smithers/vcs/jj";
 import * as BunContext from "@effect/platform-bun/BunContext";
-/** @typedef {import("@smithers/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smithers/db/adapter").SmithersDb} _SmithersDb */
 /**
  * @typedef {{ rootDir: string; }} StaticTaskBridgeToolConfig
  */
-/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 
 /**
  * @param {unknown} err
@@ -36,7 +36,7 @@ function isAbortError(err) {
     return false;
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {boolean} cacheEnabled
  * @returns {boolean}
  */
@@ -53,9 +53,9 @@ export const canExecuteBridgeManagedStaticTask = (desc, cacheEnabled) => {
     return !desc.scorers || Object.keys(desc.scorers).length === 0;
 };
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {EventBus} eventBus
  * @param {StaticTaskBridgeToolConfig} toolConfig
  * @param {string} workflowName

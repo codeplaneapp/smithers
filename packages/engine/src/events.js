@@ -11,7 +11,7 @@ import { correlationContextToLogAnnotations, getCurrentCorrelationContext, merge
  * @typedef {SmithersEvent & { correlation?: CorrelationContext; }} CorrelatedSmithersEvent
  */
 /** @typedef {import("@smithers/observability/SmithersEvent").SmithersEvent} SmithersEvent */
-/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} BunSQLiteDatabase */
+/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} _BunSQLiteDatabase */
 
 export class EventBus extends EventEmitter {
     seq = 0;

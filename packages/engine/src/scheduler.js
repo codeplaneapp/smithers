@@ -11,7 +11,7 @@
 /** @typedef {import("@smithers/scheduler").TaskRecord} TaskRecord */
 /** @typedef {import("@smithers/scheduler").TaskState} TaskState */
 /** @typedef {import("@smithers/scheduler").TaskStateMap} TaskStateMap */
-/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 /** @typedef {import("@smithers/graph/XmlNode").XmlNode} XmlNode */
 // @smithers-type-exports-end
 
@@ -26,6 +26,6 @@ export { cloneTaskStateMap, isTerminalState, parseStateKey, } from "@smithers/sc
 export const buildPlanTree = coreBuildPlanTree;
 
 /**
- * @type {(plan: PlanNode | null, states: TaskStateMap, descriptors: Map<string, TaskDescriptor>, ralphState: RalphStateMap, retryWait: Map<string, number>, nowMs: number) => ScheduleResult}
+ * @type {(plan: PlanNode | null, states: TaskStateMap, descriptors: Map<string, _TaskDescriptor>, ralphState: RalphStateMap, retryWait: Map<string, number>, nowMs: number) => ScheduleResult}
  */
 export const scheduleTasks = coreScheduleTasks;

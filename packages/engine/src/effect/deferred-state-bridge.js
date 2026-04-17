@@ -20,9 +20,9 @@ import { nowMs } from "@smithers/scheduler/nowMs";
 /**
  * @typedef {(state: "pending" | "failed" | "skipped") => Promise<void>} DeferredBridgeStateEmitter
  */
-/** @typedef {import("@smithers/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smithers/db/adapter").SmithersDb} _SmithersDb */
 /** @typedef {import("@smithers/db/adapter/ApprovalRow").ApprovalRow} ApprovalRow */
-/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} BunSQLiteDatabase */
 
 const timerDurationMultipliers = {
@@ -50,7 +50,7 @@ function shouldClearAsyncWaitMetric(snapshot) {
         !Number.isFinite(Number(snapshot.resolvedSignalSeq)));
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  */
 function buildApprovalRequestJson(desc) {
     return JSON.stringify({
@@ -67,7 +67,7 @@ function buildApprovalRequestJson(desc) {
     });
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @returns {string | null}
  */
 function buildHumanRequestSchemaJson(desc) {
@@ -121,9 +121,9 @@ function getHumanTaskPrompt(meta, fallback) {
         : getStoredHumanTaskPrompt(meta, fallback);
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {number} requestedAtMs
  */
 async function ensurePendingHumanRequest(adapter, runId, desc, requestedAtMs) {
@@ -173,9 +173,9 @@ function parseAttemptErrorCode(errorJson) {
     }
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  */
 async function reconcileHumanRequestValidationFailure(adapter, runId, desc) {
     if (!isHumanTaskMeta(desc.meta)) {
@@ -207,7 +207,7 @@ async function reconcileHumanRequestValidationFailure(adapter, runId, desc) {
     };
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  */
 function defaultAutoApprovalDecision(desc) {
     if (desc.approvalMode === "select") {
@@ -221,9 +221,9 @@ function defaultAutoApprovalDecision(desc) {
     return null;
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  */
 async function shouldAutoApprove(adapter, runId, desc) {
     const config = desc.approvalAutoApprove;
@@ -267,21 +267,21 @@ async function shouldAutoApprove(adapter, runId, desc) {
     return false;
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @returns {boolean}
  */
 export function isBridgeManagedTimerTask(desc) {
     return Boolean(desc.meta && desc.meta.__timer);
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @returns {boolean}
  */
 export function isBridgeManagedWaitForEventTask(desc) {
     return Boolean(desc.meta && desc.meta.__waitForEvent);
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @returns {TimerType}
  */
 function parseTimerType(desc) {
@@ -289,7 +289,7 @@ function parseTimerType(desc) {
     return raw === "absolute" ? "absolute" : "duration";
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @returns {string}
  */
 function parseWaitForEventSignalName(desc) {
@@ -300,7 +300,7 @@ function parseWaitForEventSignalName(desc) {
     return signalName;
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @returns {string | undefined}
  */
 function parseWaitForEventCorrelationId(desc) {
@@ -308,7 +308,7 @@ function parseWaitForEventCorrelationId(desc) {
     return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : undefined;
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @returns {WaitForEventOnTimeout}
  */
 function parseWaitForEventOnTimeout(desc) {
@@ -327,7 +327,7 @@ function parseOptionalFiniteNumber(value) {
     return Number.isFinite(parsed) ? parsed : undefined;
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {number} startedAtMs
  * @returns {WaitForEventSnapshot}
  */
@@ -441,7 +441,7 @@ function parseTimerUntilMs(raw, nodeId) {
     return Math.floor(parsed);
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {number} createdAtMs
  * @returns {TimerSnapshot}
  */
@@ -527,7 +527,7 @@ function buildTimerAttemptMeta(snapshot) {
     };
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {string} runId
  * @param {unknown} payload
  * @returns {Record<string, unknown>}
@@ -551,9 +551,9 @@ function validateDeferredOutputPayload(desc, runId, payload) {
     return validation.data;
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {EventBus} eventBus
  * @returns {Promise<DeferredBridgeResolution>}
  */
@@ -740,9 +740,9 @@ async function resolveTimerTaskStateBridge(adapter, runId, desc, eventBus) {
     return { handled: false };
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {number} attemptNo
  * @param {unknown} error
  * @param {WaitForEventSnapshot} snapshot
@@ -777,9 +777,9 @@ async function failWaitForEventTaskBridge(adapter, runId, desc, attemptNo, error
     return { handled: true, state: "failed" };
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {number} attemptNo
  * @param {unknown} payload
  * @param {WaitForEventSnapshot} snapshot
@@ -813,9 +813,9 @@ async function finishWaitForEventTaskBridge(adapter, runId, desc, attemptNo, pay
     return { handled: true, state: "finished" };
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {number} attemptNo
  * @param {WaitForEventSnapshot} snapshot
  * @param {DeferredBridgeStateEmitter} [emitStateEvent]
@@ -868,9 +868,9 @@ async function resolveWaitForEventTimeoutBridge(adapter, runId, desc, attemptNo,
     }), timeoutSnapshot, emitStateEvent);
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {WaitForEventSnapshot} snapshot
  * @param {number} [startedAtMs]
  */
@@ -893,9 +893,9 @@ async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snaps
     });
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {ApprovalRow | null | undefined} approval
  */
 async function syncApprovalDurableDeferredFromDb(adapter, runId, desc, approval) {
@@ -911,10 +911,10 @@ async function syncApprovalDurableDeferredFromDb(adapter, runId, desc, approval)
     });
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {BunSQLiteDatabase} db
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {EventBus} _eventBus
  * @param {DeferredBridgeStateEmitter} [emitStateEvent]
  * @returns {Promise<DeferredBridgeResolution>}
@@ -1090,10 +1090,10 @@ async function resolveWaitForEventTaskStateBridge(adapter, db, runId, desc, _eve
     return { handled: false };
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {BunSQLiteDatabase} db
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {EventBus} eventBus
  * @param {DeferredBridgeStateEmitter} [emitStateEvent]
  * @returns {Promise<DeferredBridgeResolution>}
@@ -1273,10 +1273,10 @@ async function resolveApprovalTaskStateBridge(adapter, db, runId, desc, eventBus
     return { handled: true, state: "waiting-approval" };
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {BunSQLiteDatabase} db
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {EventBus} eventBus
  * @param {DeferredBridgeStateEmitter} [emitStateEvent]
  * @returns {Promise<DeferredBridgeResolution>}
@@ -1293,7 +1293,7 @@ export async function resolveDeferredTaskStateBridge(adapter, db, runId, desc, e
     return resolveApprovalTaskStateBridge(adapter, db, runId, desc, eventBus, emitStateEvent);
 }
 /**
- * @param {SmithersDb} adapter
+ * @param {_SmithersDb} adapter
  * @param {string} runId
  * @param {EventBus} eventBus
  * @param {string} reason

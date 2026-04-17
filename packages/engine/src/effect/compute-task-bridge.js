@@ -17,9 +17,9 @@ import * as BunContext from "@effect/platform-bun/BunContext";
 /**
  * @typedef {{ rootDir: string; }} ComputeTaskBridgeToolConfig
  */
-/** @typedef {import("@smithers/db/adapter").SmithersDb} SmithersDb */
-/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
-/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} BunSQLiteDatabase */
+/** @typedef {import("@smithers/db/adapter").SmithersDb} _SmithersDb */
+/** @typedef {import("@smithers/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
+/** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} _BunSQLiteDatabase */
 
 const TASK_HEARTBEAT_THROTTLE_MS = 500;
 const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
@@ -174,7 +174,7 @@ function isHeartbeatPayloadValidationError(err) {
         code === "HEARTBEAT_PAYLOAD_TOO_LARGE");
 }
 /**
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {boolean} cacheEnabled
  * @returns {boolean}
  */
@@ -191,10 +191,10 @@ export const canExecuteBridgeManagedComputeTask = (desc, cacheEnabled) => {
     return !desc.scorers || Object.keys(desc.scorers).length === 0;
 };
 /**
- * @param {SmithersDb} adapter
- * @param {BunSQLiteDatabase} db
+ * @param {_SmithersDb} adapter
+ * @param {_BunSQLiteDatabase} db
  * @param {string} runId
- * @param {TaskDescriptor} desc
+ * @param {_TaskDescriptor} desc
  * @param {EventBus} eventBus
  * @param {ComputeTaskBridgeToolConfig} toolConfig
  * @param {string} workflowName
