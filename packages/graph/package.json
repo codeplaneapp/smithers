@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/graph",
-  "version": "0.16.1",
+  "version": "0.16.2",
   "description": "Framework-neutral Smithers workflow graph model and extraction helpers",
   "type": "module",
   "sideEffects": false,
