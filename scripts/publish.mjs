@@ -62,6 +62,17 @@ if (!SKIP_BUILD) {
   log("build", "skipped (--skip-build)");
 }
 
+if (!DRY_RUN) {
+  log("auth", "checking npm login");
+  const who = spawnSync("npm", ["whoami"], { cwd: root, encoding: "utf8" });
+  if (who.status === 0) {
+    console.log(`  logged in as ${who.stdout.trim()}`);
+  } else {
+    console.log("  not logged in — running `npm login`");
+    run("npm login");
+  }
+}
+
 const otpFlag = OTP ? ` --otp=${OTP}` : "";
 if (DRY_RUN) {
   log("publish", `DRY RUN — would run: pnpm -r publish --access public --no-git-checks${otpFlag}`);
