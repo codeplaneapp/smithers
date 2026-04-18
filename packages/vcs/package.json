@@ -27,11 +27,11 @@
   "dependencies": {
     "@effect/platform": "^0.96.0",
     "@smithers-orchestrator/observability": "workspace:*",
-    "effect": "^3.21.0"
+    "effect": "^3.21.1"
   },
   "devDependencies": {
     "@effect/platform-bun": "^0.89.0",
     "@types/bun": "latest",
-    "typescript": "~5.9.3"
+    "typescript": "~6.0.3"
   }
 }

@@ -25,11 +25,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "effect": "^3.21.0",
+    "effect": "^3.21.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "~5.9.3"
+    "typescript": "~6.0.3"
   }
 }

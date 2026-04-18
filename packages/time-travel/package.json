@@ -58,11 +58,11 @@
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
-    "drizzle-orm": "^0.45.1",
+    "drizzle-orm": "^0.45.2",
     "picocolors": "^1.1.1"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "~5.9.3"
+    "typescript": "~6.0.3"
   }
 }

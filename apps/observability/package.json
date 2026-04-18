@@ -30,15 +30,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@effect/opentelemetry": "^0.63.0",
+    "@effect/platform": "^0.96.0",
+    "@effect/platform-bun": "^0.89.0",
     "@smithers-orchestrator/agents": "workspace:*",
     "@smithers-orchestrator/driver": "workspace:*",
-    "effect": "^3.21.0",
-    "@effect/opentelemetry": "^0.61.0",
-    "@effect/platform": "^0.96.0",
-    "@effect/platform-bun": "^0.89.0"
+    "effect": "^3.21.1"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "~5.9.3"
+    "typescript": "~6.0.3"
   }
 }

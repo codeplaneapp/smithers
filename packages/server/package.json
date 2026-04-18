@@ -35,12 +35,12 @@
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
     "cron-parser": "^5.5.0",
-    "effect": "^3.21.0",
-    "hono": "^4.12.8",
-    "ws": "^8.18.0"
+    "effect": "^3.21.1",
+    "hono": "^4.12.14",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "~5.9.3"
+    "typescript": "~6.0.3"
   }
 }
