@@ -29,12 +29,17 @@
   "files": [
     "src/"
   ],
+  "bin": {
+    "smithers": "./src/bin/smithers.js"
+  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsup --dts-only"
   },
   "dependencies": {
     "@smithers-orchestrator/agents": "workspace:*",
+    "@smithers-orchestrator/cli": "workspace:*",
+    "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/driver": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
@@ -43,7 +48,6 @@
     "@smithers-orchestrator/memory": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/openapi": "workspace:*",
-    "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/react-reconciler": "workspace:*",
     "@smithers-orchestrator/sandbox": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
