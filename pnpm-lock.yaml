@@ -37,13 +37,13 @@ importers:
         version: 1.60.0
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(typescript@6.0.3)(yaml@2.8.3)
+        version: 8.5.1(typescript@5.9.3)(yaml@2.8.3)
       twitter-api-v2:
         specifier: ^1.29.0
         version: 1.29.0
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   .smithers:
     dependencies:
@@ -67,8 +67,8 @@ importers:
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.14)
       typescript:
-        specifier: 6.0.3
-        version: 6.0.3
+        specifier: 5.9.3
+        version: 5.9.3
 
   apps/cli:
     dependencies:
@@ -80,10 +80,10 @@ importers:
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.3.6)
       '@opentui/core':
         specifier: ^0.1.100
-        version: 0.1.100(stage-js@1.0.2)(typescript@6.0.3)(web-tree-sitter@0.25.10)
+        version: 0.1.100(stage-js@1.0.2)(typescript@5.9.3)(web-tree-sitter@0.25.10)
       '@opentui/react':
         specifier: ^0.1.100
-        version: 0.1.100(react-devtools-core@7.0.1)(react@19.2.5)(stage-js@1.0.2)(typescript@6.0.3)(web-tree-sitter@0.25.10)(ws@8.20.0)
+        version: 0.1.100(react-devtools-core@7.0.1)(react@19.2.5)(stage-js@1.0.2)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.20.0)
       '@smithers-orchestrator/agents':
         specifier: workspace:*
         version: link:../../packages/agents
@@ -134,8 +134,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   apps/observability:
     dependencies:
@@ -162,8 +162,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/agents:
     dependencies:
@@ -193,8 +193,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/components:
     dependencies:
@@ -245,8 +245,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/db:
     dependencies:
@@ -285,8 +285,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/devtools:
     devDependencies:
@@ -294,8 +294,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/driver:
     dependencies:
@@ -325,8 +325,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/engine:
     dependencies:
@@ -386,8 +386,8 @@ importers:
         specifier: ^19.2.5
         version: 19.2.5
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/errors:
     dependencies:
@@ -399,8 +399,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/graph:
     dependencies:
@@ -415,8 +415,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/memory:
     dependencies:
@@ -449,8 +449,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/openapi:
     dependencies:
@@ -474,8 +474,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/protocol:
     dependencies:
@@ -490,8 +490,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/react-reconciler:
     dependencies:
@@ -521,8 +521,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/sandbox:
     dependencies:
@@ -552,8 +552,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/scheduler:
     dependencies:
@@ -571,8 +571,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/scorers:
     dependencies:
@@ -602,8 +602,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/server:
     dependencies:
@@ -651,8 +651,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/smithers:
     dependencies:
@@ -724,8 +724,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/time-travel:
     dependencies:
@@ -764,8 +764,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/vcs:
     dependencies:
@@ -786,8 +786,8 @@ importers:
         specifier: latest
         version: 1.3.12
       typescript:
-        specifier: ~6.0.3
-        version: 6.0.3
+        specifier: ~5.9.3
+        version: 5.9.3
 
 packages:
 
@@ -2633,8 +2633,8 @@ packages:
     resolution: {integrity: sha512-OZs6gsjF4vMp32qrCbiVSkrFmXtG/AZhY3t0iAMrMBiAZyV9oALtXO8hsrHbMXF9x6L3grlFuwW2oAz7cav+Gw==}
     engines: {node: '>= 0.6'}
 
-  typescript@6.0.3:
-    resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
     hasBin: true
 
@@ -3256,9 +3256,9 @@ snapshots:
   '@opentui/core-win32-x64@0.1.100':
     optional: true
 
-  '@opentui/core@0.1.100(stage-js@1.0.2)(typescript@6.0.3)(web-tree-sitter@0.25.10)':
+  '@opentui/core@0.1.100(stage-js@1.0.2)(typescript@5.9.3)(web-tree-sitter@0.25.10)':
     dependencies:
-      bun-ffi-structs: 0.1.2(typescript@6.0.3)
+      bun-ffi-structs: 0.1.2(typescript@5.9.3)
       diff: 8.0.2
       jimp: 1.6.0
       marked: 17.0.1
@@ -3279,9 +3279,9 @@ snapshots:
       - stage-js
       - typescript
 
-  '@opentui/react@0.1.100(react-devtools-core@7.0.1)(react@19.2.5)(stage-js@1.0.2)(typescript@6.0.3)(web-tree-sitter@0.25.10)(ws@8.20.0)':
+  '@opentui/react@0.1.100(react-devtools-core@7.0.1)(react@19.2.5)(stage-js@1.0.2)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.20.0)':
     dependencies:
-      '@opentui/core': 0.1.100(stage-js@1.0.2)(typescript@6.0.3)(web-tree-sitter@0.25.10)
+      '@opentui/core': 0.1.100(stage-js@1.0.2)(typescript@5.9.3)(web-tree-sitter@0.25.10)
       react: 19.2.5
       react-devtools-core: 7.0.1
       react-reconciler: 0.32.0(react@19.2.5)
@@ -3598,9 +3598,9 @@ snapshots:
       base64-js: 1.5.1
       ieee754: 1.2.1
 
-  bun-ffi-structs@0.1.2(typescript@6.0.3):
+  bun-ffi-structs@0.1.2(typescript@5.9.3):
     dependencies:
-      typescript: 6.0.3
+      typescript: 5.9.3
 
   bun-types@1.3.12:
     dependencies:
@@ -4378,7 +4378,7 @@ snapshots:
 
   ts-interface-checker@0.1.13: {}
 
-  tsup@8.5.1(typescript@6.0.3)(yaml@2.8.3):
+  tsup@8.5.1(typescript@5.9.3)(yaml@2.8.3):
     dependencies:
       bundle-require: 5.1.0(esbuild@0.27.7)
       cac: 6.7.14
@@ -4398,7 +4398,7 @@ snapshots:
       tinyglobby: 0.2.16
       tree-kill: 1.2.2
     optionalDependencies:
-      typescript: 6.0.3
+      typescript: 5.9.3
     transitivePeerDependencies:
       - jiti
       - supports-color
@@ -4413,7 +4413,7 @@ snapshots:
       media-typer: 1.1.0
       mime-types: 3.0.2
 
-  typescript@6.0.3: {}
+  typescript@5.9.3: {}
 
   ufo@1.6.3: {}
 

@@ -77,6 +77,6 @@
     "oxlint": "^1.60.0",
     "tsup": "^8.5.1",
     "twitter-api-v2": "^1.29.0",
-    "typescript": "~6.0.3"
+    "typescript": "~5.9.3"
   }
 }

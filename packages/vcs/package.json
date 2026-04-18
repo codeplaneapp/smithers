@@ -32,6 +32,6 @@
   "devDependencies": {
     "@effect/platform-bun": "^0.89.0",
     "@types/bun": "latest",
-    "typescript": "~6.0.3"
+    "typescript": "~5.9.3"
   }
 }
