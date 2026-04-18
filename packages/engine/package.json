@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@effect/platform-bun": "^0.89.0",
+    "@effect/sql-sqlite-bun": "^0.52.0",
     "@smithers-orchestrator/agents": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",

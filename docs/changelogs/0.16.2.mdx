@@ -1,0 +1,17 @@
+# 0.16.2
+
+Patch release: declare the missing `@effect/sql-sqlite-bun` runtime dependency
+in `@smithers-orchestrator/engine` so a fresh install of `smithers-orchestrator`
+can actually run the CLI.
+
+---
+
+## Fixes
+
+- **`@smithers-orchestrator/engine` now declares `@effect/sql-sqlite-bun`** as
+  a direct dependency. `src/effect/single-runner.js` imports
+  `@effect/sql-sqlite-bun/SqliteClient` but the package wasn't listed in the
+  engine's `package.json`, so a clean `pnpm install smithers-orchestrator`
+  produced an unresolvable `Cannot find module '@effect/sql-sqlite-bun/SqliteClient'`
+  as soon as anything touched the engine (including `smithers ps`). Downstream
+  consumers previously had to add the dep themselves to unblock.
