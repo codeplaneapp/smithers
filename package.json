@@ -62,6 +62,7 @@
     "cli": "bun run apps/cli/src/index.js",
     "test": "pnpm -r test",
     "docs": "cd docs && bunx mintlify dev",
+    "version": "node scripts/bump.mjs",
     "release": "node scripts/publish.mjs"
   },
   "devDependencies": {
