@@ -1,0 +1,29 @@
+# 0.16.1
+
+Patch release: ship a `smithers` bin so the package is runnable after install,
+bump every workspace dependency to latest, and make `pnpm run release`
+self-sufficient when not logged in to npm.
+
+---
+
+## New
+
+- **`smithers-orchestrator` exposes a `smithers` bin.** A new
+  `src/bin/smithers.js` entry is wired up via the package's `bin` field so
+  `npx smithers` (and `smithers` after a global install) launches the CLI
+  without needing to import `@smithers-orchestrator/cli` directly.
+
+- **`pnpm run release` auto-runs `npm login` when needed.** The release
+  script now runs `npm whoami` before publishing and only prompts for
+  `npm login` if you are not authenticated. Skipped under `--dry-run`.
+
+---
+
+## Internal / chore
+
+- **All workspace dependencies bumped to latest via `pnpm -r up --latest`.**
+  Notable bumps: `ai` 6.0.69 → 6.0.168, `diff` 5.x → 9.x, `typescript`
+  5.9 → 6.0.3 across the 23-package workspace. One known peer-dep warning
+  remains: `@opentui/core` → `bun-ffi-structs` wants `typescript@^5` but
+  the workspace now resolves `typescript@6.0.3`. Typecheck, lint, and the
+  full test suite all pass.
