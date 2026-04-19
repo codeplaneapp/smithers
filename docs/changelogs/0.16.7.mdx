@@ -1,0 +1,50 @@
+# 0.16.7
+
+Patch release: `bunx smithers-orchestrator@latest init` followed by
+`bunx smithers-orchestrator@latest workflow <name>` now actually runs a
+workflow end-to-end on a fresh machine.
+
+---
+
+## Fixes
+
+- **`smithers init` now runs `bun install` inside `.smithers/`**. Bun's
+  runtime auto-install happily fetches registry deps but silently
+  skips `github:` specifiers, so the newly-declared
+  `github:mattpocock/skills` dep stayed missing until the user ran
+  `bun install` by hand — and every workflow that imports
+  `skills/<name>/SKILL.md` (e.g. `grill-me`) blew up with `Cannot find
+  module 'skills/<name>/SKILL.md'`. `init` now shells out to
+  `bun install` in the scaffold directory after writing files (stdio
+  inherited so the install log is visible). Install failures (no
+  `bun` on PATH, non-zero exit) don't fail init — they're surfaced on
+  the returned result and the user can re-run `bun install` manually.
+  A new `smithers init --no-install` flag skips the step for CI /
+  scripted reinits.
+
+- **`@smithers-orchestrator/react-reconciler` host config now provides
+  the methods `react-reconciler@0.33` requires**. The compiled
+  reconciler reads `resolveEventTimeStamp`, `resolveEventType`,
+  `trackSchedulerEvent`, `maySuspendCommitOnUpdate`,
+  `maySuspendCommitInSyncRender`, `getSuspendedCommitReason`,
+  `requestPostPaintCallback`, and `suspendOnActiveViewTransition`
+  directly off `$$$config` with no defaults, so every commit crashed
+  with `TypeError: resolveEventTimeStamp is not a function` the moment
+  `render` triggered `startUpdateTimerByLane`. The host config now
+  supplies neutral implementations for each (no-op void, `null`, or
+  `false` as appropriate for a headless host with no native events).
+
+- **The `smithers-orchestrator` bin now delegates to a local
+  `.smithers/node_modules/.bin/smithers` when one exists**. `bunx`
+  extracts to a throwaway tmp dir and `.smithers/` has its own
+  `node_modules/`; they're separate resolution roots, so the engine
+  and reconciler loaded from bunx-tmp were setting React's hook
+  dispatcher on bunx-tmp's React singleton while workflow components
+  loaded from `.smithers/node_modules/` called `useContext` against a
+  different React singleton — classic "two copies of React" crash
+  (`dispatcher.useContext is not a function`). Moving `react` to
+  `peerDependencies` wouldn't help because there's no shared parent to
+  hoist to. Borrowing the `tsc` pattern: when invoked, the bin checks
+  for a local smithers bin in the cwd's `.smithers/node_modules/` and
+  re-execs through it. Every module the run touches — engine,
+  reconciler, components, React — now resolves from one tree.
