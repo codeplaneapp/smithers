@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { generateAgentsTs } from "./agent-detection.js";
 /**
  * @typedef {{ force?: boolean; rootDir?: string; }} InitOptions
@@ -42,17 +43,49 @@ function readPackageVersion(path, fallback) {
     }
 }
 /**
+ * Resolve `<spec>/package.json` via Node's module resolution (from this file's
+ * location) and return its `version`. Uses `import.meta.resolve` so it works
+ * whether the CLI is running from the monorepo checkout (deps under
+ * `apps/cli/node_modules/`) or installed flat under a user's project
+ * `node_modules/`. Falls back to the pin bundled at release time when the
+ * package isn't installed in the user's project (typical for devDep-only
+ * specs like `typescript` and `@types/*`).
+ *
+ * @param {string} spec
+ * @param {string} fallback
+ */
+function resolveDependencyVersion(spec, fallback) {
+    try {
+        const url = import.meta.resolve(`${spec}/package.json`);
+        return readPackageVersion(fileURLToPath(url), fallback);
+    }
+    catch {
+        return fallback;
+    }
+}
+/**
+ * Pins shipped with this release for devDep-only specs that won't be in the
+ * user's `node_modules` after `bunx smithers-orchestrator@latest init`. Bump
+ * these when updating the monorepo's root devDependencies.
+ */
+const BUNDLED_VERSION_PINS = {
+    zod: "4.3.6",
+    typescript: "5.9.3",
+    reactTypes: "19.2.14",
+    reactDomTypes: "19.2.3",
+    mdxTypes: "2.0.13",
+};
+/**
  * @returns {DependencyVersions}
  */
 function readDependencyVersions() {
-    const nodeModulesRoot = new URL("../../../node_modules/", import.meta.url).pathname;
     return {
-        smithersVersion: readPackageVersion(new URL("../../../package.json", import.meta.url).pathname, "0.0.0"),
-        zodVersion: readPackageVersion(resolve(nodeModulesRoot, "zod", "package.json"), "4.0.0"),
-        typescriptVersion: readPackageVersion(resolve(nodeModulesRoot, "typescript", "package.json"), "5.0.0"),
-        reactTypesVersion: readPackageVersion(resolve(nodeModulesRoot, "@types", "react", "package.json"), "19.0.0"),
-        reactDomTypesVersion: readPackageVersion(resolve(nodeModulesRoot, "@types", "react-dom", "package.json"), "19.0.0"),
-        mdxTypesVersion: readPackageVersion(resolve(nodeModulesRoot, "@types", "mdx", "package.json"), "2.0.0"),
+        smithersVersion: readPackageVersion(fileURLToPath(new URL("../package.json", import.meta.url)), "0.0.0"),
+        zodVersion: resolveDependencyVersion("zod", BUNDLED_VERSION_PINS.zod),
+        typescriptVersion: resolveDependencyVersion("typescript", BUNDLED_VERSION_PINS.typescript),
+        reactTypesVersion: resolveDependencyVersion("@types/react", BUNDLED_VERSION_PINS.reactTypes),
+        reactDomTypesVersion: resolveDependencyVersion("@types/react-dom", BUNDLED_VERSION_PINS.reactDomTypes),
+        mdxTypesVersion: resolveDependencyVersion("@types/mdx", BUNDLED_VERSION_PINS.mdxTypes),
     };
 }
 /**
