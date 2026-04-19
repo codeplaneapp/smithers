@@ -47,7 +47,7 @@
   "scripts": {
     "test": "bun test tests",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "tsup --dts-only"
+    "build": "bun --bun tsup --dts-only"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",

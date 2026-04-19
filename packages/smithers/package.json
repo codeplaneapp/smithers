@@ -34,7 +34,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build": "tsup --dts-only"
+    "build": "bun --bun tsup --dts-only"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -63,6 +63,7 @@
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",
     "effect": "^3.21.1",
+    "react": "^19.2.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {

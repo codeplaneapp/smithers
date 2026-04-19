@@ -20,7 +20,7 @@
     "src/"
   ],
   "scripts": {
-    "build": "tsup --dts-only",
+    "build": "bun --bun tsup --dts-only",
     "test": "bun test tests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -50,7 +50,8 @@
     "drizzle-orm": "^0.45.2",
     "effect": "^3.21.1",
     "react-dom": "^19.2.5",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "react": "^19.2.5"
   },
   "devDependencies": {
     "@types/bun": "latest",

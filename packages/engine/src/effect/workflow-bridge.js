@@ -51,6 +51,20 @@ const runEffectOrPromise = async (value) => {
     }
     return await value;
 };
+
+/**
+ * The single-runner worker bridge is currently brittle under Bun source-tree
+ * execution. When its bootstrap fails, fall back to in-process execution so
+ * local CLI runs still make forward progress.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isSingleRunnerBootstrapError(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return (message.includes("@effect/cluster/SingleRunner") ||
+        message.includes("@effect/sql-sqlite-bun/SqliteClient") ||
+        message.includes("Service not found: effect/Scope"));
+}
 /**
  * @param {string | null} [errorJson]
  * @returns {string | null}
@@ -163,7 +177,7 @@ const executeBridgeAttempt = async (adapter, db, runId, desc, descriptorMap, inp
  */
 const runTaskBridgeExecution = async (adapter, db, runId, desc, descriptorMap, inputTable, eventBus, toolConfig, workflowName, cacheEnabled, bridgeManagedExecution, bridgeKey, signal, disabledAgents, runAbortController, hijackState, legacyExecuteTaskFn) => {
     const initialAttempt = await getNextTaskActivityAttempt(adapter, runId, desc);
-    return dispatchWorkerTask(makeWorkerTask(bridgeKey, workflowName, runId, desc, bridgeManagedExecution), async () => {
+    const executeInProcess = async () => {
         try {
             await executeTaskActivity(adapter, workflowName, runId, desc, (context) => executeBridgeAttempt(adapter, db, runId, desc, descriptorMap, inputTable, eventBus, toolConfig, workflowName, cacheEnabled, bridgeManagedExecution, context, signal, disabledAgents, runAbortController, hijackState, legacyExecuteTaskFn), {
                 initialAttempt,
@@ -177,7 +191,16 @@ const runTaskBridgeExecution = async (adapter, db, runId, desc, descriptorMap, i
             }
             throw error;
         }
-    });
+    };
+    try {
+        return await dispatchWorkerTask(makeWorkerTask(bridgeKey, workflowName, runId, desc, bridgeManagedExecution), executeInProcess);
+    }
+    catch (error) {
+        if (!isSingleRunnerBootstrapError(error)) {
+            throw error;
+        }
+        return executeInProcess();
+    }
 };
 /**
  * @param {SmithersDb} adapter
