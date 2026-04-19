@@ -1,0 +1,89 @@
+# Smoke Test
+
+You are running a **release smoke test** for the `smithers-orchestrator`
+npm package. Your job is to prove that a user who has never touched
+Smithers can install it and exercise the feature set — and that every
+claim in the latest changelog entry actually holds.
+
+## Setup — always work in a brand-new folder
+
+1. Read the latest version from `package.json` in the monorepo you are
+   running in (this file you're reading). Call it `$VERSION`.
+2. Read `docs/changelogs/$VERSION.mdx` end to end. List every claim it
+   makes — fixes, features, internal notes. Each claim is a test case.
+3. Create a fresh scratch directory outside any existing project:
+   `mkdir -p $(mktemp -d)/smoketest && cd ...`.
+   Never reuse an existing folder. Never work in the monorepo itself.
+   Before doing anything else, clear the bunx cache so you're testing
+   the registry, not a stale copy: `bun pm cache rm` and
+   `rm -rf /var/folders/**/T/bunx-*smithers-orchestrator*` (macOS) or
+   `rm -rf $TMPDIR/bunx-*smithers-orchestrator*`.
+4. Run `bunx smithers-orchestrator@latest init` from the scratch
+   directory. Capture stdout/stderr.
+
+## Baseline tests — run these every time
+
+Do each, record pass/fail with evidence (exact command, exit code,
+relevant output lines):
+
+- `bunx smithers-orchestrator@latest init` succeeds on a fresh folder.
+  Confirm `.smithers/package.json` exists, `.smithers/workflows/`
+  contains workflow files, and the `install` result from init reports
+  `status: ok` (i.e. `bun install` ran inside `.smithers/`).
+- `.smithers/node_modules/skills/` exists with at least one
+  `<name>/SKILL.md` inside — proving the `github:mattpocock/skills`
+  dep was actually fetched (runtime auto-install can't do that).
+- `node_modules/.bin/smithers` in both the bunx tmp dir AND
+  `.smithers/node_modules/.bin/smithers` resolve to
+  `smithers-orchestrator/src/bin/smithers.js` (not
+  `@smithers-orchestrator/cli/src/index.js`). Use `readlink`.
+- `bunx smithers-orchestrator@latest workflow grill-me` loads without
+  crashing. It is OK if the agent call itself fails for unrelated
+  reasons (API auth, schema errors) — what matters is that you see
+  `workflowName=grill-me` and `→ grill-me:grill (attempt 1, iteration
+  0)` in the output, and that you do NOT see any of:
+  - `Cannot find module 'skills/...'`
+  - `TypeError: resolveEventTimeStamp is not a function`
+  - `TypeError: resolveEventType is not a function`
+  - `Invalid hook call. Hooks can only be called inside of the body of
+    a function component.`
+  - `dispatcher.useContext is not a function`
+  Any of those is a **regression** and the smoke test fails.
+
+## Changelog-driven tests — derive from the latest entry
+
+For every bullet under `## Fixes` or `## Features` in
+`docs/changelogs/$VERSION.mdx`, construct a minimal reproduction of the
+*original* bug and verify it no longer reproduces on `@latest`. Some
+patterns:
+
+- If the fix is about a missing dependency in a generated file, open
+  that file after init and check the dependency is present.
+- If the fix is about a crash on a specific command, run that command
+  and confirm the crash is gone.
+- If the feature is a new command or flag, run it with `--help` and
+  exercise at least one non-trivial path.
+
+Be ruthless: a changelog entry that claims "X now works" but X still
+fails is a smoke test failure, even if the rest of the suite passes.
+
+## Output
+
+Return a single JSON object matching the required output schema.
+
+- `passed`: `true` only if every baseline test AND every
+  changelog-derived test passed. Any regression → `false`.
+- `summary`: 1-3 sentences. What worked, what broke.
+- `findings`: one entry per test. `area` is a short label
+  (e.g. `init.install`, `workflow.grill-me`, `changelog.0.16.8.bin`),
+  `status` is `pass | fail | skipped`, `evidence` is the exact command
+  + the key line of output that proves the result.
+- `reproSteps`: if `passed` is `false`, a numbered list of shell
+  commands someone can paste to reproduce each failure from a clean
+  machine.
+
+REQUEST:
+{props.prompt}
+
+REQUIRED OUTPUT:
+{props.schema}
