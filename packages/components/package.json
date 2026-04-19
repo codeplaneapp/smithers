@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/components",
-  "version": "0.16.7",
+  "version": "0.16.8",
   "description": "React components for Smithers workflows",
   "type": "module",
   "sideEffects": false,
