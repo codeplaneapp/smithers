@@ -4567,6 +4567,39 @@ const cli = Cli.create({
         }
     },
 })
+    // =========================================================================
+    // smithers gui [path]
+    // Opens a directory as a workspace in the Smithers GUI macOS app.
+    // =========================================================================
+    .command("gui", {
+    description: "Open a directory as a workspace in Smithers GUI",
+    args: z.object({
+        path: z.string().optional().describe("Directory path (defaults to current working directory)"),
+    }),
+    options: z.object({
+        bundleId: z.string().default("com.smithers.SmithersGUI").describe("Smithers GUI app bundle identifier"),
+    }),
+    async run(c) {
+        const input = c.args.path ?? process.cwd();
+        const target = resolve(input);
+        if (!existsSync(target)) {
+            return c.error({ code: "PATH_NOT_FOUND", message: `Path does not exist: ${target}`, exitCode: 1 });
+        }
+        try {
+            const proc = spawn("open", ["-b", c.options.bundleId, target], {
+                stdio: "ignore",
+                detached: true,
+            });
+            proc.unref();
+            proc.on("error", () => {});
+            console.log(`Opening ${target} in Smithers GUI…`);
+            return c.ok({ opened: target, bundleId: c.options.bundleId });
+        }
+        catch (err) {
+            return c.error({ code: "GUI_LAUNCH_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+        }
+    },
+})
     .command(workflowCli)
     .command(cronCli)
     .command(agentsCli)
@@ -4584,8 +4617,31 @@ const KNOWN_COMMANDS = new Set([
     "init", "up", "supervise", "down", "ps", "logs", "events", "chat", "inspect", "node", "why", "approve", "deny",
     "cancel", "graph", "revert", "scores", "observability", "workflow", "ask", "cron",
     "replay", "diff", "fork", "timeline", "memory", "openapi", "agents", "alerts",
-    "tree", "output", "rewind",
+    "tree", "output", "rewind", "gui",
 ]);
+/**
+ * Rewrite `smithers .` or `smithers <path>` (when path looks like a directory) to `smithers gui <path>`.
+ * Matches the convention of VS Code / Cursor's `code .` shortcut for opening the current directory.
+ *
+ * @param {string[]} argv
+ * @returns {string[]}
+ */
+function rewriteGuiShortcutArgv(argv) {
+    const firstPositionalIndex = findFirstPositionalIndex(argv);
+    if (firstPositionalIndex < 0) return argv;
+    const firstPositional = argv[firstPositionalIndex];
+    if (KNOWN_COMMANDS.has(firstPositional)) return argv;
+    const isDotShortcut = firstPositional === "." || firstPositional === "..";
+    const isAbsoluteDir = firstPositional.startsWith("/") && existsSync(firstPositional);
+    const isRelativeDir = (firstPositional.startsWith("./") || firstPositional.startsWith("../")) &&
+        existsSync(resolve(firstPositional));
+    if (!isDotShortcut && !isAbsoluteDir && !isRelativeDir) return argv;
+    return [
+        ...argv.slice(0, firstPositionalIndex),
+        "gui",
+        ...argv.slice(firstPositionalIndex),
+    ];
+}
 /**
  * Resolve the --color flag to a boolean: auto → process.stdout.isTTY.
  * Honors NO_COLOR when color === "auto" to match Unix conventions.
@@ -4783,6 +4839,7 @@ function normalizeResumeOption(value) {
 async function main() {
     const rawArgv = process.argv.slice(2);
     let argv = rawArgv.map((arg) => (arg === "-v" ? "--version" : arg));
+    argv = rewriteGuiShortcutArgv(argv);
     argv = rewriteWorkflowCommandArgv(argv);
     argv = rewriteEventsJsonFlagArgv(argv);
     // Finding #3: route `--json` to command-scoped `-j` for devtools commands.
