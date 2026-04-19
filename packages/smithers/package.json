@@ -55,6 +55,7 @@
     "@smithers-orchestrator/server": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
+    "@mdx-js/esbuild": "^3.1.1",
     "ai": "^6.0.168",
     "diff": "^9.0.0",
     "zod": "^4.3.6"
