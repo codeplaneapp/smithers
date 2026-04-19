@@ -1320,6 +1320,7 @@ const revertOptions = z.object({
 });
 const initOptions = z.object({
     force: z.boolean().default(false).describe("Overwrite existing scaffold files"),
+    install: z.boolean().default(true).describe("Run `bun install` inside .smithers/ after scaffolding (--no-install to skip)"),
 });
 const workflowPathArgs = z.object({
     name: z.string().describe("Workflow ID"),
@@ -2248,7 +2249,10 @@ const cli = Cli.create({
             return c.error(opts);
         };
         try {
-            const result = initWorkflowPack({ force: c.options.force });
+            const result = initWorkflowPack({
+                force: c.options.force,
+                skipInstall: !c.options.install,
+            });
             return c.ok(result, {
                 cta: {
                     description: "Next steps:",

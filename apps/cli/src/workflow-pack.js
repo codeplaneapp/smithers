@@ -1,12 +1,16 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { generateAgentsTs } from "./agent-detection.js";
 /**
- * @typedef {{ force?: boolean; rootDir?: string; }} InitOptions
+ * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; }} InitOptions
  */
 /**
- * @typedef {{ rootDir: string; writtenFiles: string[]; skippedFiles: string[]; preservedPaths: string[]; }} InitResult
+ * @typedef {{ status: "ok" | "skipped" | "failed"; reason?: string; }} InitInstallResult
+ */
+/**
+ * @typedef {{ rootDir: string; writtenFiles: string[]; skippedFiles: string[]; preservedPaths: string[]; install: InitInstallResult; }} InitResult
  */
 /**
  * @typedef {{ command: string; description: string; }} WorkflowCta
@@ -2109,12 +2113,44 @@ export function initWorkflowPack(options = {}) {
         writeFileSync(absolutePath, file.contents, "utf8");
         writtenFiles.push(absolutePath);
     }
+    const install = runBunInstall(rootDir, options.skipInstall ?? false);
     return {
         rootDir,
         writtenFiles,
         skippedFiles,
         preservedPaths,
+        install,
     };
+}
+/**
+ * Install `.smithers/` workspace deps so git-specifier packages like
+ * `github:mattpocock/skills` — which Bun's runtime auto-install doesn't fetch —
+ * are available the first time a workflow runs. Failures here don't fail init:
+ * the scaffold is on disk, the user can always re-run `bun install` by hand.
+ *
+ * @param {string} rootDir
+ * @param {boolean} skip
+ * @returns {InitInstallResult}
+ */
+function runBunInstall(rootDir, skip) {
+    if (skip) return { status: "skipped", reason: "skip-install" };
+    const result = spawnSync("bun", ["install"], {
+        cwd: rootDir,
+        stdio: "inherit",
+    });
+    if (result.error && /** @type {NodeJS.ErrnoException} */ (result.error).code === "ENOENT") {
+        return {
+            status: "failed",
+            reason: "`bun` not found on PATH; run `bun install` inside .smithers/ manually",
+        };
+    }
+    if (result.status !== 0) {
+        return {
+            status: "failed",
+            reason: `bun install exited with status ${result.status ?? "unknown"}; run it manually inside .smithers/`,
+        };
+    }
+    return { status: "ok" };
 }
 const WORKFLOW_FOLLOW_UPS = {
     "research": [
