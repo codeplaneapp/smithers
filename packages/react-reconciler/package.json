@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/react-reconciler",
-  "version": "0.16.4",
+  "version": "0.16.5",
   "description": "Custom React reconciler that renders Smithers host trees",
   "type": "module",
   "sideEffects": false,
