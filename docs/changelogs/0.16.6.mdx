@@ -1,0 +1,19 @@
+# 0.16.6
+
+Patch release: generated `.smithers/package.json` now includes the
+`skills` dependency that the bundled workflow components import from.
+
+---
+
+## Fixes
+
+- **`smithers workflow grill-me` (and other skill-backed workflows) on
+  a fresh init**. `.smithers/components/GrillMe.tsx` imports
+  `skills/grill-me/SKILL.md` from
+  [`mattpocock/skills`](https://github.com/mattpocock/skills), but
+  `renderPackageJson` in `@smithers-orchestrator/cli` never declared
+  the package in the generated `.smithers/package.json`. `bun install`
+  inside `.smithers/` had nothing to fetch, so the SKILL.md import
+  dangled and workflow loading blew up with `Cannot find module
+  'skills/grill-me/SKILL.md'`. The generated deps now include `"skills":
+  "github:mattpocock/skills"`, matching the monorepo's own `.smithers`.
