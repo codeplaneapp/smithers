@@ -129,6 +129,7 @@ export class OpenCodeAgent extends BaseCliAgent {
     let sessionId = "";
     let didEmitStarted = false;
     let didEmitCompleted = false;
+    let terminalError = null;
 
     // Accumulate tokens across multiple step_finish events
     let totalInputTokens = 0;
@@ -357,6 +358,7 @@ export class OpenCodeAgent extends BaseCliAgent {
         const errorMessage = errorData
           ? asString(errorData.message)
           : errorName ?? "OpenCode reported an error";
+        terminalError = errorMessage ?? "OpenCode reported an error";
 
         if (didEmitCompleted) {
           return [warningAction("error", errorMessage ?? "OpenCode reported an error", "error")];
@@ -388,7 +390,7 @@ export class OpenCodeAgent extends BaseCliAgent {
 
       onExit: (result) => {
         if (didEmitCompleted) return [];
-        const isSuccess = (result.exitCode ?? 0) === 0;
+        const isSuccess = (result.exitCode ?? 0) === 0 && !terminalError;
         didEmitCompleted = true;
         return [
           {
@@ -398,7 +400,7 @@ export class OpenCodeAgent extends BaseCliAgent {
             answer: isSuccess ? fullText || undefined : undefined,
             error: isSuccess
               ? undefined
-              : `OpenCode exited with code ${result.exitCode ?? -1}`,
+              : terminalError ?? `OpenCode exited with code ${result.exitCode ?? -1}`,
           },
         ];
       },
@@ -436,10 +438,11 @@ export class OpenCodeAgent extends BaseCliAgent {
     }
 
     // Session continuation
-    if (this.opts.continueSession) {
+    const explicitSession = resumeSession ?? this.opts.sessionId;
+    if (this.opts.continueSession && !explicitSession) {
       args.push("--continue");
     }
-    pushFlag(args, "--session", resumeSession ?? this.opts.sessionId);
+    pushFlag(args, "--session", explicitSession);
 
     // Variant / reasoning effort
     pushFlag(args, "--variant", this.opts.variant);

@@ -665,9 +665,39 @@ process.stdout.write('${stepFinish()}' + "\\n");
       const captured = JSON.parse(await readFile(argsFile, "utf8"));
       expect(captured.args).toContain("--session");
       expect(captured.args).toContain("resume-123");
+      expect(captured.args).not.toContain("--continue");
     } finally {
       await rm(fake.dir, { recursive: true, force: true });
       await rm(argsFileDir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails generate when OpenCode emits an error event even if exit code is zero", async () => {
+    const fake = await makeFakeOpenCode(`
+process.stdout.write('${stepStart("s-1")}' + "\\n");
+process.stdout.write('${errorEvent({
+  sessionID: "s-1",
+  name: "ProviderAuthError",
+  message: "Invalid API key",
+})}' + "\\n");
+process.exit(0);
+`);
+
+    try {
+      process.env.PATH = `${fake.dir}:${originalPath}`;
+
+      const agent = new OpenCodeAgent({
+        model: "anthropic/claude-opus-4-20250514",
+        env: { PATH: process.env.PATH },
+      });
+
+      await expect(
+        agent.generate({
+          messages: [{ role: "user", content: "test" }],
+        })
+      ).rejects.toThrow("Invalid API key");
+    } finally {
+      await rm(fake.dir, { recursive: true, force: true });
     }
   });
 

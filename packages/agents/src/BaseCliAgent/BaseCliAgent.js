@@ -298,7 +298,13 @@ function extractTextFromJsonPayload(raw) {
     }
     const chunks = [];
     for (const parsed of parsedLines) {
-        const text = extractTextFromJsonValue(parsed);
+        let text;
+        if (parsed?.type === "text" && typeof parsed?.part?.text === "string") {
+            text = parsed.part.text;
+        }
+        else {
+            text = extractTextFromJsonValue(parsed);
+        }
         if (text)
             chunks.push(text);
     }
@@ -755,6 +761,7 @@ export class BaseCliAgent {
             const interpreter = this.createOutputInterpreter();
             let stdoutBuffer = "";
             let stderrBuffer = "";
+            let completedEvent = null;
             /**
      * @param {AgentCliEvent[] | AgentCliEvent | null | undefined} eventPayload
      */
@@ -763,6 +770,9 @@ export class BaseCliAgent {
                     return;
                 const events = Array.isArray(eventPayload) ? eventPayload : [eventPayload];
                 for (const event of events) {
+                    if (event?.type === "completed") {
+                        completedEvent = event;
+                    }
                     logAgentCliEvent(event, commandLogAnnotations, span);
                     if (!options?.onEvent)
                         continue;
@@ -876,6 +886,9 @@ export class BaseCliAgent {
                         }
                         return yield* Effect.fail(new SmithersError("AGENT_CLI_ERROR", errorText));
                     }
+                }
+                if (completedEvent?.ok === false) {
+                    return yield* Effect.fail(new SmithersError("AGENT_CLI_ERROR", completedEvent.error || "CLI agent reported an error"));
                 }
                 // Some CLIs may print extra banners to stdout. Allow individual agents
                 // to provide patterns so this logic stays opt-in and agent-specific.
