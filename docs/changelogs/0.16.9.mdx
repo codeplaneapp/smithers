@@ -1,0 +1,20 @@
+# 0.16.9
+
+Patch release: `smithers --version` now prints the real version instead of `unknown`.
+
+---
+
+## Fixes
+
+- **`smithers --version` no longer prints `unknown`.** `readPackageVersion`
+  in `@smithers-orchestrator/cli/src/index.js` resolved
+  `new URL("../../package.json", import.meta.url)`, which climbed two
+  levels out of `@smithers-orchestrator/cli/src/` and landed on
+  `@smithers-orchestrator/package.json` — a path that doesn't exist, so
+  `readFileSync` threw `ENOENT`, the catch returned the string
+  `"unknown"`, and that literal propagated through the CLI, the
+  `getOrchestratorVersion` FFI call, and all the way into the Smithers
+  GUI sidebar (which rendered "Smithers unknown"). Fixed the URL to
+  `"../package.json"` so it resolves to `@smithers-orchestrator/cli/package.json`
+  and the declared version is read correctly. No behavior change beyond
+  the version string being accurate.
