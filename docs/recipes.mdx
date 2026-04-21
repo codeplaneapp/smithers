@@ -34,10 +34,10 @@ Two models catch different bugs. Cost = the slower model's latency.
 
 ```tsx
 <Parallel>
-  <Task id={`${t.id}:review-claude`} output={outputs.review} agent={claude} continueOnFail>
+  <Task id={`${ticket.id}:review-claude`} output={outputs.review} agent={claude} continueOnFail>
     <ReviewPrompt reviewer="claude" />
   </Task>
-  <Task id={`${t.id}:review-codex`} output={outputs.review} agent={codex} continueOnFail>
+  <Task id={`${ticket.id}:review-codex`} output={outputs.review} agent={codex} continueOnFail>
     <ReviewPrompt reviewer="codex" />
   </Task>
 </Parallel>
@@ -110,9 +110,9 @@ Discover work, run each ticket, re-render to catch the next batch. Scales to lar
 
 ```tsx
 export default smithers((ctx) => {
-  const discover = ctx.latest(tables.discover, "discover");
+  const discover = ctx.latest(outputs.discover, "discover");
   const unfinished = (discover?.tickets ?? []).filter(
-    (t) => !ctx.latest(tables.report, `${t.id}:report`)
+    (t) => !ctx.latest(outputs.report, `${t.id}:report`)
   );
 
   return (
