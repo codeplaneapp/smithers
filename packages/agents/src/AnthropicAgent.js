@@ -1,5 +1,5 @@
 import { anthropic } from "@ai-sdk/anthropic";
-import { ToolLoopAgent, } from "ai";
+import { Output, ToolLoopAgent, } from "ai";
 import { resolveSdkModel } from "./resolveSdkModel.js";
 import { streamResultToGenerateResult } from "./streamResultToGenerateResult.js";
 /** @typedef {import("ai").AgentCallParameters} AgentCallParameters */
@@ -17,6 +17,7 @@ import { streamResultToGenerateResult } from "./streamResultToGenerateResult.js"
 
 export class AnthropicAgent extends ToolLoopAgent {
     hijackEngine = "anthropic-sdk";
+    supportsNativeStructuredOutput = true;
     /**
    * @param {AnthropicAgentOptions<CALL_OPTIONS, TOOLS>} opts
    */
@@ -35,11 +36,15 @@ export class AnthropicAgent extends ToolLoopAgent {
         const promptArgs = "messages" in args
             ? { messages: args.messages }
             : { prompt: args.prompt };
+        const outputArgs = args.outputSchema
+            ? { output: Output.object({ schema: args.outputSchema }) }
+            : {};
         if (!args.onStdout) {
             return super.generate({
                 options: args.options,
                 abortSignal: args.abortSignal,
                 ...promptArgs,
+                ...outputArgs,
                 timeout: args.timeout,
                 onStepFinish: args.onStepFinish,
             });
@@ -48,6 +53,7 @@ export class AnthropicAgent extends ToolLoopAgent {
             options: args.options,
             abortSignal: args.abortSignal,
             ...promptArgs,
+            ...outputArgs,
             timeout: args.timeout,
             onStepFinish: args.onStepFinish,
         }).then((stream) => streamResultToGenerateResult(stream, args.onStdout));

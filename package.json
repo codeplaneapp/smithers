@@ -37,11 +37,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/evmts/smithers.git"
+    "url": "git+https://github.com/smithersai/smithers.git"
   },
-  "homepage": "https://github.com/evmts/smithers#readme",
+  "homepage": "https://github.com/smithersai/smithers#readme",
   "bugs": {
-    "url": "https://github.com/evmts/smithers/issues"
+    "url": "https://github.com/smithersai/smithers/issues"
   },
   "keywords": [
     "ai",
