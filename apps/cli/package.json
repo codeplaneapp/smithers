@@ -6,18 +6,19 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./src/index.d.ts",
+      "types": "./dist/index.d.ts",
       "import": "./src/index.js",
       "default": "./src/index.js"
     },
     "./*": {
-      "types": "./src/index.d.ts",
+      "types": "./dist/*.d.ts",
       "import": "./src/*.js",
       "default": "./src/*.js"
     }
   },
   "files": [
-    "src/"
+    "src/",
+    "dist/"
   ],
   "scripts": {
     "test": "bun test tests",
