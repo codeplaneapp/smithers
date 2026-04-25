@@ -1,9 +1,69 @@
-import { mkdtempSync, cpSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, cpSync, existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { BaseCliAgent, pushFlag, pushList, isRecord, asString, toolKindFromName, createSyntheticIdGenerator, } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList, } from "./capability-registry/index.js";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+
+/**
+ * Inspect the kimi CLI's on-disk OAuth credentials and surface a clear,
+ * non-retryable error if they are missing or expired. Without this check,
+ * every kimi invocation reaches the API, returns 401, and is treated as a
+ * retryable runtime error — wasting time and budget on a problem only the
+ * user can resolve (by running `kimi login`).
+ *
+ * @param {string} shareDir
+ * @param {string} agentId
+ * @param {string} agentModel
+ */
+function assertKimiCredentialsUsable(shareDir, agentId, agentModel) {
+    const credsDir = join(shareDir, "credentials");
+    if (!existsSync(credsDir))
+        return; // No creds dir → kimi will print "LLM not set" which the BaseCliAgent classifier handles.
+    let entries;
+    try {
+        entries = readdirSync(credsDir);
+    }
+    catch {
+        return;
+    }
+    const tokenFiles = entries.filter((n) => n.endsWith(".json"));
+    if (tokenFiles.length === 0)
+        return;
+    let earliestExpiry = Infinity;
+    let anyValid = false;
+    for (const name of tokenFiles) {
+        try {
+            const raw = readFileSync(join(credsDir, name), "utf8");
+            const data = JSON.parse(raw);
+            if (typeof data?.expires_at === "number") {
+                earliestExpiry = Math.min(earliestExpiry, data.expires_at);
+                if (data.expires_at * 1000 > Date.now())
+                    anyValid = true;
+            }
+            else {
+                // Non-OAuth credential or unknown format — assume usable.
+                anyValid = true;
+            }
+        }
+        catch {
+            // Unreadable credential file — let kimi handle it.
+            anyValid = true;
+        }
+    }
+    if (!anyValid && earliestExpiry !== Infinity) {
+        const expiredAt = new Date(earliestExpiry * 1000).toISOString();
+        throw new SmithersError("AGENT_CONFIG_INVALID", `Kimi OAuth token expired at ${expiredAt} — every invocation will return 401. Run \`kimi login\` to refresh, then resume the run. (agent="${agentId}", model="${agentModel}", credentials="${credsDir}")`, {
+            failureRetryable: false,
+            agentId,
+            agentEngine: "kimi",
+            agentModel,
+            command: "kimi",
+            underlying: `OAuth token in ${credsDir} expired at ${expiredAt}`,
+        });
+    }
+}
 /** @typedef {import("./BaseCliAgent/BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
@@ -166,12 +226,15 @@ export class KimiAgent extends BaseCliAgent {
         // Isolate kimi metadata per invocation to avoid concurrent writes to
         // ~/.kimi/kimi.json across parallel tasks. If caller explicitly provides
         // KIMI_SHARE_DIR in opts.env, preserve that override.
+        const sourceShareDir = this.opts.env?.KIMI_SHARE_DIR ?? process.env.KIMI_SHARE_DIR ?? join(homedir(), ".kimi");
+        // Fail fast on expired OAuth credentials with a clear, actionable, non-retryable
+        // error so the run does not spin retrying 401s.
+        assertKimiCredentialsUsable(sourceShareDir, this.id ?? "<anonymous>", this.opts.model ?? this.model ?? "<unset>");
         if (!this.opts.env?.KIMI_SHARE_DIR) {
-            const defaultShareDir = process.env.KIMI_SHARE_DIR ?? join(homedir(), ".kimi");
             const isolatedShareDir = mkdtempSync(join(tmpdir(), "kimi-share-"));
-            if (existsSync(defaultShareDir)) {
+            if (existsSync(sourceShareDir)) {
                 for (const name of ["config.toml", "credentials", "device_id", "latest_version.txt"]) {
-                    const src = join(defaultShareDir, name);
+                    const src = join(sourceShareDir, name);
                     if (existsSync(src)) {
                         try {
                             cpSync(src, join(isolatedShareDir, name), { recursive: true });
@@ -253,6 +316,12 @@ export class KimiAgent extends BaseCliAgent {
                 /^Interrupted by user$/i,
                 /^Unknown error:/i,
                 /^Error:/i,
+                // Auth failures kimi prints when OAuth/api-key is invalid or expired.
+                // BaseCliAgent's classifyNonRetryableAgentError treats these as
+                // non-retryable so the run does not waste turns on a 401 loop.
+                /Error code:\s*401\b[^\n]*/i,
+                /\binvalid_authentication_error\b/i,
+                /API\s*Key\s+appears to be invalid or may have expired/i,
             ],
             // The kimi CLI emits "To resume this session: kimi -r <id>" to stderr
             // on every non-zero exit (it's a hint for interactive users, not the

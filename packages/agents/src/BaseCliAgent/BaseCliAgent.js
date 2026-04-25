@@ -621,6 +621,10 @@ export class BaseCliAgent {
                 { re: /\bLLM not supported\b/i, hint: "the agent's model is not supported by this CLI build" },
                 { re: /\bmodel\s+['\"]?[^'\"\s]+['\"]?\s+not found\b/i, hint: "the requested model is not registered with the CLI" },
                 { re: /\bunknown model\b/i, hint: "the requested model is not registered with the CLI" },
+                { re: /\b401\b[\s\S]{0,200}?(invalid[_\s-]?authentication|unauthorized|invalid[_\s-]?api[_\s-]?key)/i, hint: `the CLI's stored credentials are invalid or expired — re-authenticate (e.g. for kimi run \`kimi login\`)` },
+                { re: /\bAPI\s*Key\b[\s\S]{0,120}?(invalid|expired|may have expired)/i, hint: `the CLI's stored credentials are invalid or expired — re-authenticate (e.g. for kimi run \`kimi login\`)` },
+                { re: /\b(access|auth(entication)?|oauth|bearer)\s+token\b[\s\S]{0,80}?(expired|invalid|revoked)/i, hint: `the CLI's auth token is no longer valid — re-authenticate (e.g. for kimi run \`kimi login\`)` },
+                { re: /\binvalid[_\s-]?authentication[_\s-]?error\b/i, hint: `the CLI's stored credentials are invalid — re-authenticate (e.g. for kimi run \`kimi login\`)` },
             ];
             for (const { re, hint } of nonRetryablePatterns) {
                 if (re.test(message)) {
