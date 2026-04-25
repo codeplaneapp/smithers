@@ -12,7 +12,7 @@ import React from "react";
 import { createSmithersContext, SmithersContext as GlobalSmithersContext } from "@smithers-orchestrator/react-reconciler/context";
 import { Approval as BaseApproval, Workflow as BaseWorkflow, Task as BaseTask, Sequence as BaseSequence, Parallel as BaseParallel, MergeQueue as BaseMergeQueue, Branch as BaseBranch, Loop as BaseLoop, Ralph as BaseRalph, ContinueAsNew as BaseContinueAsNew, continueAsNew as baseContinueAsNew, Worktree as BaseWorktree, Sandbox as BaseSandbox, Signal as BaseSignal, Timer as BaseTimer, } from "@smithers-orchestrator/components";
 import { zodToTable } from "@smithers-orchestrator/db/zodToTable";
-import { zodToCreateTableSQL } from "@smithers-orchestrator/db/zodToCreateTableSQL";
+import { zodToCreateTableSQL, syncZodTableSchema } from "@smithers-orchestrator/db/zodToCreateTableSQL";
 import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
 import { resolve } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
@@ -216,10 +216,11 @@ export function createSmithers(schemas, opts) {
         catch { }
     };
     process.on("exit", closeDb);
-    // 3. Auto-create tables using CREATE TABLE IF NOT EXISTS
+    // 3. Auto-create tables, and ALTER any existing tables to add columns the
+    // current schema introduced (CREATE TABLE IF NOT EXISTS would silently
+    // skip the columns and a later upsert would fail with "no column named X").
     if (schemas.input) {
-        const inputDdl = zodToCreateTableSQL("input", schemas.input, { isInput: true });
-        sqlite.run(inputDdl);
+        syncZodTableSchema(sqlite, "input", schemas.input, { isInput: true });
     }
     else {
         sqlite.exec(`CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`);
@@ -238,8 +239,7 @@ export function createSmithers(schemas, opts) {
         if (name === "input")
             continue;
         const tableName = camelToSnake(name);
-        const ddl = zodToCreateTableSQL(tableName, zodSchema);
-        sqlite.run(ddl);
+        syncZodTableSchema(sqlite, tableName, zodSchema);
     }
     // 4. Create Drizzle instance with all tables in the schema
     const drizzleSchema = { input: inputTable };

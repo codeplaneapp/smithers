@@ -212,7 +212,7 @@ export { mdxPlugin } from "./mdx-plugin.js";
 export { markdownComponents } from "@smithers-orchestrator/components/markdownComponents";
 export { renderMdx } from "@smithers-orchestrator/components/renderMdx";
 export { zodToTable } from "@smithers-orchestrator/db/zodToTable";
-export { zodToCreateTableSQL } from "@smithers-orchestrator/db/zodToCreateTableSQL";
+export { syncZodTableSchema, zodSchemaColumns, zodToCreateTableSQL } from "@smithers-orchestrator/db/zodToCreateTableSQL";
 export { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
 export { unwrapZodType } from "@smithers-orchestrator/db/unwrapZodType";
 export { zodSchemaToJsonExample } from "@smithers-orchestrator/components/zod-to-example";

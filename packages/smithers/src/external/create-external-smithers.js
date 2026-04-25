@@ -12,7 +12,7 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { zodToTable } from "@smithers-orchestrator/db/zodToTable";
-import { zodToCreateTableSQL } from "@smithers-orchestrator/db/zodToCreateTableSQL";
+import { syncZodTableSchema } from "@smithers-orchestrator/db/zodToCreateTableSQL";
 import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { mkdtempSync } from "node:fs";
@@ -113,7 +113,7 @@ export function createExternalSmithers(config) {
             continue;
         const tableName = camelToSnake(name);
         tables[name] = zodToTable(tableName, zodSchema);
-        sqlite.run(zodToCreateTableSQL(tableName, zodSchema));
+        syncZodTableSchema(sqlite, tableName, zodSchema);
     }
     const drizzleSchema = { input: inputTable };
     for (const [key, table] of Object.entries(tables)) {
