@@ -1,4 +1,4 @@
-import { mkdtempSync, cpSync, existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, cpSync, existsSync, readFileSync, writeFileSync, readdirSync, rmSync, renameSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
@@ -7,17 +7,146 @@ import { normalizeCapabilityStringList, } from "./capability-registry/index.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
 /**
- * Inspect the kimi CLI's on-disk OAuth credentials and surface a clear,
- * non-retryable error if they are missing or expired. Without this check,
- * every kimi invocation reaches the API, returns 401, and is treated as a
- * retryable runtime error — wasting time and budget on a problem only the
- * user can resolve (by running `kimi login`).
+ * The kimi CLI's OAuth refresh endpoint, mirroring the Python implementation
+ * in `kimi_cli.auth.oauth.refresh_token`. Honour the same env-var override
+ * the CLI uses (KIMI_OAUTH_HOST) so test/staging overrides keep working.
+ */
+function kimiOAuthHost() {
+    return process.env.KIMI_OAUTH_HOST?.replace(/\/+$/, "") || "https://auth.kimi.com";
+}
+
+/**
+ * Process-level dedup map: if multiple parallel KimiAgent invocations land in
+ * the refresh path concurrently, share one in-flight Promise so we issue a
+ * single POST instead of racing (kimi rotates refresh tokens — only one
+ * refresh wins, the other gets invalid_grant and would be wrongly classified
+ * as expired).
+ *
+ * @type {Map<string, Promise<void>>}
+ */
+const inflightRefreshes = new Map();
+
+async function refreshKimiTokenIfNeeded(credsDir, fileName) {
+    const path = join(credsDir, fileName);
+    /** @type {{access_token?: string, refresh_token?: string, expires_at?: number, token_type?: string, scope?: string} | null} */
+    let data = null;
+    try {
+        data = JSON.parse(readFileSync(path, "utf8"));
+    }
+    catch {
+        return { ok: false, reason: "unreadable", expiredAt: null };
+    }
+    if (!data || typeof data.expires_at !== "number") {
+        // Not an OAuth file — leave alone, kimi will handle.
+        return { ok: true, refreshed: false };
+    }
+    // Refresh proactively a bit before expiry to avoid races (matches the
+    // CLI's _refresh_threshold behaviour, simplified to a fixed 60s window).
+    const nowSec = Date.now() / 1000;
+    if (data.expires_at - 60 > nowSec) {
+        return { ok: true, refreshed: false };
+    }
+    if (typeof data.refresh_token !== "string" || data.refresh_token.length === 0) {
+        return { ok: false, reason: "no-refresh-token", expiredAt: new Date(data.expires_at * 1000).toISOString() };
+    }
+    // Dedupe concurrent refreshes per-credential-file within this process.
+    const flightKey = path;
+    const inflight = inflightRefreshes.get(flightKey);
+    if (inflight) {
+        try {
+            await inflight;
+            return { ok: true, refreshed: true, deduped: true };
+        }
+        catch (err) {
+            return { ok: false, reason: err?.message ?? "refresh-failed", expiredAt: new Date(data.expires_at * 1000).toISOString() };
+        }
+    }
+    const refresher = (async () => {
+        const tokenUrl = `${kimiOAuthHost()}/api/oauth/token`;
+        // client_id matches kimi_cli.auth.oauth.KIMI_CODE_CLIENT_ID. Without it the
+        // /api/oauth/token endpoint returns 400 invalid_request.
+        const body = new URLSearchParams({
+            client_id: "17e5f671-d194-4dfb-9706-5516cb48c098",
+            grant_type: "refresh_token",
+            refresh_token: data.refresh_token,
+        });
+        // Mirror kimi-cli's `_common_headers()` so the auth service treats this
+        // refresh as coming from a legitimate kimi-cli install. Some of these
+        // (notably X-Msh-Device-Id) appear to gate refresh acceptance.
+        const headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Msh-Platform": "kimi_cli",
+            "X-Msh-Version": "1.37.0",
+            "X-Msh-Device-Name": "smithers-orchestrator",
+            "X-Msh-Device-Model": "smithers-orchestrator",
+            "X-Msh-Os-Version": process.platform,
+        };
+        try {
+            const deviceIdPath = join(credsDir, "..", "device_id");
+            if (existsSync(deviceIdPath)) {
+                const deviceId = readFileSync(deviceIdPath, "utf8").trim();
+                if (deviceId)
+                    headers["X-Msh-Device-Id"] = deviceId;
+            }
+        }
+        catch { /* device-id is optional */ }
+        const resp = await fetch(tokenUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        if (!resp.ok) {
+            const text = await resp.text().catch(() => "");
+            const tag = resp.status === 401 ? "invalid_grant" : `http-${resp.status}`;
+            throw new Error(`kimi oauth refresh failed (${tag}): ${text.slice(0, 200)}`);
+        }
+        /** @type {any} */
+        const fresh = await resp.json();
+        if (typeof fresh?.access_token !== "string") {
+            throw new Error("kimi oauth refresh: missing access_token in response");
+        }
+        const expiresIn = typeof fresh.expires_in === "number"
+            ? fresh.expires_in
+            : 3600;
+        const merged = {
+            ...data,
+            access_token: fresh.access_token,
+            refresh_token: typeof fresh.refresh_token === "string" ? fresh.refresh_token : data.refresh_token,
+            token_type: typeof fresh.token_type === "string" ? fresh.token_type : data.token_type,
+            scope: typeof fresh.scope === "string" ? fresh.scope : data.scope,
+            expires_in: expiresIn,
+            expires_at: Math.floor(Date.now() / 1000) + expiresIn,
+        };
+        // Write atomically so kimi-cli reading concurrently never sees a torn file.
+        const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+        writeFileSync(tmp, JSON.stringify(merged, null, 2), { mode: 0o600 });
+        renameSync(tmp, path);
+    })();
+    inflightRefreshes.set(flightKey, refresher);
+    try {
+        await refresher;
+        return { ok: true, refreshed: true };
+    }
+    catch (err) {
+        return { ok: false, reason: err?.message ?? "refresh-failed", expiredAt: new Date(data.expires_at * 1000).toISOString() };
+    }
+    finally {
+        inflightRefreshes.delete(flightKey);
+    }
+}
+
+/**
+ * Inspect the kimi CLI's on-disk OAuth credentials and, if any are expired,
+ * attempt a non-interactive refresh against `${KIMI_OAUTH_HOST or
+ * https://auth.kimi.com}/api/oauth/token` using the stored refresh_token.
+ * Only if refresh fails do we surface a clear, non-retryable
+ * AGENT_CONFIG_INVALID error.
  *
  * @param {string} shareDir
  * @param {string} agentId
  * @param {string} agentModel
  */
-function assertKimiCredentialsUsable(shareDir, agentId, agentModel) {
+async function ensureKimiCredentialsUsable(shareDir, agentId, agentModel) {
     const credsDir = join(shareDir, "credentials");
     if (!existsSync(credsDir))
         return; // No creds dir → kimi will print "LLM not set" which the BaseCliAgent classifier handles.
@@ -31,36 +160,28 @@ function assertKimiCredentialsUsable(shareDir, agentId, agentModel) {
     const tokenFiles = entries.filter((n) => n.endsWith(".json"));
     if (tokenFiles.length === 0)
         return;
-    let earliestExpiry = Infinity;
-    let anyValid = false;
+    let lastFailure = null;
+    let anyUsable = false;
     for (const name of tokenFiles) {
-        try {
-            const raw = readFileSync(join(credsDir, name), "utf8");
-            const data = JSON.parse(raw);
-            if (typeof data?.expires_at === "number") {
-                earliestExpiry = Math.min(earliestExpiry, data.expires_at);
-                if (data.expires_at * 1000 > Date.now())
-                    anyValid = true;
-            }
-            else {
-                // Non-OAuth credential or unknown format — assume usable.
-                anyValid = true;
-            }
+        const result = await refreshKimiTokenIfNeeded(credsDir, name);
+        if (result.ok) {
+            anyUsable = true;
         }
-        catch {
-            // Unreadable credential file — let kimi handle it.
-            anyValid = true;
+        else {
+            lastFailure = result;
         }
     }
-    if (!anyValid && earliestExpiry !== Infinity) {
-        const expiredAt = new Date(earliestExpiry * 1000).toISOString();
-        throw new SmithersError("AGENT_CONFIG_INVALID", `Kimi OAuth token expired at ${expiredAt} — every invocation will return 401. Run \`kimi login\` to refresh, then resume the run. (agent="${agentId}", model="${agentModel}", credentials="${credsDir}")`, {
+    if (!anyUsable && lastFailure) {
+        const reason = lastFailure.reason === "no-refresh-token"
+            ? `OAuth token expired at ${lastFailure.expiredAt} and no refresh_token is stored`
+            : `OAuth token expired at ${lastFailure.expiredAt}; auto-refresh failed: ${lastFailure.reason}`;
+        throw new SmithersError("AGENT_CONFIG_INVALID", `${reason}. Run \`kimi login\` to re-authenticate, then resume the run. (agent="${agentId}", model="${agentModel}", credentials="${credsDir}")`, {
             failureRetryable: false,
             agentId,
             agentEngine: "kimi",
             agentModel,
             command: "kimi",
-            underlying: `OAuth token in ${credsDir} expired at ${expiredAt}`,
+            underlying: reason,
         });
     }
 }
@@ -227,9 +348,10 @@ export class KimiAgent extends BaseCliAgent {
         // ~/.kimi/kimi.json across parallel tasks. If caller explicitly provides
         // KIMI_SHARE_DIR in opts.env, preserve that override.
         const sourceShareDir = this.opts.env?.KIMI_SHARE_DIR ?? process.env.KIMI_SHARE_DIR ?? join(homedir(), ".kimi");
-        // Fail fast on expired OAuth credentials with a clear, actionable, non-retryable
-        // error so the run does not spin retrying 401s.
-        assertKimiCredentialsUsable(sourceShareDir, this.id ?? "<anonymous>", this.opts.model ?? this.model ?? "<unset>");
+        // Refresh expired OAuth credentials in place using the stored refresh_token,
+        // and only fail fast (non-retryable) if the refresh itself fails. This avoids
+        // forcing the user to run `kimi login` every time their access_token rotates.
+        await ensureKimiCredentialsUsable(sourceShareDir, this.id ?? "<anonymous>", this.opts.model ?? this.model ?? "<unset>");
         if (!this.opts.env?.KIMI_SHARE_DIR) {
             const isolatedShareDir = mkdtempSync(join(tmpdir(), "kimi-share-"));
             if (existsSync(sourceShareDir)) {
