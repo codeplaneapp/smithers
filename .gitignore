@@ -41,6 +41,10 @@ test-results
 # Gemini
 .gemini-clipboard/
 
+# Local workflow/runtime reports
+.claude/scheduled_tasks.lock
+.kanban-reports/
+
 # Profiling artifacts
 default.profraw
 
