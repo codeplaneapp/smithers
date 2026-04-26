@@ -2792,8 +2792,18 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 const heartbeatCheckpointUsable = !currentAgentEngine ||
                     !heartbeatCheckpointEngine ||
                     heartbeatCheckpointEngine === currentAgentEngine;
-                const checkpointResumeSession = heartbeatCheckpointUsable &&
-                    typeof heartbeatCheckpoint?.agentResume === "string"
+                // If the most recent failed attempt asked us to drop the resume
+                // session (e.g. kimi crashed mid-stream and reported `kimi -r
+                // <uuid>`; that session is now corrupt and re-resuming it just
+                // reproduces the crash), don't reuse the captured agentResume
+                // from the heartbeat. Forces the agent to start a fresh
+                // session on the next attempt.
+                const lastFailedAttempt = attempts.find((a) => a.state === "failed");
+                const lastFailedMeta = parseAttemptMetaJson(lastFailedAttempt?.metaJson);
+                const discardResumeSession = lastFailedMeta?.discardResumeSession === true;
+                const checkpointResumeSession = !discardResumeSession
+                    && heartbeatCheckpointUsable
+                    && typeof heartbeatCheckpoint?.agentResume === "string"
                     ? heartbeatCheckpoint.agentResume
                     : undefined;
                 const checkpointResumeMessages = heartbeatCheckpointUsable
@@ -3750,6 +3760,19 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             // @ts-ignore
             effectiveError.details.failureRetryable === false) {
             attemptMeta.failureRetryable = false;
+        }
+        // Honour `discardResumeSession: true` from agent-side errors (e.g. kimi
+        // session-loss). The next attempt's resumeSession resolution checks
+        // attemptMeta.discardResumeSession on the most recent failed attempt
+        // and clears the captured agentResume so the agent starts fresh
+        // instead of redundantly trying to resume a corrupt session.
+        if (effectiveError &&
+            typeof effectiveError === "object" &&
+            // @ts-ignore — duck-type on SmithersError shape
+            effectiveError.details &&
+            // @ts-ignore
+            effectiveError.details.discardResumeSession === true) {
+            attemptMeta.discardResumeSession = true;
         }
         if (!heartbeatTimeoutError && (taskSignal.aborted || isAbortError(err))) {
             await waitForHeartbeatWriteDrain();

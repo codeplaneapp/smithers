@@ -805,7 +805,29 @@ export class BaseCliAgent {
                             result.stdout.trim() ||
                             `CLI exited with code ${result.exitCode}`;
                         const nonRetryable = classifyNonRetryableAgentError(errorText, commandSpec.command);
-                        return yield* Effect.fail(nonRetryable ?? new SmithersError("AGENT_CLI_ERROR", errorText));
+                        if (nonRetryable) {
+                            return yield* Effect.fail(nonRetryable);
+                        }
+                        // Detect kimi session-loss. Kimi crashes mid-stream and prints
+                        // `To resume this session: kimi -r <uuid>` to stderr (and often
+                        // also to the merged error text after the benign-stderr filter
+                        // strips the bare-line variant). The session itself is corrupt
+                        // — re-running with `--session <same-uuid>` deterministically
+                        // reproduces the same crash. Surface a typed error that tells
+                        // the engine retry path to DROP the broken session id and
+                        // start a fresh one on the next attempt.
+                        const rawStderr = result.stderr ?? "";
+                        const sessionLossMatch = rawStderr.match(/kimi -r ([0-9a-f-]{8,})/i)
+                            || errorText.match(/kimi -r ([0-9a-f-]{8,})/i);
+                        if (commandSpec.command === "kimi" && sessionLossMatch) {
+                            return yield* Effect.fail(new SmithersError("AGENT_SESSION_LOST", `Kimi session ${sessionLossMatch[1]} is broken; CLI exited ${result.exitCode}. Retry will start a fresh session.`, {
+                                failureRetryable: true,
+                                discardResumeSession: true,
+                                command: "kimi",
+                                kimiSessionId: sessionLossMatch[1],
+                            }));
+                        }
+                        return yield* Effect.fail(new SmithersError("AGENT_CLI_ERROR", errorText));
                     }
                 }
                 // Some CLIs may print extra banners to stdout. Allow individual agents
