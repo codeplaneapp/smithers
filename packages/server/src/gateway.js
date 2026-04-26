@@ -101,6 +101,8 @@ const DEFAULT_PROTOCOL = 1;
 const DEFAULT_HEARTBEAT_MS = 15_000;
 const DEFAULT_MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_MAX_CONNECTIONS = 1_000;
+const DEFAULT_HEADERS_TIMEOUT = 30_000;
+const DEFAULT_REQUEST_TIMEOUT = 60_000;
 export const GATEWAY_RPC_MAX_PAYLOAD_BYTES = DEFAULT_MAX_BODY_BYTES;
 export const GATEWAY_RPC_MAX_DEPTH = 32;
 export const GATEWAY_RPC_MAX_ARRAY_LENGTH = 256;
@@ -1055,6 +1057,8 @@ export class Gateway {
     maxBodyBytes;
     maxPayload;
     maxConnections;
+    headersTimeout;
+    requestTimeout;
     auth;
     defaults;
     workflows = new Map();
@@ -1088,6 +1092,12 @@ export class Gateway {
         this.maxConnections = options.maxConnections === undefined
             ? DEFAULT_MAX_CONNECTIONS
             : Math.floor(assertPositiveFiniteInteger("maxConnections", Number(options.maxConnections)));
+        this.headersTimeout = options.headersTimeout === undefined
+            ? DEFAULT_HEADERS_TIMEOUT
+            : Math.floor(assertPositiveFiniteInteger("headersTimeout", Number(options.headersTimeout)));
+        this.requestTimeout = options.requestTimeout === undefined
+            ? DEFAULT_REQUEST_TIMEOUT
+            : Math.floor(assertPositiveFiniteInteger("requestTimeout", Number(options.requestTimeout)));
         this.auth = options.auth;
         this.defaults = options.defaults;
     }
@@ -1668,6 +1678,8 @@ export class Gateway {
             }
             return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Route not found" } });
         });
+        server.headersTimeout = this.headersTimeout;
+        server.requestTimeout = this.requestTimeout;
         server.on("upgrade", (req, socket, head) => {
             if (this.connections.size >= this.maxConnections) {
                 emitGatewayEffect(incrementMetric(gatewayErrorsTotal, {
