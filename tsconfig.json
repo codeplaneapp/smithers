@@ -134,6 +134,12 @@
         "./packages/openapi/src/*.js",
         "./packages/openapi/src/*/index.js"
       ],
+      "@smithers-orchestrator/pi-plugin": [
+        "./packages/pi-plugin/src/index.ts"
+      ],
+      "@smithers-orchestrator/pi-plugin/*": [
+        "./packages/pi-plugin/src/*.ts"
+      ],
       "@smithers-orchestrator/protocol": [
         "./packages/protocol/src/index.js"
       ],
