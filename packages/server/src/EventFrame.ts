@@ -4,4 +4,5 @@ export type EventFrame = {
   payload?: unknown;
   seq: number;
   stateVersion: number;
+  apiVersion?: "v1";
 };

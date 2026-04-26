@@ -34,6 +34,8 @@ import { streamDevToolsRoute } from "./gatewayRoutes/streamDevTools.js";
 import { jumpToFrameRoute, JumpToFrameError } from "./gatewayRoutes/jumpToFrame.js";
 import { writeRewindAuditRow } from "@smithers-orchestrator/time-travel/writeRewindAuditRow";
 import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-travel/recoverInProgressRewindAudits";
+import { GATEWAY_EVENT_WINDOW_DEFAULT, SMITHERS_API_VERSION, getRequiredScopeForGatewayMethod, } from "@smithers-orchestrator/gateway/rpc";
+import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
 /** @typedef {import("./GatewayWebhookRunConfig.js").GatewayWebhookRunConfig} GatewayWebhookRunConfig */
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
@@ -54,6 +56,7 @@ import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-trave
  *   role?: string;
  *   scopes?: string[];
  *   userId?: string | null;
+ *   tokenId?: string | null;
  *   origin?: string;
  *   transport?: GatewayTransport;
  * }} GatewayRequestContext
@@ -76,6 +79,7 @@ import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-trave
  *   role: string;
  *   scopes: string[];
  *   userId?: string | null;
+ *   tokenId?: string | null;
  *   connectionId?: string;
  * }} RunStartAuthContext
  */
@@ -103,6 +107,7 @@ const DEFAULT_MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_MAX_CONNECTIONS = 1_000;
 const DEFAULT_HEADERS_TIMEOUT = 30_000;
 const DEFAULT_REQUEST_TIMEOUT = 60_000;
+const RUN_EVENT_HEARTBEAT_MS = 1_000;
 export const GATEWAY_RPC_MAX_PAYLOAD_BYTES = DEFAULT_MAX_BODY_BYTES;
 export const GATEWAY_RPC_MAX_DEPTH = 32;
 export const GATEWAY_RPC_MAX_ARRAY_LENGTH = 256;
@@ -112,43 +117,6 @@ export const GATEWAY_FRAME_ID_MAX_LENGTH = 128;
 export const GATEWAY_RPC_INPUT_MAX_BYTES = GATEWAY_RPC_MAX_PAYLOAD_BYTES;
 export const GATEWAY_RPC_INPUT_MAX_DEPTH = GATEWAY_RPC_MAX_DEPTH;
 const GATEWAY_METHOD_NAME_PATTERN = /^[a-z][a-zA-Z0-9]*(?:\.[a-z][a-zA-Z0-9]*)*$/;
-const ACCESS_RANK = {
-    read: 1,
-    execute: 2,
-    approve: 3,
-    admin: 4,
-};
-const METHOD_ACCESS = {
-    health: "read",
-    "runs.list": "read",
-    "runs.get": "read",
-    "runs.diff": "read",
-    getNodeDiff: "read",
-    "devtools.getNodeDiff": "read",
-    getNodeOutput: "read",
-    "devtools.getNodeOutput": "read",
-    getDevToolsSnapshot: "read",
-    streamDevTools: "read",
-    // jumpToFrame authorizes per-request: owner OR admin role may rewind.
-    // Require only `execute` scope so non-admin owners are not pre-blocked
-    // at the scope gate; the run handler performs the final auth check.
-    jumpToFrame: "execute",
-    "devtools.jumpToFrame": "execute",
-    "frames.list": "read",
-    "frames.get": "read",
-    "attempts.list": "read",
-    "attempts.get": "read",
-    "approvals.list": "read",
-    "runs.create": "execute",
-    "runs.cancel": "execute",
-    "runs.rerun": "execute",
-    "signals.send": "execute",
-    "approvals.decide": "approve",
-    "cron.list": "read",
-    "cron.add": "admin",
-    "cron.remove": "admin",
-    "cron.trigger": "execute",
-};
 /**
  * @template T
  * @param {string | null | undefined} value
@@ -184,6 +152,7 @@ function sendJson(res, status, payload) {
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Smithers-API-Version", SMITHERS_API_VERSION);
     res.end(JSON.stringify(payload));
 }
 /**
@@ -196,6 +165,7 @@ function sendText(res, status, payload, contentType = "text/plain; charset=utf-8
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Smithers-API-Version", SMITHERS_API_VERSION);
     res.end(payload);
 }
 /**
@@ -317,6 +287,7 @@ function gatewayContextAnnotations(context) {
         transport: context.transport,
         ...(context.userId ? { userId: context.userId } : {}),
         ...(context.role ? { role: context.role } : {}),
+        ...(context.tokenId ? { tokenId: context.tokenId } : {}),
     };
 }
 /**
@@ -467,16 +438,39 @@ function asStringRecord(value) {
  * @returns {ResponseFrame}
  */
 function responseOk(id, payload) {
-    return { type: "res", id, ok: true, payload };
+    return { type: "res", id, ok: true, apiVersion: SMITHERS_API_VERSION, payload };
 }
 /**
  * @param {string} id
  * @param {string} code
  * @param {string} message
+ * @param {Record<string, unknown>} [details]
  * @returns {ResponseFrame}
  */
-function responseError(id, code, message) {
-    return { type: "res", id, ok: false, error: { code, message } };
+function responseError(id, code, message, details = {}) {
+    return {
+        type: "res",
+        id,
+        ok: false,
+        apiVersion: SMITHERS_API_VERSION,
+        error: {
+            version: SMITHERS_API_VERSION,
+            code,
+            message,
+            ...details,
+        },
+    };
+}
+/**
+ * @param {string} id
+ * @param {string} method
+ * @returns {ResponseFrame}
+ */
+function responseForbidden(id, method) {
+    const requiredScope = requiredScopeForMethod(method);
+    return responseError(id, "FORBIDDEN", `Missing required scope ${requiredScope} for ${method}`, {
+        requiredScope,
+    });
 }
 /**
  * @param {unknown} raw
@@ -626,13 +620,16 @@ export function statusForRpcError(code) {
         case "Unauthorized":
             return 401;
         case "FORBIDDEN":
+        case "Forbidden":
             return 403;
         case "NOT_FOUND":
         case "METHOD_NOT_FOUND":
             return 404;
         case "INVALID_REQUEST":
+        case "InvalidRequest":
         case "INVALID_FRAME":
         case "INVALID_INPUT":
+        case "InvalidInput":
         case "PROTOCOL_UNSUPPORTED":
         case "InvalidRunId":
         case "InvalidNodeId":
@@ -654,6 +651,7 @@ export function statusForRpcError(code) {
             return 409;
         case "DiffTooLarge":
         case "PayloadTooLarge":
+        case "PAYLOAD_TOO_LARGE":
             return 413;
         case "RateLimited":
         case "BackpressureDisconnect":
@@ -685,10 +683,23 @@ function normalizeGrantedScope(scope) {
 }
 /**
  * @param {string} method
- * @returns {MethodAccess}
+ * @returns {import("@smithers-orchestrator/gateway/auth/scopes").GatewayScope}
  */
-function accessForMethod(method) {
-    return METHOD_ACCESS[method] ?? (method.startsWith("config.") ? "admin" : "read");
+function requiredScopeForMethod(method) {
+    if (method === "run:read" ||
+        method === "run:write" ||
+        method === "run:admin" ||
+        method === "approval:submit" ||
+        method === "signal:submit" ||
+        method === "cron:read" ||
+        method === "cron:write" ||
+        method === "observability:read") {
+        return method;
+    }
+    if (method.startsWith("config.")) {
+        return "run:admin";
+    }
+    return getRequiredScopeForGatewayMethod(method) ?? "run:read";
 }
 /**
  * @param {string[]} scopes
@@ -696,26 +707,7 @@ function accessForMethod(method) {
  * @returns {boolean}
  */
 function hasScope(scopes, method) {
-    if (scopes.includes("*")) {
-        return true;
-    }
-    const requiredAccess = accessForMethod(method);
-    const grantedLevels = scopes
-        .map((scope) => scope.trim())
-        .filter((scope) => scope === "read" || scope === "execute" || scope === "approve" || scope === "admin");
-    if (grantedLevels.some((level) => ACCESS_RANK[level] >= ACCESS_RANK[requiredAccess])) {
-        return true;
-    }
-    for (const scope of scopes.map(normalizeGrantedScope)) {
-        if (!scope)
-            continue;
-        if (scope === method)
-            return true;
-        if (scope.endsWith(".*") && method.startsWith(scope.slice(0, -1))) {
-            return true;
-        }
-    }
-    return false;
+    return hasGatewayScope(scopes.map(normalizeGrantedScope), requiredScopeForMethod(method), method);
 }
 /**
  * @param {unknown} value
@@ -1057,6 +1049,7 @@ export class Gateway {
     maxBodyBytes;
     maxPayload;
     maxConnections;
+    eventWindowSize;
     headersTimeout;
     requestTimeout;
     auth;
@@ -1067,6 +1060,7 @@ export class Gateway {
     activeRuns = new Map();
     inflightRuns = new Map();
     devtoolsSubscribers = new Map();
+    runEventWindows = new Map();
     /** Absolute active subscriber count per runId (gauge source of truth). */
     devtoolsSubscriberCounts = new Map();
     /** Flagged subscriber IDs that should force a snapshot on their next emit. */
@@ -1092,6 +1086,9 @@ export class Gateway {
         this.maxConnections = options.maxConnections === undefined
             ? DEFAULT_MAX_CONNECTIONS
             : Math.floor(assertPositiveFiniteInteger("maxConnections", Number(options.maxConnections)));
+        this.eventWindowSize = options.eventWindowSize === undefined
+            ? GATEWAY_EVENT_WINDOW_DEFAULT
+            : Math.floor(assertPositiveFiniteInteger("eventWindowSize", Number(options.eventWindowSize)));
         this.headersTimeout = options.headersTimeout === undefined
             ? DEFAULT_HEADERS_TIMEOUT
             : Math.floor(assertPositiveFiniteInteger("headersTimeout", Number(options.headersTimeout)));
@@ -1248,6 +1245,153 @@ export class Gateway {
         }
     }
     /**
+   * @param {string} runId
+   * @returns {{ nextSeq: number; window: Array<Record<string, unknown>> }}
+   */
+    getRunEventWindow(runId) {
+        let state = this.runEventWindows.get(runId);
+        if (!state) {
+            state = { nextSeq: 0, window: [] };
+            this.runEventWindows.set(runId, state);
+        }
+        return state;
+    }
+    /**
+   * @param {string} event
+   * @param {unknown} payload
+   * @param {number} stateVersion
+   * @returns {Record<string, unknown> | null}
+   */
+    appendRunEventWindow(event, payload, stateVersion) {
+        const runId = eventRunId(payload);
+        if (!runId) {
+            return null;
+        }
+        const state = this.getRunEventWindow(runId);
+        state.nextSeq += 1;
+        const frame = {
+            apiVersion: SMITHERS_API_VERSION,
+            type: "RunEvent",
+            runId,
+            event,
+            payload,
+            seq: state.nextSeq,
+            stateVersion,
+        };
+        state.window.push(frame);
+        while (state.window.length > this.eventWindowSize) {
+            state.window.shift();
+        }
+        return frame;
+    }
+    /**
+   * @param {string} runId
+   * @returns {number}
+   */
+    getRunEventCurrentSeq(runId) {
+        return this.runEventWindows.get(runId)?.nextSeq ?? 0;
+    }
+    /**
+   * @param {ConnectionState} connection
+   * @param {string} streamId
+   * @param {string} runId
+   * @returns {() => void}
+   */
+    registerRunEventSubscriber(connection, streamId, runId) {
+        if (!connection.runEventStreams) {
+            connection.runEventStreams = new Map();
+        }
+        const heartbeat = setInterval(() => {
+            this.sendEvent(connection, "run.heartbeat", {
+                apiVersion: SMITHERS_API_VERSION,
+                type: "Heartbeat",
+                streamId,
+                runId,
+                ts: nowMs(),
+            });
+        }, RUN_EVENT_HEARTBEAT_MS);
+        connection.runEventStreams.set(streamId, { runId, heartbeat });
+        return () => this.unregisterRunEventSubscriber(connection, streamId);
+    }
+    /**
+   * @param {ConnectionState} connection
+   * @param {string} streamId
+   */
+    unregisterRunEventSubscriber(connection, streamId) {
+        const stream = connection.runEventStreams?.get(streamId);
+        if (!stream) {
+            return;
+        }
+        clearInterval(stream.heartbeat);
+        connection.runEventStreams?.delete(streamId);
+    }
+    /**
+   * @param {ConnectionState} connection
+   */
+    cleanupRunEventSubscribers(connection) {
+        const streams = connection.runEventStreams;
+        if (!streams || streams.size === 0) {
+            return;
+        }
+        for (const streamId of [...streams.keys()]) {
+            this.unregisterRunEventSubscriber(connection, streamId);
+        }
+    }
+    /**
+   * @param {ConnectionState} connection
+   * @param {string} streamId
+   * @param {Record<string, unknown>} frame
+   */
+    sendRunEventStreamFrame(connection, streamId, frame) {
+        this.sendEvent(connection, "run.event", {
+            streamId,
+            ...frame,
+        });
+    }
+    /**
+   * @param {ConnectionState} connection
+   * @param {string} streamId
+   * @param {string} runId
+   * @param {number} fromSeq
+   * @param {number} toSeq
+   * @param {unknown} snapshot
+   */
+    sendRunGapResync(connection, streamId, runId, fromSeq, toSeq, snapshot) {
+        this.sendEvent(connection, "run.gap_resync", {
+            apiVersion: SMITHERS_API_VERSION,
+            type: "GapResync",
+            streamId,
+            runId,
+            fromSeq,
+            toSeq,
+            snapshot,
+        });
+    }
+    /**
+   * @param {string} runId
+   */
+    async buildRunSnapshot(runId) {
+        const resolved = await this.resolveRun(runId);
+        if (!resolved) {
+            return null;
+        }
+        const run = await resolved.adapter.getRun(runId);
+        if (!run) {
+            return null;
+        }
+        const summary = await resolved.adapter.countNodesByState(runId);
+        const runState = await computeRunStateFromRow(resolved.adapter, run).catch(() => undefined);
+        return {
+            ...run,
+            workflowKey: resolved.workflowKey,
+            summary: summary.reduce((acc, row) => {
+                acc[row.state] = row.count;
+                return acc;
+            }, {}),
+            ...(runState ? { runState } : {}),
+        };
+    }
+    /**
    * @param {GatewayTransport} transport
    * @param {string} frameType
    * @param {GatewayMetricLabels} [labels]
@@ -1369,8 +1513,10 @@ export class Gateway {
     rpcSuccessEffect(context, frame, response) {
         const params = asObject(frame.params) ?? {};
         switch (frame.method) {
-            case "approvals.decide": {
-                const approved = asBoolean(params.approved) ?? false;
+            case "approvals.decide":
+            case "submitApproval": {
+                const decision = asObject(params.decision);
+                const approved = asBoolean(params.approved) ?? asBoolean(decision?.approved) ?? false;
                 const nodeId = asString(params.nodeId);
                 return Effect.all([
                     incrementMetric(gatewayApprovalDecisionsTotal, {
@@ -1384,9 +1530,10 @@ export class Gateway {
                     })),
                 ], { discard: true });
             }
-            case "signals.send": {
-                const signalName = asString(params.signalName);
-                const correlationId = asString(params.correlationId);
+            case "signals.send":
+            case "submitSignal": {
+                const signalName = asString(params.signalName) ?? asString(params.correlationKey);
+                const correlationId = asString(params.correlationId) ?? asString(params.correlationKey);
                 return Effect.all([
                     incrementMetric(gatewaySignalsTotal, { outcome: "sent" }),
                     Effect.logInfo("Gateway signal sent").pipe(Effect.annotateLogs({
@@ -1396,7 +1543,8 @@ export class Gateway {
                     })),
                 ], { discard: true });
             }
-            case "cron.trigger": {
+            case "cron.trigger":
+            case "cronRun": {
                 const cronId = asString(params.cronId);
                 const workflow = asString(params.workflow);
                 return Effect.all([
@@ -1656,9 +1804,13 @@ export class Gateway {
             noServer: true,
             maxPayload: this.maxPayload,
         });
+        wsServer.on("headers", (headers) => {
+            headers.push(`X-Smithers-API-Version: ${SMITHERS_API_VERSION}`);
+        });
         const server = createServer(async (req, res) => {
             const url = new URL(req.url ?? "/", "http://127.0.0.1");
             const webhookMatch = url.pathname.match(/^\/webhooks\/([^/]+)$/);
+            const rpcMatch = url.pathname.match(/^\/v1\/rpc\/([^/]+)$/);
             if ((req.method ?? "GET") === "GET" && (req.url ?? "/") === "/health") {
                 return sendJson(res, 200, {
                     ok: true,
@@ -1672,6 +1824,9 @@ export class Gateway {
             }
             if ((req.method ?? "GET") === "POST" && webhookMatch) {
                 return this.handleWebhook(req, res, decodeURIComponent(webhookMatch[1]));
+            }
+            if ((req.method ?? "GET") === "POST" && rpcMatch) {
+                return this.handleHttpRpc(req, res, decodeURIComponent(rpcMatch[1]));
             }
             if ((req.method ?? "GET") === "POST" && (req.url ?? "/") === "/rpc") {
                 return this.handleHttpRpc(req, res);
@@ -1695,6 +1850,7 @@ export class Gateway {
                 socket.write("HTTP/1.1 503 Service Unavailable\r\n"
                     + "Connection: close\r\n"
                     + "Content-Type: text/plain; charset=utf-8\r\n"
+                    + `X-Smithers-API-Version: ${SMITHERS_API_VERSION}\r\n`
                     + `Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n`
                     + "\r\n"
                     + body);
@@ -1885,6 +2041,7 @@ export class Gateway {
                 triggeredBy: auth.triggeredBy,
                 source: gatewayTriggerSource(auth.triggeredBy),
                 resume: options?.resume ?? false,
+                ...(auth.tokenId ? { tokenId: auth.tokenId } : {}),
                 ...(auth.subscribeConnection
                     ? gatewayContextAnnotations(auth.subscribeConnection)
                     : {}),
@@ -1911,6 +2068,7 @@ export class Gateway {
                 triggeredBy: auth.triggeredBy,
                 scopes: [...auth.scopes],
                 role: auth.role,
+                tokenId: auth.tokenId ?? null,
                 createdAt: new Date().toISOString(),
             },
         }))
@@ -2006,6 +2164,7 @@ export class Gateway {
             role: null,
             scopes: [],
             userId: null,
+            tokenId: null,
             subscribedRuns: null,
             devtoolsStreams: new Map(),
             heartbeatTimer: null,
@@ -2036,7 +2195,7 @@ export class Gateway {
                         return this.handleConnect(connection, req, frame.id, frame.params);
                     }
                     if (!hasScope(connection.scopes, frame.method)) {
-                        return responseError(frame.id, "FORBIDDEN", `Missing scope for ${frame.method}`);
+                        return responseForbidden(frame.id, frame.method);
                     }
                     return this.routeRequest(connection, frame);
                 });
@@ -2074,6 +2233,7 @@ export class Gateway {
             }
             this.connections.delete(connection);
             this.cleanupDevToolsSubscribers(connection);
+            this.cleanupRunEventSubscribers(connection);
             emitGatewayEffect(Effect.all([
                 updateMetric(gatewayConnectionsActive, -1, { transport: "ws" }),
                 incrementMetric(gatewayConnectionsClosedTotal, {
@@ -2158,13 +2318,14 @@ export class Gateway {
                 authCode: authResult.code,
                 authMessage: authResult.message,
             });
-            return responseError(id, authResult.code, authResult.message);
+            return responseError(id, authResult.code, authResult.message, authResult.details);
         }
         connection.authenticated = true;
         connection.sessionToken = randomUUID();
         connection.role = authResult.role;
         connection.scopes = [...authResult.scopes];
         connection.userId = authResult.userId ?? null;
+        connection.tokenId = authResult.tokenId ?? null;
         connection.subscribedRuns = Array.isArray(request.subscribe)
             ? new Set(request.subscribe.filter((value) => typeof value === "string"))
             : null;
@@ -2183,6 +2344,7 @@ export class Gateway {
                 role: authResult.role,
                 scopes: authResult.scopes,
                 userId: authResult.userId ?? null,
+                tokenId: authResult.tokenId ?? null,
             },
             snapshot: await this.buildSnapshot(),
         };
@@ -2226,11 +2388,32 @@ export class Gateway {
                     message: "Invalid token",
                 };
             }
+            if (typeof grant.revokedAtMs === "number" && grant.revokedAtMs <= Date.now()) {
+                return {
+                    ok: false,
+                    code: "UNAUTHORIZED",
+                    message: "Token has been revoked",
+                    details: {
+                        refresh: "smithers token issue",
+                    },
+                };
+            }
+            if (typeof grant.expiresAtMs === "number" && grant.expiresAtMs <= Date.now()) {
+                return {
+                    ok: false,
+                    code: "UNAUTHORIZED",
+                    message: "Token expired; issue a refreshed token.",
+                    details: {
+                        refresh: "smithers token issue",
+                    },
+                };
+            }
             return {
                 ok: true,
                 role: grant.role,
                 scopes: grant.scopes,
                 userId: grant.userId,
+                tokenId: grant.tokenId ?? createHash("sha256").update(token).digest("hex").slice(0, 16),
             };
         }
         if (this.auth.mode === "jwt") {
@@ -2247,6 +2430,9 @@ export class Gateway {
                     ok: false,
                     code: "UNAUTHORIZED",
                     message: verified.message,
+                    details: verified.message.includes("expired")
+                        ? { refresh: "smithers token issue" }
+                        : undefined,
                 };
             }
             const scopes = parseJwtScopes(verified.payload[this.auth.scopesClaim ?? "scope"]);
@@ -2259,6 +2445,7 @@ export class Gateway {
                 role,
                 scopes: scopes.length > 0 ? scopes : [...(this.auth.defaultScopes ?? [])],
                 userId: userId ?? undefined,
+                tokenId: createHash("sha256").update(token).digest("hex").slice(0, 16),
             };
         }
         if (this.auth.mode === "trusted-proxy") {
@@ -2283,6 +2470,7 @@ export class Gateway {
                 role,
                 scopes,
                 userId: userId ?? undefined,
+                tokenId: asString(req.headers["x-smithers-token-id"]) ?? undefined,
             };
         }
         return {
@@ -2294,8 +2482,9 @@ export class Gateway {
     /**
    * @param {IncomingMessage} req
    * @param {ServerResponse} res
+   * @param {string} [forcedMethod]
    */
-    async handleHttpRpc(req, res) {
+    async handleHttpRpc(req, res, forcedMethod) {
         const requestId = headerValue(req, "x-request-id") ?? randomUUID();
         const baseContext = {
             connectionId: `http:${requestId}`,
@@ -2303,6 +2492,7 @@ export class Gateway {
             role: null,
             scopes: [],
             userId: null,
+            tokenId: null,
             subscribedRuns: null,
             devtoolsStreams: null,
         };
@@ -2321,7 +2511,7 @@ export class Gateway {
                     authCode: authResult.code,
                     authMessage: authResult.message,
                 }, "warning");
-                const response = responseError(requestId, authResult.code, authResult.message);
+                const response = responseError(requestId, authResult.code, authResult.message, authResult.details);
                 return this.sendHttpRpcResponse(res, statusForRpcError(authResult.code), response);
             }
             context = {
@@ -2329,6 +2519,7 @@ export class Gateway {
                 role: authResult.role,
                 scopes: [...authResult.scopes],
                 userId: authResult.userId ?? null,
+                tokenId: authResult.tokenId ?? null,
             };
             this.recordAuthEvent("http", "success", context, {
                 requestId,
@@ -2354,18 +2545,18 @@ export class Gateway {
                 maxDepth: GATEWAY_RPC_MAX_DEPTH,
                 maxStringLength: GATEWAY_RPC_MAX_STRING_LENGTH,
             });
-            const method = validateGatewayMethodName(body.method);
+            const method = validateGatewayMethodName(forcedMethod ?? body.method);
             const bodyId = asString(body.id) ?? requestId;
             assertOptionalStringMaxLength("id", bodyId, GATEWAY_FRAME_ID_MAX_LENGTH);
             const frame = {
                 type: "req",
                 id: bodyId,
                 method,
-                params: body.params,
+                params: forcedMethod && body.method === undefined ? body : body.params,
             };
             const response = await this.executeRpc(context, frame, async () => {
                 if (!hasScope(context.scopes, method)) {
-                    return responseError(bodyId, "FORBIDDEN", `Missing scope for ${method}`);
+                    return responseForbidden(bodyId, method);
                 }
                 return this.routeRequest(context, frame);
             });
@@ -2419,6 +2610,7 @@ export class Gateway {
             payload,
             seq: connection.seq,
             stateVersion,
+            apiVersion: SMITHERS_API_VERSION,
         };
         connection.ws.send(JSON.stringify(frame));
         this.recordMessageSent("ws", "event", { event });
@@ -2430,6 +2622,7 @@ export class Gateway {
     broadcastEvent(event, payload) {
         const runId = eventRunId(payload);
         this.stateVersion += 1;
+        const runFrame = this.appendRunEventWindow(event, payload, this.stateVersion);
         let recipientCount = 0;
         for (const connection of this.connections) {
             if (!connection.authenticated || !shouldDeliverEvent(connection, runId)) {
@@ -2437,6 +2630,13 @@ export class Gateway {
             }
             recipientCount += 1;
             this.sendEvent(connection, event, payload, this.stateVersion);
+            if (runFrame && connection.runEventStreams) {
+                for (const [streamId, stream] of connection.runEventStreams.entries()) {
+                    if (stream.runId === runId) {
+                        this.sendRunEventStreamFrame(connection, streamId, runFrame);
+                    }
+                }
+            }
         }
         emitGatewayLog("debug", "Gateway event broadcast", {
             event,
@@ -2737,12 +2937,15 @@ export class Gateway {
                     stateVersion: this.stateVersion,
                     uptimeMs: nowMs() - this.startedAtMs,
                 });
-            case "runs.list": {
-                const limit = asOptionalPositiveInt(params.limit, "limit") ?? 50;
-                const status = asString(params.status);
+            case "runs.list":
+            case "listRuns": {
+                const filter = asObject(params.filter) ?? {};
+                const limit = asOptionalPositiveInt(params.limit ?? filter.limit, "limit") ?? 50;
+                const status = asString(params.status) ?? asString(filter.status);
                 return responseOk(frame.id, await this.listRunsAcrossWorkflows(limit, status));
             }
-            case "runs.create": {
+            case "runs.create":
+            case "launchRun": {
                 const workflowKey = asString(params.workflow);
                 if (!workflowKey) {
                     return responseError(frame.id, "INVALID_REQUEST", "workflow is required");
@@ -2760,14 +2963,42 @@ export class Gateway {
                     }
                     throw error;
                 }
+                const options = asObject(params.options) ?? {};
                 return responseOk(frame.id, await this.startRun(workflowKey, input, {
                     triggeredBy: connection.userId ?? "gateway",
                     scopes: [...connection.scopes],
                     role: connection.role ?? "operator",
+                    tokenId: connection.tokenId ?? null,
                     subscribeConnection: connection,
-                }, asString(params.runId) ?? crypto.randomUUID(), { resume: false }));
+                }, asString(params.runId) ?? asString(options.runId) ?? crypto.randomUUID(), { resume: false }));
             }
-            case "runs.get": {
+            case "resumeRun": {
+                const runId = asString(params.runId);
+                if (!runId) {
+                    return responseError(frame.id, "INVALID_REQUEST", "runId is required");
+                }
+                const resolved = await this.resolveRun(runId);
+                if (!resolved) {
+                    return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
+                }
+                const run = await resolved.adapter.getRun(runId);
+                if (!run) {
+                    return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
+                }
+                if (run.status === "finished" || run.status === "failed" || run.status === "cancelled") {
+                    return responseOk(frame.id, { runId, status: "already_terminal" });
+                }
+                await this.resumeRunIfNeeded(runId, resolved.workflowKey, resolved.adapter, {
+                    triggeredBy: connection.userId ?? "gateway",
+                    scopes: [...connection.scopes],
+                    role: connection.role ?? "operator",
+                    tokenId: connection.tokenId ?? null,
+                    subscribeConnection: connection.transport === "ws" ? connection : undefined,
+                });
+                return responseOk(frame.id, { runId, status: "resume_requested" });
+            }
+            case "runs.get":
+            case "getRun": {
                 const runId = asString(params.runId);
                 if (!runId) {
                     return responseError(frame.id, "INVALID_REQUEST", "runId is required");
@@ -2930,6 +3161,64 @@ export class Gateway {
                     throw error;
                 }
             }
+            case "streamRunEvents": {
+                if (connection.transport !== "ws" || !connection.ws) {
+                    return responseError(frame.id, "INVALID_REQUEST", "streamRunEvents is only supported over websocket connections");
+                }
+                const runId = asString(params.runId);
+                if (!runId) {
+                    return responseError(frame.id, "InvalidRunId", "runId is required");
+                }
+                const afterSeq = params.afterSeq;
+                if (afterSeq !== undefined &&
+                    (typeof afterSeq !== "number" || !Number.isInteger(afterSeq) || afterSeq < 0)) {
+                    return responseError(frame.id, "SeqOutOfRange", "afterSeq must be a non-negative integer");
+                }
+                const resolved = await this.resolveRun(runId);
+                if (!resolved) {
+                    return responseError(frame.id, "RunNotFound", `Run not found: ${runId}`);
+                }
+                const currentSeq = this.getRunEventCurrentSeq(runId);
+                if (typeof afterSeq === "number" && afterSeq > currentSeq) {
+                    return responseError(frame.id, "SeqOutOfRange", `afterSeq ${afterSeq} is newer than current seq ${currentSeq}`);
+                }
+                const streamId = randomUUID();
+                this.registerRunEventSubscriber(connection, streamId, runId);
+                queueMicrotask(() => {
+                    void (async () => {
+                        const state = this.getRunEventWindow(runId);
+                        const window = [...state.window];
+                        if (typeof afterSeq === "number") {
+                            const firstSeq = window.length > 0 ? Number(window[0].seq) : state.nextSeq + 1;
+                            if (window.length > 0 && afterSeq < firstSeq - 1) {
+                                const snapshot = await this.buildRunSnapshot(runId);
+                                this.sendRunGapResync(connection, streamId, runId, afterSeq + 1, firstSeq - 1, snapshot);
+                            }
+                            for (const eventFrame of window) {
+                                if (Number(eventFrame.seq) > afterSeq) {
+                                    this.sendRunEventStreamFrame(connection, streamId, eventFrame);
+                                }
+                            }
+                        }
+                    })().catch((error) => {
+                        this.sendEvent(connection, "run.error", {
+                            streamId,
+                            runId,
+                            error: {
+                                version: SMITHERS_API_VERSION,
+                                code: "Internal",
+                                message: error?.message ?? "streamRunEvents replay failed",
+                            },
+                        });
+                    });
+                });
+                return responseOk(frame.id, {
+                    streamId,
+                    runId,
+                    afterSeq: typeof afterSeq === "number" ? afterSeq : null,
+                    currentSeq,
+                });
+            }
             case "streamDevTools": {
                 if (connection.transport !== "ws" || !connection.ws) {
                     this.recordDevToolsSubscribeAttempt("error");
@@ -2940,7 +3229,7 @@ export class Gateway {
                     this.recordDevToolsSubscribeAttempt("error");
                     return responseError(frame.id, "InvalidRunId", "runId is required");
                 }
-                const fromSeq = params.fromSeq;
+                const fromSeq = typeof params.fromSeq === "number" ? params.fromSeq : params.afterSeq;
                 const streamId = randomUUID();
                 try {
                     // Full route-level validation at the gateway boundary so
@@ -3106,6 +3395,7 @@ export class Gateway {
                         streamId,
                         runId,
                         fromSeq: typeof fromSeq === "number" ? fromSeq : null,
+                        afterSeq: typeof fromSeq === "number" ? fromSeq : null,
                     });
                 }
                 catch (error) {
@@ -3116,6 +3406,22 @@ export class Gateway {
                     throw error;
                 }
             }
+            case "hijackRun": {
+                const runId = asString(params.runId);
+                if (!runId) {
+                    return responseError(frame.id, "InvalidRunId", "runId is required");
+                }
+                const resolved = await this.resolveRun(runId);
+                if (!resolved) {
+                    return responseError(frame.id, "RunNotFound", `Run not found: ${runId}`);
+                }
+                return responseOk(frame.id, {
+                    runId,
+                    status: "hijack-ready",
+                    sessionId: randomUUID(),
+                });
+            }
+            case "rewindRun":
             case "jumpToFrame":
             case "devtools.jumpToFrame": {
                 const runId = asString(params.runId);
@@ -3191,6 +3497,7 @@ export class Gateway {
                                 triggeredBy: connection.userId ?? "gateway",
                                 scopes: [...connection.scopes],
                                 role: connection.role ?? "operator",
+                                tokenId: connection.tokenId ?? null,
                                 subscribeConnection: connection.transport === "ws" ? connection : undefined,
                             });
                         },
@@ -3235,10 +3542,12 @@ export class Gateway {
             }
             case "approvals.list":
                 return responseOk(frame.id, await this.listPendingApprovals());
-            case "approvals.decide": {
+            case "approvals.decide":
+            case "submitApproval": {
                 const runId = asString(params.runId);
                 const nodeId = asString(params.nodeId);
-                const approved = asBoolean(params.approved);
+                const stableDecision = asObject(params.decision);
+                const approved = asBoolean(params.approved) ?? asBoolean(stableDecision?.approved);
                 const iteration = asNumber(params.iteration) ?? 0;
                 if (!runId || !nodeId || approved === undefined) {
                     return responseError(frame.id, "INVALID_REQUEST", "runId, nodeId, and approved are required");
@@ -3257,7 +3566,8 @@ export class Gateway {
                     !request.allowedScopes.some((scope) => hasScope(connection.scopes, scope))) {
                     return responseError(frame.id, "FORBIDDEN", "Connection is missing required approval scope");
                 }
-                const decision = params.decision;
+                const decision = stableDecision && "value" in stableDecision ? stableDecision.value : params.decision;
+                const note = asString(params.note) ?? asString(stableDecision?.note);
                 if (approved) {
                     const validation = validateApprovalDecision(request, decision);
                     if (!validation.ok) {
@@ -3265,22 +3575,25 @@ export class Gateway {
                     }
                 }
                 if (approved) {
-                    await Effect.runPromise(approveNode(resolved.adapter, runId, nodeId, iteration, asString(params.note), connection.userId ?? undefined, decision));
+                    await Effect.runPromise(approveNode(resolved.adapter, runId, nodeId, iteration, note, connection.userId ?? undefined, decision));
                 }
                 else {
-                    await Effect.runPromise(denyNode(resolved.adapter, runId, nodeId, iteration, asString(params.note), connection.userId ?? undefined, decision));
+                    await Effect.runPromise(denyNode(resolved.adapter, runId, nodeId, iteration, note, connection.userId ?? undefined, decision));
                 }
                 await this.resumeRunIfNeeded(runId, resolved.workflowKey, resolved.adapter, {
                     triggeredBy: connection.userId ?? "gateway",
                     scopes: [...connection.scopes],
                     role: connection.role ?? "operator",
+                    tokenId: connection.tokenId ?? null,
                     subscribeConnection: connection,
                 });
                 return responseOk(frame.id, { runId, nodeId, iteration, approved });
             }
-            case "signals.send": {
+            case "signals.send":
+            case "submitSignal": {
                 const runId = asString(params.runId);
-                const signalName = asString(params.signalName);
+                const correlationKey = asString(params.correlationKey);
+                const signalName = asString(params.signalName) ?? correlationKey;
                 if (!runId || !signalName) {
                     return responseError(frame.id, "INVALID_REQUEST", "runId and signalName are required");
                 }
@@ -3288,19 +3601,21 @@ export class Gateway {
                 if (!resolved) {
                     return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
                 }
-                const delivered = await Effect.runPromise(signalRun(resolved.adapter, runId, signalName, params.data ?? {}, {
-                    correlationId: asString(params.correlationId),
+                const delivered = await Effect.runPromise(signalRun(resolved.adapter, runId, signalName, params.data ?? params.payload ?? {}, {
+                    correlationId: asString(params.correlationId) ?? correlationKey,
                     receivedBy: connection.userId,
                 }));
                 await this.resumeRunIfNeeded(runId, resolved.workflowKey, resolved.adapter, {
                     triggeredBy: connection.userId ?? "gateway",
                     scopes: [...connection.scopes],
                     role: connection.role ?? "operator",
+                    tokenId: connection.tokenId ?? null,
                     subscribeConnection: connection,
                 });
                 return responseOk(frame.id, delivered);
             }
-            case "runs.cancel": {
+            case "runs.cancel":
+            case "cancelRun": {
                 const runId = asString(params.runId);
                 if (!runId) {
                     return responseError(frame.id, "INVALID_REQUEST", "runId is required");
@@ -3338,8 +3653,16 @@ export class Gateway {
                 });
             }
             case "cron.list":
-                return responseOk(frame.id, await this.listCrons());
-            case "cron.add": {
+            case "cronList": {
+                const filter = asObject(params.filter) ?? {};
+                const workflowFilter = asString(filter.workflow);
+                const rows = await this.listCrons();
+                return responseOk(frame.id, workflowFilter
+                    ? rows.filter((row) => row.workflow === workflowFilter)
+                    : rows);
+            }
+            case "cron.add":
+            case "cronCreate": {
                 const workflowKey = asString(params.workflow);
                 const pattern = asString(params.pattern);
                 if (!workflowKey || !pattern) {
@@ -3367,7 +3690,8 @@ export class Gateway {
                     workflow: workflowKey,
                 });
             }
-            case "cron.remove": {
+            case "cron.remove":
+            case "cronDelete": {
                 const cronId = asString(params.cronId);
                 if (!cronId) {
                     return responseError(frame.id, "INVALID_REQUEST", "cronId is required");
@@ -3379,7 +3703,8 @@ export class Gateway {
                 await resolvedCron.adapter.deleteCron(cronId);
                 return responseOk(frame.id, { cronId, removed: true });
             }
-            case "cron.trigger": {
+            case "cron.trigger":
+            case "cronRun": {
                 const cronId = asString(params.cronId);
                 const workflowKey = asString(params.workflow);
                 const resolvedCron = cronId ? await this.findCron(cronId) : null;
@@ -3404,6 +3729,7 @@ export class Gateway {
                     triggeredBy: connection.userId ?? "gateway",
                     scopes: [...connection.scopes],
                     role: connection.role ?? "operator",
+                    tokenId: connection.tokenId ?? null,
                     subscribeConnection: connection,
                 }, undefined, { resume: false }));
             }

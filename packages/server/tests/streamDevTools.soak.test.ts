@@ -11,7 +11,8 @@ import { streamDevToolsRoute } from "../src/gatewayRoutes/streamDevTools.js";
 
 const soakEnabled = process.env.SMITHERS_SOAK === "1";
 const soakTest = soakEnabled ? test : test.skip;
-const soakDurationMs = Number(process.env.SMITHERS_SOAK_MS ?? 10_000);
+const soakDurationMs = Number(process.env.SMITHERS_SOAK_MS ?? 3_600_000);
+const soakDisconnectEveryMs = Number(process.env.SMITHERS_SOAK_DISCONNECT_MS ?? 30_000);
 
 function now() {
   return Date.now();
@@ -54,16 +55,6 @@ describe("streamDevTools soak (opt-in)", () => {
 
     const durationMs = soakDurationMs;
     const subscribers = 5;
-    const controllers = Array.from({ length: subscribers }, () => new AbortController());
-    const iterators = controllers.map((controller) =>
-      streamDevToolsRoute({
-        adapter,
-        runId,
-        fromSeq: 0,
-        pollIntervalMs: 10,
-        signal: controller.signal,
-      })[Symbol.asyncIterator](),
-    );
     const receivedSeqs = Array.from({ length: subscribers }, () => [] as number[]);
     const baselineRss = process.memoryUsage().rss;
 
@@ -98,16 +89,37 @@ describe("streamDevTools soak (opt-in)", () => {
       }
     })();
 
-    const readers = iterators.map((iterator, index) =>
+    const controllers = new Set<AbortController>();
+    const readers = Array.from({ length: subscribers }, (_, index) =>
       (async () => {
-        while (true) {
-          const next = await iterator.next();
-          if (next.done) break;
-          const seq =
-            next.value.kind === "snapshot"
-              ? next.value.snapshot.seq
-              : next.value.delta.seq;
-          receivedSeqs[index].push(seq);
+        let afterSeq = 0;
+        while (!stopped) {
+          const controller = new AbortController();
+          controllers.add(controller);
+          const disconnect = setTimeout(() => controller.abort(), soakDisconnectEveryMs);
+          const iterator = streamDevToolsRoute({
+            adapter,
+            runId,
+            fromSeq: afterSeq,
+            pollIntervalMs: 10,
+            signal: controller.signal,
+          })[Symbol.asyncIterator]();
+          try {
+            while (!stopped) {
+              const next = await iterator.next();
+              if (next.done) break;
+              const seq =
+                next.value.kind === "snapshot"
+                  ? next.value.snapshot.seq
+                  : next.value.delta.seq;
+              receivedSeqs[index].push(seq);
+              afterSeq = Math.max(afterSeq, seq);
+            }
+          } finally {
+            clearTimeout(disconnect);
+            controller.abort();
+            controllers.delete(controller);
+          }
         }
       })(),
     );
@@ -122,14 +134,11 @@ describe("streamDevTools soak (opt-in)", () => {
 
     for (const seqs of receivedSeqs) {
       expect(seqs.length).toBeGreaterThan(0);
-      let monotonic = true;
-      for (let i = 1; i < seqs.length; i += 1) {
-        if (seqs[i] < seqs[i - 1]) {
-          monotonic = false;
-          break;
-        }
+      const seen = new Set(seqs);
+      const maxSeq = Math.max(...seqs);
+      for (let seq = 0; seq <= maxSeq; seq += 1) {
+        expect(seen.has(seq)).toBe(true);
       }
-      expect(monotonic).toBe(true);
     }
 
     const rssGrowthMb = (process.memoryUsage().rss - baselineRss) / (1024 * 1024);

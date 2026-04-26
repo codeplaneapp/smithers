@@ -31,6 +31,7 @@
     "@smithers-orchestrator/driver": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
     "@smithers-orchestrator/errors": "workspace:*",
+    "@smithers-orchestrator/gateway": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
