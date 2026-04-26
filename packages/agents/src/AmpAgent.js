@@ -3,6 +3,7 @@
 // @smithers-type-exports-end
 
 import { BaseCliAgent, pushFlag, isRecord, asString, toolKindFromName, createSyntheticIdGenerator, } from "./BaseCliAgent/index.js";
+/** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
 
 /**
@@ -11,6 +12,7 @@ import { BaseCliAgent, pushFlag, isRecord, asString, toolKindFromName, createSyn
  */
 export class AmpAgent extends BaseCliAgent {
     opts;
+    /** @type {AgentCapabilityRegistry} */
     capabilities;
     cliEngine = "amp";
     /**

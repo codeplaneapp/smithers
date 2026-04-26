@@ -1,4 +1,5 @@
 import type { AgentCapabilityRegistry } from "./capability-registry";
+import type { AgentGenerateOptions } from "./BaseCliAgent/AgentGenerateOptions";
 
 /**
  * Represents an entity capable of generating responses or actions based on prompts.
@@ -24,5 +25,5 @@ export type AgentLike = {
    * @param args.outputSchema - Optional Zod schema defining the expected structured output format
    * @returns A promise resolving to the generated output
    */
-  generate: (args: unknown) => Promise<unknown>;
+  generate: (args?: AgentGenerateOptions) => Promise<unknown>;
 };

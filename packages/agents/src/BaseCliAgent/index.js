@@ -6,6 +6,7 @@
 /** @typedef {import("./AgentCliEvent.ts").AgentCliEvent} AgentCliEvent */
 /** @typedef {import("./AgentCliEvent.ts").AgentCliEventLevel} AgentCliEventLevel */
 /** @typedef {import("./AgentCliEvent.ts").AgentCliStartedEvent} AgentCliStartedEvent */
+/** @typedef {import("./AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
 /** @typedef {import("./BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
 /** @typedef {import("./CliUsageInfo.ts").CliUsageInfo} CliUsageInfo */

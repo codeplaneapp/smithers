@@ -16,6 +16,7 @@ import { buildGenerateResult } from "./buildGenerateResult.js";
 import { runCommandEffect } from "./runCommandEffect.js";
 /** @typedef {import("./AgentCliEvent.ts").AgentCliEvent} AgentCliEvent */
 
+/** @typedef {import("./AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
 /** @typedef {import("./BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
 /** @typedef {import("./CliUsageInfo.ts").CliUsageInfo} CliUsageInfo */
@@ -38,29 +39,6 @@ import { runCommandEffect } from "./runCommandEffect.js";
  *   totalTokens?: number;
  * }} AgentTokenTotals
  */
-/**
- * Loosely-typed generation options. The AI SDK passes a dynamic shape here
- * (GenerateTextOptions / StreamTextOptions and provider-specific extensions)
- * so we keep this permissive but avoid raw `any`.
- * @typedef {{
- *   prompt?: unknown;
- *   messages?: unknown;
- *   timeout?: unknown;
- *   abortSignal?: AbortSignal;
- *   rootDir?: string;
- *   resumeSession?: string;
- *   maxOutputBytes?: number;
- *   onStdout?: (text: string) => void;
- *   onStderr?: (text: string) => void;
- *   onEvent?: (event: AgentCliEvent) => unknown;
- *   retry?: unknown;
- *   isRetry?: unknown;
- *   retryAttempt?: unknown;
- *   schemaRetry?: unknown;
- *   [key: string]: unknown;
- * }} AgentGenerateOptions
- */
-
 /**
  * @template A
  * @param {Effect.Effect<A, SmithersError, never>} effect

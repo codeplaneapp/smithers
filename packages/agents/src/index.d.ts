@@ -165,7 +165,7 @@ type AgentLike$1 = {
      * @param args.outputSchema - Optional Zod schema defining the expected structured output format
      * @returns A promise resolving to the generated output
      */
-    generate: (args: unknown) => Promise<unknown>;
+    generate: (args?: AgentGenerateOptions) => Promise<unknown>;
 };
 
 type RunCommandResult = {
@@ -304,10 +304,10 @@ declare class AnthropicAgent extends ToolLoopAgent<never, any, never> {
     constructor(opts: AnthropicAgentOptions$1<CALL_OPTIONS, TOOLS>);
     hijackEngine: string;
     /**
-   * @param {ExtendedGenerateArgs<CALL_OPTIONS, TOOLS>} args
+   * @param {AgentGenerateOptions} [args]
    * @returns {Promise<GenerateTextResult<TOOLS, never>>}
    */
-    generate(args: ExtendedGenerateArgs$1<CALL_OPTIONS, TOOLS>): Promise<GenerateTextResult$2<TOOLS, never>>;
+    generate(args?: AgentGenerateOptions): Promise<GenerateTextResult$2<TOOLS, never>>;
 }
 type AgentCallParameters$1 = any;
 type AnthropicAgentOptions$1<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = AnthropicAgentOptions$2<CALL_OPTIONS, TOOLS>;
@@ -337,10 +337,10 @@ declare class OpenAIAgent extends ToolLoopAgent<never, any, never> {
     constructor(opts: OpenAIAgentOptions$1<CALL_OPTIONS, TOOLS>);
     hijackEngine: string;
     /**
-   * @param {ExtendedGenerateArgs<CALL_OPTIONS, TOOLS>} args
+   * @param {AgentGenerateOptions} [args]
    * @returns {Promise<GenerateTextResult<TOOLS, never>>}
    */
-    generate(args: ExtendedGenerateArgs<CALL_OPTIONS, TOOLS>): Promise<GenerateTextResult$1<TOOLS, never>>;
+    generate(args?: AgentGenerateOptions): Promise<GenerateTextResult$1<TOOLS, never>>;
 }
 type AgentCallParameters = any;
 type ExtendedGenerateArgs<CALL_OPTIONS, TOOLS> = AgentCallParameters<CALL_OPTIONS, TOOLS> & {
@@ -391,25 +391,7 @@ declare class AmpAgent extends BaseCliAgent {
      */
     constructor(opts?: AmpAgentOptions);
     opts: AmpAgentOptions$1;
-    capabilities: {
-        version: number;
-        engine: string;
-        runtimeTools: {};
-        mcp: {
-            bootstrap: string;
-            supportsProjectScope: boolean;
-            supportsUserScope: boolean;
-        };
-        skills: {
-            supportsSkills: boolean;
-            smithersSkillIds: never[];
-        };
-        humanInteraction: {
-            supportsUiRequests: boolean;
-            methods: never[];
-        };
-        builtIns: string[];
-    };
+    capabilities: AgentCapabilityRegistry$3;
     cliEngine: string;
     /**
    * @returns {CliOutputInterpreter}
@@ -526,6 +508,21 @@ type CodexAgentOptions$1 = BaseCliAgentOptions$1 & {
     color?: "always" | "never" | "auto";
     json?: boolean;
     outputLastMessage?: string;
+    /**
+     * Path to an isolated Codex CLI config directory. Sets `CODEX_HOME` on the
+     * spawned process so this invocation uses the credentials stored at
+     * `<configDir>/auth.json` (instead of the user's default `~/.codex/`).
+     *
+     * Use this to run multiple Codex / ChatGPT subscriptions side-by-side. Set
+     * up the directory by running `CODEX_HOME=<path> codex login` once.
+     */
+    configDir?: string;
+    /**
+     * OpenAI API key for billing this invocation against the API instead of a
+     * ChatGPT Plus/Pro subscription. Sets `OPENAI_API_KEY` on the spawned
+     * process.
+     */
+    apiKey?: string;
 };
 
 declare class CodexAgent extends BaseCliAgent {
@@ -758,25 +755,7 @@ declare class ForgeAgent extends BaseCliAgent {
    */
     constructor(opts?: ForgeAgentOptions);
     opts: ForgeAgentOptions$1;
-    capabilities: {
-        version: number;
-        engine: string;
-        runtimeTools: {};
-        mcp: {
-            bootstrap: string;
-            supportsProjectScope: boolean;
-            supportsUserScope: boolean;
-        };
-        skills: {
-            supportsSkills: boolean;
-            smithersSkillIds: never[];
-        };
-        humanInteraction: {
-            supportsUiRequests: boolean;
-            methods: never[];
-        };
-        builtIns: string[];
-    };
+    capabilities: AgentCapabilityRegistry$3;
     cliEngine: string;
     issuedConversationId: any;
     /**
@@ -869,4 +848,4 @@ type SmithersAgentToolCategory = SmithersAgentToolCategory$1;
 type SmithersListedTool = SmithersListedTool$2;
 type SmithersToolSurface = SmithersToolSurface$2;
 
-export { type AgentCapabilityRegistry, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, BaseCliAgent, ClaudeCodeAgent, CodexAgent, ForgeAgent, GeminiAgent, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, createSmithersAgentContract, hashCapabilityRegistry, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, BaseCliAgent, ClaudeCodeAgent, CodexAgent, ForgeAgent, GeminiAgent, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, createSmithersAgentContract, hashCapabilityRegistry, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };

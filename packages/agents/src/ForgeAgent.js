@@ -1,11 +1,13 @@
 import { BaseCliAgent, pushFlag, } from "./BaseCliAgent/index.js";
 import { randomUUID } from "node:crypto";
+/** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
 /** @typedef {import("./ForgeAgentOptions.ts").ForgeAgentOptions} ForgeAgentOptions */
 
 export class ForgeAgent extends BaseCliAgent {
     opts;
+    /** @type {AgentCapabilityRegistry} */
     capabilities;
     cliEngine = "forge";
     issuedConversationId;

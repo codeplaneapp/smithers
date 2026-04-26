@@ -3,6 +3,7 @@ import { ToolLoopAgent, } from "ai";
 import { resolveSdkModel } from "./resolveSdkModel.js";
 import { streamResultToGenerateResult } from "./streamResultToGenerateResult.js";
 /** @typedef {import("ai").AgentCallParameters} AgentCallParameters */
+/** @typedef {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
 
 /**
  * @template CALL_OPTIONS, TOOLS
@@ -27,10 +28,10 @@ export class OpenAIAgent extends ToolLoopAgent {
         });
     }
     /**
-   * @param {ExtendedGenerateArgs<CALL_OPTIONS, TOOLS>} args
+   * @param {AgentGenerateOptions} [args]
    * @returns {Promise<GenerateTextResult<TOOLS, never>>}
    */
-    generate(args) {
+    generate(args = {}) {
         const promptArgs = "messages" in args
             ? { messages: args.messages }
             : { prompt: args.prompt };
