@@ -450,7 +450,7 @@ function bearerTokenFromHeaders(req) {
     if (!authHeader) {
         return null;
     }
-    return authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
+    return authHeader.slice(0, 7).toLowerCase() === "bearer " ? authHeader.slice(7) : authHeader;
 }
 /**
  * @param {unknown} value
