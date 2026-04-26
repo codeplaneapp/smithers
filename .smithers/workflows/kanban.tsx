@@ -22,7 +22,12 @@ const mergeResultSchema = z.object({
   summary: z.string(),
 });
 
+const inputSchema = z.object({
+  maxConcurrency: z.number().int().default(3),
+});
+
 const { Workflow, Task, smithers, outputs } = createSmithers({
+  input: inputSchema,
   implement: implementOutputSchema,
   validate: validateOutputSchema,
   review: reviewOutputSchema,
@@ -108,7 +113,7 @@ function buildFeedback(
 
 export default smithers((ctx) => {
   const tickets = discoverTickets();
-  const maxConcurrency = Number(ctx.input.maxConcurrency) || 3;
+  const maxConcurrency = ctx.input.maxConcurrency;
   const ticketResults = ctx.outputs.ticketResult ?? [];
 
   return (

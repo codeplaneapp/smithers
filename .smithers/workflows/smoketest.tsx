@@ -15,7 +15,7 @@ import SmoketestPrompt from "../prompts/smoketest.mdx";
  * targets the currently-checked-out version + its changelog, not whatever
  * npm `@latest` happens to be or whatever the agent stumbles onto.
  */
-const workflowDir = fileURLToPath(new URL(".", import.meta.url));
+const workflowDir = fileURLToPath(new URL(".", import.meta.url).href);
 const monorepoRoot = resolve(workflowDir, "../..");
 const rootPkg = JSON.parse(
   readFileSync(resolve(monorepoRoot, "package.json"), "utf8"),

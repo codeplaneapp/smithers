@@ -7,7 +7,12 @@ import { agents } from "../agents";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
 import { reviewOutputSchema } from "../components/Review";
 
+const inputSchema = z.object({
+  prompt: z.string().default("Implement the requested change."),
+});
+
 const { Workflow, smithers } = createSmithers({
+  input: inputSchema,
   implement: implementOutputSchema,
   validate: validateOutputSchema,
   review: reviewOutputSchema,

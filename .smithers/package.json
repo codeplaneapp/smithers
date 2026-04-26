@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "lint": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path ../.gitignore .",
+    "lint:fix": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path ../.gitignore --fix .",
     "workflow:list": "smithers workflow list",
     "workflow:run": "smithers workflow run",
     "workflow:implement": "smithers workflow implement"

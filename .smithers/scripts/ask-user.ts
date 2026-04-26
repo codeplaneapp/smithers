@@ -18,17 +18,22 @@
 import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync, watchFile, unwatchFile } from "node:fs";
 import { resolve, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { parseArgs } from "node:util";
 
-const { values, positionals } = parseArgs({
-  args: process.argv.slice(2),
-  options: {
-    recommended: { type: "string", short: "r" },
-    branch: { type: "string", short: "b" },
-    timeout: { type: "string", short: "t", default: "300" },
-  },
-  allowPositionals: true,
-});
+const values: { recommended?: string; branch?: string; timeout: string } = { timeout: "300" };
+const positionals: string[] = [];
+const args = process.argv.slice(2);
+for (let i = 0; i < args.length; i++) {
+  const arg = args[i];
+  if ((arg === "--recommended" || arg === "-r") && args[i + 1]) {
+    values.recommended = args[++i];
+  } else if ((arg === "--branch" || arg === "-b") && args[i + 1]) {
+    values.branch = args[++i];
+  } else if ((arg === "--timeout" || arg === "-t") && args[i + 1]) {
+    values.timeout = args[++i];
+  } else {
+    positionals.push(arg);
+  }
+}
 
 const question = positionals[0];
 if (!question) {
