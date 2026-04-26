@@ -962,13 +962,13 @@ async function readRawBody(req, maxBytes) {
     const lengthHeader = headerValue(req, "content-length");
     const declaredLength = lengthHeader ? Number(lengthHeader) : NaN;
     if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-        throw new SmithersError("INVALID_INPUT", `Gateway request payload exceeds ${maxBytes} bytes.`, { maxBytes });
+        throw new SmithersError("PayloadTooLarge", `Gateway request payload exceeds ${maxBytes} bytes.`, { maxBytes });
     }
     for await (const chunk of req) {
         const buffer = Buffer.from(chunk);
         total += buffer.length;
         if (total > maxBytes) {
-            throw new SmithersError("INVALID_INPUT", `Gateway request payload exceeds ${maxBytes} bytes.`, { maxBytes });
+            throw new SmithersError("PayloadTooLarge", `Gateway request payload exceeds ${maxBytes} bytes.`, { maxBytes });
         }
         chunks.push(buffer);
     }
