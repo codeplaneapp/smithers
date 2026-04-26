@@ -355,7 +355,7 @@ function assertAuth(req, authToken) {
         req.headers["Authorization"] ??
         req.headers["x-smithers-key"];
     const value = Array.isArray(header) ? header[0] : header;
-    const token = value?.startsWith("Bearer ") ? value.slice(7) : value;
+    const token = value?.slice(0, 7).toLowerCase() === "bearer " ? value.slice(7) : value;
     if (!token || token !== authToken) {
         throw new HttpError(401, "UNAUTHORIZED", "Missing or invalid authorization token");
     }

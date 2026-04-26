@@ -119,7 +119,7 @@ export function createServeApp(opts) {
                 return next();
             const authHeader = c.req.header("authorization");
             if (authHeader) {
-                const token = authHeader.startsWith("Bearer ")
+                const token = authHeader.slice(0, 7).toLowerCase() === "bearer "
                     ? authHeader.slice(7)
                     : authHeader;
                 if (token === authToken)
