@@ -3,10 +3,11 @@ import { Cause, Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { SchedulerLive, WorkflowSessionLive } from "@smithers-orchestrator/scheduler";
 import { CorrelationContextLive, MetricsServiceLive, TracingServiceLive, createSmithersRuntimeLayer, getCurrentSmithersTraceAnnotations, getCurrentSmithersTraceSpan, } from "@smithers-orchestrator/observability";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { SmithersLoggerLayer } from "./util/logger.ts";
 const ObservabilityLayer = Layer.mergeAll(CorrelationContextLive, MetricsServiceLive, TracingServiceLive);
 const SmithersCoreLayer = Layer.mergeAll(ObservabilityLayer, SchedulerLive.pipe(Layer.provide(ObservabilityLayer)), WorkflowSessionLive);
 const SmithersWorkflowEngineLayer = Layer.suspend(() => WorkflowEngine.layerMemory);
-const SmithersRuntimeLayer = Layer.mergeAll(SmithersCoreLayer, SmithersWorkflowEngineLayer, createSmithersRuntimeLayer()).pipe(Layer.orDie);
+const SmithersRuntimeLayer = Layer.mergeAll(SmithersLoggerLayer, SmithersCoreLayer, SmithersWorkflowEngineLayer, createSmithersRuntimeLayer()).pipe(Layer.orDie);
 const runtime = ManagedRuntime.make(SmithersRuntimeLayer);
 /**
  * @template A, E, R

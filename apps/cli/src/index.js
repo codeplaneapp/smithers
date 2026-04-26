@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
+import { setJsonMode } from "./util/logger.ts";
 import { resolve, dirname, basename } from "node:path";
 import { pathToFileURL } from "node:url";
-import { readFileSync, existsSync, openSync, statSync } from "node:fs";
+import { readFileSync, existsSync, openSync, statSync, mkdirSync, writeFileSync } from "node:fs";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Effect, Fiber } from "effect";
 import { Cli, Mcp as IncurMcp, z } from "incur";
@@ -103,6 +104,39 @@ function readPackageVersion() {
     catch {
         return "unknown";
     }
+}
+function smithersTokenStorePath() {
+    return process.env.SMITHERS_TOKEN_STORE ?? resolve(process.env.HOME ?? process.cwd(), ".smithers", "tokens.json");
+}
+function readSmithersTokenStore() {
+    const path = smithersTokenStorePath();
+    if (!existsSync(path)) {
+        return { tokens: {} };
+    }
+    try {
+        const parsed = JSON.parse(readFileSync(path, "utf8"));
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return { tokens: {} };
+        }
+        const tokens = parsed.tokens && typeof parsed.tokens === "object" && !Array.isArray(parsed.tokens)
+            ? parsed.tokens
+            : {};
+        return { tokens };
+    }
+    catch {
+        return { tokens: {} };
+    }
+}
+function writeSmithersTokenStore(store) {
+    const path = smithersTokenStorePath();
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
+}
+function parseTokenScopes(raw) {
+    return raw
+        .split(/[,\s]+/)
+        .map((scope) => scope.trim())
+        .filter(Boolean);
 }
 const CLI_ARGUMENT_MAX_LENGTH = 4096;
 const CLI_IDENTIFIER_MAX_LENGTH = 256;
@@ -1921,7 +1955,7 @@ const agentsCli = Cli.create({
     run(c) {
         const report = getCliAgentCapabilityDoctorReport();
         commandExitOverride = report.ok ? 0 : 1;
-        if (c.options.json) {
+        if (c.options.json || c.format === "json") {
             process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
         }
         else {
@@ -2083,6 +2117,79 @@ const openapiCli = Cli.create({
             console.error(`Error: ${err?.message ?? String(err)}`);
             return c.error({ code: "OPENAPI_LIST_FAILED", message: err?.message ?? String(err) });
         }
+    },
+});
+const tokenCli = Cli.create({
+    name: "token",
+    description: "Issue and revoke short-lived Gateway bearer tokens.",
+})
+    .command("issue", {
+    description: "Issue a local short-lived Gateway bearer token grant.",
+    options: z.object({
+        scopes: z.string().default("run:read").describe("Comma or space separated Gateway scopes"),
+        role: z.string().default("operator").describe("Role recorded on the token grant"),
+        userId: z.string().optional().describe("User id recorded on the token grant"),
+        ttl: z.string().default("1h").describe("Token lifetime, such as 15m or 1h"),
+    }),
+    run(c) {
+        const fail = (opts) => {
+            commandExitOverride = opts.exitCode ?? 1;
+            return c.error(opts);
+        };
+        try {
+            const ttlMs = parseDurationMs(c.options.ttl, "ttl");
+            const now = Date.now();
+            const token = `smithers_${crypto.randomBytes(32).toString("base64url")}`;
+            const tokenId = crypto.createHash("sha256").update(token).digest("hex").slice(0, 16);
+            const grant = {
+                tokenId,
+                role: c.options.role,
+                scopes: parseTokenScopes(c.options.scopes),
+                ...(c.options.userId ? { userId: c.options.userId } : {}),
+                issuedAtMs: now,
+                expiresAtMs: now + ttlMs,
+            };
+            const store = readSmithersTokenStore();
+            store.tokens[token] = grant;
+            writeSmithersTokenStore(store);
+            return c.ok({
+                token,
+                grant,
+                storePath: smithersTokenStorePath(),
+            });
+        }
+        catch (err) {
+            return fail({
+                code: err instanceof SmithersError ? err.code : "TOKEN_ISSUE_FAILED",
+                message: err?.message ?? String(err),
+                exitCode: 1,
+            });
+        }
+    },
+})
+    .command("revoke", {
+    description: "Revoke a locally issued Gateway bearer token.",
+    args: z.object({
+        token: z.string().describe("Bearer token to revoke"),
+    }),
+    run(c) {
+        const store = readSmithersTokenStore();
+        const grant = store.tokens[c.args.token];
+        if (!grant) {
+            commandExitOverride = 1;
+            return c.error({
+                code: "TOKEN_NOT_FOUND",
+                message: "Token was not found in the local Smithers token store",
+                exitCode: 1,
+            });
+        }
+        grant.revokedAtMs = Date.now();
+        writeSmithersTokenStore(store);
+        return c.ok({
+            revoked: true,
+            tokenId: grant.tokenId ?? crypto.createHash("sha256").update(c.args.token).digest("hex").slice(0, 16),
+            storePath: smithersTokenStorePath(),
+        });
     },
 });
 // ---------------------------------------------------------------------------
@@ -4828,7 +4935,8 @@ const cli = Cli.create({
     .command(cronCli)
     .command(agentsCli)
     .command(memoryCli)
-    .command(openapiCli);
+    .command(openapiCli)
+    .command(tokenCli);
 const cliCommands = Cli.toCommands?.get(cli);
 if (!(cliCommands instanceof Map)) {
     throw new Error("Could not resolve Smithers CLI commands for input bounds.");
@@ -4840,7 +4948,7 @@ wrapCliCommandHandlersWithInputBounds(cliCommands);
 const KNOWN_COMMANDS = new Set([
     "init", "up", "supervise", "down", "ps", "logs", "events", "chat", "inspect", "node", "why", "approve", "deny",
     "cancel", "graph", "revert", "scores", "observability", "workflow", "ask", "cron", "chat-create",
-    "replay", "diff", "fork", "timeline", "memory", "openapi", "agents", "alerts",
+    "replay", "diff", "fork", "timeline", "memory", "openapi", "token", "agents", "alerts",
     "tree", "output", "rewind", "gui",
 ]);
 /**
@@ -4977,6 +5085,67 @@ function hasHelpFlag(argv, startIndex = 0) {
         if (arg === "--help" || arg === "-h") {
             return true;
         }
+    }
+    return false;
+}
+/**
+ * @param {string[]} argv
+ */
+function hasJsonFormatFlag(argv) {
+    for (let index = 0; index < argv.length; index++) {
+        const arg = argv[index];
+        if (arg === "--format") {
+            const value = argv[index + 1];
+            if (value === "json" || value === "jsonl") {
+                return true;
+            }
+            index++;
+            continue;
+        }
+        if (arg === "--format=json" || arg === "--format=jsonl") {
+            return true;
+        }
+    }
+    return false;
+}
+/**
+ * @param {string[]} argv
+ * @param {number} startIndex
+ */
+function hasJsonFlag(argv, startIndex) {
+    for (let index = startIndex; index < argv.length; index++) {
+        const arg = argv[index];
+        if (arg === "--json" || arg === "-j") {
+            return true;
+        }
+    }
+    return false;
+}
+/**
+ * @param {string[]} argv
+ */
+function argvRequestsJsonMode(argv) {
+    const commandIndex = findFirstPositionalIndex(argv);
+    if (commandIndex < 0) {
+        return hasJsonFormatFlag(argv);
+    }
+    const command = argv[commandIndex];
+    if (hasJsonFormatFlag(argv)) {
+        return true;
+    }
+    if (command === "why" ||
+        command === "events" ||
+        command === "inspect" ||
+        command === "node" ||
+        DEVTOOLS_COMMANDS.has(command)) {
+        return hasJsonFlag(argv, commandIndex + 1);
+    }
+    if (command === "agents") {
+        const subcommandIndex = findFirstPositionalIndex(argv, commandIndex + 1);
+        return subcommandIndex >= 0 && argv[subcommandIndex] === "doctor" && hasJsonFlag(argv, subcommandIndex + 1);
+    }
+    if (command === "doctor") {
+        return hasJsonFlag(argv, commandIndex + 1);
     }
     return false;
 }
@@ -5143,6 +5312,9 @@ async function main() {
     argv = rewriteEventsJsonFlagArgv(argv);
     // Finding #3: route `--json` to command-scoped `-j` for devtools commands.
     argv = rewriteDevtoolsJsonFlagArgv(argv);
+    if (argvRequestsJsonMode(argv)) {
+        setJsonMode(true);
+    }
     // Finding #1: pre-validate argv for devtools commands so missing-args
     // / invalid-flag errors go to stderr with exit 1 (not incur's
     // remap-to-4 VALIDATION_ERROR envelope on stdout).

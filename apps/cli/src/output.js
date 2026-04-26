@@ -8,6 +8,9 @@ import { NodeOutputRouteError } from "@smithers-orchestrator/server/gatewayRoute
 import { EXIT_OK } from "./util/exitCodes.js";
 import { formatCliErrorForStderr, getCliErrorMapping } from "./util/errorMessage.js";
 
+const RUN_ID_PATTERN = /^[a-z0-9_-]{1,64}$/;
+const NODE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
+
 /**
  * @param {any} response
  * @returns {string}
@@ -70,6 +73,52 @@ async function resolveLatestIteration(adapter, runId, nodeId) {
 }
 
 /**
+ * @param {Record<string, unknown> | null} row
+ * @returns {Record<string, unknown> | null}
+ */
+function stripOutputKeyColumns(row) {
+    if (!row || typeof row !== "object") {
+        return null;
+    }
+    const result = { ...row };
+    delete result.run_id;
+    delete result.runId;
+    delete result.node_id;
+    delete result.nodeId;
+    delete result.iteration;
+    return result;
+}
+
+/**
+ * @param {RunOutputCommandInput} input
+ * @param {number} iteration
+ * @returns {Promise<RunOutputCommandResult>}
+ */
+async function runRawJsonOutput(input, iteration) {
+    if (!RUN_ID_PATTERN.test(input.runId)) {
+        throw new NodeOutputRouteError("InvalidRunId", "runId must match /^[a-z0-9_-]{1,64}$/.");
+    }
+    if (!NODE_ID_PATTERN.test(input.nodeId)) {
+        throw new NodeOutputRouteError("InvalidNodeId", "nodeId must match /^[a-zA-Z0-9:_-]{1,128}$/.");
+    }
+    const run = await input.adapter.getRun(input.runId);
+    if (!run) {
+        throw new NodeOutputRouteError("RunNotFound", `Run not found: ${input.runId}`);
+    }
+    const node = await input.adapter.getNode(input.runId, input.nodeId, iteration);
+    if (!node) {
+        throw new NodeOutputRouteError("NodeNotFound", `Node not found: ${input.nodeId}`);
+    }
+    const outputTable = typeof node.outputTable === "string" ? node.outputTable.trim() : "";
+    if (!outputTable) {
+        throw new NodeOutputRouteError("NodeHasNoOutput", `Node ${input.nodeId} has no output table.`);
+    }
+    const row = await input.adapter.getRawNodeOutputForIteration(outputTable, input.runId, input.nodeId, iteration);
+    input.stdout.write(`${JSON.stringify(stripOutputKeyColumns(row))}\n`);
+    return { exitCode: EXIT_OK };
+}
+
+/**
  * @param {RunOutputCommandInput} input
  * @returns {Promise<RunOutputCommandResult>}
  */
@@ -80,6 +129,9 @@ export async function runOutputOnce(input) {
         iteration = latest ?? 0;
     }
     try {
+        if (input.json && !input.pretty) {
+            return await runRawJsonOutput(input, iteration);
+        }
         const response = await getNodeOutputRoute({
             runId: input.runId,
             nodeId: input.nodeId,
