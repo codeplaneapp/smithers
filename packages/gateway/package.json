@@ -1,0 +1,39 @@
+{
+  "name": "@smithers-orchestrator/gateway",
+  "version": "0.16.9",
+  "description": "Stable Smithers Gateway RPC contracts, auth scopes, and deployment metadata",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./rpc": {
+      "types": "./src/rpc/index.ts",
+      "import": "./src/rpc/index.ts",
+      "default": "./src/rpc/index.ts"
+    },
+    "./auth/scopes": {
+      "types": "./src/auth/scopes.ts",
+      "import": "./src/auth/scopes.ts",
+      "default": "./src/auth/scopes.ts"
+    }
+  },
+  "files": [
+    "src/",
+    "openapi.yaml"
+  ],
+  "scripts": {
+    "generate:openapi": "bun run scripts/generate-openapi.ts",
+    "check:openapi": "bun run scripts/generate-openapi.ts --check",
+    "build": "bun run check:openapi && tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test tests"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "~5.9.3"
+  }
+}
