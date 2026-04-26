@@ -147,8 +147,11 @@ test("agents add regenerates .smithers/agents.ts when one already exists", () =>
         { cwd: repo.dir, format: "json", env: { SMITHERS_HOME: home } },
     );
     const regenerated = repo.read(".smithers/agents.ts");
+    // The new account shows up as a provider…
     expect(regenerated).toContain("claudeWork: new SmithersClaudeCodeAgent(");
-    expect(regenerated).toContain("claude: [providers.claudeWork]");
+    // …and any tier pool whose preferred order references the `claude`
+    // family (smart, smartTool) gets the account appended.
+    expect(regenerated).toMatch(/smart(Tool)?: \[[^\]]*providers\.claudeWork[^\]]*\]/);
 });
 
 test("agents add does NOT overwrite a hand-edited agents.ts (no sentinel)", () => {
@@ -163,7 +166,7 @@ test("agents add does NOT overwrite a hand-edited agents.ts (no sentinel)", () =
     expect(repo.read(".smithers/agents.ts")).toBe(userContent);
 });
 
-test("init writes detection-based agents.ts; subsequent agents add upgrades it to the account-driven form", () => {
+test("agents add appends to a detection-based agents.ts without dropping detected providers", () => {
     const repo = createTempRepo();
     const home = newSmithersHome();
     // First, run init with a fake API key so detection-based generation succeeds.
@@ -173,8 +176,11 @@ test("init writes detection-based agents.ts; subsequent agents add upgrades it t
         env: { SMITHERS_HOME: home, ANTHROPIC_API_KEY: "test", OPENAI_API_KEY: "" },
     });
     expect(initResult.exitCode).toBe(0);
-    expect(repo.read(".smithers/agents.ts")).toContain("// smithers-source: generated");
-    // Now register an account and verify agents.ts switches to the account-driven shape.
+    const initialAgentsTs = repo.read(".smithers/agents.ts");
+    expect(initialAgentsTs).toContain("// smithers-source: generated");
+    expect(initialAgentsTs).toContain("claude: ClaudeCodeAgent");
+    // Now register an account and verify agents.ts adds the new provider
+    // without removing the detected `claude` entry.
     runSmithers(
         ["agents", "add", "--provider", "codex", "--label", "codex-prod", "--skip-login"],
         { cwd: repo.dir, format: "json", env: { SMITHERS_HOME: home } },
@@ -182,4 +188,6 @@ test("init writes detection-based agents.ts; subsequent agents add upgrades it t
     const agentsTs = repo.read(".smithers/agents.ts");
     expect(agentsTs).toContain("~/.smithers/accounts.json");
     expect(agentsTs).toContain("codexProd: new SmithersCodexAgent(");
+    // Detection-based provider survives the regen.
+    expect(agentsTs).toContain("claude: ClaudeCodeAgent");
 }, 20_000);

@@ -299,21 +299,7 @@ function generateAccountsAgentsTs(accounts, env) {
         "type AgentLike",
         ...[...importNames].map((n) => `${n} as Smithers${n}`),
     ];
-    const providerLines = accounts.map((account) => {
-        const cls = ACCOUNT_PROVIDER_CLASSES[account.provider];
-        const camel = labelToCamel(account.label);
-        const model = account.model ?? ACCOUNT_PROVIDER_DEFAULT_MODEL[account.provider];
-        /** @type {string[]} */
-        const opts = [];
-        if (model) opts.push(`model: ${JSON.stringify(model)}`);
-        if (account.configDir) opts.push(`configDir: ${pathLiteral(account.configDir, homeDir)}`);
-        if (account.apiKey) opts.push(`apiKey: ${JSON.stringify(account.apiKey)}`);
-        if (account.provider === "codex" || account.provider === "openai-api") {
-            opts.push("skipGitRepoCheck: true");
-        }
-        opts.push("cwd: process.cwd()");
-        return `  ${camel}: new Smithers${cls}({ ${opts.join(", ")} }),`;
-    });
+    const providerLines = accounts.map((account) => renderAccountProviderLine(account, homeDir));
     /** @type {Map<string, string[]>} */
     const poolMembers = new Map();
     for (const account of accounts) {
@@ -347,20 +333,44 @@ function generateAccountsAgentsTs(accounts, env) {
 }
 
 /**
+ * Renders an account as `<labelCamel>: new SmithersFooAgent({ ... })` for
+ * inclusion in the providers map.
+ *
+ * @param {import("@smithers-orchestrator/accounts").Account} account
+ * @param {string} homeDir
+ * @returns {string}
+ */
+function renderAccountProviderLine(account, homeDir) {
+    const cls = ACCOUNT_PROVIDER_CLASSES[account.provider];
+    const camel = labelToCamel(account.label);
+    const model = account.model ?? ACCOUNT_PROVIDER_DEFAULT_MODEL[account.provider];
+    /** @type {string[]} */
+    const opts = [];
+    if (model) opts.push(`model: ${JSON.stringify(model)}`);
+    if (account.configDir) opts.push(`configDir: ${pathLiteral(account.configDir, homeDir)}`);
+    if (account.apiKey) opts.push(`apiKey: ${JSON.stringify(account.apiKey)}`);
+    if (account.provider === "codex" || account.provider === "openai-api") {
+        opts.push("skipGitRepoCheck: true");
+    }
+    opts.push("cwd: process.cwd()");
+    return `  ${camel}: new Smithers${cls}({ ${opts.join(", ")} }),`;
+}
+
+/**
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function generateAgentsTs(env = process.env) {
-    // Account-driven generation takes precedence: if the user has registered
-    // any accounts via `smithers agent add`, the generated file pools those
-    // accounts directly.
     const registeredAccounts = listAccounts(env);
-    if (registeredAccounts.length > 0) {
-        return generateAccountsAgentsTs(registeredAccounts, env);
-    }
     const detections = detectAvailableAgents(env);
     const available = detections.filter((entry) => entry.usable);
+    if (available.length === 0 && registeredAccounts.length === 0) {
+        throw new SmithersError("NO_USABLE_AGENTS", `No usable agents detected and no accounts registered. Checked: ${detections.flatMap((entry) => entry.checks).join(", ")}`);
+    }
+    // When no agents are detected (e.g. fresh machine with only API keys
+    // registered via `smithers agent add`), emit the accounts-only shape with
+    // engine-family pools — there's no detection-derived base to merge into.
     if (available.length === 0) {
-        throw new SmithersError("NO_USABLE_AGENTS", `No usable agents detected. Checked: ${detections.flatMap((entry) => entry.checks).join(", ")}`);
+        return generateAccountsAgentsTs(registeredAccounts, env);
     }
     // Base providers in detection order
     const orderedProviders = DETECTORS
@@ -369,7 +379,8 @@ export function generateAgentsTs(env = process.env) {
     // Derive variants (e.g. claudeSonnet from claude)
     const availableIds = new Set(orderedProviders.map((p) => p.id));
     const activeVariants = AGENT_VARIANTS.filter((v) => availableIds.has(v.derivedFrom));
-    // Collect all import names (dedup)
+    // Smithers SDK class imports needed: detection variants + non-scaffolded
+    // detection providers + every account class.
     const importNames = new Set();
     for (const provider of orderedProviders) {
         if (!(provider.id in SCAFFOLDED_PROVIDERS)) {
@@ -378,14 +389,22 @@ export function generateAgentsTs(env = process.env) {
     }
     for (const variant of activeVariants)
         importNames.add(variant.constructor.importName);
+    for (const account of registeredAccounts) {
+        const cls = ACCOUNT_PROVIDER_CLASSES[account.provider];
+        if (cls) importNames.add(cls);
+    }
     const smithersImportSpecifiers = [
         "type AgentLike",
         ...[...importNames].map((importName) => `${importName} as Smithers${importName}`),
     ];
-    // Provider lines: base + variants
+    const homeDir = env.HOME ?? homedir();
+    const hasAccounts = registeredAccounts.length > 0;
+    // Provider lines: detection base + variants + accounts (additive — `agent
+    // add` must never silently delete a previously-emitted provider).
     const providerLines = [
         ...orderedProviders.map((provider) => `  ${provider.id}: ${SCAFFOLDED_PROVIDERS[provider.id] ?? CONSTRUCTORS[provider.id].expr},`),
         ...activeVariants.map((variant) => `  ${variant.variantId}: ${variant.constructor.expr},`),
+        ...registeredAccounts.map((account) => renderAccountProviderLine(account, homeDir)),
     ];
     // All known provider/variant IDs for tier resolution
     const allProviderIds = new Set([
@@ -394,19 +413,26 @@ export function generateAgentsTs(env = process.env) {
     ]);
     // Fallback: all base provider IDs sorted by score (for tiers with no preferred match)
     const fallbackIds = orderedProviders.map((p) => p.id);
-    // Tier lines
+    // Tier lines: detection-resolved members, then accounts whose engine
+    // family is in the tier's preference order get appended.
     const tierLines = Object.entries(TIER_PREFERENCES).map(([tier, { order, maxSize }]) => {
         let resolved = order
             .filter((id) => allProviderIds.has(id))
             .slice(0, maxSize);
-        // Fallback to any available base providers if no preferred agents matched
         if (resolved.length === 0) {
             resolved = fallbackIds.slice(0, maxSize);
         }
-        return `  ${tier}: [${resolved.map((id) => `providers.${id}`).join(", ")}],`;
+        const tierFamilies = new Set(order);
+        const tierAccounts = registeredAccounts
+            .filter((account) => tierFamilies.has(ACCOUNT_PROVIDER_POOL[account.provider]))
+            .map((account) => labelToCamel(account.label));
+        const merged = [...resolved, ...tierAccounts];
+        return `  ${tier}: [${merged.map((id) => `providers.${id}`).join(", ")}],`;
     });
     return [
         "// smithers-source: generated",
+        ...(hasAccounts ? ["// Account providers (camelCase labels) come from ~/.smithers/accounts.json — managed via `smithers agent add|list|remove`."] : []),
+        ...(hasAccounts ? ['import { homedir } from "node:os";', 'import path from "node:path";'] : []),
         `import { ${smithersImportSpecifiers.join(", ")} } from "smithers-orchestrator";`,
         'import { ClaudeCodeAgent } from "./agents/claude-code";',
         'import { CodexAgent } from "./agents/codex";',
