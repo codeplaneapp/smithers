@@ -1,0 +1,23 @@
+# Checks
+
+Run this before a pull request:
+
+```sh
+pnpm verify
+```
+
+It runs, in order:
+
+```sh
+pnpm typecheck
+pnpm lint
+pnpm test
+```
+
+`pnpm typecheck` runs every workspace typecheck. Each workspace owns its `tsconfig.json`.
+
+`pnpm lint` checks `apps/*/src`, `apps/*/tests`, `packages/*/src`, `packages/*/tests`, and `.smithers`.
+
+`pnpm test` runs workspace tests.
+
+Do not use root `tsc --noEmit` as the pre-PR gate.

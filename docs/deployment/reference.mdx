@@ -1,0 +1,62 @@
+---
+title: Reference Deployment
+description: Deploy the stable Gateway with SQLite, scoped bearer auth, and a reverse proxy.
+---
+
+The reference deployment is the lower-level Gateway path for teams that do not want JJHub. It runs one Gateway process, one SQLite database file, and a TLS reverse proxy.
+
+## Docker Compose
+
+From the repo root:
+
+```bash
+docker compose -f deploy/reference/docker-compose.yml up
+```
+
+The Gateway listens on `7331` inside the compose network and Caddy exposes HTTP/TLS. The compose file mounts a SQLite volume at `/data` and reads short-lived bearer grants from `/data/tokens.json`.
+
+Issue a local token grant:
+
+```bash
+smithers token issue --scopes run:read,run:write,approval:submit --ttl 1h
+```
+
+Copy the resulting grant into the token store used by the deployment. Revoke it with:
+
+```bash
+smithers token revoke <token>
+```
+
+## Single Host
+
+Use `deploy/reference/systemd/smithers-gateway.service` for the Gateway process and `deploy/reference/systemd/smithers-caddy.service` for Caddy. Copy `smithers-gateway.env.example` to `/etc/smithers/gateway.env`, then set:
+
+```bash
+SMITHERS_DB_PATH=/var/lib/smithers/smithers.db
+SMITHERS_TOKEN_STORE=/etc/smithers/tokens.json
+SMITHERS_GATEWAY_MODULE=/etc/smithers/gateway.mjs
+```
+
+`SMITHERS_GATEWAY_MODULE` can export `register(gateway)` or a default function. Register workflows there.
+
+## Kubernetes
+
+The minimal manifests in `deploy/reference/k8s/` create:
+
+- a `smithers` namespace
+- a single Gateway `Deployment`
+- a SQLite `PersistentVolumeClaim`
+- a token `Secret`
+- a `Service` and `Ingress`
+
+Apply the manifests after replacing the example token and host:
+
+```bash
+kubectl apply -f deploy/reference/k8s/
+```
+
+## Reconnect
+
+Streams accept `afterSeq`. Clients should reconnect with the last seen sequence. If the Gateway still has the missed events in the bounded per-run window, it replays them. If the window has truncated, it emits `GapResync` with `fromSeq`, `toSeq`, and a run snapshot, then continues with available events. `Heartbeat` frames are separate from run events.
+
+All HTTP responses include `X-Smithers-API-Version: v1`.
