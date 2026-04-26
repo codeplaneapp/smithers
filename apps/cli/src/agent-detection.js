@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { SmithersError } from "@smithers-orchestrator/errors";
+import { listAccounts } from "@smithers-orchestrator/accounts";
 /** @typedef {import("./AgentAvailability.ts").AgentAvailability} AgentAvailability */
 /** @typedef {import("./AgentAvailabilityStatus.ts").AgentAvailabilityStatus} AgentAvailabilityStatus */
 
@@ -202,9 +203,160 @@ function resolveRoleAgents(role, available) {
     return fallbackAgents(available);
 }
 /**
+ * Maps an account provider id to the SDK class name that constructs it.
+ * @type {Record<string, string>}
+ */
+const ACCOUNT_PROVIDER_CLASSES = {
+    "claude-code": "ClaudeCodeAgent",
+    "codex": "CodexAgent",
+    "gemini": "GeminiAgent",
+    "kimi": "KimiAgent",
+    "anthropic-api": "ClaudeCodeAgent",
+    "openai-api": "CodexAgent",
+    "gemini-api": "GeminiAgent",
+};
+
+/**
+ * Family the account belongs to for pool grouping (e.g. anthropic-api and
+ * claude-code both go in the `claude` pool).
+ * @type {Record<string, string>}
+ */
+const ACCOUNT_PROVIDER_POOL = {
+    "claude-code": "claude",
+    "anthropic-api": "claude",
+    "codex": "codex",
+    "openai-api": "codex",
+    "gemini": "gemini",
+    "gemini-api": "gemini",
+    "kimi": "kimi",
+};
+
+/**
+ * Default model per provider when an account doesn't specify one.
+ * @type {Record<string, string>}
+ */
+const ACCOUNT_PROVIDER_DEFAULT_MODEL = {
+    "claude-code": "claude-opus-4-7",
+    "anthropic-api": "claude-opus-4-7",
+    "codex": "gpt-5.4-codex",
+    "openai-api": "gpt-5.4-codex",
+    "gemini": "gemini-3.1-pro-preview",
+    "gemini-api": "gemini-3.1-pro-preview",
+    "kimi": "kimi-latest",
+};
+
+/**
+ * @param {string} label
+ * @returns {string}
+ */
+function labelToCamel(label) {
+    return label
+        .split(/[^a-zA-Z0-9]+/)
+        .filter(Boolean)
+        .map((part, i) => (i === 0 ? part : part[0].toUpperCase() + part.slice(1)))
+        .join("");
+}
+
+/**
+ * Renders an absolute path as a JS expression. Paths under $HOME are rewritten
+ * to `path.join(homedir(), ...)` so the generated agents.ts is portable across
+ * machines (the registry stores absolute paths, but a checked-in agents.ts
+ * shouldn't bake in /Users/<name>).
+ *
+ * @param {string} absPath
+ * @param {string} homeDir
+ * @returns {string}
+ */
+function pathLiteral(absPath, homeDir) {
+    if (homeDir && absPath.startsWith(homeDir + "/")) {
+        const rel = absPath.slice(homeDir.length + 1);
+        return `path.join(homedir(), ${JSON.stringify(rel)})`;
+    }
+    if (absPath === homeDir) {
+        return "homedir()";
+    }
+    return JSON.stringify(absPath);
+}
+
+/**
+ * Generates an agents.ts file driven by ~/.smithers/accounts.json. One
+ * `providers.<labelCamel>` entry is emitted per registered account; pools
+ * group accounts by engine family.
+ *
+ * @param {import("@smithers-orchestrator/accounts").Account[]} accounts
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {string}
+ */
+function generateAccountsAgentsTs(accounts, env) {
+    const homeDir = env.HOME ?? homedir();
+    /** @type {Set<string>} */
+    const importNames = new Set();
+    for (const account of accounts) {
+        const cls = ACCOUNT_PROVIDER_CLASSES[account.provider];
+        if (cls) importNames.add(cls);
+    }
+    const smithersImportSpecifiers = [
+        "type AgentLike",
+        ...[...importNames].map((n) => `${n} as Smithers${n}`),
+    ];
+    const providerLines = accounts.map((account) => {
+        const cls = ACCOUNT_PROVIDER_CLASSES[account.provider];
+        const camel = labelToCamel(account.label);
+        const model = account.model ?? ACCOUNT_PROVIDER_DEFAULT_MODEL[account.provider];
+        /** @type {string[]} */
+        const opts = [];
+        if (model) opts.push(`model: ${JSON.stringify(model)}`);
+        if (account.configDir) opts.push(`configDir: ${pathLiteral(account.configDir, homeDir)}`);
+        if (account.apiKey) opts.push(`apiKey: ${JSON.stringify(account.apiKey)}`);
+        if (account.provider === "codex" || account.provider === "openai-api") {
+            opts.push("skipGitRepoCheck: true");
+        }
+        opts.push("cwd: process.cwd()");
+        return `  ${camel}: new Smithers${cls}({ ${opts.join(", ")} }),`;
+    });
+    /** @type {Map<string, string[]>} */
+    const poolMembers = new Map();
+    for (const account of accounts) {
+        const family = ACCOUNT_PROVIDER_POOL[account.provider];
+        if (!family) continue;
+        const arr = poolMembers.get(family) ?? [];
+        arr.push(labelToCamel(account.label));
+        poolMembers.set(family, arr);
+    }
+    const poolLines = [...poolMembers.entries()].map(([family, members]) =>
+        `  ${family}: [${members.map((m) => `providers.${m}`).join(", ")}],`,
+    );
+    const allLabels = accounts.map((a) => labelToCamel(a.label));
+    poolLines.push(`  smart: [${allLabels.map((m) => `providers.${m}`).join(", ")}],`);
+    return [
+        "// smithers-source: generated",
+        "// Source of truth: ~/.smithers/accounts.json (managed via `smithers agent add|list|remove`)",
+        'import { homedir } from "node:os";',
+        'import path from "node:path";',
+        `import { ${smithersImportSpecifiers.join(", ")} } from "smithers-orchestrator";`,
+        "",
+        "export const providers = {",
+        ...providerLines,
+        "} as const;",
+        "",
+        "export const agents = {",
+        ...poolLines,
+        "} as const satisfies Record<string, AgentLike[]>;",
+        "",
+    ].join("\n");
+}
+
+/**
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function generateAgentsTs(env = process.env) {
+    // Account-driven generation takes precedence: if the user has registered
+    // any accounts via `smithers agent add`, the generated file pools those
+    // accounts directly.
+    const registeredAccounts = listAccounts(env);
+    if (registeredAccounts.length > 0) {
+        return generateAccountsAgentsTs(registeredAccounts, env);
+    }
     const detections = detectAvailableAgents(env);
     const available = detections.filter((entry) => entry.usable);
     if (available.length === 0) {

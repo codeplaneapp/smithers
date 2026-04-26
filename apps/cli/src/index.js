@@ -34,6 +34,9 @@ import { EVENT_CATEGORY_VALUES, eventTypesForCategory, normalizeEventCategory, }
 import { aggregateNodeDetailEffect, renderNodeDetailHuman, } from "./node-detail.js";
 import { diagnoseRunEffect, diagnosisCtaCommands, renderWhyDiagnosisHuman, } from "./why-diagnosis.js";
 import { detectAvailableAgents } from "./agent-detection.js";
+import { listAccounts, removeAccount } from "@smithers-orchestrator/accounts";
+import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
+import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { initWorkflowPack, getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile } from "./workflows.js";
 import { ask } from "./ask.js";
@@ -1327,6 +1330,7 @@ const initOptions = z.object({
     force: z.boolean().default(false).describe("Overwrite existing scaffold files"),
     agentsOnly: z.boolean().default(false).describe("Only create .smithers/agents/ and leave the rest of the workflow pack untouched"),
     install: z.boolean().default(true).describe("Run `bun install` inside .smithers/ after scaffolding (--no-install to skip)"),
+    addAgents: z.boolean().default(false).describe("After scaffolding, launch the interactive `agents add` wizard to register one or more accounts."),
 });
 const workflowPathArgs = z.object({
     name: z.string().describe("Workflow ID"),
@@ -1900,7 +1904,7 @@ const cronCli = Cli.create({
 });
 const agentsCli = Cli.create({
     name: "agents",
-    description: "Inspect built-in CLI agent capability registries.",
+    description: "Inspect and register subscriptions and api keys.",
 })
     .command("capabilities", {
     description: "Print a JSON report of the built-in CLI agent capability registries.",
@@ -1924,6 +1928,128 @@ const agentsCli = Cli.create({
             process.stdout.write(`${formatCliAgentCapabilityDoctorReport(report)}\n`);
         }
         return c.ok(undefined);
+    },
+})
+    .command("add", {
+    description: "Register a Smithers agent account (interactive wizard, or non-interactive via flags).",
+    options: z.object({
+        provider: z.enum([
+            "claude-code", "codex", "gemini", "kimi",
+            "anthropic-api", "openai-api", "gemini-api",
+        ]).optional().describe("Provider id; omit to launch the interactive wizard"),
+        label: z.string().optional().describe("Unique label, e.g. 'claude-work'"),
+        configDir: z.string().optional().describe("Path to the per-account CLI config dir (subscription providers)"),
+        apiKey: z.string().optional().describe("API key (api-key providers only)"),
+        model: z.string().optional().describe("Default model for this account"),
+        skipLogin: z.boolean().default(false).describe("Skip the 'is the dir populated?' check (advanced)"),
+        force: z.boolean().default(false).describe("Register even if no credentials are present"),
+        replace: z.boolean().default(false).describe("Overwrite an existing account with the same label"),
+        loop: z.boolean().default(false).describe("Wizard mode only: keep adding accounts until you say done"),
+    }),
+    async run(c) {
+        // Flag-driven mode: provider+label given → just register.
+        if (c.options.provider && c.options.label) {
+            try {
+                const result = runAgentAdd({
+                    provider: c.options.provider,
+                    label: c.options.label,
+                    configDir: c.options.configDir,
+                    apiKey: c.options.apiKey,
+                    model: c.options.model,
+                    skipLogin: c.options.skipLogin,
+                    force: c.options.force,
+                    replace: c.options.replace,
+                });
+                if (!result.ok) {
+                    const code = result.reason === "login-required" ? 2 : 1;
+                    commandExitOverride = code;
+                    return c.error({
+                        code: result.reason === "login-required"
+                            ? "AGENT_LOGIN_REQUIRED"
+                            : "AGENT_ADD_FAILED",
+                        message: result.detail ?? result.reason,
+                        exitCode: code,
+                    });
+                }
+                return c.ok({
+                    account: result.account,
+                    regen: result.regen,
+                });
+            }
+            catch (err) {
+                commandExitOverride = 1;
+                return c.error({
+                    code: err?.code ?? "AGENT_ADD_FAILED",
+                    message: err?.message ?? String(err),
+                    exitCode: 1,
+                });
+            }
+        }
+        // Interactive wizard mode.
+        const labels = await agentAddWizard({ loop: c.options.loop });
+        return c.ok({ added: labels });
+    },
+})
+    .command("list", {
+    description: "List all registered Smithers agent accounts. Use --format json for machine output.",
+    run(c) {
+        const accounts = listAccounts();
+        if (accounts.length === 0) {
+            process.stderr.write("No accounts registered. Add one with `smithers agents add`.\n");
+            return c.ok({ accounts });
+        }
+        const rows = accounts.map((a) => {
+            const where = a.configDir ?? (a.apiKey ? "(api key set)" : "");
+            return `  ${a.label.padEnd(24)}  ${a.provider.padEnd(14)}  ${where}`;
+        });
+        process.stderr.write(`Registered accounts (${accounts.length}):\n${rows.join("\n")}\n`);
+        return c.ok({ accounts });
+    },
+})
+    .command("remove", {
+    description: "Remove a Smithers agent account by label.",
+    args: z.object({ label: z.string().describe("Account label to remove") }),
+    options: z.object({
+        silent: z.boolean().default(false).describe("Do not error if the label is not registered"),
+    }),
+    async run(c) {
+        try {
+            const removed = removeAccount(c.args.label, { silent: c.options.silent });
+            if (removed) {
+                const { regenerateAgentsTsIfPresent } = await import("./agent-commands/regenerateAgentsTsIfPresent.js");
+                const regen = regenerateAgentsTsIfPresent();
+                process.stdout.write(`Removed ${c.args.label}.\n`);
+                return c.ok({ removed: true, label: c.args.label, regen });
+            }
+            return c.ok({ removed: false, label: c.args.label });
+        }
+        catch (err) {
+            commandExitOverride = 1;
+            return c.error({
+                code: err?.code ?? "AGENT_REMOVE_FAILED",
+                message: err?.message ?? String(err),
+                exitCode: 1,
+            });
+        }
+    },
+})
+    .command("test", {
+    description: "Spawn the account's underlying CLI with --version to verify it is reachable.",
+    args: z.object({ label: z.string().describe("Account label to ping") }),
+    run(c) {
+        const account = listAccounts().find((a) => a.label === c.args.label);
+        if (!account) {
+            commandExitOverride = 1;
+            return c.error({
+                code: "ACCOUNT_NOT_FOUND",
+                message: `No account with label "${c.args.label}" is registered.`,
+                exitCode: 1,
+            });
+        }
+        const ping = pingAccount(account);
+        process.stdout.write(`Ran: ${ping.cmd}\nExit: ${ping.exitCode ?? "<n/a>"}\n`);
+        if (ping.ran && ping.exitCode !== 0) commandExitOverride = 1;
+        return c.ok({ account, ping });
     },
 });
 // ---------------------------------------------------------------------------
@@ -2249,7 +2375,7 @@ const cli = Cli.create({
     .command("init", {
     description: "Install the local Smithers workflow pack into .smithers/.",
     options: initOptions,
-    run(c) {
+    async run(c) {
         const fail = (opts) => {
             commandExitOverride = opts.exitCode ?? 1;
             return c.error(opts);
@@ -2260,6 +2386,17 @@ const cli = Cli.create({
                 agentsOnly: c.options.agentsOnly,
                 skipInstall: c.options.agentsOnly || !c.options.install,
             });
+            if (c.options.addAgents) {
+                const added = await agentAddWizard({ loop: true });
+                result.addedAccounts = added;
+                // Regenerate agents.ts now that accounts are in place — the
+                // initial generateAgentsTs() call ran before any accounts
+                // existed, so it produced the detection-based file.
+                if (added.length > 0) {
+                    const { regenerateAgentsTsIfPresent } = await import("./agent-commands/regenerateAgentsTsIfPresent.js");
+                    result.regen = regenerateAgentsTsIfPresent();
+                }
+            }
             return c.ok(result, c.options.agentsOnly
                 ? undefined
                 : {

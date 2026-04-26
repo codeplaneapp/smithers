@@ -26,9 +26,11 @@
   },
   "dependencies": {
     "@effect/workflow": "^0.18.0",
+    "@clack/prompts": "^0.10.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opentui/core": "^0.1.100",
     "@opentui/react": "^0.1.100",
+    "@smithers-orchestrator/accounts": "workspace:*",
     "@smithers-orchestrator/agents": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
