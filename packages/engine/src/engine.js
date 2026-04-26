@@ -3027,37 +3027,40 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 // Use fallback agent on retry attempts when available
                 let result;
                 try {
-                    result = await Effect.runPromise(withSmithersSpan(smithersSpanNames.agent, Effect.promise(() => {
-                        const agentCall = guidedResumeMessages?.length
-                            ? {
-                                messages: guidedResumeMessages,
-                            }
-                            : {
-                                prompt: effectivePrompt,
-                            };
-                        return effectiveAgent.generate({
-                            options: undefined,
-                            abortSignal: taskSignal,
-                            ...agentCall,
-                            resumeSession,
-                            lastHeartbeat: previousHeartbeat,
-                            rootDir: taskRoot,
-                            maxOutputBytes: toolConfig.maxOutputBytes,
-                            timeout: desc.timeoutMs
-                                ? { totalMs: desc.timeoutMs }
-                                : undefined,
-                            onStdout: (text) => {
-                                recordInternalHeartbeat();
-                                emitOutput(text, "stdout");
-                            },
-                            onStderr: (text) => {
-                                recordInternalHeartbeat();
-                                emitOutput(text, "stderr");
-                            },
-                            onEvent: handleAgentEvent,
-                            onStepFinish: handleSdkStepFinish,
-                            outputSchema: desc.outputSchema,
-                        });
+                    result = await Effect.runPromise(withSmithersSpan(smithersSpanNames.agent, Effect.tryPromise({
+                        try: () => {
+                            const agentCall = guidedResumeMessages?.length
+                                ? {
+                                    messages: guidedResumeMessages,
+                                }
+                                : {
+                                    prompt: effectivePrompt,
+                                };
+                            return effectiveAgent.generate({
+                                options: undefined,
+                                abortSignal: taskSignal,
+                                ...agentCall,
+                                resumeSession,
+                                lastHeartbeat: previousHeartbeat,
+                                rootDir: taskRoot,
+                                maxOutputBytes: toolConfig.maxOutputBytes,
+                                timeout: desc.timeoutMs
+                                    ? { totalMs: desc.timeoutMs }
+                                    : undefined,
+                                onStdout: (text) => {
+                                    recordInternalHeartbeat();
+                                    emitOutput(text, "stdout");
+                                },
+                                onStderr: (text) => {
+                                    recordInternalHeartbeat();
+                                    emitOutput(text, "stderr");
+                                },
+                                onEvent: handleAgentEvent,
+                                onStepFinish: handleSdkStepFinish,
+                                outputSchema: desc.outputSchema,
+                            });
+                        },
+                        catch: (error) => error,
                     }), {
                         ...taskSpanContext,
                         agent: attemptMeta.agentId ??
