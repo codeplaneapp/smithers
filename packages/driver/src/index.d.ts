@@ -135,6 +135,10 @@ type OutputAccessor$2<Schema, TRow = unknown> = {
 } & {
     [K in keyof Schema & string]: Array<InferOutputEntry$1<Schema[K]>>;
 };
+type OutputSchemaKey<Schema> = Exclude<keyof Schema & string, "input">;
+type OutputSchemaValue<Schema> = Schema[OutputSchemaKey<Schema>];
+type StrictTableRef<Schema> = [OutputSchemaKey<Schema>] extends [never] ? TableRef : OutputSchemaKey<Schema> | OutputSchemaValue<Schema>;
+type OutputForTable<Schema, Table> = Table extends OutputSchemaKey<Schema> ? InferOutputEntry$1<Schema[Table]> : Table extends OutputSchemaValue<Schema> ? InferOutputEntry$1<Table> : OutputRow;
 
 type SmithersRuntimeConfig$1 = {
     cliAgentToolsDefault?: "all" | "explicit-only";
@@ -205,19 +209,19 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
      * @param {OutputKey} key
      * @returns {OutputRow}
      */
-    output(table: TableRef, key: OutputKey$1): OutputRow;
+    output<Table extends StrictTableRef<Schema>>(table: Table, key: OutputKey$1): OutputForTable<Schema, Table>;
     /**
      * @param {TableRef} table
      * @param {OutputKey} key
      * @returns {OutputRow | undefined}
      */
-    outputMaybe(table: TableRef, key: OutputKey$1): OutputRow | undefined;
+    outputMaybe<Table extends StrictTableRef<Schema>>(table: Table, key: OutputKey$1): OutputForTable<Schema, Table> | undefined;
     /**
      * @param {TableRef} table
      * @param {string} nodeId
      * @returns {OutputRow | undefined}
      */
-    latest(table: TableRef, nodeId: string): OutputRow | undefined;
+    latest<Table extends StrictTableRef<Schema>>(table: Table, nodeId: string): OutputForTable<Schema, Table> | undefined;
     /**
      * @param {unknown} value
      * @param {SafeParser} schema
