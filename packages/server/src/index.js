@@ -44,6 +44,8 @@ const DEFAULT_MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_MAX_BODY_JSON_DEPTH = 32;
 const DEFAULT_SSE_HEARTBEAT_MS = 10_000;
 const COMPLETED_RUN_RETENTION_MS = 60_000;
+const DEFAULT_HEADERS_TIMEOUT = 30_000;
+const DEFAULT_REQUEST_TIMEOUT = 60_000;
 class HttpError extends Error {
     status;
     code;
@@ -645,6 +647,8 @@ function startServerInternal(opts = {}) {
     const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
     const rootDir = opts.rootDir ? resolve(opts.rootDir) : undefined;
     const allowNetwork = Boolean(opts.allowNetwork);
+    const headersTimeout = opts.headersTimeout ?? DEFAULT_HEADERS_TIMEOUT;
+    const requestTimeout = opts.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT;
     if (serverDb) {
         ensureSmithersTables(serverDb);
     }
@@ -1206,6 +1210,8 @@ function startServerInternal(opts = {}) {
             await recordHttpRequestMetricsSafely(requestMethod, requestPathname, res.statusCode || 500, performance.now() - requestStart);
         }
     });
+    server.headersTimeout = headersTimeout;
+    server.requestTimeout = requestTimeout;
     server.on("close", () => {
         logInfo("stopping smithers server", {
             activeRuns: runs.size,
