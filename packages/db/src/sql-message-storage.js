@@ -34,8 +34,6 @@ const CREATE_TABLE_STATEMENTS = [
     error_json TEXT,
     config_json TEXT
   )`,
-    `CREATE INDEX IF NOT EXISTS _smithers_runs_status_heartbeat_idx
-    ON _smithers_runs (status, heartbeat_at_ms)`,
     `CREATE TABLE IF NOT EXISTS _smithers_nodes (
     run_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
@@ -143,8 +141,6 @@ const CREATE_TABLE_STATEMENTS = [
     received_by TEXT,
     PRIMARY KEY (run_id, seq)
   )`,
-    `CREATE INDEX IF NOT EXISTS _smithers_signals_lookup_idx
-    ON _smithers_signals (run_id, signal_name, correlation_id, received_at_ms)`,
     `CREATE TABLE IF NOT EXISTS _smithers_cache (
     cache_key TEXT PRIMARY KEY,
     created_at_ms INTEGER NOT NULL,
@@ -177,8 +173,6 @@ const CREATE_TABLE_STATEMENTS = [
     result TEXT NOT NULL,
     duration_ms INTEGER
   )`,
-    `CREATE INDEX IF NOT EXISTS _smithers_time_travel_audit_lookup_idx
-    ON _smithers_time_travel_audit (run_id, caller, timestamp_ms)`,
     `CREATE TABLE IF NOT EXISTS _smithers_sandboxes (
     run_id TEXT NOT NULL,
     sandbox_id TEXT NOT NULL,
@@ -321,6 +315,14 @@ const CREATE_TABLE_STATEMENTS = [
     node_id TEXT,
     created_at_ms INTEGER NOT NULL
   )`,
+];
+const CREATE_INDEX_STATEMENTS = [
+    `CREATE INDEX IF NOT EXISTS _smithers_runs_status_heartbeat_idx
+    ON _smithers_runs (status, heartbeat_at_ms)`,
+    `CREATE INDEX IF NOT EXISTS _smithers_signals_lookup_idx
+    ON _smithers_signals (run_id, signal_name, correlation_id, received_at_ms)`,
+    `CREATE INDEX IF NOT EXISTS _smithers_time_travel_audit_lookup_idx
+    ON _smithers_time_travel_audit (run_id, caller, timestamp_ms)`,
 ];
 const MIGRATION_STATEMENTS = [
     `ALTER TABLE _smithers_attempts ADD COLUMN response_text TEXT`,
@@ -642,6 +644,9 @@ export class SqlMessageStorage {
                 catch {
                     // Ignore if another caller added it first.
                 }
+            }
+            for (const statement of CREATE_INDEX_STATEMENTS) {
+                sqlite.run(statement);
             }
         });
     }
