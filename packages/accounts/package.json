@@ -1,0 +1,34 @@
+{
+  "name": "@smithers-orchestrator/accounts",
+  "version": "0.16.9",
+  "description": "Manage multiple Claude/Codex/Gemini/Kimi subscription and API-key accounts that Smithers agents can round-robin through.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./*": {
+      "types": "./src/index.d.ts",
+      "import": "./src/*.js",
+      "default": "./src/*.js"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsup --dts-only"
+  },
+  "dependencies": {
+    "@smithers-orchestrator/errors": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "~5.9.3"
+  }
+}
