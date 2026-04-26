@@ -1,0 +1,64 @@
+{
+  "name": "@smithers-orchestrator/pi-plugin",
+  "version": "0.16.9",
+  "description": "PI coding agent integration for Smithers workflow inspection",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./extension": {
+      "types": "./src/extension.ts",
+      "import": "./src/extension.ts",
+      "default": "./src/extension.ts"
+    },
+    "./runtime/*": {
+      "types": "./src/runtime/*.ts",
+      "import": "./src/runtime/*.ts",
+      "default": "./src/runtime/*.ts"
+    },
+    "./views/*": {
+      "types": "./src/views/*.ts",
+      "import": "./src/views/*.ts",
+      "default": "./src/views/*.ts"
+    },
+    "./api/*": {
+      "types": "./src/api/*.ts",
+      "import": "./src/api/*.ts",
+      "default": "./src/api/*.ts"
+    },
+    "./*": {
+      "types": "./src/*.ts",
+      "import": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsup --dts-only"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.70.2",
+    "@mariozechner/pi-tui": "^0.70.2",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@sinclair/typebox": "^0.34.49",
+    "@smithers-orchestrator/agents": "workspace:*",
+    "@smithers-orchestrator/cli": "workspace:*",
+    "@smithers-orchestrator/devtools": "workspace:*",
+    "@smithers-orchestrator/errors": "workspace:*",
+    "@smithers-orchestrator/protocol": "workspace:*",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/ws": "^8.18.1",
+    "typescript": "~5.9.3"
+  }
+}
