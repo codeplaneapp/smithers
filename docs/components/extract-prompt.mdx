@@ -1,0 +1,108 @@
+---
+title: <ExtractPrompt>
+description: Resolve a workflow's prompt from a provided string, a cached entry, or an interactive Socratic extraction loop.
+---
+
+```ts
+import { ExtractPrompt } from "smithers-workflows/components/extract-prompt";
+
+type ExtractPromptProps = {
+  idPrefix: string;
+  prompt?: string;            // if non-trivial, used directly (passthrough)
+  cached?: CachedPrompt;      // if present, used directly (cache hit)
+  output: OutputTarget;       // where the draft lands (use rctfPromptSchema)
+  agent: AgentLike | AgentLike[];
+  schema?: "rctf" | "prd" | "freeform";  // default "rctf"
+  stakes?: "high" | "low";    // resolves the threshold; default "low"
+  threshold?: number;         // overrides stakes
+  maxTurns?: number;          // default 10
+  currentScore?: number | null;          // caller passes ctx.latest(output)?.score
+  latestDraft?: RctfPromptOutput | null; // caller passes ctx.latest(output)
+  context?: string;
+  scorers?: ScorersMap;       // optional async observability scorers
+  passthroughId?: string;
+};
+```
+
+```tsx
+import {
+  ExtractPrompt,
+  MarkdownPromptCache,
+  rctfPromptSchema,
+} from "smithers-workflows/components/extract-prompt";
+
+const cache = new MarkdownPromptCache();
+
+const { Workflow, smithers, outputs } = createSmithers({
+  input: z.object({
+    prompt: z.string().nullable().default(null),
+    cacheKey: z.string().nullable().default(null),
+    stakes: z.enum(["high", "low"]).default("low"),
+  }),
+  draft: rctfPromptSchema,
+});
+
+export default smithers((ctx) => {
+  const cached = ctx.input.cacheKey ? cache.getSync(ctx.input.cacheKey) : undefined;
+  const latest = ctx.latest("draft", "my-flow:extract:draft") as RctfPromptOutput | null;
+
+  if (latest?.resolved && ctx.input.cacheKey) {
+    cache.setSync(ctx.input.cacheKey, /* ... build CachedPrompt from latest ... */);
+  }
+
+  return (
+    <Workflow name="my-flow">
+      <ExtractPrompt
+        idPrefix="my-flow"
+        prompt={ctx.input.prompt ?? undefined}
+        cached={cached}
+        output={outputs.draft}
+        agent={agents.smart}
+        stakes={ctx.input.stakes}
+        currentScore={latest?.score ?? null}
+        latestDraft={latest}
+      />
+    </Workflow>
+  );
+});
+```
+
+## Three modes
+
+1. **Passthrough** — `prompt` is provided and ≥ 32 chars. Emits a static-output
+   task with `score: 1.0` and `resolved: true`. No agent invoked.
+2. **Cache hit** — caller resolved a `cached` entry by key. Same passthrough behavior,
+   marked `source: "cache"`.
+3. **Extraction** — wraps `<LoopUntilScored>` around the drafter task. The drafter
+   uses the R-C-T-F backbone, picks one Socratic principle per turn, asks the user
+   via `bun .smithers/scripts/ask-user.ts`, self-scores, and sets `resolved: true`
+   when ready.
+
+## Cache I/O is the caller's responsibility
+
+The component is pure — no side effects in JSX. Caller does cache `getSync` /
+`setSync` from inside the smithers `(ctx) =>` function. See the example above.
+
+Drivers shipped:
+- `MarkdownPromptCache` (default): `.smithers/cache/prompts/{slug}.md` with YAML frontmatter
+- `SqlitePromptCache`: opt-in single-table store via `bun:sqlite`
+- `MemoryPromptCache`: for tests
+
+## Stakes
+
+- `high` → threshold 1.0 (every R-C-T-F slot must be strongly filled)
+- `low`  → threshold 0.7
+
+Override via the `threshold` prop. Stakes is for callers who don't want to
+remember exact numbers.
+
+## Override semantics
+
+The human always has the final word. If the agent's score is below threshold
+and the human types "ship it" via the ask-user CLI, the agent sets:
+
+- `resolved: true`
+- `overridden: true`
+- `overrideReason: "<verbatim>"`
+
+This is recorded in the cache so it can be audited later.

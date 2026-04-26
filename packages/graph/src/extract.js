@@ -8,8 +8,25 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
 const DEFAULT_MERGE_QUEUE_CONCURRENCY = 1;
 const WORKTREE_EMPTY_PATH_ERROR = "<Worktree> requires a non-empty path prop";
-const DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS = 300_000;
-const DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS = 300_000;
+// Default per-task heartbeat timeout. 10 min is the floor for agent-backed
+// tasks: LLM CLIs (claude, codex, gemini, kimi) can sit silent for several
+// minutes during long deliberation or large-context reads. The previous
+// 5-minute default killed reviewer agents mid-review and broke ValidationLoop.
+// Overridable at runtime via SMITHERS_TASK_HEARTBEAT_MS.
+const HEARTBEAT_DEFAULT_MS = 600_000;
+function envHeartbeatTimeoutMs() {
+    const raw = typeof process !== "undefined" && process?.env
+        ? process.env.SMITHERS_TASK_HEARTBEAT_MS
+        : undefined;
+    if (typeof raw !== "string" || raw.length === 0)
+        return HEARTBEAT_DEFAULT_MS;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0)
+        return HEARTBEAT_DEFAULT_MS;
+    return Math.floor(parsed);
+}
+const DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS = envHeartbeatTimeoutMs();
+const DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS = envHeartbeatTimeoutMs();
 /**
  * @param {string} prefix
  * @param {readonly number[]} path
@@ -102,17 +119,23 @@ function parseHeartbeatTimeoutMs(raw) {
 /**
  * @param {Record<string, unknown>} raw
  */
-function resolveRetryConfig(raw) {
+function resolveRetryConfig(raw, isAgent = false) {
     const noRetry = Boolean(raw.noRetry);
     const continueOnFail = Boolean(raw.continueOnFail);
     const hasExplicitRetries = typeof raw.retries === "number" && !Number.isNaN(raw.retries);
     const hasExplicitRetryPolicy = Boolean(raw.retryPolicy && typeof raw.retryPolicy === "object");
     const defaultNoRetryForContinueOnFail = continueOnFail && !hasExplicitRetries && !hasExplicitRetryPolicy;
-    const retries = noRetry || defaultNoRetryForContinueOnFail
+    // Agent tasks (CLI agents like Codex/Claude) can hit transient upstream
+    // failures (e.g. "thread <uuid> not found"). Give them at least one free
+    // retry by default — even when the user opted into continueOnFail —
+    // unless they explicitly requested noRetry.
+    const retries = noRetry
         ? 0
-        : hasExplicitRetries
-            ? raw.retries
-            : Infinity;
+        : defaultNoRetryForContinueOnFail
+            ? (isAgent ? 1 : 0)
+            : hasExplicitRetries
+                ? raw.retries
+                : Infinity;
     const retryPolicy = hasExplicitRetryPolicy
         ? raw.retryPolicy
         : retries > 0
@@ -538,9 +561,9 @@ export function extractGraph(root, opts) {
                 raw.approvalOnDeny === "fail"
                 ? raw.approvalOnDeny
                 : undefined;
-            const { retries, retryPolicy } = resolveRetryConfig(raw);
             const kind = raw.__smithersKind;
             const isAgent = kind === "agent" || Boolean(raw.agent);
+            const { retries, retryPolicy } = resolveRetryConfig(raw, isAgent);
             const isCompute = kind === "compute" && typeof raw.__smithersComputeFn === "function";
             const parsedHeartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
             const heartbeatTimeoutMs = parsedHeartbeatTimeoutMs ??

@@ -35,6 +35,8 @@ export function Review({ idPrefix, prompt, agents }: ReviewProps) {
           output={reviewOutputSchema}
           agent={agent}
           continueOnFail
+          timeoutMs={1_800_000}
+          heartbeatTimeoutMs={600_000}
         >
           <ReviewPrompt reviewer={`reviewer-${index + 1}`} prompt={promptText} />
         </Task>

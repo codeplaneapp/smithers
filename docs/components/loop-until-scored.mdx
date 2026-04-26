@@ -1,0 +1,55 @@
+---
+title: <LoopUntilScored>
+description: Re-run children until the latest output's score crosses a threshold, or maxIterations is hit.
+---
+
+```ts
+import { LoopUntilScored } from "smithers-workflows/components/LoopUntilScored";
+
+type LoopUntilScoredProps = {
+  idPrefix: string;
+  /** Latest score read by the caller from ctx. number → ready; null/undefined → pending. */
+  currentScore: number | null | undefined;
+  threshold: number;
+  maxIterations?: number;            // default 5
+  onMaxReached?: "fail" | "return-last"; // default "return-last"
+  onPending?: "continue" | "stop";   // default "continue"
+  children?: ReactNode;
+};
+```
+
+```tsx
+import { LoopUntilScored } from "smithers-workflows/components/LoopUntilScored";
+import { stakesToThreshold } from "smithers-workflows/components/extract-prompt";
+
+export default smithers((ctx) => {
+  const draft = ctx.outputMaybe(outputs.draft, { nodeId: "extract:draft" });
+  return (
+    <Workflow name="extract">
+      <LoopUntilScored
+        idPrefix="extract"
+        currentScore={draft?.score ?? null}
+        threshold={stakesToThreshold("high")}
+        maxIterations={10}
+      >
+        <Task id="extract:draft" output={outputs.draft} agent={agent}>
+          {/* prompt instructs the agent to self-score in its output */}
+        </Task>
+      </LoopUntilScored>
+    </Workflow>
+  );
+});
+```
+
+## Notes
+
+- The score is read from the **task's output** (the agent self-scores). This makes
+  gating synchronous with task completion — no engine change required.
+- For independent verification, attach an async LLM-judge scorer via the
+  `<Task scorers={...}>` prop. That score lands in `_smithers_scorers` for
+  telemetry and is **not** consulted for gating.
+- `currentScore = null | undefined` means "pending or missing." Default behavior
+  is `onPending: "continue"` — the loop runs another iteration and the next
+  task's output should populate the score.
+- `<LoopUntilScored>` is a thin wrapper around `<Loop>`. Caller resolves the
+  score from `ctx`; the component only computes `until` and forwards.

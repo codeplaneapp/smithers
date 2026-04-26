@@ -24,11 +24,28 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 //   differ, so replacing this implementation would not produce identical output
 //   for all inputs.
 const loadRuntimeModule = new Function("specifier", "return import(specifier)");
-// CLI agents (Claude Code, Codex, etc.) can spend minutes reading files and
-// thinking without producing stdout.  60s was too aggressive and caused
-// spurious aborts on complex spec/research/plan generation tasks.
-const DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS = 300_000;
-const DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS = 300_000;
+// CLI agents (Claude Code, Codex, Gemini, Kimi) can spend many minutes reading
+// files and thinking without producing stdout. 5 min was still too aggressive:
+// reviewer agents on substantive diffs were getting killed mid-review and
+// breaking ValidationLoop. 10 min matches the explicit per-task overrides used
+// by implement/validate tasks.
+//
+// The default can be overridden at runtime via the SMITHERS_TASK_HEARTBEAT_MS
+// environment variable.
+const HEARTBEAT_DEFAULT_MS = 600_000;
+function envHeartbeatTimeoutMs() {
+    const raw = typeof process !== "undefined" && process?.env
+        ? process.env.SMITHERS_TASK_HEARTBEAT_MS
+        : undefined;
+    if (typeof raw !== "string" || raw.length === 0)
+        return HEARTBEAT_DEFAULT_MS;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0)
+        return HEARTBEAT_DEFAULT_MS;
+    return Math.floor(parsed);
+}
+const DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS = envHeartbeatTimeoutMs();
+const DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS = envHeartbeatTimeoutMs();
 /**
  * @param {unknown} value
  * @returns {boolean}
@@ -101,17 +118,24 @@ function getRalphIteration(opts, id) {
 /**
  * @param {Record<string, unknown>} raw
  */
-function resolveRetryConfig(raw) {
+function resolveRetryConfig(raw, isAgent = false) {
     const noRetry = Boolean(raw.noRetry);
     const continueOnFail = Boolean(raw.continueOnFail);
     const hasExplicitRetries = typeof raw.retries === "number" && !Number.isNaN(raw.retries);
     const hasExplicitRetryPolicy = Boolean(raw.retryPolicy && typeof raw.retryPolicy === "object");
     const defaultNoRetryForContinueOnFail = continueOnFail && !hasExplicitRetries && !hasExplicitRetryPolicy;
-    const retries = noRetry || defaultNoRetryForContinueOnFail
+    // Agent tasks (CLI agents like Codex/Claude) can hit transient upstream
+    // failures (e.g. "thread <uuid> not found"). Give them at least one free
+    // retry by default — even when the user opted into continueOnFail —
+    // unless they explicitly requested noRetry.
+    const baseRetries = noRetry
         ? 0
-        : hasExplicitRetries
-            ? /** @type {number} */ (raw.retries)
-            : Infinity;
+        : defaultNoRetryForContinueOnFail
+            ? (isAgent ? 1 : 0)
+            : hasExplicitRetries
+                ? /** @type {number} */ (raw.retries)
+                : Infinity;
+    const retries = baseRetries;
     const retryPolicy = hasExplicitRetryPolicy
         ? /** @type {import("../RetryPolicy.ts").RetryPolicy} */ (raw.retryPolicy)
         : retries > 0
@@ -703,14 +727,14 @@ export function extractFromHost(root, opts) {
                 }
                 : undefined;
             const skipIf = Boolean(raw.skipIf);
-            const { retries, retryPolicy } = resolveRetryConfig(raw);
+            const agent = raw.agent;
+            const kind = raw.__smithersKind;
+            const isAgent = kind === "agent" || Boolean(agent);
+            const { retries, retryPolicy } = resolveRetryConfig(raw, isAgent);
             const timeoutMs = typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
             const parsedHeartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
             const continueOnFail = Boolean(raw.continueOnFail);
             const cachePolicy = raw.cache && typeof raw.cache === "object" ? raw.cache : undefined;
-            const agent = raw.agent;
-            const kind = raw.__smithersKind;
-            const isAgent = kind === "agent" || Boolean(agent);
             const heartbeatTimeoutMs = parsedHeartbeatTimeoutMs ??
                 (isAgent ? DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS : null);
             const prompt = isAgent ? String(raw.children ?? "") : undefined;
