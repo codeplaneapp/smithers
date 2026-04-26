@@ -1,0 +1,16 @@
+---
+title: streamRunEvents
+description: Stable Gateway RPC for replayable run event streams.
+maturity: stable
+apiVersion: v1
+---
+
+`streamRunEvents` subscribes to per-run events over WebSocket.
+
+- Method: `streamRunEvents`
+- Scope: `run:read`
+- Transport: WebSocket RPC
+- Request: `{ runId, afterSeq? }`
+- Response: `{ streamId, runId, afterSeq, currentSeq }`
+
+Reconnect with the last seen `seq` as `afterSeq`. The Gateway stores a bounded per-run event window, default `10000`. If the requested sequence has been truncated, the stream emits `GapResync { fromSeq, toSeq }` with a run snapshot, then continues. `Heartbeat` frames are separate from events.

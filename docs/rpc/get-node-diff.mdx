@@ -1,0 +1,16 @@
+---
+title: getNodeDiff
+description: Stable Gateway RPC for node-level diff inspection.
+maturity: stable
+apiVersion: v1
+---
+
+`getNodeDiff` returns a diff bundle for a task node iteration.
+
+- Method: `getNodeDiff`
+- Scope: `run:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId, nodeId, iteration? }`
+- Response: node diff payload
+
+Errors include `NodeNotFound`, `IterationNotFound`, `PayloadTooLarge`, and `VcsError`.

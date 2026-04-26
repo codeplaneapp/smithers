@@ -1,0 +1,16 @@
+---
+title: launchRun
+description: Stable Gateway RPC for starting a workflow run.
+maturity: stable
+apiVersion: v1
+---
+
+`launchRun` starts a registered workflow.
+
+- Method: `launchRun`
+- Scope: `run:write`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ workflow, input?, options? }`
+- Response: `{ runId, workflow }`
+
+Errors are versioned as `v1` and include `InvalidRequest`, `InvalidInput`, `Unauthorized`, `Forbidden`, and `Internal`.

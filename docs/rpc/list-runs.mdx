@@ -1,0 +1,16 @@
+---
+title: listRuns
+description: Stable Gateway RPC for listing runs.
+maturity: stable
+apiVersion: v1
+---
+
+`listRuns` returns recent run summaries.
+
+- Method: `listRuns`
+- Scope: `run:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ filter?: { status?, limit? } }`
+- Response: `RunSummary[]`
+
+Results are ordered newest first.

@@ -1,0 +1,16 @@
+---
+title: streamDevTools
+description: Stable Gateway RPC for DevTools snapshot and delta streams.
+maturity: stable
+apiVersion: v1
+---
+
+`streamDevTools` subscribes to DevTools snapshots and deltas.
+
+- Method: `streamDevTools`
+- Scope: `observability:read`
+- Transport: WebSocket RPC
+- Request: `{ runId, afterSeq? }`
+- Response: `{ streamId, runId, afterSeq }`
+
+The legacy `fromSeq` field is accepted; `afterSeq` is the stable v1 name.

@@ -1,0 +1,16 @@
+---
+title: resumeRun
+description: Stable Gateway RPC for resuming a run.
+maturity: stable
+apiVersion: v1
+---
+
+`resumeRun` asks the Gateway to resume a waiting or interrupted run.
+
+- Method: `resumeRun`
+- Scope: `run:write`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId, options? }`
+- Response: `{ runId, status }`
+
+Terminal runs return `already_terminal`; resumable runs return `resume_requested`.

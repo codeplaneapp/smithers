@@ -1,0 +1,16 @@
+---
+title: submitApproval
+description: Stable Gateway RPC for submitting approval decisions.
+maturity: stable
+apiVersion: v1
+---
+
+`submitApproval` resolves a waiting approval node.
+
+- Method: `submitApproval`
+- Scope: `approval:submit`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId, nodeId, iteration?, decision }`
+- Response: `{ runId, nodeId, iteration, approved }`
+
+`decision.approved` is required. `decision.value` carries select/rank/decision payloads.

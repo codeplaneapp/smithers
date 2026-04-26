@@ -1,0 +1,14 @@
+---
+title: cronDelete
+description: Stable Gateway RPC for deleting cron schedules.
+maturity: stable
+apiVersion: v1
+---
+
+`cronDelete` deletes a Gateway cron schedule.
+
+- Method: `cronDelete`
+- Scope: `cron:write`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ cronId }`
+- Response: `{ cronId, removed: true }`

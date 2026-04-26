@@ -1,0 +1,14 @@
+---
+title: cronCreate
+description: Stable Gateway RPC for creating cron schedules.
+maturity: stable
+apiVersion: v1
+---
+
+`cronCreate` creates or replaces a Gateway cron schedule.
+
+- Method: `cronCreate`
+- Scope: `cron:write`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ workflow, pattern, cronId?, enabled? }`
+- Response: created cron row

@@ -1,0 +1,16 @@
+---
+title: submitSignal
+description: Stable Gateway RPC for submitting workflow signals.
+maturity: stable
+apiVersion: v1
+---
+
+`submitSignal` delivers a signal payload to a waiting run.
+
+- Method: `submitSignal`
+- Scope: `signal:submit`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId, correlationKey, payload?, signalName? }`
+- Response: signal delivery metadata
+
+Webhook-originated signals must be HMAC-signed over the raw request body.

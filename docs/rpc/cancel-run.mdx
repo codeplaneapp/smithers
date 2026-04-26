@@ -1,0 +1,16 @@
+---
+title: cancelRun
+description: Stable Gateway RPC for cancelling an active run.
+maturity: stable
+apiVersion: v1
+---
+
+`cancelRun` requests cancellation of an active run.
+
+- Method: `cancelRun`
+- Scope: `run:write`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId }`
+- Response: `{ runId, status: "cancelling" }`
+
+Forbidden errors include the required `run:write` scope.

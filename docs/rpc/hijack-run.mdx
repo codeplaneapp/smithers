@@ -1,0 +1,16 @@
+---
+title: hijackRun
+description: Stable Gateway RPC for elevated operator handoff.
+maturity: stable
+apiVersion: v1
+---
+
+`hijackRun` creates an elevated handoff session for a run.
+
+- Method: `hijackRun`
+- Scope: `run:admin`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId, options? }`
+- Response: `{ runId, status: "hijack-ready", sessionId }`
+
+This RPC is intentionally scoped above normal run write access.

@@ -1,0 +1,16 @@
+---
+title: getNodeOutput
+description: Stable Gateway RPC for task output inspection.
+maturity: stable
+apiVersion: v1
+---
+
+`getNodeOutput` returns a task node output payload.
+
+- Method: `getNodeOutput`
+- Scope: `run:read`
+- Transports: HTTP RPC, WebSocket RPC
+- Request: `{ runId, nodeId, iteration? }`
+- Response: `NodeOutputResponse`
+
+Errors include `NodeNotFound`, `IterationNotFound`, `NodeHasNoOutput`, and `PayloadTooLarge`.

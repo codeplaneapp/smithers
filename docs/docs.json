@@ -37,7 +37,8 @@
         "pages": [
           "cli/quickstart",
           "cli/overview",
-          "guides/tui"
+          "guides/tui",
+          "deployment/reference"
         ]
       },
       {
@@ -109,7 +110,29 @@
           "runtime/render-frame",
           "runtime/events",
           "runtime/revert",
-          "runtime/run-state"
+          "runtime/run-state",
+          {
+            "group": "Gateway RPC",
+            "pages": [
+              "rpc/launch-run",
+              "rpc/resume-run",
+              "rpc/cancel-run",
+              "rpc/hijack-run",
+              "rpc/rewind-run",
+              "rpc/submit-approval",
+              "rpc/submit-signal",
+              "rpc/get-run",
+              "rpc/list-runs",
+              "rpc/stream-run-events",
+              "rpc/stream-dev-tools",
+              "rpc/get-node-output",
+              "rpc/get-node-diff",
+              "rpc/cron-list",
+              "rpc/cron-create",
+              "rpc/cron-delete",
+              "rpc/cron-run"
+            ]
+          }
         ]
       },
       {
