@@ -567,12 +567,18 @@ export class CodexAgent extends BaseCliAgent {
             : "";
         const fullPrompt = `${systemPrefix}${params.prompt ?? ""}`;
         args.push("-");
+        const accountEnv = {};
+        if (this.opts.configDir)
+            accountEnv.CODEX_HOME = this.opts.configDir;
+        if (this.opts.apiKey)
+            accountEnv.OPENAI_API_KEY = this.opts.apiKey;
         return {
             command: "codex",
             args,
             stdin: fullPrompt,
             outputFile,
             outputFormat: "stream-json",
+            env: Object.keys(accountEnv).length > 0 ? accountEnv : undefined,
             stdoutBannerPatterns: [
                 // Codex CLI prints a startup banner like:
                 // "OpenAI Codex v0.99.0-alpha.13 (research preview)"

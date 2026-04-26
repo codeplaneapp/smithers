@@ -97,15 +97,16 @@ export class ClaudeCodeAgent extends BaseCliAgent {
         // Clear env vars that cause "Cannot run nested Claude Code instances" errors.
         // CLAUDE_CODE_ENTRYPOINT / CLAUDECODE are set by a parent Claude Code process;
         // child instances refuse to start when they detect these.
-        // ANTHROPIC_API_KEY is cleared so Claude Code uses the subscription instead of API billing.
+        // ANTHROPIC_API_KEY is cleared so Claude Code uses the subscription instead of API billing,
+        // unless the caller explicitly opts in by passing `apiKey`.
         const parentEnvOverrides = {};
         if (process.env.CLAUDE_CODE_ENTRYPOINT)
             parentEnvOverrides.CLAUDE_CODE_ENTRYPOINT = "";
         if (process.env.CLAUDECODE)
             parentEnvOverrides.CLAUDECODE = "";
-        if (process.env.ANTHROPIC_API_KEY) {
+        if (process.env.ANTHROPIC_API_KEY && !opts.apiKey) {
             logWarning("ClaudeCodeAgent: unsetting ANTHROPIC_API_KEY so Claude Code uses your subscription. " +
-                "To use API billing instead, use ToolLoopAgent from 'ai' with anthropic() provider.", {}, "agent.init");
+                "To use API billing instead, pass `apiKey` to ClaudeCodeAgent or use ToolLoopAgent from 'ai' with anthropic() provider.", {}, "agent.init");
             parentEnvOverrides.ANTHROPIC_API_KEY = "";
         }
         if (Object.keys(parentEnvOverrides).length > 0) {
@@ -446,10 +447,16 @@ export class ClaudeCodeAgent extends BaseCliAgent {
             args.push(...this.extraArgs);
         if (params.prompt)
             args.push(params.prompt);
+        const accountEnv = {};
+        if (this.opts.configDir)
+            accountEnv.CLAUDE_CONFIG_DIR = this.opts.configDir;
+        if (this.opts.apiKey)
+            accountEnv.ANTHROPIC_API_KEY = this.opts.apiKey;
         return {
             command: "claude",
             args,
             outputFormat,
+            env: Object.keys(accountEnv).length > 0 ? accountEnv : undefined,
         };
     }
 }

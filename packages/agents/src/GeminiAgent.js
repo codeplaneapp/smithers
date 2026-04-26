@@ -264,10 +264,16 @@ export class GeminiAgent extends BaseCliAgent {
             : "";
         const fullPrompt = `${systemPrefix}${params.prompt ?? ""}${jsonReminder}`;
         args.push("--prompt", fullPrompt);
+        const accountEnv = {};
+        if (this.opts.configDir)
+            accountEnv.GEMINI_DIR = this.opts.configDir;
+        if (this.opts.apiKey)
+            accountEnv.GEMINI_API_KEY = this.opts.apiKey;
         return {
             command: "gemini",
             args,
             outputFormat,
+            env: Object.keys(accountEnv).length > 0 ? accountEnv : undefined,
         };
     }
 }

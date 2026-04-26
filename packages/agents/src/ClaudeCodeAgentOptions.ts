@@ -9,6 +9,22 @@ export type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
   allowDangerouslySkipPermissions?: boolean;
   allowedTools?: string[];
   appendSystemPrompt?: string;
+  /**
+   * Path to an isolated Claude Code config directory. Sets `CLAUDE_CONFIG_DIR`
+   * on the spawned process so this invocation uses the credentials stored at
+   * `<configDir>/.credentials.json` (instead of the user's default `~/.claude/`).
+   *
+   * Use this to run multiple Claude Code subscriptions side-by-side. Set up
+   * the directory by running `CLAUDE_CONFIG_DIR=<path> claude` once and
+   * completing `/login` interactively.
+   */
+  configDir?: string;
+  /**
+   * Anthropic API key for billing this invocation against the API instead of
+   * a Claude Pro/Max subscription. When set, ClaudeCodeAgent stops unsetting
+   * `ANTHROPIC_API_KEY` (which it normally clears so subscription auth wins).
+   */
+  apiKey?: string;
   betas?: string[];
   chrome?: boolean;
   continue?: boolean;

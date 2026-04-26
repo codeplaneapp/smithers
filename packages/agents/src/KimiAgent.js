@@ -346,13 +346,14 @@ export class KimiAgent extends BaseCliAgent {
         let cleanup;
         // Isolate kimi metadata per invocation to avoid concurrent writes to
         // ~/.kimi/kimi.json across parallel tasks. If caller explicitly provides
-        // KIMI_SHARE_DIR in opts.env, preserve that override.
-        const sourceShareDir = this.opts.env?.KIMI_SHARE_DIR ?? process.env.KIMI_SHARE_DIR ?? join(homedir(), ".kimi");
+        // configDir or KIMI_SHARE_DIR in opts.env, preserve that override.
+        const explicitShareDir = this.opts.configDir ?? this.opts.env?.KIMI_SHARE_DIR;
+        const sourceShareDir = explicitShareDir ?? process.env.KIMI_SHARE_DIR ?? join(homedir(), ".kimi");
         // Refresh expired OAuth credentials in place using the stored refresh_token,
         // and only fail fast (non-retryable) if the refresh itself fails. This avoids
         // forcing the user to run `kimi login` every time their access_token rotates.
         await ensureKimiCredentialsUsable(sourceShareDir, this.id ?? "<anonymous>", this.opts.model ?? this.model ?? "<unset>");
-        if (!this.opts.env?.KIMI_SHARE_DIR) {
+        if (!explicitShareDir) {
             const isolatedShareDir = mkdtempSync(join(tmpdir(), "kimi-share-"));
             if (existsSync(sourceShareDir)) {
                 for (const name of ["config.toml", "credentials", "device_id", "latest_version.txt"]) {
@@ -371,6 +372,11 @@ export class KimiAgent extends BaseCliAgent {
             cleanup = async () => {
                 rmSync(isolatedShareDir, { recursive: true, force: true });
             };
+        }
+        else if (this.opts.configDir) {
+            // configDir takes precedence over any env-var inheritance: spawn the
+            // CLI with KIMI_SHARE_DIR pointing at the user-specified path.
+            commandEnv = { KIMI_SHARE_DIR: this.opts.configDir };
         }
         // Print mode is required for non-interactive execution
         // Note: --print implicitly adds --yolo

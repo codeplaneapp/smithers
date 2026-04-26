@@ -20,4 +20,19 @@ export type CodexAgentOptions = BaseCliAgentOptions & {
   color?: "always" | "never" | "auto";
   json?: boolean;
   outputLastMessage?: string;
+  /**
+   * Path to an isolated Codex CLI config directory. Sets `CODEX_HOME` on the
+   * spawned process so this invocation uses the credentials stored at
+   * `<configDir>/auth.json` (instead of the user's default `~/.codex/`).
+   *
+   * Use this to run multiple Codex / ChatGPT subscriptions side-by-side. Set
+   * up the directory by running `CODEX_HOME=<path> codex login` once.
+   */
+  configDir?: string;
+  /**
+   * OpenAI API key for billing this invocation against the API instead of a
+   * ChatGPT Plus/Pro subscription. Sets `OPENAI_API_KEY` on the spawned
+   * process.
+   */
+  apiKey?: string;
 };
