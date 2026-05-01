@@ -70,6 +70,14 @@
       "effect": "3.21.1"
     }
   },
+  "overrides": {
+    "@effect/cluster": "0.58.0",
+    "@effect/platform": "0.96.0",
+    "@effect/rpc": "0.75.0",
+    "@effect/sql": "0.51.0",
+    "@effect/workflow": "0.18.0",
+    "effect": "3.21.1"
+  },
   "devDependencies": {
     "@effect/cluster": "^0.58.0",
     "@effect/experimental": "^0.60.0",

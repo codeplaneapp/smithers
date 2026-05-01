@@ -10,6 +10,16 @@
       "import": "./src/index.js",
       "default": "./src/index.js"
     },
+    "./metrics": {
+      "types": "./src/index.d.ts",
+      "import": "./src/metrics.js",
+      "default": "./src/metrics.js"
+    },
+    "./schema": {
+      "types": "./src/index.d.ts",
+      "import": "./src/schema.js",
+      "default": "./src/schema.js"
+    },
     "./*": {
       "types": "./src/index.d.ts",
       "import": "./src/*.js",
@@ -29,9 +39,11 @@
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/driver": "workspace:*",
     "@smithers-orchestrator/errors": "workspace:*",
+    "@smithers-orchestrator/graph": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "effect": "^3.21.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {

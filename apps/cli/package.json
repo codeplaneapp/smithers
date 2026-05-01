@@ -20,11 +20,12 @@
     "src/"
   ],
   "scripts": {
-    "test": "bun test tests",
+    "test": "bun test --timeout=60000 --max-concurrency=1 tests",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsup --dts-only"
   },
   "dependencies": {
+    "@mdx-js/esbuild": "^3.1.1",
     "@effect/workflow": "^0.18.0",
     "@clack/prompts": "^0.10.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -38,16 +39,19 @@
     "@smithers-orchestrator/driver": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
     "@smithers-orchestrator/errors": "workspace:*",
+    "@smithers-orchestrator/memory": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
+    "@smithers-orchestrator/openapi": "workspace:*",
+    "@smithers-orchestrator/protocol": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/server": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
     "cron-parser": "^5.5.0",
+    "drizzle-orm": "^0.45.2",
     "effect": "^3.21.1",
     "incur": "^0.4.1",
     "picocolors": "^1.1.1",
     "react": "^19.2.5",
-    "smithers-orchestrator": "workspace:*",
     "zod": "^4.3.6"
   },
   "devDependencies": {

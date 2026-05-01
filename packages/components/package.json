@@ -34,14 +34,16 @@
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/react-reconciler": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
-    "@smithers-orchestrator/scorers": "workspace:*",
     "bippy": "^0.5.39",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@tanstack/react-query": "^5.99.1",
     "@types/bun": "latest",
+    "drizzle-orm": "^0.45.2",
+    "effect": "^3.21.1",
     "typescript": "~5.9.3"
   }
 }

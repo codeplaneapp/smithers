@@ -31,6 +31,7 @@ examples/run-*.log
 # playwright
 playwright-report
 test-results
+tui-buffer.txt
 
 # IntelliJ based IDEs
 .idea
@@ -42,6 +43,7 @@ test-results
 .gemini-clipboard/
 
 # Local workflow/runtime reports
+.claude/
 .claude/scheduled_tasks.lock
 .kanban-reports/
 

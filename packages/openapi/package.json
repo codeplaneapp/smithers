@@ -10,6 +10,11 @@
       "import": "./src/index.js",
       "default": "./src/index.js"
     },
+    "./metrics": {
+      "types": "./src/index.d.ts",
+      "import": "./src/metrics.js",
+      "default": "./src/metrics.js"
+    },
     "./*": {
       "types": "./src/index.d.ts",
       "import": "./src/*.js",
@@ -26,11 +31,12 @@
   },
   "dependencies": {
     "@smithers-orchestrator/driver": "workspace:*",
+    "@smithers-orchestrator/errors": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
     "ai": "^6.0.168",
     "effect": "^3.21.1",
-    "yaml": "^2.8.1",
+    "yaml": "^2.8.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {

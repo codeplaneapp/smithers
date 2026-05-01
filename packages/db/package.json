@@ -27,7 +27,6 @@
   "dependencies": {
     "@effect/experimental": "^0.60.0",
     "@effect/sql": "^0.51.0",
-    "@smithers-orchestrator/driver": "workspace:*",
     "@smithers-orchestrator/errors": "workspace:*",
     "@smithers-orchestrator/graph": "workspace:*",
     "@smithers-orchestrator/memory": "workspace:*",
