@@ -567,6 +567,8 @@ type ServerOptions = {
   maxBodyBytes?: number;
   rootDir?: string;
   allowNetwork?: boolean;
+  headersTimeout?: number;
+  requestTimeout?: number;
 };
 
 type ServeOptions = {
@@ -596,6 +598,9 @@ type GatewayOptions = {
   maxBodyBytes?: number;
   maxPayload?: number;
   maxConnections?: number;
+  eventWindowSize?: number;
+  headersTimeout?: number;
+  requestTimeout?: number;
 };
 
 // =============================================================================

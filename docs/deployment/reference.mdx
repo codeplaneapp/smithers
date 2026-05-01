@@ -35,9 +35,23 @@ Use `deploy/reference/systemd/smithers-gateway.service` for the Gateway process 
 SMITHERS_DB_PATH=/var/lib/smithers/smithers.db
 SMITHERS_TOKEN_STORE=/etc/smithers/tokens.json
 SMITHERS_GATEWAY_MODULE=/etc/smithers/gateway.mjs
+SMITHERS_GATEWAY_HEADERS_TIMEOUT_MS=30000
+SMITHERS_GATEWAY_REQUEST_TIMEOUT_MS=60000
 ```
 
 `SMITHERS_GATEWAY_MODULE` can export `register(gateway)` or a default function. Register workflows there.
+
+## Gateway Environment
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `PORT` | `7331` | Gateway listen port inside the container or host. |
+| `SMITHERS_TOKEN_STORE` | `/data/tokens.json` | JSON token grant store used by token auth. |
+| `SMITHERS_GATEWAY_MODULE` | `/workspace/gateway.mjs` | Module that registers workflows on startup. |
+| `SMITHERS_GATEWAY_HEARTBEAT_MS` | `15000` | WebSocket heartbeat interval. |
+| `SMITHERS_GATEWAY_EVENT_WINDOW` | `10000` | Per-run replay window for `streamRunEvents`. |
+| `SMITHERS_GATEWAY_HEADERS_TIMEOUT_MS` | `30000` | Maximum time to receive complete HTTP headers. |
+| `SMITHERS_GATEWAY_REQUEST_TIMEOUT_MS` | `60000` | Maximum time to receive and parse a complete HTTP request, including body. |
 
 ## Kubernetes
 

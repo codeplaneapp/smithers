@@ -36,10 +36,12 @@ type ServerOptions = {
   maxBodyBytes?: number;      // default 1_048_576
   rootDir?: string;           // sandbox root for workflow paths and tools
   allowNetwork?: boolean;     // default false; allows network in `bash`
+  headersTimeout?: number;    // default 30_000
+  requestTimeout?: number;    // default 60_000
 };
 ```
 
-`startServer` returns a listening `http.Server`.
+`startServer` returns a listening `http.Server`. `headersTimeout` and `requestTimeout` are applied to that server to bound slow header/body uploads.
 
 ## API Routes (TOON)
 
