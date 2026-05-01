@@ -82,4 +82,3 @@ Each tool call emits an `OpenApiToolCalled` event with `operationId`, `method`, 
 > Folded into the opt-in OpenAPI fragment.
 
 This material is now in the opt-in [`/llms-openapi.txt`](/llms-openapi.txt) fragment.
-

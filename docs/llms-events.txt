@@ -157,4 +157,3 @@ type SmithersEvent =
   | { type: "SandboxShipped"; runId: string; sandboxId: string; runtime: SandboxRuntime; bundleSizeBytes: number; timestampMs: number }
   | { type: "SandboxCompleted"; runId: string; sandboxId: string; remoteRunId?: string; runtime: SandboxRuntime; status: "finished" | "failed" | "cancelled"; durationMs: number; timestampMs: number };
 ```
-

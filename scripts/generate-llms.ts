@@ -174,7 +174,7 @@ function renderManifest(name: string, pages: string[], header: string): string {
   let out = `# ${name}\n\n${header}\n\n---\n\n`;
   for (const p of pages) out += renderPage(p);
   // Trim trailing separator
-  return out.replace(/\n---\n\n$/, "\n");
+  return out.replace(/\n\n---\n\n$/, "\n");
 }
 
 // -----------------------------------------------------------------------------

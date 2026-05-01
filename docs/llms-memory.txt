@@ -89,4 +89,3 @@ bunx smithers-orchestrator memory recall "auth bugs" -w workflow.tsx --top-k 10
 > Folded into the opt-in memory fragment.
 
 This material is now in the opt-in [`/llms-memory.txt`](/llms-memory.txt) fragment.
-
