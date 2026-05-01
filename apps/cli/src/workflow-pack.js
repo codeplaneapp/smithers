@@ -81,6 +81,7 @@ const BUNDLED_VERSION_PINS = {
     reactTypes: "19.2.14",
     reactDomTypes: "19.2.3",
     mdxTypes: "2.0.13",
+    nodeTypes: "25.6.0",
 };
 /**
  * @returns {DependencyVersions}
@@ -93,6 +94,7 @@ function readDependencyVersions() {
         reactTypesVersion: resolveDependencyVersion("@types/react", BUNDLED_VERSION_PINS.reactTypes),
         reactDomTypesVersion: resolveDependencyVersion("@types/react-dom", BUNDLED_VERSION_PINS.reactDomTypes),
         mdxTypesVersion: resolveDependencyVersion("@types/mdx", BUNDLED_VERSION_PINS.mdxTypes),
+        nodeTypesVersion: resolveDependencyVersion("@types/node", BUNDLED_VERSION_PINS.nodeTypes),
     };
 }
 /**
@@ -119,6 +121,7 @@ function renderPackageJson(versions) {
             "@types/react": versions.reactTypesVersion,
             "@types/react-dom": versions.reactDomTypesVersion,
             "@types/mdx": versions.mdxTypesVersion,
+            "@types/node": versions.nodeTypesVersion,
         },
     }, null, 2) + "\n";
 }

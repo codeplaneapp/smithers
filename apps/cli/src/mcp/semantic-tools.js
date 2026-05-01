@@ -10,7 +10,7 @@ import { diagnoseRunEffect, } from "../why-diagnosis.js";
 import { chatAttemptKey, parseChatAttemptMeta, parseNodeOutputEvent, selectChatAttempts, } from "../chat.js";
 import { WATCH_MIN_INTERVAL_MS } from "../watch.js";
 import { discoverWorkflows, resolveWorkflow } from "../workflows.js";
-import { mdxPlugin } from "smithers-orchestrator/mdx-plugin";
+import { mdxPlugin } from "../mdx-plugin.js";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
 import { runWorkflow } from "@smithers-orchestrator/engine";
 import { revertToAttempt } from "@smithers-orchestrator/time-travel/revert";

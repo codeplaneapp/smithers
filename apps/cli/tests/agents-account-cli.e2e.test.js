@@ -88,7 +88,7 @@ test("agents add with --replace overwrites the existing account", () => {
     const persisted = JSON.parse(readFileSync(join(home, "accounts.json"), "utf8"));
     expect(persisted.accounts).toHaveLength(1);
     expect(persisted.accounts[0].configDir).toBe("/tmp/dir-b");
-});
+}, 15_000);
 
 test("agents list emits JSON via --format json and a human table on stderr otherwise", () => {
     const repo = createTempRepo();

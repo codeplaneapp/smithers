@@ -7,7 +7,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { Effect, Fiber } from "effect";
 import { Cli, Mcp as IncurMcp, z } from "incur";
 import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
-import { mdxPlugin } from "smithers-orchestrator/mdx-plugin";
+import { mdxPlugin } from "./mdx-plugin.js";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
 import { signalRun } from "@smithers-orchestrator/engine/signals";
 import { loadInput, loadOutputs } from "@smithers-orchestrator/db/snapshot";
@@ -5267,23 +5267,59 @@ async function createChatAgent(agentId, cwd) {
 /**
  * @param {"claude-code" | "codex" | "gemini"} agentId
  * @param {string} cwd
- * @returns {Promise<import("smithers-orchestrator").SmithersWorkflow<any>>}
+ * @returns {Promise<import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>>}
  */
 async function buildInlineChatWorkflow(agentId, cwd) {
-    const { createSmithers } = await import("smithers-orchestrator");
-    const { z: zod } = await import("zod");
+    const [
+        { Database },
+        { drizzle },
+        { sqliteTable, text },
+        { Workflow, Task },
+        { zodToTable },
+        { syncZodTableSchema },
+        { camelToSnake },
+        { z: zod },
+    ] = await Promise.all([
+        import("bun:sqlite"),
+        import("drizzle-orm/bun-sqlite"),
+        import("drizzle-orm/sqlite-core"),
+        import("@smithers-orchestrator/components"),
+        import("@smithers-orchestrator/db/zodToTable"),
+        import("@smithers-orchestrator/db/zodToCreateTableSQL"),
+        import("@smithers-orchestrator/db/utils/camelToSnake"),
+        import("zod"),
+    ]);
     const agent = await createChatAgent(agentId, cwd);
-    const { Workflow, Task, smithers, outputs } = createSmithers({
-        chat: zod.object({}),
-    }, {
-        dbPath: resolve(cwd, "smithers.db"),
+    const chatSchema = zod.object({});
+    const inputTable = sqliteTable("input", {
+        runId: text("run_id").primaryKey(),
+        payload: text("payload", { mode: "json" }).$type(),
     });
-    return smithers(() => React.createElement(Workflow, { name: "chat" }, React.createElement(Task, {
-        id: "chat",
-        output: outputs.chat,
-        agent,
-        hijack: true,
-    }, CHAT_CREATE_PROMPT)));
+    const chatTableName = camelToSnake("chat");
+    const chatTable = zodToTable(chatTableName, chatSchema);
+    const sqlite = new Database(resolve(cwd, "smithers.db"));
+    sqlite.run("PRAGMA journal_mode = WAL");
+    sqlite.run("PRAGMA busy_timeout = 30000");
+    sqlite.run("PRAGMA synchronous = NORMAL");
+    sqlite.run("PRAGMA locking_mode = NORMAL");
+    sqlite.run("PRAGMA foreign_keys = ON");
+    sqlite.exec(`CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`);
+    syncZodTableSchema(sqlite, chatTableName, chatSchema);
+    const db = drizzle(sqlite, { schema: { input: inputTable, chat: chatTable } });
+    const schemaRegistry = new Map([["chat", { table: chatTable, zodSchema: chatSchema }]]);
+    const zodToKeyName = new Map([[chatSchema, "chat"]]);
+    return {
+        db,
+        build: () => React.createElement(Workflow, { name: "chat" }, React.createElement(Task, {
+            id: "chat",
+            output: chatSchema,
+            agent,
+            hijack: true,
+        }, CHAT_CREATE_PROMPT)),
+        opts: {},
+        schemaRegistry,
+        zodToKeyName,
+    };
 }
 /**
  * @param {string[]} argv
