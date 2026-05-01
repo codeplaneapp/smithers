@@ -529,4 +529,24 @@ describe("scheduleTasks boundaries", () => {
     );
     expect(result.fatalError).toBe("TryCatchFinally tcf failed");
   });
+
+  test("try failure without catch schedules finally before fatal error", () => {
+    const result = scheduleTasks(
+      {
+        kind: "try-catch-finally",
+        id: "tcf",
+        tryChildren: [{ kind: "task", nodeId: "try" }],
+        catchChildren: [],
+        finallyChildren: [{ kind: "task", nodeId: "finally" }],
+      },
+      new Map([[buildStateKey("try", 0), "failed"]]),
+      descriptorMap(makeDescriptor("try"), makeDescriptor("finally")),
+      new Map(),
+      new Map(),
+      0,
+    );
+    expect(result.runnable.map((task) => task.nodeId)).toEqual(["finally"]);
+    expect(result.fatalError).toBeUndefined();
+    expect(result.failureRecoveryActive).toBe(true);
+  });
 });

@@ -70,6 +70,8 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
     let continuation;
     let nextRetryAtMs;
     let fatalError;
+    let failureRecoveryActive = false;
+    const failureRecoveryKeys = new Set();
     const groupUsage = new Map();
     for (const [stateKey, state] of states) {
         if (state !== "in-progress")
@@ -89,7 +91,7 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
    * @param {PlanNode} node
    * @returns {{ readonly terminal: boolean; readonly failed: boolean }}
    */
-    function inspect(node) {
+    function inspect(node, options = {}) {
         switch (node.kind) {
             case "task": {
                 const descriptor = descriptors.get(node.nodeId);
@@ -102,12 +104,16 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
                     state === "failed" ||
                     Boolean(descriptor.waitAsync &&
                         (state === "waiting-approval" || state === "waiting-event"));
-                return { terminal, failed: state === "failed" && !descriptor.continueOnFail };
+                return {
+                    terminal,
+                    failed: state === "failed" &&
+                        (options.includeContinuedFailures || !descriptor.continueOnFail),
+                };
             }
             case "sequence":
             case "group": {
                 for (const child of node.children) {
-                    const result = inspect(child);
+                    const result = inspect(child, options);
                     if (!result.terminal)
                         return { terminal: false, failed: false };
                     if (result.failed)
@@ -119,7 +125,7 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
                 let terminal = true;
                 let failed = false;
                 for (const child of node.children) {
-                    const result = inspect(child);
+                    const result = inspect(child, options);
                     if (!result.terminal)
                         terminal = false;
                     if (result.failed)
@@ -129,7 +135,7 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
             }
             case "saga": {
                 for (const child of node.actionChildren) {
-                    const result = inspect(child);
+                    const result = inspect(child, options);
                     if (!result.terminal)
                         return { terminal: false, failed: false };
                     if (result.failed)
@@ -139,7 +145,7 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
             }
             case "try-catch-finally": {
                 for (const child of node.tryChildren) {
-                    const result = inspect(child);
+                    const result = inspect(child, options);
                     if (!result.terminal)
                         return { terminal: false, failed: false };
                     if (result.failed)
@@ -149,6 +155,52 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
             }
             default:
                 return { terminal: true, failed: false };
+        }
+    }
+    /**
+   * @param {PlanNode} node
+   * @param {{ includeContinuedFailures?: boolean }} options
+   */
+    function collectFailureKeys(node, options = {}) {
+        switch (node.kind) {
+            case "task": {
+                const descriptor = descriptors.get(node.nodeId);
+                if (!descriptor)
+                    return;
+                const key = buildStateKey(descriptor.nodeId, descriptor.iteration);
+                const state = states.get(key) ?? "pending";
+                if (state === "failed" &&
+                    (options.includeContinuedFailures || !descriptor.continueOnFail)) {
+                    failureRecoveryKeys.add(key);
+                }
+                return;
+            }
+            case "sequence":
+            case "group":
+            case "parallel":
+                for (const child of node.children) {
+                    collectFailureKeys(child, options);
+                }
+                return;
+            case "saga":
+                for (const child of node.actionChildren) {
+                    collectFailureKeys(child, options);
+                }
+                return;
+            case "try-catch-finally":
+                for (const child of node.tryChildren) {
+                    collectFailureKeys(child, options);
+                }
+                return;
+        }
+    }
+    /**
+   * @param {readonly PlanNode[]} children
+   * @param {{ includeContinuedFailures?: boolean }} options
+   */
+    function collectChildFailureKeys(children, options = {}) {
+        for (const child of children) {
+            collectFailureKeys(child, options);
         }
     }
     /**
@@ -247,7 +299,9 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
                 let completedActions = 0;
                 let failed = false;
                 for (const child of node.actionChildren) {
-                    const status = inspect(child);
+                    const status = inspect(child, {
+                        includeContinuedFailures: true,
+                    });
                     if (!status.terminal)
                         return walk(child);
                     if (status.failed) {
@@ -262,6 +316,23 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
                     fatalError ??= `Saga ${node.id} failed`;
                     return { terminal: true };
                 }
+                collectChildFailureKeys(node.actionChildren, {
+                    includeContinuedFailures: true,
+                });
+                let compensationFailed = false;
+                for (let index = completedActions - 1; index >= 0; index -= 1) {
+                    const compensation = node.compensationChildren[index];
+                    if (!compensation)
+                        continue;
+                    if (inspect(compensation).failed) {
+                        compensationFailed = true;
+                        break;
+                    }
+                }
+                if (compensationFailed) {
+                    return { terminal: false };
+                }
+                failureRecoveryActive = true;
                 for (let index = completedActions - 1; index >= 0; index -= 1) {
                     const compensation = node.compensationChildren[index];
                     if (!compensation)
@@ -278,7 +349,9 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
             case "try-catch-finally": {
                 let tryFailed = false;
                 for (const child of node.tryChildren) {
-                    const status = inspect(child);
+                    const status = inspect(child, {
+                        includeContinuedFailures: true,
+                    });
                     if (!status.terminal)
                         return walk(child);
                     if (status.failed) {
@@ -287,18 +360,50 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
                     }
                 }
                 if (tryFailed) {
+                    const collectTryFailureKeys = () => collectChildFailureKeys(node.tryChildren, {
+                        includeContinuedFailures: true,
+                    });
                     if (node.catchChildren.length > 0) {
+                        collectTryFailureKeys();
+                        const catchStatus = inspect({
+                            kind: "sequence",
+                            children: node.catchChildren,
+                        });
+                        if (catchStatus.failed) {
+                            return { terminal: false };
+                        }
+                        failureRecoveryActive = true;
                         const catchResult = walkSequence(node.catchChildren);
                         if (!catchResult.terminal)
                             return catchResult;
                     }
-                    else {
-                        fatalError ??= `TryCatchFinally ${node.id} failed`;
+                }
+                const finallyStatus = inspect({
+                    kind: "sequence",
+                    children: node.finallyChildren,
+                });
+                if (finallyStatus.failed) {
+                    if (tryFailed) {
+                        collectChildFailureKeys(node.tryChildren, {
+                            includeContinuedFailures: true,
+                        });
                     }
+                    failureRecoveryActive = false;
+                    return { terminal: false };
                 }
                 const finallyResult = walkSequence(node.finallyChildren);
-                if (!finallyResult.terminal)
+                if (!finallyResult.terminal) {
+                    if (tryFailed && node.catchChildren.length === 0) {
+                        collectChildFailureKeys(node.tryChildren, {
+                            includeContinuedFailures: true,
+                        });
+                        failureRecoveryActive = true;
+                    }
                     return finallyResult;
+                }
+                if (tryFailed && node.catchChildren.length === 0) {
+                    fatalError ??= `TryCatchFinally ${node.id} failed`;
+                }
                 return { terminal: true };
             }
             case "group": {
@@ -326,5 +431,7 @@ export function scheduleTasks(plan, states, descriptors, ralphState, retryWait, 
         continuation,
         nextRetryAtMs,
         fatalError,
+        failureRecoveryActive,
+        failureRecoveryKeys: [...failureRecoveryKeys],
     };
 }

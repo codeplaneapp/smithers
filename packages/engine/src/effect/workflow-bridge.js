@@ -72,8 +72,12 @@ function isRetryableBridgeTaskFailure(attempt) {
     if (meta?.failureRetryable === false) {
         return false;
     }
+    const errorCode = parseAttemptErrorCode(attempt?.errorJson);
+    if (errorCode === "AGENT_CONFIG_INVALID") {
+        return false;
+    }
     const kind = typeof meta?.kind === "string" ? meta.kind : null;
-    return !(kind !== "agent" && parseAttemptErrorCode(attempt?.errorJson) === "INVALID_OUTPUT");
+    return !(kind !== "agent" && errorCode === "INVALID_OUTPUT");
 }
 /**
  * @param {SmithersDb} adapter

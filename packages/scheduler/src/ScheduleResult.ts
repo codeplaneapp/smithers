@@ -12,4 +12,6 @@ export type ScheduleResult = {
   readonly continuation?: ContinuationRequest;
   readonly nextRetryAtMs?: number;
   readonly fatalError?: string;
+  readonly failureRecoveryActive?: boolean;
+  readonly failureRecoveryKeys?: readonly string[];
 };

@@ -25,7 +25,7 @@ import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
 import * as BunContext from "@effect/platform-bun/BunContext";
 import { eq, getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
-import { Chunk, Duration, Effect, Fiber, Metric, Queue, Schedule } from "effect";
+import { Cause, Chunk, Duration, Effect, Exit, Fiber, Metric, Queue, Schedule } from "effect";
 import { attemptDuration, cacheHits, cacheMisses, nodeDuration, promptSizeBytes, responseSizeBytes, runDuration, runsResumedTotal, schedulerConcurrencyUtilization, schedulerQueueDepth, schedulerWaitDuration, trackEvent, } from "@smithers-orchestrator/observability/metrics";
 import { runScorersAsync } from "@smithers-orchestrator/scorers/run-scorers";
 import { dirname, resolve } from "node:path";
@@ -286,6 +286,25 @@ function isHeartbeatPayloadValidationError(err) {
     const code = err.code;
     return (code === "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE" ||
         code === "HEARTBEAT_PAYLOAD_TOO_LARGE");
+}
+/**
+ * Effect.runPromise rejects with a FiberFailure wrapper. For task execution we
+ * need the original failure so retry metadata can read SmithersError fields.
+ *
+ * @template A
+ * @param {Effect.Effect<A, unknown>} effect
+ * @returns {Promise<A>}
+ */
+async function runPromisePreservingFailure(effect) {
+    const exit = await Effect.runPromiseExit(effect);
+    if (Exit.isSuccess(exit)) {
+        return exit.value;
+    }
+    const failure = Cause.failureOption(exit.cause);
+    if (failure._tag === "Some") {
+        throw failure.value;
+    }
+    throw Cause.squash(exit.cause);
 }
 /**
  * @param {Record<string, unknown>} meta
@@ -3026,7 +3045,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 // Use fallback agent on retry attempts when available
                 let result;
                 try {
-                    result = await Effect.runPromise(withSmithersSpan(smithersSpanNames.agent, Effect.tryPromise({
+                    result = await runPromisePreservingFailure(withSmithersSpan(smithersSpanNames.agent, Effect.tryPromise({
                         try: () => {
                             const agentCall = guidedResumeMessages?.length
                                 ? {
@@ -3743,9 +3762,9 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         if (effectiveError &&
             typeof effectiveError === "object" &&
             // @ts-ignore — duck-type on SmithersError shape
-            effectiveError.details &&
-            // @ts-ignore
-            effectiveError.details.failureRetryable === false) {
+            (effectiveError.details?.failureRetryable === false ||
+                // @ts-ignore
+                effectiveError.code === "AGENT_CONFIG_INVALID")) {
             attemptMeta.failureRetryable = false;
         }
         // Honour `discardResumeSession: true` from agent-side errors (e.g. kimi

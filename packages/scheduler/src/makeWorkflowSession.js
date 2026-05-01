@@ -179,8 +179,15 @@ function isRetryableFailure(descriptor, error) {
     const payloadCode = error && typeof error === "object" && typeof error.code === "string"
         ? error.code
         : undefined;
+    const payloadDetails = error && typeof error === "object" && error.details && typeof error.details === "object"
+        ? error.details
+        : undefined;
     const normalized = toSmithersError(error);
     const code = payloadCode ?? normalized.code;
+    const failureRetryable = payloadDetails?.failureRetryable ?? normalized.details?.failureRetryable;
+    if (failureRetryable === false || code === "AGENT_CONFIG_INVALID") {
+        return false;
+    }
     const isAgentTask = Boolean(descriptor.agent);
     const nonRetryableComputeCodes = new Set([
         "INVALID_OUTPUT",
@@ -372,6 +379,25 @@ export function makeWorkflowSession(options = {}) {
         state.failures.set(key, error);
         return decide();
     }
+    /**
+   * @returns {EngineDecision | null}
+   */
+    function unhandledFailureDecision(recoveryKeys = new Set()) {
+        for (const [key, taskState] of state.states) {
+            const parsed = parseStateKey(key);
+            const descriptor = findDescriptor(state, parsed.nodeId, parsed.iteration);
+            if (taskState === "failed" && !descriptor?.continueOnFail) {
+                if (recoveryKeys.has(key)) {
+                    continue;
+                }
+                return {
+                    _tag: "Failed",
+                    error: new SmithersError("SESSION_ERROR", `Task failed: ${descriptor?.nodeId ?? key}`, { key }, state.failures.get(key)),
+                };
+            }
+        }
+        return null;
+    }
     function ralphStatePayload() {
         return {
             ralphState: Object.fromEntries([...state.ralphState.entries()].map(([id, value]) => [
@@ -393,16 +419,6 @@ export function makeWorkflowSession(options = {}) {
         if (!state.graph) {
             return { _tag: "Wait", reason: { _tag: "ExternalTrigger" } };
         }
-        for (const [key, taskState] of state.states) {
-            const parsed = parseStateKey(key);
-            const descriptor = findDescriptor(state, parsed.nodeId, parsed.iteration);
-            if (taskState === "failed" && !descriptor?.continueOnFail) {
-                return {
-                    _tag: "Failed",
-                    error: new SmithersError("SESSION_ERROR", `Task failed: ${descriptor?.nodeId ?? key}`, { key }, state.failures.get(key)),
-                };
-            }
-        }
         const schedule = computeSchedule();
         if (schedule.fatalError) {
             return {
@@ -418,6 +434,11 @@ export function makeWorkflowSession(options = {}) {
                     stateJson: schedule.continuation.stateJson,
                 },
             };
+        }
+        const recoveryKeys = new Set(schedule.failureRecoveryKeys ?? []);
+        let failure = unhandledFailureDecision(recoveryKeys);
+        if (failure) {
+            return failure;
         }
         const executable = [];
         let waitReason;
@@ -488,6 +509,10 @@ export function makeWorkflowSession(options = {}) {
         }
         if ([...state.states.values()].some((taskState) => taskState === "in-progress")) {
             return { _tag: "Wait", reason: { _tag: "ExternalTrigger" } };
+        }
+        failure = unhandledFailureDecision(recoveryKeys);
+        if (failure) {
+            return failure;
         }
         if (schedule.readyRalphs.length > 0) {
             for (const ralph of schedule.readyRalphs) {

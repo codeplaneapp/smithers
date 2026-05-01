@@ -8,28 +8,13 @@ import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";
 
 /**
- * Regression coverage for commit b561fca0f. When an agent throws a SmithersError
- * with `details.failureRetryable === false` (or code === "AGENT_CONFIG_INVALID"),
- * the engine must NOT retry — even if `retries` would otherwise allow it. The
- * non-retryable signal short-circuits both regular retries and any backoff
- * delay: the run should fail immediately after attempt 1.
+ * When an agent throws a non-retryable SmithersError, the engine must stop after
+ * the first failed attempt even if `retries` would otherwise allow another try.
+ * This also bypasses retry backoff, so deterministic configuration failures
+ * surface immediately.
  */
 describe("failureRetryable=false short-circuits engine retries", () => {
-    // FIXME: bug — engine.js executeTask runs the agent via `Effect.promise(()
-    // => agent.generate(...))`. When the agent throws, Effect wraps the
-    // rejection into a `FiberFailureImpl` defect that does NOT preserve the
-    // SmithersError's `code` or `details` fields on the surface object. The
-    // catch block at engine.js line 3743 checks `effectiveError.details
-    // ?.failureRetryable === false`, but `effectiveError` is the FiberFailure
-    // wrapper — `details` is `undefined`. So Kimi-style AGENT_CONFIG_INVALID
-    // errors thrown from `agent.generate` still get retried up to `desc
-    // .retries` times. compute-task-bridge.js (commit b561fca0f) was patched
-    // to also check `effectiveError.code === "AGENT_CONFIG_INVALID"`, but
-    // engine.js was NOT patched the same way and the underlying FiberFailure
-    // unwrapping is missing on both. Fix should either swap to
-    // `Effect.tryPromise({ catch: (e) => e })` so the original error is
-    // re-thrown, or unwrap FiberFailure in the catch.
-    test.skip("Kimi-style AGENT_CONFIG_INVALID stops after a single attempt", async () => {
+    test("Kimi-style AGENT_CONFIG_INVALID stops after a single attempt", async () => {
         const { smithers, outputs, cleanup, db } = createTestSmithers(outputSchemas);
         const adapter = new SmithersDb(db);
         try {
@@ -79,11 +64,7 @@ describe("failureRetryable=false short-circuits engine retries", () => {
         }
     }, 15_000);
 
-    // FIXME: bug — same root cause as the test above. The engine.js executeTask
-    // catch block cannot read `details.failureRetryable` because the agent's
-    // SmithersError was wrapped into Effect's FiberFailure defect and never
-    // unwrapped. Generic non-retryable signals are therefore retried.
-    test.skip("generic SmithersError with details.failureRetryable=false stops retrying", async () => {
+    test("generic SmithersError with details.failureRetryable=false stops retrying", async () => {
         const { smithers, outputs, cleanup, db } = createTestSmithers(outputSchemas);
         const adapter = new SmithersDb(db);
         try {
@@ -120,6 +101,51 @@ describe("failureRetryable=false short-circuits engine retries", () => {
             expect(elapsedMs).toBeLessThan(900);
             const attempts = await adapter.listAttempts(result.runId, "bad", 0);
             expect(attempts).toHaveLength(1);
+            const meta = JSON.parse(attempts[0].metaJson ?? "{}");
+            expect(meta.failureRetryable).toBe(false);
+        } finally {
+            cleanup();
+        }
+    }, 15_000);
+
+    test("AGENT_CONFIG_INVALID without details flag stops retrying", async () => {
+        const { smithers, outputs, cleanup, db } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        try {
+            let callCount = 0;
+            const agent = {
+                id: "config-invalid-no-details",
+                tools: {},
+                async generate() {
+                    callCount += 1;
+                    throw new SmithersError(
+                        "AGENT_CONFIG_INVALID",
+                        "LLM not set: configure model in agent.",
+                    );
+                },
+            };
+            const workflow = smithers(() => (
+                <Workflow name="config-invalid-no-details">
+                    <Task
+                        id="missing-config"
+                        output={outputs.outputA}
+                        agent={agent}
+                        retries={4}
+                    >
+                        Configuration errors should not retry.
+                    </Task>
+                </Workflow>
+            ));
+            const startMs = Date.now();
+            const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+            const elapsedMs = Date.now() - startMs;
+            expect(result.status).toBe("failed");
+            expect(callCount).toBe(1);
+            expect(elapsedMs).toBeLessThan(900);
+            const attempts = await adapter.listAttempts(result.runId, "missing-config", 0);
+            expect(attempts).toHaveLength(1);
+            const error = JSON.parse(attempts[0].errorJson ?? "{}");
+            expect(error.code).toBe("AGENT_CONFIG_INVALID");
             const meta = JSON.parse(attempts[0].metaJson ?? "{}");
             expect(meta.failureRetryable).toBe(false);
         } finally {
