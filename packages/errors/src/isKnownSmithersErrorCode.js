@@ -6,5 +6,5 @@ import { smithersErrorDefinitions } from "./smithersErrorDefinitions.js";
  * @returns {code is KnownSmithersErrorCode}
  */
 export function isKnownSmithersErrorCode(code) {
-    return code in smithersErrorDefinitions;
+    return Object.prototype.hasOwnProperty.call(smithersErrorDefinitions, code);
 }
