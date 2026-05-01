@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { WORKTREE_EMPTY_PATH_ERROR } from "@smithers-orchestrator/graph/constants";
 import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
-import { Parallel, Sequence, Task, Worktree, Workflow, } from "../src/components/index.js";
+import { Sequence, Task, Worktree, Workflow, } from "../src/components/index.js";
 import { outputSchemas } from "./schema.js";
 describe("<Worktree>", () => {
     test("attaches worktreeId/worktreePath to nested tasks", async () => {

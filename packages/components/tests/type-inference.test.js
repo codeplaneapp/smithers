@@ -46,7 +46,7 @@ describe("createSmithers type inference", () => {
         expect(outputs.report).toBe(reportSchema);
     });
     test("useCtx returns typed context", () => {
-        expect(true).toBe(true);
+        expect(typeof useCtx).toBe("function");
     });
     test("ctx.output infers return type from string key", () => {
         // Verify the output method signature exists with string keys
@@ -128,6 +128,6 @@ describe("createSmithers type inference", () => {
         expect(true).toBe(true);
     });
     test("smithers builder receives typed ctx", () => {
-        expect(true).toBe(true);
+        expect(typeof smithers).toBe("function");
     });
 });

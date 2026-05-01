@@ -17,7 +17,7 @@ import { Task } from "./Task.js";
 export function Optimizer(props) {
     if (props.skipIf)
         return null;
-    const { id, generator, evaluator, generateOutput, evaluateOutput, targetScore, maxIterations = 10, onMaxReached = "return-last", children, } = props;
+    const { id, generator, evaluator, generateOutput, evaluateOutput, maxIterations = 10, onMaxReached = "return-last", children, } = props;
     const prefix = id ?? "optimizer";
     const generateId = `${prefix}-generate`;
     const evaluateId = `${prefix}-evaluate`;

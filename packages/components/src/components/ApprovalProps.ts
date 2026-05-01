@@ -8,7 +8,7 @@ import type { ApprovalAutoApprove } from "./ApprovalAutoApprove.ts";
 import type { ApprovalDecision } from "./ApprovalDecision.ts";
 import type { OutputTarget } from "./OutputTarget.ts";
 
-export type ApprovalProps<Row = ApprovalDecision, Output extends OutputTarget = OutputTarget> = {
+export type ApprovalProps<_Row = ApprovalDecision, Output extends OutputTarget = OutputTarget> = {
 	id: string;
 	mode?: ApprovalMode;
 	options?: ApprovalOption[];

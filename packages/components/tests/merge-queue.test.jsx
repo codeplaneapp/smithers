@@ -63,7 +63,7 @@ describe("<MergeQueue>", () => {
         let max = 0;
         const agent = {
             id: "fake",
-            generate: async ({ prompt }) => {
+            generate: async () => {
                 current += 1;
                 if (current > max)
                     max = current;
@@ -90,7 +90,7 @@ describe("<MergeQueue>", () => {
         let max = 0;
         const agent = {
             id: "fake",
-            generate: async ({ prompt }) => {
+            generate: async () => {
                 current += 1;
                 if (current > max)
                     max = current;

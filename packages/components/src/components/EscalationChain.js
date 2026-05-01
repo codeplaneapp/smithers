@@ -51,7 +51,6 @@ export function EscalationChain(props) {
             //
             // For the composite pattern we wrap each subsequent level so it only
             // mounts when the prior level signals escalation.
-            const prevLevel = levels[i - 1];
             const checkId = `${prefix}-check-${i - 1}`;
             const checkTask = React.createElement(Task, {
                 id: checkId,

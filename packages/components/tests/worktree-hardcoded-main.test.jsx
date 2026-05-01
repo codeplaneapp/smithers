@@ -56,7 +56,7 @@ describe("Issue #110: ensureWorktree baseBranch support", () => {
     test("worktree with baseBranch='release' syncs against origin/release, not origin/main", async () => {
         if (!hasGit())
             return;
-        const { root, repoDir, bareDir } = await createReleaseOnlyGitRepo();
+        const { root, repoDir } = await createReleaseOnlyGitRepo();
         const worktreePath = resolve(repoDir, "..", "linked-release");
         const dbPath = join(root, "db.sqlite");
         const api = createSmithers({ probe: z.object({ status: z.string() }) }, { dbPath });

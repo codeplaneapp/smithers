@@ -1,5 +1,4 @@
 import React from "react";
-import { z } from "zod";
 import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
 import { stripAutoColumns } from "@smithers-orchestrator/db/react-output";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";

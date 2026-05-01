@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import React from "react";
 import { renderMdx } from "../src/renderMdx.js";
-import { markdownComponents } from "../src/markdownComponents.js";
 // Create simple MDX-like components (plain React components that accept components prop)
 /**
  * @param {{ components?: Record<string, any> }} value

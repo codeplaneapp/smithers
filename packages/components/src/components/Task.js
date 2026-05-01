@@ -110,10 +110,9 @@ function mergeDependsOn(dependsOn, depNodeIds) {
  * @param {any} ctx
  * @param {DepsSpec | undefined} deps
  * @param {Record<string, string> | undefined} needs
- * @param {string} [taskId]
  * @returns {Record<string, unknown> | null}
  */
-function resolveDeps(ctx, deps, needs, taskId) {
+function resolveDeps(ctx, deps, needs) {
     if (!deps)
         return Object.create(null);
     const keys = Object.keys(deps);
@@ -129,26 +128,6 @@ function resolveDeps(ctx, deps, needs, taskId) {
         resolved[key] = value;
     }
     return resolved;
-}
-/**
- * Validate that all deps are satisfied. Throws a descriptive SmithersError
- * naming which dep is missing and which task needs it.
- * @param {{ outputMaybe: (target: unknown, opts: { nodeId: string }) => unknown }} ctx
- * @param {DepsSpec} deps
- * @param {Record<string, string> | undefined} needs
- * @param {string} [taskId]
- * @returns {void}
- */
-function validateDeps(ctx, deps, needs, taskId) {
-    for (const key of Object.keys(deps)) {
-        const target = deps[key];
-        const nodeId = needs?.[key] ?? key;
-        const value = ctx.outputMaybe(target, { nodeId });
-        if (value === undefined) {
-            throw new SmithersError("DEP_NOT_SATISFIED", `Task "${taskId}" dependency "${key}" (resolved from node "${nodeId}") is not satisfied. ` +
-                `The upstream task must complete and produce output before this task can run.`, { taskId, depKey: key, resolvedNodeId: nodeId });
-        }
-    }
 }
 /**
  * @param {AgentLike} agent
@@ -225,7 +204,7 @@ export function Task(props) {
     if (deps && !ctx) {
         throw new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "Task deps require a workflow context. Build the workflow with createSmithers().");
     }
-    const resolvedDeps = deps ? resolveDeps(ctx, deps, rest.needs, rest.id) : undefined;
+    const resolvedDeps = deps ? resolveDeps(ctx, deps, rest.needs) : undefined;
     if (deps && resolvedDeps == null) {
         // Deps not yet available — component defers until upstream tasks complete.
         // This is normal reactive behavior; the task will re-render once deps are ready.

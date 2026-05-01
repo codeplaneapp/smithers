@@ -23,8 +23,7 @@ import * as zod from 'zod';
 import { z } from 'zod';
 import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
 import { AgentLike } from '@smithers-orchestrator/agents/AgentLike';
-import * as _smithers_scorers_types from '@smithers-orchestrator/scorers/types';
-import { ScorersMap as ScorersMap$1 } from '@smithers-orchestrator/scorers/types';
+import { ScorersMap as ScorersMap$1 } from '@smithers-orchestrator/graph/types';
 import { TaskMemoryConfig } from '@smithers-orchestrator/memory/types';
 import * as _smithers_errors from '@smithers-orchestrator/errors';
 import * as zod_v4_core from 'zod/v4/core';
@@ -1502,7 +1501,7 @@ type SandboxRuntime = SandboxRuntime$1;
 type SandboxVolumeMount = SandboxVolumeMount$1;
 type SandboxWorkspaceSpec = SandboxWorkspaceSpec$1;
 type ScanFixVerifyProps = ScanFixVerifyProps$2;
-type ScorersMap = _smithers_scorers_types.ScorersMap;
+type ScorersMap = ScorersMap$1;
 type SequenceProps = SequenceProps$2;
 type SignalProps<Schema> = SignalProps$2<Schema>;
 type SourceDef = SourceDef$1;
@@ -1519,7 +1518,7 @@ type WorktreeProps = WorktreeProps$2;
 /** @type {Record<string, React.FC<any>>} */
 declare const markdownComponents: Record<string, React.FC<any>>;
 
-/** @typedef {import("mdx/types").MDXContent} MDXContent */
+/** @typedef {import("react").ComponentType<Record<string, any>>} MDXContent */
 /**
  * Render an MDX component to plain markdown text.
  *

@@ -1,7 +1,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { markdownComponents } from "./markdownComponents.js";
-/** @typedef {import("mdx/types").MDXContent} MDXContent */
+/** @typedef {import("react").ComponentType<Record<string, any>>} MDXContent */
 /**
  * Render an MDX component to plain markdown text.
  *
