@@ -4,7 +4,6 @@ import { ToolLoopAgent, ToolSet, ToolLoopAgentSettings } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { Effect } from 'effect';
 import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
-import * as zod from 'zod';
 import * as zod_v4_core from 'zod/v4/core';
 
 type SmithersToolSurface$2 = "raw" | "semantic";
@@ -309,15 +308,7 @@ declare class AnthropicAgent extends ToolLoopAgent<never, any, never> {
    */
     generate(args?: AgentGenerateOptions): Promise<GenerateTextResult$2<TOOLS, never>>;
 }
-type AgentCallParameters$1 = any;
 type AnthropicAgentOptions$1<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = AnthropicAgentOptions$2<CALL_OPTIONS, TOOLS>;
-type ExtendedGenerateArgs$1<CALL_OPTIONS, TOOLS> = AgentCallParameters$1<CALL_OPTIONS, TOOLS> & {
-    onStdout?: (text: string) => void;
-    onStderr?: (text: string) => void;
-    onEvent?: (event: unknown) => Promise<void> | void;
-    outputSchema?: zod.ZodTypeAny;
-    resumeSession?: string;
-};
 type GenerateTextResult$2 = ai.GenerateTextResult<any, any>;
 
 /** @typedef {import("ai").AgentCallParameters} AgentCallParameters */
@@ -342,14 +333,6 @@ declare class OpenAIAgent extends ToolLoopAgent<never, any, never> {
    */
     generate(args?: AgentGenerateOptions): Promise<GenerateTextResult$1<TOOLS, never>>;
 }
-type AgentCallParameters = any;
-type ExtendedGenerateArgs<CALL_OPTIONS, TOOLS> = AgentCallParameters<CALL_OPTIONS, TOOLS> & {
-    onStdout?: (text: string) => void;
-    onStderr?: (text: string) => void;
-    onEvent?: (event: unknown) => Promise<void> | void;
-    outputSchema?: zod.ZodTypeAny;
-    resumeSession?: string;
-};
 type GenerateTextResult$1 = ai.GenerateTextResult<any, any>;
 type OpenAIAgentOptions$1<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = OpenAIAgentOptions$2<CALL_OPTIONS, TOOLS>;
 
