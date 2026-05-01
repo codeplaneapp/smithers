@@ -27,6 +27,8 @@ jobs:
 
       - run: pnpm check:effect
 
+      - run: pnpm check:deps
+
       - run: pnpm -r typecheck
 
       - run: pnpm --filter ./.smithers typecheck
