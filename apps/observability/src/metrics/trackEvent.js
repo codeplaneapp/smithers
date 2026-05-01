@@ -1,6 +1,10 @@
 import { Effect, Metric } from "effect";
-import { memoryFactWrites, memoryRecallQueries, memoryMessageSaves, } from "@smithers-orchestrator/memory/metrics";
-import { openApiToolCallsTotal, openApiToolCallErrorsTotal, openApiToolDuration, } from "@smithers-orchestrator/openapi/metrics";
+import { memoryFactWrites } from "./memoryFactWrites.js";
+import { memoryRecallQueries } from "./memoryRecallQueries.js";
+import { memoryMessageSaves } from "./memoryMessageSaves.js";
+import { openApiToolCallsTotal } from "./openApiToolCallsTotal.js";
+import { openApiToolCallErrorsTotal } from "./openApiToolCallErrorsTotal.js";
+import { openApiToolDuration } from "./openApiToolDuration.js";
 import { runsTotal } from "./runsTotal.js";
 import { nodesStarted } from "./nodesStarted.js";
 import { nodesFinished } from "./nodesFinished.js";

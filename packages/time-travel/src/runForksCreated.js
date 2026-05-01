@@ -1,2 +1,1 @@
-import { Metric } from "effect";
-export const runForksCreated = Metric.counter("smithers.forks.created");
+export { runForksCreated } from "@smithers-orchestrator/observability/metrics";

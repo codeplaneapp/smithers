@@ -1,2 +1,1 @@
-import { Metric } from "effect";
-export const memoryRecallQueries = Metric.counter("smithers.memory.recall_queries");
+export { memoryRecallQueries } from "@smithers-orchestrator/observability/metrics";

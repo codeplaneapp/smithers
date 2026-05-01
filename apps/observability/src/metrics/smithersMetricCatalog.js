@@ -1,10 +1,5 @@
 import { toPrometheusMetricName } from "./toPrometheusMetricName.js";
 import { durationBuckets, fastBuckets, toolBuckets, tokenBuckets, contextWindowBuckets, sizeBuckets, carriedStateSizeBuckets, ancestryDepthBuckets, } from "./_buckets.js";
-// External package metrics
-import { memoryFactReads, memoryFactWrites, memoryRecallDuration, memoryRecallQueries, memoryMessageSaves, } from "@smithers-orchestrator/memory/metrics";
-import { openApiToolCallsTotal, openApiToolCallErrorsTotal, openApiToolDuration, } from "@smithers-orchestrator/openapi/metrics";
-import { scorerDuration, scorersFailed, scorersFinished, scorersStarted, } from "@smithers-orchestrator/scorers/metrics";
-import { replaysStarted, runForksCreated, snapshotDuration, snapshotsCaptured, } from "@smithers-orchestrator/time-travel/metrics";
 // Local metric instances
 import { runsTotal } from "./runsTotal.js";
 import { nodesStarted } from "./nodesStarted.js";
@@ -77,6 +72,22 @@ import { gatewayWebhooksRejectedTotal } from "./gatewayWebhooksRejectedTotal.js"
 import { eventsEmittedTotal } from "./eventsEmittedTotal.js";
 import { taskHeartbeatsTotal } from "./taskHeartbeatsTotal.js";
 import { taskHeartbeatTimeoutTotal } from "./taskHeartbeatTimeoutTotal.js";
+import { memoryFactReads } from "./memoryFactReads.js";
+import { memoryFactWrites } from "./memoryFactWrites.js";
+import { memoryRecallDuration } from "./memoryRecallDuration.js";
+import { memoryRecallQueries } from "./memoryRecallQueries.js";
+import { memoryMessageSaves } from "./memoryMessageSaves.js";
+import { openApiToolCallsTotal } from "./openApiToolCallsTotal.js";
+import { openApiToolCallErrorsTotal } from "./openApiToolCallErrorsTotal.js";
+import { openApiToolDuration } from "./openApiToolDuration.js";
+import { scorerDuration } from "./scorerDuration.js";
+import { scorersFailed } from "./scorersFailed.js";
+import { scorersFinished } from "./scorersFinished.js";
+import { scorersStarted } from "./scorersStarted.js";
+import { replaysStarted } from "./replaysStarted.js";
+import { runForksCreated } from "./runForksCreated.js";
+import { snapshotDuration } from "./snapshotDuration.js";
+import { snapshotsCaptured } from "./snapshotsCaptured.js";
 import { activeRuns } from "./activeRuns.js";
 import { activeNodes } from "./activeNodes.js";
 import { schedulerQueueDepth } from "./schedulerQueueDepth.js";
