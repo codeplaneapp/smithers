@@ -1,0 +1,31 @@
+{
+  "name": "@smithers-orchestrator/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end fault-injection matrix and soak suite for the smithers orchestrator (ticket 0022).",
+  "scripts": {
+    "test": "bun test",
+    "test:faults": "bun test faults",
+    "test:soak": "SMITHERS_E2E_SOAK=1 bun test faults",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@smithers-orchestrator/db": "workspace:*",
+    "@smithers-orchestrator/engine": "workspace:*",
+    "@smithers-orchestrator/gateway": "workspace:*",
+    "@smithers-orchestrator/sandbox": "workspace:*",
+    "@smithers-orchestrator/scheduler": "workspace:*",
+    "@smithers-orchestrator/server": "workspace:*",
+    "better-sqlite3": "^11.5.0",
+    "drizzle-orm": "^0.45.2",
+    "effect": "^3.21.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/bun": "latest",
+    "@types/ws": "^8.18.1",
+    "typescript": "~5.9.3"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "liveStream10min": {
+    "rssBytesMax": 314572800,
+    "comment": "300 MB ceiling for case 28"
+  },
+  "subscriberFanoutN5": {
+    "rssBytesMax": 524288000,
+    "comment": "500 MB for case 16"
+  }
+}
