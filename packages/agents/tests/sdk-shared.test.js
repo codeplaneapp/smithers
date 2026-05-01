@@ -20,7 +20,7 @@ describe("resolveSdkModel", () => {
     });
     test("handles empty string model id", () => {
         const mockModel = { id: "empty" };
-        const result = resolveSdkModel("", (id) => mockModel);
+        const result = resolveSdkModel("", (_id) => mockModel);
         expect(result).toBe(mockModel);
     });
     test("returns exact same reference for object model", () => {

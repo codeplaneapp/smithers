@@ -1,4 +1,3 @@
-import { extractTextFromJsonValue } from "./extractTextFromJsonValue.js";
 /** @typedef {import("ai").ModelMessage} ModelMessage */
 /**
  * @typedef {{ prompt: string; systemFromMessages?: string; }} PromptParts

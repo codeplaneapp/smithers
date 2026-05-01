@@ -428,7 +428,13 @@ export function extractFromHost(root, opts) {
                 prompt: undefined,
                 staticPayload: undefined,
                 computeFn: async () => {
-                    const { executeSandbox } = await loadRuntimeModule("@smithers-orchestrator/sandbox/execute");
+                    const [
+                        { executeSandbox },
+                        { executeChildWorkflow },
+                    ] = await Promise.all([
+                        loadRuntimeModule("@smithers-orchestrator/sandbox/execute"),
+                        loadRuntimeModule("@smithers-orchestrator/engine/child-workflow"),
+                    ]);
                     if (!workflowDef) {
                         throw new SmithersError("INVALID_INPUT", `Sandbox ${nodeId} is missing workflow definition.`, { nodeId });
                     }
@@ -441,6 +447,7 @@ export function extractFromHost(root, opts) {
                             ? runtime
                             : "bubblewrap",
                         workflow: workflowDef,
+                        executeChildWorkflow,
                         input: raw.__smithersSandboxInput ?? raw.input,
                         rootDir: topWorktree?.path ?? process.cwd(),
                         allowNetwork: Boolean(raw.allowNetwork),

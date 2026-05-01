@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { AgentCapabilityRegistry } from '@smithers-orchestrator/agents/capability-registry';
 
 type XmlNode$1 = XmlElement$1 | XmlText$1;
 type XmlElement$1 = {
@@ -42,7 +41,18 @@ type CachePolicy$1<Ctx = unknown> = {
 type AgentLike$1 = {
     id?: string;
     tools?: Record<string, unknown>;
-    capabilities?: AgentCapabilityRegistry;
+    capabilities?: {
+        version: 1;
+        engine: string;
+        runtimeTools: Record<string, {
+            description?: string;
+            source?: string;
+        }>;
+        mcp: Record<string, unknown>;
+        skills: Record<string, unknown>;
+        humanInteraction: Record<string, unknown>;
+        builtIns: string[];
+    };
     generate: (args: unknown) => Promise<unknown>;
 };
 type ScoreResult$1 = {

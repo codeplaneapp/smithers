@@ -7,7 +7,7 @@ describe("constants", () => {
         expect(typeof constants).toBe("object");
     });
     test("exported values are primitive types", () => {
-        for (const [key, value] of Object.entries(constants)) {
+        for (const value of Object.values(constants)) {
             const type = typeof value;
             expect(["string", "number", "boolean", "object"].includes(type)).toBe(true);
         }

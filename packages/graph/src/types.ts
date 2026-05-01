@@ -1,5 +1,4 @@
 import type { z } from "zod";
-import type { AgentCapabilityRegistry } from "@smithers-orchestrator/agents/capability-registry";
 
 export type XmlNode = XmlElement | XmlText;
 
@@ -51,7 +50,15 @@ export type CachePolicy<Ctx = unknown> = {
 export type AgentLike = {
   id?: string;
   tools?: Record<string, unknown>;
-  capabilities?: AgentCapabilityRegistry;
+  capabilities?: {
+    version: 1;
+    engine: string;
+    runtimeTools: Record<string, { description?: string; source?: string }>;
+    mcp: Record<string, unknown>;
+    skills: Record<string, unknown>;
+    humanInteraction: Record<string, unknown>;
+    builtIns: string[];
+  };
   generate: (args: unknown) => Promise<unknown>;
 };
 

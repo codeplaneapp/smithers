@@ -111,7 +111,7 @@ describe("agent task execution", () => {
         cleanup();
     });
     test("agent in sequence uses previous output via context", async () => {
-        const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+        const { smithers, outputs, cleanup } = createTestSmithers({
             first: z.object({ topic: z.string() }),
             second: z.object({ analysis: z.string() }),
         });
