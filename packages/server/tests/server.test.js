@@ -231,7 +231,7 @@ const fakeAgent = {
         }, 15_000);
         test("returns 400 for invalid JSON body", async () => {
             const dbPath = resolve(testDir, "test-invalid-json.db");
-            const workflowPath = writeTestWorkflow("test-invalid-json", dbPath);
+            writeTestWorkflow("test-invalid-json", dbPath);
             startTestServer();
             const res = await fetch(`http://localhost:${port}/v1/runs`, {
                 method: "POST",

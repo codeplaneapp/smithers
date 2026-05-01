@@ -4,7 +4,7 @@
 // @smithers-type-exports-end
 
 import { Effect } from "effect";
-import { BaseCliAgent, buildGenerateResult, combineNonEmpty, extractPrompt, extractTextFromJsonValue, pushFlag, resolveTimeouts, runAgentPromise, runRpcCommandEffect, tryParseJson, asString, truncate, toolKindFromName, } from "./BaseCliAgent/index.js";
+import { BaseCliAgent, buildGenerateResult, combineNonEmpty, extractPrompt, extractTextFromJsonValue, pushFlag, resolveTimeouts, runAgentPromise, runRpcCommandEffect, asString, truncate, toolKindFromName, } from "./BaseCliAgent/index.js";
 import { normalizeCapabilityStringList, } from "./capability-registry/index.js";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";

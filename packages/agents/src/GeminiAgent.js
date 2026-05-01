@@ -56,7 +56,6 @@ export class GeminiAgent extends BaseCliAgent {
     createOutputInterpreter() {
         let sessionId;
         let finalAnswer = "";
-        let emittedStarted = false;
         let didEmitCompleted = false;
         const nextSyntheticId = createSyntheticIdGenerator();
         /**
@@ -84,7 +83,6 @@ export class GeminiAgent extends BaseCliAgent {
                 if (resume) {
                     sessionId = resume;
                 }
-                emittedStarted = true;
                 return [{
                         type: "started",
                         engine: this.cliEngine,

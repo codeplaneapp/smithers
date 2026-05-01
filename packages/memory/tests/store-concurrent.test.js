@@ -143,21 +143,17 @@ describe("MemoryStore concurrency: namespace encoding", () => {
 		}
 	});
 
-	test("collision case: {kind:'a', id:'b:c'} vs {kind:'a:b', id:'c'} — non-enumerated kinds collapse to global, IDs distinguishable via raw string", () => {
+	test("synthetic namespaces with colons do not collapse to the same encoded string", () => {
 		// `parseNamespace` rejects unknown kinds and returns `{ kind: "global", id: <raw> }`.
 		// So the raw encoded form is what gets persisted in the DB column —
 		// these two synthetic namespaces are distinguishable in the DB by
 		// namespace string itself, even if parseNamespace can't reverse them.
-		const a = { kind: "a", id: "b:c" }; // "a:b:c"
+		const a = { kind: "a", id: "b:c" }; // "a:b%3Ac"
 		const b = { kind: "a:b", id: "c" }; // "a:b:c"
-		expect(namespaceToString(a)).toBe(namespaceToString(b));
-		// FIXME(real bug): namespaceToString IS lossy for arbitrary kinds — two
-		// logically-different namespaces collapse to the same string. The DB
-		// uniqueness key is the encoded string, so writes from these two
-		// namespaces would collide. In practice MemoryNamespaceKind constrains
-		// `kind` to the enum, so this is unreachable from public APIs, but the
-		// encoding lacks a separator that would prevent it (e.g. URL-encoding
-		// or a length prefix).
+		expect(namespaceToString(a)).toBe("a:b%3Ac");
+		expect(namespaceToString(b)).toBe("a:b:c");
+		expect(namespaceToString(a)).not.toBe(namespaceToString(b));
+		expect(parseNamespace("a:b%3Ac")).toEqual({ kind: "global", id: "a:b%3Ac" });
 		expect(parseNamespace("a:b:c")).toEqual({ kind: "global", id: "a:b:c" });
 	});
 

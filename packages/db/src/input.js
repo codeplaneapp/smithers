@@ -1,5 +1,4 @@
 import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
 /** @typedef {import("drizzle-orm").Table} _Table */
 
 /**

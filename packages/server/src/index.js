@@ -1,4 +1,4 @@
-import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { createServer } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
@@ -20,6 +20,7 @@ import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { assertMaxBytes, assertMaxJsonDepth } from "@smithers-orchestrator/db/input-bounds";
 import { prometheusContentType, renderPrometheusMetrics, } from "@smithers-orchestrator/observability";
+/** @typedef {import("node:http").ServerResponse} ServerResponse */
 /** @typedef {import("./ServerOptions.js").ServerOptions} ServerOptions */
 
 // Re-export the full public surface so the tsup-bundled `src/index.d.ts`

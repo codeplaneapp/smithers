@@ -24,7 +24,7 @@ import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { isSmithersError } from "@smithers-orchestrator/errors/isSmithersError";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { assertJsonPayloadWithinBounds, assertOptionalStringMaxLength, assertPositiveFiniteInteger, } from "@smithers-orchestrator/db/input-bounds";
-import { loadLatestSnapshot, loadSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
+import { loadLatestSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
 import { diffRawSnapshots } from "@smithers-orchestrator/time-travel/diff";
 import { getNodeOutputRoute } from "./gatewayRoutes/getNodeOutput.js";
 import { NodeOutputRouteError } from "./gatewayRoutes/NodeOutputRouteError.js";
@@ -1333,7 +1333,7 @@ export class Gateway {
         if (!streams || streams.size === 0) {
             return;
         }
-        for (const streamId of [...streams.keys()]) {
+        for (const streamId of streams.keys()) {
             this.unregisterRunEventSubscriber(connection, streamId);
         }
     }

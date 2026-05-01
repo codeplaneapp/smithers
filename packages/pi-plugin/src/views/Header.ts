@@ -135,8 +135,9 @@ export class Header {
       paint(theme, "dim", `seq ${this.store.seq}`),
       connection,
     ].filter(Boolean).join("  ");
-    const plainLeft = left.replace(/\x1b\[[0-9;]*m/g, "");
-    const plainRight = right.replace(/\x1b\[[0-9;]*m/g, "");
+    const ansiPattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+    const plainLeft = left.replace(ansiPattern, "");
+    const plainRight = right.replace(ansiPattern, "");
     const gap = Math.max(1, W - plainLeft.length - plainRight.length - 2);
     return [truncateToWidth(` ${left}${" ".repeat(gap)}${right} `, W)];
   }

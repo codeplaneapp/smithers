@@ -5,12 +5,12 @@ import { Effect } from "effect";
  * @param {{ run: (prompt: string) => Promise<any> }} agent
  * @returns {MemoryProcessor}
  */
-export function Summarizer(agent) {
+export function Summarizer(_agent) {
     /**
    * @param {MemoryStore} store
    * @returns {Effect.Effect<void, SmithersError>}
    */
-    function processEffect(store) {
+    function processEffect(_store) {
         return Effect.gen(function* () {
             // Summarizer operates on a specific thread's messages, compressing
             // older messages into a summary. Without a thread context, it logs

@@ -9,7 +9,6 @@ import { Database } from 'bun:sqlite';
 import * as SqlClient from '@effect/sql/SqlClient';
 import { SqlError } from '@effect/sql/SqlError';
 import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
-import * as _smithers_driver_OutputSnapshot from '@smithers-orchestrator/driver/OutputSnapshot';
 
 type SchemaRegistryEntry$1 = {
     table: Table$1;
@@ -5018,7 +5017,7 @@ declare function loadOutputsEffect(db: BunSQLiteDatabase<Record<string, unknown>
  * @returns {Promise<OutputSnapshot>}
  */
 declare function loadOutputs(db: BunSQLiteDatabase<Record<string, unknown>>, schema: Record<string, _Table | unknown>, runId: string): Promise<OutputSnapshot>;
-type OutputSnapshot = _smithers_driver_OutputSnapshot.OutputSnapshot;
+type OutputSnapshot = Record<string, Array<unknown>>;
 type BunSQLiteDatabase = drizzle_orm_bun_sqlite.BunSQLiteDatabase;
 type _Table = drizzle_orm.Table;
 

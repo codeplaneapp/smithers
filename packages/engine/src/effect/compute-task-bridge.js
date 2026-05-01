@@ -1,9 +1,7 @@
 import { Cause, Duration, Effect, Either, Exit, Metric, Schedule } from "effect";
-import { z } from "zod";
 import { buildOutputRow, stripAutoColumns, validateOutput } from "@smithers-orchestrator/db/output";
 import { TaskHeartbeatTimeout } from "@smithers-orchestrator/errors/TaskHeartbeatTimeout";
 import { TaskTimeout } from "@smithers-orchestrator/errors/TaskTimeout";
-import { EventBus } from "../events.js";
 import { makeAbortError, wireAbortSignal } from "./bridge-utils.js";
 import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
 import { logDebug, logError, logInfo, logWarning } from "@smithers-orchestrator/observability/logging";

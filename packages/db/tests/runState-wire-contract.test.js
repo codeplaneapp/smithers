@@ -63,7 +63,7 @@ describe("RunStateView wire-contract", () => {
 
         // Each surface calls computeRunState and embeds the value verbatim.
         const inspectShape = {
-            ...{ runState: await computeRunState(adapter, "r-2", { now: NOW }) },
+            runState: await computeRunState(adapter, "r-2", { now: NOW }),
         };
         const gatewayShape = {
             runState: await computeRunState(adapter, "r-2", { now: NOW }),

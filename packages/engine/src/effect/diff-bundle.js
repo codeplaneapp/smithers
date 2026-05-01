@@ -344,7 +344,7 @@ export async function applyDiffBundle(bundle, targetDir) {
         await runGit(targetDir, ["apply", "--binary", "--whitespace=nowarn", "--unsafe-paths", "-"], { input: fullPatch });
         return;
     }
-    catch (error) {
+    catch  {
         for (const patch of bundle.patches) {
             await applyPatchFallback(patch, targetDir);
         }

@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import { Cause, Effect, Exit, Metric } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { logDebug, logInfo, logWarning } from "@smithers-orchestrator/observability/logging";
-import { agentDurationMs, agentErrorsTotal, agentInvocationsTotal, agentRetriesTotal, agentTokensTotal, toolOutputTruncatedTotal, } from "@smithers-orchestrator/observability/metrics";
+import { agentDurationMs, agentErrorsTotal, agentInvocationsTotal, agentRetriesTotal, agentTokensTotal, } from "@smithers-orchestrator/observability/metrics";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { launchDiagnostics, enrichReportWithErrorAnalysis, formatDiagnosticSummary } from "../diagnostics/index.js";
 import { extractPrompt } from "./extractPrompt.js";
@@ -597,7 +597,7 @@ export class BaseCliAgent {
             const nonRetryablePatterns = [
                 { re: /\bLLM not set\b/i, hint: "the agent's model name is not present in the CLI's configured providers" },
                 { re: /\bLLM not supported\b/i, hint: "the agent's model is not supported by this CLI build" },
-                { re: /\bmodel\s+['\"]?[^'\"\s]+['\"]?\s+not found\b/i, hint: "the requested model is not registered with the CLI" },
+                { re: /\bmodel\s+['"]?[^'"\s]+['"]?\s+not found\b/i, hint: "the requested model is not registered with the CLI" },
                 { re: /\bunknown model\b/i, hint: "the requested model is not registered with the CLI" },
                 { re: /\b401\b[\s\S]{0,200}?(invalid[_\s-]?authentication|unauthorized|invalid[_\s-]?api[_\s-]?key)/i, hint: `the CLI's stored credentials are invalid or expired — re-authenticate (e.g. for kimi run \`kimi login\`)` },
                 { re: /\bAPI\s*Key\b[\s\S]{0,120}?(invalid|expired|may have expired)/i, hint: `the CLI's stored credentials are invalid or expired — re-authenticate (e.g. for kimi run \`kimi login\`)` },

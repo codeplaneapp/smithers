@@ -53,7 +53,7 @@ describe("approval extended", () => {
         cleanup();
     });
     test("denial with onDeny=continue continues workflow", async () => {
-        const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers(schemas);
+        const { smithers, outputs, db, dbPath, cleanup } = createTestSmithers(schemas);
         const workflow = smithers(() => (<Workflow name="deny-continue">
         <Sequence>
           <Task id="gate" output={outputs.a} needsApproval continueOnFail>
@@ -78,7 +78,7 @@ describe("approval extended", () => {
         cleanup();
     });
     test("multiple approvals in sequence", async () => {
-        const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers(schemas);
+        const { smithers, outputs, db, dbPath, cleanup } = createTestSmithers(schemas);
         const workflow = smithers(() => (<Workflow name="multi-approval">
         <Sequence>
           <Task id="gate1" output={outputs.a} needsApproval>

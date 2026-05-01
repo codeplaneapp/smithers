@@ -45,7 +45,7 @@ function makeFlakyAgent(failures) {
 
 describe("MAX_SCHEMA_RETRIES (3) - schema-retry mechanism", () => {
     test("agent recovers within retry budget (failures=2 < MAX) succeeds", async () => {
-        const { smithers, outputs, db, cleanup } = createTestSmithers({
+        const { smithers, outputs, cleanup } = createTestSmithers({
             out: z.object({ value: z.number() }),
         });
         const { agent, counter } = makeFlakyAgent(MAX_SCHEMA_RETRIES - 1);
@@ -64,7 +64,7 @@ describe("MAX_SCHEMA_RETRIES (3) - schema-retry mechanism", () => {
     }, TIMEOUT_MS);
 
     test("agent recovers exactly at the boundary (failures=MAX) succeeds", async () => {
-        const { smithers, outputs, db, cleanup } = createTestSmithers({
+        const { smithers, outputs, cleanup } = createTestSmithers({
             out: z.object({ value: z.number() }),
         });
         const { agent, counter } = makeFlakyAgent(MAX_SCHEMA_RETRIES);
@@ -119,7 +119,7 @@ describe("MAX_SCHEMA_RETRIES (3) - schema-retry mechanism", () => {
     }, TIMEOUT_MS);
 
     test("schema retries renew per task attempt", async () => {
-        const { smithers, outputs, db, cleanup } = createTestSmithers({
+        const { smithers, outputs, cleanup } = createTestSmithers({
             out: z.object({ value: z.number() }),
         });
         // Track each generate() call. A schema-retry call passes `messages`;

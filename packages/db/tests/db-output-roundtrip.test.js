@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { selectOutputRow, upsertOutputRow, getKeyColumns, getAgentOutputSchema, validateOutput, validateExistingOutput, } from "../src/output.js";
+import { selectOutputRow, upsertOutputRow, getAgentOutputSchema, validateOutput, } from "../src/output.js";
 import { zodToTable } from "../src/zodToTable.js";
 import { zodToCreateTableSQL } from "../src/zodToCreateTableSQL.js";
 import { z } from "zod";

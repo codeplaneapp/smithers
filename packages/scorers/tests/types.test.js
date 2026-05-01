@@ -27,7 +27,7 @@ describe("scorers/types", () => {
         expect(full.latencyMs).toBe(1500);
     });
     it("ScorerFn is an async function returning ScoreResult", async () => {
-        const fn = async (input) => ({
+        const fn = async (_input) => ({
             score: 0.8,
             reason: "Good",
         });

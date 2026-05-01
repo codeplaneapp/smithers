@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
-import { Effect, Metric, MetricState } from "effect";
+import { describe, test } from "bun:test";
+import { Effect, Metric } from "effect";
 import { snapshotsCaptured, runForksCreated, replaysStarted, snapshotDuration, } from "../src/metrics.js";
 describe("time-travel metrics", () => {
     test("snapshotsCaptured is a counter metric", async () => {

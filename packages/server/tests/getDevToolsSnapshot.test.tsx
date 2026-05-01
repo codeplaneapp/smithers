@@ -341,7 +341,9 @@ describe("getDevToolsSnapshotRoute", () => {
       note: "large",
     });
     const large = await getDevToolsSnapshotRoute({ adapter, runId, frameNo: 0 });
-    expect((large.root.children[0]?.props.payload as string).length).toBe(10 * 1024 * 1024);
+    const largePayload = large.root.children[0]?.props.payload;
+    expect(typeof largePayload).toBe("string");
+    expect((largePayload as string).length).toBe(10 * 1024 * 1024);
     await adapter.insertFrame({
       runId,
       frameNo: 1,

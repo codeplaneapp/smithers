@@ -1,6 +1,4 @@
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { EventBus } from "../events.js";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { makeWorkerTask, } from "./entity-worker.js";
 import { executeTaskActivity, makeTaskBridgeKey, RetriableTaskFailure, } from "./activity-bridge.js";

@@ -28,7 +28,7 @@ export function buildOutputRow(table, runId, nodeId, iteration, payload) {
         return { runId, nodeId, iteration, payload: (payload ?? null) };
     }
     return {
-        ...(/** @type {Record<string, unknown>} */ (payload ?? {})),
+        ...(/** @type {Record<string, unknown>} */ (payload)),
         runId, nodeId, iteration,
     };
 }

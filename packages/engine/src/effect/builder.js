@@ -298,7 +298,7 @@ function resolveHandleIteration(handle, ctx) {
  * @param {Record<string, unknown>} row
  */
 function stripPersistedKeys(row) {
-    const { runId, nodeId, iteration, payload, ...rest } = row;
+    const { runId: _runId, nodeId: _nodeId, iteration: _iteration, payload, ...rest } = row;
     if (payload !== undefined)
         return payload;
     return rest;
@@ -754,7 +754,7 @@ function normalizeExecutionError(result) {
 /**
  * @param {{ name: string; input: AnySchema }} options
  */
-function createWorkflow(options) {
+function _createWorkflow(options) {
     return {
         /**
      * @param {($: BuilderApi) => BuilderNode} buildGraph
@@ -804,7 +804,7 @@ function createWorkflow(options) {
 /**
  * @param {{ name: string; params?: Record<string, unknown> }} options
  */
-function createComponent(options) {
+function _createComponent(options) {
     return {
         /**
      * @param {($: BuilderApi, params: Record<string, unknown>) => BuilderNode} buildGraph

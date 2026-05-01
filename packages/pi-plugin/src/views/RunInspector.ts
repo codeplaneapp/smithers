@@ -24,7 +24,7 @@ function paint(theme: Theme, color: string, value: string) {
 }
 
 function stripAnsi(value: string) {
-  return value.replace(/\x1b\[[0-9;]*m/g, "");
+  return value.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "");
 }
 
 function padRight(value: string, width: number) {

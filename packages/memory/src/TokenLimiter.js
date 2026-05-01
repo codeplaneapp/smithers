@@ -12,7 +12,7 @@ export function TokenLimiter(maxTokens) {
    * @param {MemoryStore} store
    * @returns {Effect.Effect<void, SmithersError>}
    */
-    function processEffect(store) {
+    function processEffect(_store) {
         return Effect.gen(function* () {
             // Token limiter operates at the thread level; without a specific thread
             // context it logs and returns. In practice, this processor is invoked

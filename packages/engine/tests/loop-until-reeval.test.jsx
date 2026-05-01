@@ -60,7 +60,7 @@ describe("Loop until re-evaluation", () => {
         cleanup();
     });
     test("Loop exits when until becomes true (outputMaybe with explicit iteration)", async () => {
-        const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+        const { smithers, outputs, cleanup } = createTestSmithers({
             review: z.object({ lgtm: z.boolean() }),
         });
         let callCount = 0;
@@ -96,7 +96,7 @@ describe("Loop until re-evaluation", () => {
         cleanup();
     });
     test("parallel loops each re-evaluate until independently (ctx.latest)", async () => {
-        const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+        const { smithers, outputs, cleanup } = createTestSmithers({
             review: z.object({ lgtm: z.boolean() }),
         });
         const callCounts = {};
@@ -142,7 +142,7 @@ describe("Loop until re-evaluation", () => {
         cleanup();
     });
     test("parallel loops with outputMaybe re-evaluate until correctly", async () => {
-        const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+        const { smithers, outputs, cleanup } = createTestSmithers({
             review: z.object({ lgtm: z.boolean() }),
         });
         const callCounts = {};
@@ -190,7 +190,7 @@ describe("Loop until re-evaluation", () => {
         cleanup();
     });
     test("Loop with outputMaybe re-evaluates until using ctx.iterations", async () => {
-        const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
+        const { smithers, outputs, cleanup } = createTestSmithers({
             review: z.object({ lgtm: z.boolean() }),
         });
         let callCount = 0;

@@ -269,7 +269,7 @@ export function makeWorkflowSession(options = {}) {
         state.plan = plan;
         if (opts.pruneUnmounted) {
             const mounted = new Set(graph.mountedTaskIds);
-            for (const [key, taskState] of [...state.states.entries()]) {
+            for (const [key, taskState] of state.states.entries()) {
                 if (mounted.has(key))
                     continue;
                 if (taskState === "in-progress") {

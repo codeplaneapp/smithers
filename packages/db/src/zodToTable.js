@@ -1,5 +1,4 @@
 import { sqliteTable, text, integer, primaryKey, } from "drizzle-orm/sqlite-core";
-import { z } from "zod";
 import { unwrapZodType } from "./unwrapZodType.js";
 import { camelToSnake } from "./utils/camelToSnake.js";
 /**

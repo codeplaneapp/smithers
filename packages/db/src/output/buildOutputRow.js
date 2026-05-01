@@ -26,7 +26,7 @@ export function buildOutputRow(table, runId, nodeId, iteration, payload) {
         };
     }
     return {
-        ...(payload ?? {}),
+        ...payload,
         runId,
         nodeId,
         iteration,

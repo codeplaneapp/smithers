@@ -5,7 +5,7 @@ import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
 import { loadInput, loadOutputs } from "@smithers-orchestrator/db/snapshot";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { selectOutputRow, validateOutput, validateExistingOutput, getAgentOutputSchema, describeSchemaShape, buildOutputRow, stripAutoColumns, } from "@smithers-orchestrator/db/output";
+import { selectOutputRow, validateOutput, validateExistingOutput, describeSchemaShape, buildOutputRow, stripAutoColumns, } from "@smithers-orchestrator/db/output";
 import { validateInput } from "@smithers-orchestrator/db/input";
 import { schemaSignature } from "@smithers-orchestrator/db/schema-signature";
 import { withSqliteWriteRetry } from "@smithers-orchestrator/db/write-retry";
@@ -23,7 +23,6 @@ import { EventBus } from "./events.js";
 import { getJjPointer, runJj, workspaceAdd } from "@smithers-orchestrator/vcs/jj";
 import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
 import * as BunContext from "@effect/platform-bun/BunContext";
-import { z } from "zod";
 import { eq, getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { Chunk, Duration, Effect, Fiber, Metric, Queue, Schedule } from "effect";
@@ -447,16 +446,6 @@ function prependToolResumeWarningMessage(prompt, warningMessage) {
         return prompt;
     }
     return `${warningMessage}\n\n${prompt}`;
-}
-/**
- * @param {HijackCompletion} completion
- * @returns {Error}
- */
-function buildHijackAbortError(completion) {
-    const err = makeAbortError(`Hijack requested for ${completion.engine}`);
-    err.code = "RUN_HIJACKED";
-    err.hijack = completion;
-    return err;
 }
 /**
  * @param {string} cwd
@@ -3370,8 +3359,6 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     }
                     if (output === undefined) {
                         // Debug: log what we have
-                        const debugSteps = result.steps ?? [];
-                        const stepTexts = debugSteps.map((s, i) => `Step ${i}: ${(s?.text ?? "").slice(0, 200)}`);
                         const finishReason = result.finishReason ?? "unknown";
                         logDebug("agent response did not contain valid JSON output", {
                             runId,
@@ -3398,7 +3385,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     try {
                         payload = JSON.parse(output);
                     }
-                    catch (e) {
+                    catch  {
                         throw new SmithersError("INVALID_OUTPUT", `Failed to parse agent output as JSON. Output starts with: "${output.slice(0, 100)}"`);
                     }
                 }

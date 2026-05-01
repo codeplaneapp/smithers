@@ -4,7 +4,7 @@
 // double-encoding, and credential characters.
 // ---------------------------------------------------------------------------
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
-import { createOpenApiToolsSync, createOpenApiTool } from "../src/tool-factory.js";
+import { createOpenApiToolsSync } from "../src/tool-factory.js";
 import { petStoreSpec, complexSchemaSpec } from "./fixtures.js";
 
 const originalFetch = globalThis.fetch;

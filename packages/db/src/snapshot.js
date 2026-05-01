@@ -3,7 +3,7 @@ import { getTableColumns } from "drizzle-orm/utils";
 import { Effect, Option } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-/** @typedef {import("@smithers-orchestrator/driver/OutputSnapshot").OutputSnapshot} OutputSnapshot */
+/** @typedef {Record<string, Array<unknown>>} OutputSnapshot */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
 /** @typedef {import("drizzle-orm").Table} _Table */
 

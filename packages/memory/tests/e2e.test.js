@@ -4,7 +4,6 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createMemoryStore } from "../src/store/index.js";
 import { TtlGarbageCollector } from "../src/processors.js";
-import { namespaceToString, parseNamespace } from "../src/types.js";
 const WF_NS = { kind: "workflow", id: "e2e-test" };
 describe("Memory E2E", () => {
     let store;

@@ -8,7 +8,7 @@
  * - There is no slowloris/header timeout in gateway.js today; the slowloris
  *   case below is documented (skipped) rather than asserted.
  */
-import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { connect } from "node:net";
 import { Gateway, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_STRING_LENGTH, } from "../src/gateway.js";
 
@@ -68,7 +68,7 @@ function rawHttp(headers, body) {
         sock.on("data", (c) => chunks.push(c));
         sock.on("end", () => {
             const raw = Buffer.concat(chunks).toString("utf8");
-            const [statusLine, ...rest] = raw.split("\r\n");
+            const [statusLine] = raw.split("\r\n");
             const statusCode = Number(statusLine?.split(" ")[1] ?? 0);
             const bodyIdx = raw.indexOf("\r\n\r\n");
             const responseBody = bodyIdx >= 0 ? raw.slice(bodyIdx + 4) : "";
@@ -120,13 +120,7 @@ describe("gateway readRawBody / Content-Length", () => {
         expect([400, 200]).toContain(res.statusCode);
     });
 
-    // FIXME: when readRawBody throws SmithersError("INVALID_INPUT", "Gateway
-    // request payload exceeds N bytes."), handleHttpRpc surfaces the error as
-    // HTTP 400 because statusForRpcError maps INVALID_INPUT -> 400. The HTTP
-    // contract for "payload too large" is 413; this should map to either the
-    // PayloadTooLarge code or the size message should switch on a numeric
-    // status. The non-gateway server (index.js) gets this right.
-    test.skip("Content-Length exceeding maxBytes is rejected with 413 (currently 400)", async () => {
+    test("Content-Length exceeding maxBytes is rejected with 413", async () => {
         await startGateway({ maxBodyBytes: 64 });
         const headers = [
             "POST /rpc HTTP/1.1",
@@ -139,9 +133,8 @@ describe("gateway readRawBody / Content-Length", () => {
         expect(res.statusCode).toBe(413);
     });
 
-    test("body actually exceeding maxBytes returns INVALID_INPUT/400 with 'exceeds' message", async () => {
-        // Documents the current behaviour while the FIXME above is open. We
-        // send a body that legitimately exceeds maxBodyBytes via fetch (which
+    test("body actually exceeding maxBytes returns PayloadTooLarge/413 with 'exceeds' message", async () => {
+        // Send a body that legitimately exceeds maxBodyBytes via fetch (which
         // computes its own Content-Length) so the size is unambiguous.
         await startGateway({ maxBodyBytes: 64 });
         const big = JSON.stringify({
@@ -154,9 +147,9 @@ describe("gateway readRawBody / Content-Length", () => {
             headers: { "Content-Type": "application/json" },
             body: big,
         });
-        expect(res.status).toBe(400);
+        expect(res.status).toBe(413);
         const json = await res.json();
-        expect(json.error.code).toBe("INVALID_INPUT");
+        expect(json.error.code).toBe("PayloadTooLarge");
         expect(json.error.message).toMatch(/exceeds/);
     });
 
@@ -205,11 +198,9 @@ describe("gateway readRawBody / Content-Length", () => {
             headers: { "Content-Type": "application/json" },
             body: tooBig,
         });
-        // FIXME: should be 413 / PAYLOAD_TOO_LARGE — gateway maps the size
-        // error to INVALID_INPUT/400. See the skipped test above.
-        expect(tooBigRes.status).toBe(400);
+        expect(tooBigRes.status).toBe(413);
         const tooBigJson = await tooBigRes.json();
-        expect(tooBigJson.error.code).toBe("INVALID_INPUT");
+        expect(tooBigJson.error.code).toBe("PayloadTooLarge");
         expect(tooBigJson.error.message).toMatch(/exceeds/);
     });
 
@@ -345,22 +336,18 @@ describe("auth header edge cases (gateway HTTP)", () => {
         expect(status).not.toBe(401);
     });
 
-    test("lowercase 'bearer' prefix is NOT stripped (current behavior; potential bug)", async () => {
-        // FIXME: bearerTokenFromHeaders() uses startsWith("Bearer ") with
-        // case-sensitive matching. RFC 6750 §2.1 specifies the credential
-        // syntax is case-insensitive. With lowercase 'bearer ' the gateway
-        // treats the entire string as the token, which then does not match.
+    test("lowercase 'bearer' prefix is stripped case-insensitively", async () => {
         await startTokenGateway();
         const { status, json } = await rpc({ Authorization: "bearer secret-token" });
-        expect(status).toBe(401);
-        expect(json.error.code).toBe("UNAUTHORIZED");
+        expect(status).toBe(404);
+        expect(json.error.code).toBe("METHOD_NOT_FOUND");
     });
 
-    test("UPPERCASE 'BEARER' prefix is NOT stripped (current behavior)", async () => {
+    test("UPPERCASE 'BEARER' prefix is stripped case-insensitively", async () => {
         await startTokenGateway();
         const { status, json } = await rpc({ Authorization: "BEARER secret-token" });
-        expect(status).toBe(401);
-        expect(json.error.code).toBe("UNAUTHORIZED");
+        expect(status).toBe(404);
+        expect(json.error.code).toBe("METHOD_NOT_FOUND");
     });
 
     test("Authorization with extra leading whitespace is rejected (token mismatch)", async () => {

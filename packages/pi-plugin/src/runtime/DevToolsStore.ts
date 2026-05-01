@@ -76,19 +76,6 @@ function findNode(root: DevToolsNode | undefined, id: number): DevToolsNode | un
   return undefined;
 }
 
-function removeNode(root: DevToolsNode, id: number) {
-  for (const child of root.children) {
-    if (child.id === id) {
-      root.children.splice(root.children.indexOf(child), 1);
-      return true;
-    }
-    if (removeNode(child, id)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function collectGhostKeys(node: DevToolsNode, keys: Set<string>) {
   const key = ghostMapKey(node);
   if (key) {

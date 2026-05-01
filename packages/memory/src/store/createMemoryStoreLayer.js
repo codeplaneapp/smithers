@@ -1,7 +1,6 @@
 import { Layer } from "effect";
 import { MemoryStoreDb } from "./MemoryStoreDb.js";
 import { MemoryStoreLive } from "./MemoryStoreLive.js";
-import { MemoryStoreService } from "./MemoryStoreService.js";
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
 
 /**

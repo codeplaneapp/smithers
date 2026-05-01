@@ -3,23 +3,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { WebSocket } from "ws";
 import { z } from "zod";
 import { createSmithers } from "smithers-orchestrator";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { Gateway } from "../src/gateway.js";
 import { sleep } from "../../smithers/tests/helpers.js";
-/**
- * @param {Server} server
- * @returns {number}
- */
-function getPort(server) {
-    const address = server.address();
-    if (!address || typeof address === "string") {
-        throw new Error("Gateway server did not expose a port");
-    }
-    return address.port;
-}
 /**
  * @param {string} name
  */
@@ -41,103 +29,6 @@ function createValueWorkflow(dbPath) {
         </api.Task>
       </api.Workflow>)),
     };
-}
-class GatewayClient {
-    ws;
-    messages = [];
-    /**
-   * @param {WebSocket} ws
-   */
-    constructor(ws) {
-        this.ws = ws;
-        ws.on("message", (raw) => {
-            this.messages.push(JSON.parse(String(raw)));
-        });
-    }
-    /**
-   * @param {(message: GatewayMessage) => boolean} predicate
-   * @returns {Promise<GatewayMessage>}
-   */
-    async waitFor(predicate, timeoutMs = 5_000) {
-        const started = Date.now();
-        while (Date.now() - started < timeoutMs) {
-            const index = this.messages.findIndex(predicate);
-            if (index >= 0) {
-                return this.messages.splice(index, 1)[0];
-            }
-            await sleep(10);
-        }
-        throw new Error(`Timed out waiting for gateway message. Saw: ${JSON.stringify(this.messages)}`);
-    }
-    /**
-   * @param {string} method
-   * @param {unknown} [params]
-   */
-    async request(method, params) {
-        const id = `${method}-${Math.random().toString(36).slice(2)}`;
-        this.ws.send(JSON.stringify({ type: "req", id, method, params }));
-        return this.waitFor((message) => message.type === "res" && message.id === id);
-    }
-    async close() {
-        if (this.ws.readyState === this.ws.CLOSED) {
-            return;
-        }
-        await new Promise((resolve) => {
-            const timer = setTimeout(() => {
-                try {
-                    this.ws.terminate();
-                }
-                catch { }
-                resolve();
-            }, 500);
-            this.ws.once("close", () => {
-                clearTimeout(timer);
-                resolve();
-            });
-            this.ws.close();
-        });
-    }
-}
-/**
- * @param {number} port
- * @param {string} token
- */
-async function connectGateway(port, token) {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-    await new Promise((resolve, reject) => {
-        ws.once("open", () => resolve());
-        ws.once("error", reject);
-    });
-    const client = new GatewayClient(ws);
-    await client.waitFor((message) => message.type === "event" && message.event === "connect.challenge");
-    const hello = await client.request("connect", {
-        minProtocol: 1,
-        maxProtocol: 1,
-        client: {
-            id: "gateway-edge-client",
-            version: "1.0.0",
-            platform: "bun-test",
-        },
-        auth: { token },
-    });
-    expect(hello.ok).toBe(true);
-    return client;
-}
-/**
- * @param {GatewayClient} client
- * @param {string} runId
- * @param {string[]} statuses
- */
-async function waitForRunStatus(client, runId, statuses, timeoutMs = 5_000) {
-    const started = Date.now();
-    while (Date.now() - started < timeoutMs) {
-        const response = await client.request("runs.get", { runId });
-        if (response.ok && statuses.includes(response.payload.status)) {
-            return response.payload;
-        }
-        await sleep(25);
-    }
-    throw new Error(`Timed out waiting for ${runId} to reach ${statuses.join(", ")}`);
 }
 describe("Gateway edge cases", () => {
     let gateway;

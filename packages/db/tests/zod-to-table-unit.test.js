@@ -5,7 +5,7 @@ import { zodToTable } from "../src/zodToTable.js";
 import { zodToCreateTableSQL } from "../src/zodToCreateTableSQL.js";
 describe("zodToTable", () => {
     test("maps z.string() to text column", () => {
-        const table = zodToTable("test_strings", z.object({ name: z.string() }));
+        zodToTable("test_strings", z.object({ name: z.string() }));
         // Verify by creating the table in SQLite
         const sqlite = new Database(":memory:");
         const ddl = zodToCreateTableSQL("test_strings", z.object({ name: z.string() }));

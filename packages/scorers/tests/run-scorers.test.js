@@ -1,4 +1,4 @@
-import { describe, expect, it, mock, beforeEach } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 import { createScorer } from "../src/create-scorer.js";
 import { runScorersBatch } from "../src/run-scorers.js";
 // Mock DB adapter — only needs insertScorerResult for our tests

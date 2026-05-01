@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { validateInput } from "../src/input.js";
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { zodToTable } from "../src/zodToTable.js";
 describe("validateInput", () => {
     const inputTable = sqliteTable("input", {

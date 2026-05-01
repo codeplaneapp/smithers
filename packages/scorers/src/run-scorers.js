@@ -3,7 +3,7 @@ import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { scorerDuration, scorersFinished, scorersFailed, scorersStarted } from "./metrics.js";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import crypto from "node:crypto";
-/** @typedef {import("@smithers-orchestrator/engine/events").EventBus} EventBus */
+/** @typedef {{ emit: (eventName: "event", event: unknown) => unknown }} EventBus */
 /** @typedef {import("./types.js").ScoreResult} ScoreResult */
 /** @typedef {import("./types.js").ScorerContext} ScorerContext */
 /** @typedef {import("./types.js").ScorerBinding} ScorerBinding */

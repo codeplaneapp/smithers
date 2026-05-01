@@ -1,7 +1,5 @@
 import { Effect, Metric } from "effect";
-import { z } from "zod";
 import { buildOutputRow, stripAutoColumns, validateOutput } from "@smithers-orchestrator/db/output";
-import { EventBus } from "../events.js";
 import { makeAbortError, wireAbortSignal } from "./bridge-utils.js";
 import { logDebug, logError, logInfo } from "@smithers-orchestrator/observability/logging";
 import { attemptDuration, nodeDuration } from "@smithers-orchestrator/observability/metrics";

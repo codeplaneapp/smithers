@@ -36,7 +36,7 @@ class BunSpawnBackend {
    * @returns {string}
    */
     getBufferText() {
-        return this.buffer.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "");
+        return this.buffer.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g"), "");
     }
     /**
    * @param {string} expected

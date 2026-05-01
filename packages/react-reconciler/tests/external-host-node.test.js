@@ -23,13 +23,6 @@ function hostEl(tag, rawProps, children = []) {
     return { kind: "element", tag, props, rawProps, children };
 }
 /**
- * @param {string} text
- * @returns {HostText}
- */
-function hostText(text) {
-    return { kind: "text", text };
-}
-/**
  * Recursively convert a HostNode JSON tree into React elements,
  * the same way the external adapter will.
  */

@@ -273,9 +273,9 @@ export async function getNodeDiffRoute({
     emitEffect = (effect) => runPromise(effect),
     computeDiffBundleImpl,
     computeDiffBundleBetweenRefsImpl,
-    getCurrentPointerImpl,
+    getCurrentPointerImpl: _getCurrentPointerImpl,
     resolveCommitPointerImpl = resolveCommitPointer,
-    restorePointerImpl,
+    restorePointerImpl: _restorePointerImpl,
     nowMs = () => Date.now(),
     // stat: true → return summary only ({ files, filesChanged, added,
     // removed }). Bypasses the cache and the full-bundle JSON size guard
@@ -292,7 +292,6 @@ export async function getNodeDiffRoute({
             ? async (baseRef, _targetRef, cwd, seq) => computeDiffBundleImpl(baseRef, cwd, seq)
             : computeDiffBundleBetweenRefs);
     let resultLabel = "error";
-    let cacheResultLabel = "miss";
     let sizeBytes = 0;
     let computeDurationMs = 0;
     const rootSpanAttrs = {
@@ -380,7 +379,6 @@ export async function getNodeDiffRoute({
         const recordCacheResult = async (cacheResult, bytes) => {
             sizeBytes = bytes;
             resultLabel = cacheResult;
-            cacheResultLabel = cacheResult;
             rootSpanAttrs.cacheResult = cacheResult;
             await swallow(() => emitEffect(Effect.all([
                 Metric.increment(taggedMetric(nodeDiffCacheTotal, { result: cacheResult })),

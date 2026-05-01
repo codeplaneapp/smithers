@@ -1,5 +1,4 @@
 import { createSelectSchema } from "drizzle-zod";
-import { z } from "zod";
 /** @typedef {import("drizzle-orm").Table} Table */
 
 /**

@@ -2,7 +2,6 @@
 // OpenAPI JSON Schema → Zod conversion tests
 // ---------------------------------------------------------------------------
 import { describe, test, expect } from "bun:test";
-import { z } from "zod";
 import { jsonSchemaToZod, buildOperationSchema } from "../src/schema-converter.js";
 const emptySpec = {
     openapi: "3.0.0",

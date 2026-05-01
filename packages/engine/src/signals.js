@@ -1,5 +1,4 @@
 import { Effect } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { bridgeSignalResolve } from "./effect/durable-deferred-bridge.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";

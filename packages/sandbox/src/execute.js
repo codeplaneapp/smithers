@@ -7,7 +7,6 @@ import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { requireTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
-import { executeChildWorkflow } from "@smithers-orchestrator/engine/child-workflow";
 import { validateSandboxBundle, writeSandboxBundle } from "./bundle.js";
 import { SandboxTransport, layerForSandboxRuntime, resolveSandboxRuntime, } from "./transport.js";
 /** @typedef {import("./ExecuteSandboxOptions.ts").ExecuteSandboxOptions} ExecuteSandboxOptions */
@@ -222,8 +221,11 @@ export async function executeSandbox(options) {
             stage: "executing",
             progress: 40,
         });
+        if (typeof options.executeChildWorkflow !== "function") {
+            throw new SmithersError("INVALID_INPUT", `Sandbox ${options.sandboxId} is missing a child workflow executor.`, { sandboxId: options.sandboxId });
+        }
         const childStartedMs = performance.now();
-        const child = await executeChildWorkflow(options.parentWorkflow, {
+        const child = await options.executeChildWorkflow(options.parentWorkflow, {
             workflow: options.workflow,
             input: options.input,
             parentRunId: runtime.runId,

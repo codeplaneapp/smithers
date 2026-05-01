@@ -282,7 +282,9 @@ describe("getNodeOutputRoute input boundaries", () => {
     });
 
     expect(response.row?.huge).toHaveLength(10_000);
-    expect((response.row?.huge as number[])[9999]).toBe(9999);
+    const huge = response.row?.huge;
+    expect(Array.isArray(huge)).toBe(true);
+    expect((huge as number[])[9999]).toBe(9999);
   });
 
   test("100 fields are returned", async () => {

@@ -1,6 +1,4 @@
 import * as _smithers_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
-import { SmithersWorkflow } from '@smithers-orchestrator/components/SmithersWorkflow';
-import { ChildWorkflowDefinition } from '@smithers-orchestrator/engine/child-workflow';
 import { Context, Effect, Layer } from 'effect';
 import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
 
@@ -90,11 +88,37 @@ type SandboxTransportService = {
     readonly cleanup: (handle: SandboxHandle) => Effect.Effect<void, SmithersError>;
 };
 
+type SandboxWorkflow = {
+    db?: unknown;
+    build: (ctx: unknown) => unknown;
+    opts?: Record<string, unknown>;
+    schemaRegistry?: unknown;
+    zodToKeyName?: unknown;
+};
+type SandboxChildWorkflowDefinition = SandboxWorkflow | (() => SandboxWorkflow | unknown);
+type ExecuteSandboxChildWorkflowOptions = {
+    workflow: SandboxChildWorkflowDefinition;
+    input?: unknown;
+    runId?: string;
+    parentRunId?: string;
+    rootDir?: string;
+    allowNetwork?: boolean;
+    maxOutputBytes?: number;
+    toolTimeoutMs?: number;
+    workflowPath?: string;
+    signal?: AbortSignal;
+};
+type ExecuteSandboxChildWorkflow = (parentWorkflow: SandboxWorkflow | undefined, options: ExecuteSandboxChildWorkflowOptions) => Promise<{
+    runId: string;
+    status: string;
+    output: unknown;
+}>;
 type ExecuteSandboxOptions$1 = {
-    parentWorkflow?: SmithersWorkflow<unknown>;
+    parentWorkflow?: SandboxWorkflow;
     sandboxId: string;
     runtime?: SandboxRuntime$1;
-    workflow: ChildWorkflowDefinition;
+    workflow: SandboxChildWorkflowDefinition;
+    executeChildWorkflow: ExecuteSandboxChildWorkflow;
     input?: unknown;
     rootDir: string;
     allowNetwork: boolean;

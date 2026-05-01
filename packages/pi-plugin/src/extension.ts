@@ -202,7 +202,7 @@ function statusIcon(status: string) {
 }
 
 function stripAnsi(value: string) {
-  return value.replace(/\x1b\[[0-9;]*m/g, "");
+  return value.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "");
 }
 
 function collectNodeStates(run: TrackedRun) {

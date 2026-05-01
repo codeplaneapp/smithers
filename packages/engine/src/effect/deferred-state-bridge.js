@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { Effect, Exit } from "effect";
 import { buildOutputRow, describeSchemaShape, selectOutputRow, stripAutoColumns, validateExistingOutput, validateOutput, } from "@smithers-orchestrator/db/output";
 import { awaitApprovalDurableDeferred, awaitWaitForEventDurableDeferred, bridgeApprovalResolve, bridgeWaitForEventResolve, } from "./durable-deferred-bridge.js";
-import { EventBus } from "../events.js";
 import { buildHumanRequestId, getHumanTaskPrompt as getStoredHumanTaskPrompt, isHumanTaskMeta, } from "../human-requests.js";
 import { parseAttemptMetaJson } from "./bridge-utils.js";
 import { updateAsyncExternalWaitPending } from "@smithers-orchestrator/observability/metrics";

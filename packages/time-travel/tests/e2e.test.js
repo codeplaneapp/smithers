@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { captureSnapshot, loadSnapshot, parseSnapshot, listSnapshots } from "../src/snapshot/index.js";
-import { forkRun, listBranches, getBranchInfo } from "../src/fork/index.js";
+import { forkRun, getBranchInfo } from "../src/fork/index.js";
 import { diffRawSnapshots, formatDiffForTui, formatDiffAsJson } from "../src/diff.js";
 import { buildTimeline, buildTimelineTree, formatTimelineForTui, formatTimelineAsJson } from "../src/timeline/index.js";
 function createTestDb() {

@@ -1,4 +1,4 @@
-import { Effect, Schedule, ScheduleDecision, ScheduleIntervals } from "effect";
+import { Effect, ScheduleDecision, ScheduleIntervals } from "effect";
 /**
  * @param {Schedule.Schedule<unknown>} schedule
  * @param {number} attempt

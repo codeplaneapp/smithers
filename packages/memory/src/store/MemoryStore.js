@@ -2,4 +2,4 @@
 /** @typedef {import("./MemoryStore.ts").MemoryStore} MemoryStore */
 // @smithers-type-exports-end
 
-import { Effect } from "effect";
+export {};

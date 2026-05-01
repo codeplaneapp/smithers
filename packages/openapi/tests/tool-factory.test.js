@@ -12,7 +12,7 @@ describe("createOpenApiToolsSync", () => {
     });
     test("each tool has description and execute", () => {
         const tools = createOpenApiToolsSync(petStoreSpec);
-        for (const [name, t] of Object.entries(tools)) {
+        for (const t of Object.values(tools)) {
             expect(t).toBeDefined();
             // AI SDK tools have these properties
             expect(typeof t.execute).toBe("function");

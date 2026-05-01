@@ -14,7 +14,7 @@ import { getTableName, sql } from "drizzle-orm";
 import { Effect, Exit, FiberId, Metric } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { getSqlMessageStorage } from "./sql-message-storage.js";
-import { alertsAcknowledgedTotal, alertsActive, alertsFiredTotal, dbQueryDuration, dbTransactionDuration, dbTransactionRetries, dbTransactionRollbacks, } from "@smithers-orchestrator/observability/metrics";
+import { alertsAcknowledgedTotal, alertsActive, alertsFiredTotal, dbQueryDuration, dbTransactionDuration, dbTransactionRollbacks, } from "@smithers-orchestrator/observability/metrics";
 import { assertOptionalStringMaxLength, assertPositiveFiniteNumber, } from "./input-bounds.js";
 import { FRAME_KEYFRAME_INTERVAL, applyFrameDeltaJson, encodeFrameDelta, normalizeFrameEncoding, serializeFrameDelta, } from "./frame-codec.js";
 import { getKeyColumns } from "./output.js";
@@ -77,7 +77,6 @@ export const DB_RUN_ALLOWED_STATUSES = [
     "cancelled",
     "continued",
 ];
-const RUN_HEARTBEAT_STALE_MS = 30_000;
 const RAW_QUERY_ALLOWED_PREFIX = /^(?:select|with|explain|values)\b/i;
 const RAW_QUERY_FORBIDDEN_KEYWORDS = /\b(?:drop|delete|insert|update|alter|create|attach|detach|pragma)\b/i;
 const ACTIVE_ALERT_STATUSES = new Set([

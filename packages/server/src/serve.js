@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { Effect, Metric } from "effect";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
 import { isRunHeartbeatFresh } from "@smithers-orchestrator/engine";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";

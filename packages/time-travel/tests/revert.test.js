@@ -1,7 +1,7 @@
-import { describe, expect, test, mock, beforeEach, afterEach } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { revertToJjPointer, getJjPointer } from "@smithers-orchestrator/vcs/jj";
+import { revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
 import * as BunContext from "@effect/platform-bun/BunContext";
 import { Effect } from "effect";
 import { revertToAttempt } from "../src/revert.js";
@@ -85,7 +85,7 @@ describe("revertToAttempt", () => {
             jjPointer: "test-pointer-123",
         });
         const events = [];
-        const result = await revertToAttempt(adapter, {
+        const _result = await revertToAttempt(adapter, {
             runId: "run1",
             nodeId: "task1",
             iteration: 0,

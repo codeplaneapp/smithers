@@ -1,6 +1,6 @@
 import { watch } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
-import { resolve, relative } from "node:path";
+import { readdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { Effect } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { logDebug, logInfo } from "@smithers-orchestrator/observability/logging";
