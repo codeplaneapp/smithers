@@ -12,6 +12,6 @@ export function createGatewayReactRoot(
     throw new Error(`Gateway React root element not found: ${options.rootId ?? "root"}`);
   }
   const client = new SmithersGatewayClient(options);
-  createRoot(root).render(createElement(SmithersGatewayProvider, { client }, element));
+  createRoot(root).render(createElement(SmithersGatewayProvider, { client, children: element }));
   return client;
 }

@@ -29,6 +29,7 @@ import * as _smithers_errors from '@smithers-orchestrator/errors';
 import * as zod_v4_core from 'zod/v4/core';
 
 type WorktreeProps$2 = {
+    key?: string;
     id?: string;
     path: string;
     branch?: string;

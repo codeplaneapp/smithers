@@ -221,7 +221,10 @@ function toYaml(value: unknown, indent = 0): string {
       .map((entry) => {
         if (entry && typeof entry === "object") {
           const rendered = toYaml(entry, indent + 2);
-          return `${pad}- ${rendered.startsWith("\n") ? rendered.slice(1) : `\n${rendered}`}`;
+          if (rendered === "{}" || rendered === "[]") {
+            return `${pad}- ${rendered}`;
+          }
+          return `${pad}-\n${rendered}`;
         }
         return `${pad}- ${scalarToYaml(entry)}`;
       })

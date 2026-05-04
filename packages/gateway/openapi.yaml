@@ -4,11 +4,11 @@ info:
   version: v1
   description: "Stable v1 Smithers Gateway RPC contract generated from packages/gateway/src/rpc."
 servers:
-  - 
+  -
     url: https://gateway.example.com
     description: "Reference Gateway deployment."
 security:
-  - 
+  -
     bearerAuth: []
 paths:
   /v1/rpc/launchRun:
@@ -19,7 +19,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - run:write
       x-smithers-api-version: v1
@@ -357,7 +357,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - run:write
       x-smithers-api-version: v1
@@ -740,7 +740,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - run:write
       x-smithers-api-version: v1
@@ -1173,7 +1173,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - run:admin
       x-smithers-api-version: v1
@@ -1558,7 +1558,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - run:admin
       x-smithers-api-version: v1
@@ -2140,7 +2140,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - approval:submit
       x-smithers-api-version: v1
@@ -2186,22 +2186,22 @@ paths:
                           description: "Any JSON value."
                           nullable: true
                           oneOf:
-                            - 
+                            -
                               type: object
                               additionalProperties: true
-                            - 
+                            -
                               type: array
                               items:
                                 nullable: true
-                            - 
+                            -
                               type: string
-                            - 
+                            -
                               type: number
-                            - 
+                            -
                               type: integer
-                            - 
+                            -
                               type: boolean
-                            - 
+                            -
                               type: "null"
                         note:
                           type: string
@@ -2573,7 +2573,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - signal:submit
       x-smithers-api-version: v1
@@ -2612,22 +2612,22 @@ paths:
                       description: "Any JSON value."
                       nullable: true
                       oneOf:
-                        - 
+                        -
                           type: object
                           additionalProperties: true
-                        - 
+                        -
                           type: array
                           items:
                             nullable: true
-                        - 
+                        -
                           type: string
-                        - 
+                        -
                           type: number
-                        - 
+                        -
                           type: integer
-                        - 
+                        -
                           type: boolean
-                        - 
+                        -
                           type: "null"
                   required:
                     - runId
@@ -2971,7 +2971,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - run:read
       x-smithers-api-version: v1
@@ -3336,7 +3336,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - run:read
       x-smithers-api-version: v1
@@ -3443,11 +3443,672 @@ paths:
                 ok: true
                 apiVersion: v1
                 payload:
-                  - 
+                  -
                     runId: run_01
                     workflowKey: deploy
                     status: finished
                     createdAtMs: 1710000000000
+        400:
+          description: "The request shape is invalid."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - observability:read
+                      refresh:
+                        type: string
+        401:
+          description: "Authentication failed or the token expired."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - observability:read
+                      refresh:
+                        type: string
+        403:
+          description: "The token is missing the required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - observability:read
+                      refresh:
+                        type: string
+        500:
+          description: "The Gateway encountered an internal error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - observability:read
+                      refresh:
+                        type: string
+  /v1/rpc/listWorkflows:
+    post:
+      operationId: listWorkflows
+      summary: "List Workflows"
+      description: "List workflows registered with the Gateway."
+      tags:
+        - "Gateway RPC"
+      security:
+        -
+          bearerAuth:
+            - run:read
+      x-smithers-api-version: v1
+      x-smithers-maturity: stable
+      x-smithers-transport: "http+websocket"
+      x-smithers-required-scope: run:read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - method
+                - params
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  description: "Optional caller request id."
+                method:
+                  const: listWorkflows
+                params:
+                  type: object
+                  properties:
+                    filter:
+                      type: object
+                      properties:
+                        hasUi:
+                          type: boolean
+                          description: "Only return workflows with or without an attached UI."
+                      required: []
+                      additionalProperties: false
+                  required: []
+                  additionalProperties: false
+            example:
+              id: listWorkflows-1
+              method: listWorkflows
+              params:
+                filter:
+                  hasUi: true
+      responses:
+        200:
+          description: "List Workflows response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - payload
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: true
+                  apiVersion:
+                    const: v1
+                  payload:
+                    type: array
+                    description: "Registered workflow summaries."
+                    items:
+                      type: object
+                      properties:
+                        key:
+                          type: string
+                          description: "Registered Gateway workflow key."
+                        readableName:
+                          type: string
+                          description: "Human-readable workflow name."
+                        description:
+                          type: string
+                          description: "Workflow description."
+                        hasUi:
+                          type: boolean
+                          description: "Whether this workflow has a custom UI mounted."
+                        uiPath:
+                          type:
+                            - string
+                            - "null"
+                          description: "Mounted UI path when present."
+                      required:
+                        - key
+                        - hasUi
+                        - uiPath
+                      additionalProperties: false
+              example:
+                type: res
+                id: listWorkflows-1
+                ok: true
+                apiVersion: v1
+                payload:
+                  -
+                    key: deploy
+                    readableName: Deploy
+                    hasUi: true
+                    uiPath: /workflows/deploy
+        400:
+          description: "The request shape is invalid."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - observability:read
+                      refresh:
+                        type: string
+        401:
+          description: "Authentication failed or the token expired."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - observability:read
+                      refresh:
+                        type: string
+        403:
+          description: "The token is missing the required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - observability:read
+                      refresh:
+                        type: string
+        500:
+          description: "The Gateway encountered an internal error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - observability:read
+                      refresh:
+                        type: string
+  /v1/rpc/listApprovals:
+    post:
+      operationId: listApprovals
+      summary: "List Approvals"
+      description: "List pending Gateway approval requests."
+      tags:
+        - "Gateway RPC"
+      security:
+        -
+          bearerAuth:
+            - run:read
+      x-smithers-api-version: v1
+      x-smithers-maturity: stable
+      x-smithers-transport: "http+websocket"
+      x-smithers-required-scope: run:read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - method
+                - params
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  description: "Optional caller request id."
+                method:
+                  const: listApprovals
+                params:
+                  type: object
+                  properties:
+                    filter:
+                      type: object
+                      properties:
+                        runId:
+                          type: string
+                          description: "Stable run identifier."
+                        workflow:
+                          type: string
+                          description: "Registered Gateway workflow key."
+                        limit:
+                          type: integer
+                          minimum: 1
+                          description: "Maximum number of approvals."
+                      required: []
+                      additionalProperties: false
+                  required: []
+                  additionalProperties: false
+            example:
+              id: listApprovals-1
+              method: listApprovals
+              params:
+                filter:
+                  workflow: deploy
+                  limit: 20
+      responses:
+        200:
+          description: "List Approvals response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - payload
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: true
+                  apiVersion:
+                    const: v1
+                  payload:
+                    type: array
+                    description: "Pending approvals."
+                    items:
+                      type: object
+                      description: "Pending approval summary."
+                      properties: {}
+                      required: []
+                      additionalProperties: true
+              example:
+                type: res
+                id: listApprovals-1
+                ok: true
+                apiVersion: v1
+                payload:
+                  -
+                    runId: run_01
+                    workflowKey: deploy
+                    nodeId: approve
+                    iteration: 0
+                    requestTitle: "Approve deploy"
+                    requestedAtMs: 1710000000000
         400:
           description: "The request shape is invalid."
           content:
@@ -3672,7 +4333,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - run:read
       x-smithers-api-version: v1
@@ -4065,7 +4726,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - observability:read
       x-smithers-api-version: v1
@@ -4513,7 +5174,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - run:read
       x-smithers-api-version: v1
@@ -4968,7 +5629,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - run:read
       x-smithers-api-version: v1
@@ -5422,7 +6083,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - cron:read
       x-smithers-api-version: v1
@@ -5509,7 +6170,7 @@ paths:
                 ok: true
                 apiVersion: v1
                 payload:
-                  - 
+                  -
                     cronId: cron_01
                     workflow: deploy
                     pattern: "0 8 * * 1-5"
@@ -5737,7 +6398,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - cron:write
       x-smithers-api-version: v1
@@ -6055,7 +6716,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - cron:write
       x-smithers-api-version: v1
@@ -6426,7 +7087,7 @@ paths:
       tags:
         - "Gateway RPC"
       security:
-        - 
+        -
           bearerAuth:
             - cron:write
       x-smithers-api-version: v1

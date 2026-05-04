@@ -1,6 +1,7 @@
 import type React from "react";
 
 export type WorktreeProps = {
+	key?: string;
 	id?: string;
 	path: string;
 	branch?: string;
