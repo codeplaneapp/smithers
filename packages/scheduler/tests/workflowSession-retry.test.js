@@ -135,6 +135,62 @@ describe("makeWorkflowSession failure control flow", () => {
     expect(afterFailure.tasks.map((task) => task.nodeId)).toEqual(["recover"]);
   });
 
+  test("try-catch-finally runs finally before surfacing catch failure", () => {
+    const session = makeWorkflowSession({ nowMs: () => 1_000 });
+    const explode = makeAgentDescriptor({
+      nodeId: "explode",
+      retries: 0,
+      retryPolicy: undefined,
+    });
+    const recover = makeAgentDescriptor({
+      nodeId: "recover",
+      retries: 0,
+      retryPolicy: undefined,
+    });
+    const cleanup = makeAgentDescriptor({
+      nodeId: "cleanup",
+      retries: 0,
+      retryPolicy: undefined,
+    });
+    const graph = {
+      xml: el("smithers:workflow", {}, [
+        el("smithers:try-catch-finally", { id: "tcf" }, [
+          el("smithers:tcf-try", {}, [el("smithers:task", { id: "explode" })]),
+          el("smithers:tcf-catch", {}, [el("smithers:task", { id: "recover" })]),
+          el("smithers:tcf-finally", {}, [el("smithers:task", { id: "cleanup" })]),
+        ]),
+      ]),
+      tasks: [explode, recover, cleanup],
+      mountedTaskIds: new Set(["explode::0", "recover::0", "cleanup::0"]),
+    };
+
+    expect(Effect.runSync(session.submitGraph(graph))._tag).toBe("Execute");
+
+    const afterTryFailure = Effect.runSync(session.taskFailed({
+      nodeId: "explode",
+      iteration: 0,
+      error: { message: "boom" },
+    }));
+    expect(afterTryFailure._tag).toBe("Execute");
+    expect(afterTryFailure.tasks.map((task) => task.nodeId)).toEqual(["recover"]);
+
+    const afterCatchFailure = Effect.runSync(session.taskFailed({
+      nodeId: "recover",
+      iteration: 0,
+      error: { message: "recovery failed" },
+    }));
+    expect(afterCatchFailure._tag).toBe("Execute");
+    expect(afterCatchFailure.tasks.map((task) => task.nodeId)).toEqual(["cleanup"]);
+
+    const afterCleanup = Effect.runSync(session.taskCompleted({
+      nodeId: "cleanup",
+      iteration: 0,
+      output: { ok: true },
+    }));
+    expect(afterCleanup._tag).toBe("Failed");
+    expect(afterCleanup.error.message).toContain("Task failed: recover");
+  });
+
   test("saga failure runs compensation for completed actions", () => {
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
     const reserve = makeAgentDescriptor({

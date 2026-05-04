@@ -74,6 +74,8 @@ type ScheduleResult$3 = {
     readonly continuation?: ContinuationRequest$1;
     readonly nextRetryAtMs?: number;
     readonly fatalError?: string;
+    readonly failureRecoveryActive?: boolean;
+    readonly failureRecoveryKeys?: readonly string[];
 };
 
 type ScheduleSnapshot$1 = {

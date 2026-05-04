@@ -549,4 +549,93 @@ describe("scheduleTasks boundaries", () => {
     expect(result.fatalError).toBeUndefined();
     expect(result.failureRecoveryActive).toBe(true);
   });
+
+  test("try-catch-finally schedules finally before surfacing catch failure", () => {
+    const result = scheduleTasks(
+      {
+        kind: "try-catch-finally",
+        id: "tcf",
+        tryChildren: [{ kind: "task", nodeId: "try" }],
+        catchChildren: [{ kind: "task", nodeId: "catch" }],
+        finallyChildren: [{ kind: "task", nodeId: "finally" }],
+      },
+      new Map([
+        [buildStateKey("try", 0), "failed"],
+        [buildStateKey("catch", 0), "failed"],
+      ]),
+      descriptorMap(
+        makeDescriptor("try"),
+        makeDescriptor("catch"),
+        makeDescriptor("finally"),
+      ),
+      new Map(),
+      new Map(),
+      0,
+    );
+    expect(result.runnable.map((task) => task.nodeId)).toEqual(["finally"]);
+    expect(result.failureRecoveryKeys).toContain(buildStateKey("try", 0));
+    expect(result.failureRecoveryKeys).toContain(buildStateKey("catch", 0));
+  });
+
+  test("try-catch-finally surfaces catch failure after finally finishes", () => {
+    const result = scheduleTasks(
+      {
+        kind: "try-catch-finally",
+        id: "tcf",
+        tryChildren: [{ kind: "task", nodeId: "try" }],
+        catchChildren: [{ kind: "task", nodeId: "catch" }],
+        finallyChildren: [{ kind: "task", nodeId: "finally" }],
+      },
+      new Map([
+        [buildStateKey("try", 0), "failed"],
+        [buildStateKey("catch", 0), "failed"],
+        [buildStateKey("finally", 0), "finished"],
+      ]),
+      descriptorMap(
+        makeDescriptor("try"),
+        makeDescriptor("catch"),
+        makeDescriptor("finally"),
+      ),
+      new Map(),
+      new Map(),
+      0,
+    );
+    expect(result.runnable).toEqual([]);
+    expect(result.failureRecoveryKeys).toContain(buildStateKey("try", 0));
+    expect(result.failureRecoveryKeys).not.toContain(buildStateKey("catch", 0));
+  });
+
+  test("outer try-catch-finally does not catch an inner recovered failure", () => {
+    const result = scheduleTasks(
+      {
+        kind: "try-catch-finally",
+        id: "outer",
+        tryChildren: [
+          {
+            kind: "try-catch-finally",
+            id: "inner",
+            tryChildren: [{ kind: "task", nodeId: "inner-try" }],
+            catchChildren: [{ kind: "task", nodeId: "inner-catch" }],
+            finallyChildren: [],
+          },
+        ],
+        catchChildren: [{ kind: "task", nodeId: "outer-catch" }],
+        finallyChildren: [],
+      },
+      new Map([
+        [buildStateKey("inner-try", 0), "failed"],
+        [buildStateKey("inner-catch", 0), "finished"],
+      ]),
+      descriptorMap(
+        makeDescriptor("inner-try"),
+        makeDescriptor("inner-catch"),
+        makeDescriptor("outer-catch"),
+      ),
+      new Map(),
+      new Map(),
+      0,
+    );
+    expect(result.runnable).toEqual([]);
+    expect(result.failureRecoveryKeys).toEqual([]);
+  });
 });
