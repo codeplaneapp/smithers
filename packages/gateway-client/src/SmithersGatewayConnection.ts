@@ -34,6 +34,42 @@ function frameError(frame: Extract<GatewayResponseFrame, { ok: false }>, method:
   });
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function invalidFrameError(details?: unknown) {
+  return new GatewayRpcError({
+    method: "websocket",
+    code: "INVALID_GATEWAY_RESPONSE",
+    message: "Gateway returned an invalid WebSocket frame.",
+    details,
+  });
+}
+
+function isGatewayResponseFrame(value: unknown): value is GatewayResponseFrame {
+  if (!isObject(value)) {
+    return false;
+  }
+  if (value.type !== "res" || typeof value.id !== "string" || typeof value.ok !== "boolean") {
+    return false;
+  }
+  if (value.ok === true) {
+    return "payload" in value;
+  }
+  return isObject(value.error) &&
+    typeof value.error.code === "string" &&
+    typeof value.error.message === "string";
+}
+
+function isGatewayEventFrame(value: unknown): value is GatewayEventFrame {
+  return isObject(value) &&
+    value.type === "event" &&
+    typeof value.event === "string" &&
+    typeof value.seq === "number" &&
+    typeof value.stateVersion === "number";
+}
+
 export class SmithersGatewayConnection {
   readonly ws: WebSocket;
   readonly pending = new Map<string, PendingRequest>();
@@ -50,12 +86,12 @@ export class SmithersGatewayConnection {
       this.push({ kind: "error", error: new Error("Gateway WebSocket error") });
     });
     ws.addEventListener("close", () => {
+      const alreadyClosed = this.closed;
       this.closed = true;
-      for (const pending of this.pending.values()) {
-        pending.reject(new Error("Gateway WebSocket closed"));
+      this.rejectPending(new Error("Gateway WebSocket closed"));
+      if (!alreadyClosed) {
+        this.push({ kind: "close" });
       }
-      this.pending.clear();
-      this.push({ kind: "close" });
     });
   }
 
@@ -63,6 +99,9 @@ export class SmithersGatewayConnection {
     method: Method,
     params: GatewayRpcParams<Method>,
   ): Promise<GatewayRpcPayload<Method>> {
+    if (this.closed) {
+      return Promise.reject(new Error("Gateway WebSocket is closed"));
+    }
     const id = randomId(method);
     const frame = { type: "req", id, method, params };
     return new Promise((resolve, reject) => {
@@ -71,21 +110,38 @@ export class SmithersGatewayConnection {
         resolve: (payload) => resolve(payload as GatewayRpcPayload<Method>),
         reject,
       });
-      this.ws.send(JSON.stringify(frame));
+      try {
+        this.ws.send(JSON.stringify(frame));
+      } catch (cause) {
+        this.pending.delete(id);
+        reject(cause instanceof Error ? cause : new Error(String(cause)));
+      }
     });
   }
 
   requestRaw(method: string, params?: unknown): Promise<unknown> {
+    if (this.closed) {
+      return Promise.reject(new Error("Gateway WebSocket is closed"));
+    }
     const id = randomId(method);
     const frame = { type: "req", id, method, params };
     return new Promise((resolve, reject) => {
       this.pending.set(id, { method, resolve, reject });
-      this.ws.send(JSON.stringify(frame));
+      try {
+        this.ws.send(JSON.stringify(frame));
+      } catch (cause) {
+        this.pending.delete(id);
+        reject(cause instanceof Error ? cause : new Error(String(cause)));
+      }
     });
   }
 
   async *events(signal?: AbortSignal): AsyncGenerator<GatewayEventFrame> {
     const abort = () => this.close();
+    if (signal?.aborted) {
+      this.close();
+      return;
+    }
     signal?.addEventListener("abort", abort, { once: true });
     try {
       while (!this.closed || this.queue.length > 0) {
@@ -108,13 +164,21 @@ export class SmithersGatewayConnection {
       return;
     }
     this.closed = true;
+    this.rejectPending(new Error("Gateway WebSocket closed"));
+    this.push({ kind: "close" });
     this.ws.close();
   }
 
   private handleMessage(raw: unknown) {
     const text = typeof raw === "string" ? raw : String(raw);
-    const frame = JSON.parse(text) as GatewayResponseFrame | GatewayEventFrame;
-    if (frame.type === "res") {
+    let frame: unknown;
+    try {
+      frame = JSON.parse(text);
+    } catch {
+      this.push({ kind: "error", error: invalidFrameError(text) });
+      return;
+    }
+    if (isGatewayResponseFrame(frame)) {
       const pending = this.pending.get(frame.id);
       if (!pending) {
         return;
@@ -127,9 +191,19 @@ export class SmithersGatewayConnection {
       pending.reject(frameError(frame, pending.method));
       return;
     }
-    if (frame.type === "event") {
-      this.push({ kind: "event", frame });
+    if (isObject(frame) && frame.type === "res" && typeof frame.id === "string") {
+      const pending = this.pending.get(frame.id);
+      if (pending) {
+        this.pending.delete(frame.id);
+        pending.reject(invalidFrameError(frame));
+      }
+      return;
     }
+    if (isGatewayEventFrame(frame)) {
+      this.push({ kind: "event", frame });
+      return;
+    }
+    this.push({ kind: "error", error: invalidFrameError(frame) });
   }
 
   private push(event: QueuedEvent) {
@@ -150,5 +224,12 @@ export class SmithersGatewayConnection {
       });
     }
     return this.queue.shift();
+  }
+
+  private rejectPending(error: Error) {
+    for (const pending of this.pending.values()) {
+      pending.reject(error);
+    }
+    this.pending.clear();
   }
 }
