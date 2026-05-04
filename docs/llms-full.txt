@@ -3649,6 +3649,7 @@ type CachePolicy<Ctx = any> = {
 type AgentLike = {
   id?: string;
   tools?: Record<string, any>;
+  supportsNativeStructuredOutput?: boolean;
   capabilities?: any;
   generate: (args: any) => Promise<any>;
 };

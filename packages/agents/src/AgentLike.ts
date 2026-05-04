@@ -12,6 +12,8 @@ export type AgentLike = {
   tools?: Record<string, unknown>;
   /** Optional structured capability registry for cache and diagnostics */
   capabilities?: AgentCapabilityRegistry;
+  /** True when the agent consumes outputSchema through a native structured-output API. */
+  supportsNativeStructuredOutput?: boolean;
   /**
    * Generates a response or action based on the provided arguments.
    *

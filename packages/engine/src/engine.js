@@ -2581,6 +2581,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     let cacheJjBase = null;
     let responseText = null;
     let effectiveAgent = null;
+    let supportsNativeStructuredOutput = false;
     // Resolve effective root once so both caching and execution share it.
     const taskRoot = desc.worktreePath ?? toolConfig.rootDir;
     const stepCacheEnabled = cacheEnabled || Boolean(desc.cachePolicy);
@@ -2901,7 +2902,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     maybeCompleteHijack();
                 };
                 let effectivePrompt = desc.prompt ?? "";
-                const supportsNativeStructuredOutput = effectiveAgent.supportsNativeStructuredOutput === true;
+                supportsNativeStructuredOutput = effectiveAgent.supportsNativeStructuredOutput === true;
                 if (desc.outputTable && !supportsNativeStructuredOutput) {
                     const schemaDesc = describeSchemaShape(desc.outputTable, desc.outputSchema);
                     const jsonInstructions = [
@@ -3514,17 +3515,25 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             const zodIssues = validation.error?.issues
                 ?.map((iss) => `  - ${(iss.path ?? []).join(".")}: ${iss.message}`)
                 .join("\n") ?? "Unknown validation error";
-            const schemaRetryPrompt = [
-                `Your output didn't match the required schema. Validation errors:`,
-                zodIssues,
-                ``,
-                `Please return valid JSON matching the schema exactly.`,
-                ``,
-                `You MUST output ONLY a valid JSON object with exactly these fields and types:`,
-                schemaDesc,
-                ``,
-                `Output ONLY the JSON object, no other text.`,
-            ].join("\n");
+            const schemaRetryPrompt = supportsNativeStructuredOutput
+                ? [
+                    `Your structured output didn't match the required schema. Validation errors:`,
+                    zodIssues,
+                    ``,
+                    `Return corrected structured data matching this schema:`,
+                    schemaDesc,
+                ].join("\n")
+                : [
+                    `Your output didn't match the required schema. Validation errors:`,
+                    zodIssues,
+                    ``,
+                    `Please return valid JSON matching the schema exactly.`,
+                    ``,
+                    `You MUST output ONLY a valid JSON object with exactly these fields and types:`,
+                    schemaDesc,
+                    ``,
+                    `Output ONLY the JSON object, no other text.`,
+                ].join("\n");
             logInfo("schema validation retry", {
                 runId,
                 nodeId: desc.nodeId,
@@ -3554,6 +3563,9 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     recordInternalHeartbeat();
                     emitOutput(text, "stderr");
                 },
+                ...(supportsNativeStructuredOutput
+                    ? { outputSchema: desc.outputSchema }
+                    : {}),
             });
             const retryText = (schemaRetryResult.text ?? "").trim();
             responseText = retryText || responseText;
@@ -3575,8 +3587,24 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 cloneJsonValue(schemaRetryMessages) ?? schemaRetryMessages;
             // Try to parse the retry response
             let retryOutput;
+            if (supportsNativeStructuredOutput) {
+                try {
+                    if (schemaRetryResult._output !== undefined &&
+                        schemaRetryResult._output !== null) {
+                        retryOutput = schemaRetryResult._output;
+                    }
+                    else if (schemaRetryResult.output !== undefined &&
+                        schemaRetryResult.output !== null) {
+                        retryOutput = schemaRetryResult.output;
+                    }
+                }
+                catch {
+                    // Structured output access threw; fall back to text parsing.
+                }
+            }
             try {
-                if (retryText.startsWith("{") || retryText.startsWith("[")) {
+                if (retryOutput === undefined &&
+                    (retryText.startsWith("{") || retryText.startsWith("["))) {
                     retryOutput = JSON.parse(retryText);
                 }
             }

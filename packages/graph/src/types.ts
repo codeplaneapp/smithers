@@ -50,6 +50,7 @@ export type CachePolicy<Ctx = unknown> = {
 export type AgentLike = {
   id?: string;
   tools?: Record<string, unknown>;
+  supportsNativeStructuredOutput?: boolean;
   capabilities?: {
     version: 1;
     engine: string;

@@ -41,6 +41,7 @@ type CachePolicy$1<Ctx = unknown> = {
 type AgentLike$1 = {
     id?: string;
     tools?: Record<string, unknown>;
+    supportsNativeStructuredOutput?: boolean;
     capabilities?: {
         version: 1;
         engine: string;

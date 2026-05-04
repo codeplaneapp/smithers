@@ -13,6 +13,11 @@ import type {
 
 type AssertAssignable<T extends AgentLike> = T;
 
+type _CustomNativeStructuredAgent = AssertAssignable<{
+  supportsNativeStructuredOutput: true;
+  generate: () => Promise<unknown>;
+}>;
+
 type _ConcreteAgentsAreAgentLike = [
   AssertAssignable<AmpAgent>,
   AssertAssignable<AnthropicAgent>,
