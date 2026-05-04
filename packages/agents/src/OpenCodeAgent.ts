@@ -13,8 +13,8 @@ export type OpenCodeAgentOptions = BaseCliAgentOptions & {
   continueSession?: boolean;
   /** Resume a specific session by ID */
   sessionId?: string;
-  /** Variant/reasoning effort level */
-  variant?: "high" | "medium" | "low";
+  /** Provider-specific model variant/reasoning effort level */
+  variant?: string;
 };
 
 export declare function createOpenCodeCapabilityRegistry(

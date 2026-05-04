@@ -112,7 +112,7 @@ type AgentToolDescriptor$1 = {
 
 type AgentCapabilityRegistry$3 = {
     version: 1;
-    engine: "claude-code" | "codex" | "gemini" | "kimi" | "pi" | "amp" | "forge";
+    engine: "claude-code" | "codex" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode";
     runtimeTools: Record<string, AgentToolDescriptor$1>;
     mcp: {
         bootstrap: "inline-config" | "project-config" | "allow-list" | "unsupported";
@@ -762,6 +762,42 @@ declare class ForgeAgent extends BaseCliAgent {
 type CliOutputInterpreter = CliOutputInterpreter$8;
 type ForgeAgentOptions = ForgeAgentOptions$1;
 
+type OpenCodeAgentOptions$1 = BaseCliAgentOptions$1 & {
+    /** Model identifier (e.g., "anthropic/claude-opus-4-20250514", "openai/gpt-5.4") */
+    model?: string;
+    /** OpenCode agent name (maps to --agent flag, selects predefined agent config) */
+    agentName?: string;
+    /** Files to attach to the prompt via -f flags */
+    attachFiles?: string[];
+    /** Continue a previous session */
+    continueSession?: boolean;
+    /** Resume a specific session by ID */
+    sessionId?: string;
+    /** Provider-specific model variant/reasoning effort level */
+    variant?: string;
+};
+
+declare class OpenCodeAgent extends BaseCliAgent {
+    constructor(opts?: OpenCodeAgentOptions);
+    opts: OpenCodeAgentOptions$1;
+    capabilities: AgentCapabilityRegistry$3;
+    cliEngine: "opencode";
+    createOutputInterpreter(): CliOutputInterpreter;
+    buildCommand(params: {
+        prompt: string;
+        systemPrompt?: string;
+        cwd: string;
+        options: any;
+    }): Promise<{
+        command: string;
+        args: string[];
+        outputFormat: "stream-json";
+        env?: Record<string, string>;
+        stdoutBannerPatterns: RegExp[];
+        stdoutErrorPatterns: RegExp[];
+    }>;
+}
+
 /**
  * @param {CreateSmithersAgentContractOptions} options
  * @returns {SmithersAgentContract}
@@ -821,6 +857,7 @@ type AgentCapabilityRegistry = AgentCapabilityRegistry$3;
 type AgentLike = AgentLike$1;
 type AgentToolDescriptor = AgentToolDescriptor$1;
 type AnthropicAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = AnthropicAgentOptions$2<CALL_OPTIONS, TOOLS>;
+type OpenCodeAgentOptions = OpenCodeAgentOptions$1;
 type OpenAIAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = OpenAIAgentOptions$2<CALL_OPTIONS, TOOLS>;
 type PiAgentOptions = PiAgentOptions$2;
 type PiExtensionUiRequest = PiExtensionUiRequest$1;
@@ -831,4 +868,4 @@ type SmithersAgentToolCategory = SmithersAgentToolCategory$1;
 type SmithersListedTool = SmithersListedTool$2;
 type SmithersToolSurface = SmithersToolSurface$2;
 
-export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, BaseCliAgent, ClaudeCodeAgent, CodexAgent, ForgeAgent, GeminiAgent, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, createSmithersAgentContract, hashCapabilityRegistry, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, BaseCliAgent, ClaudeCodeAgent, CodexAgent, ForgeAgent, GeminiAgent, KimiAgent, OpenCodeAgent, type OpenCodeAgentOptions, OpenAIAgent, type OpenAIAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, createSmithersAgentContract, hashCapabilityRegistry, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
