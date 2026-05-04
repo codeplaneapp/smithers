@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +19,9 @@ import { generateAgentsTs } from "./agent-detection.js";
 /**
  * @typedef {{ path: string; contents: string; preserveExisting?: boolean; }} TemplateFile
  */
+
+const FALLBACK_SMITHERS_SPEC = "latest";
+const require = createRequire(import.meta.url);
 
 /**
  * @param {string} path
@@ -50,24 +54,31 @@ function readPackageVersion(path, fallback) {
     }
 }
 /**
- * Resolve `<spec>/package.json` via Node's module resolution (from this file's
- * location) and return its `version`. Uses `import.meta.resolve` so it works
- * whether the CLI is running from the monorepo checkout (deps under
- * `apps/cli/node_modules/`) or installed flat under a user's project
- * `node_modules/`. Falls back to the pin bundled at release time when the
- * package isn't installed in the user's project (typical for devDep-only
- * specs like `typescript` and `@types/*`).
+ * Resolve an installed dependency version from the current package layout.
  *
- * @param {string} spec
+ * @param {string} specifier
  * @param {string} fallback
  */
-function resolveDependencyVersion(spec, fallback) {
+function resolveInstalledPackageVersion(specifier, fallback) {
     try {
-        const url = import.meta.resolve(`${spec}/package.json`);
-        return readPackageVersion(fileURLToPath(url), fallback);
+        const resolved = require.resolve(`${specifier}/package.json`);
+        return readPackageVersion(resolved, fallback);
     }
     catch {
         return fallback;
+    }
+}
+/**
+ * @returns {string | undefined}
+ */
+function readOwnPackageVersion() {
+    try {
+        const ownPackagePath = fileURLToPath(new URL("../package.json", import.meta.url));
+        const version = readJson(ownPackagePath).version;
+        return typeof version === "string" && version.length > 0 ? version : undefined;
+    }
+    catch {
+        return undefined;
     }
 }
 /**
@@ -88,19 +99,22 @@ const BUNDLED_VERSION_PINS = {
  */
 function readDependencyVersions() {
     return {
-        smithersVersion: readPackageVersion(fileURLToPath(new URL("../package.json", import.meta.url)), "0.0.0"),
-        zodVersion: resolveDependencyVersion("zod", BUNDLED_VERSION_PINS.zod),
-        typescriptVersion: resolveDependencyVersion("typescript", BUNDLED_VERSION_PINS.typescript),
-        reactTypesVersion: resolveDependencyVersion("@types/react", BUNDLED_VERSION_PINS.reactTypes),
-        reactDomTypesVersion: resolveDependencyVersion("@types/react-dom", BUNDLED_VERSION_PINS.reactDomTypes),
-        mdxTypesVersion: resolveDependencyVersion("@types/mdx", BUNDLED_VERSION_PINS.mdxTypes),
-        nodeTypesVersion: resolveDependencyVersion("@types/node", BUNDLED_VERSION_PINS.nodeTypes),
+        smithersVersion: readOwnPackageVersion(),
+        zodVersion: resolveInstalledPackageVersion("zod", BUNDLED_VERSION_PINS.zod),
+        typescriptVersion: resolveInstalledPackageVersion("typescript", BUNDLED_VERSION_PINS.typescript),
+        reactTypesVersion: resolveInstalledPackageVersion("@types/react", BUNDLED_VERSION_PINS.reactTypes),
+        reactDomTypesVersion: resolveInstalledPackageVersion("@types/react-dom", BUNDLED_VERSION_PINS.reactDomTypes),
+        mdxTypesVersion: resolveInstalledPackageVersion("@types/mdx", BUNDLED_VERSION_PINS.mdxTypes),
+        nodeTypesVersion: resolveInstalledPackageVersion("@types/node", BUNDLED_VERSION_PINS.nodeTypes),
     };
 }
 /**
  * @param {DependencyVersions} versions
  */
 function renderPackageJson(versions) {
+    const smithersSpec = versions.smithersVersion
+        ? `^${versions.smithersVersion}`
+        : FALLBACK_SMITHERS_SPEC;
     return JSON.stringify({
         name: "smithers-workflows",
         private: true,
@@ -113,7 +127,7 @@ function renderPackageJson(versions) {
         },
         dependencies: {
             skills: "github:mattpocock/skills",
-            "smithers-orchestrator": "latest",
+            "smithers-orchestrator": smithersSpec,
             zod: versions.zodVersion,
         },
         devDependencies: {
