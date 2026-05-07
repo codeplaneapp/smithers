@@ -5,8 +5,6 @@
  * Notes:
  * - These tests use a no-auth Gateway and POST /rpc, except where the auth
  *   suite explicitly configures token mode.
- * - There is no slowloris/header timeout in gateway.js today; the slowloris
- *   case below is documented (skipped) rather than asserted.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { connect } from "node:net";
@@ -120,25 +118,20 @@ describe("gateway readRawBody / Content-Length", () => {
         expect(res.body).toContain("INVALID");
     });
 
-    test("negative Content-Length is currently NOT rejected by readRawBody (documents observed behavior)", async () => {
-        // FIXME: gateway.readRawBody does not reject negative Content-Length
-        // values. Number("-1") is finite and -1 > maxBytes is false, so the
-        // header is silently ignored. Node's HTTP parser may also reject the
-        // request before it reaches readRawBody; this test only documents that
-        // the gateway-level check has no negative-value branch.
+    test("invalid Content-Length values are rejected before RPC dispatch", async () => {
         await startGateway();
-        const headers = [
-            "POST /rpc HTTP/1.1",
-            "Host: 127.0.0.1",
-            "Content-Type: application/json",
-            "Content-Length: -1",
-            "Connection: close",
-        ].join("\r\n");
-        const res = await rawHttp(headers, null);
-        // Either node rejects with 400 or readRawBody treats it as no body.
-        // Both indicate the request never reached business logic with a
-        // negative declared length.
-        expect([400, 200]).toContain(res.statusCode);
+        for (const value of ["-1", "1.5", "abc"]) {
+            const headers = [
+                "POST /rpc HTTP/1.1",
+                "Host: 127.0.0.1",
+                "Content-Type: application/json",
+                `Content-Length: ${value}`,
+                "Connection: close",
+            ].join("\r\n");
+            const res = await rawHttp(headers, null);
+            expect(res.statusCode).toBe(400);
+            expect(res.body).not.toContain("METHOD_NOT_FOUND");
+        }
     });
 
     test("Content-Length exceeding maxBytes is rejected with 413", async () => {
@@ -246,12 +239,16 @@ describe("gateway readRawBody / Content-Length", () => {
         expect(res.statusCode).toBe(400);
     });
 
-    // No header/slowloris timeout exists in gateway.js today; document and skip.
-    test.skip("slowloris: drip body byte-by-byte hits a per-request timeout", () => {
-        // FIXME: gateway.js does not configure server.headersTimeout or
-        // server.requestTimeout, so a slow client cannot be timed out at the
-        // application layer. If a timeout is added later, replace this skip
-        // with a connect()-based drip test.
+    test("applies default HTTP parser timeouts", async () => {
+        await startGateway();
+        expect(server?.headersTimeout).toBe(30_000);
+        expect(server?.requestTimeout).toBe(60_000);
+    });
+
+    test("applies custom HTTP parser timeouts", async () => {
+        await startGateway({ headersTimeout: 1_500, requestTimeout: 2_500 });
+        expect(server?.headersTimeout).toBe(1_500);
+        expect(server?.requestTimeout).toBe(2_500);
     });
 });
 

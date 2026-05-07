@@ -1077,6 +1077,22 @@ function parseJsonBuffer(body, description) {
     }
 }
 /**
+ * @param {string | null} lengthHeader
+ * @param {number} maxBytes
+ */
+function assertContentLengthWithinBounds(lengthHeader, maxBytes) {
+    if (lengthHeader === null) {
+        return;
+    }
+    const normalized = lengthHeader.trim();
+    if (!/^\d+$/.test(normalized)) {
+        throw new SmithersError("INVALID_INPUT", "Gateway request Content-Length must be a non-negative integer.", { contentLength: lengthHeader });
+    }
+    if (BigInt(normalized) > BigInt(maxBytes)) {
+        throw new SmithersError("PayloadTooLarge", `Gateway request payload exceeds ${maxBytes} bytes.`, { maxBytes });
+    }
+}
+/**
  * @param {IncomingMessage} req
  * @param {number} maxBytes
  */
@@ -1084,10 +1100,7 @@ async function readRawBody(req, maxBytes) {
     const chunks = [];
     let total = 0;
     const lengthHeader = headerValue(req, "content-length");
-    const declaredLength = lengthHeader ? Number(lengthHeader) : NaN;
-    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-        throw new SmithersError("PayloadTooLarge", `Gateway request payload exceeds ${maxBytes} bytes.`, { maxBytes });
-    }
+    assertContentLengthWithinBounds(lengthHeader, maxBytes);
     for await (const chunk of req) {
         const buffer = Buffer.from(chunk);
         total += buffer.length;
