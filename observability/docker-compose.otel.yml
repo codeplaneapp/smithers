@@ -2,7 +2,8 @@ version: "3.9"
 
 services:
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:0.148.0
+    restart: unless-stopped
     command: ["--config", "/etc/otelcol/config.yml"]
     volumes:
       - ./otel-collector-config.yml:/etc/otelcol/config.yml:ro
@@ -11,28 +12,71 @@ services:
       - "4318:4318"   # HTTP (Smithers sends here)
       - "8889:8889"   # Prometheus exporter scrape endpoint
     depends_on:
-      - tempo
+      tempo:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/otelcol-contrib", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  loki:
+    image: grafana/loki:3.3.2
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - ./data/loki:/loki
+    ports:
+      - "3100:3100"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 10s
 
   prometheus:
     image: prom/prometheus:v3.2.0
+    restart: unless-stopped
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./data/prometheus:/prometheus
     ports:
       - "9090:9090"
     depends_on:
-      - otel-collector
+      otel-collector:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 10s
 
   tempo:
     image: grafana/tempo:2.7.0
+    restart: unless-stopped
     command: ["-config.file=/etc/tempo/tempo.yml"]
     volumes:
       - ./tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - ./data/tempo:/tmp/tempo
     ports:
       - "3200:3200"   # Tempo query API
       - "4317"        # OTLP gRPC (internal)
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:3200/api/search"]
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
 
   grafana:
     image: grafana/grafana:11.5.0
+    restart: unless-stopped
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_AUTH_ANONYMOUS_ENABLED=true
@@ -40,8 +84,19 @@ services:
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./data/grafana:/var/lib/grafana
     ports:
       - "3001:3000"
     depends_on:
-      - prometheus
-      - tempo
+      prometheus:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 20s

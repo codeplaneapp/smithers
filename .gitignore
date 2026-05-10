@@ -62,6 +62,8 @@ reference/
 codex/
 ghostty/
 burns
+observability/data/
+tmp/verification/
 
 # External reference repos
 .mastra-ref/

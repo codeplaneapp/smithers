@@ -14,6 +14,15 @@ datasources:
         - name: traceID
           datasourceUid: tempo
 
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      maxLines: 1000
+
   - name: Tempo
     type: tempo
     uid: tempo
@@ -21,6 +30,17 @@ datasources:
     url: http://tempo:3200
     editable: false
     jsonData:
+      tracesToLogs:
+        datasourceUid: loki
+        tags: ["service.name"]
+        mappedTags:
+          - key: service.name
+            value: service.name
+        mapTagNamesEnabled: false
+        spanStartTimeShift: "-1h"
+        spanEndTimeShift: "1h"
+        filterByTraceID: false
+        filterBySpanID: false
       tracesToMetrics:
         datasourceUid: prometheus
         spanStartTimeShift: "-1h"
