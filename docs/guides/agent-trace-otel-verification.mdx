@@ -1,0 +1,265 @@
+---
+title: Agent Trace OTEL Log Verification
+description: Reproducible local verification for Smithers canonical trace and provider session transcript OTEL log export with Loki.
+---
+
+## Local stack
+
+Start the local stack:
+
+```bash
+docker compose -f observability/docker-compose.otel.yml up -d
+scripts/obs-wait-healthy.sh
+```
+
+Or use the all-in-one reset:
+
+```bash
+scripts/obs-reset.sh
+```
+
+Expected endpoints:
+
+- Grafana: `http://localhost:3001`
+- Prometheus: `http://localhost:9090`
+- Tempo: `http://localhost:3200`
+- Loki: `http://localhost:3100`
+- OTEL collector HTTP: `http://localhost:4318`
+
+Validate the stack:
+
+```bash
+docker compose -f observability/docker-compose.otel.yml ps
+curl -sf http://localhost:3100/ready
+curl -sf http://localhost:3001/api/datasources | jq 'map({name,type,url})'
+docker logs observability-otel-collector-1 | tail -n 80
+```
+
+## Enable OTEL export
+
+```bash
+export SMITHERS_OTEL_ENABLED=1
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_SERVICE_NAME=smithers-dev
+export SMITHERS_LOG_FORMAT=json
+```
+
+## Demo workflow
+
+Use the built-in reproducible workflow at `workflows/agent-trace-otel-demo.tsx`.
+It emits:
+
+- one Pi-like high-fidelity attempt with canonical trace events plus persisted session transcript rows
+- one Claude-like structured attempt with canonical trace events plus provider session transcript rows
+- one Codex-like structured attempt with canonical trace events plus provider session transcript rows
+- one Gemini-like structured attempt
+- one SDK-style final-only attempt
+- stable run annotations for Loki queries
+
+Run the success case:
+
+```bash
+bun run apps/cli/src/index.js up workflows/agent-trace-otel-demo.tsx \
+  --run-id agent-trace-otel-demo \
+  --annotations '{"custom.demo":true,"custom.ticket":"OBS-123"}'
+```
+
+Run the malformed JSON failure case:
+
+```bash
+bun run apps/cli/src/index.js up workflows/agent-trace-otel-demo.tsx \
+  --run-id agent-trace-otel-demo-fail \
+  --input '{"failureMode":"malformed-json"}' \
+  --annotations '{"custom.demo":true,"custom.ticket":"OBS-ERR"}'
+```
+
+Optional durable-local verification:
+
+```bash
+jq 'select(.type == "AgentTraceEvent" or .type == "AgentTraceSummary")' \
+  .smithers/executions/agent-trace-otel-demo/logs/stream.ndjson
+
+find .smithers/executions/agent-trace-otel-demo/logs/agent-trace -type f -maxdepth 1 -print
+```
+
+## End-to-end verification script
+
+`scripts/verify-observability.sh` runs the full reset → start → demo workflow (success + failure) → Loki/Tempo query verification flow and writes a timestamped evidence bundle under `tmp/verification/<timestamp>`. Use this as the canonical reproduction path for reviewers:
+
+```bash
+scripts/verify-observability.sh
+```
+
+The bundle contains every Loki query result, the Tempo trace export, Grafana datasource health, and the success/failure CLI run logs as JSON.
+
+## Loki queries
+
+Smithers OTEL attributes are exposed to Loki as sanitized structured metadata fields such as:
+
+- `smithers_event_category`
+- `run_id`
+- `workflow_path`
+- `node_id`
+- `node_attempt`
+- `agent_family`
+- `agent_capture_mode`
+- `trace_completeness`
+- `event_kind`
+- `session_row_type`
+
+Smithers exports two related Loki log families:
+
+- `agent-trace`: normalized canonical execution events such as deltas, tool lifecycle, usage, and capture warnings/errors
+- `agent-session`: provider transcript/session rows observed live or backfilled from persisted session logs
+
+Both families share the same run/workflow/node/attempt/agent correlation fields and the same redaction rules.
+`artifact.created` remains local-only and is not exported to Loki.
+
+Use `{service_name="smithers-dev"}` as the stream selector, then filter on structured metadata in the LogQL pipeline. Use `| json` to inspect the structured log body.
+
+All events for one run:
+
+```logql
+{service_name="smithers-dev"} | run_id="agent-trace-otel-demo"
+```
+
+One node attempt:
+
+```logql
+{service_name="smithers-dev"} | run_id="agent-trace-otel-demo" | node_id="pi-rich-trace" | node_attempt="1"
+```
+
+Thinking deltas only:
+
+```logql
+{service_name="smithers-dev"} | run_id="agent-trace-otel-demo" | event_kind="assistant.thinking.delta"
+```
+
+Tool execution only:
+
+```logql
+{service_name="smithers-dev"} | run_id="agent-trace-otel-demo" | event_kind=~"tool\.execution\..*"
+```
+
+Capture errors only:
+
+```logql
+{service_name="smithers-dev"} | event_kind="capture.error"
+```
+
+Inspect the structured JSON body for one run:
+
+```logql
+{service_name="smithers-dev"} | run_id="agent-trace-otel-demo" | json
+```
+
+Canonical trace rows only:
+
+```logql
+{service_name="smithers-dev"} | smithers_event_category="agent-trace" | run_id="agent-trace-otel-demo"
+```
+
+Provider session rows only:
+
+```logql
+{service_name="smithers-dev"} | smithers_event_category="agent-session" | run_id="agent-trace-otel-demo"
+```
+
+Pi persisted session metadata:
+
+```logql
+{service_name="smithers-dev"} | run_id="agent-trace-otel-demo" | node_id="pi-rich-trace" | session_row_type="model_change"
+```
+
+Claude persisted session queue events:
+
+```logql
+{service_name="smithers-dev"} | run_id="agent-trace-otel-demo" | node_id="claude-structured-trace" | session_row_type="queue-operation"
+```
+
+Codex persisted session reasoning rows:
+
+```logql
+{service_name="smithers-dev"} | run_id="agent-trace-otel-demo" | node_id="codex-structured-trace" | session_row_type="event_msg"
+```
+
+Redaction proof query:
+
+```logql
+{service_name="smithers-dev"} | run_id="agent-trace-otel-demo" |= "REDACTED"
+```
+
+## API query examples
+
+Equivalent direct Loki API checks:
+
+```bash
+curl -sG 'http://localhost:3100/loki/api/v1/query_range' \
+  --data-urlencode 'query={service_name="smithers-dev"} | run_id="agent-trace-otel-demo"' \
+  --data-urlencode 'limit=200' | jq '.data.result[] | {stream, values: (.values | length)}'
+
+curl -sG 'http://localhost:3100/loki/api/v1/query_range' \
+  --data-urlencode 'query={service_name="smithers-dev"} | run_id="agent-trace-otel-demo" | event_kind="assistant.thinking.delta"' \
+  --data-urlencode 'limit=20' | jq '.data.result[]?.values[]?[1]'
+
+curl -sG 'http://localhost:3100/loki/api/v1/query_range' \
+  --data-urlencode 'query={service_name="smithers-dev"} | run_id="agent-trace-otel-demo" | node_id="codex-structured-trace" | session_row_type="event_msg"' \
+  --data-urlencode 'limit=20' | jq '.data.result[]?.values[]?[1]'
+```
+
+## Tempo trace checks
+
+Tempo search should show Smithers spans once a workflow has run:
+
+```bash
+curl -s http://localhost:3200/api/search | jq .
+curl -s http://localhost:3200/api/search/tags | jq .
+curl -s 'http://localhost:3200/api/search/tag/service.name/values' | jq .
+curl -s 'http://localhost:3200/api/search/tag/runId/values' | jq .
+```
+
+Inspect one trace directly:
+
+```bash
+TRACE_ID=$(curl -s http://localhost:3200/api/search \
+  | jq -r '.traces[] | select(.rootTraceName=="engine:run-workflow") | .traceID' \
+  | head -n 1)
+
+curl -s http://localhost:3200/api/traces/$TRACE_ID | jq .
+```
+
+Expected trace attributes include at least:
+
+- `service.name = smithers-dev`
+- `runId = <RUN_ID>`
+- `workflowPath = <workflow path>`
+
+## Verification checklist
+
+- stack starts successfully in Docker
+- Loki is present and queryable
+- collector logs pipeline is active
+- Pi traces show text deltas, thinking deltas, tool execution lifecycle, final message, usage, and run/node/attempt correlation
+- Pi session transcript rows are queryable in Loki
+- Claude session transcript rows are queryable in Loki
+- Codex session transcript rows are queryable in Loki
+- second agent family is exported with truthful `final-only` completeness classification
+- Gemini `stream-json` attempts preserve structured deltas truthfully
+- malformed or truncated structured streams emit `capture.error` and classify as `capture-failed`
+- artifact write failures emit `capture.warning` and degrade to `partial-observed` without losing durable DB truth
+- Tempo search shows Smithers spans and trace attributes including `runId`
+- Prometheus is still scraping the collector successfully
+- secrets are redacted from canonical events, OTEL log bodies, and persisted trace artifacts
+
+## Automated coverage
+
+`apps/observability/tests/agentTrace.test.js` covers the canonical contract:
+
+- capability profiles for every agent family
+- family + capture-mode detection
+- Pi / Claude / Codex / Gemini structured event normalization
+- redaction rules for API keys, bearer tokens, and secret-ish key=value pairs
+- canonical OTEL log record shaping with stable Loki query attributes
+- session-event OTEL log record shaping
+
+The full provider-specific test matrix from PR #119 (truncated streams, artifact write failures, multi-family final-only classification) is partially covered and will be extended in a follow-up.
