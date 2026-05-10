@@ -20,6 +20,7 @@ import { buildPlanTree, scheduleTasks, buildStateKey, } from "./scheduler.js";
 import { getDefinedToolMetadata } from "./getDefinedToolMetadata.js";
 import { captureSnapshotEffect, loadLatestSnapshot, parseSnapshot, } from "@smithers-orchestrator/time-travel/snapshot";
 import { EventBus } from "./events.js";
+import { AgentTraceCollector } from "./AgentTraceCollector.js";
 import { getJjPointer, runJj, workspaceAdd } from "@smithers-orchestrator/vcs/jj";
 import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
 import * as BunContext from "@effect/platform-bun/BunContext";
@@ -3053,54 +3054,88 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     }, 100)
                     : undefined;
                 // Use fallback agent on retry attempts when available
+                const traceCollector = toolConfig.traceContext && effectiveAgent
+                    ? new AgentTraceCollector({
+                        eventBus,
+                        runId,
+                        workflowPath: toolConfig.traceContext.workflowPath,
+                        workflowHash: toolConfig.traceContext.workflowHash,
+                        cwd: taskRoot,
+                        nodeId: desc.nodeId,
+                        iteration: desc.iteration,
+                        attempt: attemptNo,
+                        agent: effectiveAgent,
+                        agentId: attemptMeta.agentId ?? undefined,
+                        model: attemptMeta.agentModel ?? undefined,
+                        logDir: toolConfig.traceContext.logDir,
+                        annotations: toolConfig.traceContext.annotations,
+                    })
+                    : null;
+                if (traceCollector) traceCollector.begin();
                 let result;
                 try {
-                    result = await runPromisePreservingFailure(withSmithersSpan(smithersSpanNames.agent, Effect.tryPromise({
-                        try: () => {
-                            const agentCall = guidedResumeMessages?.length
-                                ? {
-                                    messages: guidedResumeMessages,
-                                }
-                                : {
-                                    prompt: effectivePrompt,
-                                };
-                            return effectiveAgent.generate({
-                                options: undefined,
-                                abortSignal: taskSignal,
-                                ...agentCall,
-                                resumeSession,
-                                lastHeartbeat: previousHeartbeat,
-                                rootDir: taskRoot,
-                                maxOutputBytes: toolConfig.maxOutputBytes,
-                                timeout: desc.timeoutMs
-                                    ? { totalMs: desc.timeoutMs }
-                                    : undefined,
-                                onStdout: (text) => {
-                                    recordInternalHeartbeat();
-                                    emitOutput(text, "stdout");
-                                },
-                                onStderr: (text) => {
-                                    recordInternalHeartbeat();
-                                    emitOutput(text, "stderr");
-                                },
-                                onEvent: handleAgentEvent,
-                                onStepFinish: handleSdkStepFinish,
-                                outputSchema: desc.outputSchema,
-                            });
-                        },
-                        catch: (error) => error,
-                    }), {
-                        ...taskSpanContext,
-                        agent: attemptMeta.agentId ??
-                            attemptMeta.agentEngine ??
-                            "unknown",
-                        model: attemptMeta.agentModel,
-                    }));
-                }
-                finally {
-                    if (hijackPollingInterval) {
-                        clearInterval(hijackPollingInterval);
+                    try {
+                        result = await runPromisePreservingFailure(withSmithersSpan(smithersSpanNames.agent, Effect.tryPromise({
+                            try: () => {
+                                const agentCall = guidedResumeMessages?.length
+                                    ? {
+                                        messages: guidedResumeMessages,
+                                    }
+                                    : {
+                                        prompt: effectivePrompt,
+                                    };
+                                return effectiveAgent.generate({
+                                    options: undefined,
+                                    abortSignal: taskSignal,
+                                    ...agentCall,
+                                    resumeSession,
+                                    lastHeartbeat: previousHeartbeat,
+                                    rootDir: taskRoot,
+                                    maxOutputBytes: toolConfig.maxOutputBytes,
+                                    timeout: desc.timeoutMs
+                                        ? { totalMs: desc.timeoutMs }
+                                        : undefined,
+                                    onStdout: (text) => {
+                                        recordInternalHeartbeat();
+                                        emitOutput(text, "stdout");
+                                        traceCollector?.onStdout(text);
+                                    },
+                                    onStderr: (text) => {
+                                        recordInternalHeartbeat();
+                                        emitOutput(text, "stderr");
+                                        traceCollector?.onStderr(text);
+                                    },
+                                    onEvent: handleAgentEvent,
+                                    onStepFinish: handleSdkStepFinish,
+                                    outputSchema: desc.outputSchema,
+                                });
+                            },
+                            catch: (error) => error,
+                        }), {
+                            ...taskSpanContext,
+                            agent: attemptMeta.agentId ??
+                                attemptMeta.agentEngine ??
+                                "unknown",
+                            model: attemptMeta.agentModel,
+                        }));
                     }
+                    finally {
+                        if (hijackPollingInterval) {
+                            clearInterval(hijackPollingInterval);
+                        }
+                    }
+                }
+                catch (error) {
+                    if (traceCollector) {
+                        traceCollector.observeError(error);
+                        try { await traceCollector.flush(); }
+                        catch { /* trace flush failures must not mask the original error */ }
+                    }
+                    throw error;
+                }
+                if (traceCollector) {
+                    traceCollector.observeResult(result);
+                    await traceCollector.flush();
                 }
                 agentResult = result;
                 if (!conversationMessages) {
@@ -4280,6 +4315,12 @@ async function runWorkflowBodyDriver(workflow, opts) {
         allowNetwork,
         maxOutputBytes,
         toolTimeoutMs,
+        traceContext: {
+            workflowPath: resolvedWorkflowPath ?? opts.workflowPath ?? null,
+            workflowHash: runMetadata.workflowHash ?? null,
+            logDir: logDir ?? undefined,
+            annotations: opts.annotations,
+        },
     };
     let frameNo = ((await adapter.getLastFrame(runId))?.frameNo ?? 0);
     let defaultIteration = 0;
@@ -5665,6 +5706,12 @@ async function runWorkflowBodyLegacy(workflow, opts) {
             allowNetwork,
             maxOutputBytes,
             toolTimeoutMs,
+            traceContext: {
+                workflowPath: resolvedWorkflowPath ?? opts.workflowPath ?? null,
+                workflowHash: runMetadata.workflowHash ?? null,
+                logDir: logDir ?? undefined,
+                annotations: opts.annotations,
+            },
         };
         const schedulerExecutionConcurrency = Math.max(1, maxConcurrency);
         /**
