@@ -260,6 +260,36 @@ function parseJsonInput(raw, label, fail) {
     }
 }
 /**
+ * @param {string | undefined} raw
+ * @param {FailFn} fail
+ * @returns {Record<string, string | number | boolean> | undefined}
+ */
+function parseAnnotations(raw, fail) {
+    const parsed = parseJsonInput(raw, "annotations", fail);
+    if (parsed === undefined)
+        return undefined;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return fail({
+            code: "INVALID_ANNOTATIONS",
+            message: "Run annotations must be a flat JSON object of string/number/boolean values",
+            exitCode: 4,
+        });
+    }
+    /** @type {Record<string, string | number | boolean>} */
+    const annotations = {};
+    for (const [key, value] of Object.entries(parsed)) {
+        if (!["string", "number", "boolean"].includes(typeof value)) {
+            return fail({
+                code: "INVALID_ANNOTATIONS",
+                message: `Run annotation ${key} must be a string, number, or boolean`,
+                exitCode: 4,
+            });
+        }
+        annotations[key] = /** @type {string | number | boolean} */ (value);
+    }
+    return annotations;
+}
+/**
  * @param {string | undefined} status
  */
 function formatStatusExitCode(status) {
@@ -1225,6 +1255,7 @@ const upOptions = z.object({
     toolTimeoutMs: z.number().int().min(1).optional().describe("Max wall-clock time per tool call in ms"),
     hot: z.boolean().default(false).describe("Enable hot module replacement for .tsx workflows"),
     input: z.string().optional().describe("Input data as JSON string"),
+    annotations: z.string().optional().describe("Run annotations as a flat JSON object of string/number/boolean values"),
     resume: z.union([z.boolean(), z.string()]).default(false).describe("Resume a previous run. Pass true with --run-id, or pass the run ID directly (e.g. --resume <run-id>)"),
     force: z.boolean().default(false).describe("Resume even if still marked running"),
     resumeClaimOwner: z.string().optional().describe("Internal durable resume claim owner"),
@@ -1450,6 +1481,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
     try {
         const resolvedWorkflowPath = resolve(process.cwd(), workflowPath);
         const input = parseJsonInput(options.input, "input", fail) ?? {};
+        const annotations = parseAnnotations(options.annotations, fail);
         const { resume, resumeRunId } = normalizeResumeOption(options.resume);
         const runId = options.runId ?? resumeRunId;
         // Detached mode: spawn ourselves as a background process
@@ -1460,6 +1492,8 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 childArgs.push("--run-id", runId);
             if (options.input)
                 childArgs.push("--input", options.input);
+            if (options.annotations)
+                childArgs.push("--annotations", options.annotations);
             if (options.maxConcurrency)
                 childArgs.push("--max-concurrency", String(options.maxConcurrency));
             if (options.root)
@@ -1647,6 +1681,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 maxOutputBytes: options.maxOutputBytes,
                 toolTimeoutMs: options.toolTimeoutMs,
                 hot: options.hot,
+                annotations,
                 onProgress,
                 signal: abort.signal,
             }));
@@ -1699,6 +1734,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             maxOutputBytes: options.maxOutputBytes,
             toolTimeoutMs: options.toolTimeoutMs,
             hot: options.hot,
+            annotations,
             onProgress,
             signal: abort.signal,
         }));
