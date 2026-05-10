@@ -10,6 +10,7 @@
 /** @typedef {import("./BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
 /** @typedef {import("./CliUsageInfo.ts").CliUsageInfo} CliUsageInfo */
+/** @typedef {import("./NormalizedTokenUsage.ts").NormalizedTokenUsage} NormalizedTokenUsage */
 /** @typedef {import("./CodexConfigOverrides.ts").CodexConfigOverrides} CodexConfigOverrides */
 /** @typedef {import("./PiExtensionUiRequest.ts").PiExtensionUiRequest} PiExtensionUiRequest */
 /** @typedef {import("./PiExtensionUiResponse.ts").PiExtensionUiResponse} PiExtensionUiResponse */
@@ -21,6 +22,7 @@ export { combineNonEmpty } from "./combineNonEmpty.js";
 export { extractPrompt } from "./extractPrompt.js";
 export { tryParseJson } from "./tryParseJson.js";
 export { extractTextFromJsonValue } from "./extractTextFromJsonValue.js";
+export { normalizeTokenUsage } from "./normalizeTokenUsage.js";
 export { createAgentStdoutTextEmitter } from "./createAgentStdoutTextEmitter.js";
 export { truncateToBytes } from "./truncateToBytes.js";
 export { buildGenerateResult } from "./buildGenerateResult.js";

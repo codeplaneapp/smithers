@@ -64,6 +64,7 @@ ghostty/
 burns
 observability/data/
 tmp/verification/
+.context/
 
 # External reference repos
 .mastra-ref/

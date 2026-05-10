@@ -30,6 +30,7 @@ export type RunOptions = {
   maxOutputBytes?: number;
   toolTimeoutMs?: number;
   hot?: boolean | HotReloadOptions;
+  annotations?: Record<string, string | number | boolean>;
   auth?: RunAuthContext | null;
   config?: Record<string, unknown>;
   cliAgentToolsDefault?: "all" | "explicit-only";

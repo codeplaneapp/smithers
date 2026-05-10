@@ -5,6 +5,10 @@
 export function extractTextFromJsonValue(value) {
     if (typeof value === "string")
         return value;
+    if (Array.isArray(value)) {
+        const text = value.map((item) => extractTextFromJsonValue(item) ?? "").join("");
+        return text || undefined;
+    }
     if (!value || typeof value !== "object")
         return undefined;
     const record = /** @type {Record<string, unknown>} */ (value);
@@ -12,37 +16,21 @@ export function extractTextFromJsonValue(value) {
         return record.text;
     if (typeof record.content === "string")
         return record.content;
+    if (typeof record.output_text === "string")
+        return record.output_text;
     if (Array.isArray(record.content)) {
-        const parts = record.content
-            .map((part) => {
-            if (!part)
-                return "";
-            if (typeof part === "string")
-                return part;
-            if (typeof part !== "object")
-                return "";
-            const partRecord = /** @type {Record<string, unknown>} */ (part);
-            if (typeof partRecord.text === "string")
-                return partRecord.text;
-            if (typeof partRecord.content === "string")
-                return partRecord.content;
-            return "";
-        })
+        const text = record.content
+            .map((part) => extractTextFromJsonValue(part) ?? "")
             .join("");
-        if (parts.trim())
-            return parts;
+        if (text)
+            return text;
     }
     if (record.type === "text" && record.part)
         return extractTextFromJsonValue(record.part);
-    if (record.response)
-        return extractTextFromJsonValue(record.response);
-    if (record.message)
-        return extractTextFromJsonValue(record.message);
-    if (record.result)
-        return extractTextFromJsonValue(record.result);
-    if (record.output)
-        return extractTextFromJsonValue(record.output);
-    if (record.data)
-        return extractTextFromJsonValue(record.data);
+    for (const field of ["response", "message", "result", "output", "data", "item"]) {
+        const text = extractTextFromJsonValue(record[field]);
+        if (text)
+            return text;
+    }
     return undefined;
 }

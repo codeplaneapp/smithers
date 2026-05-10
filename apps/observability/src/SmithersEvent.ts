@@ -1,3 +1,9 @@
+import type {
+  AgentSessionTranscriptEvent,
+  AgentTraceSummary,
+  CanonicalAgentTraceEvent,
+} from "./agentTrace";
+
 type RunStatus =
   | "running"
   | "waiting-approval"
@@ -351,6 +357,7 @@ export type SmithersEvent =
       nodeId: string;
       iteration: number;
       attempt: number;
+      toolCallId: string;
       toolName: string;
       seq: number;
       timestampMs: number;
@@ -361,6 +368,7 @@ export type SmithersEvent =
       nodeId: string;
       iteration: number;
       attempt: number;
+      toolCallId: string;
       toolName: string;
       seq: number;
       status: "success" | "error";
@@ -599,5 +607,32 @@ export type SmithersEvent =
       type: "TimerCancelled";
       runId: string;
       timerId: string;
+      timestampMs: number;
+    }
+  | {
+      type: "AgentTraceEvent";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+      trace: CanonicalAgentTraceEvent;
+      timestampMs: number;
+    }
+  | {
+      type: "AgentTraceSummary";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+      summary: AgentTraceSummary;
+      timestampMs: number;
+    }
+  | {
+      type: "AgentSessionEvent";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+      transcript: AgentSessionTranscriptEvent;
       timestampMs: number;
     };
