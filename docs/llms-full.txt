@@ -7411,6 +7411,55 @@ Both classes accept a model ID string (`"claude-opus-4-6"`, `"gpt-5.3-codex"`) o
 
 Constructors forward standard AI SDK `ToolLoopAgent` settings: `instructions`, `tools`, `stopWhen`, `maxOutputTokens`, `temperature`, `providerOptions`, `prepareCall`. The wrapper adds `model`, which resolves model-ID strings automatically.
 
+For `OpenAIAgent`, pass `baseURL` and `apiKey` directly when targeting an OpenAI-compatible endpoint instead of the default OpenAI API. This is the simplest path for local servers such as llama.cpp:
+
+```ts
+const local = new OpenAIAgent({
+  model: "llama-3.1-8b-instruct",
+  baseURL: "http://127.0.0.1:8080/v1",
+  apiKey: "none",
+  tools,
+  instructions: "You are a local coding assistant.",
+  stopWhen: stepCountIs(40),
+});
+```
+
+Set `apiKey: "none"` in the `OpenAIAgent` config when your local server accepts OpenAI-compatible requests but does not require a real key.
+
+Some OpenAI-compatible local servers accept chat requests but do not reliably implement JSON schema structured output. For those servers, keep the output schema on the Smithers task and disable native structured output on the agent so Smithers uses prompt-based JSON extraction instead:
+
+```ts
+const local = new OpenAIAgent({
+  model: "llama-3.1-8b-instruct",
+  baseURL: "http://127.0.0.1:8080/v1",
+  apiKey: "none",
+  nativeStructuredOutput: false,
+  tools,
+  instructions: "You are a local coding assistant.",
+  stopWhen: stepCountIs(40),
+});
+```
+
+For advanced provider setup, create the AI SDK OpenAI provider yourself and pass the prebuilt model into `OpenAIAgent`:
+
+```ts
+import { createOpenAI } from "@ai-sdk/openai";
+
+const localOpenAI = createOpenAI({
+  baseURL: "http://127.0.0.1:8080/v1",
+  apiKey: "none",
+});
+
+const local = new OpenAIAgent({
+  model: localOpenAI("llama-3.1-8b-instruct"),
+  tools,
+  instructions: "You are a local coding assistant.",
+  stopWhen: stepCountIs(40),
+});
+```
+
+Use the `createOpenAI` path when you need provider-level configuration beyond `baseURL` and `apiKey`; in that form, `apiKey: "none"` belongs in the `createOpenAI` config.
+
 ## Hijack Support
 
 SDK agents do not reopen a provider-native CLI. Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `smithers hijack <runId>`.
