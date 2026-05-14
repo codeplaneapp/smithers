@@ -1,3 +1,5 @@
+import * as ai from 'ai';
+import { Tool } from 'ai';
 import * as _smithers_graph_XmlNode from '@smithers-orchestrator/graph/XmlNode';
 import * as _smithers_time_travel_timetravel from '@smithers-orchestrator/time-travel/timetravel';
 import * as _smithers_graph_TaskDescriptor from '@smithers-orchestrator/graph/TaskDescriptor';
@@ -77,7 +79,6 @@ export { camelToSnake } from '@smithers-orchestrator/db/utils/camelToSnake';
 export { unwrapZodType } from '@smithers-orchestrator/db/unwrapZodType';
 export { zodSchemaToJsonExample } from '@smithers-orchestrator/components/zod-to-example';
 export { BuilderApi, BuiltSmithersWorkflow, Smithers, StepOptions, fragment, renderFrame, runWorkflow, workflow } from '@smithers-orchestrator/engine';
-import { Tool } from 'ai';
 import { SmithersDb } from '@smithers-orchestrator/db/adapter';
 
 type SerializedCtx$1 = {
@@ -329,7 +330,7 @@ type MemoryServiceApi = _smithers_memory.MemoryServiceApi;
 type MemoryStore = _smithers_memory.MemoryStore;
 type MemoryThread = _smithers_memory.MemoryThread;
 type MessageHistoryConfig = _smithers_memory.MessageHistoryConfig;
-type OpenAIAgentOptions<CALL_OPTIONS, TOOLS> = _smithers_agents.OpenAIAgentOptions<CALL_OPTIONS, TOOLS>;
+type OpenAIAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = _smithers_agents.OpenAIAgentOptions<CALL_OPTIONS, TOOLS>;
 type OpenApiAuth = _smithers_openapi.OpenApiAuth;
 type OpenApiSpec = _smithers_openapi.OpenApiSpec;
 type OpenApiToolsOptions = _smithers_openapi.OpenApiToolsOptions;

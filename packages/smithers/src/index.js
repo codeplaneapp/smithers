@@ -64,8 +64,8 @@
 /** @typedef {import("@smithers-orchestrator/memory").MemoryThread} MemoryThread */
 /** @typedef {import("@smithers-orchestrator/memory").MessageHistoryConfig} MessageHistoryConfig */
 /**
- * @template CALL_OPTIONS
- * @template TOOLS
+ * @template [CALL_OPTIONS=never]
+ * @template [TOOLS=import("ai").ToolSet]
  * @typedef {import("@smithers-orchestrator/agents").OpenAIAgentOptions<CALL_OPTIONS, TOOLS>} OpenAIAgentOptions
  */
 /** @typedef {import("@smithers-orchestrator/openapi").OpenApiAuth} OpenApiAuth */

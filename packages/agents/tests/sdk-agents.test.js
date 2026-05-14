@@ -67,6 +67,45 @@ describe("SDK agents", () => {
         expect(fake.getLastCall()?.prompt?.[0]?.role).toBe("system");
         expect(fake.getLastCall()?.prompt?.[0]?.content).toBe("You are an implementer.");
     });
+    test("OpenAIAgent applies baseURL/apiKey convenience options for string models", async () => {
+        const originalFetch = globalThis.fetch;
+        let requestUrl = "";
+        let authorization = "";
+        try {
+            globalThis.fetch = async (url, init) => {
+                requestUrl = String(url);
+                authorization = new Headers(init?.headers).get("authorization") ?? "";
+                throw new Error("captured OpenAI request");
+            };
+            const agent = new OpenAIAgent({
+                id: "openai-sdk-local",
+                model: "local-model",
+                baseURL: "http://127.0.0.1:8080/v1",
+                apiKey: "none",
+            });
+            let message = "";
+            try {
+                await agent.generate({ prompt: "hit local server" });
+            }
+            catch (error) {
+                message = error?.cause?.message ?? error?.message ?? String(error);
+            }
+            expect(message).toContain("captured OpenAI request");
+            expect(requestUrl).toContain("http://127.0.0.1:8080/v1");
+            expect(authorization).toBe("Bearer none");
+        }
+        finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+    test("OpenAIAgent rejects provider options with a prebuilt model", () => {
+        const fake = createFakeModel();
+        expect(() => new OpenAIAgent({
+            id: "openai-sdk-conflict",
+            model: fake.model,
+            baseURL: "http://127.0.0.1:8080/v1",
+        })).toThrow(/baseURL\/apiKey can only be used when model is a string/);
+    });
     test("OpenAIAgent forwards outputSchema through the SDK structured output channel", async () => {
         const fake = createFakeModel();
         const agent = new OpenAIAgent({
@@ -81,6 +120,20 @@ describe("SDK agents", () => {
         expect(fake.getLastCall()?.responseFormat).toMatchObject({
             type: "json",
         });
+    });
+    test("OpenAIAgent can disable native structured output for local providers", async () => {
+        const fake = createFakeModel();
+        const agent = new OpenAIAgent({
+            id: "openai-sdk-prompt-structured",
+            model: fake.model,
+            nativeStructuredOutput: false,
+        });
+        const result = await agent.generate({
+            prompt: "return a value",
+            outputSchema: z.object({ value: z.number() }),
+        });
+        expect(result.text).toBe("hello from sdk agent");
+        expect(fake.getLastCall()?.responseFormat).toBeUndefined();
     });
     test("AnthropicAgent forwards outputSchema through the SDK structured output channel", async () => {
         const fake = createFakeModel();

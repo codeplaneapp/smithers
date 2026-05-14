@@ -101,7 +101,33 @@ type SdkAgentOptions<CALL_OPTIONS = never, TOOLS extends ToolSet = {}, MODEL = a
     model: string | MODEL;
 };
 
-type OpenAIAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = SdkAgentOptions<CALL_OPTIONS, TOOLS, ReturnType<typeof openai>>;
+type OpenAIAgentCommonOptions<CALL_OPTIONS, TOOLS extends ToolSet> = Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, ReturnType<typeof openai>>, "model"> & {
+    /**
+     * Disable AI SDK native structured output and let Smithers use prompt-based JSON extraction.
+     * Useful for OpenAI-compatible local servers that do not honor JSON schema response formats.
+     */
+    nativeStructuredOutput?: boolean;
+};
+
+type OpenAIAgentStringModelOptions = {
+    model: string;
+    /**
+     * Base URL for OpenAI-compatible API calls, e.g. a local llama.cpp server.
+     */
+    baseURL?: string;
+    /**
+     * API key sent to OpenAI-compatible endpoints. Local servers often accept "none".
+     */
+    apiKey?: string;
+};
+
+type OpenAIAgentPrebuiltModelOptions = {
+    model: ReturnType<typeof openai>;
+    baseURL?: never;
+    apiKey?: never;
+};
+
+type OpenAIAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = OpenAIAgentCommonOptions<CALL_OPTIONS, TOOLS> & (OpenAIAgentStringModelOptions | OpenAIAgentPrebuiltModelOptions);
 
 type AnthropicAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = SdkAgentOptions<CALL_OPTIONS, TOOLS, ReturnType<typeof anthropic>>;
 
