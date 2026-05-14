@@ -119,6 +119,78 @@ function isAbortError(err) {
     return false;
 }
 /**
+ * @param {unknown} err
+ * @returns {string[]}
+ */
+function collectErrorMessages(err) {
+    const messages = [];
+    let current = err;
+    const seen = new Set();
+    while (current && typeof current === "object" && !seen.has(current)) {
+        seen.add(current);
+        const record = /** @type {Record<string, unknown>} */ (current);
+        if (typeof record.name === "string")
+            messages.push(record.name);
+        if (typeof record.message === "string")
+            messages.push(record.message);
+        current = record.cause;
+    }
+    if (typeof err === "string") {
+        messages.push(err);
+    }
+    return messages;
+}
+/**
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isStructuredOutputParseFailure(err) {
+    // AI SDK 6.x names structured-output parse/validation failures with these
+    // stable error names. The message fallback catches errors after wrapping.
+    const aiSdkErrorName = /^AI_(NoObjectGeneratedError|NoOutputGeneratedError|JSONParseError|TypeValidationError)$/;
+    const aiSdkErrorMessage = /No output generated|No object generated|could not parse the response|structured output parse|response did not match schema/i;
+    return collectErrorMessages(err).some((message) => aiSdkErrorName.test(message) || aiSdkErrorMessage.test(message));
+}
+/**
+ * @param {string} nodeId
+ * @returns {string}
+ */
+function depsTextAccessHint(nodeId) {
+    return /^[A-Za-z_$][\w$]*$/.test(nodeId)
+        ? `deps.${nodeId}.text`
+        : `deps[${JSON.stringify(nodeId)}].text`;
+}
+/**
+ * @param {Pick<TaskDescriptor, "nodeId" | "outputTableName">} desc
+ * @param {unknown} cause
+ * @param {Record<string, unknown>} [details]
+ * @returns {SmithersError}
+ */
+function makeStructuredOutputCompatibilityError(desc, cause, details = {}) {
+    return new SmithersError("INVALID_OUTPUT", `Task "${desc.nodeId}" expected structured JSON output, but the agent/model did not return valid JSON for the declared output schema. This commonly happens with OpenAI-compatible local model servers such as llama.cpp that do not fully support JSON schema structured output. Use a model that supports structured output, or opt out with OpenAIAgent({ nativeStructuredOutput: false }) so Smithers can use prompt-based JSON extraction.`, {
+        nodeId: desc.nodeId,
+        outputTable: desc.outputTableName,
+        ...details,
+        hint: "For plain text, use an object-shaped schema such as z.object({ text: z.string() }) and read it downstream as deps.<task>.text.",
+    }, { cause });
+}
+/**
+ * @param {Pick<TaskDescriptor, "nodeId" | "outputTableName">} desc
+ * @param {string} text
+ * @param {unknown} [cause]
+ * @param {Record<string, unknown>} [details]
+ * @returns {SmithersError}
+ */
+function makePlainTextOutputError(desc, text, cause, details = {}) {
+    const preview = text.slice(0, 120).replace(/\s+/g, " ").trim();
+    return new SmithersError("INVALID_OUTPUT", `Task "${desc.nodeId}" returned plain text, but Smithers task outputs must be JSON objects matching the declared output schema. Plain text cannot be passed through deps directly. Use z.object({ text: z.string() }), return {"text":"..."}, and read it downstream as ${depsTextAccessHint(desc.nodeId)}.`, {
+        nodeId: desc.nodeId,
+        outputTable: desc.outputTableName,
+        ...details,
+        textPreview: preview || undefined,
+    }, cause === undefined ? undefined : { cause });
+}
+/**
  * @param {AbortSignal} [signal]
  * @returns {Promise<never> | null}
  */
@@ -2583,6 +2655,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     let responseText = null;
     let effectiveAgent = null;
     let supportsNativeStructuredOutput = false;
+    let structuredOutputAccessError;
     // Resolve effective root once so both caching and execution share it.
     const taskRoot = desc.worktreePath ?? toolConfig.rootDir;
     const stepCacheEnabled = cacheEnabled || Boolean(desc.cachePolicy);
@@ -3126,12 +3199,19 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     }
                 }
                 catch (error) {
+                    const errorDetails = {
+                        attempt: attemptNo,
+                        iteration: desc.iteration,
+                    };
+                    const effectiveError = supportsNativeStructuredOutput && desc.outputSchema && isStructuredOutputParseFailure(error)
+                        ? makeStructuredOutputCompatibilityError(desc, error, errorDetails)
+                        : error;
                     if (traceCollector) {
-                        traceCollector.observeError(error);
+                        traceCollector.observeError(effectiveError);
                         try { await traceCollector.flush(); }
                         catch { /* trace flush failures must not mask the original error */ }
                     }
-                    throw error;
+                    throw effectiveError;
                 }
                 if (traceCollector) {
                     traceCollector.observeResult(result);
@@ -3198,8 +3278,9 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         output = result.output;
                     }
                 }
-                catch {
-                    // Structured output access threw
+                catch (error) {
+                    structuredOutputAccessError = error;
+                    // Structured output access threw; text parsing below may still recover.
                 }
                 // Fall back to parsing text/steps for JSON
                 if (output === undefined) {
@@ -3424,6 +3505,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     if (output === undefined) {
                         // Debug: log what we have
                         const finishReason = result.finishReason ?? "unknown";
+                        const debugSteps = result.steps ?? [];
                         logDebug("agent response did not contain valid JSON output", {
                             runId,
                             nodeId: desc.nodeId,
@@ -3441,6 +3523,16 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         const tailHint = tail
                             ? ` Last 200 chars of response: ${JSON.stringify(tail)}`
                             : " Agent returned an empty response.";
+                        const errorDetails = {
+                            attempt: attemptNo,
+                            iteration: desc.iteration,
+                        };
+                        if (supportsNativeStructuredOutput && structuredOutputAccessError) {
+                            throw makeStructuredOutputCompatibilityError(desc, structuredOutputAccessError, errorDetails);
+                        }
+                        if (text.trim()) {
+                            throw makePlainTextOutputError(desc, text, undefined, errorDetails);
+                        }
                         throw new SmithersError("INVALID_OUTPUT", `No valid JSON output found in agent response (finishReason=${finishReason}, textLength=${text.length}).${tailHint}`);
                     }
                 }
@@ -3449,8 +3541,11 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     try {
                         payload = JSON.parse(output);
                     }
-                    catch  {
-                        throw new SmithersError("INVALID_OUTPUT", `Failed to parse agent output as JSON. Output starts with: "${output.slice(0, 100)}"`);
+                    catch (error) {
+                        throw makePlainTextOutputError(desc, output, error, {
+                            attempt: attemptNo,
+                            iteration: desc.iteration,
+                        });
                     }
                 }
                 else {
@@ -3504,16 +3599,32 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
      * @param {unknown} cause
      * @param {number} schemaRetryAttempts
      */
-        const toInvalidOutputError = (cause, schemaRetryAttempts) => new SmithersError("INVALID_OUTPUT", `Task output failed validation for ${desc.outputTableName}`, {
-            attempt: attemptNo,
-            nodeId: desc.nodeId,
-            iteration: desc.iteration,
-            outputTable: desc.outputTableName,
-            schemaRetryAttempts,
-            issues: cause && typeof cause === "object" && "issues" in cause
-                ? cause.issues
-                : undefined,
-        }, { cause });
+        const toInvalidOutputError = (cause, schemaRetryAttempts) => {
+            if (supportsNativeStructuredOutput && structuredOutputAccessError) {
+                return makeStructuredOutputCompatibilityError(desc, structuredOutputAccessError, {
+                    attempt: attemptNo,
+                    iteration: desc.iteration,
+                    schemaRetryAttempts,
+                });
+            }
+            if (typeof payload === "string") {
+                return makePlainTextOutputError(desc, payload, cause, {
+                    attempt: attemptNo,
+                    iteration: desc.iteration,
+                    schemaRetryAttempts,
+                });
+            }
+            return new SmithersError("INVALID_OUTPUT", `Task output failed validation for ${desc.outputTableName}`, {
+                attempt: attemptNo,
+                nodeId: desc.nodeId,
+                iteration: desc.iteration,
+                outputTable: desc.outputTableName,
+                schemaRetryAttempts,
+                issues: cause && typeof cause === "object" && "issues" in cause
+                    ? cause.issues
+                    : undefined,
+            }, { cause });
+        };
         // Schema-validation retry: if the agent returned parseable JSON but it
         // doesn't match the Zod schema, resume the SAME agent conversation with
         // the validation error up to 3 times before giving up. These attempts
@@ -3546,6 +3657,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         }
         while (!validation.ok && desc.agent && schemaRetry < MAX_SCHEMA_RETRIES) {
             schemaRetry++;
+            structuredOutputAccessError = undefined;
             const schemaDesc = describeSchemaShape(desc.outputTable, desc.outputSchema);
             const zodIssues = validation.error?.issues
                 ?.map((iss) => `  - ${(iss.path ?? []).join(".")}: ${iss.message}`)
@@ -3633,7 +3745,8 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         retryOutput = schemaRetryResult.output;
                     }
                 }
-                catch {
+                catch (error) {
+                    structuredOutputAccessError = error;
                     // Structured output access threw; fall back to text parsing.
                 }
             }
