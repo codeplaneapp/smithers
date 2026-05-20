@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { addAccount } from "@smithers-orchestrator/accounts";
-import { generateAgentsTs } from "../src/agent-detection.js";
+import { extractGeneratedProviderIds, generateAgentsTs } from "../src/agent-detection.js";
 import { createExecutableDir, writeFakeClaudeBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 /** @type {string[]} */
@@ -87,5 +87,24 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).toContain("// smithers-source: generated");
         // Detection-based output does NOT pull in the accounts.json header.
         expect(generated).not.toContain("~/.smithers/accounts.json");
+    });
+
+    test("preserves generated detection providers during account-driven rewrites", () => {
+        const env = newSmithersHome();
+        addAccount({ label: "codex-prod", provider: "codex", configDir: `${env.HOME}/.smithers/accounts/codex-prod` }, { env });
+        const previous = [
+            "// smithers-source: generated",
+            "export const providers = {",
+            "  claude: ClaudeCodeAgent,",
+            "  claudeSonnet: new SmithersClaudeCodeAgent({ model: \"claude-sonnet-4-7\", cwd: process.cwd() }),",
+            "} as const;",
+            "",
+        ].join("\n");
+        const generated = generateAgentsTs({ ...env, PATH: "/no-agent-binaries" }, {
+            preserveProviderIds: extractGeneratedProviderIds(previous),
+        });
+        expect(generated).toContain("claude: ClaudeCodeAgent");
+        expect(generated).toContain("claudeSonnet: new SmithersClaudeCodeAgent(");
+        expect(generated).toContain("codexProd: new SmithersCodexAgent(");
     });
 });

@@ -131,6 +131,10 @@ const CONSTRUCTORS = {
         expr: "new SmithersAmpAgent()",
     },
 };
+const PRESERVABLE_PROVIDER_IDS = new Set([
+    ...DETECTORS.map((detector) => detector.id),
+    ...AGENT_VARIANTS.map((variant) => variant.variantId),
+]);
 
 /**
  * @param {string} id
@@ -158,6 +162,35 @@ function baseAgentIdForProviderId(id) {
  */
 function displayNameForProviderId(id) {
     return variantForId(id)?.displayName ?? detectorForId(id)?.displayName ?? id;
+}
+
+/**
+ * Reads provider IDs from a generated agents.ts file so later account-driven
+ * rewrites can stay additive even when the current machine cannot redetect a
+ * previously scaffolded provider.
+ *
+ * @param {string} source
+ * @returns {string[]}
+ */
+export function extractGeneratedProviderIds(source) {
+    if (!source.startsWith("// smithers-source: generated")) {
+        return [];
+    }
+    const match = source.match(/export const providers = \{([\s\S]*?)\n\} as const;/);
+    if (!match) {
+        return [];
+    }
+    /** @type {string[]} */
+    const ids = [];
+    const providerKeyPattern = /^\s*([A-Za-z_$][\w$]*)\s*:/gm;
+    let providerKeyMatch;
+    while ((providerKeyMatch = providerKeyPattern.exec(match[1])) !== null) {
+        const id = providerKeyMatch[1];
+        if (PRESERVABLE_PROVIDER_IDS.has(id) && !ids.includes(id)) {
+            ids.push(id);
+        }
+    }
+    return ids;
 }
 
 /**
@@ -564,12 +597,46 @@ function renderTierLine(tier, providerIds, comments) {
 
 /**
  * @param {NodeJS.ProcessEnv} [env]
- * @param {{ cwd?: string }} [options]
+ * @param {{ cwd?: string; preserveProviderIds?: string[] }} [options]
  */
 export function generateAgentsTs(env = process.env, options = {}) {
     const registeredAccounts = listAccounts(env);
     const detections = detectAvailableAgents(env, options);
-    const available = detections.filter((entry) => entry.usable);
+    const preservedBaseIds = new Set();
+    for (const id of options.preserveProviderIds ?? []) {
+        const variant = variantForId(id);
+        if (variant) {
+            preservedBaseIds.add(variant.derivedFrom);
+        }
+        else if (detectorForId(id)) {
+            preservedBaseIds.add(id);
+        }
+    }
+    const availableById = new Map(detections.filter((entry) => entry.usable).map((entry) => [entry.id, entry]));
+    for (const id of preservedBaseIds) {
+        if (availableById.has(id)) {
+            continue;
+        }
+        const detector = detectorForId(id);
+        if (!detector) {
+            continue;
+        }
+        availableById.set(id, {
+            id: detector.id,
+            displayName: detector.displayName,
+            binary: detector.binary,
+            hasBinary: false,
+            hasAuthSignal: false,
+            hasApiKeySignal: false,
+            hasProjectTrustSignal: true,
+            status: "likely-subscription",
+            score: scoreStatus("likely-subscription"),
+            usable: true,
+            checks: [`preserved:${detector.id}:yes`],
+            unusableReasons: [],
+        });
+    }
+    const available = [...availableById.values()];
     if (available.length === 0 && registeredAccounts.length === 0) {
         throw new SmithersError("NO_USABLE_AGENTS", formatNoUsableAgentsMessage(detections));
     }

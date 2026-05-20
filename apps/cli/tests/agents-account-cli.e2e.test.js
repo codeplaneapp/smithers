@@ -170,6 +170,7 @@ test("agents add appends to a detection-based agents.ts without dropping detecte
     const repo = createTempRepo();
     const home = newSmithersHome();
     const binDir = createExecutableDir();
+    const cleanBinDir = createExecutableDir("smithers-clean-bin-");
     writeFakeClaudeBinary(binDir);
     repo.write(".claude/.credentials.json", "{}\n");
     // First, run init with a fake API key so detection-based generation succeeds.
@@ -192,7 +193,17 @@ test("agents add appends to a detection-based agents.ts without dropping detecte
     // without removing the detected `claude` entry.
     runSmithers(
         ["agents", "add", "--provider", "codex", "--label", "codex-prod", "--skip-login"],
-        { cwd: repo.dir, format: "json", env: { SMITHERS_HOME: home } },
+        {
+            cwd: repo.dir,
+            format: "json",
+            env: {
+                HOME: repo.dir,
+                PATH: cleanBinDir,
+                SMITHERS_HOME: home,
+                ANTHROPIC_API_KEY: "",
+                OPENAI_API_KEY: "",
+            },
+        },
     );
     const agentsTs = repo.read(".smithers/agents.ts");
     expect(agentsTs).toContain("~/.smithers/accounts.json");
