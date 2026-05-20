@@ -24,6 +24,9 @@ function runRow(runId, status = "running", extra = {}) {
         ...extra,
     };
 }
+async function seedRun(adapter, runId = "r1") {
+    await adapter.insertRun(runRow(runId));
+}
 /**
  * @param {string} runId
  * @param {string} nodeId
@@ -205,6 +208,7 @@ describe("SmithersDb adapter", () => {
     });
     test("insertNode and getNode", async () => {
         const { adapter } = createTestDb();
+        await seedRun(adapter);
         await adapter.insertNode(nodeRow("r1", "n1"));
         const node = await adapter.getNode("r1", "n1", 0);
         expect(node).toBeDefined();
@@ -213,6 +217,7 @@ describe("SmithersDb adapter", () => {
     });
     test("listNodes returns all nodes for run", async () => {
         const { adapter } = createTestDb();
+        await seedRun(adapter);
         await adapter.insertNode(nodeRow("r1", "n1"));
         await adapter.insertNode(nodeRow("r1", "n2", "finished"));
         const nodes = await adapter.listNodes("r1");
@@ -310,6 +315,7 @@ describe("SmithersDb adapter", () => {
     });
     test("insertFrame and getLastFrame", async () => {
         const { adapter } = createTestDb();
+        await seedRun(adapter);
         await adapter.insertFrame(frameRow("r1", 0));
         await adapter.insertFrame(frameRow("r1", 1));
         const last = await adapter.getLastFrame("r1");
@@ -318,6 +324,7 @@ describe("SmithersDb adapter", () => {
     });
     test("insertFrame delta-encodes frames and reconstructs on read", async () => {
         const { adapter, sqlite } = createTestDb();
+        await seedRun(adapter);
         const frame0 = workflowFrameXml("pending");
         const frame1 = workflowFrameXml("in-progress");
         const frame2 = workflowFrameXml("in-progress", true);
@@ -341,6 +348,7 @@ describe("SmithersDb adapter", () => {
     });
     test("insertFrame writes periodic keyframes", async () => {
         const { adapter, sqlite } = createTestDb();
+        await seedRun(adapter);
         for (let i = 0; i <= 50; i += 1) {
             await adapter.insertFrame(frameRow("r1", i, {
                 xmlJson: workflowFrameXml(i % 2 === 0 ? "pending" : "finished"),
@@ -354,6 +362,7 @@ describe("SmithersDb adapter", () => {
     });
     test("deleteFramesAfter removes later frames", async () => {
         const { adapter } = createTestDb();
+        await seedRun(adapter);
         await adapter.insertFrame(frameRow("r1", 0));
         await adapter.insertFrame(frameRow("r1", 1));
         await adapter.insertFrame(frameRow("r1", 2));
@@ -616,6 +625,7 @@ describe("SmithersDb adapter", () => {
     });
     test("countNodesByState returns correct counts", async () => {
         const { adapter } = createTestDb();
+        await seedRun(adapter);
         await adapter.insertNode(nodeRow("r1", "n1", "finished"));
         await adapter.insertNode(nodeRow("r1", "n2", "finished"));
         await adapter.insertNode(nodeRow("r1", "n3", "failed"));
@@ -708,6 +718,7 @@ describe("SmithersDb adapter", () => {
     });
     test("listFrames returns frames with limit", async () => {
         const { adapter } = createTestDb();
+        await seedRun(adapter);
         for (let i = 0; i < 5; i++) {
             await adapter.insertFrame(frameRow("r1", i));
         }
@@ -720,6 +731,7 @@ describe("SmithersDb adapter", () => {
     });
     test("listNodeIterations returns descending iterations for a node", async () => {
         const { adapter } = createTestDb();
+        await seedRun(adapter);
         await adapter.insertNode(nodeRow("r1", "n1", "finished", { iteration: 1 }));
         await adapter.insertNode(nodeRow("r1", "n1", "finished", { iteration: 3 }));
         await adapter.insertNode(nodeRow("r1", "n1", "finished", { iteration: 2 }));

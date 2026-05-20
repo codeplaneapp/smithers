@@ -491,6 +491,7 @@ export async function jumpToFrame(input) {
   let lock = null;
   /** @type {number | null} */
   let auditRowId = null;
+  let canWriteAudit = false;
 
   try {
     return await withSpan(
@@ -512,6 +513,12 @@ export async function jumpToFrame(input) {
             "jumpToFrame is destructive; pass confirm: true to proceed.",
           );
         }
+
+        const run = await input.adapter.getRun(runId);
+        if (!run) {
+          throw new JumpToFrameError("RunNotFound", `Run not found: ${runId}`);
+        }
+        canWriteAudit = true;
 
         lock = await withSpan(
           "timetravel.lock.acquire",
@@ -561,11 +568,6 @@ export async function jumpToFrame(input) {
               durationMs: null,
             }),
         );
-
-        const run = await input.adapter.getRun(runId);
-        if (!run) {
-          throw new JumpToFrameError("RunNotFound", `Run not found: ${runId}`);
-        }
 
         const latestFrame = await readLatestFrame(input.adapter, runId);
         if (!latestFrame) {
@@ -971,9 +973,9 @@ export async function jumpToFrame(input) {
           durationMs,
           fromFrameNo: fromFrameNoForAudit,
         });
-      } else {
-        // We threw before reaching the in_progress write (usually validation /
-        // lock-busy / rate-limit). Still record the attempt for auditability.
+      } else if (canWriteAudit) {
+        // The run exists but we threw before reaching the in_progress write.
+        // Still record the attempt for auditability.
         await writeRewindAuditRow(input.adapter, {
           runId: runIdForAudit,
           fromFrameNo: fromFrameNoForAudit,

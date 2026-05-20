@@ -73,7 +73,8 @@ const CREATE_TABLE_STATEMENTS = [
     mounted_task_ids_json TEXT,
     task_index_json TEXT,
     note TEXT,
-    PRIMARY KEY (run_id, frame_no)
+    PRIMARY KEY (run_id, frame_no),
+    FOREIGN KEY (run_id) REFERENCES _smithers_runs(run_id) ON DELETE CASCADE
   )`,
     `CREATE TABLE IF NOT EXISTS _smithers_approvals (
     run_id TEXT NOT NULL,
@@ -161,7 +162,10 @@ const CREATE_TABLE_STATEMENTS = [
     diff_json TEXT NOT NULL,
     computed_at_ms INTEGER NOT NULL,
     size_bytes INTEGER NOT NULL,
-    PRIMARY KEY (run_id, node_id, iteration, base_ref)
+    PRIMARY KEY (run_id, node_id, iteration, base_ref),
+    FOREIGN KEY (run_id, node_id, iteration)
+      REFERENCES _smithers_nodes(run_id, node_id, iteration)
+      ON DELETE CASCADE
   )`,
     `CREATE TABLE IF NOT EXISTS _smithers_time_travel_audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -171,7 +175,8 @@ const CREATE_TABLE_STATEMENTS = [
     caller TEXT NOT NULL,
     timestamp_ms INTEGER NOT NULL,
     result TEXT NOT NULL,
-    duration_ms INTEGER
+    duration_ms INTEGER,
+    FOREIGN KEY (run_id) REFERENCES _smithers_runs(run_id) ON DELETE CASCADE
   )`,
     `CREATE TABLE IF NOT EXISTS _smithers_sandboxes (
     run_id TEXT NOT NULL,
@@ -323,6 +328,65 @@ const CREATE_INDEX_STATEMENTS = [
     ON _smithers_signals (run_id, signal_name, correlation_id, received_at_ms)`,
     `CREATE INDEX IF NOT EXISTS _smithers_time_travel_audit_lookup_idx
     ON _smithers_time_travel_audit (run_id, caller, timestamp_ms)`,
+];
+const CREATE_TRIGGER_STATEMENTS = [
+    `CREATE TRIGGER IF NOT EXISTS _smithers_frames_run_fk_insert
+    BEFORE INSERT ON _smithers_frames
+    FOR EACH ROW
+    WHEN NOT EXISTS (SELECT 1 FROM _smithers_runs WHERE run_id = NEW.run_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'foreign key mismatch: _smithers_frames.run_id');
+    END`,
+    `CREATE TRIGGER IF NOT EXISTS _smithers_frames_run_fk_update
+    BEFORE UPDATE OF run_id ON _smithers_frames
+    FOR EACH ROW
+    WHEN NOT EXISTS (SELECT 1 FROM _smithers_runs WHERE run_id = NEW.run_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'foreign key mismatch: _smithers_frames.run_id');
+    END`,
+    `CREATE TRIGGER IF NOT EXISTS _smithers_node_diffs_node_fk_insert
+    BEFORE INSERT ON _smithers_node_diffs
+    FOR EACH ROW
+    WHEN NOT EXISTS (
+      SELECT 1 FROM _smithers_nodes
+      WHERE run_id = NEW.run_id AND node_id = NEW.node_id AND iteration = NEW.iteration
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'foreign key mismatch: _smithers_node_diffs.node');
+    END`,
+    `CREATE TRIGGER IF NOT EXISTS _smithers_node_diffs_node_fk_update
+    BEFORE UPDATE OF run_id, node_id, iteration ON _smithers_node_diffs
+    FOR EACH ROW
+    WHEN NOT EXISTS (
+      SELECT 1 FROM _smithers_nodes
+      WHERE run_id = NEW.run_id AND node_id = NEW.node_id AND iteration = NEW.iteration
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'foreign key mismatch: _smithers_node_diffs.node');
+    END`,
+    `CREATE TRIGGER IF NOT EXISTS _smithers_time_travel_audit_run_fk_insert
+    BEFORE INSERT ON _smithers_time_travel_audit
+    FOR EACH ROW
+    WHEN NOT EXISTS (SELECT 1 FROM _smithers_runs WHERE run_id = NEW.run_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'foreign key mismatch: _smithers_time_travel_audit.run_id');
+    END`,
+    `CREATE TRIGGER IF NOT EXISTS _smithers_time_travel_audit_run_fk_update
+    BEFORE UPDATE OF run_id ON _smithers_time_travel_audit
+    FOR EACH ROW
+    WHEN NOT EXISTS (SELECT 1 FROM _smithers_runs WHERE run_id = NEW.run_id)
+    BEGIN
+      SELECT RAISE(ABORT, 'foreign key mismatch: _smithers_time_travel_audit.run_id');
+    END`,
+    `CREATE TRIGGER IF NOT EXISTS _smithers_runs_delete_cascade_core
+    AFTER DELETE ON _smithers_runs
+    FOR EACH ROW
+    BEGIN
+      DELETE FROM _smithers_node_diffs WHERE run_id = OLD.run_id;
+      DELETE FROM _smithers_nodes WHERE run_id = OLD.run_id;
+      DELETE FROM _smithers_frames WHERE run_id = OLD.run_id;
+      DELETE FROM _smithers_time_travel_audit WHERE run_id = OLD.run_id;
+    END`,
 ];
 const MIGRATION_STATEMENTS = [
     `ALTER TABLE _smithers_attempts ADD COLUMN response_text TEXT`,
@@ -623,6 +687,7 @@ export class SqlMessageStorage {
     ensureSchemaEffect() {
         const sqlite = this.sqlite;
         return Effect.sync(() => {
+            sqlite.run("PRAGMA foreign_keys = ON");
             for (const statement of CREATE_TABLE_STATEMENTS) {
                 sqlite.run(statement);
             }
@@ -646,6 +711,9 @@ export class SqlMessageStorage {
                 }
             }
             for (const statement of CREATE_INDEX_STATEMENTS) {
+                sqlite.run(statement);
+            }
+            for (const statement of CREATE_TRIGGER_STATEMENTS) {
                 sqlite.run(statement);
             }
         });

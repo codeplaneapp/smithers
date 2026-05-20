@@ -1,6 +1,6 @@
 ---
 title: <Sandbox>
-description: Run a child workflow in an isolated runtime; collect its result bundle.
+description: Run a child workflow with sandbox bundle collection, diff review, and runtime-specific isolation controls.
 ---
 
 ```ts
@@ -70,3 +70,5 @@ type SandboxProps = {
 - Bundle limits: 100 MB total, 5 MB manifest, 1,000 patches max; path traversal rejected.
 - Concurrency cap via `SMITHERS_MAX_CONCURRENT_SANDBOXES` (default 10).
 - `cleanup` always runs in `finally`; `codeplane` requires `CODEPLANE_API_URL` and `CODEPLANE_API_KEY`.
+- `allowNetwork`, `image`, `env`, `ports`, `volumes`, `memoryLimit`, `cpuLimit`, and `workspace` are runtime controls. Verify the selected runtime enforces the controls your workflow depends on before running untrusted code.
+- Patch review is on by default. Set `autoAcceptDiffs` only for workflows whose output can be applied without a human review step.

@@ -11,6 +11,24 @@ function createDb() {
     const adapter = new SmithersDb(db);
     return { sqlite, adapter };
 }
+async function seedNode(adapter, runId, nodeId, iteration = 0) {
+    await adapter.insertRun({
+        runId,
+        workflowName: "node-diff-cache-test",
+        status: "running",
+        createdAtMs: Date.now(),
+    });
+    await adapter.insertNode({
+        runId,
+        nodeId,
+        iteration,
+        state: "finished",
+        lastAttempt: null,
+        updatedAtMs: Date.now(),
+        outputTable: "out",
+        label: null,
+    });
+}
 const BUNDLE = {
     seq: 1,
     baseRef: "base",
@@ -33,6 +51,7 @@ describe("NodeDiffCache", () => {
             iteration: 0,
             baseRef: "base-1",
         };
+        await seedNode(adapter, key.runId, key.nodeId, key.iteration);
         const cold = await cache.getOrCompute(key, async () => {
             computeCalls += 1;
             return BUNDLE;
@@ -59,6 +78,7 @@ describe("NodeDiffCache", () => {
             iteration: 0,
             baseRef: "base-2",
         };
+        await seedNode(adapter, key.runId, key.nodeId, key.iteration);
         const all = await Promise.all(Array.from({ length: 10 }, () => cache.getOrCompute(key, async () => {
             computeCalls += 1;
             await Bun.sleep(25);
@@ -135,6 +155,7 @@ describe("NodeDiffCache", () => {
             iteration: 0,
             baseRef: "base-perf",
         };
+        await seedNode(adapter, key.runId, key.nodeId, key.iteration);
         await cache.getOrCompute(key, async () => BUNDLE);
         const iterations = 50;
         const samples = [];
@@ -155,6 +176,32 @@ describe("NodeDiffCache", () => {
         const { sqlite, adapter } = createDb();
         const cache = new NodeDiffCache(adapter);
         const runId = "run-node-diff-invalidate";
+        await adapter.insertRun({
+            runId,
+            workflowName: "node-diff-cache-test",
+            status: "running",
+            createdAtMs: Date.now(),
+        });
+        await adapter.insertNode({
+            runId,
+            nodeId: "keep",
+            iteration: 0,
+            state: "finished",
+            lastAttempt: null,
+            updatedAtMs: Date.now(),
+            outputTable: "out",
+            label: null,
+        });
+        await adapter.insertNode({
+            runId,
+            nodeId: "drop",
+            iteration: 0,
+            state: "finished",
+            lastAttempt: null,
+            updatedAtMs: Date.now(),
+            outputTable: "out",
+            label: null,
+        });
         await adapter.insertFrame({
             runId,
             frameNo: 0,

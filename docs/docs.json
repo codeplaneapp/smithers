@@ -46,7 +46,8 @@
           "cli/quickstart",
           "cli/overview",
           "guides/tui",
-          "deployment/reference"
+          "deployment/reference",
+          "deployment/production-hardening"
         ]
       },
       {

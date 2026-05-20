@@ -137,6 +137,9 @@ describe("executeSandbox", () => {
         );
         const handle = { sandboxId: "ok" };
         expect(__executeSandboxInternals.requireSandboxHandle(handle, "ok")).toBe(handle);
+        expect(__executeSandboxInternals.resolveSandboxCommand("custom run")).toBe("custom run");
+        expect(__executeSandboxInternals.resolveSandboxCommand("   ")).toBe("smithers up bundle.tsx");
+        expect(__executeSandboxInternals.resolveSandboxCommand(undefined)).toBe("smithers up bundle.tsx");
     });
 
     test("runs a child workflow, collects the bundle, and persists sandbox events", async () => {

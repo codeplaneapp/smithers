@@ -1320,6 +1320,52 @@ async function buildCacheContext(db, inputTable, runId, desc, descriptorMap, att
     return ctx;
 }
 /**
+ * @param {TaskDescriptor["cachePolicy"]} policy
+ * @returns {"run" | "workflow" | "global"}
+ */
+function normalizeCacheScope(policy) {
+    return policy?.scope === "run" || policy?.scope === "global"
+        ? policy.scope
+        : "workflow";
+}
+/**
+ * @param {"run" | "workflow" | "global"} scope
+ * @param {string} runId
+ * @param {string} workflowName
+ * @param {TaskDescriptor} desc
+ * @returns {Record<string, unknown>}
+ */
+function buildCacheScopeIdentity(scope, runId, workflowName, desc) {
+    const taskKey = desc.cachePolicy?.key ?? desc.nodeId;
+    const identity = {
+        taskKey,
+        outputTableName: desc.outputTableName,
+    };
+    if (scope === "global") {
+        return identity;
+    }
+    if (scope === "run") {
+        return { runId, workflowName, ...identity };
+    }
+    return { workflowName, ...identity };
+}
+/**
+ * @param {unknown} row
+ * @param {TaskDescriptor["cachePolicy"]} policy
+ * @returns {boolean}
+ */
+function isFreshCacheRow(row, policy) {
+    const ttlMs = policy?.ttlMs;
+    if (ttlMs === undefined || ttlMs === null) {
+        return true;
+    }
+    if (typeof ttlMs !== "number" || !Number.isFinite(ttlMs) || ttlMs < 0) {
+        return false;
+    }
+    const createdAtMs = /** @type {{ createdAtMs?: unknown }} */ (row)?.createdAtMs;
+    return typeof createdAtMs === "number" && nowMs() - createdAtMs <= ttlMs;
+}
+/**
  * @param {RunOptions} opts
  * @param {string | null} [workflowPath]
  * @returns {string}
@@ -2732,6 +2778,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             if (desc.cachePolicy) {
                 let cachePayload = null;
                 let cacheByOk = true;
+                const cacheScope = normalizeCacheScope(desc.cachePolicy);
                 try {
                     const ctx = await buildCacheContext(db, inputTable, runId, desc, descriptorMap, attemptNo);
                     if (desc.cachePolicy.by) {
@@ -2752,16 +2799,17 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     cacheKeyDisabled = true;
                 }
                 cacheBase = {
-                    workflowName,
+                    cacheScope,
+                    ...buildCacheScopeIdentity(cacheScope, runId, workflowName, desc),
                     nodeId: desc.nodeId,
                     iteration: desc.iteration,
-                    outputTableName: desc.outputTableName,
                     schemaSig,
                     outputSchemaSig,
                     agentSig,
                     toolsSig,
                     jjPointer: cacheJjBase,
                     cacheVersion: desc.cachePolicy.version ?? null,
+                    cacheKey: desc.cachePolicy.key ?? null,
                     cacheBy: cachePayload ?? null,
                 };
             }
@@ -2797,7 +2845,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             }
             if (cacheKey) {
                 const cachedRow = await Effect.runPromise(adapter.getCache(cacheKey));
-                if (cachedRow) {
+                if (cachedRow && isFreshCacheRow(cachedRow, desc.cachePolicy)) {
                     const parsed = JSON.parse(cachedRow.payloadJson);
                     const valid = validateOutput(desc.outputTable, parsed);
                     if (valid.ok) {
@@ -2817,6 +2865,16 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     }
                 }
                 else {
+                    if (cachedRow) {
+                        logInfo("cache entry expired for task output", {
+                            runId,
+                            nodeId: desc.nodeId,
+                            iteration: desc.iteration,
+                            attempt: attemptNo,
+                            cacheKey,
+                            ttlMs: desc.cachePolicy?.ttlMs,
+                        }, "engine:task-cache");
+                    }
                     void Effect.runPromise(Metric.increment(cacheMisses));
                 }
             }

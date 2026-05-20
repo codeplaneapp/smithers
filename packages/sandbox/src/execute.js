@@ -82,9 +82,19 @@ function requireSandboxHandle(handle, sandboxId) {
         return handle;
     throw new SmithersError("SANDBOX_EXECUTION_FAILED", `Sandbox ${sandboxId} did not initialize correctly.`, { sandboxId });
 }
+/**
+ * @param {unknown} command
+ * @returns {string}
+ */
+function resolveSandboxCommand(command) {
+    return typeof command === "string" && command.trim().length > 0
+        ? command
+        : "smithers up bundle.tsx";
+}
 export const __executeSandboxInternals = {
     directorySize,
     requireSandboxHandle,
+    resolveSandboxCommand,
 };
 /**
  * @returns {number}
@@ -219,7 +229,7 @@ export async function executeSandbox(options) {
             completedAtMs: null,
             bundlePath: null,
         });
-        await transportCall(selectedRuntime, sandboxTransport((svc) => svc.execute("smithers up bundle.tsx", sandboxHandle)));
+        await transportCall(selectedRuntime, sandboxTransport((svc) => svc.execute(resolveSandboxCommand(options.config?.command), sandboxHandle)));
         runtime.heartbeat({
             sandboxId: options.sandboxId,
             stage: "executing",

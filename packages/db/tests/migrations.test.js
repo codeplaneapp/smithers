@@ -1,9 +1,8 @@
 /**
  * Persistence/replay edges for the SQLite schema applied by
  * `ensureSmithersTables`. Tests cover legacy-row upgrades, JSON validity at
- * the deserialize boundary, and large-blob round-trips. Some FK tests are
- * skipped because the schema does not declare any FOREIGN KEY constraints
- * (see FIXMEs).
+ * the deserialize boundary, large-blob round-trips, and relational integrity
+ * for core run-owned tables.
  */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -123,6 +122,11 @@ describe("DB migration edges", () => {
       expect(() => JSON.parse(cfg.config_json)).toThrow(SyntaxError);
 
       sqlite.run(
+        `INSERT INTO _smithers_runs (run_id, workflow_name, status, created_at_ms)
+         VALUES (?, ?, ?, ?)`,
+        ["bad-xml-run", "wf", "running", 1],
+      );
+      sqlite.run(
         `INSERT INTO _smithers_frames (run_id, frame_no, created_at_ms, xml_json, xml_hash)
          VALUES (?, ?, ?, ?, ?)`,
         ["bad-xml-run", 0, 1, "{garbage", "h"],
@@ -169,6 +173,11 @@ describe("DB migration edges", () => {
       expect(giant.length).toBeGreaterThan(blobChars);
 
       ctx.sqlite.run(
+        `INSERT INTO _smithers_runs (run_id, workflow_name, status, created_at_ms)
+         VALUES (?, ?, ?, ?)`,
+        ["big-run", "wf", "running", 1],
+      );
+      ctx.sqlite.run(
         `INSERT INTO _smithers_frames (run_id, frame_no, created_at_ms, xml_json, xml_hash)
          VALUES (?, ?, ?, ?, ?)`,
         ["big-run", 0, 1, giant, "hash"],
@@ -195,45 +204,78 @@ describe("DB migration edges", () => {
     }
   });
 
-  test("inserting row with FK violation is NOT rejected — schema declares no FKs", () => {
-    // FIXME: prod code does not declare any FOREIGN KEY constraints between
-    // `_smithers_runs` / `_smithers_frames` / `_smithers_node_diffs`. Once
-    // FK constraints are added, this test should be flipped: inserting an
-    // attempt with a missing run_id should throw. For now, we document
-    // current behavior so a future contract change is caught.
+  test("inserting core child rows with missing parents is rejected", () => {
     const { sqlite } = setupMemoryDb();
     try {
       sqlite.exec("PRAGMA foreign_keys = ON");
-      // Insert a frame for a run that does not exist in _smithers_runs.
       expect(() =>
         sqlite.run(
           `INSERT INTO _smithers_frames (run_id, frame_no, created_at_ms, xml_json, xml_hash)
            VALUES (?, ?, ?, ?, ?)`,
           ["nonexistent", 0, 1, "{}", "h"],
         ),
-      ).not.toThrow();
-      // Also: a node_diff with a missing parent run/node is silently accepted.
+      ).toThrow(/foreign key|constraint|mismatch/i);
       expect(() =>
         sqlite.run(
           `INSERT INTO _smithers_node_diffs (run_id, node_id, iteration, base_ref, diff_json, computed_at_ms, size_bytes)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
           ["ghost-run", "ghost-node", 0, "ref", "{}", 1, 2],
         ),
-      ).not.toThrow();
+      ).toThrow(/foreign key|constraint|mismatch/i);
     } finally {
       sqlite.close();
     }
   });
 
-  test.skip("FIXME: deleting a run cascades to _smithers_node_diffs / frames / audit", () => {
-    // FIXME: skipped because the schema declares no FKs — see the test above.
-    // When ON DELETE CASCADE constraints are introduced, this test should
-    // delete a run row and verify all child rows are gone in one statement.
+  test("deleting a run cascades to core frames, nodes, node diffs, and audit", () => {
+    const { sqlite } = setupMemoryDb();
+    try {
+      sqlite.exec("PRAGMA foreign_keys = ON");
+      sqlite.run(
+        `INSERT INTO _smithers_runs (run_id, workflow_name, status, created_at_ms)
+         VALUES (?, ?, ?, ?)`,
+        ["cascade-run", "wf", "running", 1],
+      );
+      sqlite.run(
+        `INSERT INTO _smithers_nodes (run_id, node_id, iteration, state, updated_at_ms, output_table)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        ["cascade-run", "n1", 0, "finished", 2, "out"],
+      );
+      sqlite.run(
+        `INSERT INTO _smithers_frames (run_id, frame_no, created_at_ms, xml_json, xml_hash)
+         VALUES (?, ?, ?, ?, ?)`,
+        ["cascade-run", 0, 3, "{}", "h"],
+      );
+      sqlite.run(
+        `INSERT INTO _smithers_node_diffs (run_id, node_id, iteration, base_ref, diff_json, computed_at_ms, size_bytes)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ["cascade-run", "n1", 0, "base", "{}", 4, 2],
+      );
+      sqlite.run(
+        `INSERT INTO _smithers_time_travel_audit (run_id, from_frame_no, to_frame_no, caller, timestamp_ms, result)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        ["cascade-run", 0, 0, "tester", 5, "success"],
+      );
+
+      sqlite.run(`DELETE FROM _smithers_runs WHERE run_id = ?`, ["cascade-run"]);
+
+      for (const table of ["_smithers_nodes", "_smithers_frames", "_smithers_node_diffs", "_smithers_time_travel_audit"]) {
+        const row = sqlite.query(`SELECT COUNT(*) AS count FROM ${table} WHERE run_id = ?`).get("cascade-run");
+        expect(row.count).toBe(0);
+      }
+    } finally {
+      sqlite.close();
+    }
   });
 
   test("re-inserting same primary key into _smithers_frames is rejected (constraint enforcement)", () => {
     const { sqlite } = setupMemoryDb();
     try {
+      sqlite.run(
+        `INSERT INTO _smithers_runs (run_id, workflow_name, status, created_at_ms)
+         VALUES (?, ?, ?, ?)`,
+        ["dup-run", "wf", "running", 1],
+      );
       sqlite.run(
         `INSERT INTO _smithers_frames (run_id, frame_no, created_at_ms, xml_json, xml_hash)
          VALUES (?, ?, ?, ?, ?)`,
@@ -251,26 +293,31 @@ describe("DB migration edges", () => {
     }
   });
 
-  test.skip("FIXME: forward-migration partial failure on legacy _smithers_runs throws because index references a column that hasn't been added yet", () => {
-    // FIXME (real bug surfaced): when a legacy database has an old
-    // `_smithers_runs` table missing `heartbeat_at_ms`, calling
-    // `ensureSmithersTables` throws "no such column: heartbeat_at_ms" because
-    // CREATE_TABLE_STATEMENTS creates the index `_smithers_runs_status_heartbeat_idx`
-    // BEFORE MIGRATION_STATEMENTS runs `ALTER TABLE _smithers_runs ADD COLUMN
-    // heartbeat_at_ms`. The CREATE_TABLE_STATEMENTS loop has no try/catch, so
-    // the throw propagates to the caller.
-    //
-    // Repro:
-    //   const sqlite = new Database(":memory:");
-    //   sqlite.exec(`CREATE TABLE _smithers_runs (
-    //     run_id TEXT PRIMARY KEY, workflow_name TEXT NOT NULL,
-    //     status TEXT NOT NULL, created_at_ms INTEGER NOT NULL
-    //   )`);
-    //   ensureSmithersTables(drizzle(sqlite)); // throws SQLiteError
-    //
-    // Fix: either (a) wrap CREATE INDEX statements in try/catch or (b) run
-    // ALTER TABLEs BEFORE CREATE INDEX statements, or (c) make the index
-    // creation idempotent + lazy. Per task rules we leave this skipped.
+  test("forward migration over legacy _smithers_runs adds heartbeat before heartbeat index", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      sqlite.exec(`
+        CREATE TABLE _smithers_runs (
+          run_id TEXT PRIMARY KEY,
+          workflow_name TEXT NOT NULL,
+          status TEXT NOT NULL,
+          created_at_ms INTEGER NOT NULL
+        );
+        INSERT INTO _smithers_runs (run_id, workflow_name, status, created_at_ms)
+          VALUES ('legacy-run', 'wf', 'running', 1);
+      `);
+      const db = drizzle(sqlite);
+      expect(() => ensureSmithersTables(db)).not.toThrow();
+      const cols = sqlite.query('PRAGMA table_info("_smithers_runs")').all().map((c) => c.name);
+      expect(cols).toContain("heartbeat_at_ms");
+      const indexes = sqlite.query('PRAGMA index_list("_smithers_runs")').all().map((i) => i.name);
+      expect(indexes).toContain("_smithers_runs_status_heartbeat_idx");
+      const row = sqlite.query("SELECT workflow_name, heartbeat_at_ms FROM _smithers_runs WHERE run_id = ?").get("legacy-run");
+      expect(row.workflow_name).toBe("wf");
+      expect(row.heartbeat_at_ms).toBeNull();
+    } finally {
+      sqlite.close();
+    }
   });
 
   test("migrations 0011 and 0012 produce the expected node_diffs + audit tables", () => {

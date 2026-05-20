@@ -1,20 +1,12 @@
 /** @jsxImportSource smithers-orchestrator */
-// Tests for cachePolicy.ttlMs and cachePolicy.scope.
-//
-// These options are declared on `CachePolicy` in
-// packages/scheduler/src/CachePolicy.ts, but the engine implementation
-// in packages/engine/src/engine.js does NOT consult `ttlMs` or `scope`
-// when computing or invalidating cache keys (it only honors `by`,
-// `version`, and `key`). The tests below are kept skipped with FIXMEs
-// so they fail loudly the moment those features land.
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { Effect } from "effect";
 import { Workflow, Task, runWorkflow } from "smithers-orchestrator";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 
-describe("cachePolicy.ttlMs (FIXME: not yet implemented in engine)", () => {
-    test.skip("FIXME(cache-ttl): ttlMs expiration causes re-execution", async () => {
+describe("cachePolicy.ttlMs", () => {
+    test("ttlMs expiration causes re-execution", async () => {
         const { smithers, outputs, cleanup } = createTestSmithers({
             out: z.object({ v: z.number() }),
         });
@@ -43,20 +35,122 @@ describe("cachePolicy.ttlMs (FIXME: not yet implemented in engine)", () => {
     });
 });
 
-describe("cachePolicy.scope (FIXME: not yet implemented in engine)", () => {
-    test.skip("FIXME(cache-scope): scope=run keeps cache local to a single run", async () => {
-        // With scope=run, two separate runs of the same workflow with the
-        // same prompt should each re-execute (cache must NOT be shared
-        // across runIds).
-        expect(true).toBe(true);
+describe("cachePolicy.scope", () => {
+    test("scope=run keeps cache local to a single run", async () => {
+        const { smithers, outputs, cleanup } = createTestSmithers({
+            out: z.object({ v: z.number() }),
+        });
+        try {
+            let calls = 0;
+            const agent = {
+                id: "run-scope",
+                tools: {},
+                generate: async () => { calls += 1; return { output: { v: calls } }; },
+            };
+            const workflow = smithers(() => (
+                <Workflow name="run-scope-cache">
+                    <Task id="t" output={outputs.out} agent={agent} cache={{ scope: "run", key: "same" }}>
+                        same prompt
+                    </Task>
+                </Workflow>
+            ));
+            await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "run-scope-r1" }));
+            await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "run-scope-r2" }));
+            expect(calls).toBe(2);
+        } finally {
+            cleanup();
+        }
     });
-    test.skip("FIXME(cache-scope): scope=workflow shares cache across runs of the same workflow", async () => {
-        expect(true).toBe(true);
+    test("scope=workflow shares cache across runs of the same workflow", async () => {
+        const { smithers, outputs, cleanup } = createTestSmithers({
+            out: z.object({ v: z.number() }),
+        });
+        try {
+            let calls = 0;
+            const agent = {
+                id: "workflow-scope",
+                tools: {},
+                generate: async () => { calls += 1; return { output: { v: calls } }; },
+            };
+            const workflow = smithers(() => (
+                <Workflow name="workflow-scope-cache">
+                    <Task id="t" output={outputs.out} agent={agent} cache={{ scope: "workflow", key: "same" }}>
+                        same prompt
+                    </Task>
+                </Workflow>
+            ));
+            await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "workflow-scope-r1" }));
+            await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "workflow-scope-r2" }));
+            expect(calls).toBe(1);
+        } finally {
+            cleanup();
+        }
     });
-    test.skip("FIXME(cache-scope): scope=global shares across distinct workflows", async () => {
-        expect(true).toBe(true);
+    test("scope=global shares across distinct workflows", async () => {
+        const { smithers, outputs, cleanup } = createTestSmithers({
+            out: z.object({ v: z.number() }),
+        });
+        try {
+            let calls = 0;
+            const agent = {
+                id: "global-scope",
+                tools: {},
+                generate: async () => { calls += 1; return { output: { v: calls } }; },
+            };
+            const first = smithers(() => (
+                <Workflow name="global-scope-a">
+                    <Task id="t" output={outputs.out} agent={agent} cache={{ scope: "global", key: "shared" }}>
+                        same prompt
+                    </Task>
+                </Workflow>
+            ));
+            const second = smithers(() => (
+                <Workflow name="global-scope-b">
+                    <Task id="t" output={outputs.out} agent={agent} cache={{ scope: "global", key: "shared" }}>
+                        same prompt
+                    </Task>
+                </Workflow>
+            ));
+            await Effect.runPromise(runWorkflow(first, { input: {}, runId: "global-scope-r1" }));
+            await Effect.runPromise(runWorkflow(second, { input: {}, runId: "global-scope-r2" }));
+            expect(calls).toBe(1);
+        } finally {
+            cleanup();
+        }
     });
-    test.skip("FIXME(cache-scope-collisions): two tasks with the same key but different scopes do not collide", async () => {
-        expect(true).toBe(true);
+    test("two tasks with the same key but different scopes do not collide", async () => {
+        const { smithers, outputs, cleanup } = createTestSmithers({
+            out: z.object({ v: z.number() }),
+        });
+        try {
+            let runCalls = 0;
+            let workflowCalls = 0;
+            const runAgent = {
+                id: "scope-collision-run",
+                tools: {},
+                generate: async () => { runCalls += 1; return { output: { v: runCalls } }; },
+            };
+            const workflowAgent = {
+                id: "scope-collision-workflow",
+                tools: {},
+                generate: async () => { workflowCalls += 1; return { output: { v: workflowCalls } }; },
+            };
+            const workflow = smithers(() => (
+                <Workflow name="scope-collision-cache">
+                    <Task id="run-task" output={outputs.out} agent={runAgent} cache={{ scope: "run", key: "shared" }}>
+                        same prompt
+                    </Task>
+                    <Task id="workflow-task" output={outputs.out} agent={workflowAgent} cache={{ scope: "workflow", key: "shared" }}>
+                        same prompt
+                    </Task>
+                </Workflow>
+            ));
+            await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "scope-collision-r1" }));
+            await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "scope-collision-r2" }));
+            expect(runCalls).toBe(2);
+            expect(workflowCalls).toBe(1);
+        } finally {
+            cleanup();
+        }
     });
 });

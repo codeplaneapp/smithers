@@ -1,5 +1,5 @@
 import { watch } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Effect } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
@@ -12,13 +12,18 @@ const DEFAULT_IGNORE = [
     ".jj",
     ".smithers",
 ];
+const MIN_POLL_MS = 50;
+const MAX_POLL_MS = 250;
 export class WatchTree {
     watchers = [];
     rootDir;
     ignore;
     debounceMs;
     changedFiles = new Set();
+    fileSignatures = new Map();
     debounceTimer = null;
+    pollTimer = null;
+    polling = false;
     waitResolve = null;
     closed = false;
     /**
@@ -53,6 +58,8 @@ export class WatchTree {
         this.closed = true;
         if (this.debounceTimer)
             clearTimeout(this.debounceTimer);
+        if (this.pollTimer)
+            clearInterval(this.pollTimer);
         for (const w of this.watchers) {
             try {
                 w.close();
@@ -71,7 +78,11 @@ export class WatchTree {
     }
     startEffect() {
         return Effect.tryPromise({
-            try: () => this.watchDir(this.rootDir),
+            try: async () => {
+                this.fileSignatures = await this.scanFileSignatures(this.rootDir);
+                await this.watchDir(this.rootDir);
+                this.startPolling();
+            },
             catch: (cause) => toSmithersError(cause, "start hot watch tree"),
         }).pipe(Effect.annotateLogs({
             rootDir: this.rootDir,
@@ -105,6 +116,81 @@ export class WatchTree {
     shouldIgnore(name) {
         return this.ignore.includes(name) || name.startsWith(".");
     }
+    pollIntervalMs() {
+        return Math.min(MAX_POLL_MS, Math.max(MIN_POLL_MS, this.debounceMs));
+    }
+    startPolling() {
+        if (this.pollTimer || this.closed)
+            return;
+        this.pollTimer = setInterval(() => {
+            void this.pollOnce();
+        }, this.pollIntervalMs());
+    }
+    async pollOnce() {
+        if (this.closed || this.polling)
+            return;
+        this.polling = true;
+        try {
+            const next = await this.scanFileSignatures(this.rootDir);
+            this.recordScanChanges(next);
+        }
+        catch {
+            // Ignore transient filesystem races; the next interval will retry.
+        }
+        finally {
+            this.polling = false;
+        }
+    }
+    /**
+   * @param {string} dir
+   * @returns {Promise<Map<string, string>>}
+   */
+    async scanFileSignatures(dir) {
+        const files = new Map();
+        await this.scanDir(dir, files);
+        return files;
+    }
+    /**
+   * @param {string} dir
+   * @param {Map<string, string>} files
+   * @returns {Promise<void>}
+   */
+    async scanDir(dir, files) {
+        const baseName = dir.split("/").pop() ?? "";
+        if (baseName && this.shouldIgnore(baseName) && dir !== this.rootDir)
+            return;
+        const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+        for (const entry of entries) {
+            if (this.shouldIgnore(entry.name))
+                continue;
+            const fullPath = resolve(dir, entry.name);
+            if (entry.isDirectory()) {
+                await this.scanDir(fullPath, files);
+            }
+            else if (entry.isFile()) {
+                const info = await stat(fullPath).catch(() => null);
+                if (info?.isFile()) {
+                    files.set(fullPath, `${info.mtimeMs}:${info.size}`);
+                }
+            }
+        }
+    }
+    /**
+   * @param {Map<string, string>} next
+   */
+    recordScanChanges(next) {
+        for (const [filePath, signature] of next) {
+            if (this.fileSignatures.get(filePath) !== signature) {
+                this.onFileChange(filePath);
+            }
+        }
+        for (const filePath of this.fileSignatures.keys()) {
+            if (!next.has(filePath)) {
+                this.onFileChange(filePath);
+            }
+        }
+        this.fileSignatures = next;
+    }
     /**
    * @param {string} dir
    * @returns {Promise<void>}
@@ -129,7 +215,7 @@ export class WatchTree {
                     eventType,
                     fullPath,
                 }, "hot:watch");
-                this.onFileChange(fullPath);
+                void this.pollOnce();
             });
             this.watchers.push(watcher);
             // Recursively watch subdirectories
