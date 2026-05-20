@@ -40,6 +40,16 @@ import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { initWorkflowPack, getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile } from "./workflows.js";
+import {
+    assertEvalReportWritable,
+    buildEvalPlan,
+    buildEvalReport,
+    evaluateEvalCaseResult,
+    loadEvalCases,
+    renderEvalPlan,
+    renderEvalReport,
+    writeEvalReport,
+} from "./eval-suite.js";
 import { ask } from "./ask.js";
 import { runScheduler } from "./scheduler.js";
 import { resumeRunDetached } from "./resume-detached.js";
@@ -1308,6 +1318,24 @@ const upOptions = z.object({
     authToken: z.string().optional().describe("Bearer token for HTTP auth (or set SMITHERS_API_KEY)"),
     metrics: z.boolean().default(true).describe("Expose /metrics endpoint (with --serve)"),
 });
+const evalOptions = z.object({
+    cases: z.string().describe("JSON or JSONL eval case file"),
+    suite: z.string().optional().describe("Stable suite ID used in run IDs and report paths"),
+    runLabel: z.string().optional().describe("Run label appended to eval run IDs; defaults to current UTC timestamp"),
+    dryRun: z.boolean().default(false).describe("Plan the suite without launching runs"),
+    concurrency: z.number().int().min(1).max(16).default(1).describe("Number of eval cases to run at once"),
+    maxCases: z.number().int().min(1).optional().describe("Run only the first N cases"),
+    report: z.string().optional().describe("Write report JSON to this path"),
+    force: z.boolean().default(false).describe("Overwrite an existing eval report"),
+    includeOutput: z.boolean().default(true).describe("Include workflow outputs in the report"),
+    maxConcurrency: z.number().int().min(1).optional().describe("Per-workflow max task concurrency"),
+    root: z.string().optional().describe("Tool sandbox root directory"),
+    log: z.boolean().default(true).describe("Enable NDJSON event log file output"),
+    logDir: z.string().optional().describe("NDJSON event logs directory"),
+    allowNetwork: z.boolean().default(false).describe("Allow bash tool network requests"),
+    maxOutputBytes: z.number().int().min(1).optional().describe("Max bytes a single tool call can return"),
+    toolTimeoutMs: z.number().int().min(1).optional().describe("Max wall-clock time per tool call in ms"),
+});
 const superviseOptions = z.object({
     dryRun: z.boolean().default(false).describe("Show which stale runs would be resumed, without acting"),
     interval: z.string().default("10s").describe("Poll interval (e.g. 10s, 30s, 1m)"),
@@ -1454,6 +1482,53 @@ function normalizeWorkflowRunOptions(options) {
                 : undefined),
         root: options.root ?? ".",
     };
+}
+function formatRequestedJsonOutput() {
+    for (let index = 0; index < process.argv.length; index += 1) {
+        const arg = process.argv[index];
+        if (arg === "--format") {
+            const value = process.argv[index + 1];
+            return value === "json" || value === "jsonl";
+        }
+        if (arg === "--format=json" || arg === "--format=jsonl") {
+            return true;
+        }
+    }
+    return false;
+}
+function defaultEvalRunLabel() {
+    return new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+}
+/**
+ * @param {string} workflowInput
+ */
+function resolveWorkflowPathForEval(workflowInput) {
+    const asPath = resolve(process.cwd(), workflowInput);
+    if (existsSync(asPath)) {
+        return workflowInput;
+    }
+    return resolveWorkflow(workflowInput, process.cwd()).entryFile;
+}
+/**
+ * @template T
+ * @template R
+ * @param {T[]} items
+ * @param {number} limit
+ * @param {(item: T, index: number) => Promise<R>} worker
+ * @returns {Promise<R[]>}
+ */
+async function runWithLimit(items, limit, worker) {
+    const results = new Array(items.length);
+    let cursor = 0;
+    const workerCount = Math.min(limit, items.length);
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+        while (cursor < items.length) {
+            const index = cursor;
+            cursor += 1;
+            results[index] = await worker(items[index], index);
+        }
+    }));
+    return results;
 }
 /**
  * @param {string} intervalRaw
@@ -2622,6 +2697,142 @@ const cli = Cli.create({
             return c.error(opts);
         };
         return executeUpCommand(c, c.args.workflow, c.options, fail);
+    },
+})
+    // =========================================================================
+    // smithers eval <workflow>
+    // =========================================================================
+    .command("eval", {
+    description: "Run a workflow over a JSON/JSONL eval suite and write a regression report.",
+    args: workflowArgs,
+    options: evalOptions,
+    alias: { cases: "c", suite: "s", dryRun: "n", concurrency: "j", report: "r" },
+    async run(c) {
+        const fail = (opts) => {
+            commandExitOverride = opts.exitCode ?? 1;
+            return c.error(opts);
+        };
+        try {
+            const workflowPath = resolveWorkflowPathForEval(c.args.workflow);
+            const loadedCases = loadEvalCases(process.cwd(), c.options.cases, {
+                maxCases: c.options.maxCases,
+            });
+            const plan = buildEvalPlan({
+                suiteId: c.options.suite,
+                runLabel: c.options.runLabel ?? defaultEvalRunLabel(),
+                workflowPath,
+                casesPath: c.options.cases,
+                loadedCases,
+            });
+            const wantsStructured = c.format === "json" || c.format === "jsonl" || formatRequestedJsonOutput();
+            if (c.options.dryRun) {
+                if (wantsStructured) {
+                    return c.ok({ suite: plan });
+                }
+                process.stdout.write(`${renderEvalPlan(plan)}\n`);
+                return c.ok(undefined);
+            }
+            assertEvalReportWritable(process.cwd(), plan.suiteId, {
+                path: c.options.report,
+                force: c.options.force,
+            });
+            const workflow = await loadWorkflow(workflowPath);
+            ensureSmithersTables(workflow.db);
+            setupSqliteCleanup(workflow);
+            const schema = resolveSchema(workflow.db);
+            const resolvedWorkflowPath = resolve(process.cwd(), workflowPath);
+            const rootDir = c.options.root ? resolve(process.cwd(), c.options.root) : dirname(resolvedWorkflowPath);
+            const logDir = c.options.log ? c.options.logDir : null;
+            const abort = setupAbortSignal();
+            const startedAtMs = Date.now();
+            const results = await runWithLimit(plan.cases, c.options.concurrency, async (testCase) => {
+                const caseStartedAtMs = Date.now();
+                process.stderr.write(`[eval:${plan.suiteId}] ${testCase.id} -> ${testCase.runId}\n`);
+                try {
+                    const result = await Effect.runPromise(runWorkflow(workflow, {
+                        input: testCase.input,
+                        runId: testCase.runId,
+                        workflowPath: resolvedWorkflowPath,
+                        maxConcurrency: c.options.maxConcurrency,
+                        rootDir,
+                        logDir,
+                        allowNetwork: c.options.allowNetwork,
+                        maxOutputBytes: c.options.maxOutputBytes,
+                        toolTimeoutMs: c.options.toolTimeoutMs,
+                        annotations: {
+                            suiteId: plan.suiteId,
+                            caseId: testCase.id,
+                            ...testCase.annotations,
+                        },
+                        signal: abort.signal,
+                    }));
+                    const output = result.output === undefined
+                        ? await loadOutputs(workflow.db, schema, testCase.runId)
+                        : result.output;
+                    const durationMs = Date.now() - caseStartedAtMs;
+                    const evaluation = evaluateEvalCaseResult(testCase, {
+                        ...result,
+                        output,
+                    });
+                    return {
+                        caseId: testCase.id,
+                        runId: testCase.runId,
+                        expectedStatus: testCase.expected.status,
+                        status: result.status,
+                        passed: evaluation.passed,
+                        assertions: evaluation.assertions,
+                        durationMs,
+                        input: testCase.input,
+                        ...(c.options.includeOutput ? { output } : {}),
+                        metadata: testCase.metadata,
+                    };
+                }
+                catch (err) {
+                    const errorMessage = err?.message ?? String(err);
+                    const durationMs = Date.now() - caseStartedAtMs;
+                    const evaluation = evaluateEvalCaseResult(testCase, {
+                        status: "error",
+                        error: errorMessage,
+                    });
+                    return {
+                        caseId: testCase.id,
+                        runId: testCase.runId,
+                        expectedStatus: testCase.expected.status,
+                        status: "error",
+                        passed: evaluation.passed,
+                        assertions: evaluation.assertions,
+                        durationMs,
+                        input: testCase.input,
+                        error: errorMessage,
+                        metadata: testCase.metadata,
+                    };
+                }
+            });
+            const finishedAtMs = Date.now();
+            let report = buildEvalReport({
+                plan,
+                results,
+                startedAtMs,
+                finishedAtMs,
+            });
+            const reportPath = writeEvalReport(process.cwd(), report, {
+                path: c.options.report,
+                force: c.options.force,
+            });
+            report = { ...report, reportPath };
+            process.exitCode = report.summary.failed > 0 ? 1 : 0;
+            if (wantsStructured) {
+                return c.ok({ eval: report });
+            }
+            process.stdout.write(`${renderEvalReport(report)}\n`);
+            return c.ok(undefined);
+        }
+        catch (err) {
+            if (err instanceof SmithersError) {
+                return fail({ code: err.code, message: err.message, exitCode: 4 });
+            }
+            return fail({ code: "EVAL_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+        }
     },
 })
     // =========================================================================
@@ -4990,7 +5201,7 @@ wrapCliCommandHandlersWithInputBounds(cliCommands);
 // Main
 // ---------------------------------------------------------------------------
 const KNOWN_COMMANDS = new Set([
-    "init", "up", "supervise", "down", "ps", "logs", "events", "chat", "inspect", "node", "why", "approve", "deny",
+    "init", "up", "eval", "supervise", "down", "ps", "logs", "events", "chat", "inspect", "node", "why", "approve", "deny",
     "cancel", "graph", "revert", "scores", "observability", "workflow", "ask", "cron", "chat-create",
     "replay", "diff", "fork", "timeline", "memory", "openapi", "token", "agents", "alerts",
     "tree", "output", "rewind", "gui",

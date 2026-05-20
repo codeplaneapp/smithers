@@ -45,6 +45,7 @@
         "pages": [
           "cli/quickstart",
           "cli/overview",
+          "guides/evals-quickstart",
           "guides/tui",
           "deployment/reference"
         ]
@@ -335,7 +336,6 @@
     { "source": "/guides/troubleshooting", "destination": "/cli/overview" },
     { "source": "/guides/tutorial-workflow", "destination": "/tour" },
     { "source": "/guides/time-travel-quickstart", "destination": "/recipes" },
-    { "source": "/guides/evals-quickstart", "destination": "/recipes" },
     { "source": "/guides/memory-quickstart", "destination": "/llms-memory.txt" },
     { "source": "/guides/openapi-tools-quickstart", "destination": "/llms-openapi.txt" },
     { "source": "/guides/project-structure", "destination": "/recipes" },

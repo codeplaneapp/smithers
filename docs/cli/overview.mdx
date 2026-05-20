@@ -11,7 +11,7 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 - Boolean flags accept either bare form (`--watch`) or explicit `--watch true|false`.
 - Global options: `--format toon|json|yaml|md|jsonl`, `--filter-output <key.path>`, `--full-output`, `--token-count`, `--token-limit N`, `--token-offset N`, `--schema`, `--llms`, `--llms-full`, `--mcp`, `--help`, `--version`.
 - MCP stdio mode: pass `--mcp` to start Smithers as an MCP server. Add `--surface semantic|raw|both` to choose the exposed tool surface.
-- Workflow resolution: `up`, `graph`, `revert`, `replay`, `fork`, `retry-task`, and `timetravel` take a workflow file path. `workflow run <name>` resolves IDs from `.smithers/workflows/<name>.tsx`.
+- Workflow resolution: `up`, `graph`, `revert`, `replay`, `fork`, `retry-task`, and `timetravel` take a workflow file path. `eval` accepts either a workflow path or a discovered workflow ID. `workflow run <name>` resolves IDs from `.smithers/workflows/<name>.tsx`.
 - Rewrites: `smithers workflow <id>` runs a discovered workflow when `<id>` resolves; `smithers workflow.tsx` behaves like `smithers up workflow.tsx`; `smithers chat create` behaves like `smithers chat-create`; `smithers .` opens the current directory in Smithers GUI.
 
 ## Exit codes
@@ -31,7 +31,7 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[59]:
+commands[60]:
   - name: init
     purpose: Install the local workflow pack into .smithers/
     flags[4]{name,short,type,default,desc}:
@@ -72,6 +72,27 @@ commands[59]:
       host,,string,127.0.0.1,HTTP bind address when --serve
       auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
+  - name: eval
+    purpose: Run a workflow over JSON/JSONL cases and write a regression report
+    args[1]{name,type,required,desc}:
+      workflow,string,true,Workflow file path or discovered workflow ID
+    flags[16]{name,short,type,default,desc}:
+      cases,c,string,,JSON array, { cases: [...] }, or JSONL case file
+      suite,s,string,,Stable suite ID used in run IDs and report paths
+      run-label,,string,current UTC timestamp,Label appended to eval run IDs
+      dry-run,n,boolean,false,Plan run IDs without launching workflows
+      concurrency,j,number,1,Number of eval cases to run at once
+      max-cases,,number,,Run only the first N cases
+      report,r,string,.smithers/evals/<suite>.json,Report path
+      force,,boolean,false,Overwrite an existing report
+      include-output,,boolean,true,Include workflow outputs in the report
+      max-concurrency,,number,,Per-workflow task concurrency
+      root,,string,,Tool sandbox root directory
+      log,,boolean,true,Enable NDJSON event log file output
+      log-dir,,string,,NDJSON event logs directory
+      allow-network,,boolean,false,Allow bash tool network requests
+      max-output-bytes,,number,,Max bytes a single tool call can return
+      tool-timeout-ms,,number,,Max wall-clock time per tool call in ms
   - name: supervise
     purpose: Watch for stale running runs and auto-resume them
     flags[4]{name,short,type,default,desc}:

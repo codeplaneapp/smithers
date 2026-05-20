@@ -281,6 +281,19 @@ import { schemaAdherenceScorer, latencyScorer, llmJudge } from "smithers-orchest
 
 Scorers run after the task and never block. Sample expensive scorers with `ratio`.
 
+## Eval suites for regressions
+
+```jsonl
+{"id":"happy-path","input":{"prompt":"Draft release notes"},"expected":{"status":"finished"}}
+{"id":"quality-gate","input":{"prompt":"Find risky changes"},"expected":{"status":"finished","outputContains":{"analysis":[{"riskLevel":"low"}]}}}
+```
+
+```bash
+bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force
+```
+
+Use eval suites when you need repeatable workflow-level checks. `output` asserts exact JSON; `outputContains` asserts a recursive partial match; reports are written to `.smithers/evals/<suite>.json` and exit non-zero on failed cases.
+
 ## Continue-as-new for very long runs
 
 A run with too much accumulated state hands off to a fresh run with carried state.

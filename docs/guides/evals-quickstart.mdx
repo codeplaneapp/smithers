@@ -1,6 +1,93 @@
 ---
-title: "Evals Quickstart"
-description: Folded into Recipes.
+title: "Eval Suites Quickstart"
+description: Run repeatable workflow regressions from JSON or JSONL cases.
 ---
 
-This material is now in [Recipes](/recipes#scoring-tasks).
+Use eval suites when a workflow is important enough to protect with repeatable cases. Each case gets a persisted run record, stable case metadata, and a JSON report that can be checked in CI.
+
+## 1. Create cases
+
+Create `evals/smoke.jsonl`:
+
+```jsonl
+{"id":"simple-request","input":{"prompt":"Summarize the repository"},"expected":{"status":"finished"}}
+{"id":"structured-output","input":{"prompt":"Return the key risks"},"expected":{"status":"finished","outputContains":{"analysis":[{"riskLevel":"low"}]}}}
+```
+
+Case files can be JSONL, a JSON array, or an object with a `cases` array:
+
+```json
+{
+  "cases": [
+    {
+      "id": "happy-path",
+      "input": { "prompt": "Draft a release note" },
+      "annotations": { "area": "release" },
+      "expected": {
+        "status": "finished",
+        "outputContains": { "analysis": [{ "riskLevel": "low" }] }
+      }
+    }
+  ]
+}
+```
+
+Supported `expected` checks:
+
+- `status`: one of `finished`, `failed`, `cancelled`, `waiting-approval`, `waiting-event`, or `waiting-timer`
+- `output`: exact JSON match against the workflow result output
+- `outputContains`: recursive partial JSON match
+- `errorContains`: substring match against thrown errors
+
+For standard workflows, output assertions match the persisted output snapshot, keyed by output name.
+
+## 2. Dry-run the plan
+
+```bash
+bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --dry-run
+```
+
+Dry-run mode prints the planned case IDs and run IDs without touching the database. Pass `--run-label <label>` when you want the dry-run and execution to use the same generated IDs.
+
+## 3. Execute the suite
+
+```bash
+bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force
+```
+
+By default, the report is written to `.smithers/evals/smoke.json`. Use `--report path/to/report.json` to choose a different location.
+
+The command exits `0` when all cases pass and `1` when any case fails. Invalid case files exit with `4`.
+
+## 4. Use structured output in CI
+
+```bash
+bunx smithers-orchestrator eval workflow.tsx \
+  --cases evals/smoke.jsonl \
+  --suite smoke \
+  --report artifacts/smoke-eval.json \
+  --force \
+  --format json
+```
+
+The JSON payload includes the suite summary, per-case assertions, run IDs, inputs, outputs, errors, and report path.
+
+## Options that matter in production
+
+- `--concurrency N`: run multiple cases at once; keep this low for stateful or expensive workflows.
+- `--run-label LABEL`: append a stable label to run IDs, useful for CI build IDs or benchmark names.
+- `--max-concurrency N`: pass a per-workflow task concurrency cap to each case.
+- `--max-cases N`: shard or sample a large suite.
+- `--no-include-output`: omit workflow outputs from the report when outputs are too large or sensitive.
+- `--allow-network`: enable network access for bash tools in cases that need it.
+- `--root PATH`: set the sandbox root for tool execution.
+
+## Run a discovered workflow
+
+`eval` also accepts workflow IDs from `.smithers/workflows`:
+
+```bash
+bunx smithers-orchestrator eval implement --cases evals/implement.jsonl --suite implement-smoke
+```
+
+Use this for workflow packs so the same suite can run on every checkout without hard-coding entry file paths.

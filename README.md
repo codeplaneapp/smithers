@@ -78,10 +78,25 @@ Each task output is validated against its Zod schema and persisted to SQLite. If
 ```bash
 smithers up workflow.tsx --input '{"description": "Fix bug"}'
 smithers up workflow.tsx --run-id abc123 --resume true
+smithers eval workflow.tsx --cases evals/smoke.jsonl --suite smoke
 smithers ps
 smithers workflow list
 smithers approve abc123 --node review
 ```
+
+## Eval suites
+
+Run repeatable workflow regressions from JSON or JSONL cases:
+
+```jsonl
+{"id":"happy-path","input":{"description":"Fix bug"},"expected":{"status":"finished"}}
+```
+
+```bash
+smithers eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force
+```
+
+Reports are written to `.smithers/evals/<suite>.json` and the command exits non-zero when any case fails.
 
 ## Hot Reload
 
