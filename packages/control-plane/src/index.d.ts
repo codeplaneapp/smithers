@@ -1,6 +1,6 @@
-import type { Database } from "bun:sqlite";
+import { Database } from 'bun:sqlite';
 
-export type ControlPlaneSqlite = Database | {
+type ControlPlaneSqlite = Database | {
   exec(sql: string): unknown;
   query(sql: string): {
     run(...params: unknown[]): unknown;
@@ -9,14 +9,14 @@ export type ControlPlaneSqlite = Database | {
   };
 };
 
-export type ControlPlaneOrg = {
+type ControlPlaneOrg = {
   orgId: string;
   slug: string;
   name: string;
   createdAtMs: number;
 };
 
-export type ControlPlaneTeam = {
+type ControlPlaneTeam = {
   orgId: string;
   teamId: string;
   slug: string;
@@ -24,7 +24,7 @@ export type ControlPlaneTeam = {
   createdAtMs: number;
 };
 
-export type ControlPlaneProject = {
+type ControlPlaneProject = {
   orgId: string;
   projectId: string;
   slug: string;
@@ -33,7 +33,7 @@ export type ControlPlaneProject = {
   createdAtMs: number;
 };
 
-export type ControlPlaneBillingAccount = {
+type ControlPlaneBillingAccount = {
   orgId: string;
   plan: string;
   billingCustomerId: string | null;
@@ -41,7 +41,7 @@ export type ControlPlaneBillingAccount = {
   updatedAtMs: number;
 };
 
-export type ControlPlaneUsageEvent = {
+type ControlPlaneUsageEvent = {
   id: number;
   orgId: string;
   projectId: string | null;
@@ -53,14 +53,14 @@ export type ControlPlaneUsageEvent = {
   metadata: Record<string, unknown>;
 };
 
-export type ControlPlaneUsageSummary = {
+type ControlPlaneUsageSummary = {
   orgId: string;
   metric: string;
   unit: string;
   quantity: number;
 };
 
-export type ControlPlaneSecretRef = {
+type ControlPlaneSecretRef = {
   orgId: string;
   projectId: string | null;
   name: string;
@@ -71,7 +71,7 @@ export type ControlPlaneSecretRef = {
   rotatedAtMs: number | null;
 };
 
-export type ControlPlaneAuditEvent = {
+type ControlPlaneAuditEvent = {
   id: number;
   orgId: string;
   projectId: string | null;
@@ -83,7 +83,7 @@ export type ControlPlaneAuditEvent = {
   metadata: Record<string, unknown>;
 };
 
-export type ControlPlaneExport = {
+type ControlPlaneExport = {
   exportedAtMs: number;
   org: ControlPlaneOrg;
   projects: ControlPlaneProject[];
@@ -94,9 +94,9 @@ export type ControlPlaneExport = {
   auditEvents: ControlPlaneAuditEvent[];
 };
 
-export function ensureControlPlaneTables(sqlite: ControlPlaneSqlite): void;
+declare function ensureControlPlaneTables(sqlite: ControlPlaneSqlite): void;
 
-export class ControlPlaneStore {
+declare class ControlPlaneStore {
   constructor(sqlite: ControlPlaneSqlite);
 
   createOrg(input: { orgId?: string; slug: string; name: string; createdAtMs?: number }): ControlPlaneOrg;
@@ -113,3 +113,5 @@ export class ControlPlaneStore {
   recordAuditEvent(input: { orgId: string; projectId?: string | null; actorId?: string | null; action: string; targetType: string; targetId?: string | null; occurredAtMs?: number; metadata?: Record<string, unknown> }): ControlPlaneAuditEvent;
   exportOrgAudit(input: { orgId: string; sinceMs?: number; untilMs?: number; exportedAtMs?: number }): ControlPlaneExport;
 }
+
+export { type ControlPlaneAuditEvent, type ControlPlaneBillingAccount, type ControlPlaneExport, type ControlPlaneOrg, type ControlPlaneProject, type ControlPlaneSecretRef, type ControlPlaneSqlite, ControlPlaneStore, type ControlPlaneTeam, type ControlPlaneUsageEvent, type ControlPlaneUsageSummary, ensureControlPlaneTables };
