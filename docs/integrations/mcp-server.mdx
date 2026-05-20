@@ -131,7 +131,10 @@ List all Smithers workflows discovered in the working directory.
     id: string;
     displayName: string;
     entryFile: string;
-    sourceType: "seeded" | "user" | "generated";
+    sourceType: string;
+    description: string;
+    tags: string[];
+    aliases: string[];
   }>;
 }
 ```

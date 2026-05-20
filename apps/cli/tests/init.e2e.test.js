@@ -193,14 +193,17 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
     expect(repo.exists(".smithers/workflows/feature-enum.tsx")).toBe(true);
     expect(repo.exists(".smithers/workflows/audit.tsx")).toBe(true);
     expect(repo.exists(".smithers/workflows/mission.tsx")).toBe(true);
+    expect(repo.exists(".smithers/workflows/workflow-skill.tsx")).toBe(true);
     expect(repo.exists(".smithers/workflows/kanban.tsx")).toBe(true);
     expect(repo.exists(".smithers/ui/kanban.tsx")).toBe(true);
+    expect(repo.exists(".smithers/skills/.gitkeep")).toBe(true);
     expect(repo.exists(".smithers/prompts/mission-plan.mdx")).toBe(true);
     expect(repo.exists(".smithers/prompts/mission-worker.mdx")).toBe(true);
     expect(repo.exists(".smithers/prompts/mission-integrate.mdx")).toBe(true);
     expect(repo.exists(".smithers/prompts/mission-validate.mdx")).toBe(true);
     expect(repo.exists(".smithers/prompts/mission-follow-up.mdx")).toBe(true);
     expect(repo.exists(".smithers/prompts/mission-final.mdx")).toBe(true);
+    expect(repo.exists(".smithers/prompts/workflow-skill.mdx")).toBe(true);
     expect(repo.exists(".smithers/prompts/ask-user-instructions.mdx")).toBe(true);
     expect(repo.exists(".smithers/components/GrillMe.tsx")).toBe(true);
     expect(repo.exists(".smithers/components/CommandProbe.tsx")).toBe(true);
@@ -211,6 +214,7 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
     expect(repo.read(".smithers/workflows/feature-enum.tsx")).toContain("existingFeatures: z.record(z.string(), z.array(z.string())).nullable().default(null)");
     expect(repo.read(".smithers/workflows/audit.tsx")).toContain("features: z.record(z.string(), z.array(z.string())).default({})");
     expect(repo.read(".smithers/workflows/mission.tsx")).toContain('id="mission:approve-plan"');
+    expect(repo.read(".smithers/workflows/workflow-skill.tsx")).toContain('WorkflowSkillPrompt');
     expect(repo.read(".smithers/gateway.ts")).toContain("process.chdir(projectRoot);");
     expect(repo.read(".smithers/ui/kanban.tsx")).toContain('nodeId: "tickets", iteration: 0');
     expect(repo.read(".smithers/workflows/kanban.tsx")).toContain('<Task id="tickets" output={outputs.tickets}>');
@@ -299,6 +303,39 @@ test("smithers init does not clobber user edits unless --force is passed", () =>
     });
     expect(forced.exitCode).toBe(0);
     expect(repo.read(".smithers/workflows/implement.tsx")).not.toContain("user-edited workflow");
+}, 15_000);
+test("workflow inspect and skills use seeded workflow metadata", () => {
+    const repo = createTempRepo();
+    const env = buildInitEnv(repo.dir);
+    const initResult = runSmithers(["init"], {
+        cwd: repo.dir,
+        format: "json",
+        env,
+    });
+    expect(initResult.exitCode).toBe(0);
+
+    const inspect = runSmithers(["workflow", "inspect", "implement"], {
+        cwd: repo.dir,
+        format: "json",
+    });
+    expect(inspect.exitCode).toBe(0);
+    expect(inspect.json.workflow).toMatchObject({
+        id: "implement",
+        displayName: "Implement",
+        sourceType: "seeded",
+        description: "Implement a focused change with validation and review feedback loops.",
+        tags: ["coding", "implementation", "review"],
+    });
+    expect(inspect.json.skillPreview).toContain("smithers workflow run implement");
+
+    const skills = runSmithers(["workflow", "skills", "implement", "--output", "docs/implement-skill.md"], {
+        cwd: repo.dir,
+        format: "json",
+    });
+    expect(skills.exitCode).toBe(0);
+    expect(skills.json.writtenFiles).toHaveLength(1);
+    expect(repo.read("docs/implement-skill.md")).toContain("name: implement");
+    expect(repo.read("docs/implement-skill.md")).toContain("Implement a focused change");
 }, 15_000);
 test("seeded workflows reuse the shared review substrate", () => {
     const repo = createTempRepo();

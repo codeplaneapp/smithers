@@ -3,12 +3,13 @@
 // @smithers-type-exports-end
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, } from "node:fs";
-import { join } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors";
 
 /** @typedef {import("./DiscoveredWorkflow.ts").DiscoveredWorkflow} DiscoveredWorkflow */
 
 const WORKFLOW_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 /**
  * @param {string} root
  */
@@ -16,15 +17,44 @@ function workflowsDir(root) {
     return join(root, ".smithers", "workflows");
 }
 /**
+ * @param {string} id
+ * @returns {string}
+ */
+function defaultDescription(id) {
+    return `Run the ${id} Smithers workflow from this repository.`;
+}
+/**
+ * @param {string} source
+ * @param {string} key
+ * @returns {string | undefined}
+ */
+function metadataValue(source, key) {
+    return source.match(new RegExp(`^//\\s*smithers-${key}:\\s*(.+)$`, "m"))?.[1]?.trim();
+}
+/**
+ * @param {string | undefined} raw
+ * @returns {string[]}
+ */
+function parseCsvMetadata(raw) {
+    return (raw ?? "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
+/**
  * @param {string} source
  * @param {string} id
  */
 function parseMetadata(source, id) {
-    const sourceMatch = source.match(/^\/\/\s*smithers-source:\s*(.+)$/m);
-    const displayMatch = source.match(/^\/\/\s*smithers-display-name:\s*(.+)$/m);
+    const sourceType = metadataValue(source, "source") || "user";
+    const displayName = metadataValue(source, "display-name") || id;
+    const description = metadataValue(source, "description") || defaultDescription(id);
     return {
-        sourceType: sourceMatch?.[1]?.trim() || "user",
-        displayName: displayMatch?.[1]?.trim() || id,
+        sourceType,
+        displayName,
+        description,
+        tags: parseCsvMetadata(metadataValue(source, "tags")),
+        aliases: parseCsvMetadata(metadataValue(source, "aliases")),
     };
 }
 /**
@@ -40,6 +70,9 @@ function workflowFromFile(file, root) {
         id,
         displayName: metadata.displayName,
         sourceType: metadata.sourceType,
+        description: metadata.description,
+        tags: metadata.tags,
+        aliases: metadata.aliases,
         entryFile,
         path: entryFile,
     };
@@ -119,4 +152,124 @@ export function createWorkflowFile(name, root) {
         "",
     ].join("\n"));
     return workflowFromFile(`${name}.tsx`, root);
+}
+/**
+ * @param {string} root
+ * @param {string} path
+ * @returns {string}
+ */
+function resolveOutputPath(root, path) {
+    return isAbsolute(path) ? path : resolve(root, path);
+}
+/**
+ * @param {string} root
+ * @param {string} path
+ * @returns {string}
+ */
+function displayPath(root, path) {
+    const rel = relative(root, path);
+    return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : path;
+}
+/**
+ * @param {string} id
+ * @returns {string}
+ */
+function assertSkillFileName(id) {
+    if (!SKILL_NAME_PATTERN.test(id)) {
+        throw new SmithersError("INVALID_WORKFLOW_NAME", `Invalid skill file name for workflow: ${id}`, { id });
+    }
+    return `${id}.md`;
+}
+/**
+ * @param {DiscoveredWorkflow} workflow
+ * @param {{ root?: string }} [options]
+ * @returns {string}
+ */
+export function renderWorkflowSkill(workflow, options = {}) {
+    const root = options.root ?? process.cwd();
+    const entryPath = displayPath(root, workflow.entryFile);
+    const description = workflow.description || defaultDescription(workflow.id);
+    const workflowTags = workflow.tags ?? [];
+    const workflowAliases = workflow.aliases ?? [];
+    const tags = workflowTags.length > 0 ? workflowTags.join(", ") : "workflow";
+    const aliases = workflowAliases.length > 0 ? workflowAliases.join(", ") : "none";
+    return [
+        "---",
+        `name: ${workflow.id}`,
+        `description: ${description}`,
+        "---",
+        "",
+        `# ${workflow.displayName}`,
+        "",
+        "## When To Use",
+        "",
+        description,
+        "",
+        "## Run",
+        "",
+        "```bash",
+        `smithers workflow run ${workflow.id} --prompt "<request>"`,
+        "```",
+        "",
+        "For structured inputs, pass JSON explicitly:",
+        "",
+        "```bash",
+        `smithers workflow run ${workflow.id} --input '{"prompt":"<request>"}'`,
+        "```",
+        "",
+        "## Operating Notes",
+        "",
+        `- Workflow ID: \`${workflow.id}\``,
+        `- Entry file: \`${entryPath}\``,
+        `- Source type: \`${workflow.sourceType}\``,
+        `- Tags: ${tags}`,
+        `- Aliases: ${aliases}`,
+        "- Run from the repository root so `.smithers/agents.ts`, prompts, and relative imports resolve.",
+        "- Inspect progress with `smithers ps`, `smithers inspect <run-id>`, `smithers logs <run-id>`, and `smithers chat <run-id>`.",
+        "",
+    ].join("\n");
+}
+/**
+ * @param {string} root
+ * @param {{ workflowId?: string; output?: string; force?: boolean }} [options]
+ */
+export function writeWorkflowSkillFiles(root, options = {}) {
+    const workflowId = options.workflowId ?? "all";
+    const force = options.force === true;
+    const workflows = workflowId === "all"
+        ? discoverWorkflows(root).filter((workflow) => workflow.id !== "workflow-skill")
+        : [resolveWorkflow(workflowId, root)];
+    const output = options.output;
+    const defaultOutputDir = join(root, ".smithers", "skills");
+    const outputPath = output ? resolveOutputPath(root, output) : defaultOutputDir;
+    const outputIsSingleFile = workflows.length === 1 && output !== undefined && extname(outputPath) !== "";
+    if (workflows.length > 1 && output !== undefined && extname(outputPath) !== "") {
+        throw new SmithersError("INVALID_INPUT", "Generating skills for multiple workflows requires an output directory.", {
+            workflowId,
+            output,
+        });
+    }
+    const writtenFiles = [];
+    const skippedFiles = [];
+    for (const workflow of workflows) {
+        const target = outputIsSingleFile
+            ? outputPath
+            : join(outputPath, assertSkillFileName(workflow.id));
+        if (existsSync(target) && !force) {
+            skippedFiles.push(target);
+            continue;
+        }
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, renderWorkflowSkill(workflow, { root }));
+        writtenFiles.push(target);
+    }
+    return {
+        rootDir: root,
+        workflowId,
+        outputPath,
+        force,
+        workflows,
+        writtenFiles,
+        skippedFiles,
+    };
 }

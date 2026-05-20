@@ -39,7 +39,7 @@ Most prompt-driven workflows accept `--prompt` as shorthand for `--input '{"prom
 
 - Default workflow files are user-owned after scaffold. `smithers init` will not overwrite edited files unless you pass `--force`.
 - Agent pools come from `.smithers/agents.ts`; the default workflows use pools such as `agents.smart`, `agents.smartTool`, and `agents.cheapFast`.
-- Run `smithers workflow list` to see the workflows in the current repo.
+- Run `smithers workflow list` to see the workflows in the current repo, `smithers workflow inspect <id>` to see metadata, and `smithers workflow skills` to generate agent-facing docs under `.smithers/skills/`.
 - Inspect and resume runs with the normal CLI: `inspect`, `logs`, `chat`, `events`, `why`, `approve`, and `up --resume`.
 
 `workflow-skill` is included in this repository's local `.smithers` pack. Copy it into another workflow pack when you want agents to generate skill files from local workflows.

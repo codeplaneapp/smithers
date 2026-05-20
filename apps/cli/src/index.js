@@ -39,7 +39,7 @@ import { listAccounts, removeAccount } from "@smithers-orchestrator/accounts";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { initWorkflowPack, getWorkflowFollowUpCtas } from "./workflow-pack.js";
-import { discoverWorkflows, resolveWorkflow, createWorkflowFile } from "./workflows.js";
+import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles } from "./workflows.js";
 import {
     assertEvalRunIdsAvailable,
     assertEvalReportWritable,
@@ -1467,6 +1467,13 @@ const workflowPathArgs = z.object({
 const workflowDoctorArgs = z.object({
     name: z.string().optional().describe("Workflow ID"),
 });
+const workflowSkillArgs = z.object({
+    name: z.string().optional().describe("Workflow ID, or omit to generate skills for all workflows"),
+});
+const workflowSkillOptions = z.object({
+    output: z.string().optional().describe("Output file for one workflow, or output directory for all workflows"),
+    force: z.boolean().default(false).describe("Overwrite existing skill files"),
+});
 const workflowRunOptions = upOptions.extend({
     prompt: z.string().optional().describe("Prompt text mapped to input.prompt when --input is omitted"),
 });
@@ -1942,6 +1949,49 @@ const workflowCli = Cli.create({
             }
             return fail({
                 code: "WORKFLOW_CREATE_FAILED",
+                message: err?.message ?? String(err),
+                exitCode: 1,
+            });
+        }
+    },
+})
+    .command("inspect", {
+    description: "Show workflow metadata and an agent-facing skill preview.",
+    args: workflowPathArgs,
+    run(c) {
+        const workflow = resolveWorkflow(c.args.name, process.cwd());
+        return c.ok({
+            workflow,
+            skillPreview: renderWorkflowSkill(workflow, { root: process.cwd() }),
+        });
+    },
+})
+    .command("skills", {
+    description: "Generate agent-facing skill docs for local workflows.",
+    args: workflowSkillArgs,
+    options: workflowSkillOptions,
+    run(c) {
+        const fail = (opts) => {
+            commandExitOverride = opts.exitCode ?? 1;
+            return c.error(opts);
+        };
+        try {
+            return c.ok(writeWorkflowSkillFiles(process.cwd(), {
+                workflowId: c.args.name ?? "all",
+                output: c.options.output,
+                force: c.options.force,
+            }));
+        }
+        catch (err) {
+            if (err instanceof SmithersError) {
+                return fail({
+                    code: err.code,
+                    message: err.message,
+                    exitCode: 4,
+                });
+            }
+            return fail({
+                code: "WORKFLOW_SKILLS_FAILED",
                 message: err?.message ?? String(err),
                 exitCode: 1,
             });
@@ -5254,6 +5304,8 @@ const WORKFLOW_UTILITY_COMMANDS = new Set([
     "list",
     "path",
     "create",
+    "inspect",
+    "skills",
     "doctor",
 ]);
 /**

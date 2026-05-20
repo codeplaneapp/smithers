@@ -31,7 +31,7 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[60]:
+commands[62]:
   - name: init
     purpose: Install the local workflow pack into .smithers/
     flags[4]{name,short,type,default,desc}:
@@ -405,10 +405,21 @@ commands[60]:
     purpose: Resolve a workflow ID to its entry file path
     args[1]{name,type,required,desc}:
       name,string,true,Workflow ID
+  - name: workflow.inspect
+    purpose: Show workflow metadata and an agent-facing skill preview
+    args[1]{name,type,required,desc}:
+      name,string,true,Workflow ID
   - name: workflow.create
     purpose: Create a new flat workflow scaffold in .smithers/workflows/
     args[1]{name,type,required,desc}:
       name,string,true,New workflow ID
+  - name: workflow.skills
+    purpose: Generate agent-facing skill docs for local workflows
+    args[1]{name,type,required,desc}:
+      name,string,false,Workflow ID; omit for all workflows
+    flags[2]{name,short,type,default,desc}:
+      output,,string,,Output file for one workflow, or output directory for all
+      force,,boolean,false,Overwrite existing skill files
   - name: workflow.doctor
     purpose: Inspect workflow discovery, preload files, bunfig, and detected agents
     args[1]{name,type,required,desc}:

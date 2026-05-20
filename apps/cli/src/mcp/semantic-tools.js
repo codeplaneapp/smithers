@@ -44,7 +44,10 @@ const workflowSummarySchema = z.object({
     id: z.string(),
     displayName: z.string(),
     entryFile: z.string(),
-    sourceType: z.enum(["seeded", "user", "generated"]),
+    sourceType: z.string(),
+    description: z.string(),
+    tags: z.array(z.string()),
+    aliases: z.array(z.string()),
 });
 const timerSchema = z.object({
     nodeId: z.string(),

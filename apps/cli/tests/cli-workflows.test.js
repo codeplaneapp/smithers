@@ -2,7 +2,14 @@ import { describe, expect, test, afterEach } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { discoverWorkflows, resolveWorkflow, validateWorkflowName, createWorkflowFile, } from "../src/workflows.js";
+import {
+    createWorkflowFile,
+    discoverWorkflows,
+    renderWorkflowSkill,
+    resolveWorkflow,
+    validateWorkflowName,
+    writeWorkflowSkillFiles,
+} from "../src/workflows.js";
 function makeTempDir() {
     return mkdtempSync(join(tmpdir(), "smithers-wf-"));
 }
@@ -65,6 +72,22 @@ describe("discoverWorkflows", () => {
         const result = discoverWorkflows(root);
         expect(result[0].displayName).toBe("My Workflow");
     });
+    test("parses description, tags, and aliases from metadata comments", () => {
+        const root = makeTempDir();
+        dirs.push(root);
+        const wfDir = join(root, ".smithers", "workflows");
+        mkdirSync(wfDir, { recursive: true });
+        writeFileSync(join(wfDir, "ship-it.tsx"), [
+            "// smithers-description: Ship a polished change.",
+            "// smithers-tags: coding, release",
+            "// smithers-aliases: ship, release",
+            "export default {};",
+        ].join("\n"));
+        const result = discoverWorkflows(root);
+        expect(result[0].description).toBe("Ship a polished change.");
+        expect(result[0].tags).toEqual(["coding", "release"]);
+        expect(result[0].aliases).toEqual(["ship", "release"]);
+    });
     test("defaults to id as display name", () => {
         const root = makeTempDir();
         dirs.push(root);
@@ -102,6 +125,9 @@ describe("discoverWorkflows", () => {
         writeFileSync(join(wfDir, "plain.tsx"), "export default {};");
         const result = discoverWorkflows(root);
         expect(result[0].sourceType).toBe("user");
+        expect(result[0].description).toBe("Run the plain Smithers workflow from this repository.");
+        expect(result[0].tags).toEqual([]);
+        expect(result[0].aliases).toEqual([]);
     });
     test("ignores directories inside workflows dir", () => {
         const root = makeTempDir();
@@ -113,6 +139,102 @@ describe("discoverWorkflows", () => {
         const result = discoverWorkflows(root);
         expect(result).toHaveLength(1);
         expect(result[0].id).toBe("real");
+    });
+});
+
+describe("workflow skill docs", () => {
+    const dirs = [];
+    afterEach(() => {
+        for (const d of dirs) {
+            try {
+                rmSync(d, { recursive: true, force: true });
+            }
+            catch { }
+        }
+        dirs.length = 0;
+    });
+
+    test("renders a deterministic skill from workflow metadata", () => {
+        const root = makeTempDir();
+        dirs.push(root);
+        const wfDir = join(root, ".smithers", "workflows");
+        mkdirSync(wfDir, { recursive: true });
+        writeFileSync(join(wfDir, "ship-it.tsx"), [
+            "// smithers-display-name: Ship It",
+            "// smithers-description: Ship a polished change.",
+            "// smithers-tags: coding, release",
+            "export default {};",
+        ].join("\n"));
+        const workflow = resolveWorkflow("ship-it", root);
+        const skill = renderWorkflowSkill(workflow, { root });
+        expect(skill).toContain("name: ship-it");
+        expect(skill).toContain("Ship a polished change.");
+        expect(skill).toContain("smithers workflow run ship-it --prompt");
+        expect(skill).toContain("Tags: coding, release");
+        expect(skill).toContain("Entry file: `.smithers/workflows/ship-it.tsx`");
+    });
+
+    test("writes skill files for all workflows except workflow-skill", () => {
+        const root = makeTempDir();
+        dirs.push(root);
+        const wfDir = join(root, ".smithers", "workflows");
+        mkdirSync(wfDir, { recursive: true });
+        writeFileSync(join(wfDir, "implement.tsx"), "// smithers-display-name: Implement\nexport default {};");
+        writeFileSync(join(wfDir, "workflow-skill.tsx"), "// smithers-display-name: Workflow Skill\nexport default {};");
+
+        const result = writeWorkflowSkillFiles(root);
+
+        expect(result.workflows.map((workflow) => workflow.id)).toEqual(["implement"]);
+        expect(result.writtenFiles).toHaveLength(1);
+        expect(result.writtenFiles[0]).toContain(join(".smithers", "skills", "implement.md"));
+        expect(readFileSync(result.writtenFiles[0], "utf8")).toContain("smithers workflow run implement");
+    });
+
+    test("preserves existing skill files unless forced", () => {
+        const root = makeTempDir();
+        dirs.push(root);
+        const wfDir = join(root, ".smithers", "workflows");
+        const skillsDir = join(root, ".smithers", "skills");
+        mkdirSync(wfDir, { recursive: true });
+        mkdirSync(skillsDir, { recursive: true });
+        writeFileSync(join(wfDir, "review.tsx"), "// smithers-display-name: Review\nexport default {};");
+        writeFileSync(join(skillsDir, "review.md"), "custom skill\n");
+
+        const skipped = writeWorkflowSkillFiles(root);
+        expect(skipped.writtenFiles).toEqual([]);
+        expect(skipped.skippedFiles).toEqual([join(skillsDir, "review.md")]);
+        expect(readFileSync(join(skillsDir, "review.md"), "utf8")).toBe("custom skill\n");
+
+        const forced = writeWorkflowSkillFiles(root, { force: true });
+        expect(forced.writtenFiles).toEqual([join(skillsDir, "review.md")]);
+        expect(readFileSync(join(skillsDir, "review.md"), "utf8")).toContain("smithers workflow run review");
+    });
+
+    test("writes one selected workflow to an explicit output file", () => {
+        const root = makeTempDir();
+        dirs.push(root);
+        const wfDir = join(root, ".smithers", "workflows");
+        mkdirSync(wfDir, { recursive: true });
+        writeFileSync(join(wfDir, "plan.tsx"), "// smithers-display-name: Plan\nexport default {};");
+
+        const result = writeWorkflowSkillFiles(root, {
+            workflowId: "plan",
+            output: "docs/plan-skill.md",
+        });
+
+        expect(result.writtenFiles).toEqual([join(root, "docs", "plan-skill.md")]);
+        expect(readFileSync(join(root, "docs", "plan-skill.md"), "utf8")).toContain("name: plan");
+    });
+
+    test("rejects one output file for multiple workflow skills", () => {
+        const root = makeTempDir();
+        dirs.push(root);
+        const wfDir = join(root, ".smithers", "workflows");
+        mkdirSync(wfDir, { recursive: true });
+        writeFileSync(join(wfDir, "plan.tsx"), "// smithers-display-name: Plan\nexport default {};");
+        writeFileSync(join(wfDir, "review.tsx"), "// smithers-display-name: Review\nexport default {};");
+
+        expect(() => writeWorkflowSkillFiles(root, { output: "skills.md" })).toThrow("requires an output directory");
     });
 });
 describe("resolveWorkflow", () => {

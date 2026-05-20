@@ -5,6 +5,12 @@ description: Create or update agent-facing skill docs from local workflows.
 
 `workflow-skill` reads local Smithers workflow files and asks an agent to write concise skill documentation for them. The generated skill files describe when to use each workflow, which workflow ID to run, which inputs matter, and how to operate the run.
 
+For deterministic, no-agent generation, use the CLI command:
+
+```bash
+bunx smithers-orchestrator workflow skills
+```
+
 ```bash
 bunx smithers-orchestrator workflow run workflow-skill --input '{"workflow":"mission"}'
 ```
