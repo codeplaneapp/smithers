@@ -53,6 +53,7 @@ import {
     renderEvalReport,
     writeEvalReport,
 } from "./eval-suite.js";
+import { buildStarterGallery, findStarterRecipe, renderStarterGallery } from "./starter-gallery.js";
 import { ask } from "./ask.js";
 import { runScheduler } from "./scheduler.js";
 import { resumeRunDetached } from "./resume-detached.js";
@@ -1413,6 +1414,15 @@ const initOptions = z.object({
     install: z.boolean().default(true).describe("Run `bun install` inside .smithers/ after scaffolding (--no-install to skip)"),
     addAgents: z.boolean().default(false).describe("After scaffolding, launch the interactive `agents add` wizard to register one or more accounts."),
 });
+const startersArgs = z.object({
+    id: z.string().optional().describe("Starter ID or alias"),
+});
+const startersOptions = z.object({
+    audience: z.string().optional().describe("Filter by audience, such as product, support, or founder"),
+    goal: z.string().optional().describe("Filter by goal, such as plan, build, debug, or quality"),
+    workflow: z.string().optional().describe("Filter by seeded workflow ID"),
+    tag: z.string().optional().describe("Filter by starter tag"),
+});
 const workflowPathArgs = z.object({
     name: z.string().describe("Workflow ID"),
 });
@@ -2694,10 +2704,12 @@ const cli = Cli.create({
                         description: "Next steps:",
                         commands: c.agent
                             ? [
+                                { command: "starters", description: "Pick a starter by outcome" },
                                 { command: "workflow list", description: "View all available workflows" },
                                 { command: "workflow run implement", description: "Run the implementation workflow" },
                             ]
                             : [
+                                { command: "starters", description: "Pick a starter by outcome" },
                                 { command: "workflow list", description: "View all available workflows" },
                                 { command: "workflow run implement", description: "Run the implementation workflow" },
                             ],
@@ -2718,6 +2730,40 @@ const cli = Cli.create({
                 exitCode: 1,
             });
         }
+    },
+})
+    // =========================================================================
+    // smithers starters [id]
+    // =========================================================================
+    .command("starters", {
+    description: "Show plain-English starter workflows with copy-paste commands.",
+    args: startersArgs,
+    options: startersOptions,
+    run(c) {
+        if (c.args.id && !findStarterRecipe(c.args.id)) {
+            commandExitOverride = 4;
+            return c.error({
+                code: "STARTER_NOT_FOUND",
+                message: `Starter not found: ${c.args.id}. Run "smithers starters" to list available starters.`,
+                details: {
+                    availableStarters: buildStarterGallery().starters.map((starter) => starter.id),
+                },
+                exitCode: 4,
+            });
+        }
+        const gallery = buildStarterGallery({
+            id: c.args.id,
+            audience: c.options.audience,
+            goal: c.options.goal,
+            workflow: c.options.workflow,
+            tag: c.options.tag,
+        });
+        const explicitFormat = process.argv.some((arg) => arg === "--format" || arg.startsWith("--format="));
+        if (explicitFormat || c.format === "json" || c.format === "jsonl") {
+            return c.ok(gallery);
+        }
+        process.stdout.write(`${renderStarterGallery(gallery)}\n`);
+        return undefined;
     },
 })
     // =========================================================================

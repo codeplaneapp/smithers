@@ -8,9 +8,10 @@ Write agent workflows as TypeScript, run them for minutes or days, and keep the 
 
 ```bash
 bunx smithers-orchestrator@latest init
+bunx smithers-orchestrator@latest starters
 ```
 
-This scaffolds a `.smithers/` folder with canonical workflows for implementation, review, debugging, planning, audits, and long-horizon missions.
+This scaffolds a `.smithers/` folder with canonical workflows for implementation, review, debugging, planning, audits, and long-horizon missions. `starters` shows plain-English outcomes like product briefs, support incident fixes, launch checklists, quality audits, and larger milestone projects, then gives you the exact command to run.
 
 Use the `smithers` CLI or Gateway console to operate runs.
 

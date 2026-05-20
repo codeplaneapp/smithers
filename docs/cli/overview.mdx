@@ -32,7 +32,7 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[62]:
+commands[63]:
   - name: init
     purpose: Install the local workflow pack into .smithers/
     flags[4]{name,short,type,default,desc}:
@@ -40,6 +40,15 @@ commands[62]:
       agents-only,,boolean,false,Only create .smithers/agents/ and leave workflow pack untouched
       install,,boolean,true,Run bun install inside .smithers/ after scaffolding
       add-agents,,boolean,false,Launch the account registration wizard after scaffolding
+  - name: starters
+    purpose: Show plain-English starter workflows with copy-paste commands
+    args[1]{name,type,required,desc}:
+      id,string,false,Starter ID or alias
+    flags[4]{name,short,type,default,desc}:
+      audience,,string,,Filter by audience such as product, support, or founder
+      goal,,string,,Filter by goal such as plan, build, debug, or quality
+      workflow,,string,,Filter by seeded workflow ID
+      tag,,string,,Filter by starter tag
   - name: up
     purpose: Start or resume a workflow execution
     args[1]{name,type,required,desc}:

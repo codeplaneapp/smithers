@@ -1,0 +1,53 @@
+---
+title: Starters
+description: Choose a plain-English outcome and copy the Smithers command.
+---
+
+Smithers ships with starter workflows for people who want a result before they want to write workflow code. Run the starter gallery from any repo:
+
+```bash
+bunx smithers-orchestrator starters
+```
+
+First-time setup:
+
+```bash
+bunx smithers-orchestrator init --add-agents
+```
+
+Then pick a starter:
+
+| Starter | Best for | Workflow | Command |
+| --- | --- | --- | --- |
+| `idea-to-prd` | founders, product, marketing | `write-a-prd` | `smithers starters idea-to-prd` |
+| `idea-to-tickets` | product, operations, engineering | `tickets-create` | `smithers starters idea-to-tickets` |
+| `launch-checklist` | launch owners and operators | `plan` | `smithers starters launch-checklist` |
+| `customer-incident` | support escalations | `debug` | `smithers starters customer-incident` |
+| `nontechnical-research` | before-build decisions | `research` | `smithers starters nontechnical-research` |
+| `requirements-interview` | vague stakeholder requests | `grill-me` | `smithers starters requirements-interview` |
+| `quality-audit` | release readiness | `audit` | `smithers starters quality-audit` |
+| `test-coverage` | regression prevention | `improve-test-coverage` | `smithers starters test-coverage` |
+| `ship-a-change` | focused product improvements | `research-plan-implement` | `smithers starters ship-a-change` |
+| `mission-mode` | larger approved milestones | `mission` | `smithers starters mission-mode` |
+
+Each detailed starter prints:
+
+- What outcome to expect
+- What context to gather before running
+- The exact `smithers workflow run ...` command
+- Useful follow-up commands
+- When not to use that starter
+
+Filter by audience or goal:
+
+```bash
+bunx smithers-orchestrator starters --audience product
+bunx smithers-orchestrator starters --goal quality
+bunx smithers-orchestrator starters --workflow debug
+```
+
+Use JSON when another tool needs the catalog:
+
+```bash
+bunx smithers-orchestrator starters --format json
+```

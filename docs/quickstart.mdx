@@ -5,10 +5,11 @@ description: Scaffold and run a Smithers workflow in two commands.
 
 ```bash
 bunx smithers-orchestrator init
+bunx smithers-orchestrator starters
 bunx smithers-orchestrator workflow run implement --prompt "Add rate limiting"
 ```
 
-`init` scaffolds `.smithers/` (workflows, prompts, components, agent config). The `workflow run` command launches one of the seeded workflows.
+`init` scaffolds `.smithers/` (workflows, prompts, components, agent config). `starters` helps you choose a seeded workflow by outcome, then `workflow run` launches it.
 
 Inspect the run:
 
