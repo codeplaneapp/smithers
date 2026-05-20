@@ -5,6 +5,8 @@ description: Deploy the stable Gateway with SQLite, scoped bearer auth, and a re
 
 The reference deployment is the lower-level Gateway path for teams that do not want JJHub. It runs one Gateway process, one SQLite database file, and a TLS reverse proxy.
 
+For multi-tenant hosted deployments, pair the Gateway with the [Control Plane](/deployment/control-plane) package for orgs, projects, teams, billing account records, usage events, secret references, and audit export.
+
 ## Docker Compose
 
 From the repo root:

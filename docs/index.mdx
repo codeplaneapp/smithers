@@ -1,9 +1,9 @@
 ---
 title: Smithers
-description: Smithers powers TypeScript teams to run long AI coding workflows that survive crashes and handle approvals, retries, and restarts
+description: Durable control plane for long-running coding agents.
 ---
 
-Smithers powers TypeScript teams to run long AI coding workflows that survive crashes and handle approvals, retries, and restarts
+Smithers is a durable control plane for long-running coding agents. It gives TypeScript teams crash recovery, retries, human approvals, replay, evals, sandbox review, and Gateway APIs in one workflow runtime.
 
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
@@ -32,7 +32,7 @@ bunx smithers-orchestrator init
 bunx smithers-orchestrator up workflow.tsx --input '{"name":"world"}'
 ```
 
-Outputs are validated by Zod, persisted to SQLite, and survive crashes. Resume with `--resume true`.
+Outputs are validated by Zod, persisted to SQLite, and survive crashes. Resume with `--resume true`, or expose the Gateway console with `new Gateway({ ui: true })`.
 
 ## Read next
 
@@ -40,5 +40,6 @@ Outputs are validated by Zod, persisted to SQLite, and survive crashes. Resume w
 - [How It Works](/how-it-works) — the render → execute → persist loop.
 - [Components](/components/workflow) — JSX surface reference.
 - [CLI](/cli/overview) — every command in one table.
+- [Control Plane](/deployment/control-plane) — org/project, metering, secret-reference, and audit primitives.
 - [Recipes](/recipes) — common patterns.
 - [Types](/reference/types) — public TypeScript surface.

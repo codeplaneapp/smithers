@@ -17,6 +17,7 @@ import {
 } from "../src/effect/http-runner.js";
 import { BubblewrapSandboxExecutorLive } from "../src/effect/socket-runner.js";
 import { layerForSandboxRuntime, resolveSandboxRuntime } from "../src/transport.js";
+import { bubblewrapArgs, dockerArgs, sandboxExecArgs } from "../src/effect/process-runner.js";
 
 /**
  * @param {string} prefix
@@ -151,17 +152,26 @@ async function expectExecutorLifecycle(layer, config) {
 }
 
 function makeFakeDockerBin() {
+    return makeFakeBin("docker", "#!/bin/sh\nexit 0\n");
+}
+
+/**
+ * @param {string} name
+ * @param {string} script
+ */
+function makeFakeBin(name, script = "#!/bin/sh\nexit 0\n") {
     const binDir = tempDir("smithers-fake-docker-bin-");
-    const dockerPath = join(binDir, "docker");
-    writeFileSync(dockerPath, "#!/bin/sh\nexit 0\n", "utf8");
-    chmodSync(dockerPath, 0o755);
-    return binDir;
+    const binPath = join(binDir, name);
+    writeFileSync(binPath, script, "utf8");
+    chmodSync(binPath, 0o755);
+    return { binDir, binPath };
 }
 
 describe("sandbox transport runners", () => {
     test("bubblewrap executor creates, ships, executes, collects, and cleans up", async () => {
+        const fake = makeFakeBin("bwrap");
         await withPlatform("linux", () =>
-            withBunWhich((command) => (command === "bwrap" ? "/usr/bin/bwrap" : null), async () => {
+            withBunWhich((command) => (command === "bwrap" ? fake.binPath : null), async () => {
                 await expectExecutorLifecycle(
                     BubblewrapSandboxExecutorLive,
                     configFor(tempDir("smithers-bubblewrap-"), "run-bwrap", "sandbox-bwrap", "bubblewrap"),
@@ -199,8 +209,9 @@ describe("sandbox transport runners", () => {
     });
 
     test("bubblewrap executor accepts the macOS fallback binary", async () => {
+        const fake = makeFakeBin("sandbox-exec");
         await withPlatform("darwin", () =>
-            withBunWhich((command) => (command === "sandbox-exec" ? "/usr/bin/sandbox-exec" : null), async () => {
+            withBunWhich((command) => (command === "sandbox-exec" ? fake.binPath : null), async () => {
                 const handle = await runExecutor(BubblewrapSandboxExecutorLive, (executor) =>
                     executor.create(
                         configFor(tempDir("smithers-bubblewrap-"), "run-sandbox-exec", "sandbox", "bubblewrap"),
@@ -215,7 +226,7 @@ describe("sandbox transport runners", () => {
 
     test("docker executor uses docker info before creating the workspace", async () => {
         const fakeDocker = makeFakeDockerBin();
-        await withEnv({ PATH: `${fakeDocker}:${process.env.PATH ?? ""}` }, async () => {
+        await withEnv({ PATH: `${fakeDocker.binDir}:${process.env.PATH ?? ""}` }, async () => {
             await expectExecutorLifecycle(
                 DockerSandboxExecutorLive,
                 configFor(tempDir("smithers-docker-"), "run-docker", "sandbox-docker", "docker"),
@@ -258,5 +269,48 @@ describe("sandbox transport runners", () => {
             expect(resolveSandboxRuntime("docker")).toBe("bubblewrap");
             expect(resolveSandboxRuntime("codeplane")).toBe("codeplane");
         });
+    });
+
+    test("local sandbox command args enforce network defaults and mount request/result paths", () => {
+        const handle = {
+            runtime: "docker",
+            runId: "run",
+            sandboxId: "sandbox",
+            sandboxRoot: "/tmp/sandbox",
+            requestPath: "/tmp/sandbox/request",
+            resultPath: "/tmp/sandbox/result",
+            image: "node:22-slim",
+            allowNetwork: false,
+        };
+
+        expect(dockerArgs("npm test", handle)).toContain("--network");
+        expect(dockerArgs("npm test", handle)).toContain("none");
+        expect(dockerArgs("npm test", { ...handle, allowNetwork: true })).not.toContain("--network");
+
+        const bwrap = bubblewrapArgs("npm test", handle);
+        expect(bwrap).toContain("--unshare-net");
+        expect(bwrap).toContain("/workspace");
+        expect(bwrap).toContain("/result");
+
+        const sandboxExec = sandboxExecArgs("npm test", handle).join(" ");
+        expect(sandboxExec).toContain("(deny network*)");
+        expect(sandboxExec).toContain(handle.requestPath);
+        expect(sandboxExec).toContain(handle.resultPath);
+    });
+
+    test("sandbox-exec profile escapes mounted paths", () => {
+        const handle = {
+            runtime: "bubblewrap",
+            runId: "run",
+            sandboxId: "sandbox",
+            sandboxRoot: "/tmp/sandbox",
+            requestPath: '/tmp/sandbox/request"quoted',
+            resultPath: "/tmp/sandbox/result\\slash",
+            allowNetwork: false,
+        };
+
+        const profile = sandboxExecArgs("npm test", handle)[1];
+        expect(profile).toContain('/tmp/sandbox/request\\"quoted');
+        expect(profile).toContain("/tmp/sandbox/result\\\\slash");
     });
 });

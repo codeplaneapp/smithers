@@ -6,6 +6,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { spawnCaptureEffect } from "@smithers-orchestrator/driver/child-process";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { SandboxEntityExecutor } from "./sandbox-entity.js";
+import { dockerArgs, spawnSandboxCommand } from "./process-runner.js";
 /** @typedef {import("../SandboxTransportConfig.ts").SandboxTransportConfig} SandboxTransportConfig */
 /** @typedef {import("../SandboxHandle.ts").SandboxHandle} SandboxHandle */
 /**
@@ -21,6 +22,8 @@ function baseHandle(config) {
         sandboxRoot,
         requestPath: join(sandboxRoot, "request"),
         resultPath: join(sandboxRoot, "result"),
+        image: config.image,
+        allowNetwork: Boolean(config.allowNetwork),
     };
 }
 /** @type {Layer.Layer<SandboxEntityExecutor, never, never>} */
@@ -50,7 +53,10 @@ export const DockerSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor, Sa
         },
         catch: (cause) => toSmithersError(cause, "ship docker bundle"),
     }),
-    execute: (_command, _handle) => Effect.succeed({ exitCode: 0 }),
+    execute: (command, handle) => spawnSandboxCommand("docker", dockerArgs(command, handle), {
+        cwd: handle.requestPath,
+        runtime: "docker",
+    }),
     collect: (handle) => Effect.succeed({ bundlePath: handle.resultPath }),
     cleanup: (_handle) => Effect.void,
 }));
@@ -83,7 +89,11 @@ export const CodeplaneSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor,
         },
         catch: (cause) => toSmithersError(cause, "ship codeplane bundle"),
     }),
-    execute: (_command, _handle) => Effect.succeed({ exitCode: 0 }),
+    execute: (command, handle) => Effect.fail(new SmithersError("SANDBOX_EXECUTION_FAILED", "Codeplane sandbox command execution requires the remote Codeplane worker integration.", {
+        runtime: "codeplane",
+        command,
+        workspaceId: handle.workspaceId ?? null,
+    })),
     collect: (handle) => Effect.succeed({ bundlePath: handle.resultPath }),
     cleanup: (_handle) => Effect.void,
 }));

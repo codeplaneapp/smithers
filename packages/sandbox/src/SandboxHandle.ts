@@ -7,6 +7,8 @@ export type SandboxHandle = {
     sandboxRoot: string;
     requestPath: string;
     resultPath: string;
+    image?: string;
+    allowNetwork?: boolean;
     containerId?: string;
     workspaceId?: string;
 };

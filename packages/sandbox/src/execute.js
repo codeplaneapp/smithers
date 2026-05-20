@@ -198,6 +198,7 @@ export async function executeSandbox(options) {
             runtime: selectedRuntime,
             rootDir: options.rootDir,
             image: options.config?.image ?? undefined,
+            allowNetwork: options.allowNetwork,
         };
         handle = await transportCall(selectedRuntime, sandboxTransport((svc) => svc.create(transportConfig)));
         const sandboxHandle = requireSandboxHandle(handle, options.sandboxId);
@@ -229,7 +230,9 @@ export async function executeSandbox(options) {
             completedAtMs: null,
             bundlePath: null,
         });
-        await transportCall(selectedRuntime, sandboxTransport((svc) => svc.execute(resolveSandboxCommand(options.config?.command), sandboxHandle)));
+        if (options.config?.command) {
+            await transportCall(selectedRuntime, sandboxTransport((svc) => svc.execute(resolveSandboxCommand(options.config?.command), sandboxHandle)));
+        }
         runtime.heartbeat({
             sandboxId: options.sandboxId,
             stage: "executing",

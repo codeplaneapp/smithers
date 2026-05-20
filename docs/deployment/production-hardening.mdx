@@ -12,6 +12,7 @@ Run these checks before promoting a workflow module:
 ```bash
 pnpm check:effect
 pnpm check:deps
+pnpm check:architecture
 pnpm -r typecheck
 pnpm test
 ```
@@ -44,6 +45,8 @@ Recommended scopes by client type:
 | Operator tools | `run:read`, `run:write`, `approval:submit` |
 
 Rotate token grants regularly and revoke grants when a user, CI job, or integration no longer needs access.
+
+For multi-tenant deployments, store tenant-level orgs, projects, teams, usage, secret references, and audit events with `ControlPlaneStore` from `smithers-orchestrator/control-plane`. Keep identity-provider assertions and billing-provider webhooks outside SQLite, then write normalized grants and audit events into the control-plane tables.
 
 ## Execution Boundary
 

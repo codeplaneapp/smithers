@@ -174,6 +174,13 @@
         "./packages/components/src/*.js",
         "./packages/components/src/*/index.js"
       ],
+      "@smithers-orchestrator/control-plane": [
+        "./packages/control-plane/src/index.js"
+      ],
+      "@smithers-orchestrator/control-plane/*": [
+        "./packages/control-plane/src/*.js",
+        "./packages/control-plane/src/*/index.js"
+      ],
       "@smithers-orchestrator/react-reconciler": [
         "./packages/react-reconciler/src/index.js"
       ],

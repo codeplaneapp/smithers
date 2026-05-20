@@ -3,7 +3,7 @@ title: Introduction
 description: What Smithers is and when to use it.
 ---
 
-Smithers is a durable workflow runtime. Smithers survive crashes and handle approvals, retries, and restarts.
+Smithers is a durable control plane for long-running coding agents. Smithers workflows survive crashes and handle approvals, retries, restarts, replay, evals, and operator visibility.
 
 You write a workflow as a JSX tree, and Smithers repeatedly renders it every "tick". Each render answers: given what has already finished, what can run now? Tasks produce outputs validated by Zod schemas; the runtime persists them to SQLite. Crashes, restarts, and approvals are first-class — the runtime resumes from the last persisted state without re-running completed work.
 
@@ -28,6 +28,7 @@ Use Smithers when:
 - you need crash recovery
 - humans must approve or answer questions mid-run
 - different tasks need different models, tools, or policies
+- operators need a Gateway API or browser console for active runs
 
 Don't use it for a single prompt → single response. That's just an `Agent.generate(...)` call.
 

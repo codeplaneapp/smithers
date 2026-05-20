@@ -119,10 +119,11 @@ type GatewayDefaults$1 = {
     cliAgentTools?: "all" | "explicit-only";
 };
 
-type GatewayUiConfig$1 = {
+type GatewayUiConfig$1 = true | {
     /**
      * Browser entry module for the React app. Smithers bundles this with Bun and
-     * serves it from the Gateway origin.
+     * serves it from the Gateway origin. Pass `true` to mount the built-in
+     * operator console.
      */
     entry: string;
     /**
@@ -781,6 +782,7 @@ type ResolvedRun = {
 type ResolvedGatewayUiConfig = {
     entry: string;
     path: string;
+    builtin?: "console";
     title?: string;
     props?: Record<string, unknown>;
 };

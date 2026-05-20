@@ -45,6 +45,7 @@ import { hashCapabilityRegistry } from "@smithers-orchestrator/agents/capability
 import { cancelPendingTimersBridge, executeTaskBridgeEffect, isBridgeManagedTimerTask as isTimerTask, resolveDeferredTaskStateBridge, } from "./effect/workflow-bridge.js";
 import { AlertRuntime } from "./alert-runtime.js";
 import { executeChildWorkflow } from "./child-workflow.js";
+import { buildCacheScopeIdentity, isFreshCacheRow, normalizeCacheScope } from "./cache-policy.js";
 import { runWorkflowWithMakeBridge } from "./effect/workflow-make-bridge.js";
 import { createWorkflowVersioningRuntime, getWorkflowPatchDecisions, withWorkflowVersioningRuntime, } from "./effect/versioning.js";
 import { runWithCorrelationContext, updateCurrentCorrelationContext, withCorrelationContext, } from "@smithers-orchestrator/observability/correlation";
@@ -1318,52 +1319,6 @@ async function buildCacheContext(db, inputTable, runId, desc, descriptorMap, att
         }
     }
     return ctx;
-}
-/**
- * @param {TaskDescriptor["cachePolicy"]} policy
- * @returns {"run" | "workflow" | "global"}
- */
-function normalizeCacheScope(policy) {
-    return policy?.scope === "run" || policy?.scope === "global"
-        ? policy.scope
-        : "workflow";
-}
-/**
- * @param {"run" | "workflow" | "global"} scope
- * @param {string} runId
- * @param {string} workflowName
- * @param {TaskDescriptor} desc
- * @returns {Record<string, unknown>}
- */
-function buildCacheScopeIdentity(scope, runId, workflowName, desc) {
-    const taskKey = desc.cachePolicy?.key ?? desc.nodeId;
-    const identity = {
-        taskKey,
-        outputTableName: desc.outputTableName,
-    };
-    if (scope === "global") {
-        return identity;
-    }
-    if (scope === "run") {
-        return { runId, workflowName, ...identity };
-    }
-    return { workflowName, ...identity };
-}
-/**
- * @param {unknown} row
- * @param {TaskDescriptor["cachePolicy"]} policy
- * @returns {boolean}
- */
-function isFreshCacheRow(row, policy) {
-    const ttlMs = policy?.ttlMs;
-    if (ttlMs === undefined || ttlMs === null) {
-        return true;
-    }
-    if (typeof ttlMs !== "number" || !Number.isFinite(ttlMs) || ttlMs < 0) {
-        return false;
-    }
-    const createdAtMs = /** @type {{ createdAtMs?: unknown }} */ (row)?.createdAtMs;
-    return typeof createdAtMs === "number" && nowMs() - createdAtMs <= ttlMs;
 }
 /**
  * @param {RunOptions} opts

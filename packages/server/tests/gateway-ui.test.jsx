@@ -91,6 +91,26 @@ describe("Gateway UI", () => {
     expect(await assetResponse.text()).toContain("Gateway Console");
   });
 
+  test("serves the built-in operator console without a custom UI bundle", async () => {
+    gateway = new Gateway({ ui: true });
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+
+    const htmlResponse = await fetch(`http://127.0.0.1:${port}/console`);
+    expect(htmlResponse.status).toBe(200);
+    const html = await htmlResponse.text();
+    expect(html).toContain("<title>Smithers Console</title>");
+    expect(html).toContain('"mountPath":"/console"');
+    expect(html).toContain('/console/__smithers_ui/client.js');
+
+    const assetResponse = await fetch(`http://127.0.0.1:${port}/console/__smithers_ui/client.js`);
+    expect(assetResponse.status).toBe(200);
+    const asset = await assetResponse.text();
+    expect(asset).toContain("Smithers Console");
+    expect(asset).toContain("listWorkflows");
+    expect(asset).toContain("submitApproval");
+  });
+
   test("serves a workflow-level UI and exposes UI metadata through listWorkflows", async () => {
     tempDir = mkdtempSync(join(process.cwd(), ".smithers-workflow-ui-"));
     const dbPath = join(tempDir, "workflow.db");

@@ -3,9 +3,9 @@
 // Scope: this file does NOT exercise live container/jail isolation
 // (bubblewrap on Linux, sandbox-exec on macOS, docker, codeplane).
 // Those runtimes are environment-dependent and the local
-// `BubblewrapSandboxExecutorLive` layer is a no-op shim that just
-// creates request/result directories under `<rootDir>/.smithers/sandboxes/...`
-// (see packages/sandbox/src/effect/socket-runner.js).
+// local transports are exercised with fake runtime binaries in
+// transport-runners.test.js, but this file still avoids host-specific process
+// isolation assertions.
 //
 // What IS enforceable in-process and exercised here:
 //   - resolveSandboxPath path traversal validation (../../, absolute paths, symlink
@@ -16,10 +16,8 @@
 //   - walkFiles handling of symlinks and deeply nested artifacts.
 //   - Cleanup of the sandbox temp directory after a write.
 //
-// FIXME: when a real container runtime is wired up, replace these with end-to-end
-// process-level tests: spawn a child inside the sandbox, attempt to read
-// `/etc/passwd`, expect EACCES; kill the child mid-run, then verify there are
-// no orphan processes via `ps`. The current local test stack cannot do that.
+// Host-level process tests remain opt-in because they require the real runtime
+// binaries and platform privileges.
 import { describe, expect, test } from "bun:test";
 import {
 	mkdtempSync,

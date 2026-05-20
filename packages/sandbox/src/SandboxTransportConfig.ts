@@ -6,4 +6,5 @@ export type SandboxTransportConfig = {
     runtime: SandboxRuntime;
     rootDir: string;
     image?: string;
+    allowNetwork?: boolean;
 };

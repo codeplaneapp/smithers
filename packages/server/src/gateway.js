@@ -40,6 +40,7 @@ import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-trave
 import { GATEWAY_EVENT_WINDOW_DEFAULT, SMITHERS_API_VERSION, getRequiredScopeForGatewayMethod, } from "@smithers-orchestrator/gateway/rpc";
 import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
 import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
+import { renderDefaultConsoleClient } from "./gatewayUi/defaultConsole.js";
 /** @typedef {import("./GatewayWebhookRunConfig.js").GatewayWebhookRunConfig} GatewayWebhookRunConfig */
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
@@ -109,6 +110,7 @@ import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
  * @typedef {{
  *   entry: string;
  *   path: string;
+ *   builtin?: "console";
  *   title?: string;
  *   props?: Record<string, unknown>;
  * }} ResolvedGatewayUiConfig
@@ -194,6 +196,15 @@ function joinUiPath(mountPath, suffix) {
 function resolveGatewayUiConfig(ui, fallbackPath) {
     if (!ui) {
         return null;
+    }
+    if (ui === true) {
+        return {
+            entry: "__smithers_builtin_console__",
+            path: normalizeUiMountPath(fallbackPath === "/" ? "/console" : fallbackPath, fallbackPath),
+            title: "Smithers Console",
+            builtin: "console",
+            props: {},
+        };
     }
     if (typeof ui.entry !== "string" || !ui.entry.trim()) {
         throw new SmithersError("INVALID_INPUT", "Gateway UI config requires a non-empty entry path.");
@@ -1340,6 +1351,12 @@ export class Gateway {
     async renderUiAsset(match) {
         if (match.assetPath !== "client.js") {
             return null;
+        }
+        if (match.config.config.builtin === "console") {
+            return {
+                body: renderDefaultConsoleClient(),
+                contentType: "text/javascript; charset=utf-8",
+            };
         }
         const body = await this.bundleUiEntry(match.config.config);
         return {

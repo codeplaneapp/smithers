@@ -30,6 +30,7 @@ Use the subpath form to import only the surface you need.
 | `smithers-orchestrator/scorers` | `./src/scorers.js` | Eval scorers: `createScorer`, `llmJudge`, `aggregateScores` |
 | `smithers-orchestrator/memory` | `./src/memory.js` | Cross-run facts, message history, processors, and metrics |
 | `smithers-orchestrator/openapi` | `./src/openapi.js` | Generate AI SDK tools from OpenAPI specs |
+| `smithers-orchestrator/control-plane` | `./src/control-plane.js` | Organization, project, billing, usage, secret-reference, and audit primitives |
 
 The PI plugin is published as the separate `@smithers-orchestrator/pi-plugin` package. The old `smithers-orchestrator/pi-plugin` and `smithers-orchestrator/pi-extension` subpaths are no longer exported.
 
@@ -44,6 +45,7 @@ Most applications should import from `smithers-orchestrator`. The scoped workspa
 | `@smithers-orchestrator/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | [CLI Agents](/integrations/cli-agents) |
 | `@smithers-orchestrator/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry | [CLI Agents](/integrations/cli-agents), [SDK Agents](/integrations/sdk-agents) |
 | `@smithers-orchestrator/components` | JSX workflow components such as `Task`, `Workflow`, `Approval`, `Sandbox`, `Timer`, `Signal`, and control-flow components | [Components](/concepts/control-flow) |
+| `@smithers-orchestrator/control-plane` | Durable organization, project, team, billing, usage, secret-reference, and audit primitives for hosted deployments | [Control Plane](/deployment/control-plane) |
 | `@smithers-orchestrator/db` | SQLite/Drizzle adapter, table setup, run-state derivation, schema helpers, and output tables | [Data Model](/concepts/data-model), [Run State](/runtime/run-state) |
 | `@smithers-orchestrator/devtools` | Snapshot, tree, diff, node lookup, task collection, and DevTools run-store helpers behind the CLI inspect commands | [Debugging](/guides/debugging), [CLI Overview](/cli/overview) |
 | `@smithers-orchestrator/driver` | Runtime driver contracts: `RunOptions`, `RunResult`, `RunStatus`, `SmithersCtx`, outputs, task runtime, interop, and child process helpers | [Run Workflow](/runtime/run-workflow), [Execution Model](/concepts/execution-model) |
@@ -80,6 +82,9 @@ import { createScorer, llmJudge } from "smithers-orchestrator/scorers";
 
 // MDX plugin (in preload.ts)
 import { mdxPlugin } from "smithers-orchestrator/mdx-plugin";
+
+// Control-plane primitives
+import { ControlPlaneStore } from "smithers-orchestrator/control-plane";
 ```
 
 ## TypeScript Configuration
