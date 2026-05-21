@@ -102,7 +102,7 @@ test("workflow help exposes run as a declared subcommand", () => {
         format: null,
     });
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("run     Run a discovered workflow by ID.");
+    expect(result.stdout).toMatch(/^  run\s+Run a discovered workflow by ID\.$/m);
 });
 test("workflow run help exposes prompt and execution options", () => {
     const repo = createTempRepo();
