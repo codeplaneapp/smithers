@@ -1,0 +1,77 @@
+# 0.20.4
+
+Patch release: the `smithers` bin now resolves the workspace-local
+install through `package.json` instead of the npm/pnpm `.bin/` shell
+shim, fixing the `bun: Expected ")" but found "$(echo "` crash that
+hit any project with a local `.smithers/` install. Engine prompts for
+schema-driven outputs now demand raw JSON without code fences.
+
+---
+
+## CLI
+
+- **Bin delegation now resolves the workspace-local install through
+  `package.json`.** When you run `smithers` inside a directory whose
+  `.smithers/node_modules/` ships its own copy of
+  `smithers-orchestrator`, the global bin re-execs into that local
+  copy so the workflow runtime — engine, react-reconciler,
+  components, React — all load from a single module tree. Previously
+  the global bin handed the local pnpm/npm `.bin/smithers` *shell
+  shim* to `process.execPath` (bun), which tried to parse the
+  `#!/bin/sh` shim as JavaScript and crashed with
+  `Expected ")" but found "$(echo "`. Resolution now reads
+  `node_modules/smithers-orchestrator/package.json` and re-execs the
+  actual JS entry, bypassing the shim. Workflow-path commands
+  (`up`, `graph`, `fork`, `replay`, `revert`, `timetravel`) also
+  walk upward from the workflow file to find the nearest local
+  install, so `smithers up examples/foo/workflow.tsx` picks up the
+  workflow's own `node_modules` even when invoked from elsewhere.
+
+  Unit tests for the resolution paths live in
+  `apps/cli/tests/bin-delegation-unit.test.js`.
+
+## Engine
+
+- **Structured outputs now require raw JSON, not a code-fenced
+  block.** When the engine asks an agent to emit a typed output and
+  the agent doesn't support native structured outputs, the appended
+  prompt now instructs the agent to return ONLY the raw JSON object
+  — no markdown, no headings, no `` ```json `` fence — and to start
+  the response with `{` and end with `}`. The validation-retry and
+  schema-summary prompts received the same tightening. This matches
+  what the downstream parser expects and removes the failure mode
+  where an agent emitted a perfectly valid JSON block but the
+  workflow rejected it because of the surrounding markdown.
+
+## Dependencies
+
+- Dropped unused workspace dependencies across `apps/observability`,
+  `packages/db`, `packages/engine`, `packages/graph`,
+  `packages/memory`, `packages/openapi`, `packages/protocol`,
+  `packages/sandbox`, `packages/scorers`, `packages/smithers`, and
+  `packages/time-travel`. Net change: −67 lines from
+  `pnpm-lock.yaml`, no public API impact.
+
+## Docs
+
+- **Docs example smoke tests.** New
+  `apps/cli/tests/docs-examples-smoke.test.js` exercises the
+  workflow snippets shipped in the docs so broken examples surface
+  in CI instead of in users' first runs. Several docs files
+  (`tour.mdx`, `examples/loop.mdx`, `examples/multi-agent-review.mdx`,
+  `integrations/cli-agents.mdx`, `integrations/tools.mdx`) received
+  small corrections discovered by that pass.
+
+- **Public feature coverage audit.** A docs-side sweep verified that
+  every public-facing engine and CLI feature has at least one
+  example or how-to reference, and patched the gaps it found.
+
+## Internal
+
+- Test coverage additions for the CLI (`node-detail`,
+  `semantic-tools`, `why-diagnosis`) and components (Runbook,
+  markdown, array control-flow, and composite suites).
+- CLI refactors: inlined single-statement branches, dropped a few
+  dead `try/catch` wrappers, and replaced a handful of duplicate
+  implementations with re-export shims to keep the workspace
+  graph tidy.
