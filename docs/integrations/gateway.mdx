@@ -52,9 +52,20 @@ ws.onopen = () => ws.send(JSON.stringify({
 }));
 ```
 
+## Operator Console
+
+Gateway serves a built-in operator console at `/console`. It gives non-coding operators a same-origin surface for health, workflow launch, active runs, and pending approvals. The console uses the Gateway RPC API and accepts the same bearer tokens as programmatic clients.
+
+Disable or move it when embedding Smithers behind another app:
+
+```ts
+new Gateway({ operatorUi: false });
+new Gateway({ operatorUi: { path: "/ops", title: "Ops Console" } });
+```
+
 ## Custom React UI
 
-Gateway can also serve a browser React app from the same origin as the RPC and WebSocket API. Use this when a workflow needs a custom operator surface instead of a generic client.
+Gateway can also serve a browser React app from the same origin as the RPC and WebSocket API. Use this when a workflow needs a custom operator surface instead of the built-in console.
 
 ```tsx
 const gateway = new Gateway({

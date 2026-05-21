@@ -1,5 +1,6 @@
 import type { GatewayAuthConfig } from "./GatewayAuthConfig.js";
 import type { GatewayDefaults } from "./GatewayDefaults.js";
+import type { GatewayOperatorUiConfig } from "./GatewayOperatorUiConfig.js";
 import type { GatewayUiConfig } from "./GatewayUiConfig.js";
 
 export type GatewayOptions = {
@@ -8,6 +9,11 @@ export type GatewayOptions = {
   heartbeatMs?: number;
   auth?: GatewayAuthConfig;
   ui?: GatewayUiConfig;
+  /**
+   * Built-in browser console for operators. Set to false to disable it.
+   * @default { path: "/console" }
+   */
+  operatorUi?: GatewayOperatorUiConfig | false;
   defaults?: GatewayDefaults;
   maxBodyBytes?: number;
   maxPayload?: number;

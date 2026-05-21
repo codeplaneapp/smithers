@@ -40,10 +40,12 @@ import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-trave
 import { GATEWAY_EVENT_WINDOW_DEFAULT, SMITHERS_API_VERSION, getRequiredScopeForGatewayMethod, } from "@smithers-orchestrator/gateway/rpc";
 import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
 import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
+import { DEFAULT_OPERATOR_UI_CLIENT_JS, DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
 /** @typedef {import("./GatewayWebhookRunConfig.js").GatewayWebhookRunConfig} GatewayWebhookRunConfig */
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
 /** @typedef {import("./GatewayAuthConfig.js").GatewayAuthConfig} GatewayAuthConfig */
+/** @typedef {import("./GatewayOperatorUiConfig.js").GatewayOperatorUiConfig} GatewayOperatorUiConfig */
 /** @typedef {import("./GatewayOptions.js").GatewayOptions} GatewayOptions */
 /** @typedef {import("./GatewayWebhookConfig.js").GatewayWebhookConfig} GatewayWebhookConfig */
 /** @typedef {import("node:http").IncomingMessage} IncomingMessage */
@@ -111,11 +113,12 @@ import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
  *   path: string;
  *   title?: string;
  *   props?: Record<string, unknown>;
+ *   builtin?: "operator";
  * }} ResolvedGatewayUiConfig
  */
 /**
  * @typedef {{
- *   kind: "gateway" | "workflow";
+ *   kind: "gateway" | "workflow" | "operator";
  *   workflowKey: string | null;
  *   config: ResolvedGatewayUiConfig;
  * }} GatewayUiMount
@@ -205,6 +208,25 @@ function resolveGatewayUiConfig(ui, fallbackPath) {
         ...(ui.props && typeof ui.props === "object" && !Array.isArray(ui.props)
             ? { props: ui.props }
             : {}),
+    };
+}
+/**
+ * @param {GatewayOperatorUiConfig | false | undefined} ui
+ * @returns {ResolvedGatewayUiConfig | null}
+ */
+function resolveDefaultOperatorUiConfig(ui) {
+    if (ui === false) {
+        return null;
+    }
+    const config = ui && typeof ui === "object" && !Array.isArray(ui) ? ui : {};
+    return {
+        entry: DEFAULT_OPERATOR_UI_ENTRY,
+        path: normalizeUiMountPath(config.path, "/console"),
+        title: typeof config.title === "string" ? config.title : "Smithers Operator Console",
+        props: config.props && typeof config.props === "object" && !Array.isArray(config.props)
+            ? config.props
+            : {},
+        builtin: "operator",
     };
 }
 
@@ -1197,6 +1219,7 @@ export class Gateway {
     requestTimeout;
     auth;
     ui;
+    operatorUi;
     uiApp;
     defaults;
     workflows = new Map();
@@ -1243,6 +1266,7 @@ export class Gateway {
             : Math.floor(assertPositiveFiniteInteger("requestTimeout", Number(options.requestTimeout)));
         this.auth = options.auth;
         this.ui = resolveGatewayUiConfig(options.ui, "/");
+        this.operatorUi = resolveDefaultOperatorUiConfig(options.operatorUi);
         this.uiApp = createGatewayUiApp({
             resolveMatch: (pathname) => this.resolveUiMatch(pathname),
             renderIndex: (match) => this.renderUiIndex(match),
@@ -1257,6 +1281,9 @@ export class Gateway {
         const mounts = [];
         if (this.ui) {
             mounts.push({ kind: "gateway", workflowKey: null, config: this.ui });
+        }
+        if (this.operatorUi && (!this.ui || this.ui.path !== this.operatorUi.path)) {
+            mounts.push({ kind: "operator", workflowKey: null, config: this.operatorUi });
         }
         for (const [workflowKey, entry] of this.workflows.entries()) {
             if (entry.ui) {
@@ -1352,6 +1379,9 @@ export class Gateway {
    * @returns {Promise<string>}
    */
     async bundleUiEntry(config) {
+        if (config.entry === DEFAULT_OPERATOR_UI_ENTRY) {
+            return DEFAULT_OPERATOR_UI_CLIENT_JS;
+        }
         const cached = this.uiAssetCache.get(config.entry);
         if (cached) {
             return cached;

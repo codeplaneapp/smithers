@@ -119,6 +119,22 @@ type GatewayDefaults$1 = {
     cliAgentTools?: "all" | "explicit-only";
 };
 
+type GatewayOperatorUiConfig$1 = {
+    /**
+     * URL path for the built-in operator console.
+     * @default "/console"
+     */
+    path?: string;
+    /**
+     * Document title for the generated HTML shell.
+     */
+    title?: string;
+    /**
+     * JSON-serializable boot data exposed to the browser.
+     */
+    props?: Record<string, unknown>;
+};
+
 type GatewayUiConfig$1 = {
     /**
      * Browser entry module for the React app. Smithers bundles this with Bun and
@@ -146,6 +162,11 @@ type GatewayOptions$1 = {
     heartbeatMs?: number;
     auth?: GatewayAuthConfig$1;
     ui?: GatewayUiConfig$1;
+    /**
+     * Built-in browser console for operators. Set to false to disable it.
+     * @default { path: "/console" }
+     */
+    operatorUi?: GatewayOperatorUiConfig$1 | false;
     defaults?: GatewayDefaults$1;
     maxBodyBytes?: number;
     maxPayload?: number;
@@ -267,6 +288,7 @@ declare class Gateway {
     requestTimeout: number;
     auth: GatewayAuthConfig$1 | undefined;
     ui: ResolvedGatewayUiConfig | null;
+    operatorUi: ResolvedGatewayUiConfig | null;
     uiApp: hono.Hono<hono_types.BlankEnv, hono_types.BlankSchema, "/">;
     defaults: GatewayDefaults$1 | undefined;
     workflows: Map<any, any>;
@@ -309,7 +331,7 @@ declare class Gateway {
    */
     uiBootConfig(mount: GatewayUiMount): {
         apiVersion: "v1";
-        kind: "workflow" | "gateway";
+        kind: "workflow" | "gateway" | "operator";
         workflowKey: string | null;
         mountPath: string;
         rpcPath: string;
@@ -727,6 +749,7 @@ type GatewayWebhookRunConfig = GatewayWebhookRunConfig$1;
 type GatewayWebhookSignalConfig = GatewayWebhookSignalConfig$1;
 type ConnectRequest = ConnectRequest$1;
 type GatewayAuthConfig = GatewayAuthConfig$1;
+type GatewayOperatorUiConfig = GatewayOperatorUiConfig$1;
 type GatewayOptions = GatewayOptions$1;
 type GatewayWebhookConfig = GatewayWebhookConfig$1;
 type IncomingMessage = node_http.IncomingMessage;
@@ -783,9 +806,10 @@ type ResolvedGatewayUiConfig = {
     path: string;
     title?: string;
     props?: Record<string, unknown>;
+    builtin?: "operator";
 };
 type GatewayUiMount = {
-    kind: "gateway" | "workflow";
+    kind: "gateway" | "workflow" | "operator";
     workflowKey: string | null;
     config: ResolvedGatewayUiConfig;
 };
@@ -1175,4 +1199,4 @@ type RunRow = _smithers_orchestrator_db_adapter_RunRow.RunRow;
 type ServerResponse = node_http.ServerResponse;
 type ServerOptions = ServerOptions$1;
 
-export { type AttemptRow, type ConnectRequest, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayMetricLabels, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedGatewayUiConfig, type ResolvedRun, type ResponseFrame, type RunRow, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, assertGatewayInputDepthWithinBounds, createServeApp, emptyDevToolsRoot, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };
+export { type AttemptRow, type ConnectRequest, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedGatewayUiConfig, type ResolvedRun, type ResponseFrame, type RunRow, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, assertGatewayInputDepthWithinBounds, createServeApp, emptyDevToolsRoot, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };

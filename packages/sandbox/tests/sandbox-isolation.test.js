@@ -1,11 +1,10 @@
 // Sandbox isolation tests.
 //
-// Scope: this file does NOT exercise live container/jail isolation
+// Scope: this file does NOT require live container/jail binaries
 // (bubblewrap on Linux, sandbox-exec on macOS, docker, codeplane).
-// Those runtimes are environment-dependent and the local
-// `BubblewrapSandboxExecutorLive` layer is a no-op shim that just
-// creates request/result directories under `<rootDir>/.smithers/sandboxes/...`
-// (see packages/sandbox/src/effect/socket-runner.js).
+// Runtime-specific process execution is covered in transport-runners.test.js
+// with fake binaries so CI can validate the executor contract without a
+// privileged sandbox image.
 //
 // What IS enforceable in-process and exercised here:
 //   - resolveSandboxPath path traversal validation (../../, absolute paths, symlink
@@ -16,10 +15,8 @@
 //   - walkFiles handling of symlinks and deeply nested artifacts.
 //   - Cleanup of the sandbox temp directory after a write.
 //
-// FIXME: when a real container runtime is wired up, replace these with end-to-end
-// process-level tests: spawn a child inside the sandbox, attempt to read
-// `/etc/passwd`, expect EACCES; kill the child mid-run, then verify there are
-// no orphan processes via `ps`. The current local test stack cannot do that.
+// Full host isolation still needs environment-specific e2e coverage on a CI
+// image that includes bubblewrap or sandbox-exec.
 import { describe, expect, test } from "bun:test";
 import {
 	mkdtempSync,
@@ -235,16 +232,12 @@ describe("sandbox isolation: cleanup", () => {
 		expect(existsSync(bundlePath)).toBe(false);
 	});
 
-	// FIXME: testing "no orphan processes via ps" and "cleanup after crash
-	// (process killed mid-run)" requires spawning a real sandbox subprocess
-	// against bubblewrap/docker, which is unavailable in this unit-test
-	// environment. The bubblewrap executor in
-	// packages/sandbox/src/effect/socket-runner.js is a no-op shim. Promote
-	// these to e2e tests once a CI image with `bwrap` exists.
+	// Testing "no orphan processes via ps" and "cleanup after crash
+	// (process killed mid-run)" requires a CI image with a real sandbox binary.
 	test.skip("sandbox cleanup after timeout removes temp dir and leaves no orphan processes", () => {
-		// Requires real sandbox runtime; see file-top FIXME.
+		// Requires real sandbox runtime; see file-top scope note.
 	});
 	test.skip("sandbox cleanup after crash (process killed mid-run)", () => {
-		// Requires real sandbox runtime; see file-top FIXME.
+		// Requires real sandbox runtime; see file-top scope note.
 	});
 });

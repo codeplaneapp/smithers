@@ -1,4 +1,4 @@
-import { blob, integer, sqliteTable, text, primaryKey, } from "drizzle-orm/sqlite-core";
+import { blob, foreignKey, integer, sqliteTable, text, primaryKey, } from "drizzle-orm/sqlite-core";
 export const smithersRuns = sqliteTable("_smithers_runs", {
     runId: text("run_id").primaryKey(),
     parentRunId: text("parent_run_id"),
@@ -63,6 +63,10 @@ export const smithersFrames = sqliteTable("_smithers_frames", {
     note: text("note"),
 }, (t) => ({
     pk: primaryKey({ columns: [t.runId, t.frameNo] }),
+    runFk: foreignKey({
+        columns: [t.runId],
+        foreignColumns: [smithersRuns.runId],
+    }).onDelete("cascade"),
 }));
 export const smithersApprovals = sqliteTable("_smithers_approvals", {
     runId: text("run_id").notNull(),
@@ -158,6 +162,10 @@ export const smithersNodeDiffs = sqliteTable("_smithers_node_diffs", {
     pk: primaryKey({
         columns: [t.runId, t.nodeId, t.iteration, t.baseRef],
     }),
+    runFk: foreignKey({
+        columns: [t.runId],
+        foreignColumns: [smithersRuns.runId],
+    }).onDelete("cascade"),
 }));
 export const smithersTimeTravelAudit = sqliteTable("_smithers_time_travel_audit", {
     id: integer("id").primaryKey({ autoIncrement: true }),
@@ -168,7 +176,12 @@ export const smithersTimeTravelAudit = sqliteTable("_smithers_time_travel_audit"
     timestampMs: integer("timestamp_ms").notNull(),
     result: text("result").notNull(),
     durationMs: integer("duration_ms"),
-});
+}, (t) => ({
+    runFk: foreignKey({
+        columns: [t.runId],
+        foreignColumns: [smithersRuns.runId],
+    }).onDelete("cascade"),
+}));
 export const smithersSandboxes = sqliteTable("_smithers_sandboxes", {
     runId: text("run_id").notNull(),
     sandboxId: text("sandbox_id").notNull(),

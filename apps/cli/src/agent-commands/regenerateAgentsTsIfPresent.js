@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { generateAgentsTs } from "../agent-detection.js";
+import { extractGeneratedDetectionProviderIds, generateAgentsTs } from "../agent-detection.js";
 
 /**
  * If the current working directory contains a `.smithers/agents.ts` that was
@@ -19,7 +19,10 @@ export function regenerateAgentsTsIfPresent(cwd = process.cwd()) {
     if (!existing.startsWith("// smithers-source: generated")) {
         return { rewritten: false, path, reason: "agents.ts has been edited by hand; not overwriting" };
     }
-    const next = generateAgentsTs(process.env);
+    const next = generateAgentsTs(process.env, {
+        cwd,
+        preserveProviderIds: extractGeneratedDetectionProviderIds(existing),
+    });
     if (next === existing) {
         return { rewritten: false, path, reason: "no changes" };
     }

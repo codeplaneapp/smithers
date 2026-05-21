@@ -140,13 +140,22 @@ async function expectExecutorLifecycle(layer, config) {
     await runExecutor(layer, (executor) => executor.ship(bundlePath, handle));
     expect(readFileSync(join(handle.requestPath, "README.md"), "utf8")).toBe(`bundle:${config.runtime}`);
     expect(readFileSync(join(handle.requestPath, "nested", "file.txt"), "utf8")).toBe("payload");
-    expect(await runExecutor(layer, (executor) => executor.execute("smithers up bundle.tsx", handle))).toEqual({
+    const executeCommand = config.runtime === "bubblewrap"
+        ? "printf ok > ../result/executed.txt"
+        : "smithers up bundle.tsx";
+    expect(await runExecutor(layer, (executor) => executor.execute(executeCommand, handle))).toEqual({
         exitCode: 0,
     });
+    if (config.runtime === "bubblewrap") {
+        expect(readFileSync(join(handle.resultPath, "executed.txt"), "utf8")).toBe("ok");
+    }
     expect(await runExecutor(layer, (executor) => executor.collect(handle))).toEqual({
         bundlePath: handle.resultPath,
     });
     await expect(runExecutor(layer, (executor) => executor.cleanup(handle))).resolves.toBeUndefined();
+    if (config.runtime === "bubblewrap") {
+        expect(existsSync(handle.sandboxRoot)).toBe(false);
+    }
     return handle;
 }
 
@@ -158,15 +167,63 @@ function makeFakeDockerBin() {
     return binDir;
 }
 
+function makeFakeBwrapBin() {
+    const binDir = tempDir("smithers-fake-bwrap-bin-");
+    const bwrapPath = join(binDir, "bwrap");
+    writeFileSync(
+        bwrapPath,
+        [
+            "#!/bin/sh",
+            "last=''",
+            "for arg in \"$@\"; do",
+            "  last=\"$arg\"",
+            "done",
+            "/bin/sh -lc \"$last\"",
+            "",
+        ].join("\n"),
+        "utf8",
+    );
+    chmodSync(bwrapPath, 0o755);
+    return bwrapPath;
+}
+
 describe("sandbox transport runners", () => {
     test("bubblewrap executor creates, ships, executes, collects, and cleans up", async () => {
+        const fakeBwrap = makeFakeBwrapBin();
         await withPlatform("linux", () =>
-            withBunWhich((command) => (command === "bwrap" ? "/usr/bin/bwrap" : null), async () => {
+            withBunWhich((command) => (command === "bwrap" ? fakeBwrap : null), async () => {
                 await expectExecutorLifecycle(
                     BubblewrapSandboxExecutorLive,
                     configFor(tempDir("smithers-bubblewrap-"), "run-bwrap", "sandbox-bwrap", "bubblewrap"),
                 );
             }),
+        );
+    });
+
+    test("bubblewrap executor does not inherit host secrets", async () => {
+        const fakeBwrap = makeFakeBwrapBin();
+        await withEnv({ SMITHERS_SECRET_SHOULD_NOT_LEAK: "secret" }, () =>
+            withPlatform("linux", () =>
+                withBunWhich((command) => (command === "bwrap" ? fakeBwrap : null), async () => {
+                    const handle = await runExecutor(BubblewrapSandboxExecutorLive, (executor) =>
+                        executor.create(
+                            configFor(tempDir("smithers-bubblewrap-"), "run-bwrap-env", "sandbox", "bubblewrap"),
+                        ),
+                    );
+                    try {
+                        await runExecutor(BubblewrapSandboxExecutorLive, (executor) =>
+                            executor.execute(
+                                'test -z "$SMITHERS_SECRET_SHOULD_NOT_LEAK" && printf ok > ../result/env.txt',
+                                handle,
+                            ),
+                        );
+                        expect(readFileSync(join(handle.resultPath, "env.txt"), "utf8")).toBe("ok");
+                    } finally {
+                        await runExecutor(BubblewrapSandboxExecutorLive, (executor) => executor.cleanup(handle));
+                    }
+                    expect(existsSync(handle.sandboxRoot)).toBe(false);
+                }),
+            ),
         );
     });
 
@@ -180,6 +237,24 @@ describe("sandbox transport runners", () => {
                         ),
                     ),
                 ).rejects.toThrow("bwrap");
+            }),
+        );
+    });
+
+    test("bubblewrap executor fails when the sandboxed command fails", async () => {
+        const fakeBwrap = makeFakeBwrapBin();
+        await withPlatform("linux", () =>
+            withBunWhich((command) => (command === "bwrap" ? fakeBwrap : null), async () => {
+                const handle = await runExecutor(BubblewrapSandboxExecutorLive, (executor) =>
+                    executor.create(configFor(tempDir("smithers-bubblewrap-"), "run-bwrap-fail", "sandbox", "bubblewrap")),
+                );
+                try {
+                    await expect(
+                        runExecutor(BubblewrapSandboxExecutorLive, (executor) => executor.execute("exit 7", handle)),
+                    ).rejects.toThrow("Sandbox command exited with code 7");
+                } finally {
+                    await runExecutor(BubblewrapSandboxExecutorLive, (executor) => executor.cleanup(handle));
+                }
             }),
         );
     });

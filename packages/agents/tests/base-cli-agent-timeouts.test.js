@@ -22,9 +22,11 @@ class TimedAgent extends BaseCliAgent {
 }
 describe("BaseCliAgent timeouts", () => {
     test("idle timeout resets on stdout activity", async () => {
-        const agent = new TimedAgent("for i in 1 2 3 4 5; do echo tick; sleep 0.05; done", { idleTimeoutMs: 150 });
+        const agent = new TimedAgent("for i in 1 2 3 4 5 6 7 8 9 10; do echo tick-$i; sleep 0.1; done", {
+            idleTimeoutMs: 500,
+        });
         const result = await agent.generate({ prompt: "run" });
-        expect(result.text).toContain("tick");
+        expect(result.text).toContain("tick-10");
     });
     test("idle timeout fails after inactivity", async () => {
         const agent = new TimedAgent("echo start; sleep 0.2; echo end", {

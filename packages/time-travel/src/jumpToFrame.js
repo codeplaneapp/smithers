@@ -491,6 +491,7 @@ export async function jumpToFrame(input) {
   let lock = null;
   /** @type {number | null} */
   let auditRowId = null;
+  let skipTerminalAudit = false;
 
   try {
     return await withSpan(
@@ -528,6 +529,12 @@ export async function jumpToFrame(input) {
           },
         );
 
+        const run = await input.adapter.getRun(runId);
+        if (!run) {
+          skipTerminalAudit = true;
+          throw new JumpToFrameError("RunNotFound", `Run not found: ${runId}`);
+        }
+
         const rateLimit = await evaluateRewindRateLimit({
           adapter: input.adapter,
           runId,
@@ -561,11 +568,6 @@ export async function jumpToFrame(input) {
               durationMs: null,
             }),
         );
-
-        const run = await input.adapter.getRun(runId);
-        if (!run) {
-          throw new JumpToFrameError("RunNotFound", `Run not found: ${runId}`);
-        }
 
         const latestFrame = await readLatestFrame(input.adapter, runId);
         if (!latestFrame) {
@@ -964,7 +966,10 @@ export async function jumpToFrame(input) {
     // Persist the terminal audit state BEFORE releasing the lock so a second
     // caller cannot beat us to the rate-limit count.
     try {
-      if (auditRowId !== null) {
+      if (skipTerminalAudit) {
+        // No durable audit row can be attached when the parent run does not
+        // exist; the runs table owns rewind audit rows through a foreign key.
+      } else if (auditRowId !== null) {
         await updateRewindAuditRow(input.adapter, {
           id: auditRowId,
           result: auditResult,
@@ -984,13 +989,15 @@ export async function jumpToFrame(input) {
           durationMs,
         });
       }
-      await emitLog(input.onLog, "info", "jumpToFrame audit row written", {
-        runId: runIdForAudit,
-        fromFrameNo: fromFrameNoForAudit,
-        toFrameNo: toFrameNoForAudit,
-        caller,
-        result: auditResult,
-      });
+      if (!skipTerminalAudit) {
+        await emitLog(input.onLog, "info", "jumpToFrame audit row written", {
+          runId: runIdForAudit,
+          fromFrameNo: fromFrameNoForAudit,
+          toFrameNo: toFrameNoForAudit,
+          caller,
+          result: auditResult,
+        });
+      }
     } catch (auditError) {
       await emitLog(input.onLog, "error", "jumpToFrame audit write failed", {
         runId: runIdForAudit,

@@ -193,17 +193,7 @@ describe("SmithersDb cross-adapter concurrency", () => {
 		}
 	});
 
-	// FIXME(real bug): each SmithersDb instance has its own per-instance
-	// transaction-turn queue (`acquireTransactionTurn`), but two adapters
-	// pointing at the same underlying drizzle client do NOT coordinate, so
-	// adapter B can call `BEGIN IMMEDIATE` while adapter A is still inside its
-	// transaction → "cannot start a transaction within a transaction" from
-	// bun:sqlite. Production code must hold a single SmithersDb per database
-	// connection (see packages/driver task-runtime), so this is latent rather
-	// than user-visible today, but the assumption is undocumented. This test
-	// surfaces the foot-gun; promote to a real test once the queue is hoisted
-	// to be keyed on the underlying client.
-	test.skip("transactions from two adapters serialise (no interleaving inside BEGIN..COMMIT)", async () => {
+	test("transactions from two adapters serialise (no interleaving inside BEGIN..COMMIT)", async () => {
 		const { sqlite, db } = createSharedDb();
 		try {
 			const a = new SmithersDb(db);

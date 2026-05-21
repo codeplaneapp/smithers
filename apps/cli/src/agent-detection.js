@@ -154,6 +154,39 @@ function baseAgentIdForProviderId(id) {
 }
 
 /**
+ * Extracts detection-derived provider ids from a generated `.smithers/agents.ts`.
+ * Account labels are deliberately ignored; the accounts registry remains the
+ * source of truth for account-backed providers.
+ *
+ * @param {string} source
+ * @returns {Set<string>}
+ */
+export function extractGeneratedDetectionProviderIds(source) {
+    const ids = new Set();
+    if (!source.startsWith("// smithers-source: generated")) {
+        return ids;
+    }
+    const providersMatch = source.match(/export const providers\s*=\s*{([\s\S]*?)}\s*as const;/);
+    if (!providersMatch) {
+        return ids;
+    }
+    const providerKeyPattern = /^\s*([A-Za-z_$][\w$]*)\s*:/gm;
+    let match;
+    while ((match = providerKeyPattern.exec(providersMatch[1])) !== null) {
+        const providerId = match[1];
+        if (detectorForId(providerId)) {
+            ids.add(providerId);
+            continue;
+        }
+        const variant = variantForId(providerId);
+        if (variant) {
+            ids.add(variant.derivedFrom);
+        }
+    }
+    return ids;
+}
+
+/**
  * @param {string} id
  */
 function displayNameForProviderId(id) {
@@ -564,12 +597,32 @@ function renderTierLine(tier, providerIds, comments) {
 
 /**
  * @param {NodeJS.ProcessEnv} [env]
- * @param {{ cwd?: string }} [options]
+ * @param {{ cwd?: string; preserveProviderIds?: Iterable<string> }} [options]
  */
 export function generateAgentsTs(env = process.env, options = {}) {
     const registeredAccounts = listAccounts(env);
     const detections = detectAvailableAgents(env, options);
-    const available = detections.filter((entry) => entry.usable);
+    const availableById = new Map(detections.filter((entry) => entry.usable).map((entry) => [entry.id, entry]));
+    for (const providerId of options.preserveProviderIds ?? []) {
+        const baseId = baseAgentIdForProviderId(providerId);
+        const detector = detectorForId(baseId);
+        if (!detector || availableById.has(baseId)) continue;
+        availableById.set(baseId, {
+            id: detector.id,
+            displayName: detector.displayName,
+            binary: detector.binary,
+            hasBinary: false,
+            hasAuthSignal: false,
+            hasApiKeySignal: false,
+            hasProjectTrustSignal: true,
+            status: "unavailable",
+            score: 0,
+            usable: true,
+            checks: [`preserved-from-generated-agents-ts:${detector.id}`],
+            unusableReasons: [],
+        });
+    }
+    const available = [...availableById.values()];
     if (available.length === 0 && registeredAccounts.length === 0) {
         throw new SmithersError("NO_USABLE_AGENTS", formatNoUsableAgentsMessage(detections));
     }
@@ -581,7 +634,7 @@ export function generateAgentsTs(env = process.env, options = {}) {
     }
     // Base providers in detection order
     const orderedProviders = DETECTORS
-        .map((detector) => available.find((entry) => entry.id === detector.id))
+        .map((detector) => availableById.get(detector.id))
         .filter((entry) => Boolean(entry));
     // Derive variants (e.g. claudeSonnet from claude)
     const availableIds = new Set(orderedProviders.map((p) => p.id));

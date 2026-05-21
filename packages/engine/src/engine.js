@@ -2660,6 +2660,12 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     const taskRoot = desc.worktreePath ?? toolConfig.rootDir;
     const stepCacheEnabled = cacheEnabled || Boolean(desc.cachePolicy);
     const cacheAgent = Array.isArray(desc.agent) ? desc.agent[0] : desc.agent;
+    const cachePolicyScope = desc.cachePolicy?.scope === "run" || desc.cachePolicy?.scope === "global"
+        ? desc.cachePolicy.scope
+        : "workflow";
+    const cachePolicyTtlMs = typeof desc.cachePolicy?.ttlMs === "number" && Number.isFinite(desc.cachePolicy.ttlMs)
+        ? Math.max(0, desc.cachePolicy.ttlMs)
+        : null;
     let heartbeatWatchdogFiber = null;
     try {
         if (taskSignal.aborted) {
@@ -2752,7 +2758,9 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     cacheKeyDisabled = true;
                 }
                 cacheBase = {
-                    workflowName,
+                    cacheScope: cachePolicyScope,
+                    ...(cachePolicyScope === "run" ? { runId } : {}),
+                    ...(cachePolicyScope === "global" ? {} : { workflowName }),
                     nodeId: desc.nodeId,
                     iteration: desc.iteration,
                     outputTableName: desc.outputTableName,
@@ -2798,22 +2806,39 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             if (cacheKey) {
                 const cachedRow = await Effect.runPromise(adapter.getCache(cacheKey));
                 if (cachedRow) {
-                    const parsed = JSON.parse(cachedRow.payloadJson);
-                    const valid = validateOutput(desc.outputTable, parsed);
-                    if (valid.ok) {
-                        payload = valid.data;
-                        cached = true;
-                        void Effect.runPromise(Metric.increment(cacheHits));
-                        logInfo("cache hit for task output", {
+                    const createdAtMs = Number(cachedRow.createdAtMs);
+                    const expired = cachePolicyTtlMs !== null &&
+                        Number.isFinite(createdAtMs) &&
+                        nowMs() - createdAtMs >= cachePolicyTtlMs;
+                    if (expired) {
+                        void Effect.runPromise(Metric.increment(cacheMisses));
+                        logInfo("cache entry expired for task output", {
                             runId,
                             nodeId: desc.nodeId,
                             iteration: desc.iteration,
                             attempt: attemptNo,
                             cacheKey,
+                            ttlMs: cachePolicyTtlMs,
                         }, "engine:task-cache");
                     }
                     else {
-                        void Effect.runPromise(Metric.increment(cacheMisses));
+                        const parsed = JSON.parse(cachedRow.payloadJson);
+                        const valid = validateOutput(desc.outputTable, parsed);
+                        if (valid.ok) {
+                            payload = valid.data;
+                            cached = true;
+                            void Effect.runPromise(Metric.increment(cacheHits));
+                            logInfo("cache hit for task output", {
+                                runId,
+                                nodeId: desc.nodeId,
+                                iteration: desc.iteration,
+                                attempt: attemptNo,
+                                cacheKey,
+                            }, "engine:task-cache");
+                        }
+                        else {
+                            void Effect.runPromise(Metric.increment(cacheMisses));
+                        }
                     }
                 }
                 else {
