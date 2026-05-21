@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/accounts",
-  "version": "0.20.3",
+  "version": "0.20.4",
   "description": "Manage multiple Claude/Codex/Gemini/Kimi subscription and API-key accounts that Smithers agents can round-robin through.",
   "type": "module",
   "sideEffects": false,

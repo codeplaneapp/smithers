@@ -1,6 +1,6 @@
 {
   "name": "smithers-monorepo",
-  "version": "0.20.3",
+  "version": "0.20.4",
   "description": "AI workflow orchestration with JSX",
   "author": "William Cory",
   "license": "MIT",
