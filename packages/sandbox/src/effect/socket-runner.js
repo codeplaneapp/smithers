@@ -79,6 +79,9 @@ export const BubblewrapSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor
         });
     }),
     collect: (handle) => Effect.succeed({ bundlePath: handle.resultPath }),
-    cleanup: (_handle) => Effect.void,
+    cleanup: (handle) => Effect.tryPromise({
+        try: () => rm(handle.requestPath, { recursive: true, force: true }),
+        catch: (cause) => toSmithersError(cause, "cleanup sandbox workspace"),
+    }),
 }));
 export const SandboxSocketRunner = SocketRunner;

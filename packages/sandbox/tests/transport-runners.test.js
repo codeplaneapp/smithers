@@ -148,6 +148,8 @@ async function expectExecutorLifecycle(layer, config) {
         bundlePath: handle.resultPath,
     });
     await expect(runExecutor(layer, (executor) => executor.cleanup(handle))).resolves.toBeUndefined();
+    expect(existsSync(handle.requestPath)).toBe(false);
+    expect(existsSync(handle.resultPath)).toBe(true);
     return handle;
 }
 

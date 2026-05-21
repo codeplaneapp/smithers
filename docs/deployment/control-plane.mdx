@@ -1,9 +1,9 @@
 ---
 title: Control Plane
-description: Organization, project, billing, usage, secret-reference, and audit primitives for hosted Smithers deployments.
+description: Organization, project, identity, billing, usage, secret-reference, and audit primitives for hosted Smithers deployments.
 ---
 
-Smithers ships local Gateway and runtime primitives, plus a durable control-plane store for deployments that need multi-tenant product boundaries. The store is intentionally small: it gives hosted services a tested schema for the objects enterprise buyers ask about, without pretending to include a payment processor, SSO provider, or managed secret backend.
+Smithers ships local Gateway and runtime primitives, plus a durable control-plane store for deployments that need multi-tenant product boundaries. The store is intentionally small: it gives hosted services a tested schema for the objects enterprise buyers ask about, while leaving payment collection, identity-provider handshakes, and secret-value reads to the hosted service.
 
 ## What Ships
 
@@ -25,7 +25,8 @@ The store creates SQLite tables for:
 - teams and team membership
 - projects and project team grants
 - billing account records
-- usage events and usage summaries
+- identity-provider records for SAML/OIDC configuration
+- usage events, summaries, and quota checks
 - secret manager references, not secret values
 - audit events and org audit export
 
@@ -54,6 +55,24 @@ store.recordUsage({
   unit: "ms",
 });
 
+store.setUsageLimit({
+  orgId: org.orgId,
+  projectId: project.projectId,
+  metric: "agent_runtime_ms",
+  unit: "ms",
+  period: "monthly",
+  limitQuantity: 10_000_000,
+});
+
+store.upsertIdentityProvider({
+  orgId: org.orgId,
+  providerId: "idp_okta",
+  type: "saml",
+  issuer: "https://acme.okta.com",
+  ssoUrl: "https://acme.okta.com/app/smithers/sso/saml",
+  certificateRef: "vault://identity/acme-okta-cert",
+});
+
 store.putSecretRef({
   orgId: org.orgId,
   projectId: project.projectId,
@@ -62,10 +81,18 @@ store.putSecretRef({
   ref: "arn:aws:secretsmanager:us-east-1:123:secret:deploy",
 });
 
+const quota = store.checkUsageLimit({
+  orgId: org.orgId,
+  projectId: project.projectId,
+  metric: "agent_runtime_ms",
+  unit: "ms",
+  period: "monthly",
+});
+
 const audit = store.exportOrgAudit({ orgId: org.orgId });
 ```
 
-Foreign keys are enabled during setup. Deleting an org cascades to its projects, teams, usage rows, secret references, and audit rows.
+Foreign keys are enabled during setup. Deleting an org cascades to its projects, teams, identity providers, usage rows, usage limits, secret references, and audit rows.
 
 ## Hosted Boundary
 

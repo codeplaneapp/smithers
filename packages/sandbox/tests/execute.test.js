@@ -201,18 +201,9 @@ describe("executeSandbox", () => {
             });
             expect(existsSync(String(sandbox.bundlePath))).toBe(true);
 
-            const requestReadme = JSON.parse(
-                readFileSync(
-                    join(rootDir, ".smithers", "sandboxes", "parent-run", "sandbox-success", "request", "README.md"),
-                    "utf8",
-                ),
-            );
-            expect(requestReadme).toMatchObject({
-                status: "pending",
-                sandboxId: "sandbox-success",
-                runtime: "codeplane",
-                input: { prompt: "ship it" },
-            });
+            expect(
+                existsSync(join(rootDir, ".smithers", "sandboxes", "parent-run", "sandbox-success", "request")),
+            ).toBe(false);
 
             const resultReadme = JSON.parse(
                 readFileSync(join(String(sandbox.bundlePath), "README.md"), "utf8"),

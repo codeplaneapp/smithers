@@ -135,6 +135,7 @@ export function runSmithers(args, options) {
             ...options.env,
         },
         encoding: "utf8",
+        input: options.stdin,
         maxBuffer: 10 * 1024 * 1024,
     });
     const stdout = result.stdout ?? "";

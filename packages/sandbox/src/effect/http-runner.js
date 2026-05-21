@@ -58,7 +58,10 @@ export const DockerSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor, Sa
         runtime: "docker",
     }),
     collect: (handle) => Effect.succeed({ bundlePath: handle.resultPath }),
-    cleanup: (_handle) => Effect.void,
+    cleanup: (handle) => Effect.tryPromise({
+        try: () => rm(handle.requestPath, { recursive: true, force: true }),
+        catch: (cause) => toSmithersError(cause, "cleanup docker sandbox workspace"),
+    }),
 }));
 /** @type {Layer.Layer<SandboxEntityExecutor, never, never>} */
 export const CodeplaneSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor, SandboxEntityExecutor.of({
@@ -95,6 +98,9 @@ export const CodeplaneSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor,
         workspaceId: handle.workspaceId ?? null,
     })),
     collect: (handle) => Effect.succeed({ bundlePath: handle.resultPath }),
-    cleanup: (_handle) => Effect.void,
+    cleanup: (handle) => Effect.tryPromise({
+        try: () => rm(handle.requestPath, { recursive: true, force: true }),
+        catch: (cause) => toSmithersError(cause, "cleanup codeplane sandbox workspace"),
+    }),
 }));
 export const SandboxHttpRunner = HttpRunner;

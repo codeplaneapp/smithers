@@ -7,7 +7,10 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
  * @typedef {import("./index.d.ts").ControlPlaneTeam} ControlPlaneTeam
  * @typedef {import("./index.d.ts").ControlPlaneProject} ControlPlaneProject
  * @typedef {import("./index.d.ts").ControlPlaneBillingAccount} ControlPlaneBillingAccount
+ * @typedef {import("./index.d.ts").ControlPlaneIdentityProvider} ControlPlaneIdentityProvider
  * @typedef {import("./index.d.ts").ControlPlaneUsageEvent} ControlPlaneUsageEvent
+ * @typedef {import("./index.d.ts").ControlPlaneUsageLimit} ControlPlaneUsageLimit
+ * @typedef {import("./index.d.ts").ControlPlaneUsageLimitCheck} ControlPlaneUsageLimitCheck
  * @typedef {import("./index.d.ts").ControlPlaneUsageSummary} ControlPlaneUsageSummary
  * @typedef {import("./index.d.ts").ControlPlaneSecretRef} ControlPlaneSecretRef
  * @typedef {import("./index.d.ts").ControlPlaneAuditEvent} ControlPlaneAuditEvent
@@ -83,6 +86,24 @@ CREATE TABLE IF NOT EXISTS _smithers_cp_billing_accounts (
   FOREIGN KEY (org_id) REFERENCES _smithers_cp_orgs(org_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS _smithers_cp_identity_providers (
+  org_id TEXT NOT NULL,
+  provider_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  issuer TEXT NOT NULL,
+  sso_url TEXT,
+  certificate_ref TEXT,
+  status TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (org_id, provider_id),
+  FOREIGN KEY (org_id) REFERENCES _smithers_cp_orgs(org_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS _smithers_cp_idp_org_status_idx
+  ON _smithers_cp_identity_providers(org_id, status);
+
 CREATE TABLE IF NOT EXISTS _smithers_cp_usage_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   org_id TEXT NOT NULL,
@@ -99,6 +120,22 @@ CREATE TABLE IF NOT EXISTS _smithers_cp_usage_events (
 
 CREATE INDEX IF NOT EXISTS _smithers_cp_usage_org_time_idx
   ON _smithers_cp_usage_events(org_id, observed_at_ms);
+
+CREATE TABLE IF NOT EXISTS _smithers_cp_usage_limits (
+  org_id TEXT NOT NULL,
+  project_key TEXT NOT NULL,
+  project_id TEXT,
+  metric TEXT NOT NULL,
+  unit TEXT NOT NULL,
+  period TEXT NOT NULL,
+  limit_quantity REAL NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (org_id, project_key, metric, unit, period),
+  FOREIGN KEY (org_id) REFERENCES _smithers_cp_orgs(org_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS _smithers_cp_usage_limits_org_idx
+  ON _smithers_cp_usage_limits(org_id, metric, unit, period);
 
 CREATE TABLE IF NOT EXISTS _smithers_cp_secret_refs (
   org_id TEXT NOT NULL,
@@ -227,6 +264,13 @@ function quantity(value) {
 }
 
 /**
+ * @param {string | null} projectId
+ */
+function projectKey(projectId) {
+    return projectId ?? "__org__";
+}
+
+/**
  * @param {Record<string, unknown>} row
  * @returns {ControlPlaneOrg}
  */
@@ -284,6 +328,25 @@ function billingRow(row) {
 
 /**
  * @param {Record<string, unknown>} row
+ * @returns {ControlPlaneIdentityProvider}
+ */
+function identityProviderRow(row) {
+    return {
+        orgId: String(row.orgId),
+        providerId: String(row.providerId),
+        type: String(row.type),
+        issuer: String(row.issuer),
+        ssoUrl: row.ssoUrl === null ? null : String(row.ssoUrl),
+        certificateRef: row.certificateRef === null ? null : String(row.certificateRef),
+        status: String(row.status),
+        metadata: parseJsonObject(row.metadataJson),
+        createdAtMs: Number(row.createdAtMs),
+        updatedAtMs: Number(row.updatedAtMs),
+    };
+}
+
+/**
+ * @param {Record<string, unknown>} row
  * @returns {ControlPlaneUsageEvent}
  */
 function usageRow(row) {
@@ -297,6 +360,22 @@ function usageRow(row) {
         unit: String(row.unit),
         observedAtMs: Number(row.observedAtMs),
         metadata: parseJsonObject(row.metadataJson),
+    };
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {ControlPlaneUsageLimit}
+ */
+function usageLimitRow(row) {
+    return {
+        orgId: String(row.orgId),
+        projectId: row.projectId === null ? null : String(row.projectId),
+        metric: String(row.metric),
+        unit: String(row.unit),
+        period: String(row.period),
+        limitQuantity: Number(row.limitQuantity),
+        updatedAtMs: Number(row.updatedAtMs),
     };
 }
 
@@ -333,6 +412,23 @@ function auditRow(row) {
         occurredAtMs: Number(row.occurredAtMs),
         metadata: parseJsonObject(row.metadataJson),
     };
+}
+
+/**
+ * @param {ControlPlaneSqlite} sqlite
+ * @param {string} orgId
+ * @param {string} projectId
+ */
+function assertProjectExists(sqlite, orgId, projectId) {
+    const row = sqlite.query(`
+SELECT 1 AS ok
+FROM _smithers_cp_projects
+WHERE org_id = ? AND project_id = ?
+LIMIT 1
+`).get(orgId, projectId);
+    if (!row) {
+        throw new SmithersError("INVALID_INPUT", `Control-plane project not found: ${projectId}`, { orgId, projectId });
+    }
 }
 
 export class ControlPlaneStore {
@@ -526,6 +622,83 @@ LIMIT 1
     }
 
     /**
+     * @param {{ orgId: string; providerId?: string; type: "saml" | "oidc" | string; issuer: string; ssoUrl?: string | null; certificateRef?: string | null; status?: string; metadata?: Record<string, unknown>; createdAtMs?: number; updatedAtMs?: number }} input
+     * @returns {ControlPlaneIdentityProvider}
+     */
+    upsertIdentityProvider(input) {
+        const orgId = requiredId("orgId", input.orgId);
+        const providerId = optionalId("providerId", input.providerId);
+        const metadata = jsonObject(input.metadata);
+        const updatedAtMs = timestamp(input.updatedAtMs);
+        const createdAtMs = timestamp(input.createdAtMs ?? updatedAtMs);
+        const status = nonEmptyString("status", input.status ?? "active");
+        this.sqlite.query(`
+INSERT INTO _smithers_cp_identity_providers (
+  org_id, provider_id, type, issuer, sso_url, certificate_ref, status, metadata_json, created_at_ms, updated_at_ms
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(org_id, provider_id) DO UPDATE SET
+  type = excluded.type,
+  issuer = excluded.issuer,
+  sso_url = excluded.sso_url,
+  certificate_ref = excluded.certificate_ref,
+  status = excluded.status,
+  metadata_json = excluded.metadata_json,
+  updated_at_ms = excluded.updated_at_ms
+`).run(
+            orgId,
+            providerId,
+            nonEmptyString("type", input.type),
+            nonEmptyString("issuer", input.issuer),
+            input.ssoUrl ? nonEmptyString("ssoUrl", input.ssoUrl) : null,
+            input.certificateRef ? nonEmptyString("certificateRef", input.certificateRef) : null,
+            status,
+            JSON.stringify(metadata),
+            createdAtMs,
+            updatedAtMs,
+        );
+        this.recordAuditEvent({
+            orgId,
+            action: "identity_provider.upsert",
+            targetType: "identity_provider",
+            targetId: providerId,
+            occurredAtMs: updatedAtMs,
+            metadata: { type: input.type, status },
+        });
+        const row = this.sqlite.query(`
+SELECT org_id AS orgId, provider_id AS providerId, type, issuer, sso_url AS ssoUrl, certificate_ref AS certificateRef, status, metadata_json AS metadataJson, created_at_ms AS createdAtMs, updated_at_ms AS updatedAtMs
+FROM _smithers_cp_identity_providers
+WHERE org_id = ? AND provider_id = ?
+LIMIT 1
+`).get(orgId, providerId);
+        return identityProviderRow(row);
+    }
+
+    /**
+     * @param {{ orgId: string; status?: string }} input
+     * @returns {ControlPlaneIdentityProvider[]}
+     */
+    listIdentityProviders(input) {
+        const orgId = requiredId("orgId", input.orgId);
+        const status = input.status ? nonEmptyString("status", input.status) : null;
+        const sql = status
+            ? `
+SELECT org_id AS orgId, provider_id AS providerId, type, issuer, sso_url AS ssoUrl, certificate_ref AS certificateRef, status, metadata_json AS metadataJson, created_at_ms AS createdAtMs, updated_at_ms AS updatedAtMs
+FROM _smithers_cp_identity_providers
+WHERE org_id = ? AND status = ?
+ORDER BY provider_id
+`
+            : `
+SELECT org_id AS orgId, provider_id AS providerId, type, issuer, sso_url AS ssoUrl, certificate_ref AS certificateRef, status, metadata_json AS metadataJson, created_at_ms AS createdAtMs, updated_at_ms AS updatedAtMs
+FROM _smithers_cp_identity_providers
+WHERE org_id = ?
+ORDER BY provider_id
+`;
+        const args = status ? [orgId, status] : [orgId];
+        return this.sqlite.query(sql).all(...args).map(identityProviderRow);
+    }
+
+    /**
      * @param {{ orgId: string; projectId?: string | null; runId?: string | null; metric: string; quantity: number; unit?: string; observedAtMs?: number; metadata?: Record<string, unknown> }} input
      * @returns {ControlPlaneUsageEvent}
      */
@@ -580,6 +753,94 @@ ORDER BY metric, unit
     }
 
     /**
+     * @param {{ orgId: string; projectId?: string | null; metric: string; unit?: string; period?: string; limitQuantity: number; updatedAtMs?: number }} input
+     * @returns {ControlPlaneUsageLimit}
+     */
+    setUsageLimit(input) {
+        const orgId = requiredId("orgId", input.orgId);
+        const projectId = input.projectId ? requiredId("projectId", input.projectId) : null;
+        if (projectId) {
+            assertProjectExists(this.sqlite, orgId, projectId);
+        }
+        const metric = nonEmptyString("metric", input.metric);
+        const unit = nonEmptyString("unit", input.unit ?? "count");
+        const period = nonEmptyString("period", input.period ?? "monthly");
+        const limitValue = quantity(input.limitQuantity);
+        const updatedAtMs = timestamp(input.updatedAtMs);
+        this.sqlite.query(`
+INSERT INTO _smithers_cp_usage_limits (org_id, project_key, project_id, metric, unit, period, limit_quantity, updated_at_ms)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(org_id, project_key, metric, unit, period) DO UPDATE SET
+  project_id = excluded.project_id,
+  limit_quantity = excluded.limit_quantity,
+  updated_at_ms = excluded.updated_at_ms
+`).run(orgId, projectKey(projectId), projectId, metric, unit, period, limitValue, updatedAtMs);
+        this.recordAuditEvent({
+            orgId,
+            projectId,
+            action: "usage_limit.upsert",
+            targetType: "usage_limit",
+            targetId: projectId ?? orgId,
+            occurredAtMs: updatedAtMs,
+            metadata: { metric, unit, period, limitQuantity: limitValue },
+        });
+        const row = this.sqlite.query(`
+SELECT org_id AS orgId, project_id AS projectId, metric, unit, period, limit_quantity AS limitQuantity, updated_at_ms AS updatedAtMs
+FROM _smithers_cp_usage_limits
+WHERE org_id = ? AND project_key = ? AND metric = ? AND unit = ? AND period = ?
+LIMIT 1
+`).get(orgId, projectKey(projectId), metric, unit, period);
+        return usageLimitRow(row);
+    }
+
+    /**
+     * @param {{ orgId: string; projectId?: string | null; metric: string; unit?: string; period?: string; sinceMs?: number; untilMs?: number }} input
+     * @returns {ControlPlaneUsageLimitCheck | null}
+     */
+    checkUsageLimit(input) {
+        const orgId = requiredId("orgId", input.orgId);
+        const projectId = input.projectId ? requiredId("projectId", input.projectId) : null;
+        const metric = nonEmptyString("metric", input.metric);
+        const unit = nonEmptyString("unit", input.unit ?? "count");
+        const period = nonEmptyString("period", input.period ?? "monthly");
+        const limitRowRaw = this.sqlite.query(`
+SELECT org_id AS orgId, project_id AS projectId, metric, unit, period, limit_quantity AS limitQuantity, updated_at_ms AS updatedAtMs
+FROM _smithers_cp_usage_limits
+WHERE org_id = ? AND project_key = ? AND metric = ? AND unit = ? AND period = ?
+LIMIT 1
+`).get(orgId, projectKey(projectId), metric, unit, period);
+        if (!limitRowRaw) {
+            return null;
+        }
+        const sinceMs = input.sinceMs === undefined ? 0 : timestamp(input.sinceMs);
+        const untilMs = input.untilMs === undefined ? Number.MAX_SAFE_INTEGER : timestamp(input.untilMs);
+        const usageSql = projectId
+            ? `
+SELECT COALESCE(SUM(quantity), 0) AS usedQuantity
+FROM _smithers_cp_usage_events
+WHERE org_id = ? AND project_id = ? AND metric = ? AND unit = ? AND observed_at_ms >= ? AND observed_at_ms <= ?
+`
+            : `
+SELECT COALESCE(SUM(quantity), 0) AS usedQuantity
+FROM _smithers_cp_usage_events
+WHERE org_id = ? AND metric = ? AND unit = ? AND observed_at_ms >= ? AND observed_at_ms <= ?
+`;
+        const usageArgs = projectId
+            ? [orgId, projectId, metric, unit, sinceMs, untilMs]
+            : [orgId, metric, unit, sinceMs, untilMs];
+        const usageRowRaw = this.sqlite.query(usageSql).get(...usageArgs);
+        const limit = usageLimitRow(limitRowRaw);
+        const usedQuantity = Number(usageRowRaw?.usedQuantity ?? 0);
+        const remainingQuantity = Math.max(0, limit.limitQuantity - usedQuantity);
+        return {
+            ...limit,
+            usedQuantity,
+            remainingQuantity,
+            exceeded: usedQuantity > limit.limitQuantity,
+        };
+    }
+
+    /**
      * @param {{ orgId: string; projectId?: string | null; name: string; provider: string; ref: string; createdBy?: string | null; createdAtMs?: number; rotatedAtMs?: number | null }} input
      * @returns {ControlPlaneSecretRef}
      */
@@ -591,32 +852,35 @@ ORDER BY metric, unit
         const rotatedAtMs = input.rotatedAtMs === undefined || input.rotatedAtMs === null
             ? null
             : timestamp(input.rotatedAtMs);
+        const provider = nonEmptyString("provider", input.provider);
+        const ref = nonEmptyString("ref", input.ref);
+        const createdBy = input.createdBy ? requiredId("createdBy", input.createdBy) : null;
+        this.sqlite.query(`
+DELETE FROM _smithers_cp_secret_refs
+WHERE org_id = ? AND project_id IS ? AND name = ?
+`).run(orgId, projectId, name);
         this.sqlite.query(`
 INSERT INTO _smithers_cp_secret_refs (org_id, project_id, name, provider, ref, created_by, created_at_ms, rotated_at_ms)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(org_id, project_id, name) DO UPDATE SET
-  provider = excluded.provider,
-  ref = excluded.ref,
-  rotated_at_ms = COALESCE(excluded.rotated_at_ms, excluded.created_at_ms)
 `).run(
             orgId,
             projectId,
             name,
-            nonEmptyString("provider", input.provider),
-            nonEmptyString("ref", input.ref),
-            input.createdBy ? requiredId("createdBy", input.createdBy) : null,
+            provider,
+            ref,
+            createdBy,
             createdAtMs,
             rotatedAtMs,
         );
         this.recordAuditEvent({
             orgId,
             projectId,
-            actorId: input.createdBy ?? null,
+            actorId: createdBy,
             action: "secret_ref.upsert",
             targetType: "secret_ref",
             targetId: name,
             occurredAtMs: rotatedAtMs ?? createdAtMs,
-            metadata: { provider: input.provider },
+            metadata: { provider },
         });
         const row = this.sqlite.query(`
 SELECT org_id AS orgId, project_id AS projectId, name, provider, ref, created_by AS createdBy, created_at_ms AS createdAtMs, rotated_at_ms AS rotatedAtMs
@@ -713,6 +977,18 @@ FROM _smithers_cp_billing_accounts
 WHERE org_id = ?
 LIMIT 1
 `).get(orgId);
+        const identityProviders = this.sqlite.query(`
+SELECT org_id AS orgId, provider_id AS providerId, type, issuer, sso_url AS ssoUrl, certificate_ref AS certificateRef, status, metadata_json AS metadataJson, created_at_ms AS createdAtMs, updated_at_ms AS updatedAtMs
+FROM _smithers_cp_identity_providers
+WHERE org_id = ?
+ORDER BY provider_id
+`).all(orgId).map(identityProviderRow);
+        const usageLimits = this.sqlite.query(`
+SELECT org_id AS orgId, project_id AS projectId, metric, unit, period, limit_quantity AS limitQuantity, updated_at_ms AS updatedAtMs
+FROM _smithers_cp_usage_limits
+WHERE org_id = ?
+ORDER BY project_key, metric, unit, period
+`).all(orgId).map(usageLimitRow);
         const auditEvents = this.sqlite.query(`
 SELECT id, org_id AS orgId, project_id AS projectId, actor_id AS actorId, action, target_type AS targetType, target_id AS targetId, occurred_at_ms AS occurredAtMs, metadata_json AS metadataJson
 FROM _smithers_cp_audit_events
@@ -725,7 +1001,9 @@ ORDER BY occurred_at_ms, id
             projects,
             teams,
             billing: billingRaw ? billingRow(billingRaw) : null,
+            identityProviders,
             usage: this.summarizeUsage({ orgId, sinceMs, untilMs }),
+            usageLimits,
             secretRefs: this.listSecretRefs({ orgId }),
             auditEvents,
         };

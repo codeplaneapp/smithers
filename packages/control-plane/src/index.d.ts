@@ -41,6 +41,19 @@ type ControlPlaneBillingAccount = {
   updatedAtMs: number;
 };
 
+type ControlPlaneIdentityProvider = {
+  orgId: string;
+  providerId: string;
+  type: string;
+  issuer: string;
+  ssoUrl: string | null;
+  certificateRef: string | null;
+  status: string;
+  metadata: Record<string, unknown>;
+  createdAtMs: number;
+  updatedAtMs: number;
+};
+
 type ControlPlaneUsageEvent = {
   id: number;
   orgId: string;
@@ -51,6 +64,22 @@ type ControlPlaneUsageEvent = {
   unit: string;
   observedAtMs: number;
   metadata: Record<string, unknown>;
+};
+
+type ControlPlaneUsageLimit = {
+  orgId: string;
+  projectId: string | null;
+  metric: string;
+  unit: string;
+  period: string;
+  limitQuantity: number;
+  updatedAtMs: number;
+};
+
+type ControlPlaneUsageLimitCheck = ControlPlaneUsageLimit & {
+  usedQuantity: number;
+  remainingQuantity: number;
+  exceeded: boolean;
 };
 
 type ControlPlaneUsageSummary = {
@@ -89,7 +118,9 @@ type ControlPlaneExport = {
   projects: ControlPlaneProject[];
   teams: ControlPlaneTeam[];
   billing: ControlPlaneBillingAccount | null;
+  identityProviders: ControlPlaneIdentityProvider[];
   usage: ControlPlaneUsageSummary[];
+  usageLimits: ControlPlaneUsageLimit[];
   secretRefs: ControlPlaneSecretRef[];
   auditEvents: ControlPlaneAuditEvent[];
 };
@@ -106,12 +137,16 @@ declare class ControlPlaneStore {
   createProject(input: { orgId: string; projectId?: string; slug: string; name: string; metadata?: Record<string, unknown>; createdAtMs?: number }): ControlPlaneProject;
   addProjectTeam(input: { orgId: string; projectId: string; teamId: string; role?: string; createdAtMs?: number }): void;
   upsertBillingAccount(input: { orgId: string; plan: string; billingCustomerId?: string | null; status?: string; updatedAtMs?: number }): ControlPlaneBillingAccount;
+  upsertIdentityProvider(input: { orgId: string; providerId?: string; type: string; issuer: string; ssoUrl?: string | null; certificateRef?: string | null; status?: string; metadata?: Record<string, unknown>; createdAtMs?: number; updatedAtMs?: number }): ControlPlaneIdentityProvider;
+  listIdentityProviders(input: { orgId: string; status?: string }): ControlPlaneIdentityProvider[];
   recordUsage(input: { orgId: string; projectId?: string | null; runId?: string | null; metric: string; quantity: number; unit?: string; observedAtMs?: number; metadata?: Record<string, unknown> }): ControlPlaneUsageEvent;
   summarizeUsage(input: { orgId: string; sinceMs?: number; untilMs?: number }): ControlPlaneUsageSummary[];
+  setUsageLimit(input: { orgId: string; projectId?: string | null; metric: string; unit?: string; period?: string; limitQuantity: number; updatedAtMs?: number }): ControlPlaneUsageLimit;
+  checkUsageLimit(input: { orgId: string; projectId?: string | null; metric: string; unit?: string; period?: string; sinceMs?: number; untilMs?: number }): ControlPlaneUsageLimitCheck | null;
   putSecretRef(input: { orgId: string; projectId?: string | null; name: string; provider: string; ref: string; createdBy?: string | null; createdAtMs?: number; rotatedAtMs?: number | null }): ControlPlaneSecretRef;
   listSecretRefs(input: { orgId: string; projectId?: string | null }): ControlPlaneSecretRef[];
   recordAuditEvent(input: { orgId: string; projectId?: string | null; actorId?: string | null; action: string; targetType: string; targetId?: string | null; occurredAtMs?: number; metadata?: Record<string, unknown> }): ControlPlaneAuditEvent;
   exportOrgAudit(input: { orgId: string; sinceMs?: number; untilMs?: number; exportedAtMs?: number }): ControlPlaneExport;
 }
 
-export { type ControlPlaneAuditEvent, type ControlPlaneBillingAccount, type ControlPlaneExport, type ControlPlaneOrg, type ControlPlaneProject, type ControlPlaneSecretRef, type ControlPlaneSqlite, ControlPlaneStore, type ControlPlaneTeam, type ControlPlaneUsageEvent, type ControlPlaneUsageSummary, ensureControlPlaneTables };
+export { type ControlPlaneAuditEvent, type ControlPlaneBillingAccount, type ControlPlaneExport, type ControlPlaneIdentityProvider, type ControlPlaneOrg, type ControlPlaneProject, type ControlPlaneSecretRef, type ControlPlaneSqlite, ControlPlaneStore, type ControlPlaneTeam, type ControlPlaneUsageEvent, type ControlPlaneUsageLimit, type ControlPlaneUsageLimitCheck, type ControlPlaneUsageSummary, ensureControlPlaneTables };

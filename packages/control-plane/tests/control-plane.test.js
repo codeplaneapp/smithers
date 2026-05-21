@@ -31,6 +31,26 @@ describe("ControlPlaneStore", () => {
         status: "trialing",
         updatedAtMs: 60,
       });
+      const idp = store.upsertIdentityProvider({
+        orgId: org.orgId,
+        providerId: "idp_okta",
+        type: "saml",
+        issuer: "https://acme.okta.com",
+        ssoUrl: "https://acme.okta.com/app/smithers/sso/saml",
+        certificateRef: "vault://identity/acme-okta-cert",
+        metadata: { domains: ["acme.test"] },
+        createdAtMs: 65,
+        updatedAtMs: 65,
+      });
+      const usageLimit = store.setUsageLimit({
+        orgId: org.orgId,
+        projectId: project.projectId,
+        metric: "agent_runtime_ms",
+        unit: "ms",
+        period: "monthly",
+        limitQuantity: 250,
+        updatedAtMs: 66,
+      });
       const firstUsage = store.recordUsage({
         orgId: org.orgId,
         projectId: project.projectId,
@@ -52,6 +72,32 @@ describe("ControlPlaneStore", () => {
       });
 
       expect(billing).toMatchObject({ orgId: "org_acme", plan: "business", status: "trialing" });
+      expect(idp).toMatchObject({
+        orgId: "org_acme",
+        providerId: "idp_okta",
+        type: "saml",
+        status: "active",
+        metadata: { domains: ["acme.test"] },
+      });
+      expect(store.listIdentityProviders({ orgId: org.orgId })).toEqual([idp]);
+      expect(usageLimit).toMatchObject({
+        orgId: "org_acme",
+        projectId: "project_app",
+        metric: "agent_runtime_ms",
+        limitQuantity: 250,
+      });
+      expect(store.checkUsageLimit({
+        orgId: org.orgId,
+        projectId: project.projectId,
+        metric: "agent_runtime_ms",
+        unit: "ms",
+        period: "monthly",
+      })).toMatchObject({
+        limitQuantity: 250,
+        usedQuantity: 200,
+        remainingQuantity: 50,
+        exceeded: false,
+      });
       expect(firstUsage).toMatchObject({
         orgId: "org_acme",
         projectId: "project_app",
@@ -68,9 +114,11 @@ describe("ControlPlaneStore", () => {
       expect(exported.projects).toEqual([project]);
       expect(exported.teams).toEqual([team]);
       expect(exported.billing).toEqual(billing);
+      expect(exported.identityProviders).toEqual([idp]);
       expect(exported.usage).toEqual([
         { orgId: "org_acme", metric: "agent_runtime_ms", unit: "ms", quantity: 200 },
       ]);
+      expect(exported.usageLimits).toEqual([usageLimit]);
       expect(exported.auditEvents.map((event) => event.action)).toEqual([
         "org.create",
         "team.create",
@@ -78,6 +126,8 @@ describe("ControlPlaneStore", () => {
         "project.create",
         "project.team.upsert",
         "billing.account.upsert",
+        "identity_provider.upsert",
+        "usage_limit.upsert",
       ]);
     }
     finally {
@@ -99,6 +149,15 @@ describe("ControlPlaneStore", () => {
         createdBy: "user_ops",
         createdAtMs: 3,
       });
+      const rotated = store.putSecretRef({
+        orgId: "org_secure",
+        projectId: "project_api",
+        name: "deploy-token",
+        provider: "aws-secrets-manager",
+        ref: "arn:aws:secretsmanager:us-east-1:123:secret:deploy-v2",
+        createdBy: "user_ops",
+        createdAtMs: 4,
+      });
 
       expect(ref).toMatchObject({
         name: "deploy-token",
@@ -106,8 +165,39 @@ describe("ControlPlaneStore", () => {
         ref: "arn:aws:secretsmanager:us-east-1:123:secret:deploy",
       });
       const rawRows = sqlite.query("SELECT * FROM _smithers_cp_secret_refs").all();
+      expect(rawRows).toHaveLength(1);
       expect(JSON.stringify(rawRows)).not.toContain("super-secret-value");
-      expect(store.listSecretRefs({ orgId: "org_secure", projectId: "project_api" })).toEqual([ref]);
+      expect(store.listSecretRefs({ orgId: "org_secure", projectId: "project_api" })).toEqual([rotated]);
+    }
+    finally {
+      sqlite.close();
+    }
+  });
+
+  test("usage limits support org-wide and project-scoped quota checks", () => {
+    const { sqlite, store } = makeStore();
+    try {
+      store.createOrg({ orgId: "org_limits", slug: "limits", name: "Limits", createdAtMs: 1 });
+      store.createProject({ orgId: "org_limits", projectId: "project_one", slug: "one", name: "One", createdAtMs: 2 });
+      store.createProject({ orgId: "org_limits", projectId: "project_two", slug: "two", name: "Two", createdAtMs: 3 });
+      store.setUsageLimit({ orgId: "org_limits", metric: "runs", unit: "count", period: "daily", limitQuantity: 3, updatedAtMs: 4 });
+      store.setUsageLimit({ orgId: "org_limits", projectId: "project_one", metric: "runs", unit: "count", period: "daily", limitQuantity: 1, updatedAtMs: 5 });
+      store.recordUsage({ orgId: "org_limits", projectId: "project_one", metric: "runs", quantity: 2, unit: "count", observedAtMs: 6 });
+      store.recordUsage({ orgId: "org_limits", projectId: "project_two", metric: "runs", quantity: 1, unit: "count", observedAtMs: 7 });
+
+      expect(store.checkUsageLimit({ orgId: "org_limits", metric: "runs", unit: "count", period: "daily" })).toMatchObject({
+        usedQuantity: 3,
+        remainingQuantity: 0,
+        exceeded: false,
+      });
+      expect(store.checkUsageLimit({ orgId: "org_limits", projectId: "project_one", metric: "runs", unit: "count", period: "daily" })).toMatchObject({
+        usedQuantity: 2,
+        remainingQuantity: 0,
+        exceeded: true,
+      });
+      expect(() =>
+        store.setUsageLimit({ orgId: "org_limits", projectId: "project_missing", metric: "runs", limitQuantity: 1 }),
+      ).toThrow("Control-plane project not found");
     }
     finally {
       sqlite.close();

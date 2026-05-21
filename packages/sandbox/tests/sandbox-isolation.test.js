@@ -236,9 +236,9 @@ describe("sandbox isolation: cleanup", () => {
 	// FIXME: testing "no orphan processes via ps" and "cleanup after crash
 	// (process killed mid-run)" requires spawning a real sandbox subprocess
 	// against bubblewrap/docker, which is unavailable in this unit-test
-	// environment. The bubblewrap executor in
-	// packages/sandbox/src/effect/socket-runner.js is a no-op shim. Promote
-	// these to e2e tests once a CI image with `bwrap` exists.
+	// environment. Local transport cleanup is covered in
+	// transport-runners.test.js with fake runtime binaries; promote the
+	// host-level process assertions once a CI image with `bwrap` exists.
 	test.skip("sandbox cleanup after timeout removes temp dir and leaves no orphan processes", () => {
 		// Requires real sandbox runtime; see file-top FIXME.
 	});
