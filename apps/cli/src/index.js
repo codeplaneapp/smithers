@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { setJsonMode } from "./util/logger.ts";
+import { findFirstPositionalIndex, parseMcpSurfaceArgv, rewriteBareResumeFlagArgv } from "./argv-utils.js";
 import { CLI_JSON_ARGUMENT_MAX_BYTES, parseJsonArgument, parseJsonInput } from "./json-args.js";
 import { resolve, dirname, basename } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -5017,13 +5018,6 @@ function resolveCliColor(mode, stream) {
     if (process.env.NO_COLOR !== undefined && process.env.NO_COLOR.length > 0) return false;
     return Boolean(stream.isTTY);
 }
-const BUILTIN_FLAGS_WITH_VALUES = new Set([
-    "--format",
-    "--filter-output",
-    "--surface",
-    "--token-limit",
-    "--token-offset",
-]);
 const WORKFLOW_UTILITY_COMMANDS = new Set([
     "run",
     "list",
@@ -5031,41 +5025,6 @@ const WORKFLOW_UTILITY_COMMANDS = new Set([
     "create",
     "doctor",
 ]);
-/**
- * @param {string | undefined} value
- * @returns {McpSurface}
- */
-function normalizeMcpSurface(value) {
-    const surface = value?.trim().toLowerCase();
-    if (surface === undefined || surface.length === 0) {
-        throw new Error("Missing value for --surface. Expected semantic, raw, or both.");
-    }
-    if (surface === "semantic" || surface === "raw" || surface === "both") {
-        return surface;
-    }
-    throw new Error(`Invalid --surface value: ${value}. Expected semantic, raw, or both.`);
-}
-/**
- * @param {string[]} argv
- */
-function parseMcpSurfaceArgv(argv) {
-    let surface = "semantic";
-    const filtered = [];
-    for (let index = 0; index < argv.length; index++) {
-        const arg = argv[index];
-        if (arg === "--surface") {
-            surface = normalizeMcpSurface(argv[index + 1]);
-            index += 1;
-            continue;
-        }
-        if (arg.startsWith("--surface=")) {
-            surface = normalizeMcpSurface(arg.slice("--surface=".length));
-            continue;
-        }
-        filtered.push(arg);
-    }
-    return { surface, argv: filtered };
-}
 /**
  * @param {ReturnType<typeof createSemanticMcpServer>} server
  */
@@ -5089,22 +5048,6 @@ function registerRawToolsOnMcpServer(server) {
             return IncurMcp.callTool(tool, params, extra);
         });
     }
-}
-/**
- * @param {string[]} argv
- * @returns {number}
- */
-function findFirstPositionalIndex(argv, startIndex = 0) {
-    for (let index = startIndex; index < argv.length; index++) {
-        const arg = argv[index];
-        if (!arg.startsWith("-")) {
-            return index;
-        }
-        if (BUILTIN_FLAGS_WITH_VALUES.has(arg)) {
-            index++;
-        }
-    }
-    return -1;
 }
 /**
  * @param {string[]} argv
@@ -5225,17 +5168,6 @@ function rewriteEventsJsonFlagArgv(argv) {
         return argv;
     }
     return argv.map((arg) => (arg === "--json" ? "-j" : arg));
-}
-/**
- * Incur treats union-typed options as value-bearing flags, so a bare
- * `--resume --run-id value` would consume `--run-id` as the resume value.
- *
- * @param {string[]} argv
- */
-function rewriteBareResumeFlagArgv(argv) {
-    return argv.map((arg, index) => arg === "--resume" && (argv[index + 1] === undefined || argv[index + 1]?.startsWith("-"))
-        ? "--resume=true"
-        : arg);
 }
 /**
  * @param {unknown} value
