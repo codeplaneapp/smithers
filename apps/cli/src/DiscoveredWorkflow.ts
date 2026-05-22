@@ -2,6 +2,7 @@ import type { WorkflowSourceType } from "./WorkflowSourceType.ts";
 
 export type DiscoveredWorkflow = {
     id: string;
+    metadataVersion: 1;
     displayName: string;
     sourceType: WorkflowSourceType;
     description: string;

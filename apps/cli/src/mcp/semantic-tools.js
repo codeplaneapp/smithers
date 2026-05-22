@@ -42,6 +42,7 @@ export const SEMANTIC_TOOL_NAMES = [
 ];
 const workflowSummarySchema = z.object({
     id: z.string(),
+    metadataVersion: z.number().int(),
     displayName: z.string(),
     entryFile: z.string(),
     sourceType: z.string(),
@@ -626,9 +627,13 @@ async function loadWorkflowById(workflowId, cwd) {
         workflow,
         summary: {
             id: discovered.id,
+            metadataVersion: discovered.metadataVersion,
             displayName: discovered.displayName,
             entryFile: discovered.entryFile,
             sourceType: discovered.sourceType,
+            description: discovered.description,
+            tags: discovered.tags,
+            aliases: discovered.aliases,
         },
     };
 }

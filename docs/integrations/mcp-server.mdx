@@ -129,6 +129,7 @@ List all Smithers workflows discovered in the working directory.
 {
   workflows: Array<{
     id: string;
+    metadataVersion: number;
     displayName: string;
     entryFile: string;
     sourceType: string;
@@ -171,7 +172,16 @@ Start or resume a discovered workflow.
 
 ```ts
 {
-  workflow: { id, displayName, entryFile, sourceType };
+  workflow: {
+    id: string;
+    metadataVersion: number;
+    displayName: string;
+    entryFile: string;
+    sourceType: string;
+    description: string;
+    tags: string[];
+    aliases: string[];
+  };
   runId: string;
   launchMode: "background" | "waited";
   requestedResume: boolean;

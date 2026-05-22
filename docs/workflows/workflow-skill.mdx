@@ -3,7 +3,7 @@ title: workflow-skill
 description: Create or update agent-facing skill docs from local workflows.
 ---
 
-`workflow-skill` reads local Smithers workflow files and asks an agent to write concise skill documentation for them. The generated skill files describe when to use each workflow, which workflow ID to run, which inputs matter, and how to operate the run.
+`workflow-skill` reads local Smithers workflow metadata and asks an agent to write concise skill documentation for selected workflows. It passes workflow IDs, display names, descriptions, tags, aliases, and paths as untrusted repository metadata, not full workflow source.
 
 For deterministic, no-agent generation, use the CLI command:
 
