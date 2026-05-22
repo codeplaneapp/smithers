@@ -2031,7 +2031,7 @@ export class SmithersDb {
    * @returns {RunnableEffect<void, SmithersError>}
    */
     insertCache(row) {
-        return this.write(`insert cache ${row.cacheKey}`, () => this.internalStorage.insertIgnore("_smithers_cache", row));
+        return this.write(`insert cache ${row.cacheKey}`, () => this.internalStorage.upsert("_smithers_cache", row, ["cacheKey"]));
     }
     /**
    * @param {Record<string, unknown>} row

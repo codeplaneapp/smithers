@@ -1,5 +1,6 @@
 /** @jsxImportSource smithers-orchestrator */
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { z } from "zod";
 import { Effect } from "effect";
 import { Workflow, Task, runWorkflow } from "smithers-orchestrator";
@@ -29,21 +30,28 @@ function countingAgent(id) {
 }
 
 describe("cachePolicy.ttlMs", () => {
-    test("ttlMs expiration causes re-execution", async () => {
-        const { smithers, outputs, cleanup } = createTestSmithers(outputShape());
+    test("ttlMs expiration causes re-execution and refreshes the cache row", async () => {
+        const { smithers, outputs, dbPath, cleanup } = createTestSmithers(outputShape());
         const counter = countingAgent("ttl");
         try {
             const workflow = smithers(() => (
                 <Workflow name="ttl-cache">
-                    <Task id="t" output={outputs.out} agent={counter.agent} cache={{ ttlMs: 1 }}>
+                    <Task id="t" output={outputs.out} agent={counter.agent} cache={{ ttlMs: 1000 }}>
                         same prompt
                     </Task>
                 </Workflow>
             ));
 
             await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "ttl-r1" }));
-            await new Promise((resolve) => setTimeout(resolve, 20));
+            const sqlite = new Database(dbPath);
+            try {
+                sqlite.query("UPDATE _smithers_cache SET created_at_ms = ?").run(Date.now() - 5000);
+            }
+            finally {
+                sqlite.close();
+            }
             await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "ttl-r2" }));
+            await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "ttl-r3" }));
 
             expect(counter.calls).toBe(2);
         }

@@ -187,6 +187,32 @@ function makeFakeBwrapBin() {
     return bwrapPath;
 }
 
+/**
+ * @param {string} captureDir
+ */
+function makeFakeSandboxExecBin(captureDir) {
+    const binDir = tempDir("smithers-fake-sandbox-exec-bin-");
+    const sandboxExecPath = join(binDir, "sandbox-exec");
+    writeFileSync(
+        sandboxExecPath,
+        [
+            "#!/bin/sh",
+            `printf '%s\\n' "$@" > ${JSON.stringify(join(captureDir, "args.txt"))}`,
+            `printf '%s\\n' "$HOME" > ${JSON.stringify(join(captureDir, "home.txt"))}`,
+            `printf '%s\\n' "$TMPDIR" > ${JSON.stringify(join(captureDir, "tmpdir.txt"))}`,
+            "last=''",
+            "for arg in \"$@\"; do",
+            "  last=\"$arg\"",
+            "done",
+            "/bin/sh -lc \"$last\"",
+            "",
+        ].join("\n"),
+        "utf8",
+    );
+    chmodSync(sandboxExecPath, 0o755);
+    return sandboxExecPath;
+}
+
 describe("sandbox transport runners", () => {
     test("bubblewrap executor creates, ships, executes, collects, and cleans up", async () => {
         const fakeBwrap = makeFakeBwrapBin();
@@ -284,6 +310,36 @@ describe("sandbox transport runners", () => {
                 expect(handle.runtime).toBe("bubblewrap");
                 expect(existsSync(handle.requestPath)).toBe(true);
                 expect(existsSync(handle.resultPath)).toBe(true);
+            }),
+        );
+    });
+
+    test("macOS fallback executes with a writable sandbox temp directory", async () => {
+        const captureDir = tempDir("smithers-sandbox-exec-capture-");
+        const fakeSandboxExec = makeFakeSandboxExecBin(captureDir);
+        await withPlatform("darwin", () =>
+            withBunWhich((command) => (command === "sandbox-exec" ? fakeSandboxExec : null), async () => {
+                const handle = await runExecutor(BubblewrapSandboxExecutorLive, (executor) =>
+                    executor.create(
+                        configFor(tempDir("smithers-sandbox-exec-"), "run-sandbox-exec-temp", "sandbox", "bubblewrap"),
+                    ),
+                );
+                try {
+                    await runExecutor(BubblewrapSandboxExecutorLive, (executor) =>
+                        executor.execute(
+                            'test -d "$TMPDIR" && test "$HOME" = "$TMPDIR" && printf ok > "$TMPDIR/check.txt" && printf ok > ../result/macos-temp.txt',
+                            handle,
+                        ),
+                    );
+                    const expectedTempPath = join(handle.sandboxRoot, "tmp");
+                    expect(readFileSync(join(captureDir, "home.txt"), "utf8").trim()).toBe(expectedTempPath);
+                    expect(readFileSync(join(captureDir, "tmpdir.txt"), "utf8").trim()).toBe(expectedTempPath);
+                    expect(readFileSync(join(captureDir, "args.txt"), "utf8")).toContain(expectedTempPath);
+                    expect(readFileSync(join(expectedTempPath, "check.txt"), "utf8")).toBe("ok");
+                    expect(readFileSync(join(handle.resultPath, "macos-temp.txt"), "utf8")).toBe("ok");
+                } finally {
+                    await runExecutor(BubblewrapSandboxExecutorLive, (executor) => executor.cleanup(handle));
+                }
             }),
         );
     });

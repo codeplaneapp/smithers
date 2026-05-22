@@ -170,16 +170,20 @@ export function extractGeneratedDetectionProviderIds(source) {
     if (!providersMatch) {
         return ids;
     }
-    const providerKeyPattern = /^\s*([A-Za-z_$][\w$]*)\s*:/gm;
-    let match;
-    while ((match = providerKeyPattern.exec(providersMatch[1])) !== null) {
-        const providerId = match[1];
-        if (detectorForId(providerId)) {
+    for (const line of providersMatch[1].split("\n")) {
+        const match = line.match(/^\s*([A-Za-z_$][\w$]*)\s*:\s*(.*?)\s*,?\s*$/);
+        if (!match)
+            continue;
+        const [, providerId, initializer] = match;
+        const scaffoldedProvider = SCAFFOLDED_PROVIDERS[providerId];
+        const constructorProvider = CONSTRUCTORS[providerId];
+        if ((scaffoldedProvider && initializer === scaffoldedProvider) ||
+            (constructorProvider && initializer === constructorProvider.expr)) {
             ids.add(providerId);
             continue;
         }
         const variant = variantForId(providerId);
-        if (variant) {
+        if (variant && initializer === variant.constructor.expr) {
             ids.add(variant.derivedFrom);
         }
     }

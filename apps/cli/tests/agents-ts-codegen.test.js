@@ -107,4 +107,20 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(regenerated).toContain("claudeSonnet: new SmithersClaudeCodeAgent(");
         expect(regenerated).toContain("codexProd: new SmithersCodexAgent(");
     });
+
+    test("does not preserve account labels that collide with generated provider ids", () => {
+        const env = newSmithersHome();
+        addAccount({ label: "codex", provider: "codex", configDir: `${env.HOME}/.smithers/accounts/codex` }, { env });
+        addAccount({ label: "claude-sonnet", provider: "claude-code", configDir: `${env.HOME}/.smithers/accounts/claude-sonnet` }, { env });
+
+        const generated = generateAgentsTs(env);
+        const preserved = extractGeneratedDetectionProviderIds(generated);
+        expect([...preserved]).toEqual([]);
+
+        const regenerated = generateAgentsTs(env, { preserveProviderIds: preserved });
+        expect(regenerated).toContain("codex: new SmithersCodexAgent(");
+        expect(regenerated).toContain("claudeSonnet: new SmithersClaudeCodeAgent(");
+        expect(regenerated).not.toContain("codex: CodexAgent");
+        expect(regenerated).not.toContain("claude: ClaudeCodeAgent");
+    });
 });

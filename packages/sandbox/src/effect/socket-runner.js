@@ -46,6 +46,26 @@ const SANDBOX_PROCESS_ENV = {
     LANG: "C.UTF-8",
 };
 /**
+ * @param {SandboxHandle} handle
+ */
+function sandboxTempPath(handle) {
+    return join(handle.sandboxRoot, "tmp");
+}
+/**
+ * @param {SandboxHandle} handle
+ */
+function sandboxProcessEnv(handle) {
+    if (process.platform !== "darwin") {
+        return SANDBOX_PROCESS_ENV;
+    }
+    const tempPath = sandboxTempPath(handle);
+    return {
+        ...SANDBOX_PROCESS_ENV,
+        HOME: tempPath,
+        TMPDIR: tempPath,
+    };
+}
+/**
  * @param {string} value
  */
 function sandboxProfileString(value) {
@@ -76,6 +96,9 @@ function bubblewrapArgs(command, handle) {
         "--setenv",
         "PATH",
         SANDBOX_PATH,
+        "--setenv",
+        "TMPDIR",
+        "/tmp",
     ];
     for (const path of BWRAP_HOST_READ_PATHS) {
         if (existsSync(path)) {
@@ -90,6 +113,7 @@ function bubblewrapArgs(command, handle) {
  * @param {SandboxHandle} handle
  */
 function sandboxExecArgs(command, handle) {
+    const tempPath = sandboxTempPath(handle);
     const readRules = MACOS_SANDBOX_READ_PATHS
         .filter((path) => existsSync(path))
         .map((path) => `(subpath ${sandboxProfileString(path)})`)
@@ -98,8 +122,8 @@ function sandboxExecArgs(command, handle) {
         "(version 1)",
         "(deny default)",
         "(allow process*)",
-        `(allow file-read* ${readRules} (subpath ${sandboxProfileString(handle.requestPath)}) (subpath ${sandboxProfileString(handle.resultPath)}))`,
-        `(allow file-write* (subpath ${sandboxProfileString(handle.requestPath)}) (subpath ${sandboxProfileString(handle.resultPath)}))`,
+        `(allow file-read* ${readRules} (subpath ${sandboxProfileString(handle.requestPath)}) (subpath ${sandboxProfileString(handle.resultPath)}) (subpath ${sandboxProfileString(tempPath)}))`,
+        `(allow file-write* (subpath ${sandboxProfileString(handle.requestPath)}) (subpath ${sandboxProfileString(handle.resultPath)}) (subpath ${sandboxProfileString(tempPath)}))`,
     ].join("\n");
     return ["-p", profile, "/bin/sh", "-lc", command];
 }
@@ -127,7 +151,7 @@ function executeLocalSandbox(command, handle) {
         }
         const result = yield* spawnCaptureEffect(binary, args, {
             cwd: handle.requestPath,
-            env: SANDBOX_PROCESS_ENV,
+            env: sandboxProcessEnv(handle),
             timeoutMs: SANDBOX_EXEC_TIMEOUT_MS,
             maxOutputBytes: SANDBOX_EXEC_OUTPUT_BYTES,
             detached: true,
@@ -165,6 +189,7 @@ export const BubblewrapSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor
             try: async () => {
                 await mkdir(handle.requestPath, { recursive: true });
                 await mkdir(handle.resultPath, { recursive: true });
+                await mkdir(sandboxTempPath(handle), { recursive: true });
             },
             catch: (cause) => toSmithersError(cause, "create sandbox workspace"),
         });
