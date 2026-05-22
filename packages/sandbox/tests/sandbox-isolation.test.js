@@ -164,11 +164,7 @@ describe("sandbox isolation: bundle artifact safety", () => {
 		);
 	});
 
-	test("symlink artifact inside bundle is silently skipped (not counted as patch)", async () => {
-		// walkFiles ignores entries that aren't isFile(); symlinks land in
-		// neither directory nor file branch. This documents that behaviour:
-		// a symlink can't smuggle bytes past the limit, but it also won't
-		// become a recognised patch file.
+	test("symlink artifact inside bundle is rejected during collection", async () => {
 		const bundlePath = tempDir("sandbox-bundle-");
 		const outside = tempDir("sandbox-outside-");
 		writeFileSync(join(outside, "leak"), "secret", "utf8");
@@ -182,9 +178,23 @@ describe("sandbox isolation: bundle artifact safety", () => {
 			join(outside, "leak"),
 			join(bundlePath, "patches", "0001-symlink.patch"),
 		);
-		const validated = await validateSandboxBundle(bundlePath);
-		// Symlink was not collected as a real patch file.
-		expect(validated.patchFiles).toEqual([]);
+		await expect(validateSandboxBundle(bundlePath)).rejects.toThrow(
+			"may not contain symlinks",
+		);
+	});
+
+	test("README.md symlink is rejected before reading outside content", async () => {
+		const bundlePath = tempDir("sandbox-bundle-");
+		const outside = tempDir("sandbox-outside-");
+		writeFileSync(
+			join(outside, "README.md"),
+			JSON.stringify({ status: "finished", outputs: { leaked: true } }),
+			"utf8",
+		);
+		symlinkSync(join(outside, "README.md"), join(bundlePath, "README.md"));
+		await expect(validateSandboxBundle(bundlePath)).rejects.toThrow(
+			"README.md may not be a symlink",
+		);
 	});
 
 	test("deeply nested artifact paths within bundle are accepted and resolvable", async () => {

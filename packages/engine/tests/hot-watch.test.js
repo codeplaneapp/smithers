@@ -106,4 +106,17 @@ describe("WatchTree", () => {
         // Should construct without error
         tree.close();
     });
+    test("uses conservative polling with idle backoff", () => {
+        const dir = makeTempDir();
+        cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+        const tree = new WatchTree(dir, { debounceMs: 50 });
+        cleanups.push(() => tree.close());
+        expect(tree.pollIntervalMs()).toBeGreaterThanOrEqual(1000);
+        tree.resetPollBackoff();
+        const first = tree.currentPollIntervalMs;
+        tree.advancePollBackoff(false);
+        expect(tree.currentPollIntervalMs).toBeGreaterThan(first);
+        tree.advancePollBackoff(true);
+        expect(tree.currentPollIntervalMs).toBe(first);
+    });
 });

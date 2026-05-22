@@ -12,8 +12,15 @@ const DEFAULT_IGNORE = [
     ".jj",
     ".smithers",
 ];
-const MIN_POLL_MS = 50;
-const MAX_POLL_MS = 250;
+const MIN_POLL_MS = 1000;
+const MAX_POLL_MS = 10_000;
+const MAX_POLL_FILES = 5000;
+class HotWatchScanLimitError extends Error {
+    constructor() {
+        super(`Hot watch polling skipped after ${MAX_POLL_FILES} files.`);
+        this.name = "HotWatchScanLimitError";
+    }
+}
 export class WatchTree {
     watchers = [];
     rootDir;
@@ -24,6 +31,8 @@ export class WatchTree {
     debounceTimer = null;
     pollTimer = null;
     polling = false;
+    pollingDisabled = false;
+    currentPollIntervalMs = MIN_POLL_MS;
     waitResolve = null;
     closed = false;
     /**
@@ -59,7 +68,7 @@ export class WatchTree {
         if (this.debounceTimer)
             clearTimeout(this.debounceTimer);
         if (this.pollTimer)
-            clearInterval(this.pollTimer);
+            clearTimeout(this.pollTimer);
         for (const w of this.watchers) {
             try {
                 w.close();
@@ -79,9 +88,24 @@ export class WatchTree {
     startEffect() {
         return Effect.tryPromise({
             try: async () => {
-                this.fileSignatures = await this.scanFileSignatures(this.rootDir);
+                try {
+                    this.fileSignatures = await this.scanFileSignatures(this.rootDir);
+                }
+                catch (error) {
+                    if (!(error instanceof HotWatchScanLimitError)) {
+                        throw error;
+                    }
+                    this.pollingDisabled = true;
+                    this.fileSignatures = new Map();
+                    logInfo("hot watch polling disabled by file count guard", {
+                        rootDir: this.rootDir,
+                        maxFiles: MAX_POLL_FILES,
+                    }, "hot:watch");
+                }
                 await this.watchDir(this.rootDir);
-                this.startPolling();
+                if (!this.pollingDisabled) {
+                    this.startPolling();
+                }
             },
             catch: (cause) => toSmithersError(cause, "start hot watch tree"),
         }).pipe(Effect.annotateLogs({
@@ -117,25 +141,57 @@ export class WatchTree {
         return this.ignore.includes(name) || name.startsWith(".");
     }
     pollIntervalMs() {
-        return Math.min(MAX_POLL_MS, Math.max(MIN_POLL_MS, this.debounceMs));
+        return Math.min(MAX_POLL_MS, Math.max(MIN_POLL_MS, this.debounceMs * 4));
+    }
+    resetPollBackoff() {
+        this.currentPollIntervalMs = this.pollIntervalMs();
+    }
+    advancePollBackoff(changed) {
+        if (changed) {
+            this.resetPollBackoff();
+            return;
+        }
+        this.currentPollIntervalMs = Math.min(MAX_POLL_MS, Math.max(this.pollIntervalMs(), this.currentPollIntervalMs * 2));
+    }
+    scheduleNextPoll() {
+        if (this.pollTimer || this.closed || this.pollingDisabled)
+            return;
+        this.pollTimer = setTimeout(() => {
+            this.pollTimer = null;
+            void this.pollOnce().finally(() => {
+                this.scheduleNextPoll();
+            });
+        }, this.currentPollIntervalMs);
     }
     startPolling() {
-        if (this.pollTimer || this.closed)
+        if (this.pollTimer || this.closed || this.pollingDisabled)
             return;
-        this.pollTimer = setInterval(() => {
-            void this.pollOnce();
-        }, this.pollIntervalMs());
+        this.resetPollBackoff();
+        this.scheduleNextPoll();
     }
     async pollOnce() {
-        if (this.closed || this.polling)
-            return;
+        if (this.closed || this.polling || this.pollingDisabled)
+            return false;
         this.polling = true;
         try {
             const next = await this.scanFileSignatures(this.rootDir);
-            this.recordScanChanges(next);
+            const changed = this.recordScanChanges(next);
+            this.advancePollBackoff(changed);
+            return changed;
         }
-        catch {
+        catch (error) {
+            if (error instanceof HotWatchScanLimitError) {
+                this.pollingDisabled = true;
+                logInfo("hot watch polling disabled by file count guard", {
+                    rootDir: this.rootDir,
+                    maxFiles: MAX_POLL_FILES,
+                }, "hot:watch");
+            }
+            else {
+                this.advancePollBackoff(false);
+            }
             // Ignore transient filesystem races; the next interval will retry.
+            return false;
         }
         finally {
             this.polling = false;
@@ -163,6 +219,9 @@ export class WatchTree {
         for (const entry of entries) {
             if (this.shouldIgnore(entry.name))
                 continue;
+            if (files.size >= MAX_POLL_FILES) {
+                throw new HotWatchScanLimitError();
+            }
             const fullPath = resolve(dir, entry.name);
             if (entry.isDirectory()) {
                 await this.scanDir(fullPath, files);
@@ -179,17 +238,21 @@ export class WatchTree {
    * @param {Map<string, string>} next
    */
     recordScanChanges(next) {
+        let changed = false;
         for (const [filePath, signature] of next) {
             if (this.fileSignatures.get(filePath) !== signature) {
                 this.onFileChange(filePath);
+                changed = true;
             }
         }
         for (const filePath of this.fileSignatures.keys()) {
             if (!next.has(filePath)) {
                 this.onFileChange(filePath);
+                changed = true;
             }
         }
         this.fileSignatures = next;
+        return changed;
     }
     /**
    * @param {string} dir
@@ -215,6 +278,8 @@ export class WatchTree {
                     eventType,
                     fullPath,
                 }, "hot:watch");
+                this.onFileChange(fullPath);
+                this.resetPollBackoff();
                 void this.pollOnce();
             });
             this.watchers.push(watcher);

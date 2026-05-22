@@ -17,7 +17,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
  * @typedef {import("./index.d.ts").ControlPlaneExport} ControlPlaneExport
  */
 
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/;
+const SLUG_RE = /^(?:[a-z0-9]|[a-z0-9][a-z0-9-]{0,62}[a-z0-9])$/;
 const ID_RE = /^[A-Za-z0-9:_-]{1,128}$/;
 
 /**
@@ -139,6 +139,7 @@ CREATE INDEX IF NOT EXISTS _smithers_cp_usage_limits_org_idx
 
 CREATE TABLE IF NOT EXISTS _smithers_cp_secret_refs (
   org_id TEXT NOT NULL,
+  project_key TEXT NOT NULL,
   project_id TEXT,
   name TEXT NOT NULL,
   provider TEXT NOT NULL,
@@ -146,7 +147,7 @@ CREATE TABLE IF NOT EXISTS _smithers_cp_secret_refs (
   created_by TEXT,
   created_at_ms INTEGER NOT NULL,
   rotated_at_ms INTEGER,
-  PRIMARY KEY (org_id, project_id, name),
+  PRIMARY KEY (org_id, project_key, name),
   FOREIGN KEY (org_id) REFERENCES _smithers_cp_orgs(org_id) ON DELETE CASCADE,
   FOREIGN KEY (org_id, project_id) REFERENCES _smithers_cp_projects(org_id, project_id) ON DELETE CASCADE
 );
@@ -167,6 +168,53 @@ CREATE TABLE IF NOT EXISTS _smithers_cp_audit_events (
 
 CREATE INDEX IF NOT EXISTS _smithers_cp_audit_org_time_idx
   ON _smithers_cp_audit_events(org_id, occurred_at_ms);
+`);
+    migrateSecretRefsProjectKey(sqlite);
+}
+
+/**
+ * @param {ControlPlaneSqlite} sqlite
+ */
+function migrateSecretRefsProjectKey(sqlite) {
+    const columns = sqlite.query("PRAGMA table_info(_smithers_cp_secret_refs)").all();
+    if (columns.some((column) => String(column.name) === "project_key")) {
+        return;
+    }
+    sqlite.exec(`
+ALTER TABLE _smithers_cp_secret_refs RENAME TO _smithers_cp_secret_refs_legacy;
+
+CREATE TABLE _smithers_cp_secret_refs (
+  org_id TEXT NOT NULL,
+  project_key TEXT NOT NULL,
+  project_id TEXT,
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  created_by TEXT,
+  created_at_ms INTEGER NOT NULL,
+  rotated_at_ms INTEGER,
+  PRIMARY KEY (org_id, project_key, name),
+  FOREIGN KEY (org_id) REFERENCES _smithers_cp_orgs(org_id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id, project_id) REFERENCES _smithers_cp_projects(org_id, project_id) ON DELETE CASCADE
+);
+
+INSERT OR REPLACE INTO _smithers_cp_secret_refs (
+  org_id, project_key, project_id, name, provider, ref, created_by, created_at_ms, rotated_at_ms
+)
+SELECT
+  org_id,
+  COALESCE(project_id, '__org__') AS project_key,
+  project_id,
+  name,
+  provider,
+  ref,
+  created_by,
+  created_at_ms,
+  rotated_at_ms
+FROM _smithers_cp_secret_refs_legacy
+ORDER BY created_at_ms;
+
+DROP TABLE _smithers_cp_secret_refs_legacy;
 `);
 }
 
@@ -847,6 +895,10 @@ WHERE org_id = ? AND metric = ? AND unit = ? AND observed_at_ms >= ? AND observe
     putSecretRef(input) {
         const orgId = requiredId("orgId", input.orgId);
         const projectId = input.projectId ? requiredId("projectId", input.projectId) : null;
+        if (projectId) {
+            assertProjectExists(this.sqlite, orgId, projectId);
+        }
+        const secretProjectKey = projectKey(projectId);
         const name = nonEmptyString("name", input.name);
         const createdAtMs = timestamp(input.createdAtMs);
         const rotatedAtMs = input.rotatedAtMs === undefined || input.rotatedAtMs === null
@@ -857,13 +909,14 @@ WHERE org_id = ? AND metric = ? AND unit = ? AND observed_at_ms >= ? AND observe
         const createdBy = input.createdBy ? requiredId("createdBy", input.createdBy) : null;
         this.sqlite.query(`
 DELETE FROM _smithers_cp_secret_refs
-WHERE org_id = ? AND project_id IS ? AND name = ?
-`).run(orgId, projectId, name);
+WHERE org_id = ? AND project_key = ? AND name = ?
+`).run(orgId, secretProjectKey, name);
         this.sqlite.query(`
-INSERT INTO _smithers_cp_secret_refs (org_id, project_id, name, provider, ref, created_by, created_at_ms, rotated_at_ms)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO _smithers_cp_secret_refs (org_id, project_key, project_id, name, provider, ref, created_by, created_at_ms, rotated_at_ms)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `).run(
             orgId,
+            secretProjectKey,
             projectId,
             name,
             provider,
@@ -885,9 +938,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         const row = this.sqlite.query(`
 SELECT org_id AS orgId, project_id AS projectId, name, provider, ref, created_by AS createdBy, created_at_ms AS createdAtMs, rotated_at_ms AS rotatedAtMs
 FROM _smithers_cp_secret_refs
-WHERE org_id = ? AND project_id IS ? AND name = ?
+WHERE org_id = ? AND project_key = ? AND name = ?
 LIMIT 1
-`).get(orgId, projectId, name);
+`).get(orgId, secretProjectKey, name);
         return secretRefRow(row);
     }
 
@@ -908,10 +961,10 @@ ORDER BY name
             : `
 SELECT org_id AS orgId, project_id AS projectId, name, provider, ref, created_by AS createdBy, created_at_ms AS createdAtMs, rotated_at_ms AS rotatedAtMs
 FROM _smithers_cp_secret_refs
-WHERE org_id = ? AND project_id IS ?
+WHERE org_id = ? AND project_key = ?
 ORDER BY name
 `;
-        const args = projectId === undefined ? [orgId] : [orgId, projectId ? requiredId("projectId", projectId) : null];
+        const args = projectId === undefined ? [orgId] : [orgId, projectKey(projectId ? requiredId("projectId", projectId) : null)];
         return this.sqlite.query(sql).all(...args).map(secretRefRow);
     }
 

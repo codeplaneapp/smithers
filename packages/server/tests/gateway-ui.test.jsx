@@ -109,6 +109,40 @@ describe("Gateway UI", () => {
     expect(asset).toContain("Smithers Console");
     expect(asset).toContain("listWorkflows");
     expect(asset).toContain("submitApproval");
+    expect(asset).not.toContain("localStorage");
+  });
+
+  test("requires bearer auth for the built-in operator console when gateway auth is configured", async () => {
+    gateway = new Gateway({
+      ui: true,
+      auth: {
+        mode: "token",
+        tokens: {
+          "operator-token": {
+            role: "operator",
+            scopes: ["*"],
+            userId: "user:operator",
+          },
+        },
+      },
+    });
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+
+    const anonymous = await fetch(`http://127.0.0.1:${port}/console`);
+    expect(anonymous.status).toBe(401);
+
+    const authorized = await fetch(`http://127.0.0.1:${port}/console`, {
+      headers: { authorization: "Bearer operator-token" },
+    });
+    expect(authorized.status).toBe(200);
+    expect(await authorized.text()).toContain("<title>Smithers Console</title>");
+
+    const asset = await fetch(`http://127.0.0.1:${port}/console/__smithers_ui/client.js`, {
+      headers: { authorization: "Bearer operator-token" },
+    });
+    expect(asset.status).toBe(200);
+    expect(await asset.text()).toContain("Smithers Console");
   });
 
   test("serves a workflow-level UI and exposes UI metadata through listWorkflows", async () => {

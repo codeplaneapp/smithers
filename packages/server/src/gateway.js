@@ -41,6 +41,8 @@ import { GATEWAY_EVENT_WINDOW_DEFAULT, SMITHERS_API_VERSION, getRequiredScopeFor
 import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
 import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
 import { renderDefaultConsoleClient } from "./gatewayUi/defaultConsole.js";
+import { authorizeGatewayUiRequest } from "./gatewayUi/auth.js";
+import { bundleGatewayUiEntry } from "./gatewayUi/bundle.js";
 /** @typedef {import("./GatewayWebhookRunConfig.js").GatewayWebhookRunConfig} GatewayWebhookRunConfig */
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
@@ -1358,45 +1360,11 @@ export class Gateway {
                 contentType: "text/javascript; charset=utf-8",
             };
         }
-        const body = await this.bundleUiEntry(match.config.config);
+        const body = await bundleGatewayUiEntry(match.config.config, this.uiAssetCache);
         return {
             body,
             contentType: "text/javascript; charset=utf-8",
         };
-    }
-    /**
-   * @param {ResolvedGatewayUiConfig} config
-   * @returns {Promise<string>}
-   */
-    async bundleUiEntry(config) {
-        const cached = this.uiAssetCache.get(config.entry);
-        if (cached) {
-            return cached;
-        }
-        if (typeof Bun === "undefined" || typeof Bun.build !== "function") {
-            throw new SmithersError("INVALID_INPUT", "Gateway UI bundling requires Bun.build.");
-        }
-        const result = await Bun.build({
-            entrypoints: [config.entry],
-            root: process.cwd(),
-            target: "browser",
-            format: "esm",
-            sourcemap: "inline",
-            minify: false,
-            jsx: {
-                runtime: "automatic",
-                importSource: "react",
-            },
-        });
-        if (!result.success) {
-            const message = result.logs?.map((entry) => entry.message).filter(Boolean).join("\n")
-                || `Failed to build Gateway UI entry ${config.entry}`;
-            throw new SmithersError("INVALID_INPUT", message);
-        }
-        const output = result.outputs.find((entry) => entry.path.endsWith(".js")) ?? result.outputs[0];
-        const body = await output.text();
-        this.uiAssetCache.set(config.entry, body);
-        return body;
     }
     /**
    * @param {IncomingMessage} req
@@ -1407,6 +1375,21 @@ export class Gateway {
             return false;
         }
         const host = headerValue(req, "host") ?? "127.0.0.1";
+        const url = new URL(`http://${host}${req.url ?? "/"}`);
+        const uiMatch = this.resolveUiMatch(url.pathname);
+        if (!uiMatch) {
+            return false;
+        }
+        const uiAuthFailure = await authorizeGatewayUiRequest({
+            match: uiMatch,
+            authMode: gatewayAuthMode(this.auth),
+            token: bearerTokenFromHeaders(req),
+            authenticate: (token) => this.authenticateRequest(req, token),
+        });
+        if (uiAuthFailure) {
+            sendJson(res, statusForRpcError(uiAuthFailure.code), responseError(randomUUID(), uiAuthFailure.code, uiAuthFailure.message, uiAuthFailure.details));
+            return true;
+        }
         const request = new Request(`http://${host}${req.url ?? "/"}`, {
             method: "GET",
             headers: nodeHeadersToFetchHeaders(req.headers),

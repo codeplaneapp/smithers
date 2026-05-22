@@ -3,12 +3,38 @@ import * as Rpc from "@effect/rpc/Rpc";
 import { Context, Effect, Layer, Schema } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 const SandboxRuntimeSchema = Schema.Literal("bubblewrap", "docker", "codeplane");
+const SandboxEnvSchema = Schema.Record({
+    key: Schema.String,
+    value: Schema.String,
+});
+const SandboxPortSchema = Schema.Struct({
+    host: Schema.Number,
+    container: Schema.Number,
+});
+const SandboxVolumeSchema = Schema.Struct({
+    host: Schema.String,
+    container: Schema.String,
+    readonly: Schema.optional(Schema.Boolean),
+});
+const SandboxWorkspaceSchema = Schema.Struct({
+    name: Schema.String,
+    snapshotId: Schema.optional(Schema.String),
+    idleTimeoutSecs: Schema.optional(Schema.Number),
+    persistence: Schema.optional(Schema.Literal("ephemeral", "sticky")),
+});
 const SandboxTransportConfigSchema = Schema.Struct({
     runId: Schema.String,
     sandboxId: Schema.String,
     runtime: SandboxRuntimeSchema,
     rootDir: Schema.String,
     image: Schema.optional(Schema.String),
+    allowNetwork: Schema.optional(Schema.Boolean),
+    env: Schema.optional(SandboxEnvSchema),
+    ports: Schema.optional(Schema.Array(SandboxPortSchema)),
+    volumes: Schema.optional(Schema.Array(SandboxVolumeSchema)),
+    memoryLimit: Schema.optional(Schema.String),
+    cpuLimit: Schema.optional(Schema.String),
+    workspace: Schema.optional(SandboxWorkspaceSchema),
 });
 const SandboxHandleSchema = Schema.Struct({
     runtime: SandboxRuntimeSchema,
@@ -17,6 +43,14 @@ const SandboxHandleSchema = Schema.Struct({
     sandboxRoot: Schema.String,
     requestPath: Schema.String,
     resultPath: Schema.String,
+    image: Schema.optional(Schema.String),
+    allowNetwork: Schema.optional(Schema.Boolean),
+    env: Schema.optional(SandboxEnvSchema),
+    ports: Schema.optional(Schema.Array(SandboxPortSchema)),
+    volumes: Schema.optional(Schema.Array(SandboxVolumeSchema)),
+    memoryLimit: Schema.optional(Schema.String),
+    cpuLimit: Schema.optional(Schema.String),
+    workspace: Schema.optional(SandboxWorkspaceSchema),
     containerId: Schema.optional(Schema.String),
     workspaceId: Schema.optional(Schema.String),
 });

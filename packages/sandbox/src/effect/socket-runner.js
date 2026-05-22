@@ -5,7 +5,7 @@ import { Effect, Layer } from "effect";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { SandboxEntityExecutor } from "./sandbox-entity.js";
-import { bubblewrapArgs, sandboxExecArgs, spawnSandboxCommand } from "./process-runner.js";
+import { bubblewrapArgs, normalizeSandboxHandleControls, sandboxExecArgs, spawnSandboxCommand } from "./process-runner.js";
 /** @typedef {import("../SandboxTransportConfig.ts").SandboxTransportConfig} SandboxTransportConfig */
 /** @typedef {import("../SandboxHandle.ts").SandboxHandle} SandboxHandle */
 /**
@@ -14,6 +14,7 @@ import { bubblewrapArgs, sandboxExecArgs, spawnSandboxCommand } from "./process-
  */
 function baseHandle(config) {
     const sandboxRoot = join(config.rootDir, ".smithers", "sandboxes", config.runId, config.sandboxId);
+    const controls = normalizeSandboxHandleControls(config);
     return {
         runtime: config.runtime,
         runId: config.runId,
@@ -23,6 +24,7 @@ function baseHandle(config) {
         resultPath: join(sandboxRoot, "result"),
         image: config.image,
         allowNetwork: Boolean(config.allowNetwork),
+        ...controls,
     };
 }
 /** @type {Layer.Layer<SandboxEntityExecutor, never, never>} */

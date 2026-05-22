@@ -9,6 +9,20 @@ function makeStore() {
 }
 
 describe("ControlPlaneStore", () => {
+  test("accepts one-character org, team, and project slugs", () => {
+    const { sqlite, store } = makeStore();
+    try {
+      const org = store.createOrg({ orgId: "org_x", slug: "x", name: "X", createdAtMs: 1 });
+      const team = store.createTeam({ orgId: org.orgId, teamId: "team_a", slug: "a", name: "A", createdAtMs: 2 });
+      const project = store.createProject({ orgId: org.orgId, projectId: "project_b", slug: "b", name: "B", createdAtMs: 3 });
+      expect(team.slug).toBe("a");
+      expect(project.slug).toBe("b");
+    }
+    finally {
+      sqlite.close();
+    }
+  });
+
   test("creates org, team, project, billing account, usage rows, and audit export", () => {
     const { sqlite, store } = makeStore();
     try {
@@ -174,6 +188,47 @@ describe("ControlPlaneStore", () => {
     }
   });
 
+  test("org-wide secret refs rotate through the non-null project key", () => {
+    const { sqlite, store } = makeStore();
+    try {
+      store.createOrg({ orgId: "org_secret_org", slug: "secret-org", name: "Secret Org", createdAtMs: 1 });
+      store.putSecretRef({
+        orgId: "org_secret_org",
+        name: "billing-token",
+        provider: "vault",
+        ref: "vault://billing-token-v1",
+        createdAtMs: 2,
+      });
+      const rotated = store.putSecretRef({
+        orgId: "org_secret_org",
+        name: "billing-token",
+        provider: "vault",
+        ref: "vault://billing-token-v2",
+        createdAtMs: 3,
+      });
+
+      expect(store.listSecretRefs({ orgId: "org_secret_org", projectId: null })).toEqual([rotated]);
+      const rawRows = sqlite.query("SELECT project_key AS projectKey, project_id AS projectId, name, ref FROM _smithers_cp_secret_refs").all();
+      expect(rawRows).toEqual([
+        {
+          projectKey: "__org__",
+          projectId: null,
+          name: "billing-token",
+          ref: "vault://billing-token-v2",
+        },
+      ]);
+      expect(() =>
+        sqlite.query(`
+INSERT INTO _smithers_cp_secret_refs (org_id, project_key, project_id, name, provider, ref, created_at_ms)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`).run("org_secret_org", "__org__", null, "billing-token", "vault", "vault://billing-token-v3", 4),
+      ).toThrow();
+    }
+    finally {
+      sqlite.close();
+    }
+  });
+
   test("usage limits support org-wide and project-scoped quota checks", () => {
     const { sqlite, store } = makeStore();
     try {
@@ -241,6 +296,51 @@ describe("ControlPlaneStore", () => {
         .map((row) => row.name);
       expect(tables).toContain("_smithers_cp_orgs");
       expect(tables).toContain("_smithers_cp_audit_events");
+    }
+    finally {
+      sqlite.close();
+    }
+  });
+
+  test("migrates legacy nullable secret-ref primary keys to project_key", () => {
+    const sqlite = new Database(":memory:");
+    try {
+      sqlite.exec(`
+CREATE TABLE _smithers_cp_orgs (
+  org_id TEXT PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL
+);
+INSERT INTO _smithers_cp_orgs (org_id, slug, name, created_at_ms)
+VALUES ('org_legacy', 'legacy', 'Legacy', 1);
+CREATE TABLE _smithers_cp_secret_refs (
+  org_id TEXT NOT NULL,
+  project_id TEXT,
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  created_by TEXT,
+  created_at_ms INTEGER NOT NULL,
+  rotated_at_ms INTEGER,
+  PRIMARY KEY (org_id, project_id, name)
+);
+INSERT INTO _smithers_cp_secret_refs (org_id, project_id, name, provider, ref, created_at_ms)
+VALUES ('org_legacy', NULL, 'token', 'vault', 'vault://old', 2);
+INSERT INTO _smithers_cp_secret_refs (org_id, project_id, name, provider, ref, created_at_ms)
+VALUES ('org_legacy', NULL, 'token', 'vault', 'vault://new', 3);
+`);
+      ensureControlPlaneTables(sqlite);
+      const columns = sqlite.query("PRAGMA table_info(_smithers_cp_secret_refs)").all().map((column) => column.name);
+      expect(columns).toContain("project_key");
+      const store = new ControlPlaneStore(sqlite);
+      expect(store.listSecretRefs({ orgId: "org_legacy", projectId: null })).toEqual([
+        expect.objectContaining({
+          name: "token",
+          ref: "vault://new",
+          projectId: null,
+        }),
+      ]);
     }
     finally {
       sqlite.close();

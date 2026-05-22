@@ -2,9 +2,8 @@ export function renderDefaultConsoleClient() {
     return `
 const boot = globalThis.__SMITHERS_GATEWAY_UI__ || {};
 const root = document.getElementById("root");
-const tokenKey = "smithers.gateway.token";
 const state = {
-  token: localStorage.getItem(tokenKey) || "",
+  token: "",
   workflows: [],
   runs: [],
   approvals: [],
@@ -187,7 +186,7 @@ function render() {
         <div class="toolbar">
           <div class="token">
             <input id="gateway-token" type="password" autocomplete="off" placeholder="Bearer token" value="\${escapeHtml(state.token)}">
-            <button id="save-token" class="ghost">Save</button>
+            <button id="save-token" class="ghost">Apply</button>
           </div>
           <button id="refresh">\${state.loading ? "Refreshing..." : "Refresh"}</button>
         </div>
@@ -210,7 +209,6 @@ function render() {
   document.getElementById("refresh")?.addEventListener("click", refresh);
   document.getElementById("save-token")?.addEventListener("click", () => {
     state.token = document.getElementById("gateway-token")?.value || "";
-    localStorage.setItem(tokenKey, state.token);
     refresh();
   });
   root.querySelectorAll("[data-approve]").forEach((button) => {

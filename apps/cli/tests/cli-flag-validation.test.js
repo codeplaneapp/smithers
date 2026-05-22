@@ -8,6 +8,7 @@
 // full e2e dependencies.
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { existsSync, readFileSync } from "node:fs";
 import { createTempRepo, runSmithers, writeTestWorkflow } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 describe("conflicting / invalid flag combinations", () => {
@@ -140,4 +141,38 @@ describe("--input streaming via stdin", () => {
         expect(result.exitCode).not.toBe(0);
         expect(`${result.stdout}\n${result.stderr}`).toContain("input");
     });
+});
+
+describe("--annotations streaming via stdin", () => {
+    test("detached runs serialize `--annotations -` before spawning the child", async () => {
+        const repo = createTempRepo();
+        writeTestWorkflow(repo);
+        const result = runSmithers(["up", "workflow.tsx", "--detach", "--annotations", "-"], {
+            cwd: repo.dir,
+            format: "json",
+            stdin: JSON.stringify({ channel: "ops" }),
+        });
+        expect(result.exitCode).toBe(0);
+        expect(result.json?.runId).toBeString();
+        expect(result.json?.logFile).toBeString();
+
+        let status;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            if (existsSync(repo.path("smithers.db"))) {
+                const sqlite = new Database(repo.path("smithers.db"), { readonly: true });
+                try {
+                    status = sqlite.query("select status from _smithers_runs where run_id = ?").get(result.json.runId)?.status;
+                }
+                finally {
+                    sqlite.close();
+                }
+                if (status && status !== "running") {
+                    break;
+                }
+            }
+            await Bun.sleep(50);
+        }
+        expect(status).toBe("finished");
+        expect(readFileSync(result.json.logFile, "utf8")).not.toContain("INVALID_JSON");
+    }, 15_000);
 });

@@ -86,6 +86,33 @@ describe("cachePolicy.scope", () => {
             cleanup();
         }
     });
+    test("explicit key shares cache across different task ids in the same workflow", async () => {
+        const { smithers, outputs, cleanup } = createTestSmithers({
+            out: z.object({ v: z.number() }),
+        });
+        try {
+            let calls = 0;
+            const agent = {
+                id: "workflow-key",
+                tools: {},
+                generate: async () => { calls += 1; return { output: { v: calls } }; },
+            };
+            const workflow = smithers(() => (
+                <Workflow name="workflow-key-cache">
+                    <Task id="first-task" output={outputs.out} agent={agent} cache={{ scope: "workflow", key: "shared-task-key" }}>
+                        same prompt
+                    </Task>
+                    <Task id="second-task" output={outputs.out} agent={agent} cache={{ scope: "workflow", key: "shared-task-key" }} dependsOn={["first-task"]}>
+                        same prompt
+                    </Task>
+                </Workflow>
+            ));
+            await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "workflow-key-r1" }));
+            expect(calls).toBe(1);
+        } finally {
+            cleanup();
+        }
+    });
     test("scope=global shares across distinct workflows", async () => {
         const { smithers, outputs, cleanup } = createTestSmithers({
             out: z.object({ v: z.number() }),

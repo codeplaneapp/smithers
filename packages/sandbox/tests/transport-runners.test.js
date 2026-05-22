@@ -17,7 +17,7 @@ import {
 } from "../src/effect/http-runner.js";
 import { BubblewrapSandboxExecutorLive } from "../src/effect/socket-runner.js";
 import { layerForSandboxRuntime, resolveSandboxRuntime } from "../src/transport.js";
-import { bubblewrapArgs, dockerArgs, sandboxExecArgs } from "../src/effect/process-runner.js";
+import { bubblewrapArgs, dockerArgs, sandboxExecArgs, sandboxRunnerEnv } from "../src/effect/process-runner.js";
 
 /**
  * @param {string} prefix
@@ -170,6 +170,81 @@ function makeFakeBin(name, script = "#!/bin/sh\nexit 0\n") {
 }
 
 describe("sandbox transport runners", () => {
+    test("runner env is minimal and excludes ambient secrets", async () => {
+        await withEnv({ SMITHERS_TEST_SECRET: "do-not-inherit" }, async () => {
+            const env = sandboxRunnerEnv();
+            expect(env.PATH).toBeString();
+            expect(env.SMITHERS_TEST_SECRET).toBeUndefined();
+        });
+    });
+
+    test("bubblewrap args clear ambient env and pass only explicit sandbox env", () => {
+        const handle = {
+            requestPath: "/tmp/request",
+            resultPath: "/tmp/result",
+            allowNetwork: false,
+            env: { SAFE_VALUE: "ok" },
+        };
+        const args = bubblewrapArgs("env", handle);
+        expect(args).toContain("--clearenv");
+        expect(args).toContain("--unshare-net");
+        expect(args).toContain("--setenv");
+        expect(args).toContain("SAFE_VALUE");
+        expect(args).toContain("ok");
+        expect(args.join(" ")).not.toContain("SMITHERS_TEST_SECRET");
+        expect(args).toContain("--ro-bind");
+    });
+
+    test("docker args map explicit sandbox controls", () => {
+        const handle = {
+            requestPath: "/tmp/request",
+            resultPath: "/tmp/result",
+            allowNetwork: true,
+            image: "example/sandbox:latest",
+            env: { SAFE_VALUE: "ok" },
+            ports: [{ host: 7331, container: 7331 }],
+            volumes: [{ host: "/tmp/cache", container: "/cache", readonly: true }],
+            memoryLimit: "512m",
+            cpuLimit: "0.5",
+        };
+        const args = dockerArgs("smithers up bundle.tsx", handle);
+        expect(args).toContain("--env");
+        expect(args).toContain("SAFE_VALUE=ok");
+        expect(args).toContain("--publish");
+        expect(args).toContain("7331:7331");
+        expect(args).toContain("/tmp/cache:/cache:ro");
+        expect(args).toContain("--memory");
+        expect(args).toContain("512m");
+        expect(args).toContain("--cpus");
+        expect(args).toContain("0.5");
+        expect(args).not.toContain("--network");
+    });
+
+    test("sandbox controls fail closed when a runtime cannot enforce them", () => {
+        expect(() =>
+            dockerArgs("run", {
+                requestPath: "/tmp/request",
+                resultPath: "/tmp/result",
+                allowNetwork: false,
+                ports: [{ host: 8080, container: 8080 }],
+            }),
+        ).toThrow("allowNetwork=true");
+        expect(() =>
+            bubblewrapArgs("run", {
+                requestPath: "/tmp/request",
+                resultPath: "/tmp/result",
+                memoryLimit: "1g",
+            }),
+        ).toThrow("memoryLimit");
+        expect(() =>
+            sandboxExecArgs("run", {
+                requestPath: "/tmp/request",
+                resultPath: "/tmp/result",
+                volumes: [{ host: "/tmp/cache", container: "/cache" }],
+            }),
+        ).toThrow("volume remapping");
+    });
+
     test("bubblewrap executor creates, ships, executes, collects, and cleans up", async () => {
         const fake = makeFakeBin("bwrap");
         await withPlatform("linux", () =>

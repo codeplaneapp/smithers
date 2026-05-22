@@ -6,7 +6,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { spawnCaptureEffect } from "@smithers-orchestrator/driver/child-process";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { SandboxEntityExecutor } from "./sandbox-entity.js";
-import { dockerArgs, spawnSandboxCommand } from "./process-runner.js";
+import { dockerArgs, normalizeSandboxHandleControls, sandboxRunnerEnv, spawnSandboxCommand } from "./process-runner.js";
 /** @typedef {import("../SandboxTransportConfig.ts").SandboxTransportConfig} SandboxTransportConfig */
 /** @typedef {import("../SandboxHandle.ts").SandboxHandle} SandboxHandle */
 /**
@@ -15,6 +15,7 @@ import { dockerArgs, spawnSandboxCommand } from "./process-runner.js";
  */
 function baseHandle(config) {
     const sandboxRoot = join(config.rootDir, ".smithers", "sandboxes", config.runId, config.sandboxId);
+    const controls = normalizeSandboxHandleControls(config);
     return {
         runtime: config.runtime,
         runId: config.runId,
@@ -24,6 +25,7 @@ function baseHandle(config) {
         resultPath: join(sandboxRoot, "result"),
         image: config.image,
         allowNetwork: Boolean(config.allowNetwork),
+        ...controls,
     };
 }
 /** @type {Layer.Layer<SandboxEntityExecutor, never, never>} */
@@ -32,7 +34,7 @@ export const DockerSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor, Sa
         const handle = baseHandle(config);
         yield* spawnCaptureEffect("docker", ["info"], {
             cwd: config.rootDir,
-            env: process.env,
+            env: sandboxRunnerEnv(),
             timeoutMs: 10_000,
             maxOutputBytes: 200_000,
         }).pipe(Effect.catchAll(() => Effect.fail(new SmithersError("PROCESS_SPAWN_FAILED", "Docker daemon not reachable.", { runtime: "docker" }))));

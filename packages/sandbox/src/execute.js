@@ -91,9 +91,34 @@ function resolveSandboxCommand(command) {
         ? command
         : "smithers up bundle.tsx";
 }
+/**
+ * @param {unknown} value
+ * @returns {Record<string, unknown> | null}
+ */
+function asPlainObject(value) {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? /** @type {Record<string, unknown>} */ (value)
+        : null;
+}
+/**
+ * @param {unknown} config
+ */
+function redactSandboxConfig(config) {
+    const source = asPlainObject(config);
+    if (!source) {
+        return config;
+    }
+    const redacted = { ...source };
+    const env = asPlainObject(source.env);
+    if (env) {
+        redacted.env = Object.fromEntries(Object.keys(env).sort().map((key) => [key, "[redacted]"]));
+    }
+    return redacted;
+}
 export const __executeSandboxInternals = {
     directorySize,
     requireSandboxHandle,
+    redactSandboxConfig,
     resolveSandboxCommand,
 };
 /**
@@ -131,6 +156,7 @@ export async function executeSandbox(options) {
     const requestedRuntime = options.runtime ?? "bubblewrap";
     const selectedRuntime = resolveSandboxRuntime(requestedRuntime);
     const createdAtMs = nowMs();
+    const rawConfig = asPlainObject(options.config) ?? {};
     const configJson = JSON.stringify({
         runtime: requestedRuntime,
         selectedRuntime,
@@ -139,7 +165,7 @@ export async function executeSandbox(options) {
         toolTimeoutMs: options.toolTimeoutMs,
         reviewDiffs: options.reviewDiffs ?? true,
         autoAcceptDiffs: Boolean(options.autoAcceptDiffs),
-        ...options.config,
+        ...redactSandboxConfig(rawConfig),
     });
     const sandboxRoot = join(options.rootDir, ".smithers", "sandboxes", runtime.runId, options.sandboxId);
     const requestBundlePath = join(sandboxRoot, "request-bundle");
@@ -197,8 +223,14 @@ export async function executeSandbox(options) {
             sandboxId: options.sandboxId,
             runtime: selectedRuntime,
             rootDir: options.rootDir,
-            image: options.config?.image ?? undefined,
+            image: typeof rawConfig.image === "string" ? rawConfig.image : undefined,
             allowNetwork: options.allowNetwork,
+            env: rawConfig.env,
+            ports: rawConfig.ports,
+            volumes: rawConfig.volumes,
+            memoryLimit: rawConfig.memoryLimit,
+            cpuLimit: rawConfig.cpuLimit,
+            workspace: rawConfig.workspace,
         };
         handle = await transportCall(selectedRuntime, sandboxTransport((svc) => svc.create(transportConfig)));
         const sandboxHandle = requireSandboxHandle(handle, options.sandboxId);

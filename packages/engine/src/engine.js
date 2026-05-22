@@ -2756,8 +2756,6 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 cacheBase = {
                     cacheScope,
                     ...buildCacheScopeIdentity(cacheScope, runId, workflowName, desc),
-                    nodeId: desc.nodeId,
-                    iteration: desc.iteration,
                     schemaSig,
                     outputSchemaSig,
                     agentSig,

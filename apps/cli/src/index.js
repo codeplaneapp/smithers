@@ -1513,7 +1513,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             if (options.input)
                 childArgs.push("--input", options.input === "-" ? JSON.stringify(input) : options.input);
             if (options.annotations)
-                childArgs.push("--annotations", options.annotations);
+                childArgs.push("--annotations", options.annotations === "-" ? JSON.stringify(annotations ?? {}) : options.annotations);
             if (options.maxConcurrency)
                 childArgs.push("--max-concurrency", String(options.maxConcurrency));
             if (options.root)
@@ -5020,6 +5020,7 @@ function resolveCliColor(mode, stream) {
 const BUILTIN_FLAGS_WITH_VALUES = new Set([
     "--format",
     "--filter-output",
+    "--surface",
     "--token-limit",
     "--token-offset",
 ]);
