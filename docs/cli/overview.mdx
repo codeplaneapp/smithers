@@ -79,7 +79,7 @@ commands[60]:
     flags[16]{name,short,type,default,desc}:
       cases,c,string,,JSON array, { cases: [...] }, or JSONL case file
       suite,s,string,,Stable suite ID used in run IDs and report paths
-      run-label,,string,current UTC timestamp,Label appended to eval run IDs
+      run-label,,string,current UTC timestamp + nonce,Label appended to eval run IDs
       dry-run,n,boolean,false,Plan run IDs without launching workflows
       concurrency,j,number,1,Number of eval cases to run at once
       max-cases,,number,,Run only the first N cases

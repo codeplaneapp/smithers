@@ -41,6 +41,7 @@ import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { initWorkflowPack, getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile } from "./workflows.js";
 import {
+    assertEvalRunIdsAvailable,
     assertEvalReportWritable,
     buildEvalPlan,
     buildEvalReport,
@@ -1321,7 +1322,7 @@ const upOptions = z.object({
 const evalOptions = z.object({
     cases: z.string().describe("JSON or JSONL eval case file"),
     suite: z.string().optional().describe("Stable suite ID used in run IDs and report paths"),
-    runLabel: z.string().optional().describe("Run label appended to eval run IDs; defaults to current UTC timestamp"),
+    runLabel: z.string().optional().describe("Run label appended to eval run IDs; defaults to current UTC timestamp plus a nonce"),
     dryRun: z.boolean().default(false).describe("Plan the suite without launching runs"),
     concurrency: z.number().int().min(1).max(16).default(1).describe("Number of eval cases to run at once"),
     maxCases: z.number().int().min(1).optional().describe("Run only the first N cases"),
@@ -1497,7 +1498,8 @@ function formatRequestedJsonOutput() {
     return false;
 }
 function defaultEvalRunLabel() {
-    return new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+    const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+    return `${timestamp}-${crypto.randomUUID().slice(0, 8)}`;
 }
 /**
  * @param {string} workflowInput
@@ -2738,6 +2740,7 @@ const cli = Cli.create({
             });
             const workflow = await loadWorkflow(workflowPath);
             ensureSmithersTables(workflow.db);
+            await assertEvalRunIdsAvailable(new SmithersDb(workflow.db), plan.cases);
             setupSqliteCleanup(workflow);
             const schema = resolveSchema(workflow.db);
             const resolvedWorkflowPath = resolve(process.cwd(), workflowPath);
@@ -2766,9 +2769,7 @@ const cli = Cli.create({
                         },
                         signal: abort.signal,
                     }));
-                    const output = result.output === undefined
-                        ? await loadOutputs(workflow.db, schema, testCase.runId)
-                        : result.output;
+                    const output = await loadOutputs(workflow.db, schema, testCase.runId);
                     const durationMs = Date.now() - caseStartedAtMs;
                     const evaluation = evaluateEvalCaseResult(testCase, {
                         ...result,
@@ -2792,7 +2793,7 @@ const cli = Cli.create({
                     const durationMs = Date.now() - caseStartedAtMs;
                     const evaluation = evaluateEvalCaseResult(testCase, {
                         status: "error",
-                        error: errorMessage,
+                        error: err,
                     });
                     return {
                         caseId: testCase.id,

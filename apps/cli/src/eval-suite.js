@@ -5,6 +5,7 @@ import { SmithersError } from "@smithers-orchestrator/errors";
 
 export const EVAL_CASE_STATUSES = [
     "finished",
+    "continued",
     "failed",
     "cancelled",
     "waiting-approval",
@@ -13,6 +14,7 @@ export const EVAL_CASE_STATUSES = [
 ];
 
 const RUN_ID_MAX_LENGTH = 64;
+const EVAL_EXPECTED_KEYS = new Set(["status", "output", "outputContains", "errorContains"]);
 
 /**
  * @param {unknown} value
@@ -89,6 +91,13 @@ function normalizeExpected(value, label) {
         return { status: "finished" };
     }
     const object = assertJsonObject(value, label);
+    const unknownKeys = Object.keys(object).filter((key) => !EVAL_EXPECTED_KEYS.has(key));
+    if (unknownKeys.length > 0) {
+        throw new SmithersError("INVALID_INPUT", `${label} contains unsupported assertion keys: ${unknownKeys.join(", ")}.`, {
+            keys: unknownKeys,
+            supportedKeys: [...EVAL_EXPECTED_KEYS],
+        });
+    }
     const status = object.status ?? "finished";
     if (typeof status !== "string" || !EVAL_CASE_STATUSES.includes(status)) {
         throw new SmithersError("INVALID_INPUT", `${label}.status must be one of ${EVAL_CASE_STATUSES.join(", ")}.`, { status });
@@ -144,6 +153,25 @@ function jsonContains(actual, expected) {
 }
 
 /**
+ * @param {unknown} error
+ */
+function formatEvalError(error) {
+    if (error === undefined || error === null) {
+        return "";
+    }
+    if (error instanceof Error) {
+        return error.message;
+    }
+    if (isPlainObject(error)) {
+        if (typeof error.message === "string") {
+            return error.message;
+        }
+        return stableJson(error);
+    }
+    return String(error);
+}
+
+/**
  * @param {unknown} raw
  * @param {number} index
  */
@@ -169,6 +197,26 @@ export function normalizeEvalCase(raw, index) {
         expected,
         metadata,
     };
+}
+
+/**
+ * @param {Array<ReturnType<typeof normalizeEvalCase>>} cases
+ */
+function assertUniqueEvalCaseIds(cases) {
+    /** @type {Map<string, number>} */
+    const seen = new Map();
+    for (let index = 0; index < cases.length; index += 1) {
+        const testCase = cases[index];
+        const firstIndex = seen.get(testCase.id);
+        if (firstIndex !== undefined) {
+            throw new SmithersError("INVALID_INPUT", `Duplicate eval case ID after normalization: ${testCase.id}`, {
+                id: testCase.id,
+                firstIndex,
+                duplicateIndex: index,
+            });
+        }
+        seen.set(testCase.id, index);
+    }
 }
 
 /**
@@ -223,9 +271,11 @@ export function loadEvalCases(root, path, options = {}) {
         throw new SmithersError("INVALID_INPUT", "Eval case file must contain at least one case.", { path });
     }
     const limit = options.maxCases ?? rawCases.length;
+    const cases = rawCases.slice(0, limit).map(normalizeEvalCase);
+    assertUniqueEvalCaseIds(cases);
     return {
         path: absolutePath,
-        cases: rawCases.slice(0, limit).map(normalizeEvalCase),
+        cases,
         totalCases: rawCases.length,
     };
 }
@@ -258,6 +308,11 @@ export function buildEvalPlan(input) {
     const suiteId = slugifyEvalToken(input.suiteId ?? defaultSuite, "suite", 32);
     const runLabel = input.runLabel ? slugifyEvalToken(input.runLabel, "run", 24) : null;
     const runSuiteId = runLabel ? `${suiteId}-${runLabel}` : suiteId;
+    const cases = input.loadedCases.cases.map((testCase) => ({
+        ...testCase,
+        runId: evalRunId(runSuiteId, testCase.id),
+    }));
+    assertUniqueEvalRunIds(cases);
     return {
         suiteId,
         runLabel,
@@ -265,11 +320,45 @@ export function buildEvalPlan(input) {
         casesPath: input.loadedCases.path,
         totalCases: input.loadedCases.totalCases,
         plannedCases: input.loadedCases.cases.length,
-        cases: input.loadedCases.cases.map((testCase) => ({
-            ...testCase,
-            runId: evalRunId(runSuiteId, testCase.id),
-        })),
+        cases,
     };
+}
+
+/**
+ * @param {Array<{ runId: string; id: string }>} cases
+ */
+function assertUniqueEvalRunIds(cases) {
+    /** @type {Map<string, string>} */
+    const seen = new Map();
+    for (const testCase of cases) {
+        const firstCaseId = seen.get(testCase.runId);
+        if (firstCaseId !== undefined) {
+            throw new SmithersError("INVALID_INPUT", `Duplicate eval run ID after normalization: ${testCase.runId}`, {
+                runId: testCase.runId,
+                firstCaseId,
+                duplicateCaseId: testCase.id,
+            });
+        }
+        seen.set(testCase.runId, testCase.id);
+    }
+}
+
+/**
+ * @param {{ getRun(runId: string): Promise<unknown> }} adapter
+ * @param {Array<{ runId: string }>} cases
+ */
+export async function assertEvalRunIdsAvailable(adapter, cases) {
+    const existing = [];
+    for (const testCase of cases) {
+        if (await adapter.getRun(testCase.runId)) {
+            existing.push(testCase.runId);
+        }
+    }
+    if (existing.length > 0) {
+        throw new SmithersError("EVAL_RUN_ID_EXISTS", `Eval run ID${existing.length === 1 ? "" : "s"} already ${existing.length === 1 ? "exists" : "exist"}: ${existing.join(", ")}. Use a unique --run-label.`, {
+            runIds: existing,
+        });
+    }
 }
 
 /**
@@ -322,9 +411,7 @@ export function evaluateEvalCaseResult(testCase, result) {
         });
     }
     if (Object.prototype.hasOwnProperty.call(testCase.expected, "errorContains")) {
-        const actualError = result.error === undefined || result.error === null
-            ? ""
-            : String(result.error);
+        const actualError = formatEvalError(result.error);
         assertions.push({
             name: "errorContains",
             passed: actualError.includes(String(testCase.expected.errorContains)),

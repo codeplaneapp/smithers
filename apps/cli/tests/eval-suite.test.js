@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+    assertEvalRunIdsAvailable,
     buildEvalPlan,
     evaluateEvalCaseResult,
     evalRunId,
@@ -40,6 +41,18 @@ describe("eval suite helpers", () => {
         expect(id.startsWith("eval-")).toBe(true);
     });
 
+    test("rejects ambiguous eval case files before planning", () => {
+        const repo = createTempRepo();
+        repo.write("evals/dupes.jsonl", [
+            '{"id":"Alpha Case","input":{}}',
+            '{"id":"alpha-case","input":{}}',
+        ].join("\n"));
+        expect(() => loadEvalCases(repo.dir, "evals/dupes.jsonl")).toThrow("Duplicate eval case ID after normalization: alpha-case");
+
+        repo.write("evals/unknown-expected.jsonl", '{"id":"alpha","expected":{"outputsContains":{}}}\n');
+        expect(() => loadEvalCases(repo.dir, "evals/unknown-expected.jsonl")).toThrow("unsupported assertion keys");
+    });
+
     test("evaluates status, exact output, and partial output assertions", () => {
         const testCase = {
             id: "checks",
@@ -64,6 +77,48 @@ describe("eval suite helpers", () => {
             "output",
             "outputContains",
         ]);
+    });
+
+    test("supports continued status and structured error matching", () => {
+        const testCase = {
+            id: "error",
+            name: "error",
+            input: {},
+            annotations: {},
+            expected: {
+                status: "continued",
+                errorContains: "durable handoff",
+            },
+            metadata: {},
+        };
+        const result = evaluateEvalCaseResult(testCase, {
+            status: "continued",
+            error: { message: "continued via durable handoff", code: "CONTINUED" },
+        });
+
+        expect(result.passed).toBe(true);
+        expect(result.assertions.map((assertion) => assertion.name)).toEqual([
+            "status",
+            "errorContains",
+        ]);
+    });
+
+    test("detects existing run IDs before execution", async () => {
+        let checked = 0;
+        await assertEvalRunIdsAvailable({
+            async getRun(runId) {
+                checked += 1;
+                return runId === "eval-smoke-alpha" ? { runId } : null;
+            },
+        }, [
+            { runId: "eval-smoke-alpha" },
+            { runId: "eval-smoke-beta" },
+        ]).then(() => {
+            throw new Error("expected duplicate run ID rejection");
+        }).catch((err) => {
+            expect(err.message).toContain("Eval run ID already exists");
+        });
+        expect(checked).toBe(2);
     });
 });
 
@@ -133,5 +188,23 @@ describe("smithers eval command", () => {
         const report = JSON.parse(repo.read("artifacts/smoke-report.json"));
         expect(report.summary.total).toBe(2);
         expect(report.results[0].assertions.map((assertion) => assertion.name)).toContain("outputContains");
+        expect(report.results[0].output.result[0].prompt).toBe("A");
+
+        const rerun = runSmithers([
+            "eval",
+            "workflow.tsx",
+            "--cases",
+            "evals/smoke.jsonl",
+            "--suite",
+            "smoke",
+            "--run-label",
+            "ci",
+            "--report",
+            "artifacts/smoke-report.json",
+            "--force",
+        ], { cwd: repo.dir, format: "json" });
+
+        expect(rerun.exitCode).toBe(4);
+        expect(rerun.json?.code).toBe("EVAL_RUN_ID_EXISTS");
     }, 20_000);
 });

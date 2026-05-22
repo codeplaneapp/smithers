@@ -292,7 +292,7 @@ Scorers run after the task and never block. Sample expensive scorers with `ratio
 bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke --force
 ```
 
-Use eval suites when you need repeatable workflow-level checks. `output` asserts exact JSON; `outputContains` asserts a recursive partial match; reports are written to `.smithers/evals/<suite>.json` and exit non-zero on failed cases.
+Use eval suites when you need repeatable workflow-level checks. Expected assertions support `status`, `output`, `outputContains`, and `errorContains`; unknown assertion keys fail before launch. `output` asserts exact JSON against the normalized output snapshot, while `outputContains` asserts a recursive partial match. Reports are written to `.smithers/evals/<suite>.json` and exit non-zero on failed cases. Reuse `--run-label` only when you know the generated run IDs are new.
 
 ## Continue-as-new for very long runs
 
