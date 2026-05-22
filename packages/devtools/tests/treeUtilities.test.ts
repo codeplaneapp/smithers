@@ -143,6 +143,99 @@ describe("collectTasks", () => {
     };
     expect(collectTasks(node)).toEqual([]);
   });
+
+  test("returns tasks in depth-first order through nested containers", () => {
+    const root: DevToolsNode = {
+      id: 1,
+      type: "workflow",
+      name: "Root",
+      props: { name: "Root" },
+      depth: 0,
+      children: [
+        {
+          id: 2,
+          type: "sequence",
+          name: "Sequence",
+          props: {},
+          depth: 1,
+          children: [
+            {
+              id: 3,
+              type: "task",
+              name: "Task",
+              props: {},
+              task: { nodeId: "task-a", kind: "static" },
+              depth: 2,
+              children: [],
+            },
+          ],
+        },
+        {
+          id: 4,
+          type: "parallel",
+          name: "Parallel",
+          props: {},
+          depth: 1,
+          children: [
+            {
+              id: 5,
+              type: "task",
+              name: "Task",
+              props: {},
+              task: { nodeId: "task-b", kind: "compute" },
+              depth: 2,
+              children: [],
+            },
+            {
+              id: 6,
+              type: "sequence",
+              name: "NestedSequence",
+              props: {},
+              depth: 2,
+              children: [
+                {
+                  id: 7,
+                  type: "task",
+                  name: "Task",
+                  props: {},
+                  task: { nodeId: "task-c", kind: "static" },
+                  depth: 3,
+                  children: [],
+                },
+                {
+                  id: 8,
+                  type: "task",
+                  name: "Task",
+                  props: {},
+                  task: { nodeId: "task-d", kind: "agent", agent: "gpt-5" },
+                  depth: 3,
+                  children: [],
+                },
+              ],
+            },
+            {
+              id: 9,
+              type: "task",
+              name: "Task",
+              props: {},
+              task: { nodeId: "task-e", kind: "static" },
+              depth: 2,
+              children: [],
+            },
+          ],
+        },
+      ],
+    };
+
+    const tasks = collectTasks(root);
+    expect(tasks.map((t) => t.task?.nodeId)).toEqual([
+      "task-a",
+      "task-b",
+      "task-c",
+      "task-d",
+      "task-e",
+    ]);
+  });
 });
 
 describe("printTree", () => {
