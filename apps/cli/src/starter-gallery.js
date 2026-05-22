@@ -1,4 +1,28 @@
-const INSTALL_COMMAND = "smithers init --add-agents";
+const CLI_COMMAND = "bunx smithers-orchestrator";
+const INSTALL_COMMAND = `${CLI_COMMAND} init --add-agents`;
+
+/**
+ * @param {string} args
+ */
+function cliCommand(args) {
+    return `${CLI_COMMAND} ${args}`;
+}
+
+/**
+ * @param {string} workflow
+ * @param {string} prompt
+ */
+function workflowPromptCommand(workflow, prompt) {
+    return cliCommand(`workflow run ${workflow} --prompt ${shellQuote(prompt)}`);
+}
+
+/**
+ * @param {string} workflow
+ * @param {Record<string, unknown>} input
+ */
+function workflowInputCommand(workflow, input) {
+    return cliCommand(`workflow run ${workflow} --input ${shellQuote(JSON.stringify(input))}`);
+}
 
 export const STARTER_AUDIENCES = [
     "founder",
@@ -31,6 +55,7 @@ export const STARTER_GOALS = [
  *   outcome: string;
  *   setup: string[];
  *   prompt: string;
+ *   input?: Record<string, unknown>;
  *   followUps: string[];
  *   goodFor: string[];
  *   avoidWhen: string;
@@ -54,8 +79,8 @@ export const STARTER_RECIPES = [
         ],
         prompt: "Draft a PRD for a self-serve onboarding flow that helps new customers finish setup in under ten minutes.",
         followUps: [
-            "smithers workflow run tickets-create --prompt \"Break this PRD into implementation tickets\"",
-            "smithers workflow run grill-me --prompt \"Interview me until the unclear PRD requirements are actionable\"",
+            workflowPromptCommand("tickets-create", "Break this PRD into implementation tickets"),
+            workflowPromptCommand("grill-me", "Interview me until the unclear PRD requirements are actionable"),
         ],
         goodFor: ["new feature ideas", "executive alignment", "scope decisions"],
         avoidWhen: "You already have implementation-ready tickets.",
@@ -75,8 +100,9 @@ export const STARTER_RECIPES = [
         ],
         prompt: "Break our billing cleanup project into tickets. Include data migration, customer messaging, QA, rollback, and owner handoff work.",
         followUps: [
-            "smithers workflow run kanban --prompt \"Implement the tickets in .smithers/tickets\"",
-            "smithers workflow run plan --prompt \"Sequence these tickets into milestones\"",
+            "Save each generated ticket as a Markdown file under `.smithers/tickets/`.",
+            workflowInputCommand("kanban", { maxConcurrency: 3 }),
+            workflowPromptCommand("plan", "Sequence these tickets into milestones"),
         ],
         goodFor: ["roadmap planning", "handoffs", "large changes"],
         avoidWhen: "The request is still too vague to estimate.",
@@ -96,8 +122,8 @@ export const STARTER_RECIPES = [
         ],
         prompt: "Create a launch checklist for releasing team invitations to all customers next Friday.",
         followUps: [
-            "smithers workflow run review --prompt \"Review this launch plan for missed risks\"",
-            "smithers workflow run ticket-create --prompt \"Create one ticket for the highest-risk launch gap\"",
+            workflowPromptCommand("review", "Review this launch plan for missed risks"),
+            workflowPromptCommand("ticket-create", "Create one ticket for the highest-risk launch gap"),
         ],
         goodFor: ["go-to-market work", "internal rollouts", "customer-facing releases"],
         avoidWhen: "The launch owner has not approved the scope.",
@@ -117,8 +143,12 @@ export const STARTER_RECIPES = [
         ],
         prompt: "A customer says exports fail after selecting more than 500 rows. Reproduce the issue, fix it, and summarize customer impact.",
         followUps: [
-            "smithers workflow run review --prompt \"Review the incident fix and customer summary\"",
-            "smithers workflow run audit --prompt \"Find similar export reliability risks\"",
+            workflowPromptCommand("review", "Review the incident fix and customer summary"),
+            workflowInputCommand("audit", {
+                features: { exports: ["bulk export reliability"] },
+                focus: "reliability",
+                additionalContext: "Find similar export reliability risks.",
+            }),
         ],
         goodFor: ["support escalations", "bug reports", "urgent regressions"],
         avoidWhen: "The report contains secrets that should not be sent to local tools.",
@@ -138,8 +168,8 @@ export const STARTER_RECIPES = [
         ],
         prompt: "Research whether we should add a public template gallery. Compare user value, maintenance cost, and launch risk.",
         followUps: [
-            "smithers workflow run write-a-prd --prompt \"Turn this research into a PRD\"",
-            "smithers workflow run plan --prompt \"Make a practical execution plan from this research\"",
+            workflowPromptCommand("write-a-prd", "Turn this research into a PRD"),
+            workflowPromptCommand("plan", "Make a practical execution plan from this research"),
         ],
         goodFor: ["strategy questions", "competitive scans", "before-build decisions"],
         avoidWhen: "The answer depends on live private data that is not available in the repo.",
@@ -159,8 +189,8 @@ export const STARTER_RECIPES = [
         ],
         prompt: "We need a better admin experience for enterprise customers, but the scope is unclear.",
         followUps: [
-            "smithers workflow run write-a-prd --prompt \"Turn the clarified requirements into a PRD\"",
-            "smithers workflow run tickets-create --prompt \"Create tickets from the clarified requirements\"",
+            workflowPromptCommand("write-a-prd", "Turn the clarified requirements into a PRD"),
+            workflowPromptCommand("tickets-create", "Create tickets from the clarified requirements"),
         ],
         goodFor: ["ambiguous stakeholder asks", "sales feedback", "pre-ticket discovery"],
         avoidWhen: "You need implementation work immediately and already know the scope.",
@@ -179,9 +209,14 @@ export const STARTER_RECIPES = [
             "Mention the standard you care about: reliability, speed, safety, supportability, or docs.",
         ],
         prompt: "Audit the checkout flow for missing tests, unclear docs, weak observability, and support risks.",
+        input: {
+            features: { checkout: ["checkout flow"] },
+            focus: "release readiness",
+            additionalContext: "Audit the checkout flow for missing tests, unclear docs, weak observability, and support risks.",
+        },
         followUps: [
-            "smithers workflow run improve-test-coverage --prompt \"Add the highest-impact missing tests from this audit\"",
-            "smithers workflow run ticket-create --prompt \"Create a ticket for the top audit finding\"",
+            workflowPromptCommand("improve-test-coverage", "Add the highest-impact missing tests from this audit"),
+            workflowPromptCommand("ticket-create", "Create a ticket for the top audit finding"),
         ],
         goodFor: ["release readiness", "technical debt triage", "risk reviews"],
         avoidWhen: "You only need a single known bug fixed.",
@@ -201,8 +236,12 @@ export const STARTER_RECIPES = [
         ],
         prompt: "Improve test coverage for subscription downgrade behavior, especially invoices, entitlements, and rollback cases.",
         followUps: [
-            "smithers workflow run review --prompt \"Review the new tests for meaningful assertions\"",
-            "smithers workflow run audit --prompt \"Find the next highest-value coverage gap\"",
+            workflowPromptCommand("review", "Review the new tests for meaningful assertions"),
+            workflowInputCommand("audit", {
+                features: { coverage: ["test coverage"] },
+                focus: "coverage",
+                additionalContext: "Find the next highest-value coverage gap.",
+            }),
         ],
         goodFor: ["pre-release hardening", "regression prevention", "quality drives"],
         avoidWhen: "The feature is still changing too quickly for durable tests.",
@@ -222,8 +261,8 @@ export const STARTER_RECIPES = [
         ],
         prompt: "Add a first-run checklist that helps a new workspace owner invite teammates and finish setup.",
         followUps: [
-            "smithers workflow run review --prompt \"Review the completed change before opening a PR\"",
-            "smithers workflow run debug --prompt \"Fix the most important failure found during validation\"",
+            workflowPromptCommand("review", "Review the completed change before opening a PR"),
+            workflowPromptCommand("debug", "Fix the most important failure found during validation"),
         ],
         goodFor: ["product polish", "small features", "workflow improvements"],
         avoidWhen: "The change needs executive or legal approval before implementation.",
@@ -243,8 +282,8 @@ export const STARTER_RECIPES = [
         ],
         prompt: "Modernize the onboarding funnel across copy, setup tasks, analytics, and support handoff without changing billing behavior.",
         followUps: [
-            "smithers ps",
-            "smithers inspect <run-id>",
+            cliCommand("ps"),
+            cliCommand("inspect <run-id>"),
         ],
         goodFor: ["multi-step projects", "cross-functional work", "large refactors"],
         avoidWhen: "The work should be a quick one-file change.",
@@ -270,7 +309,9 @@ function shellQuote(value) {
  * @param {StarterRecipe} recipe
  */
 export function starterCommand(recipe) {
-    return `smithers workflow run ${recipe.workflow} --prompt ${shellQuote(recipe.prompt)}`;
+    return recipe.input
+        ? workflowInputCommand(recipe.workflow, recipe.input)
+        : workflowPromptCommand(recipe.workflow, recipe.prompt);
 }
 
 /**
@@ -396,8 +437,8 @@ export function renderStarterGallery(gallery) {
     lines.push("");
     if (gallery.count === 0) {
         lines.push("No starters matched those filters.");
-        lines.push("Try: smithers starters --audience product");
-        lines.push("Try: smithers starters --goal quality");
+        lines.push(`Try: ${cliCommand("starters --audience product")}`);
+        lines.push(`Try: ${cliCommand("starters --goal quality")}`);
         return lines.join("\n");
     }
     for (const starter of gallery.starters) {
@@ -408,7 +449,7 @@ export function renderStarterGallery(gallery) {
         lines.push(`  Run: ${starter.command}`);
         lines.push("");
     }
-    lines.push("Use `smithers starters <id>` for setup notes and follow-ups.");
-    lines.push("Filter examples: `smithers starters --audience product`, `smithers starters --goal quality`, `smithers starters --workflow debug`.");
+    lines.push(`Use \`${cliCommand("starters <id>")}\` for setup notes and follow-ups.`);
+    lines.push(`Filter examples: \`${cliCommand("starters --audience product")}\`, \`${cliCommand("starters --goal quality")}\`, \`${cliCommand("starters --workflow debug")}\`.`);
     return lines.join("\n");
 }

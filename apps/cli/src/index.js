@@ -2744,7 +2744,7 @@ const cli = Cli.create({
             commandExitOverride = 4;
             return c.error({
                 code: "STARTER_NOT_FOUND",
-                message: `Starter not found: ${c.args.id}. Run "smithers starters" to list available starters.`,
+                message: `Starter not found: ${c.args.id}. Run "bunx smithers-orchestrator starters" to list available starters.`,
                 details: {
                     availableStarters: buildStarterGallery().starters.map((starter) => starter.id),
                 },
