@@ -1,16 +1,14 @@
 // smithers-source: generated
 // Source of truth: ~/.smithers/accounts.json (managed via `smithers agent add|list|remove`)
-import { homedir } from "node:os";
-import path from "node:path";
-import { type AgentLike, CodexAgent as SmithersCodexAgent } from "smithers-orchestrator";
+import { type AgentLike, ClaudeCodeAgent as SmithersClaudeCodeAgent } from "smithers-orchestrator";
 
 export const providers = {
-  codex1: new SmithersCodexAgent({ model: "gpt-5.4-codex", configDir: "/tmp/smithers-test/accounts/codex-1", skipGitRepoCheck: true, cwd: process.cwd() }),
+  claude1: new SmithersClaudeCodeAgent({ cwd: process.cwd(), yolo: true }),
 } as const;
 
 export const agents = {
-  codex: [providers.codex1],
-  cheapFast: [providers.codex1],
-  smart: [providers.codex1],
-  smartTool: [providers.codex1],
+  claude: [providers.claude1],
+  cheapFast: [providers.claude1],
+  smart: [providers.claude1],
+  smartTool: [providers.claude1],
 } as const satisfies Record<string, AgentLike[]>;
