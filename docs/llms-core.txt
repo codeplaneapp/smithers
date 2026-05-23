@@ -1,6 +1,6 @@
 # Smithers
 
-> Smithers — durable AI workflow orchestration as a JSX runtime.
+> Smithers — durable control plane for long-running coding agents.
 > Repo: github.com/smithersai/smithers · Package: smithers-orchestrator (npm)
 
 This file contains the core Smithers documentation. Read top to bottom for a complete picture of the runtime, JSX surface, CLI, and components.
@@ -19,9 +19,9 @@ Changelogs are not included; see /docs/changelogs/ on the docs site.
 
 ## Smithers
 
-> Smithers powers TypeScript teams to run long AI coding workflows that survive crashes and handle approvals, retries, and restarts
+> Smithers is a durable control plane for long-running coding agents.
 
-Smithers powers TypeScript teams to run long AI coding workflows that survive crashes and handle approvals, retries, and restarts
+Smithers gives TypeScript teams crash recovery, retries, human approvals, replay, evals, sandbox review, and Gateway APIs in one workflow runtime.
 
 ```tsx
 /** @jsxImportSource smithers-orchestrator */

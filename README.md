@@ -1,6 +1,8 @@
 # Smithers
 
-Smithers powers TypeScript teams to run long AI coding workflows that survive crashes and handle approvals, retries, and restarts
+Smithers is a durable control plane for long-running coding agents.
+
+Write agent workflows as TypeScript, run them for minutes or days, and keep the operational contract in one place: crash recovery, retries, human approvals, replay, evals, sandbox review, and Gateway APIs.
 
 ## Getting started
 
@@ -8,9 +10,9 @@ Smithers powers TypeScript teams to run long AI coding workflows that survive cr
 bunx smithers-orchestrator@latest init
 ```
 
-This will scaffold a `.smithers/` folder with common simple preconfigured workflows ready to use right away.
+This scaffolds a `.smithers/` folder with canonical workflows for implementation, review, debugging, planning, audits, and long-horizon missions.
 
-Use the `smithers` cli to work with smithers.
+Use the `smithers` CLI or Gateway console to operate runs.
 
 ## [See Docs](https://smithers.sh)
 
@@ -46,7 +48,7 @@ export default smithers((ctx) => (
 ));
 ```
 
-Each task output is validated against its Zod schema and persisted to SQLite. If the process crashes, Smithers resumes from the last completed node.
+Each task output is validated against its Zod schema and persisted to SQLite. If the process crashes, Smithers resumes from the last completed node without re-running completed work.
 
 ## Components
 
@@ -83,6 +85,16 @@ smithers ps
 smithers workflow list
 smithers approve abc123 --node review
 ```
+
+## Gateway Console
+
+```ts
+import { Gateway } from "smithers-orchestrator/gateway";
+
+const gateway = new Gateway({ ui: true });
+```
+
+The built-in console mounts at `/console` and gives operators a browser surface for workflow inventory, active runs, and approval decisions. Custom Gateway UIs can still be mounted with `ui: { entry, path, title, props }`.
 
 ## Eval suites
 

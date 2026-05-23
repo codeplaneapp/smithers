@@ -1,0 +1,107 @@
+---
+title: Production Hardening
+description: Operate Smithers with durable storage, scoped access, bounded execution, and auditable workflows.
+---
+
+Smithers can run long-lived agent workflows, so production deployments need a stricter posture than a local quickstart. Treat the Gateway, database, workflow modules, and sandbox workers as one operational boundary.
+
+## Required Checks
+
+Run these checks before promoting a workflow module:
+
+```bash
+pnpm check:effect
+pnpm check:deps
+pnpm check:architecture
+pnpm -r typecheck
+pnpm test
+```
+
+The default CI workflow runs the same test gate on pull requests and pushes to `main`.
+
+## Persistence
+
+Use one SQLite database file per deployment and place it on durable storage. The internal tables are created and migrated idempotently on startup.
+
+Recommended database practices:
+
+- Back up the database file and its WAL files together.
+- Keep `PRAGMA foreign_keys = ON`; Smithers enables it during schema setup and uses referential checks for core run artifacts.
+- Keep run IDs stable across resume attempts.
+- Use the Gateway event stream sequence numbers for reconnects; clients should resume from the last seen `seq`.
+- Avoid manually deleting internal rows. Delete whole runs through supported administrative paths so dependent frames, node diffs, and audit rows stay consistent.
+
+## Access Control
+
+Expose the Gateway only behind TLS. Use scoped bearer grants for automation and short TTLs for human-triggered actions.
+
+Recommended scopes by client type:
+
+| Client | Typical scopes |
+| ------ | -------------- |
+| Run dashboard | `run:read`, `approval:read` |
+| Launch automation | `run:read`, `run:write` |
+| Approval inbox | `run:read`, `approval:read`, `approval:submit` |
+| Operator tools | `run:read`, `run:write`, `approval:submit` |
+
+Rotate token grants regularly and revoke grants when a user, CI job, or integration no longer needs access.
+
+For multi-tenant deployments, store tenant-level orgs, projects, teams, usage, secret references, and audit events with `ControlPlaneStore` from `smithers-orchestrator/control-plane`. Keep identity-provider assertions and billing-provider webhooks outside SQLite, then write normalized grants and audit events into the control-plane tables.
+
+## Execution Boundary
+
+Sandbox tasks isolate the Smithers control plane from bundle collection and diff application:
+
+- request and result bundles are written under the run sandbox directory
+- bundle manifests are size-bounded
+- patch and artifact paths are checked against path traversal
+- produced diffs require review unless `autoAcceptDiffs` is enabled
+- sandbox records and events are persisted for audit
+
+Treat `allowNetwork`, container images, environment variables, ports, volumes, and CPU or memory limits as runtime-specific controls. Verify the selected runtime enforces the controls you depend on before running untrusted workflows. For high-risk code generation, run sandbox workers in a separate account, namespace, or machine with no ambient production credentials.
+
+## Secrets
+
+Never pass long-lived credentials through workflow input. Prefer short-lived tokens from the caller, scoped environment injection at the worker boundary, or a secret manager mounted only into the worker process that needs it.
+
+Operational rules:
+
+- Do not store provider keys in SQLite rows, run input, task output, or event payloads.
+- Redact logs before forwarding them to shared observability sinks.
+- Split launch permissions from approval permissions for workflows that can write files, create pull requests, or deploy.
+
+## Cache Policy
+
+Use cache policy keys deliberately:
+
+- `scope: "run"` keeps reuse inside one run.
+- `scope: "workflow"` shares reuse across runs of the same workflow.
+- `scope: "global"` shares reuse across workflow names.
+- `ttlMs` bounds staleness; expired cache rows are treated as misses and refreshed.
+- `version` should change whenever prompt, model, provider, tool behavior, or output semantics change.
+
+Cached payloads are still validated against the current output schema on every hit. A schema mismatch is a cache miss.
+
+## Audit Trail
+
+For incident review, preserve:
+
+- Gateway access logs
+- Smithers run events
+- `_smithers_time_travel_audit` rows
+- sandbox bundle metadata and review decisions
+- approval decisions, notes, and actor IDs
+- deployment version and workflow module revision
+
+Keep the audit log append-only from the perspective of normal operators.
+
+## Release Checklist
+
+Before a production release:
+
+- CI is green on typecheck, dependency checks, and tests.
+- Database backups have been restored in a staging environment.
+- Gateway tokens are scoped and have bounded TTLs.
+- Sandbox runtime enforcement has been tested against the intended threat model.
+- Approval paths have a named owner and a fallback owner.
+- Logs are retained long enough to investigate delayed workflow failures.

@@ -1,0 +1,120 @@
+---
+title: Control Plane
+description: Organization, project, identity, billing, usage, secret-reference, and audit primitives for hosted Smithers deployments.
+---
+
+Smithers ships local Gateway and runtime primitives, plus a durable control-plane store for deployments that need multi-tenant product boundaries. The store is intentionally small: it gives hosted services a tested schema for the objects enterprise buyers ask about, while leaving payment collection, identity-provider handshakes, and secret-value reads to the hosted service.
+
+## What Ships
+
+Import the store from the public facade:
+
+```ts
+import { ControlPlaneStore } from "smithers-orchestrator/control-plane";
+```
+
+Or from the scoped package:
+
+```ts
+import { ControlPlaneStore } from "@smithers-orchestrator/control-plane";
+```
+
+The store creates SQLite tables for:
+
+- organizations
+- teams and team membership
+- projects and project team grants
+- billing account records
+- identity-provider records for SAML/OIDC configuration
+- usage events, summaries, and quota checks
+- secret manager references, not secret values
+- audit events and org audit export
+
+```ts
+const store = new ControlPlaneStore(sqlite);
+
+const org = store.createOrg({
+  orgId: "org_acme",
+  slug: "acme",
+  name: "Acme",
+});
+
+const project = store.createProject({
+  orgId: org.orgId,
+  projectId: "project_app",
+  slug: "app",
+  name: "App",
+});
+
+store.recordUsage({
+  orgId: org.orgId,
+  projectId: project.projectId,
+  runId: "run_123",
+  metric: "agent_runtime_ms",
+  quantity: 42_000,
+  unit: "ms",
+});
+
+store.setUsageLimit({
+  orgId: org.orgId,
+  projectId: project.projectId,
+  metric: "agent_runtime_ms",
+  unit: "ms",
+  period: "monthly",
+  limitQuantity: 10_000_000,
+});
+
+store.upsertIdentityProvider({
+  orgId: org.orgId,
+  providerId: "idp_okta",
+  type: "saml",
+  issuer: "https://acme.okta.com",
+  ssoUrl: "https://acme.okta.com/app/smithers/sso/saml",
+  certificateRef: "vault://identity/acme-okta-cert",
+});
+
+store.putSecretRef({
+  orgId: org.orgId,
+  projectId: project.projectId,
+  name: "deploy-token",
+  provider: "aws-secrets-manager",
+  ref: "arn:aws:secretsmanager:us-east-1:123:secret:deploy",
+});
+
+const quota = store.checkUsageLimit({
+  orgId: org.orgId,
+  projectId: project.projectId,
+  metric: "agent_runtime_ms",
+  unit: "ms",
+  period: "monthly",
+});
+
+const audit = store.exportOrgAudit({ orgId: org.orgId });
+```
+
+Foreign keys are enabled during setup. Deleting an org cascades to its projects, teams, identity providers, usage rows, usage limits, secret references, and audit rows.
+
+## Hosted Boundary
+
+A hosted Smithers service should layer these primitives behind:
+
+- SSO/SAML or OIDC authentication
+- billing provider checkout and invoices
+- cloud object storage for large artifacts
+- managed secret provider reads at worker runtime
+- audit export delivery and retention policy
+- SLAs, support, compliance controls, and incident response
+
+The open-source package owns the durable data contract. The hosted service owns identity, payment collection, tenant isolation, compliance operations, and infrastructure support.
+
+## Gateway Console
+
+Use the built-in console when you need an operator surface before building a custom app:
+
+```ts
+import { Gateway } from "smithers-orchestrator/gateway";
+
+const gateway = new Gateway({ ui: true });
+```
+
+It mounts at `/console` and uses stable Gateway RPCs for workflow inventory, active runs, and approval decisions. For branded or domain-specific operations, pass `ui: { entry, path, title, props }` and build a custom Gateway UI.

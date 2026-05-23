@@ -5,4 +5,12 @@ description: Folded into How It Works.
 
 This material is now in [How It Works](/how-it-works#caching).
 
-Cached payloads are revalidated against the current output schema on every hit; mismatches are treated as misses. Service instances are never part of the cache key — encode model/provider changes by bumping `cache.version`.
+Cached payloads are revalidated against the current output schema on every hit; mismatches are treated as misses. Service instances are never part of the cache key; encode model/provider changes by bumping `cache.version`.
+
+Cache policy controls reuse explicitly:
+
+- `key` overrides the task ID portion of the cache identity.
+- `scope: "run"` reuses output only inside the same run.
+- `scope: "workflow"` reuses output across runs of the same workflow.
+- `scope: "global"` reuses output across workflow names.
+- `ttlMs` expires stale rows; expired rows are recomputed and refreshed.

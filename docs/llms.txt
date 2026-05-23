@@ -1,6 +1,6 @@
 # Smithers
 
-Durable AI workflow orchestration as a JSX runtime.
+Durable control plane for long-running coding agents.
 
 ## Documentation
 

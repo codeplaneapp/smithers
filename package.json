@@ -1,7 +1,7 @@
 {
   "name": "smithers-monorepo",
   "version": "0.20.4",
-  "description": "AI workflow orchestration with JSX",
+  "description": "Durable control plane for long-running coding agents",
   "author": "William Cory",
   "license": "MIT",
   "private": true,
@@ -30,7 +30,8 @@
     "./serve": "./packages/server/src/serve.js",
     "./scorers": "./packages/scorers/src/index.js",
     "./memory": "./packages/memory/src/index.js",
-    "./openapi": "./packages/openapi/src/index.js"
+    "./openapi": "./packages/openapi/src/index.js",
+    "./control-plane": "./packages/smithers/src/control-plane.js"
   },
   "engines": {
     "bun": ">=1.3.0"
@@ -91,6 +92,7 @@
     "@smithers-orchestrator/agents": "workspace:*",
     "@smithers-orchestrator/cli": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
+    "@smithers-orchestrator/control-plane": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/devtools": "workspace:*",
     "@smithers-orchestrator/driver": "workspace:*",

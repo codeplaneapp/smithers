@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "name": "Smithers",
-  "description": "AI workflow orchestration framework",
+  "description": "Durable control plane for long-running coding agents",
   "theme": "mint",
   "colors": {
     "primary": "#00D2A0"
@@ -47,7 +47,9 @@
           "cli/overview",
           "guides/evals-quickstart",
           "guides/tui",
-          "deployment/reference"
+          "deployment/reference",
+          "deployment/control-plane",
+          "deployment/production-hardening"
         ]
       },
       {
@@ -62,7 +64,8 @@
               "workflows/mission",
               "workflows/kanban",
               "workflows/ralph",
-              "workflows/workflow-skill"
+              "workflows/workflow-skill",
+              "workflows/catalog"
             ]
           },
           {

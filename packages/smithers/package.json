@@ -1,7 +1,7 @@
 {
   "name": "smithers-orchestrator",
   "version": "0.20.4",
-  "description": "Public Smithers facade and workflow authoring convenience package",
+  "description": "Public Smithers facade for durable coding-agent workflows and Gateway operation",
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -24,6 +24,11 @@
       "types": "./src/gateway-react.d.ts",
       "import": "./src/gateway-react.js",
       "default": "./src/gateway-react.js"
+    },
+    "./control-plane": {
+      "types": "./src/control-plane.d.ts",
+      "import": "./src/control-plane.js",
+      "default": "./src/control-plane.js"
     },
     "./*": {
       "types": "./src/index.d.ts",
@@ -50,6 +55,7 @@
     "@smithers-orchestrator/agents": "workspace:*",
     "@smithers-orchestrator/cli": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
+    "@smithers-orchestrator/control-plane": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/driver": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
