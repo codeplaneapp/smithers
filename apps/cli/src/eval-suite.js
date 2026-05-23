@@ -147,7 +147,17 @@ function jsonContains(actual, expected) {
         if (!Array.isArray(actual) || actual.length < expected.length) {
             return false;
         }
-        return expected.every((entry, index) => jsonContains(actual[index], entry));
+        const matchedActualIndexes = new Set();
+        return expected.every((entry) => {
+            const matchIndex = actual.findIndex((actualEntry, index) => {
+                return !matchedActualIndexes.has(index) && jsonContains(actualEntry, entry);
+            });
+            if (matchIndex < 0) {
+                return false;
+            }
+            matchedActualIndexes.add(matchIndex);
+            return true;
+        });
     }
     return jsonEquals(actual, expected);
 }

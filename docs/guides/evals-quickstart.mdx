@@ -34,7 +34,7 @@ Case files can be JSONL, a JSON array, or an object with a `cases` array:
 
 Supported `expected` checks:
 
-- `status`: one of `finished`, `failed`, `cancelled`, `waiting-approval`, `waiting-event`, or `waiting-timer`
+- `status`: one of `finished`, `continued`, `failed`, `cancelled`, `waiting-approval`, `waiting-event`, or `waiting-timer`
 - `output`: exact JSON match against the workflow result output
 - `outputContains`: recursive partial JSON match
 - `errorContains`: substring match against thrown errors

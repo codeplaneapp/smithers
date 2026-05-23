@@ -79,6 +79,38 @@ describe("eval suite helpers", () => {
         ]);
     });
 
+    test("matches partial output array entries outside the prefix", () => {
+        const testCase = {
+            id: "array-contains",
+            name: "array-contains",
+            input: {},
+            annotations: {},
+            expected: {
+                status: "finished",
+                outputContains: {
+                    result: [
+                        { prompt: "B" },
+                        { prompt: "C" },
+                    ],
+                },
+            },
+            metadata: {},
+        };
+        const result = evaluateEvalCaseResult(testCase, {
+            status: "finished",
+            output: {
+                result: [
+                    { prompt: "A", summary: "first" },
+                    { prompt: "B", summary: "second" },
+                    { prompt: "C", summary: "third" },
+                ],
+            },
+        });
+
+        expect(result.passed).toBe(true);
+        expect(result.assertions.find((assertion) => assertion.name === "outputContains")?.passed).toBe(true);
+    });
+
     test("supports continued status and structured error matching", () => {
         const testCase = {
             id: "error",
