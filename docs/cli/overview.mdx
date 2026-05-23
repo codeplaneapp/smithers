@@ -13,6 +13,7 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 - MCP stdio mode: pass `--mcp` to start Smithers as an MCP server. Add `--surface semantic|raw|both` to choose the exposed tool surface.
 - Workflow resolution: `up`, `graph`, `revert`, `replay`, `fork`, `retry-task`, and `timetravel` take a workflow file path. `eval` accepts either a workflow path or a discovered workflow ID. `workflow run <name>` resolves IDs from `.smithers/workflows/<name>.tsx`.
 - Rewrites: `smithers workflow <id>` runs a discovered workflow when `<id>` resolves; `smithers workflow.tsx` behaves like `smithers up workflow.tsx`; `smithers chat create` behaves like `smithers chat-create`; `smithers .` opens the current directory in Smithers GUI.
+- JSON arguments are preflighted before workflow modules load. `--input` and `--annotations` accept an inline JSON value or `-` to read JSON from stdin, capped at 1 MiB.
 
 ## Exit codes
 
@@ -54,8 +55,8 @@ commands[62]:
       max-output-bytes,,number,,Max bytes a single tool call can return
       tool-timeout-ms,,number,,Max wall-clock time per tool call in ms
       hot,,boolean,false,Hot reload for .tsx workflows
-      input,i,string,,Input data as JSON string
-      annotations,,string,,Run annotations as flat JSON string/number/boolean object
+      input,i,string,,Input data as JSON string or '-' to read JSON from stdin
+      annotations,,string,,Run annotations as flat JSON string/number/boolean object or '-' to read JSON from stdin
       resume,,boolean|string,false,Resume an existing run; may be true or a run ID
       force,,boolean,false,Resume even if still marked running
       resume-claim-owner,,string,,Internal durable resume claim owner
