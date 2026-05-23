@@ -68,7 +68,7 @@ describe("cachePolicy.scope", () => {
         try {
             const workflow = smithers(() => (
                 <Workflow name="scope-run-cache">
-                    <Task id="t" output={outputs.out} agent={counter.agent} cache={{ scope: "run" }}>
+                    <Task id="t" output={outputs.out} agent={counter.agent} cache={{ scope: "run", key: "same" }}>
                         same prompt
                     </Task>
                 </Workflow>
@@ -90,7 +90,7 @@ describe("cachePolicy.scope", () => {
         try {
             const workflow = smithers(() => (
                 <Workflow name="scope-workflow-cache">
-                    <Task id="t" output={outputs.out} agent={counter.agent} cache={{ scope: "workflow" }}>
+                    <Task id="t" output={outputs.out} agent={counter.agent} cache={{ scope: "workflow", key: "same" }}>
                         same prompt
                     </Task>
                 </Workflow>
@@ -106,20 +106,44 @@ describe("cachePolicy.scope", () => {
         }
     });
 
+    test("explicit key shares cache across different task ids in the same workflow", async () => {
+        const { smithers, outputs, cleanup } = createTestSmithers(outputShape());
+        const counter = countingAgent("scope-workflow-key");
+        try {
+            const workflow = smithers(() => (
+                <Workflow name="scope-workflow-key-cache">
+                    <Task id="first-task" output={outputs.out} agent={counter.agent} cache={{ scope: "workflow", key: "shared-task-key" }}>
+                        same prompt
+                    </Task>
+                    <Task id="second-task" output={outputs.out} agent={counter.agent} cache={{ scope: "workflow", key: "shared-task-key" }} dependsOn={["first-task"]}>
+                        same prompt
+                    </Task>
+                </Workflow>
+            ));
+
+            await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "scope-workflow-key-r1" }));
+
+            expect(counter.calls).toBe(1);
+        }
+        finally {
+            cleanup();
+        }
+    });
+
     test("scope=global shares across distinct workflows", async () => {
         const { smithers, outputs, cleanup } = createTestSmithers(outputShape());
         const counter = countingAgent("scope-global");
         try {
             const first = smithers(() => (
                 <Workflow name="scope-global-a">
-                    <Task id="t" output={outputs.out} agent={counter.agent} cache={{ scope: "global" }}>
+                    <Task id="t" output={outputs.out} agent={counter.agent} cache={{ scope: "global", key: "shared" }}>
                         same prompt
                     </Task>
                 </Workflow>
             ));
             const second = smithers(() => (
                 <Workflow name="scope-global-b">
-                    <Task id="t" output={outputs.out} agent={counter.agent} cache={{ scope: "global" }}>
+                    <Task id="t" output={outputs.out} agent={counter.agent} cache={{ scope: "global", key: "shared" }}>
                         same prompt
                     </Task>
                 </Workflow>
@@ -135,29 +159,27 @@ describe("cachePolicy.scope", () => {
         }
     });
 
-    test("same task key with different scopes does not collide", async () => {
+    test("two tasks with the same key but different scopes do not collide", async () => {
         const { smithers, outputs, cleanup } = createTestSmithers(outputShape());
-        const counter = countingAgent("scope-collision");
+        const runCounter = countingAgent("scope-collision-run");
+        const workflowCounter = countingAgent("scope-collision-workflow");
         try {
-            const globalWorkflow = smithers(() => (
-                <Workflow name="scope-collision">
-                    <Task id="t" output={outputs.out} agent={counter.agent} cache={{ scope: "global" }}>
+            const workflow = smithers(() => (
+                <Workflow name="scope-collision-cache">
+                    <Task id="run-task" output={outputs.out} agent={runCounter.agent} cache={{ scope: "run", key: "shared" }}>
                         same prompt
                     </Task>
-                </Workflow>
-            ));
-            const workflowScoped = smithers(() => (
-                <Workflow name="scope-collision">
-                    <Task id="t" output={outputs.out} agent={counter.agent} cache={{ scope: "workflow" }}>
+                    <Task id="workflow-task" output={outputs.out} agent={workflowCounter.agent} cache={{ scope: "workflow", key: "shared" }}>
                         same prompt
                     </Task>
                 </Workflow>
             ));
 
-            await Effect.runPromise(runWorkflow(globalWorkflow, { input: {}, runId: "scope-collision-r1" }));
-            await Effect.runPromise(runWorkflow(workflowScoped, { input: {}, runId: "scope-collision-r2" }));
+            await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "scope-collision-r1" }));
+            await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "scope-collision-r2" }));
 
-            expect(counter.calls).toBe(2);
+            expect(runCounter.calls).toBe(2);
+            expect(workflowCounter.calls).toBe(1);
         }
         finally {
             cleanup();

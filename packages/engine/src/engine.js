@@ -45,6 +45,7 @@ import { hashCapabilityRegistry } from "@smithers-orchestrator/agents/capability
 import { cancelPendingTimersBridge, executeTaskBridgeEffect, isBridgeManagedTimerTask as isTimerTask, resolveDeferredTaskStateBridge, } from "./effect/workflow-bridge.js";
 import { AlertRuntime } from "./alert-runtime.js";
 import { executeChildWorkflow } from "./child-workflow.js";
+import { buildCacheScopeIdentity, isFreshCacheRow, normalizeCacheScope } from "./cache-policy.js";
 import { runWorkflowWithMakeBridge } from "./effect/workflow-make-bridge.js";
 import { createWorkflowVersioningRuntime, getWorkflowPatchDecisions, withWorkflowVersioningRuntime, } from "./effect/versioning.js";
 import { runWithCorrelationContext, updateCurrentCorrelationContext, withCorrelationContext, } from "@smithers-orchestrator/observability/correlation";
@@ -2660,9 +2661,6 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     const taskRoot = desc.worktreePath ?? toolConfig.rootDir;
     const stepCacheEnabled = cacheEnabled || Boolean(desc.cachePolicy);
     const cacheAgent = Array.isArray(desc.agent) ? desc.agent[0] : desc.agent;
-    const cachePolicyScope = desc.cachePolicy?.scope === "run" || desc.cachePolicy?.scope === "global"
-        ? desc.cachePolicy.scope
-        : "workflow";
     const cachePolicyTtlMs = typeof desc.cachePolicy?.ttlMs === "number" && Number.isFinite(desc.cachePolicy.ttlMs)
         ? Math.max(0, desc.cachePolicy.ttlMs)
         : null;
@@ -2738,6 +2736,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             if (desc.cachePolicy) {
                 let cachePayload = null;
                 let cacheByOk = true;
+                const cacheScope = normalizeCacheScope(desc.cachePolicy);
                 try {
                     const ctx = await buildCacheContext(db, inputTable, runId, desc, descriptorMap, attemptNo);
                     if (desc.cachePolicy.by) {
@@ -2758,18 +2757,15 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     cacheKeyDisabled = true;
                 }
                 cacheBase = {
-                    cacheScope: cachePolicyScope,
-                    ...(cachePolicyScope === "run" ? { runId } : {}),
-                    ...(cachePolicyScope === "global" ? {} : { workflowName }),
-                    nodeId: desc.nodeId,
-                    iteration: desc.iteration,
-                    outputTableName: desc.outputTableName,
+                    cacheScope,
+                    ...buildCacheScopeIdentity(cacheScope, runId, workflowName, desc),
                     schemaSig,
                     outputSchemaSig,
                     agentSig,
                     toolsSig,
                     jjPointer: cacheJjBase,
                     cacheVersion: desc.cachePolicy.version ?? null,
+                    cacheKey: desc.cachePolicy.key ?? null,
                     cacheBy: cachePayload ?? null,
                 };
             }
@@ -2805,7 +2801,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             }
             if (cacheKey) {
                 const cachedRow = await Effect.runPromise(adapter.getCache(cacheKey));
-                if (cachedRow) {
+                if (cachedRow && isFreshCacheRow(cachedRow, desc.cachePolicy)) {
                     const createdAtMs = Number(cachedRow.createdAtMs);
                     const expired = cachePolicyTtlMs !== null &&
                         Number.isFinite(createdAtMs) &&
@@ -2842,6 +2838,16 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     }
                 }
                 else {
+                    if (cachedRow) {
+                        logInfo("cache entry expired for task output", {
+                            runId,
+                            nodeId: desc.nodeId,
+                            iteration: desc.iteration,
+                            attempt: attemptNo,
+                            cacheKey,
+                            ttlMs: desc.cachePolicy?.ttlMs,
+                        }, "engine:task-cache");
+                    }
                     void Effect.runPromise(Metric.increment(cacheMisses));
                 }
             }

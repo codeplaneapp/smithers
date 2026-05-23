@@ -491,7 +491,7 @@ export async function jumpToFrame(input) {
   let lock = null;
   /** @type {number | null} */
   let auditRowId = null;
-  let skipTerminalAudit = false;
+  let canWriteAudit = false;
 
   try {
     return await withSpan(
@@ -514,6 +514,12 @@ export async function jumpToFrame(input) {
           );
         }
 
+        const run = await input.adapter.getRun(runId);
+        if (!run) {
+          throw new JumpToFrameError("RunNotFound", `Run not found: ${runId}`);
+        }
+        canWriteAudit = true;
+
         lock = await withSpan(
           "timetravel.lock.acquire",
           { runId },
@@ -528,12 +534,6 @@ export async function jumpToFrame(input) {
             return handle;
           },
         );
-
-        const run = await input.adapter.getRun(runId);
-        if (!run) {
-          skipTerminalAudit = true;
-          throw new JumpToFrameError("RunNotFound", `Run not found: ${runId}`);
-        }
 
         const rateLimit = await evaluateRewindRateLimit({
           adapter: input.adapter,
@@ -966,19 +966,16 @@ export async function jumpToFrame(input) {
     // Persist the terminal audit state BEFORE releasing the lock so a second
     // caller cannot beat us to the rate-limit count.
     try {
-      if (skipTerminalAudit) {
-        // No durable audit row can be attached when the parent run does not
-        // exist; the runs table owns rewind audit rows through a foreign key.
-      } else if (auditRowId !== null) {
+      if (auditRowId !== null) {
         await updateRewindAuditRow(input.adapter, {
           id: auditRowId,
           result: auditResult,
           durationMs,
           fromFrameNo: fromFrameNoForAudit,
         });
-      } else {
-        // We threw before reaching the in_progress write (usually validation /
-        // lock-busy / rate-limit). Still record the attempt for auditability.
+      } else if (canWriteAudit) {
+        // The run exists but we threw before reaching the in_progress write.
+        // Still record the attempt for auditability.
         await writeRewindAuditRow(input.adapter, {
           runId: runIdForAudit,
           fromFrameNo: fromFrameNoForAudit,
@@ -989,7 +986,7 @@ export async function jumpToFrame(input) {
           durationMs,
         });
       }
-      if (!skipTerminalAudit) {
+      if (auditRowId !== null || canWriteAudit) {
         await emitLog(input.onLog, "info", "jumpToFrame audit row written", {
           runId: runIdForAudit,
           fromFrameNo: fromFrameNoForAudit,

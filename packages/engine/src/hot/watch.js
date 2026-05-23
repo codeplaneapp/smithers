@@ -13,6 +13,7 @@ const DEFAULT_IGNORE = [
     ".smithers",
 ];
 const MIN_POLL_MS = 1000;
+const MAX_POLL_MS = 10_000;
 const MAX_POLL_FILES = 5000;
 class HotWatchScanLimitError extends Error {
     constructor() {
@@ -31,6 +32,7 @@ export class WatchTree {
     pollTimer = null;
     polling = false;
     pollingDisabled = false;
+    currentPollIntervalMs = MIN_POLL_MS;
     waitResolve = null;
     closed = false;
     /**
@@ -106,7 +108,9 @@ export class WatchTree {
                     }
                 }
                 await this.watchDir(this.rootDir);
-                this.startPolling();
+                if (!this.pollingDisabled) {
+                    this.startPolling();
+                }
             },
             catch: (cause) => toSmithersError(cause, "start hot watch tree"),
         }).pipe(Effect.annotateLogs({
@@ -142,17 +146,33 @@ export class WatchTree {
         return this.ignore.includes(name) || name.startsWith(".");
     }
     pollIntervalMs() {
-        return Math.max(MIN_POLL_MS, this.debounceMs * 4);
+        return Math.min(MAX_POLL_MS, Math.max(MIN_POLL_MS, this.debounceMs * 4));
     }
-    startPolling() {
+    resetPollBackoff() {
+        this.currentPollIntervalMs = this.pollIntervalMs();
+    }
+    advancePollBackoff(changed) {
+        if (changed) {
+            this.resetPollBackoff();
+            return;
+        }
+        this.currentPollIntervalMs = Math.min(MAX_POLL_MS, Math.max(this.pollIntervalMs(), this.currentPollIntervalMs * 2));
+    }
+    scheduleNextPoll() {
         if (this.pollTimer || this.closed || this.pollingDisabled)
             return;
         this.pollTimer = setTimeout(() => {
             this.pollTimer = null;
             void this.pollOnce().finally(() => {
-                this.startPolling();
+                this.scheduleNextPoll();
             });
-        }, this.pollIntervalMs());
+        }, this.currentPollIntervalMs);
+    }
+    startPolling() {
+        if (this.pollTimer || this.closed || this.pollingDisabled)
+            return;
+        this.resetPollBackoff();
+        this.scheduleNextPoll();
     }
     async pollOnce() {
         if (this.closed || this.polling || this.pollingDisabled)
@@ -160,7 +180,9 @@ export class WatchTree {
         this.polling = true;
         try {
             const next = await this.scanFileSignatures(this.rootDir);
-            return this.recordScanChanges(next);
+            const changed = this.recordScanChanges(next);
+            this.advancePollBackoff(changed);
+            return changed;
         }
         catch (error) {
             if (error instanceof HotWatchScanLimitError) {
@@ -170,6 +192,10 @@ export class WatchTree {
                     maxFiles: MAX_POLL_FILES,
                 }, "hot:watch");
             }
+            else {
+                this.advancePollBackoff(false);
+            }
+            // Ignore transient filesystem races; the next interval will retry.
             return false;
         }
         finally {
@@ -188,6 +214,7 @@ export class WatchTree {
     /**
    * @param {string} dir
    * @param {Map<string, string>} files
+   * @returns {Promise<void>}
    */
     async scanDir(dir, files) {
         if (this.closed)
@@ -195,7 +222,7 @@ export class WatchTree {
         const baseName = basename(dir);
         if (baseName && this.shouldIgnore(baseName) && dir !== this.rootDir)
             return;
-        const entries = await readdir(dir, { withFileTypes: true });
+        const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
         for (const entry of entries) {
             if (this.shouldIgnore(entry.name))
                 continue;
@@ -207,8 +234,10 @@ export class WatchTree {
                 await this.scanDir(fullPath, files);
             }
             else if (entry.isFile()) {
-                const info = await stat(fullPath);
-                files.set(fullPath, `${info.mtimeMs}:${info.size}`);
+                const info = await stat(fullPath).catch(() => null);
+                if (info?.isFile()) {
+                    files.set(fullPath, `${info.mtimeMs}:${info.size}`);
+                }
             }
         }
     }
@@ -257,6 +286,8 @@ export class WatchTree {
                     fullPath,
                 }, "hot:watch");
                 this.onFileChange(fullPath);
+                this.resetPollBackoff();
+                void this.pollOnce();
             });
             this.watchers.push(watcher);
             // Recursively watch subdirectories
