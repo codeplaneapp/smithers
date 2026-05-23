@@ -454,6 +454,21 @@ describe("SmithersDb adapter", () => {
         expect(cached).toBeDefined();
         expect(cached.payloadJson).toBe('{"v":1}');
     });
+    test("insertCache updates an existing cache row", async () => {
+        const { adapter } = createTestDb();
+        await adapter.insertCache(cacheRow("key-upsert", {
+            createdAtMs: 1,
+            payloadJson: '{"v":1}',
+        }));
+        await adapter.insertCache(cacheRow("key-upsert", {
+            createdAtMs: 2,
+            payloadJson: '{"v":2}',
+        }));
+        const cached = await adapter.getCache("key-upsert");
+        expect(cached).toBeDefined();
+        expect(cached?.createdAtMs).toBe(2);
+        expect(cached?.payloadJson).toBe('{"v":2}');
+    });
     test("getCache returns undefined for missing key", async () => {
         const { adapter } = createTestDb();
         const cached = await adapter.getCache("nonexistent");
