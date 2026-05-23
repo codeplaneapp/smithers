@@ -131,7 +131,6 @@ const CONSTRUCTORS = {
         expr: "new SmithersAmpAgent()",
     },
 };
-
 /**
  * @param {string} id
  */
@@ -619,10 +618,10 @@ export function generateAgentsTs(env = process.env, options = {}) {
             hasAuthSignal: false,
             hasApiKeySignal: false,
             hasProjectTrustSignal: true,
-            status: "unavailable",
-            score: 0,
+            status: "likely-subscription",
+            score: scoreStatus("likely-subscription"),
             usable: true,
-            checks: [`preserved-from-generated-agents-ts:${detector.id}`],
+            checks: [`preserved:${detector.id}:yes`],
             unusableReasons: [],
         });
     }

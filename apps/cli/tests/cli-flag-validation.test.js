@@ -7,7 +7,9 @@
 // node_modules tree, so these stay green even in worktrees that lack
 // full e2e dependencies.
 import { describe, expect, test } from "bun:test";
-import { createTempRepo, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { Database } from "bun:sqlite";
+import { existsSync, readFileSync } from "node:fs";
+import { createTempRepo, runSmithers, writeTestWorkflow } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 describe("conflicting / invalid flag combinations", () => {
     test("--supervise without --serve on `up` exits non-zero with a clear message", () => {
@@ -24,12 +26,7 @@ describe("conflicting / invalid flag combinations", () => {
         expect(all.toLowerCase()).toContain("--serve");
     });
 
-    test.skip("FIXME(cli-resume-claim): --resume-claim-owner without --heartbeat should fail before workflow load", () => {
-        // Currently the CLI tries to load the workflow first (line ~1507
-        // in apps/cli/src/index.js) and only checks the resume-claim
-        // pairing after, so passing a non-existent workflow path masks
-        // this validation entirely. Move the check above the workflow
-        // load so this scenario fails on its own merits.
+    test("--resume-claim-owner without --heartbeat fails before workflow load", () => {
         const repo = createTempRepo();
         const result = runSmithers(
             ["up", "fake-workflow.tsx", "--resume-claim-owner", "owner-1"],
@@ -41,19 +38,14 @@ describe("conflicting / invalid flag combinations", () => {
         expect(all).toContain("--resume-claim-heartbeat");
     });
 
-    test.skip("FIXME(cli-unknown-cmd-exit): unknown subcommand should exit non-zero", () => {
-        // CLI currently prints a "command not found" surface but exits 0,
-        // which means CI treats `smithers totally-bogus` as a successful
-        // run. Confirmed reproducible with `smithers totally-bogus` →
-        // exit 0 + COMMAND_NOT_FOUND payload on stdout. Fix in the CLI
-        // command dispatcher: emit a non-zero exit code on unrecognized
-        // commands.
+    test("unknown subcommand exits non-zero", () => {
         const repo = createTempRepo();
         const result = runSmithers(["totally-not-a-real-subcommand"], {
             cwd: repo.dir,
             format: null,
         });
         expect(result.exitCode).not.toBe(0);
+        expect(result.stderr).toContain("Unknown command");
     });
 
     test("--input with malformed JSON does not produce a raw V8 stack trace", () => {
@@ -107,18 +99,87 @@ describe("NO_COLOR / TTY handling", () => {
     });
 });
 
-describe("--input streaming via stdin (FIXME: not implemented)", () => {
-    // The CLI does not currently support `--input -` to stream JSON from
-    // stdin (apps/cli/src/index.js parses --input as a literal JSON
-    // string only). These tests are placeholders so that, when the
-    // feature lands, they fail loudly until the contract is verified.
-    test.skip("FIXME(cli-stdin-input): `--input -` reads small JSON from stdin", () => {
-        expect(true).toBe(true);
+describe("--input streaming via stdin", () => {
+    test("`--input -` reads small JSON from stdin", () => {
+        const repo = createTempRepo();
+        writeTestWorkflow(repo);
+        const result = runSmithers(["up", "workflow.tsx", "--input", "-"], {
+            cwd: repo.dir,
+            format: "json",
+            stdin: JSON.stringify({ prompt: "from stdin" }),
+        });
+        expect(result.exitCode).toBe(0);
+        expect(result.json).toMatchObject({ status: "finished" });
+        const sqlite = new Database(repo.path("smithers.db"), { readonly: true });
+        try {
+            const row = sqlite.query('select prompt from "result" order by rowid desc limit 1').get();
+            expect(row?.prompt).toBe("from stdin");
+        }
+        finally {
+            sqlite.close();
+        }
     });
-    test.skip("FIXME(cli-stdin-input): malformed stdin JSON yields INVALID_JSON", () => {
-        expect(true).toBe(true);
+
+    test("malformed stdin JSON yields INVALID_JSON", () => {
+        const repo = createTempRepo();
+        const result = runSmithers(["up", "fake-workflow.tsx", "--input", "-"], {
+            cwd: repo.dir,
+            format: null,
+            stdin: "{not-json",
+        });
+        expect(result.exitCode).not.toBe(0);
+        expect(`${result.stdout}\n${result.stderr}`).toContain("INVALID_JSON");
     });
-    test.skip("FIXME(cli-stdin-input): stdin >1MB rejected at the documented limit (CLI_JSON_ARGUMENT_MAX_BYTES)", () => {
-        expect(true).toBe(true);
+
+    test("stdin over 1MB is rejected at the documented limit", () => {
+        const repo = createTempRepo();
+        const result = runSmithers(["up", "fake-workflow.tsx", "--input", "-"], {
+            cwd: repo.dir,
+            format: null,
+            stdin: JSON.stringify({ payload: "x".repeat(1024 * 1024 + 1) }),
+        });
+        expect(result.exitCode).not.toBe(0);
+        expect(`${result.stdout}\n${result.stderr}`).toContain("input");
     });
+});
+
+describe("--annotations streaming via stdin", () => {
+    test("detached runs serialize `--annotations -` before spawning the child", async () => {
+        const repo = createTempRepo();
+        writeTestWorkflow(repo);
+        const result = runSmithers(["up", "workflow.tsx", "--detach", "--annotations", "-"], {
+            cwd: repo.dir,
+            format: "json",
+            stdin: JSON.stringify({ channel: "ops" }),
+        });
+        expect(result.exitCode).toBe(0);
+        expect(result.json?.runId).toBeString();
+        expect(result.json?.logFile).toBeString();
+
+        let status;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            if (existsSync(repo.path("smithers.db"))) {
+                const sqlite = new Database(repo.path("smithers.db"), { readonly: true });
+                try {
+                    try {
+                        status = sqlite.query("select status from _smithers_runs where run_id = ?").get(result.json.runId)?.status;
+                    }
+                    catch (err) {
+                        if (!String(err?.message ?? err).includes("no such table: _smithers_runs")) {
+                            throw err;
+                        }
+                    }
+                }
+                finally {
+                    sqlite.close();
+                }
+                if (status && status !== "running") {
+                    break;
+                }
+            }
+            await Bun.sleep(50);
+        }
+        expect(status).toBe("finished");
+        expect(readFileSync(result.json.logFile, "utf8")).not.toContain("INVALID_JSON");
+    }, 15_000);
 });

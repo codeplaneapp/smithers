@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 import { setJsonMode } from "./util/logger.ts";
+import { findFirstPositionalIndex, parseMcpSurfaceArgv, rewriteBareResumeFlagArgv } from "./argv-utils.js";
+import { CLI_JSON_ARGUMENT_MAX_BYTES, parseJsonArgument, parseJsonInput } from "./json-args.js";
 import { resolve, dirname, basename } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFileSync, existsSync, openSync, statSync, mkdirSync, writeFileSync } from "node:fs";
@@ -152,7 +154,6 @@ function parseTokenScopes(raw) {
 const CLI_ARGUMENT_MAX_LENGTH = 4096;
 const CLI_IDENTIFIER_MAX_LENGTH = 256;
 const CLI_TEXT_ARGUMENT_MAX_LENGTH = 64 * 1024;
-const CLI_JSON_ARGUMENT_MAX_BYTES = 1024 * 1024;
 const CLI_HANDLER_BOUNDS_WRAPPED = Symbol("smithers.cliHandlerBoundsWrapped");
 /**
  * @param {string} path
@@ -250,55 +251,6 @@ function wrapCliCommandHandlersWithInputBounds(commands) {
         };
         entry[CLI_HANDLER_BOUNDS_WRAPPED] = true;
     }
-}
-/**
- * @param {string | undefined} raw
- * @param {string} label
- * @param {FailFn} fail
- */
-function parseJsonInput(raw, label, fail) {
-    if (!raw)
-        return undefined;
-    try {
-        return JSON.parse(raw);
-    }
-    catch (err) {
-        return fail({
-            code: "INVALID_JSON",
-            message: `Invalid JSON for ${label}: ${err?.message ?? String(err)}`,
-            exitCode: 4,
-        });
-    }
-}
-/**
- * @param {string | undefined} raw
- * @param {FailFn} fail
- * @returns {Record<string, string | number | boolean> | undefined}
- */
-function parseAnnotations(raw, fail) {
-    const parsed = parseJsonInput(raw, "annotations", fail);
-    if (parsed === undefined)
-        return undefined;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return fail({
-            code: "INVALID_ANNOTATIONS",
-            message: "Run annotations must be a flat JSON object of string/number/boolean values",
-            exitCode: 4,
-        });
-    }
-    /** @type {Record<string, string | number | boolean>} */
-    const annotations = {};
-    for (const [key, value] of Object.entries(parsed)) {
-        if (!["string", "number", "boolean"].includes(typeof value)) {
-            return fail({
-                code: "INVALID_ANNOTATIONS",
-                message: `Run annotation ${key} must be a string, number, or boolean`,
-                exitCode: 4,
-            });
-        }
-        annotations[key] = /** @type {string | number | boolean} */ (value);
-    }
-    return annotations;
 }
 /**
  * @param {string | undefined} status
@@ -1599,8 +1551,42 @@ function normalizeEventsQuery(options) {
 async function executeUpCommand(c, workflowPath, options, fail) {
     try {
         const resolvedWorkflowPath = resolve(process.cwd(), workflowPath);
-        const input = parseJsonInput(options.input, "input", fail) ?? {};
-        const annotations = parseAnnotations(options.annotations, fail);
+        let input;
+        let annotations;
+        try {
+            input = parseJsonArgument(options.input, "input") ?? {};
+            const parsedAnnotations = parseJsonArgument(options.annotations, "annotations");
+            if (parsedAnnotations === undefined) {
+                annotations = undefined;
+            }
+            else if (!parsedAnnotations || typeof parsedAnnotations !== "object" || Array.isArray(parsedAnnotations)) {
+                return fail({
+                    code: "INVALID_ANNOTATIONS",
+                    message: "Run annotations must be a flat JSON object of string/number/boolean values",
+                    exitCode: 4,
+                });
+            }
+            else {
+                annotations = {};
+                for (const [key, value] of Object.entries(parsedAnnotations)) {
+                    if (!["string", "number", "boolean"].includes(typeof value)) {
+                        return fail({
+                            code: "INVALID_ANNOTATIONS",
+                            message: `Run annotation ${key} must be a string, number, or boolean`,
+                            exitCode: 4,
+                        });
+                    }
+                    annotations[key] = /** @type {string | number | boolean} */ (value);
+                }
+            }
+        }
+        catch (err) {
+            return fail({
+                code: err instanceof SmithersError ? err.code : "INVALID_JSON",
+                message: err?.message ?? String(err),
+                exitCode: 4,
+            });
+        }
         const { resume, resumeRunId } = normalizeResumeOption(options.resume);
         const runId = options.runId ?? resumeRunId;
         // Detached mode: spawn ourselves as a background process
@@ -1610,9 +1596,9 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             if (runId)
                 childArgs.push("--run-id", runId);
             if (options.input)
-                childArgs.push("--input", options.input);
+                childArgs.push("--input", options.input === "-" ? JSON.stringify(input) : options.input);
             if (options.annotations)
-                childArgs.push("--annotations", options.annotations);
+                childArgs.push("--annotations", options.annotations === "-" ? JSON.stringify(annotations ?? {}) : options.annotations);
             if (options.maxConcurrency)
                 childArgs.push("--max-concurrency", String(options.maxConcurrency));
             if (options.root)
@@ -1695,6 +1681,13 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 exitCode: 4,
             });
         }
+        if (Boolean(options.resumeClaimOwner) !== Boolean(options.resumeClaimHeartbeat)) {
+            return fail({
+                code: "INVALID_RESUME_CLAIM",
+                message: "--resume-claim-owner and --resume-claim-heartbeat must be provided together.",
+                exitCode: 4,
+            });
+        }
         const workflow = await loadWorkflow(workflowPath);
         ensureSmithersTables(workflow.db);
         if (options.hot) {
@@ -1728,13 +1721,6 @@ async function executeUpCommand(c, workflowPath, options, fail) {
         const logDir = options.log ? options.logDir : null;
         const onProgress = buildProgressReporter();
         const abort = setupAbortSignal();
-        if (Boolean(options.resumeClaimOwner) !== Boolean(options.resumeClaimHeartbeat)) {
-            return fail({
-                code: "INVALID_RESUME_CLAIM",
-                message: "--resume-claim-owner and --resume-claim-heartbeat must be provided together.",
-                exitCode: 4,
-            });
-        }
         const resumeClaim = options.resumeClaimOwner && options.resumeClaimHeartbeat
             ? {
                 claimOwnerId: options.resumeClaimOwner,
@@ -5251,10 +5237,10 @@ wrapCliCommandHandlersWithInputBounds(cliCommands);
 // Main
 // ---------------------------------------------------------------------------
 const KNOWN_COMMANDS = new Set([
-    "init", "up", "eval", "supervise", "down", "ps", "logs", "events", "chat", "inspect", "node", "why", "approve", "deny",
-    "cancel", "graph", "revert", "scores", "observability", "workflow", "ask", "cron", "chat-create",
-    "replay", "diff", "fork", "timeline", "memory", "openapi", "token", "agents", "alerts",
-    "tree", "output", "rewind", "gui",
+    ...cliCommands.keys(),
+    "completions",
+    "mcp",
+    "skills",
 ]);
 /**
  * Rewrite `smithers .` or `smithers <path>` (when path looks like a directory) to `smithers gui <path>`.
@@ -5293,12 +5279,6 @@ function resolveCliColor(mode, stream) {
     if (process.env.NO_COLOR !== undefined && process.env.NO_COLOR.length > 0) return false;
     return Boolean(stream.isTTY);
 }
-const BUILTIN_FLAGS_WITH_VALUES = new Set([
-    "--format",
-    "--filter-output",
-    "--token-limit",
-    "--token-offset",
-]);
 const WORKFLOW_UTILITY_COMMANDS = new Set([
     "run",
     "list",
@@ -5308,41 +5288,6 @@ const WORKFLOW_UTILITY_COMMANDS = new Set([
     "skills",
     "doctor",
 ]);
-/**
- * @param {string | undefined} value
- * @returns {McpSurface}
- */
-function normalizeMcpSurface(value) {
-    const surface = value?.trim().toLowerCase();
-    if (surface === undefined || surface.length === 0) {
-        throw new Error("Missing value for --surface. Expected semantic, raw, or both.");
-    }
-    if (surface === "semantic" || surface === "raw" || surface === "both") {
-        return surface;
-    }
-    throw new Error(`Invalid --surface value: ${value}. Expected semantic, raw, or both.`);
-}
-/**
- * @param {string[]} argv
- */
-function parseMcpSurfaceArgv(argv) {
-    let surface = "semantic";
-    const filtered = [];
-    for (let index = 0; index < argv.length; index++) {
-        const arg = argv[index];
-        if (arg === "--surface") {
-            surface = normalizeMcpSurface(argv[index + 1]);
-            index += 1;
-            continue;
-        }
-        if (arg.startsWith("--surface=")) {
-            surface = normalizeMcpSurface(arg.slice("--surface=".length));
-            continue;
-        }
-        filtered.push(arg);
-    }
-    return { surface, argv: filtered };
-}
 /**
  * @param {ReturnType<typeof createSemanticMcpServer>} server
  */
@@ -5366,22 +5311,6 @@ function registerRawToolsOnMcpServer(server) {
             return IncurMcp.callTool(tool, params, extra);
         });
     }
-}
-/**
- * @param {string[]} argv
- * @returns {number}
- */
-function findFirstPositionalIndex(argv, startIndex = 0) {
-    for (let index = startIndex; index < argv.length; index++) {
-        const arg = argv[index];
-        if (!arg.startsWith("-")) {
-            return index;
-        }
-        if (BUILTIN_FLAGS_WITH_VALUES.has(arg)) {
-            index++;
-        }
-    }
-    return -1;
 }
 /**
  * @param {string[]} argv
@@ -5552,17 +5481,6 @@ function rewriteEventsJsonFlagArgv(argv) {
     return argv.map((arg) => (arg === "--json" ? "-j" : arg));
 }
 /**
- * Incur treats union-typed options as value-bearing flags, so a bare
- * `--resume --run-id value` would consume `--run-id` as the resume value.
- *
- * @param {string[]} argv
- */
-function rewriteBareResumeFlagArgv(argv) {
-    return argv.map((arg, index) => arg === "--resume" && (argv[index + 1] === undefined || argv[index + 1]?.startsWith("-"))
-        ? "--resume=true"
-        : arg);
-}
-/**
  * @param {unknown} value
  */
 function normalizeResumeOption(value) {
@@ -5724,6 +5642,12 @@ async function main() {
             "up",
             ...argv.slice(firstPositionalIndex),
         ];
+    }
+    const commandIndex = findFirstPositionalIndex(argv);
+    const command = commandIndex >= 0 ? argv[commandIndex] : undefined;
+    if (command && !KNOWN_COMMANDS.has(command)) {
+        console.error(`Unknown command: ${command}`);
+        process.exit(4);
     }
     argv = rewriteBareResumeFlagArgv(argv);
     // --mcp mode: the MCP server needs to stay alive listening on stdin.

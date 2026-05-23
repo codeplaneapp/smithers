@@ -60,9 +60,10 @@
     "lint": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore -A react/no-children-prop -A unicorn/no-thenable --ignore-pattern 'packages/*/src/**/*.d.ts' packages/*/src packages/*/tests",
     "lint:fix": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore -A react/no-children-prop -A unicorn/no-thenable --ignore-pattern 'packages/*/src/**/*.d.ts' --fix --fix-suggestions packages/*/src packages/*/tests",
     "cli": "bun run apps/cli/src/index.js",
-    "test": "node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && pnpm -r test",
+    "test": "node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-architecture-budget.mjs && pnpm -r test",
     "check:effect": "node scripts/check-single-effect-version.mjs",
     "check:deps": "node scripts/check-dependency-boundaries.mjs",
+    "check:architecture": "node scripts/check-architecture-budget.mjs",
     "docs": "cd docs && bunx mintlify dev",
     "version": "node scripts/bump.mjs",
     "release": "node scripts/publish.mjs"

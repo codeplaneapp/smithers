@@ -123,4 +123,23 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(regenerated).not.toContain("codex: CodexAgent");
         expect(regenerated).not.toContain("claude: ClaudeCodeAgent");
     });
+
+    test("preserves generated detection providers during account-driven rewrites", () => {
+        const env = newSmithersHome();
+        addAccount({ label: "codex-prod", provider: "codex", configDir: `${env.HOME}/.smithers/accounts/codex-prod` }, { env });
+        const previous = [
+            "// smithers-source: generated",
+            "export const providers = {",
+            "  claude: ClaudeCodeAgent,",
+            "  claudeSonnet: new SmithersClaudeCodeAgent({ model: \"claude-sonnet-4-7\", cwd: process.cwd() }),",
+            "} as const;",
+            "",
+        ].join("\n");
+        const generated = generateAgentsTs({ ...env, PATH: "/no-agent-binaries" }, {
+            preserveProviderIds: extractGeneratedDetectionProviderIds(previous),
+        });
+        expect(generated).toContain("claude: ClaudeCodeAgent");
+        expect(generated).toContain("claudeSonnet: new SmithersClaudeCodeAgent(");
+        expect(generated).toContain("codexProd: new SmithersCodexAgent(");
+    });
 });
