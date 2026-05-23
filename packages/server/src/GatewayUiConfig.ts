@@ -1,7 +1,8 @@
-export type GatewayUiConfig = {
+export type GatewayUiConfig = true | {
   /**
    * Browser entry module for the React app. Smithers bundles this with Bun and
-   * serves it from the Gateway origin.
+   * serves it from the Gateway origin. Pass `true` to mount the built-in
+   * operator console.
    */
   entry: string;
   /**

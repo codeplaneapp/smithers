@@ -135,10 +135,11 @@ type GatewayOperatorUiConfig$1 = {
     props?: Record<string, unknown>;
 };
 
-type GatewayUiConfig$1 = {
+type GatewayUiConfig$1 = true | {
     /**
      * Browser entry module for the React app. Smithers bundles this with Bun and
-     * serves it from the Gateway origin.
+     * serves it from the Gateway origin. Pass `true` to mount the built-in
+     * operator console.
      */
     entry: string;
     /**
@@ -355,11 +356,6 @@ declare class Gateway {
         body: string;
         contentType: string;
     } | null>;
-    /**
-   * @param {ResolvedGatewayUiConfig} config
-   * @returns {Promise<string>}
-   */
-    bundleUiEntry(config: ResolvedGatewayUiConfig): Promise<string>;
     /**
    * @param {IncomingMessage} req
    * @param {ServerResponse} res

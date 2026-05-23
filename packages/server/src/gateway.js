@@ -40,7 +40,10 @@ import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-trave
 import { GATEWAY_EVENT_WINDOW_DEFAULT, SMITHERS_API_VERSION, getRequiredScopeForGatewayMethod, } from "@smithers-orchestrator/gateway/rpc";
 import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
 import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
-import { DEFAULT_OPERATOR_UI_CLIENT_JS, DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
+import { renderDefaultConsoleClient } from "./gatewayUi/defaultConsole.js";
+import { authorizeGatewayUiRequest } from "./gatewayUi/auth.js";
+import { bundleGatewayUiEntry } from "./gatewayUi/bundle.js";
+import { DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
 /** @typedef {import("./GatewayWebhookRunConfig.js").GatewayWebhookRunConfig} GatewayWebhookRunConfig */
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
@@ -197,6 +200,15 @@ function joinUiPath(mountPath, suffix) {
 function resolveGatewayUiConfig(ui, fallbackPath) {
     if (!ui) {
         return null;
+    }
+    if (ui === true) {
+        return {
+            entry: DEFAULT_OPERATOR_UI_ENTRY,
+            path: normalizeUiMountPath(fallbackPath === "/" ? "/console" : fallbackPath, fallbackPath),
+            title: "Smithers Operator Console",
+            builtin: "operator",
+            props: {},
+        };
     }
     if (typeof ui.entry !== "string" || !ui.entry.trim()) {
         throw new SmithersError("INVALID_INPUT", "Gateway UI config requires a non-empty entry path.");
@@ -1280,7 +1292,11 @@ export class Gateway {
     getUiMounts() {
         const mounts = [];
         if (this.ui) {
-            mounts.push({ kind: "gateway", workflowKey: null, config: this.ui });
+            mounts.push({
+                kind: this.ui.builtin === "operator" ? "operator" : "gateway",
+                workflowKey: null,
+                config: this.ui,
+            });
         }
         if (this.operatorUi && (!this.ui || this.ui.path !== this.operatorUi.path)) {
             mounts.push({ kind: "operator", workflowKey: null, config: this.operatorUi });
@@ -1368,48 +1384,17 @@ export class Gateway {
         if (match.assetPath !== "client.js") {
             return null;
         }
-        const body = await this.bundleUiEntry(match.config.config);
+        if (match.config.config.builtin === "operator") {
+            return {
+                body: renderDefaultConsoleClient(),
+                contentType: "text/javascript; charset=utf-8",
+            };
+        }
+        const body = await bundleGatewayUiEntry(match.config.config, this.uiAssetCache);
         return {
             body,
             contentType: "text/javascript; charset=utf-8",
         };
-    }
-    /**
-   * @param {ResolvedGatewayUiConfig} config
-   * @returns {Promise<string>}
-   */
-    async bundleUiEntry(config) {
-        if (config.entry === DEFAULT_OPERATOR_UI_ENTRY) {
-            return DEFAULT_OPERATOR_UI_CLIENT_JS;
-        }
-        const cached = this.uiAssetCache.get(config.entry);
-        if (cached) {
-            return cached;
-        }
-        if (typeof Bun === "undefined" || typeof Bun.build !== "function") {
-            throw new SmithersError("INVALID_INPUT", "Gateway UI bundling requires Bun.build.");
-        }
-        const result = await Bun.build({
-            entrypoints: [config.entry],
-            root: process.cwd(),
-            target: "browser",
-            format: "esm",
-            sourcemap: "inline",
-            minify: false,
-            jsx: {
-                runtime: "automatic",
-                importSource: "react",
-            },
-        });
-        if (!result.success) {
-            const message = result.logs?.map((entry) => entry.message).filter(Boolean).join("\n")
-                || `Failed to build Gateway UI entry ${config.entry}`;
-            throw new SmithersError("INVALID_INPUT", message);
-        }
-        const output = result.outputs.find((entry) => entry.path.endsWith(".js")) ?? result.outputs[0];
-        const body = await output.text();
-        this.uiAssetCache.set(config.entry, body);
-        return body;
     }
     /**
    * @param {IncomingMessage} req
@@ -1420,6 +1405,21 @@ export class Gateway {
             return false;
         }
         const host = headerValue(req, "host") ?? "127.0.0.1";
+        const url = new URL(`http://${host}${req.url ?? "/"}`);
+        const uiMatch = this.resolveUiMatch(url.pathname);
+        if (!uiMatch) {
+            return false;
+        }
+        const uiAuthFailure = await authorizeGatewayUiRequest({
+            match: uiMatch,
+            authMode: gatewayAuthMode(this.auth),
+            token: bearerTokenFromHeaders(req),
+            authenticate: (token) => this.authenticateRequest(req, token),
+        });
+        if (uiAuthFailure) {
+            sendJson(res, statusForRpcError(uiAuthFailure.code), responseError(randomUUID(), uiAuthFailure.code, uiAuthFailure.message, uiAuthFailure.details));
+            return true;
+        }
         const request = new Request(`http://${host}${req.url ?? "/"}`, {
             method: "GET",
             headers: nodeHeadersToFetchHeaders(req.headers),

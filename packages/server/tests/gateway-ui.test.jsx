@@ -117,6 +117,61 @@ describe("Gateway UI", () => {
     expect(asset).toContain('rpc("submitApproval"');
   });
 
+  test("serves the built-in operator console from ui=true without a custom bundle", async () => {
+    gateway = new Gateway({ ui: true });
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+
+    const htmlResponse = await fetch(`http://127.0.0.1:${port}/console`);
+    expect(htmlResponse.status).toBe(200);
+    const html = await htmlResponse.text();
+    expect(html).toContain("<title>Smithers Operator Console</title>");
+    expect(html).toContain('"kind":"operator"');
+    expect(html).toContain('"mountPath":"/console"');
+    expect(html).toContain('/console/__smithers_ui/client.js');
+
+    const assetResponse = await fetch(`http://127.0.0.1:${port}/console/__smithers_ui/client.js`);
+    expect(assetResponse.status).toBe(200);
+    const asset = await assetResponse.text();
+    expect(asset).toContain("Smithers Console");
+    expect(asset).toContain("listWorkflows");
+    expect(asset).toContain("submitApproval");
+    expect(asset).not.toContain("localStorage");
+  });
+
+  test("requires bearer auth for the built-in operator console when gateway auth is configured", async () => {
+    gateway = new Gateway({
+      ui: true,
+      auth: {
+        mode: "token",
+        tokens: {
+          "operator-token": {
+            role: "operator",
+            scopes: ["*"],
+            userId: "user:operator",
+          },
+        },
+      },
+    });
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+
+    const anonymous = await fetch(`http://127.0.0.1:${port}/console`);
+    expect(anonymous.status).toBe(401);
+
+    const authorized = await fetch(`http://127.0.0.1:${port}/console`, {
+      headers: { authorization: "Bearer operator-token" },
+    });
+    expect(authorized.status).toBe(200);
+    expect(await authorized.text()).toContain("<title>Smithers Operator Console</title>");
+
+    const asset = await fetch(`http://127.0.0.1:${port}/console/__smithers_ui/client.js`, {
+      headers: { authorization: "Bearer operator-token" },
+    });
+    expect(asset.status).toBe(200);
+    expect(await asset.text()).toContain("Smithers Console");
+  });
+
   test("allows the built-in operator console to be disabled", async () => {
     gateway = new Gateway({ operatorUi: false });
     const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
