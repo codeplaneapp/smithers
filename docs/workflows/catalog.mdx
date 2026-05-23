@@ -1,0 +1,39 @@
+---
+title: Workflow Catalog
+description: Canonical workflow packs and marketplace-ready metadata.
+---
+
+The default `.smithers` pack is the canonical starting catalog. It gives teams useful workflows immediately, and each entry is normal TSX that can be edited, copied, or published as part of a larger pack.
+
+## Canonical Packs
+
+| Pack | Workflows | Audience |
+| --- | --- | --- |
+| Build | `implement`, `research-plan-implement`, `mission`, `kanban`, `ralph` | Teams delegating code changes to long-running agents. |
+| Plan | `research`, `plan`, `write-a-prd`, `ticket-create`, `tickets-create`, `grill-me` | Product, engineering, and operations users turning ambiguous work into scoped tickets. |
+| Quality | `review`, `debug`, `improve-test-coverage`, `feature-enum`, `audit` | Maintainers who need repeatable review, diagnostics, and test hardening. |
+
+## Marketplace Metadata
+
+Workflow packs should document:
+
+- workflow ID and display name
+- required agents and tools
+- required Gateway scopes
+- input schema and example input
+- expected outputs
+- whether the workflow writes files, opens pull requests, or needs approval
+- recommended sandbox runtime
+- validation command
+
+Use that metadata in README files, internal catalogs, or hosted pack registries. A pack that is clear about permissions, inputs, and outputs is easier for non-coders to run safely.
+
+## Publishing Checklist
+
+Before sharing a workflow pack:
+
+- Run the workflow on a disposable repository.
+- Confirm every write path goes through approval or review when needed.
+- Include screenshots or Gateway console steps for non-coder operators.
+- Include a small example input and the expected final output.
+- Note which failures are safe to retry and which require human intervention.
