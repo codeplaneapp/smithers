@@ -6,6 +6,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { spawnCaptureEffect } from "@smithers-orchestrator/driver/child-process";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { SandboxEntityExecutor } from "./sandbox-entity.js";
+import { dockerArgs, normalizeSandboxHandleControls, sandboxRunnerEnv, spawnSandboxCommand } from "./process-runner.js";
 /** @typedef {import("../SandboxTransportConfig.ts").SandboxTransportConfig} SandboxTransportConfig */
 /** @typedef {import("../SandboxHandle.ts").SandboxHandle} SandboxHandle */
 /**
@@ -14,6 +15,7 @@ import { SandboxEntityExecutor } from "./sandbox-entity.js";
  */
 function baseHandle(config) {
     const sandboxRoot = join(config.rootDir, ".smithers", "sandboxes", config.runId, config.sandboxId);
+    const controls = normalizeSandboxHandleControls(config);
     return {
         runtime: config.runtime,
         runId: config.runId,
@@ -21,6 +23,9 @@ function baseHandle(config) {
         sandboxRoot,
         requestPath: join(sandboxRoot, "request"),
         resultPath: join(sandboxRoot, "result"),
+        image: config.image,
+        allowNetwork: Boolean(config.allowNetwork),
+        ...controls,
     };
 }
 /** @type {Layer.Layer<SandboxEntityExecutor, never, never>} */
@@ -29,7 +34,7 @@ export const DockerSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor, Sa
         const handle = baseHandle(config);
         yield* spawnCaptureEffect("docker", ["info"], {
             cwd: config.rootDir,
-            env: process.env,
+            env: sandboxRunnerEnv(),
             timeoutMs: 10_000,
             maxOutputBytes: 200_000,
         }).pipe(Effect.catchAll(() => Effect.fail(new SmithersError("PROCESS_SPAWN_FAILED", "Docker daemon not reachable.", { runtime: "docker" }))));
@@ -50,9 +55,15 @@ export const DockerSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor, Sa
         },
         catch: (cause) => toSmithersError(cause, "ship docker bundle"),
     }),
-    execute: (_command, _handle) => Effect.succeed({ exitCode: 0 }),
+    execute: (command, handle) => spawnSandboxCommand("docker", dockerArgs(command, handle), {
+        cwd: handle.requestPath,
+        runtime: "docker",
+    }),
     collect: (handle) => Effect.succeed({ bundlePath: handle.resultPath }),
-    cleanup: (_handle) => Effect.void,
+    cleanup: (handle) => Effect.tryPromise({
+        try: () => rm(handle.requestPath, { recursive: true, force: true }),
+        catch: (cause) => toSmithersError(cause, "cleanup docker sandbox workspace"),
+    }),
 }));
 /** @type {Layer.Layer<SandboxEntityExecutor, never, never>} */
 export const CodeplaneSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor, SandboxEntityExecutor.of({
@@ -83,8 +94,15 @@ export const CodeplaneSandboxExecutorLive = Layer.succeed(SandboxEntityExecutor,
         },
         catch: (cause) => toSmithersError(cause, "ship codeplane bundle"),
     }),
-    execute: (_command, _handle) => Effect.succeed({ exitCode: 0 }),
+    execute: (command, handle) => Effect.fail(new SmithersError("SANDBOX_EXECUTION_FAILED", "Codeplane sandbox command execution requires the remote Codeplane worker integration.", {
+        runtime: "codeplane",
+        command,
+        workspaceId: handle.workspaceId ?? null,
+    })),
     collect: (handle) => Effect.succeed({ bundlePath: handle.resultPath }),
-    cleanup: (_handle) => Effect.void,
+    cleanup: (handle) => Effect.tryPromise({
+        try: () => rm(handle.requestPath, { recursive: true, force: true }),
+        catch: (cause) => toSmithersError(cause, "cleanup codeplane sandbox workspace"),
+    }),
 }));
 export const SandboxHttpRunner = HttpRunner;

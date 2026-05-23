@@ -1,10 +1,11 @@
 // Sandbox isolation tests.
 //
-// Scope: this file does NOT require live container/jail binaries
+// Scope: this file does NOT exercise live container/jail isolation
 // (bubblewrap on Linux, sandbox-exec on macOS, docker, codeplane).
-// Runtime-specific process execution is covered in transport-runners.test.js
-// with fake binaries so CI can validate the executor contract without a
-// privileged sandbox image.
+// Those runtimes are environment-dependent and the local
+// local transports are exercised with fake runtime binaries in
+// transport-runners.test.js, but this file still avoids host-specific process
+// isolation assertions.
 //
 // What IS enforceable in-process and exercised here:
 //   - resolveSandboxPath path traversal validation (../../, absolute paths, symlink
@@ -15,8 +16,8 @@
 //   - walkFiles handling of symlinks and deeply nested artifacts.
 //   - Cleanup of the sandbox temp directory after a write.
 //
-// Full host isolation still needs environment-specific e2e coverage on a CI
-// image that includes bubblewrap or sandbox-exec.
+// Host-level process tests remain opt-in because they require the real runtime
+// binaries and platform privileges.
 import { describe, expect, test } from "bun:test";
 import {
 	mkdtempSync,
@@ -163,11 +164,7 @@ describe("sandbox isolation: bundle artifact safety", () => {
 		);
 	});
 
-	test("symlink artifact inside bundle is silently skipped (not counted as patch)", async () => {
-		// walkFiles ignores entries that aren't isFile(); symlinks land in
-		// neither directory nor file branch. This documents that behaviour:
-		// a symlink can't smuggle bytes past the limit, but it also won't
-		// become a recognised patch file.
+	test("symlink artifact inside bundle is rejected during collection", async () => {
 		const bundlePath = tempDir("sandbox-bundle-");
 		const outside = tempDir("sandbox-outside-");
 		writeFileSync(join(outside, "leak"), "secret", "utf8");
@@ -181,9 +178,23 @@ describe("sandbox isolation: bundle artifact safety", () => {
 			join(outside, "leak"),
 			join(bundlePath, "patches", "0001-symlink.patch"),
 		);
-		const validated = await validateSandboxBundle(bundlePath);
-		// Symlink was not collected as a real patch file.
-		expect(validated.patchFiles).toEqual([]);
+		await expect(validateSandboxBundle(bundlePath)).rejects.toThrow(
+			"may not contain symlinks",
+		);
+	});
+
+	test("README.md symlink is rejected before reading outside content", async () => {
+		const bundlePath = tempDir("sandbox-bundle-");
+		const outside = tempDir("sandbox-outside-");
+		writeFileSync(
+			join(outside, "README.md"),
+			JSON.stringify({ status: "finished", outputs: { leaked: true } }),
+			"utf8",
+		);
+		symlinkSync(join(outside, "README.md"), join(bundlePath, "README.md"));
+		await expect(validateSandboxBundle(bundlePath)).rejects.toThrow(
+			"README.md may not be a symlink",
+		);
 	});
 
 	test("deeply nested artifact paths within bundle are accepted and resolvable", async () => {
@@ -232,12 +243,16 @@ describe("sandbox isolation: cleanup", () => {
 		expect(existsSync(bundlePath)).toBe(false);
 	});
 
-	// Testing "no orphan processes via ps" and "cleanup after crash
-	// (process killed mid-run)" requires a CI image with a real sandbox binary.
+	// FIXME: testing "no orphan processes via ps" and "cleanup after crash
+	// (process killed mid-run)" requires spawning a real sandbox subprocess
+	// against bubblewrap/docker, which is unavailable in this unit-test
+	// environment. Local transport cleanup is covered in
+	// transport-runners.test.js with fake runtime binaries; promote the
+	// host-level process assertions once a CI image with `bwrap` exists.
 	test.skip("sandbox cleanup after timeout removes temp dir and leaves no orphan processes", () => {
-		// Requires real sandbox runtime; see file-top scope note.
+		// Requires real sandbox runtime; see file-top FIXME.
 	});
 	test.skip("sandbox cleanup after crash (process killed mid-run)", () => {
-		// Requires real sandbox runtime; see file-top scope note.
+		// Requires real sandbox runtime; see file-top FIXME.
 	});
 });

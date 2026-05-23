@@ -137,6 +137,16 @@ describe("executeSandbox", () => {
         );
         const handle = { sandboxId: "ok" };
         expect(__executeSandboxInternals.requireSandboxHandle(handle, "ok")).toBe(handle);
+        expect(__executeSandboxInternals.resolveSandboxCommand("custom run")).toBe("custom run");
+        expect(__executeSandboxInternals.resolveSandboxCommand("   ")).toBe("smithers up bundle.tsx");
+        expect(__executeSandboxInternals.resolveSandboxCommand(undefined)).toBe("smithers up bundle.tsx");
+        expect(__executeSandboxInternals.redactSandboxConfig({
+            image: "example/sandbox",
+            env: { SECRET_TOKEN: "secret", PUBLIC_MODE: "test" },
+        })).toEqual({
+            image: "example/sandbox",
+            env: { PUBLIC_MODE: "[redacted]", SECRET_TOKEN: "[redacted]" },
+        });
     });
 
     test("runs a child workflow, collects the bundle, and persists sandbox events", async () => {
@@ -198,18 +208,9 @@ describe("executeSandbox", () => {
             });
             expect(existsSync(String(sandbox.bundlePath))).toBe(true);
 
-            const requestReadme = JSON.parse(
-                readFileSync(
-                    join(rootDir, ".smithers", "sandboxes", "parent-run", "sandbox-success", "request", "README.md"),
-                    "utf8",
-                ),
-            );
-            expect(requestReadme).toMatchObject({
-                status: "pending",
-                sandboxId: "sandbox-success",
-                runtime: "codeplane",
-                input: { prompt: "ship it" },
-            });
+            expect(
+                existsSync(join(rootDir, ".smithers", "sandboxes", "parent-run", "sandbox-success", "request")),
+            ).toBe(false);
 
             const resultReadme = JSON.parse(
                 readFileSync(join(String(sandbox.bundlePath), "README.md"), "utf8"),
@@ -240,6 +241,31 @@ describe("executeSandbox", () => {
                 "SandboxBundleReceived",
                 "SandboxCompleted",
             ]);
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
+    test("redacts sandbox env values in persisted config while passing controls to transport", async () => {
+        const { adapter, db, sqlite } = createDb();
+        const runtime = createRuntime(db, { runId: "run-redacted-env" });
+        try {
+            await withCodeplaneEnv(() =>
+                runInRuntime(runtime, {
+                    sandboxId: "sandbox-redacted-env",
+                    config: {
+                        env: { SECRET_TOKEN: "secret-value" },
+                        workspace: { name: "review-workspace" },
+                    },
+                }),
+            );
+            const sandbox = await adapter.getSandbox("run-redacted-env", "sandbox-redacted-env");
+            expect(JSON.parse(String(sandbox.configJson))).toMatchObject({
+                env: { SECRET_TOKEN: "[redacted]" },
+                workspace: { name: "review-workspace" },
+            });
+            expect(String(sandbox.configJson)).not.toContain("secret-value");
         }
         finally {
             sqlite.close();

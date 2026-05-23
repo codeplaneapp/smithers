@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { assertJsonPayloadWithinBounds, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, } from "@smithers-orchestrator/db/input-bounds";
@@ -27,12 +27,17 @@ async function walkFiles(dir) {
         const entries = await readdir(current, { withFileTypes: true });
         for (const entry of entries) {
             const full = join(current, entry.name);
-            if (entry.isDirectory()) {
+            const info = await lstat(full);
+            if (info.isSymbolicLink()) {
+                throw new SmithersError("TOOL_PATH_ESCAPE", "Sandbox bundle may not contain symlinks.", {
+                    path: relative(dir, full),
+                });
+            }
+            if (info.isDirectory()) {
                 pending.push(full);
             }
-            else if (entry.isFile()) {
+            else if (info.isFile()) {
                 files.push(full);
-                const info = await stat(full);
                 totalBytes += info.size;
             }
         }
@@ -133,7 +138,10 @@ async function validateSandboxBundleWriteParams(params) {
  */
 export async function validateSandboxBundle(bundlePath) {
     const resolvedReadme = resolveSandboxPath(bundlePath, "README.md");
-    const readmeStats = await stat(resolvedReadme).catch(() => null);
+    const readmeStats = await lstat(resolvedReadme).catch(() => null);
+    if (readmeStats?.isSymbolicLink()) {
+        throw new SmithersError("TOOL_PATH_ESCAPE", "Sandbox bundle README.md may not be a symlink.", { bundlePath });
+    }
     if (!readmeStats?.isFile()) {
         throw new SmithersError("INVALID_INPUT", "Sandbox bundle is missing README.md", { bundlePath });
     }
@@ -160,7 +168,10 @@ export async function validateSandboxBundle(bundlePath) {
         assertPatchPathSafe(bundlePath, patchPath);
     }
     const logsPath = resolveSandboxPath(bundlePath, "logs/stream.ndjson");
-    const logsStats = await stat(logsPath).catch(() => null);
+    const logsStats = await lstat(logsPath).catch(() => null);
+    if (logsStats?.isSymbolicLink()) {
+        throw new SmithersError("TOOL_PATH_ESCAPE", "Sandbox bundle logs may not be a symlink.", { bundlePath });
+    }
     return {
         manifest,
         bundleSizeBytes: walked.totalBytes,

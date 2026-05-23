@@ -55,12 +55,34 @@ type ValidatedSandboxBundle = ValidatedSandboxBundle$1;
 
 type SandboxRuntime$1 = "bubblewrap" | "docker" | "codeplane";
 
+type SandboxPortMapping = {
+    host: number;
+    container: number;
+};
+type SandboxVolumeMount = {
+    host: string;
+    container: string;
+    readonly?: boolean;
+};
+type SandboxWorkspaceSpec = {
+    name: string;
+    snapshotId?: string;
+    idleTimeoutSecs?: number;
+    persistence?: "ephemeral" | "sticky";
+};
 type SandboxTransportConfig$1 = {
     runId: string;
     sandboxId: string;
     runtime: SandboxRuntime$1;
     rootDir: string;
     image?: string;
+    allowNetwork?: boolean;
+    env?: Record<string, string>;
+    ports?: SandboxPortMapping[];
+    volumes?: SandboxVolumeMount[];
+    memoryLimit?: string;
+    cpuLimit?: string;
+    workspace?: SandboxWorkspaceSpec;
 };
 
 type SandboxHandle = {
@@ -70,6 +92,14 @@ type SandboxHandle = {
     sandboxRoot: string;
     requestPath: string;
     resultPath: string;
+    image?: string;
+    allowNetwork?: boolean;
+    env?: Record<string, string>;
+    ports?: SandboxPortMapping[];
+    volumes?: SandboxVolumeMount[];
+    memoryLimit?: string;
+    cpuLimit?: string;
+    workspace?: SandboxWorkspaceSpec;
     containerId?: string;
     workspaceId?: string;
 };

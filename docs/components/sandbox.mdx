@@ -1,6 +1,6 @@
 ---
 title: <Sandbox>
-description: Run a child workflow in an isolated runtime; collect its result bundle.
+description: Run a child workflow with sandbox bundle collection, diff review, and runtime-specific isolation controls.
 ---
 
 ```ts
@@ -29,7 +29,7 @@ type SandboxProps = {
   volumes?: SandboxVolumeMount[];
   memoryLimit?: string; // e.g. "512m", "2g"
   cpuLimit?: string; // e.g. "0.5", "2"
-  command?: string; // override default `smithers up bundle.tsx`
+  command?: string; // optional runtime command executed inside the selected sandbox
   workspace?: SandboxWorkspaceSpec; // codeplane only
   skipIf?: boolean;
   timeoutMs?: number;
@@ -69,4 +69,8 @@ type SandboxProps = {
 
 - Bundle limits: 100 MB total, 5 MB manifest, 1,000 patches max; path traversal rejected.
 - Concurrency cap via `SMITHERS_MAX_CONCURRENT_SANDBOXES` (default 10).
+- `bubblewrap`, macOS `sandbox-exec`, and `docker` transports execute configured commands inside their runtime instead of silently succeeding. `codeplane` still requires a remote worker integration for command execution.
+- The default path runs the supplied child workflow and collects its result bundle. Set `command` when the transport itself should invoke a process before the child workflow handoff.
 - `cleanup` always runs in `finally`; `codeplane` requires `CODEPLANE_API_URL` and `CODEPLANE_API_KEY`.
+- `allowNetwork`, `image`, `env`, `ports`, `volumes`, `memoryLimit`, `cpuLimit`, and `workspace` are runtime controls. Verify the selected runtime enforces the controls your workflow depends on before running untrusted code.
+- Patch review is on by default. Set `autoAcceptDiffs` only for workflows whose output can be applied without a human review step.
