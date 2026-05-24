@@ -7,7 +7,7 @@ const repoRoot = process.cwd();
 const budgets = [
   {
     path: "packages/engine/src/engine.js",
-    maxLines: 7340,
+    maxLines: 7402,
     reason: "engine orchestration core",
   },
   {

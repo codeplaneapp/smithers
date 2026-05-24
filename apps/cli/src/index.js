@@ -40,7 +40,7 @@ import { detectAvailableAgents } from "./agent-detection.js";
 import { listAccounts, removeAccount } from "@smithers-orchestrator/accounts";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
-import { initWorkflowPack, getWorkflowFollowUpCtas } from "./workflow-pack.js";
+import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles } from "./workflows.js";
 import {
     assertEvalRunIdsAvailable,
@@ -53,7 +53,8 @@ import {
     renderEvalReport,
     writeEvalReport,
 } from "./eval-suite.js";
-import { STARTER_TEMPLATE_IDS, buildStarterGallery, findStarterRecipe, renderStarterGallery } from "./starter-gallery.js";
+import { initOptions, runInitCommand } from "./init-command.js";
+import { startersArgs, startersOptions, runStartersCommand } from "./starter-gallery-command.js";
 import { ask } from "./ask.js";
 import { runScheduler } from "./scheduler.js";
 import { resumeRunDetached } from "./resume-detached.js";
@@ -1408,26 +1409,6 @@ const revertOptions = z.object({
     attempt: z.number().int().min(1).default(1).describe("Attempt number"),
     iteration: z.number().int().min(0).default(0).describe("Loop iteration number"),
 });
-const initTemplateOption = z
-    .union(STARTER_TEMPLATE_IDS.map((id) => z.literal(id)))
-    .optional()
-    .describe("Show next steps for a canonical starter template ID after init");
-const initOptions = z.object({
-    force: z.boolean().default(false).describe("Overwrite existing scaffold files"),
-    agentsOnly: z.boolean().default(false).describe("Only create .smithers/agents/ and leave the rest of the workflow pack untouched"),
-    install: z.boolean().default(true).describe("Run `bun install` inside .smithers/ after scaffolding (--no-install to skip)"),
-    addAgents: z.boolean().default(false).describe("After scaffolding, launch the interactive `agents add` wizard to register one or more accounts."),
-    template: initTemplateOption,
-});
-const startersArgs = z.object({
-    id: z.string().optional().describe("Starter ID or alias"),
-});
-const startersOptions = z.object({
-    audience: z.string().optional().describe("Filter by audience, such as product, support, or founder"),
-    goal: z.string().optional().describe("Filter by goal, such as plan, build, debug, or quality"),
-    workflow: z.string().optional().describe("Filter by seeded workflow ID"),
-    tag: z.string().optional().describe("Filter by starter tag"),
-});
 const workflowPathArgs = z.object({
     name: z.string().describe("Workflow ID"),
 });
@@ -2685,61 +2666,7 @@ const cli = Cli.create({
             commandExitOverride = opts.exitCode ?? 1;
             return c.error(opts);
         };
-        try {
-            const selectedTemplate = c.options.template ? findStarterRecipe(c.options.template) : undefined;
-            const result = initWorkflowPack({
-                force: c.options.force,
-                agentsOnly: c.options.agentsOnly,
-                skipInstall: c.options.agentsOnly || !c.options.install,
-            });
-            if (selectedTemplate) {
-                const gallery = buildStarterGallery({ id: selectedTemplate.id });
-                result.template = gallery.selected;
-            }
-            if (c.options.addAgents) {
-                const added = await agentAddWizard({ loop: true });
-                result.addedAccounts = added;
-                // Regenerate agents.ts now that accounts are in place — the
-                // initial generateAgentsTs() call ran before any accounts
-                // existed, so it produced the detection-based file.
-                if (added.length > 0) {
-                    const { regenerateAgentsTsIfPresent } = await import("./agent-commands/regenerateAgentsTsIfPresent.js");
-                    result.regen = regenerateAgentsTsIfPresent();
-                }
-            }
-            return c.ok(result, c.options.agentsOnly
-                ? undefined
-                : {
-                    cta: {
-                        description: "Next steps:",
-                        commands: selectedTemplate
-                            ? [
-                                { command: result.template.command.replace(/^bunx smithers-orchestrator\s+/, ""), description: `Run ${result.template.id}` },
-                                { command: "starters", description: "Browse the other templates" },
-                                { command: "workflow list", description: "View all available workflows" },
-                            ]
-                            : [
-                                { command: "init --template <id>", description: "Start from a guided template" },
-                                { command: "starters", description: "Browse templates by outcome" },
-                                { command: "workflow list", description: "View all available workflows" },
-                            ],
-                    },
-                });
-        }
-        catch (err) {
-            if (err instanceof SmithersError) {
-                return fail({
-                    code: err.code,
-                    message: err.message,
-                    exitCode: 4,
-                });
-            }
-            return fail({
-                code: "INIT_FAILED",
-                message: err?.message ?? String(err),
-                exitCode: 1,
-            });
-        }
+        return runInitCommand(c, fail);
     },
 })
     // =========================================================================
@@ -2750,30 +2677,11 @@ const cli = Cli.create({
     args: startersArgs,
     options: startersOptions,
     run(c) {
-        if (c.args.id && !findStarterRecipe(c.args.id)) {
-            commandExitOverride = 4;
-            return c.error({
-                code: "STARTER_NOT_FOUND",
-                message: `Starter not found: ${c.args.id}. Run "bunx smithers-orchestrator starters" to list available starters.`,
-                details: {
-                    availableStarters: buildStarterGallery().starters.map((starter) => starter.id),
-                },
-                exitCode: 4,
-            });
-        }
-        const gallery = buildStarterGallery({
-            id: c.args.id,
-            audience: c.options.audience,
-            goal: c.options.goal,
-            workflow: c.options.workflow,
-            tag: c.options.tag,
-        });
-        const explicitFormat = process.argv.some((arg) => arg === "--format" || arg.startsWith("--format="));
-        if (explicitFormat || c.format === "json" || c.format === "jsonl") {
-            return c.ok(gallery);
-        }
-        process.stdout.write(`${renderStarterGallery(gallery)}\n`);
-        return undefined;
+        const fail = (opts) => {
+            commandExitOverride = opts.exitCode ?? 1;
+            return c.error(opts);
+        };
+        return runStartersCommand(c, fail);
     },
 })
     // =========================================================================
