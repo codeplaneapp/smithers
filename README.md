@@ -8,10 +8,10 @@ Write agent workflows as TypeScript, run them for minutes or days, and keep the 
 
 ```bash
 bunx smithers-orchestrator@latest init
-bunx smithers-orchestrator@latest starters
+bunx smithers-orchestrator@latest init --template idea-to-prd
 ```
 
-This scaffolds a `.smithers/` folder with canonical workflows for implementation, review, debugging, planning, audits, and long-horizon missions. `starters` shows plain-English outcomes like product briefs, support incident fixes, launch checklists, quality audits, and larger milestone projects, then gives you the exact command to run.
+This scaffolds a `.smithers/` folder with canonical workflows for implementation, review, debugging, planning, audits, and long-horizon missions. Add `--template <id>` with a canonical starter ID when you want guided next steps for plain-English outcomes like product briefs, support incident fixes, launch checklists, quality audits, and larger milestone projects. Run `bunx smithers-orchestrator@latest starters` to browse the template IDs.
 
 Use the `smithers` CLI or Gateway console to operate runs.
 

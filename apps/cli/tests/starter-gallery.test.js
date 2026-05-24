@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createTempRepo, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 import {
     STARTER_RECIPES,
+    STARTER_TEMPLATE_IDS,
     buildStarterGallery,
     findStarterRecipe,
     listStarterRecipes,
@@ -44,6 +45,7 @@ describe("starter gallery data", () => {
             expect(starter.outcome.length).toBeGreaterThan(20);
             expect(starterCommand(starter)).toStartWith(`bunx smithers-orchestrator workflow run ${starter.workflow} --`);
         }
+        expect(STARTER_TEMPLATE_IDS).toEqual(STARTER_RECIPES.map((starter) => starter.id));
     });
 
     test("renders commands that match seeded workflow inputs", () => {
@@ -95,10 +97,11 @@ describe("starter gallery data", () => {
         const overview = renderStarterGallery(buildStarterGallery({ audience: "product" }));
         expect(overview).toContain("Smithers starters");
         expect(overview).toContain("idea-to-prd");
-        expect(overview).toContain("Use `bunx smithers-orchestrator starters <id>`");
+        expect(overview).toContain("Use `bunx smithers-orchestrator init --template <id>`");
 
         const detail = renderStarterGallery(buildStarterGallery({ id: "customer-incident" }));
         expect(detail).toContain("Turn a customer report into a fix path");
+        expect(detail).toContain("Template ID: customer-incident");
         expect(detail).toContain("Before you run it:");
         expect(detail).toContain("bunx smithers-orchestrator workflow run debug");
     });

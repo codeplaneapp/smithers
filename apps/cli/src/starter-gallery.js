@@ -291,6 +291,8 @@ export const STARTER_RECIPES = [
     },
 ];
 
+export const STARTER_TEMPLATE_IDS = STARTER_RECIPES.map((recipe) => recipe.id);
+
 /**
  * @param {string} value
  */
@@ -405,7 +407,7 @@ export function renderStarterGallery(gallery) {
         const recipe = gallery.selected;
         lines.push(recipe.title);
         lines.push("");
-        lines.push(`Starter ID: ${recipe.id}`);
+        lines.push(`Template ID: ${recipe.id}`);
         lines.push(`Best for: ${renderInlineList(recipe.audience)}`);
         lines.push(`Goals: ${renderInlineList(recipe.goals)}`);
         lines.push(`Workflow: ${recipe.workflow}`);
@@ -432,7 +434,7 @@ export function renderStarterGallery(gallery) {
     }
     lines.push("Smithers starters");
     lines.push("");
-    lines.push("Pick a plain-English outcome, run one command, and let the seeded workflow do the structured work.");
+    lines.push("Pick a plain-English outcome, initialize the workflow pack, and run the selected template command.");
     lines.push(`First-time setup: ${gallery.installCommand}`);
     lines.push("");
     if (gallery.count === 0) {
@@ -449,6 +451,7 @@ export function renderStarterGallery(gallery) {
         lines.push(`  Run: ${starter.command}`);
         lines.push("");
     }
+    lines.push(`Use \`${cliCommand("init --template <id>")}\` to initialize with a selected template.`);
     lines.push(`Use \`${cliCommand("starters <id>")}\` for setup notes and follow-ups.`);
     lines.push(`Filter examples: \`${cliCommand("starters --audience product")}\`, \`${cliCommand("starters --goal quality")}\`, \`${cliCommand("starters --workflow debug")}\`.`);
     return lines.join("\n");

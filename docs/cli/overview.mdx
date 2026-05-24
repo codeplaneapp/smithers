@@ -35,11 +35,12 @@ Commands listed by dotted name. `human` and `alerts` use an action positional in
 commands[63]:
   - name: init
     purpose: Install the local workflow pack into .smithers/
-    flags[4]{name,short,type,default,desc}:
+    flags[5]{name,short,type,default,desc}:
       force,,boolean,false,Overwrite existing scaffold files
       agents-only,,boolean,false,Only create .smithers/agents/ and leave workflow pack untouched
       install,,boolean,true,Run bun install inside .smithers/ after scaffolding
       add-agents,,boolean,false,Launch the account registration wizard after scaffolding
+      template,,string,,Show next steps for a canonical starter template ID after init
   - name: starters
     purpose: Show plain-English starter workflows with copy-paste commands
     args[1]{name,type,required,desc}:

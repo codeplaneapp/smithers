@@ -53,7 +53,7 @@ import {
     renderEvalReport,
     writeEvalReport,
 } from "./eval-suite.js";
-import { buildStarterGallery, findStarterRecipe, renderStarterGallery } from "./starter-gallery.js";
+import { STARTER_TEMPLATE_IDS, buildStarterGallery, findStarterRecipe, renderStarterGallery } from "./starter-gallery.js";
 import { ask } from "./ask.js";
 import { runScheduler } from "./scheduler.js";
 import { resumeRunDetached } from "./resume-detached.js";
@@ -1408,11 +1408,16 @@ const revertOptions = z.object({
     attempt: z.number().int().min(1).default(1).describe("Attempt number"),
     iteration: z.number().int().min(0).default(0).describe("Loop iteration number"),
 });
+const initTemplateOption = z
+    .union(STARTER_TEMPLATE_IDS.map((id) => z.literal(id)))
+    .optional()
+    .describe("Show next steps for a canonical starter template ID after init");
 const initOptions = z.object({
     force: z.boolean().default(false).describe("Overwrite existing scaffold files"),
     agentsOnly: z.boolean().default(false).describe("Only create .smithers/agents/ and leave the rest of the workflow pack untouched"),
     install: z.boolean().default(true).describe("Run `bun install` inside .smithers/ after scaffolding (--no-install to skip)"),
     addAgents: z.boolean().default(false).describe("After scaffolding, launch the interactive `agents add` wizard to register one or more accounts."),
+    template: initTemplateOption,
 });
 const startersArgs = z.object({
     id: z.string().optional().describe("Starter ID or alias"),
@@ -2681,11 +2686,16 @@ const cli = Cli.create({
             return c.error(opts);
         };
         try {
+            const selectedTemplate = c.options.template ? findStarterRecipe(c.options.template) : undefined;
             const result = initWorkflowPack({
                 force: c.options.force,
                 agentsOnly: c.options.agentsOnly,
                 skipInstall: c.options.agentsOnly || !c.options.install,
             });
+            if (selectedTemplate) {
+                const gallery = buildStarterGallery({ id: selectedTemplate.id });
+                result.template = gallery.selected;
+            }
             if (c.options.addAgents) {
                 const added = await agentAddWizard({ loop: true });
                 result.addedAccounts = added;
@@ -2702,16 +2712,16 @@ const cli = Cli.create({
                 : {
                     cta: {
                         description: "Next steps:",
-                        commands: c.agent
+                        commands: selectedTemplate
                             ? [
-                                { command: "starters", description: "Pick a starter by outcome" },
+                                { command: result.template.command.replace(/^bunx smithers-orchestrator\s+/, ""), description: `Run ${result.template.id}` },
+                                { command: "starters", description: "Browse the other templates" },
                                 { command: "workflow list", description: "View all available workflows" },
-                                { command: "workflow run implement", description: "Run the implementation workflow" },
                             ]
                             : [
-                                { command: "starters", description: "Pick a starter by outcome" },
+                                { command: "init --template <id>", description: "Start from a guided template" },
+                                { command: "starters", description: "Browse templates by outcome" },
                                 { command: "workflow list", description: "View all available workflows" },
-                                { command: "workflow run implement", description: "Run the implementation workflow" },
                             ],
                     },
                 });

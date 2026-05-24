@@ -3,7 +3,7 @@ title: Starters
 description: Choose a plain-English outcome and copy the Smithers command.
 ---
 
-Smithers ships with starter workflows for people who want a result before they want to write workflow code. Run the starter gallery from any repo:
+Smithers ships with starter workflows for people who want a result before they want to write workflow code. Browse the starter gallery from any repo:
 
 ```bash
 bunx smithers-orchestrator starters
@@ -15,20 +15,28 @@ First-time setup:
 bunx smithers-orchestrator init --add-agents
 ```
 
-Then pick a starter:
+Or initialize with guided next steps for one template:
+
+```bash
+bunx smithers-orchestrator init --template idea-to-prd
+```
+
+Template IDs:
+
+Use these canonical IDs with `init --template`. `starters <id>` also accepts aliases for lookup.
 
 | Starter | Best for | Workflow | Command |
 | --- | --- | --- | --- |
-| `idea-to-prd` | founders, product, marketing | `write-a-prd` | `bunx smithers-orchestrator starters idea-to-prd` |
-| `idea-to-tickets` | product, operations, engineering | `tickets-create` | `bunx smithers-orchestrator starters idea-to-tickets` |
-| `launch-checklist` | launch owners and operators | `plan` | `bunx smithers-orchestrator starters launch-checklist` |
-| `customer-incident` | support escalations | `debug` | `bunx smithers-orchestrator starters customer-incident` |
-| `nontechnical-research` | before-build decisions | `research` | `bunx smithers-orchestrator starters nontechnical-research` |
-| `requirements-interview` | vague stakeholder requests | `grill-me` | `bunx smithers-orchestrator starters requirements-interview` |
-| `quality-audit` | release readiness | `audit` | `bunx smithers-orchestrator starters quality-audit` |
-| `test-coverage` | regression prevention | `improve-test-coverage` | `bunx smithers-orchestrator starters test-coverage` |
-| `ship-a-change` | focused product improvements | `research-plan-implement` | `bunx smithers-orchestrator starters ship-a-change` |
-| `mission-mode` | larger approved milestones | `mission` | `bunx smithers-orchestrator starters mission-mode` |
+| `idea-to-prd` | founders, product, marketing | `write-a-prd` | `bunx smithers-orchestrator init --template idea-to-prd` |
+| `idea-to-tickets` | product, operations, engineering | `tickets-create` | `bunx smithers-orchestrator init --template idea-to-tickets` |
+| `launch-checklist` | launch owners and operators | `plan` | `bunx smithers-orchestrator init --template launch-checklist` |
+| `customer-incident` | support escalations | `debug` | `bunx smithers-orchestrator init --template customer-incident` |
+| `nontechnical-research` | before-build decisions | `research` | `bunx smithers-orchestrator init --template nontechnical-research` |
+| `requirements-interview` | vague stakeholder requests | `grill-me` | `bunx smithers-orchestrator init --template requirements-interview` |
+| `quality-audit` | release readiness | `audit` | `bunx smithers-orchestrator init --template quality-audit` |
+| `test-coverage` | regression prevention | `improve-test-coverage` | `bunx smithers-orchestrator init --template test-coverage` |
+| `ship-a-change` | focused product improvements | `research-plan-implement` | `bunx smithers-orchestrator init --template ship-a-change` |
+| `mission-mode` | larger approved milestones | `mission` | `bunx smithers-orchestrator init --template mission-mode` |
 
 Each detailed starter prints:
 
