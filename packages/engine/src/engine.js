@@ -49,6 +49,7 @@ import { runWorkflowWithMakeBridge } from "./effect/workflow-make-bridge.js";
 import { createWorkflowVersioningRuntime, getWorkflowPatchDecisions, withWorkflowVersioningRuntime, } from "./effect/versioning.js";
 import { runWithCorrelationContext, updateCurrentCorrelationContext, withCorrelationContext, } from "@smithers-orchestrator/observability/correlation";
 import { extractWorkflowImportSpecifiers, getWorkflowImportScanLoader, readWorkflowEntryHash, readWorkflowGraphHash, resolveWorkflowImport, sha256Hex, } from "./workflow-hash.js";
+import { applyOptimizationArtifactToTasks } from "./optimization-artifact.js";
 /** @typedef {import("@smithers-orchestrator/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
 /** @typedef {import("@smithers-orchestrator/driver/RunOptions").RunOptions} RunOptions */
@@ -3983,9 +3984,10 @@ async function renderFrameAsync(workflow, ctx, opts) {
         workflowPath: opts?.workflowPath,
         defaultIteration: ctx?.iteration,
     });
-    const tasks = result.tasks;
+    let tasks = result.tasks;
     // Resolve output tasks: ZodObject references via zodToKeyName, string keys via schemaRegistry
     resolveTaskOutputs(tasks, workflow);
+    tasks = applyOptimizationArtifactToTasks(tasks);
     attachSubflowComputeFns(tasks, workflow, {
         rootDir: opts?.baseRootDir,
         workflowPath: opts?.workflowPath,
@@ -5130,6 +5132,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             render: async (element, renderOpts) => {
                 const graph = await withWorkflowVersioningRuntime(workflowVersioning, () => renderer.render(element, renderOpts));
                 await workflowVersioning.flush();
+                graph.tasks = applyOptimizationArtifactToTasks(graph.tasks);
                 resolveTaskOutputs(graph.tasks, workflowRef);
             attachSubflowComputeFns(graph.tasks, workflowRef, {
                 rootDir,

@@ -1,0 +1,53 @@
+---
+title: Workflow optimization
+description: Optimize Smithers workflow prompts against eval suites with GEPA-style prompt artifacts.
+---
+
+Smithers can optimize agent task prompts against an eval suite, prove whether the optimized prompts improve the workflow, and save the winning prompt artifact for later runs.
+
+```bash
+bunx smithers-orchestrator optimize workflow.tsx \
+  --cases evals/smoke.jsonl \
+  --suite smoke-gepa \
+  --provider cerebras \
+  --model gpt-oss-120b \
+  --artifact .smithers/optimizations/smoke-gepa.json
+```
+
+`smithers optimize` runs the eval suite twice:
+
+1. baseline run with the workflow's current prompts
+2. optimized run with GEPA-generated prompt patches applied
+
+The command writes the artifact only when the optimized score improves by at least `--min-improvement`. Reports for both runs are written under `.smithers/optimizations/reports` unless `--report-dir` is set.
+
+## Reuse an artifact
+
+Apply the optimized prompts to future evals with `--optimization`:
+
+```bash
+bunx smithers-orchestrator eval workflow.tsx \
+  --cases evals/smoke.jsonl \
+  --suite smoke-optimized \
+  --optimization .smithers/optimizations/smoke-gepa.json
+```
+
+The artifact patches only agent-backed `<Task>` prompts by `nodeId`. Workflow structure, output schemas, retries, approvals, and persistence behavior stay unchanged.
+
+## Providers
+
+`--provider cerebras` uses the Cerebras OpenAI-compatible API and defaults to `gpt-oss-120b`. Set `CEREBRAS_API_KEY` before running the command.
+
+`--provider heuristic` is deterministic and intended for local tests and fixtures. It uses eval-case metadata such as:
+
+```json
+{
+  "metadata": {
+    "optimizationHints": {
+      "answer": "Include the exact rubric requirement in the task prompt."
+    }
+  }
+}
+```
+
+Artifacts are Ax/GEPA-compatible JSON records with baseline score, optimized score, improvement, prompt patches, and linked eval reports.

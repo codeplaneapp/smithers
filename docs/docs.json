@@ -47,6 +47,7 @@
           "cli/quickstart",
           "cli/overview",
           "guides/evals-quickstart",
+          "guides/workflow-optimization",
           "guides/tui",
           "deployment/reference",
           "deployment/control-plane",

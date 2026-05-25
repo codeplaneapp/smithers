@@ -36,6 +36,7 @@ export * from "./effect/diff-bundle.js";
 export * from "./effect/rpc-schema.js";
 export * from "./effect/static-task-bridge.js";
 export * from "./effect/versioning.js";
+export * from "./optimization-artifact.js";
 
 // External helpers
 export * from "./external/json-schema-to-zod.js";
