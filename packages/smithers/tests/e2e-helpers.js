@@ -137,6 +137,8 @@ export function runSmithers(args, options) {
         input: options.stdin,
         encoding: "utf8",
         maxBuffer: 10 * 1024 * 1024,
+        timeout: options.timeoutMs ?? 60_000,
+        killSignal: "SIGTERM",
     });
     const stdout = result.stdout ?? "";
     const stderr = result.stderr ?? "";
@@ -145,7 +147,7 @@ export function runSmithers(args, options) {
         json = parseTrailingJson(stdout);
     }
     return {
-        exitCode: result.status ?? 1,
+        exitCode: result.status ?? (result.signal === "SIGTERM" ? 143 : 1),
         stdout,
         stderr,
         json,

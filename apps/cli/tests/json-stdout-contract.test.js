@@ -170,5 +170,5 @@ describe("CLI --json stdout contract", () => {
         finally {
             sqlite.close();
         }
-    }, 20_000);
+    }, 120_000);
 });

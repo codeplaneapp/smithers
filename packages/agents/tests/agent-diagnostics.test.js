@@ -192,9 +192,12 @@ describe("launchDiagnostics", () => {
         const result = launchDiagnostics("unknown", {}, "/tmp");
         expect(result).toBeNull();
     });
-    test("returns a promise for known command", () => {
+    test("returns a diagnostics report for known command", async () => {
         const result = launchDiagnostics("claude", {}, "/tmp");
         expect(result).toBeInstanceOf(Promise);
+        const report = await result;
+        expect(report.agentId).toBe("claude-code");
+        expect(report.checks.length).toBeGreaterThan(0);
     });
 });
 // ---------------------------------------------------------------------------

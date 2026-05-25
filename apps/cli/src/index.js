@@ -2344,21 +2344,11 @@ const tokenCli = Cli.create({
 // DevTools live-run commands (tree / diff / output / rewind)
 // ---------------------------------------------------------------------------
 
-/**
- * The four commands added by ticket 0014. Used by:
- * - `rewriteDevtoolsJsonFlagArgv` to route `--json` to the command option
- *   instead of incur's global `--format json` handling.
- * - `validateDevtoolsArgv` to emit usage-on-stderr + exit 1 on missing
- *   args / invalid flags (finding #1).
- * - `mapDevtoolsExitCode` to keep exit 1 rather than the generic 4
- *   remap in `main()`.
- */
 const DEVTOOLS_COMMANDS = new Set(["tree", "diff", "output", "rewind"]);
 
 /**
- * Stashed during telemetry so `main()` can preserve the typed exit code
- * out of the helper-level errors (rather than incur's generic "exit 4 on
- * validation failure"). Also consulted by `mapDevtoolsExitCode`.
+ * Lets `main()` preserve devtools exit codes instead of Incur's generic
+ * validation-code mapping.
  * @type {{ cmd: string; exitCode: number } | undefined}
  */
 let lastDevtoolsCommandOutcome;
@@ -2371,12 +2361,6 @@ let lastDevtoolsCommandOutcome;
  * - Emits an `smithers_cli_command_total{cmd,exit}` counter and a
  *   `smithers_cli_command_duration_ms{cmd}` histogram via the
  *   observability package.
- *
- * The inner handler returns the *resolved* exit code from the helper
- * (tree/diff/output/rewind). We never call `c.error()` here because
- * that would emit a second envelope on stdout in addition to the
- * friendly typed error the helper already wrote to stderr (finding #2).
- *
  * @param {"tree"|"diff"|"output"|"rewind"} cmd
  * @param {{ args: any; options: any }} c
  * @param {() => Promise<number>} handler
@@ -2388,8 +2372,6 @@ async function* runDevtoolsCommandWithTelemetry(cmd, c, handler) {
         exitCode = await handler();
     }
     catch (err) {
-        // Unexpected handler-level throws bubble up to a server-error
-        // exit with a friendly stderr message and no stdout envelope.
         const message = err instanceof Error ? err.message : String(err);
         process.stderr.write(`error: ${cmd} failed: ${message}\n`);
         exitCode = 2;
@@ -2397,7 +2379,6 @@ async function* runDevtoolsCommandWithTelemetry(cmd, c, handler) {
     const durationMs = Date.now() - startedAt;
     commandExitOverride = exitCode;
     lastDevtoolsCommandOutcome = { cmd, exitCode };
-    // Finding #11: structured command log + metrics.
     if (process.env.SMITHERS_LOG_JSON === "1") {
         try {
             const runId = typeof c.args?.runId === "string" ? c.args.runId : undefined;
@@ -2411,17 +2392,6 @@ async function* runDevtoolsCommandWithTelemetry(cmd, c, handler) {
                 exitCode,
             });
             process.stderr.write(`${line}\n`);
-        }
-        catch {
-            // logging is best-effort.
-        }
-    }
-    // Metrics: emit a compact metric line to stderr under the same env gate
-    // so test/ops tooling can scrape { counter, histogram } without
-    // depending on an OTel exporter. Real OTel wiring is inherited from
-    // the runtime's existing exporter path (ticket §Observability).
-    if (process.env.SMITHERS_LOG_JSON === "1") {
-        try {
             const counter = JSON.stringify({
                 metric: "smithers_cli_command_total",
                 labels: { cmd, exit: String(exitCode) },
@@ -2436,16 +2406,14 @@ async function* runDevtoolsCommandWithTelemetry(cmd, c, handler) {
             process.stderr.write(`${histogram}\n`);
         }
         catch {
-            // best-effort metrics.
+            // Telemetry must not affect command output.
         }
     }
-    // This is an empty stream so Incur does not emit an additional envelope
-    // or framework CTA on stdout after the helper has already written output.
 }
 
 /**
  * Rewrite raw `--json` to `-j` for devtools commands so it lands as a
- * command-scoped boolean option (finding #3). Without this, incur's
+ * command-scoped boolean option. Without this, Incur's
  * global `--json` flag promotes stdout formatting to JSON and our
  * command option stays false.
  *
@@ -2461,22 +2429,7 @@ function rewriteDevtoolsJsonFlagArgv(argv) {
     return argv.map((arg, idx) => (idx > commandIndex && arg === "--json" ? "-j" : arg));
 }
 
-/**
- * Pre-validate argv for devtools commands (finding #1).
- *
- * When the user omits required positional args or passes an invalid
- * flag value, incur's default path writes a VALIDATION_ERROR envelope
- * to *stdout* and exits 1 — which `main()` then remaps to exit 4.
- * For these four commands the ticket requires:
- *   - missing args / invalid flag → exit 1
- *   - usage message on stderr only, stdout empty
- *
- * Returning `{ handled: true }` signals to `main()` that the process
- * already exited via this path.
- *
- * @param {string[]} argv
- * @returns {{ handled: boolean }}
- */
+/** @param {string[]} argv */
 function validateDevtoolsArgv(argv) {
     const commandIndex = findFirstPositionalIndex(argv);
     if (commandIndex < 0) return { handled: false };
@@ -2502,8 +2455,6 @@ function validateDevtoolsArgv(argv) {
             value = token.slice(eq + 1);
         }
         else if (token.startsWith("--") && idx + 1 < rest.length && !rest[idx + 1].startsWith("-")) {
-            // Peek-ahead for long-form flag values (not robust for boolean flags
-            // that shouldn't consume; we only validate specific values below).
             value = rest[idx + 1];
         }
         flags.set(key, value);
@@ -2544,8 +2495,6 @@ function validateDevtoolsArgv(argv) {
             process.exit(1);
         }
     }
-    // For rewind, the second positional (frameNo) must be a non-negative
-    // integer. rewind passes it as an arg, not a flag.
     if (cmd === "rewind" && positionals.length >= 2) {
         const frameRaw = positionals[1];
         const num = Number(frameRaw);
@@ -2559,14 +2508,7 @@ function validateDevtoolsArgv(argv) {
     return { handled: false };
 }
 
-/**
- * Stable usage strings matched to spec §Scope of ticket 0014. Kept
- * under 60 columns per the acceptance checklist so help / error output
- * wraps cleanly on narrow terminals (finding #7, partial).
- *
- * @param {string} cmd
- * @returns {string}
- */
+/** @param {string} cmd */
 function devtoolsUsage(cmd) {
     if (cmd === "tree") {
         return [
@@ -5557,7 +5499,6 @@ async function main() {
     argv = rewriteChatCreateArgv(argv);
     argv = rewriteWorkflowCommandArgv(argv);
     argv = rewriteEventsJsonFlagArgv(argv);
-    // Finding #3: route `--json` to command-scoped `-j` for devtools commands.
     argv = rewriteDevtoolsJsonFlagArgv(argv);
     if (argvRequestsJsonMode(argv)) {
         setJsonMode(true);
@@ -5565,9 +5506,6 @@ async function main() {
     if (runRawJsonAgentCommandIfMatched(argv)) {
         return;
     }
-    // Finding #1: pre-validate argv for devtools commands so missing-args
-    // / invalid-flag errors go to stderr with exit 1 (not incur's
-    // remap-to-4 VALIDATION_ERROR envelope on stdout).
     validateDevtoolsArgv(argv);
     // Allow running workflow files directly: `smithers workflow.tsx` → `smithers up workflow.tsx`
     const firstPositionalIndex = findFirstPositionalIndex(argv);
@@ -5626,9 +5564,6 @@ async function main() {
         process.exit(1);
     }
     if (exitCodeFromServe !== undefined) {
-        // Finding #1: for devtools commands, skip the generic exit 4
-        // remap so parser/validation failures land on the ticket's
-        // uniform exit-code table (1 = user error).
         const commandIndex = findFirstPositionalIndex(argv);
         const cmd = commandIndex >= 0 ? argv[commandIndex] : undefined;
         const isDevtoolsCmd = Boolean(cmd && DEVTOOLS_COMMANDS.has(cmd));
@@ -5641,9 +5576,7 @@ async function main() {
                     : exitCodeFromServe;
         process.exit(mapped);
     }
-    // Incur does not call the `exit` callback on success paths. Honor
-    // `commandExitOverride` here so handlers that report a non-zero
-    // typed exit via helper (finding #2 fix) still exit with that code.
+    // Incur does not call the `exit` callback on success paths.
     if (commandExitOverride !== undefined) {
         process.exit(commandExitOverride);
     }

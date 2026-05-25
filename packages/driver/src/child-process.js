@@ -88,13 +88,24 @@ export function spawnCaptureEffect(command, args, options) {
         };
         let totalTimer;
         let idleTimer;
+        let idleGeneration = 0;
+        // Bun can deliver child stdout/stderr chunks late on macOS; avoid
+        // killing active CLI agents before observable output reaches JS.
+        const effectiveIdleTimeoutMs = typeof process.versions.bun === "string" && idleTimeoutMs >= 1000
+            ? Math.max(idleTimeoutMs, 5000)
+            : idleTimeoutMs;
         const resetIdle = () => {
             if (idleTimer)
                 clearTimeout(idleTimer);
-            if (idleTimeoutMs) {
+            if (effectiveIdleTimeoutMs) {
+                idleGeneration += 1;
+                const generation = idleGeneration;
                 idleTimer = setTimeout(() => {
+                    if (generation !== idleGeneration) {
+                        return;
+                    }
                     kill(`CLI idle timed out after ${idleTimeoutMs}ms`, "PROCESS_IDLE_TIMEOUT");
-                }, idleTimeoutMs);
+                }, effectiveIdleTimeoutMs);
             }
         };
         if (timeoutMs) {

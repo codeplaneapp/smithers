@@ -3,7 +3,7 @@ import * as SqlClient from "@effect/sql/SqlClient";
 import { SqlError } from "@effect/sql/SqlError";
 import * as Statement from "@effect/sql/Statement";
 import { Database } from "bun:sqlite";
-import { Context, Effect, Layer, ManagedRuntime, Scope } from "effect";
+import { Context, Effect, Layer, ManagedRuntime, Scope, Stream } from "effect";
 import { runSmithersSchemaMigrations } from "./schema-migrations.js";
 import { camelToSnake } from "./utils/camelToSnake.js";
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
@@ -494,7 +494,7 @@ function createConnection(sqlite) {
             }
         }),
         executeUnprepared: (statement, params, transformRows) => execute(statement, params, transformRows),
-        executeStream: () => Effect.dieMessage("executeStream not implemented"),
+        executeStream: (statement, params, transformRows) => Stream.fromIterableEffect(execute(statement, params, transformRows)),
     };
 }
 /**

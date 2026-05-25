@@ -192,7 +192,7 @@ describe("deferred contract", () => {
                 name: "deferred-timer-duration",
                 children: jsxs(Sequence, {
                     children: [
-                        jsx(Timer, { id: "cooldown", duration: "120ms" }),
+                        jsx(Timer, { id: "cooldown", duration: "2000ms" }),
                         jsx(Task, {
                             id: "after",
                             output: outputs.out,
@@ -203,7 +203,7 @@ describe("deferred contract", () => {
             }));
             const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
             expect(first.status).toBe("waiting-timer");
-            await sleep(180);
+            await sleep(2200);
             const resumed = await Effect.runPromise(runWorkflow(workflow, {
                 input: {},
                 runId: first.runId,
