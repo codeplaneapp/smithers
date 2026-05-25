@@ -1,0 +1,17 @@
+{
+  "name": "@smithers-orchestrator/smithers-tui-demo",
+  "version": "0.21.0",
+  "description": "React TUI Smithers Cerebras debate demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tui": "node src/tui-demo.mjs",
+    "smoke": "SMITHERS_TUI_SMOKE=1 node src/tui-demo.mjs",
+    "test": "node --test src/*.test.mjs && SMITHERS_TUI_SMOKE=1 node src/tui-demo.mjs"
+  },
+  "dependencies": {
+    "@dino-dna/react-tui": "^1.0.1",
+    "neo-blessed": "^0.2.0",
+    "react": "16.13.1"
+  }
+}

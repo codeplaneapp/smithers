@@ -1,0 +1,28 @@
+{
+  "name": "@smithers-orchestrator/smithers-demo",
+  "version": "0.21.0",
+  "description": "Interactive Smithers workflow generator demo with React Flow visualization",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "e2e": "playwright test",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run tests/*.test.ts",
+    "cerebras:debate": "node src/run-cerebras-debate.mjs"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.10.2",
+    "dagre": "^0.8.5",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/dagre": "^0.7.54",
+    "@vitejs/plugin-react": "^6.0.2",
+    "vite": "^8.0.14",
+    "vitest": "^4.0.16"
+  }
+}

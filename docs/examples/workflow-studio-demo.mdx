@@ -1,0 +1,52 @@
+---
+title: Workflow Studio Demo
+description: Generate Smithers workflows from a chat prompt and inspect the React Flow graph beside the generated Smithers code.
+---
+
+The Smithers Workflow Studio demo lives in `apps/smithers-demo`. It is a Vite React app that uses React Flow (`@xyflow/react`) to render Smithers workflow nodes with automatic Dagre layout.
+
+```bash
+pnpm --filter @smithers-orchestrator/smithers-demo dev
+```
+
+The browser demo has synchronized surfaces:
+
+- A bottom prompt composer for regenerating the workflow graph and code.
+- A settings panel with provider, model, and local API key settings.
+- A React Flow graph on the left with generated Smithers task nodes.
+- Generated Smithers React code on the right, produced from the same workflow model as the graph.
+
+Provider defaults:
+
+- Cerebras: `gpt-oss-120b` with `CEREBRAS_API_KEY`
+- OpenAI: `gpt-5.5` with `OPENAI_API_KEY`
+- Claude: `claude-opus-4.7` with `ANTHROPIC_API_KEY`
+
+The same package also includes a terminal demo built with `@dino-dna/react-tui`:
+
+```bash
+pnpm --filter @smithers-orchestrator/smithers-tui-demo tui
+```
+
+The TUI reads `CEREBRAS_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY` from the environment, renders a connected 2D workflow graph, and keeps the prompt composer at the bottom for local graph regeneration. Running the workflow switches the graph to execution status, changes the action to `Cancel`, and changes it to `Done` after the provider workflow completes. The default workflow prompt is:
+
+```text
+Do a loop where you have two LMs debate communism versus capitalism and then have a judge LM output a final result.
+```
+
+For a non-interactive live provider verification, set one provider key and run:
+
+```bash
+pnpm --filter @smithers-orchestrator/smithers-demo cerebras:debate
+```
+
+Run the demo checks with:
+
+```bash
+pnpm --filter @smithers-orchestrator/smithers-demo test
+pnpm --filter @smithers-orchestrator/smithers-demo build
+pnpm --filter @smithers-orchestrator/smithers-demo e2e
+pnpm --filter @smithers-orchestrator/smithers-tui-demo test
+```
+
+The layout tests fail if generated node rectangles overlap, which protects the visual spacing contract for generated diagrams. The Playwright e2e test runs the real Workflow Studio in desktop and mobile viewports, checks settings persistence, verifies prompt regeneration, confirms provider-neutral `Run Workflow` copy, stubs provider output, and asserts rendered React Flow nodes do not overlap. The TUI tests also fail if the terminal graph collapses back into a list, if terminal node boxes overlap, or if the Run Workflow -> Cancel -> Done button contract regresses.
