@@ -8,17 +8,6 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 
-/**
- * Process-level CLI tests (finding #9).
- *
- * These drive the actual `smithers` entrypoint with real argv parsing
- * so parser-error handling (finding #1), double envelope suppression
- * (finding #2), and command-scoped `--json` (finding #3) are all
- * exercised end-to-end. Helper-level tests in tree.test/diff.test/
- * output.test/rewind.test bypass the parser and therefore cannot see
- * these bugs.
- */
-
 const CLI_ENTRY = resolve(import.meta.dir, "..", "src", "index.js");
 
 /** @type {string} */
@@ -95,7 +84,7 @@ afterAll(() => {
     }
 });
 
-describe("finding #1 — parser errors use exit 1 on stderr only", () => {
+describe("devtools parser errors", () => {
     test("tree with no runId → exit 1, usage on stderr, empty stdout", async () => {
         const r = await runCli(["tree"]);
         expect(r.exitCode).toBe(1);
@@ -126,7 +115,7 @@ describe("finding #1 — parser errors use exit 1 on stderr only", () => {
     });
 });
 
-describe("finding #2 — no double error envelope on failure", () => {
+describe("devtools error output", () => {
     test("tree INVALID!!! → exit 1, friendly on stderr, no TREE_FAILED on stdout", async () => {
         const r = await runCli(["tree", "INVALID!!!"]);
         expect(r.exitCode).toBe(1);
@@ -158,17 +147,14 @@ describe("finding #2 — no double error envelope on failure", () => {
     });
 });
 
-describe("finding #3 — --json is command-scoped for devtools commands", () => {
+describe("devtools --json", () => {
     test("tree fixture-run --json → stdout is parseable JSON of the snapshot", async () => {
         const r = await runCli(["tree", "fixture-run", "--json"]);
         expect(r.exitCode).toBe(0);
         expect(r.stderr).toBe("");
-        // Must parse as JSON; must be a snapshot object (not an envelope).
         const parsed = JSON.parse(r.stdout);
         expect(parsed.runId).toBe("fixture-run");
         expect(parsed.root).toBeDefined();
-        // Envelope keys would be `ok` / `data` / `error` — ensure they
-        // are not present on the top level.
         expect(parsed.ok).toBeUndefined();
         expect(parsed.data).toBeUndefined();
     });
@@ -182,18 +168,13 @@ describe("finding #3 — --json is command-scoped for devtools commands", () => 
     });
 });
 
-describe("finding #7 — per-command help lines are reasonable width", () => {
-    // We can't shrink incur's global options (--filter-output, etc.).
-    // Assert only the command-specific option lines stay under 72 cols
-    // so acceptance §--help is at least met for the lines we own.
+describe("devtools help", () => {
     const commands = ["tree", "diff", "output", "rewind"];
     for (const cmd of commands) {
         test(`${cmd} --help: command-specific option lines are <= 72 cols`, async () => {
             const r = await runCli([cmd, "--help"]);
             expect(r.exitCode).toBe(0);
             const lines = r.stdout.split("\n");
-            // Narrow to our option lines (indented with two spaces and
-            // starting with `--` but not in Global Options block).
             let inGlobals = false;
             for (const line of lines) {
                 if (line.includes("Global Options")) { inGlobals = true; continue; }
@@ -205,15 +186,13 @@ describe("finding #7 — per-command help lines are reasonable width", () => {
     }
 });
 
-describe("finding #11 — SMITHERS_LOG_JSON=1 emits structured telemetry", () => {
+describe("devtools telemetry", () => {
     test("tree fixture-run emits command log + metric lines to stderr", async () => {
         const r = await runCli(
             ["tree", "fixture-run"],
             { SMITHERS_LOG_JSON: "1" },
         );
         expect(r.exitCode).toBe(0);
-        // stderr should contain 3 JSON lines: command log, counter,
-        // histogram. Filter lines starting with `{`.
         const jsonLines = r.stderr.split("\n").filter((l) => l.startsWith("{"));
         expect(jsonLines.length).toBeGreaterThanOrEqual(3);
         const parsed = jsonLines.map((l) => {
@@ -238,18 +217,9 @@ describe("finding #11 — SMITHERS_LOG_JSON=1 emits structured telemetry", () =>
     });
 });
 
-describe("finding #4 — output --json emits raw row, not envelope", () => {
-    // We can't easily produce a real output row without running a
-    // workflow, so assert that when a row doesn't exist, the raw-row
-    // path still emits a plain JSON value (null) — i.e. NOT a response
-    // envelope with `status`/`schema` keys. This directly catches the
-    // bug the finding describes.
+describe("devtools output", () => {
     test("no output → stdout is plain null, not {status,row,schema}", async () => {
         const r = await runCli(["output", "fixture-run", "no-such-node"]);
-        // Expect an error flow (exit 1 or 2). The key assertion is that
-        // stdout never contains the envelope keys when output path is
-        // attempted. (Stdout is empty here because the error surfaces
-        // before any JSON is written — acceptable for this guard.)
         expect([1, 2]).toContain(r.exitCode);
         expect(r.stdout).not.toContain('"schema"');
         expect(r.stdout).not.toContain('"status"');

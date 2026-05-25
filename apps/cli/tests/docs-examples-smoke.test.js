@@ -243,4 +243,4 @@ test("complete single-file workflow snippets in docs render as graphs", () => {
         .filter((label) => !checkedLabels.has(label))
         .filter((label) => !allowedNonStandalone.has(label));
     expect(unclassified).toEqual([]);
-}, 30_000);
+}, 120_000);

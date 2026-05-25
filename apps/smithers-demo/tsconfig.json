@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "jsxImportSource": "react",
+    "noEmit": true,
+    "baseUrl": "."
+  },
+  "include": ["src", "tests/*.test.ts", "vite.config.ts"],
+  "exclude": ["tests/e2e", "src/tui-demo.mjs"]
+}

@@ -55,7 +55,7 @@ export function forkRun(adapter, params) {
             });
             nodesJson = JSON.stringify(updatedNodes);
         }
-        // 4. Insert snapshot for the child run at frame 0
+        // 4. Build rows for the child fork.
         const childSnapshot = {
             runId: childRunId,
             frameNo: 0,
@@ -68,49 +68,29 @@ export function forkRun(adapter, params) {
             contentHash: source.contentHash,
             createdAtMs: ts,
         };
-        yield* Effect.tryPromise({
-            try: () => adapter.db
-                .insert(smithersSnapshots)
-                .values(childSnapshot)
-                .onConflictDoUpdate({
-                target: [smithersSnapshots.runId, smithersSnapshots.frameNo],
-                set: childSnapshot,
-            }),
-            catch: (cause) => toSmithersError(cause, "insert forked snapshot", {
-                code: "DB_WRITE_FAILED",
-                details: { frameNo: 0, runId: childRunId },
-            }),
-        });
-        if (parentRun) {
-            yield* Effect.tryPromise({
-                try: () => adapter.insertRun({
-                    runId: childRunId,
-                    parentRunId,
-                    workflowName: parentRun.workflowName,
-                    workflowPath: parentRun.workflowPath ?? null,
-                    workflowHash: source.workflowHash ?? parentRun.workflowHash ?? null,
-                    status: parentRun.status === "running" ? "failed" : parentRun.status,
-                    createdAtMs: ts,
-                    startedAtMs: null,
-                    finishedAtMs: parentRun.finishedAtMs ?? ts,
-                    heartbeatAtMs: null,
-                    runtimeOwnerId: null,
-                    cancelRequestedAtMs: null,
-                    hijackRequestedAtMs: null,
-                    hijackTarget: null,
-                    vcsType: parentRun.vcsType ?? null,
-                    vcsRoot: parentRun.vcsRoot ?? null,
-                    vcsRevision: source.vcsPointer ?? parentRun.vcsRevision ?? null,
-                    errorJson: null,
-                    configJson: parentRun.configJson ?? null,
-                }),
-                catch: (cause) => toSmithersError(cause, "insert forked run", {
-                    code: "DB_WRITE_FAILED",
-                    details: { runId: childRunId },
-                }),
-            });
-        }
-        // 5. Record branch relationship
+        const childRun = parentRun
+            ? {
+                runId: childRunId,
+                parentRunId,
+                workflowName: parentRun.workflowName,
+                workflowPath: parentRun.workflowPath ?? null,
+                workflowHash: source.workflowHash ?? parentRun.workflowHash ?? null,
+                status: parentRun.status === "running" ? "failed" : parentRun.status,
+                createdAtMs: ts,
+                startedAtMs: null,
+                finishedAtMs: parentRun.finishedAtMs ?? ts,
+                heartbeatAtMs: null,
+                runtimeOwnerId: null,
+                cancelRequestedAtMs: null,
+                hijackRequestedAtMs: null,
+                hijackTarget: null,
+                vcsType: parentRun.vcsType ?? null,
+                vcsRoot: parentRun.vcsRoot ?? null,
+                vcsRevision: source.vcsPointer ?? parentRun.vcsRevision ?? null,
+                errorJson: null,
+                configJson: parentRun.configJson ?? null,
+            }
+            : null;
         const branch = {
             runId: childRunId,
             parentRunId,
@@ -119,19 +99,39 @@ export function forkRun(adapter, params) {
             forkDescription: forkDescription ?? null,
             createdAtMs: ts,
         };
-        yield* Effect.tryPromise({
-            try: () => adapter.db
-                .insert(smithersBranches)
-                .values(branch)
-                .onConflictDoUpdate({
-                target: smithersBranches.runId,
-                set: branch,
-            }),
-            catch: (cause) => toSmithersError(cause, "insert branch", {
-                code: "DB_WRITE_FAILED",
-                details: { runId: childRunId },
-            }),
-        });
+        // 5. Persist the fork atomically: snapshot, optional run metadata, and
+        // branch relationship must either all commit or all roll back.
+        yield* adapter.withTransactionEffect("fork run", Effect.gen(function* () {
+            yield* Effect.tryPromise({
+                try: () => adapter.db
+                    .insert(smithersSnapshots)
+                    .values(childSnapshot)
+                    .onConflictDoUpdate({
+                    target: [smithersSnapshots.runId, smithersSnapshots.frameNo],
+                    set: childSnapshot,
+                }),
+                catch: (cause) => toSmithersError(cause, "insert forked snapshot", {
+                    code: "DB_WRITE_FAILED",
+                    details: { frameNo: 0, runId: childRunId },
+                }),
+            });
+            if (childRun) {
+                yield* adapter.insertRun(childRun);
+            }
+            yield* Effect.tryPromise({
+                try: () => adapter.db
+                    .insert(smithersBranches)
+                    .values(branch)
+                    .onConflictDoUpdate({
+                    target: smithersBranches.runId,
+                    set: branch,
+                }),
+                catch: (cause) => toSmithersError(cause, "insert branch", {
+                    code: "DB_WRITE_FAILED",
+                    details: { runId: childRunId },
+                }),
+            });
+        }));
         yield* Metric.increment(runForksCreated);
         yield* Effect.logInfo("Run forked").pipe(Effect.annotateLogs({
             parentRunId,

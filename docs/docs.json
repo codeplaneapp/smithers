@@ -211,6 +211,7 @@
           "examples/tools-agent",
           "examples/multi-agent-review",
           "examples/dynamic-plan",
+          "examples/workflow-studio-demo",
           "examples/loop",
           {
             "group": "Workflow Samples",

@@ -7,24 +7,9 @@ import {
     EXIT_SERVER_ERROR,
 } from "./exitCodes.js";
 
-/**
- * Exhaustive map of every typed error code the four devtools RPCs may
- * return. Each entry yields a user-friendly message plus an actionable
- * hint and the uniform exit code to surface.
- *
- * Codes come from:
- * - getDevToolsSnapshot / streamDevTools  (ticket 0010, 0011)
- * - getNodeDiff                           (ticket 0012)
- * - getNodeOutput                         (ticket 0012)
- * - jumpToFrame                           (ticket 0013)
- *
- * Plus two transport-level codes used by the CLI itself when it cannot
- * reach the server or the auth token is missing.
- *
- * @type {Readonly<Record<string, CliErrorMapping>>}
- */
+/** @type {Readonly<Record<string, CliErrorMapping>>} */
 export const CLI_ERROR_MESSAGES = Object.freeze({
-    // ----- Input validation (every Invalid* → exit 1) -----
+    // Input validation
     InvalidRunId: {
         message: "The run id is not in the expected shape.",
         hint: "Run ids must match /^[a-z0-9_-]{1,64}$/. Check for typos or pick a run from `smithers ps`.",
@@ -51,7 +36,7 @@ export const CLI_ERROR_MESSAGES = Object.freeze({
         exitCode: EXIT_SERVER_ERROR,
     },
 
-    // ----- Lookups -----
+    // Lookups
     RunNotFound: {
         message: "No run with that id exists in the local database.",
         hint: "Use `smithers ps` to list runs.",
@@ -88,21 +73,21 @@ export const CLI_ERROR_MESSAGES = Object.freeze({
         exitCode: EXIT_USER_ERROR,
     },
 
-    // ----- Stream lifecycle -----
+    // Stream lifecycle
     BackpressureDisconnect: {
         message: "The server disconnected the stream because the client fell behind.",
         hint: "Re-run with a slower consumer (e.g. pipe to `less -R`) or drop --watch.",
         exitCode: EXIT_SERVER_ERROR,
     },
 
-    // ----- Auth -----
+    // Auth
     Unauthorized: {
         message: "The request was rejected because credentials are missing or expired.",
         hint: "Run `smithers login` and try again.",
         exitCode: EXIT_SERVER_ERROR,
     },
 
-    // ----- Rewind -----
+    // Rewind
     ConfirmationRequired: {
         message: "The server requires explicit confirmation for this rewind.",
         hint: "Rerun the command with --yes to confirm.",
@@ -139,7 +124,7 @@ export const CLI_ERROR_MESSAGES = Object.freeze({
         exitCode: EXIT_SERVER_ERROR,
     },
 
-    // ----- Diff / output payload -----
+    // Diff / output payload
     DiffTooLarge: {
         message: "The diff exceeds the payload budget and cannot be sent in full.",
         hint: "Rerun with --stat for a summary only.",
@@ -166,8 +151,7 @@ export const CLI_ERROR_MESSAGES = Object.freeze({
         exitCode: EXIT_SERVER_ERROR,
     },
 
-    // ----- Transport / infra (not produced by route functions, but the
-    // boundary tests in the ticket reference them).
+    // Transport
     ServerUnreachable: {
         message: "The smithers gateway is not reachable.",
         hint: "Check SMITHERS_HOST and verify the gateway is running.",

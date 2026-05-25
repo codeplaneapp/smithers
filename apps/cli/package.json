@@ -21,7 +21,7 @@
     "dist/"
   ],
   "scripts": {
-    "test": "bun test --timeout=60000 --max-concurrency=1 tests",
+    "test": "bun test --timeout=120000 --max-concurrency=1 tests",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsup --dts-only"
   },

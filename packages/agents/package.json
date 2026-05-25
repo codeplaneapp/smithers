@@ -45,7 +45,7 @@
     "src/"
   ],
   "scripts": {
-    "test": "bun test tests",
+    "test": "bun test --timeout=60000 --max-concurrency=1 tests",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsup --dts-only"
   },

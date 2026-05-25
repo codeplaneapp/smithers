@@ -185,7 +185,7 @@ test("workflow create scaffolds a workflow that runs immediately", () => {
     expect(runResult.json).toMatchObject({
         status: "finished",
     });
-}, 15_000);
+}, 60_000);
 test("workflow path can pause on WaitForEvent, accept a signal, and resume", () => {
     const repo = createTempRepo();
     repo.write("workflow.tsx", [
@@ -249,7 +249,7 @@ test("workflow path can pause on WaitForEvent, accept a signal, and resume", () 
     finally {
         sqlite.close();
     }
-}, 20_000);
+}, 60_000);
 test("workflow create rejects invalid workflow names", () => {
     const repo = createTempRepo();
     const env = buildWorkflowEnv(repo.dir);

@@ -120,10 +120,17 @@ describe("fork recovery: mid-creation failure", () => {
     }
     expect(caught).toBeDefined();
 
-    // Recreate branches so we can read; the child run row may exist (forkRun
-    // does not run inside a transaction). Document the contract: child
-    // metadata IS persisted before the branch row, so listBranches sees no
-    // stranded branch entry — that's the durable contract.
+    const runCount = sqlite
+      .query(`SELECT COUNT(*) AS count FROM _smithers_runs`)
+      .get().count;
+    const snapshotCount = sqlite
+      .query(`SELECT COUNT(*) AS count FROM _smithers_snapshots`)
+      .get().count;
+    expect(runCount).toBe(1);
+    expect(snapshotCount).toBe(1);
+
+    // Recreate branches so we can read; fork creation is atomic, so a branch
+    // insert failure must not leave a stranded branch entry either.
     sqlite.run(`CREATE TABLE _smithers_branches (
       run_id TEXT PRIMARY KEY,
       parent_run_id TEXT NOT NULL,
