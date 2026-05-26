@@ -54,7 +54,7 @@ ws.onopen = () => ws.send(JSON.stringify({
 
 ## Operator Console
 
-Gateway serves a built-in operator console at `/console`. It gives non-coding operators a same-origin surface for health, workflow launch, active runs, and pending approvals. The console uses the Gateway RPC API and accepts the same bearer tokens as programmatic clients.
+Gateway serves a built-in operator console at `/console`. It gives non-coding operators a same-origin surface for health, workflow launch, active runs, pending approvals, and run inspection. Selecting a run opens a Run Chronicle view backed by `streamDevTools`, `streamRunEvents`, `getNodeOutput`, and `getNodeDiff`, so operators can inspect the live task tree, event history, output, and diff without leaving the Gateway. The console uses the Gateway RPC API and accepts the same bearer tokens as programmatic clients.
 
 Disable or move it when embedding Smithers behind another app:
 

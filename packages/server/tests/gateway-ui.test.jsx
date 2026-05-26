@@ -107,7 +107,9 @@ describe("Gateway UI", () => {
     const assetResponse = await fetch(`http://127.0.0.1:${port}/console/__smithers_ui/client.js`);
     expect(assetResponse.status).toBe(200);
     const asset = await assetResponse.text();
+    expect(() => new Function(asset)).not.toThrow();
     expect(asset).toContain("Smithers Console");
+    expect(asset).toContain("Run Chronicle");
     expect(asset).toContain("sessionStorage");
     expect(asset).not.toContain("localStorage");
     expect(asset).toContain('rpc("listWorkflows"');
@@ -115,6 +117,11 @@ describe("Gateway UI", () => {
     expect(asset).toContain('rpc("listApprovals"');
     expect(asset).toContain('rpc("launchRun"');
     expect(asset).toContain('rpc("submitApproval"');
+    expect(asset).toContain('rpcSocket("getNodeOutput"');
+    expect(asset).toContain('rpcSocket("getNodeDiff"');
+    expect(asset).toContain('"streamDevTools"');
+    expect(asset).toContain('"streamRunEvents"');
+    expect(asset).toContain("new WebSocket");
   });
 
   test("serves the built-in operator console from ui=true without a custom bundle", async () => {
