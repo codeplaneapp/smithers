@@ -34,6 +34,33 @@ bunx smithers-orchestrator eval workflow.tsx \
 
 The artifact patches only agent-backed `<Task>` prompts by `nodeId`. Workflow structure, output schemas, retries, approvals, and persistence behavior stay unchanged.
 
+## Cerebras improvement demo
+
+This PR was verified with `--provider cerebras --model gpt-oss-120b` against a prompt-sensitive workflow fixture. The baseline prompt did not include the required optimization token, so the eval failed. Cerebras GEPA generated a prompt patch that included the missing requirement, and the optimized eval passed.
+
+```bash
+CEREBRAS_API_KEY=... bunx smithers-orchestrator optimize workflow.tsx \
+  --cases evals/opt.jsonl \
+  --suite cerebras-proof \
+  --provider cerebras \
+  --model gpt-oss-120b \
+  --artifact artifacts/optimized.json \
+  --report-dir artifacts/reports \
+  --format json
+```
+
+Observed result:
+
+```json
+{
+  "baseline": { "score": 0.1, "passed": 0, "total": 1 },
+  "optimized": { "score": 1, "passed": 1, "total": 1 },
+  "improved": true,
+  "provider": "cerebras",
+  "model": "gpt-oss-120b"
+}
+```
+
 ## Providers
 
 `--provider cerebras` uses the Cerebras OpenAI-compatible API and defaults to `gpt-oss-120b`. Set `CEREBRAS_API_KEY` before running the command.
