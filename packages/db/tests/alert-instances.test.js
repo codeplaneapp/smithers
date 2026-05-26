@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createTempRepo, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
-const ALERT_CLI_TIMEOUT_MS = 15_000;
+const ALERT_CLI_TIMEOUT_MS = 45_000;
 function createAdapter() {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);

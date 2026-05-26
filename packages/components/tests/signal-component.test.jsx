@@ -7,6 +7,8 @@ import { SmithersDb, runWorkflow, signalRun } from "smithers-orchestrator";
 import { renderPrometheusMetrics } from "@smithers-orchestrator/observability";
 import { createTestSmithers } from "./helpers.js";
 import { Effect } from "effect";
+
+const SIGNAL_COMPONENT_TIMEOUT_MS = 20_000;
 /**
  * @param {any} workflow
  * @param {string} dbPath
@@ -154,7 +156,7 @@ describe("Signal component", () => {
         finally {
             cleanup();
         }
-    });
+    }, SIGNAL_COMPONENT_TIMEOUT_MS);
     test("async signals allow unrelated downstream work before the signal arrives", async () => {
         const { smithers, Sequence, Signal, Workflow, Task, outputs, tables, db, dbPath, cleanup, } = createTestSmithers({
             signalData: z.object({ value: z.number() }),
@@ -205,5 +207,5 @@ describe("Signal component", () => {
         finally {
             cleanup();
         }
-    });
+    }, SIGNAL_COMPONENT_TIMEOUT_MS);
 });

@@ -54,10 +54,8 @@ function deepEqual(left, right) {
         if (leftKeys.length !== rightKeys.length) {
             return false;
         }
-        leftKeys.sort();
-        rightKeys.sort();
-        for (let index = 0; index < leftKeys.length; index += 1) {
-            if (leftKeys[index] !== rightKeys[index]) {
+        for (const key of leftKeys) {
+            if (!Object.hasOwn(right, key)) {
                 return false;
             }
         }
