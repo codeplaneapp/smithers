@@ -63,7 +63,18 @@ Observed result:
 
 ## Providers
 
-`--provider cerebras` uses the Cerebras OpenAI-compatible API and defaults to `gpt-oss-120b`. Set `CEREBRAS_API_KEY` before running the command.
+`smithers optimize` accepts the same provider vocabulary Smithers uses for agents and accounts:
+
+| Provider | Optimizer API | Required env | Default model |
+| --- | --- | --- | --- |
+| `cerebras` | OpenAI-compatible | `CEREBRAS_API_KEY` | `gpt-oss-120b` |
+| `openai-api`, `openai`, `codex` | OpenAI-compatible | `OPENAI_API_KEY` | `gpt-5.3-codex` |
+| `anthropic-api`, `anthropic`, `claude-code`, `claude` | Anthropic Messages API | `ANTHROPIC_API_KEY` | `claude-opus-4-7` |
+| `gemini-api`, `gemini`, `antigravity` | Gemini generateContent API | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-3.1-pro-preview` |
+| `kimi`, `moonshot` | OpenAI-compatible Moonshot API | `MOONSHOT_API_KEY` | `kimi-latest` |
+| `opencode`, `pi`, `amp`, `forge`, `openai-compatible` | OpenAI-compatible endpoint | `SMITHERS_OPTIMIZER_API_KEY` and `SMITHERS_OPTIMIZER_BASE_URL` | pass `--model` when needed |
+
+The CLI provider names (`claude-code`, `codex`, `antigravity`, `gemini`, `kimi`) map to their hosted API equivalents for optimization because GEPA needs a direct model call to propose prompt patches. Providers with no single hosted backend (`opencode`, `pi`, `amp`, `forge`) are still accepted through a generic OpenAI-compatible endpoint.
 
 `--provider heuristic` is deterministic and intended for local tests and fixtures. It uses eval-case metadata such as:
 

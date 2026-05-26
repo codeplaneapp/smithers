@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
+    OPTIMIZER_PROVIDER_IDS,
+    buildProviderGepaPatches,
     buildHeuristicGepaPatches,
     discoverOptimizablePromptTasks,
+    getOptimizerProviderConfig,
+    resolveOptimizerProviderModel,
     scoreOptimizationReport,
 } from "../src/optimize-suite.js";
 import { createTempRepo, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
@@ -71,6 +75,91 @@ describe("optimize suite helpers", () => {
         ], baselineReport);
         expect(patches.answer.prompt).toContain("Base prompt");
         expect(patches.answer.prompt).toContain("OPTIMIZED_TOKEN");
+    });
+
+    test("covers Smithers account and agent provider ids", () => {
+        expect(OPTIMIZER_PROVIDER_IDS).toEqual(expect.arrayContaining([
+            "claude-code",
+            "codex",
+            "antigravity",
+            "gemini",
+            "kimi",
+            "anthropic-api",
+            "openai-api",
+            "gemini-api",
+            "opencode",
+            "pi",
+            "amp",
+            "forge",
+        ]));
+        expect(getOptimizerProviderConfig("claude-code")?.kind).toBe("anthropic");
+        expect(getOptimizerProviderConfig("codex")?.kind).toBe("openai-compatible");
+        expect(getOptimizerProviderConfig("antigravity")?.kind).toBe("gemini");
+        expect(getOptimizerProviderConfig("kimi")?.kind).toBe("openai-compatible");
+        expect(resolveOptimizerProviderModel("cerebras")).toBe("gpt-oss-120b");
+        expect(resolveOptimizerProviderModel("openai-compatible", "custom-model")).toBe("custom-model");
+    });
+
+    test("builds provider optimizer calls for OpenAI-compatible, Anthropic, and Gemini providers", async () => {
+        const promptTasks = [{ nodeId: "answer", prompt: "Base prompt", promptHash: "abc", label: null }];
+        const cases = [{ id: "alpha", input: {}, expected: {}, metadata: {} }];
+        const baselineReport = { results: [{ caseId: "alpha", passed: false, assertions: [] }] };
+        const successfulPatch = JSON.stringify({
+            patches: [{ nodeId: "answer", prompt: "Improved prompt", rationale: "Because the eval failed." }],
+        });
+        /** @type {Array<{ url: string; body: any; headers: Record<string, string> }>} */
+        const calls = [];
+        const fakeFetch = async (url, init) => {
+            calls.push({
+                url: String(url),
+                body: JSON.parse(String(init?.body)),
+                headers: Object.fromEntries(new Headers(init?.headers).entries()),
+            });
+            if (String(url).includes(":generateContent")) {
+                return new Response(JSON.stringify({
+                    candidates: [{ content: { parts: [{ text: successfulPatch }] } }],
+                }), { status: 200 });
+            }
+            if (String(url).endsWith("/messages")) {
+                return new Response(JSON.stringify({
+                    content: [{ type: "text", text: successfulPatch }],
+                }), { status: 200 });
+            }
+            return new Response(JSON.stringify({
+                choices: [{ message: { content: successfulPatch } }],
+            }), { status: 200 });
+        };
+
+        const openaiPatches = await buildProviderGepaPatches({
+            provider: "codex",
+            promptTasks,
+            cases,
+            baselineReport,
+        }, { fetch: fakeFetch, env: { OPENAI_API_KEY: "openai-key" } });
+        expect(openaiPatches.answer.source).toBe("codex-gepa");
+        expect(calls.at(-1).url).toBe("https://api.openai.com/v1/chat/completions");
+        expect(calls.at(-1).body.model).toBe("gpt-5.3-codex");
+
+        await buildProviderGepaPatches({
+            provider: "claude-code",
+            model: "claude-test",
+            promptTasks,
+            cases,
+            baselineReport,
+        }, { fetch: fakeFetch, env: { ANTHROPIC_API_KEY: "anthropic-key" } });
+        expect(calls.at(-1).url).toBe("https://api.anthropic.com/v1/messages");
+        expect(calls.at(-1).headers["x-api-key"]).toBe("anthropic-key");
+        expect(calls.at(-1).body.model).toBe("claude-test");
+
+        await buildProviderGepaPatches({
+            provider: "antigravity",
+            model: "gemini-test",
+            promptTasks,
+            cases,
+            baselineReport,
+        }, { fetch: fakeFetch, env: { GOOGLE_API_KEY: "google-key" } });
+        expect(calls.at(-1).url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-test:generateContent?key=google-key");
+        expect(calls.at(-1).body.generationConfig.responseMimeType).toBe("application/json");
     });
 });
 

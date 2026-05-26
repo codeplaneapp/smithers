@@ -4,6 +4,138 @@ import crypto from "node:crypto";
 import { SmithersError } from "@smithers-orchestrator/errors";
 
 const ARTIFACT_SCHEMA_VERSION = 1;
+export const OPTIMIZER_PROVIDER_IDS = [
+    "heuristic",
+    "cerebras",
+    "openai-api",
+    "openai",
+    "codex",
+    "anthropic-api",
+    "anthropic",
+    "claude-code",
+    "claude",
+    "gemini-api",
+    "gemini",
+    "antigravity",
+    "kimi",
+    "moonshot",
+    "opencode",
+    "pi",
+    "amp",
+    "forge",
+    "openai-compatible",
+];
+const PROVIDER_CONFIGS = {
+    heuristic: { kind: "heuristic" },
+    cerebras: {
+        kind: "openai-compatible",
+        baseURL: "https://api.cerebras.ai/v1",
+        apiKeyEnv: "CEREBRAS_API_KEY",
+        defaultModel: "gpt-oss-120b",
+    },
+    "openai-api": {
+        kind: "openai-compatible",
+        baseURL: "https://api.openai.com/v1",
+        apiKeyEnv: "OPENAI_API_KEY",
+        defaultModel: "gpt-5.3-codex",
+    },
+    openai: {
+        kind: "openai-compatible",
+        baseURL: "https://api.openai.com/v1",
+        apiKeyEnv: "OPENAI_API_KEY",
+        defaultModel: "gpt-5.3-codex",
+    },
+    codex: {
+        kind: "openai-compatible",
+        baseURL: "https://api.openai.com/v1",
+        apiKeyEnv: "OPENAI_API_KEY",
+        defaultModel: "gpt-5.3-codex",
+    },
+    "anthropic-api": {
+        kind: "anthropic",
+        baseURL: "https://api.anthropic.com/v1",
+        apiKeyEnv: "ANTHROPIC_API_KEY",
+        defaultModel: "claude-opus-4-7",
+    },
+    anthropic: {
+        kind: "anthropic",
+        baseURL: "https://api.anthropic.com/v1",
+        apiKeyEnv: "ANTHROPIC_API_KEY",
+        defaultModel: "claude-opus-4-7",
+    },
+    "claude-code": {
+        kind: "anthropic",
+        baseURL: "https://api.anthropic.com/v1",
+        apiKeyEnv: "ANTHROPIC_API_KEY",
+        defaultModel: "claude-opus-4-7",
+    },
+    claude: {
+        kind: "anthropic",
+        baseURL: "https://api.anthropic.com/v1",
+        apiKeyEnv: "ANTHROPIC_API_KEY",
+        defaultModel: "claude-opus-4-7",
+    },
+    "gemini-api": {
+        kind: "gemini",
+        baseURL: "https://generativelanguage.googleapis.com/v1beta",
+        apiKeyEnv: "GEMINI_API_KEY",
+        fallbackApiKeyEnv: "GOOGLE_API_KEY",
+        defaultModel: "gemini-3.1-pro-preview",
+    },
+    gemini: {
+        kind: "gemini",
+        baseURL: "https://generativelanguage.googleapis.com/v1beta",
+        apiKeyEnv: "GEMINI_API_KEY",
+        fallbackApiKeyEnv: "GOOGLE_API_KEY",
+        defaultModel: "gemini-3.1-pro-preview",
+    },
+    antigravity: {
+        kind: "gemini",
+        baseURL: "https://generativelanguage.googleapis.com/v1beta",
+        apiKeyEnv: "GEMINI_API_KEY",
+        fallbackApiKeyEnv: "GOOGLE_API_KEY",
+        defaultModel: "gemini-3.1-pro-preview",
+    },
+    kimi: {
+        kind: "openai-compatible",
+        baseURL: "https://api.moonshot.ai/v1",
+        apiKeyEnv: "MOONSHOT_API_KEY",
+        defaultModel: "kimi-latest",
+    },
+    moonshot: {
+        kind: "openai-compatible",
+        baseURL: "https://api.moonshot.ai/v1",
+        apiKeyEnv: "MOONSHOT_API_KEY",
+        defaultModel: "kimi-latest",
+    },
+    opencode: {
+        kind: "openai-compatible",
+        baseURLEnv: "SMITHERS_OPTIMIZER_BASE_URL",
+        apiKeyEnv: "SMITHERS_OPTIMIZER_API_KEY",
+        defaultModel: "anthropic/claude-sonnet-4-5",
+    },
+    pi: {
+        kind: "openai-compatible",
+        baseURLEnv: "SMITHERS_OPTIMIZER_BASE_URL",
+        apiKeyEnv: "SMITHERS_OPTIMIZER_API_KEY",
+        defaultModel: "gpt-5.3-codex",
+    },
+    amp: {
+        kind: "openai-compatible",
+        baseURLEnv: "SMITHERS_OPTIMIZER_BASE_URL",
+        apiKeyEnv: "SMITHERS_OPTIMIZER_API_KEY",
+    },
+    forge: {
+        kind: "openai-compatible",
+        baseURLEnv: "SMITHERS_OPTIMIZER_BASE_URL",
+        apiKeyEnv: "SMITHERS_OPTIMIZER_API_KEY",
+    },
+    "openai-compatible": {
+        kind: "openai-compatible",
+        baseURLEnv: "SMITHERS_OPTIMIZER_BASE_URL",
+        apiKeyEnv: "SMITHERS_OPTIMIZER_API_KEY",
+    },
+};
 
 /**
  * @param {unknown} value
@@ -25,6 +157,22 @@ function asString(value) {
  */
 function sha1(text) {
     return crypto.createHash("sha1").update(text).digest("hex");
+}
+
+/**
+ * @param {string} provider
+ */
+export function getOptimizerProviderConfig(provider) {
+    return PROVIDER_CONFIGS[provider] ?? null;
+}
+
+/**
+ * @param {string} provider
+ * @param {string | undefined} model
+ */
+export function resolveOptimizerProviderModel(provider, model) {
+    const config = getOptimizerProviderConfig(provider);
+    return model ?? config?.defaultModel ?? null;
 }
 
 /**
@@ -125,38 +273,110 @@ export function buildHeuristicGepaPatches(promptTasks, cases, baselineReport) {
 
 /**
  * @param {{
+ *   provider: string;
  *   apiKey?: string;
- *   model: string;
+ *   baseURL?: string;
+ *   model?: string;
  *   promptTasks: Array<ReturnType<typeof discoverOptimizablePromptTasks>[number]>;
  *   cases: Array<Record<string, any>>;
  *   baselineReport: Record<string, any>;
  * }} input
+ * @param {{ fetch?: typeof fetch; env?: NodeJS.ProcessEnv }} [options]
  */
-export async function buildCerebrasGepaPatches(input) {
-    const apiKey = input.apiKey ?? process.env.CEREBRAS_API_KEY;
-    if (!apiKey) {
-        throw new SmithersError("INVALID_INPUT", "CEREBRAS_API_KEY is required for --provider cerebras.", {
-            provider: "cerebras",
+export async function buildProviderGepaPatches(input, options = {}) {
+    const config = getOptimizerProviderConfig(input.provider);
+    if (!config) {
+        throw new SmithersError("INVALID_INPUT", `Unsupported optimizer provider "${input.provider}".`, {
+            provider: input.provider,
+            supportedProviders: OPTIMIZER_PROVIDER_IDS,
         });
     }
-    const optimizerPrompt = [
+    if (config.kind === "heuristic") {
+        return buildHeuristicGepaPatches(input.promptTasks, input.cases, input.baselineReport);
+    }
+    const env = options.env ?? process.env;
+    const model = resolveOptimizerProviderModel(input.provider, input.model);
+    if (!model) {
+        throw new SmithersError("INVALID_INPUT", `--model is required for --provider ${input.provider}.`, {
+            provider: input.provider,
+        });
+    }
+    const apiKey = input.apiKey ?? env[config.apiKeyEnv] ?? (config.fallbackApiKeyEnv ? env[config.fallbackApiKeyEnv] : undefined);
+    if (!apiKey) {
+        const envNames = [config.apiKeyEnv, config.fallbackApiKeyEnv].filter(Boolean).join(" or ");
+        throw new SmithersError("INVALID_INPUT", `${envNames} is required for --provider ${input.provider}.`, {
+            provider: input.provider,
+        });
+    }
+    const baseURL = input.baseURL ?? (config.baseURLEnv ? env[config.baseURLEnv] : undefined) ?? config.baseURL;
+    if (!baseURL) {
+        throw new SmithersError("INVALID_INPUT", `${config.baseURLEnv ?? "baseURL"} is required for --provider ${input.provider}.`, {
+            provider: input.provider,
+        });
+    }
+    const optimizerPrompt = buildOptimizerPrompt(input.promptTasks, input.cases, input.baselineReport);
+    const fetchFn = options.fetch ?? fetch;
+    const text = config.kind === "anthropic"
+        ? await requestAnthropicOptimizer(fetchFn, { provider: input.provider, apiKey, baseURL, model, optimizerPrompt })
+        : config.kind === "gemini"
+            ? await requestGeminiOptimizer(fetchFn, { provider: input.provider, apiKey, baseURL, model, optimizerPrompt })
+            : await requestOpenAICompatibleOptimizer(fetchFn, { provider: input.provider, apiKey, baseURL, model, optimizerPrompt });
+    return parseOptimizerPatches(text, input.provider);
+}
+
+/**
+ * @param {{
+ *   apiKey?: string;
+ *   model?: string;
+ *   promptTasks: Array<ReturnType<typeof discoverOptimizablePromptTasks>[number]>;
+ *   cases: Array<Record<string, any>>;
+ *   baselineReport: Record<string, any>;
+ * }} input
+ * @param {{ fetch?: typeof fetch; env?: NodeJS.ProcessEnv }} [options]
+ */
+export async function buildCerebrasGepaPatches(input, options = {}) {
+    return buildProviderGepaPatches({ provider: "cerebras", ...input }, options);
+}
+
+/**
+ * @param {Array<ReturnType<typeof discoverOptimizablePromptTasks>[number]>} promptTasks
+ * @param {Array<Record<string, any>>} cases
+ * @param {Record<string, any>} baselineReport
+ */
+function buildOptimizerPrompt(promptTasks, cases, baselineReport) {
+    return [
         "You are GEPA optimizing Smithers workflow task prompts.",
         "Return only JSON: {\"patches\":[{\"nodeId\":\"...\",\"prompt\":\"...\",\"rationale\":\"...\"}]}",
         "Improve prompts to maximize validation pass rate while preserving task intent.",
         "",
-        `Tasks: ${JSON.stringify(input.promptTasks)}`,
-        `Eval cases: ${JSON.stringify(input.cases.map((testCase) => ({
+        `Tasks: ${JSON.stringify(promptTasks)}`,
+        `Eval cases: ${JSON.stringify(cases.map((testCase) => ({
             id: testCase.id,
             input: testCase.input,
             expected: testCase.expected,
             metadata: testCase.metadata,
         })))}`,
-        `Baseline results: ${JSON.stringify(input.baselineReport.results ?? [])}`,
+        `Baseline results: ${JSON.stringify(baselineReport.results ?? [])}`,
     ].join("\n");
-    const response = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+}
+
+/**
+ * @param {string} baseURL
+ * @param {string} path
+ */
+function endpoint(baseURL, path) {
+    return `${baseURL.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+}
+
+/**
+ * @param {typeof fetch} fetchFn
+ * @param {{ provider: string; apiKey: string; baseURL: string; model: string; optimizerPrompt: string }} input
+ */
+async function requestOpenAICompatibleOptimizer(fetchFn, input) {
+    const response = await fetchFn(endpoint(input.baseURL, "/chat/completions"), {
         method: "POST",
         headers: {
-            authorization: `Bearer ${apiKey}`,
+            authorization: `Bearer ${input.apiKey}`,
             "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -166,25 +386,108 @@ export async function buildCerebrasGepaPatches(input) {
                     role: "system",
                     content: "You produce strict JSON and do not include Markdown fences.",
                 },
-                { role: "user", content: optimizerPrompt },
+                { role: "user", content: input.optimizerPrompt },
             ],
             temperature: 0.2,
         }),
     });
-    if (!response.ok) {
-        const body = await response.text();
-        throw new SmithersError("INVALID_INPUT", `Cerebras optimizer request failed (${response.status}): ${body.slice(0, 500)}`, {
-            provider: "cerebras",
-            status: response.status,
-        });
-    }
+    await assertOptimizerResponseOk(response, input.provider);
     const payload = await response.json();
     const text = payload?.choices?.[0]?.message?.content;
     if (typeof text !== "string") {
-        throw new SmithersError("INVALID_INPUT", "Cerebras optimizer response did not include message content.", {
-            provider: "cerebras",
+        throw new SmithersError("INVALID_INPUT", `${input.provider} optimizer response did not include message content.`, {
+            provider: input.provider,
         });
     }
+    return text;
+}
+
+/**
+ * @param {typeof fetch} fetchFn
+ * @param {{ provider: string; apiKey: string; baseURL: string; model: string; optimizerPrompt: string }} input
+ */
+async function requestAnthropicOptimizer(fetchFn, input) {
+    const response = await fetchFn(endpoint(input.baseURL, "/messages"), {
+        method: "POST",
+        headers: {
+            "x-api-key": input.apiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({
+            model: input.model,
+            max_tokens: 4096,
+            system: "You produce strict JSON and do not include Markdown fences.",
+            messages: [{ role: "user", content: input.optimizerPrompt }],
+            temperature: 0.2,
+        }),
+    });
+    await assertOptimizerResponseOk(response, input.provider);
+    const payload = await response.json();
+    const text = payload?.content?.find((part) => part?.type === "text")?.text;
+    if (typeof text !== "string") {
+        throw new SmithersError("INVALID_INPUT", `${input.provider} optimizer response did not include text content.`, {
+            provider: input.provider,
+        });
+    }
+    return text;
+}
+
+/**
+ * @param {typeof fetch} fetchFn
+ * @param {{ provider: string; apiKey: string; baseURL: string; model: string; optimizerPrompt: string }} input
+ */
+async function requestGeminiOptimizer(fetchFn, input) {
+    const url = `${endpoint(input.baseURL, `/models/${encodeURIComponent(input.model)}:generateContent`)}?key=${encodeURIComponent(input.apiKey)}`;
+    const response = await fetchFn(url, {
+        method: "POST",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({
+            systemInstruction: {
+                parts: [{ text: "You produce strict JSON and do not include Markdown fences." }],
+            },
+            contents: [{ role: "user", parts: [{ text: input.optimizerPrompt }] }],
+            generationConfig: {
+                temperature: 0.2,
+                responseMimeType: "application/json",
+            },
+        }),
+    });
+    await assertOptimizerResponseOk(response, input.provider);
+    const payload = await response.json();
+    const text = payload?.candidates?.[0]?.content?.parts
+        ?.map((part) => typeof part?.text === "string" ? part.text : "")
+        .join("");
+    if (typeof text !== "string" || !text.trim()) {
+        throw new SmithersError("INVALID_INPUT", `${input.provider} optimizer response did not include text content.`, {
+            provider: input.provider,
+        });
+    }
+    return text;
+}
+
+/**
+ * @param {Response} response
+ * @param {string} provider
+ */
+async function assertOptimizerResponseOk(response, provider) {
+    if (response.ok) {
+        return;
+    }
+    const body = await response.text();
+    throw new SmithersError("INVALID_INPUT", `${provider} optimizer request failed (${response.status}): ${body.slice(0, 500)}`, {
+        provider,
+        status: response.status,
+    });
+}
+
+/**
+ * @param {string} text
+ * @param {string} provider
+ */
+function parseOptimizerPatches(text, provider) {
     const parsed = JSON.parse(text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, ""));
     const patchRows = Array.isArray(parsed?.patches) ? parsed.patches : [];
     /** @type {Record<string, { prompt: string; rationale: string; source: string }>} */
@@ -195,8 +498,8 @@ export async function buildCerebrasGepaPatches(input) {
         }
         patches[row.nodeId] = {
             prompt: row.prompt,
-            rationale: typeof row.rationale === "string" ? row.rationale : "Cerebras GEPA prompt candidate.",
-            source: "cerebras-gepa",
+            rationale: typeof row.rationale === "string" ? row.rationale : `${provider} GEPA prompt candidate.`,
+            source: `${provider}-gepa`,
         };
     }
     return patches;

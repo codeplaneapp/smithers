@@ -56,10 +56,11 @@ import {
 import { initOptions, runInitCommand } from "./init-command.js";
 import { startersArgs, startersOptions, runStartersCommand } from "./starter-gallery-command.js";
 import {
-    buildCerebrasGepaPatches,
-    buildHeuristicGepaPatches,
+    OPTIMIZER_PROVIDER_IDS,
+    buildProviderGepaPatches,
     discoverOptimizablePromptTasks,
     renderOptimizationReport,
+    resolveOptimizerProviderModel,
     scoreOptimizationReport,
     writeCandidateOptimizationArtifact,
     writeOptimizationArtifact,
@@ -1272,8 +1273,8 @@ const evalOptions = z.object({
 const optimizeOptions = z.object({
     cases: z.string().describe("JSON or JSONL eval case file"),
     suite: z.string().optional().describe("Stable suite ID used in run IDs and report paths"),
-    provider: z.enum(["heuristic", "cerebras"]).default("cerebras").describe("GEPA patch generator provider"),
-    model: z.string().default("gpt-oss-120b").describe("Optimizer model for provider-backed GEPA"),
+    provider: z.enum(OPTIMIZER_PROVIDER_IDS).default("cerebras").describe("GEPA patch generator provider"),
+    model: z.string().optional().describe("Optimizer model for provider-backed GEPA"),
     artifact: z.string().optional().describe("Write the optimized prompt artifact to this path"),
     reportDir: z.string().optional().describe("Directory for baseline and optimized eval reports"),
     minImprovement: z.number().default(0.000001).describe("Minimum required absolute score improvement"),
@@ -2962,14 +2963,13 @@ const cli = Cli.create({
                 },
                 reportPath: join(reportDir, `${baselinePlan.suiteId}.json`),
             });
-            const promptPatches = c.options.provider === "cerebras"
-                ? await buildCerebrasGepaPatches({
-                    model: c.options.model,
-                    promptTasks,
-                    cases: loadedCases.cases,
-                    baselineReport,
-                })
-                : buildHeuristicGepaPatches(promptTasks, loadedCases.cases, baselineReport);
+            const promptPatches = await buildProviderGepaPatches({
+                provider: c.options.provider,
+                model: c.options.model,
+                promptTasks,
+                cases: loadedCases.cases,
+                baselineReport,
+            });
             if (Object.keys(promptPatches).length === 0) {
                 throw new SmithersError("INVALID_INPUT", "GEPA did not produce any prompt patches.", {
                     provider: c.options.provider,
@@ -3002,7 +3002,7 @@ const cli = Cli.create({
                 workflowPath,
                 requestedPath: c.options.artifact,
                 provider: c.options.provider,
-                model: c.options.model,
+                model: resolveOptimizerProviderModel(c.options.provider, c.options.model) ?? "provider-default",
                 promptTasks,
                 promptPatches,
                 baselineReport,
