@@ -1603,6 +1603,49 @@ async function executeEvalPlan(input) {
     return { ...report, reportPath };
 }
 /**
+ * @param {{
+ *   workflow: import("@smithers-orchestrator/components").SmithersWorkflow<any>;
+ *   workflowPath: string;
+ *   cases: Array<Record<string, any>>;
+ * }} input
+ */
+async function discoverOptimizablePromptTasksForCases(input) {
+    const resolvedWorkflowPath = resolve(process.cwd(), input.workflowPath);
+    /** @type {Map<string, ReturnType<typeof discoverOptimizablePromptTasks>[number]>} */
+    const discovered = new Map();
+    for (const testCase of input.cases) {
+        const ctx = new SmithersCtx({
+            runId: `optimize-discovery-${testCase.id ?? crypto.randomUUID()}`,
+            iteration: 0,
+            input: testCase?.input ?? {},
+            outputs: {},
+            zodToKeyName: input.workflow.zodToKeyName,
+        });
+        const snap = await Effect.runPromise(renderFrame(input.workflow, ctx, {
+            baseRootDir: dirname(resolvedWorkflowPath),
+            workflowPath: resolvedWorkflowPath,
+        }));
+        for (const task of discoverOptimizablePromptTasks(snap.tasks)) {
+            const existing = discovered.get(task.nodeId);
+            if (!existing) {
+                discovered.set(task.nodeId, {
+                    ...task,
+                    promptSamples: [{ caseId: testCase.id, prompt: task.prompt, promptHash: task.promptHash }],
+                });
+                continue;
+            }
+            const samples = Array.isArray(existing.promptSamples) ? existing.promptSamples : [];
+            if (!samples.some((sample) => sample.promptHash === task.promptHash)) {
+                discovered.set(task.nodeId, {
+                    ...existing,
+                    promptSamples: [...samples, { caseId: testCase.id, prompt: task.prompt, promptHash: task.promptHash }],
+                });
+            }
+        }
+    }
+    return [...discovered.values()];
+}
+/**
  * @param {string} intervalRaw
  * @param {string} staleThresholdRaw
  * @param {number} maxConcurrent
@@ -2931,23 +2974,14 @@ const cli = Cli.create({
             const adapter = new SmithersDb(workflow.db);
             await assertEvalRunIdsAvailable(adapter, [...baselinePlan.cases, ...optimizedPlan.cases]);
             setupSqliteCleanup(workflow);
-            const resolvedWorkflowPath = resolve(process.cwd(), workflowPath);
             const reportDir = c.options.reportDir
                 ? resolve(process.cwd(), c.options.reportDir)
                 : resolve(process.cwd(), ".smithers", "optimizations", "reports");
-            const firstCase = loadedCases.cases[0];
-            const ctx = new SmithersCtx({
-                runId: "optimize-discovery",
-                iteration: 0,
-                input: firstCase?.input ?? {},
-                outputs: {},
-                zodToKeyName: workflow.zodToKeyName,
+            const promptTasks = await discoverOptimizablePromptTasksForCases({
+                workflow,
+                workflowPath,
+                cases: loadedCases.cases,
             });
-            const snap = await Effect.runPromise(renderFrame(workflow, ctx, {
-                baseRootDir: dirname(resolvedWorkflowPath),
-                workflowPath: resolvedWorkflowPath,
-            }));
-            const promptTasks = discoverOptimizablePromptTasks(snap.tasks);
             if (promptTasks.length === 0) {
                 throw new SmithersError("INVALID_INPUT", "No agent-backed prompt tasks were found to optimize.", {
                     workflowPath,

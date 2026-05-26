@@ -9,9 +9,11 @@ export const OPTIMIZER_PROVIDER_IDS = [
     "cerebras",
     "openai-api",
     "openai",
+    "openai-sdk",
     "codex",
     "anthropic-api",
     "anthropic",
+    "anthropic-sdk",
     "claude-code",
     "claude",
     "gemini-api",
@@ -45,6 +47,12 @@ const PROVIDER_CONFIGS = {
         apiKeyEnv: "OPENAI_API_KEY",
         defaultModel: "gpt-5.3-codex",
     },
+    "openai-sdk": {
+        kind: "openai-compatible",
+        baseURL: "https://api.openai.com/v1",
+        apiKeyEnv: "OPENAI_API_KEY",
+        defaultModel: "gpt-5.3-codex",
+    },
     codex: {
         kind: "openai-compatible",
         baseURL: "https://api.openai.com/v1",
@@ -58,6 +66,12 @@ const PROVIDER_CONFIGS = {
         defaultModel: "claude-opus-4-7",
     },
     anthropic: {
+        kind: "anthropic",
+        baseURL: "https://api.anthropic.com/v1",
+        apiKeyEnv: "ANTHROPIC_API_KEY",
+        defaultModel: "claude-opus-4-7",
+    },
+    "anthropic-sdk": {
         kind: "anthropic",
         baseURL: "https://api.anthropic.com/v1",
         apiKeyEnv: "ANTHROPIC_API_KEY",

@@ -44,6 +44,46 @@ function writeOptimizableWorkflow(repo) {
     ].join("\n"));
 }
 
+function writeConditionalOptimizableWorkflow(repo) {
+    return repo.write("conditional-workflow.tsx", [
+        "/** @jsxImportSource smithers-orchestrator */",
+        'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
+        'import { z } from "zod";',
+        "",
+        "const { smithers, outputs } = createSmithers({",
+        "  result: z.object({",
+        "    optimized: z.boolean(),",
+        "    prompt: z.string(),",
+        "  }),",
+        "});",
+        "",
+        "const promptSensitiveAgent = {",
+        '  id: "prompt-sensitive-agent",',
+        '  model: "fixture-model",',
+        "  generate: async ({ prompt }) => {",
+        '    const optimized = prompt.includes("OPTIMIZED_TOKEN");',
+        "    const output = { optimized, prompt };",
+        "    return { text: JSON.stringify(output), output };",
+        "  },",
+        "};",
+        "",
+        "export default smithers((ctx) => (",
+        '  <Workflow name="conditional-optimizable-workflow">',
+        '    {ctx.input.kind === "secondary" ? (',
+        '      <Task id="secondary" output={outputs.result} agent={promptSensitiveAgent}>',
+        "        {`Secondary answer for ${ctx.input.prompt}`}",
+        "      </Task>",
+        "    ) : (",
+        '      <Task id="primary" output={outputs.result} agent={promptSensitiveAgent}>',
+        "        {`Primary answer with OPTIMIZED_TOKEN for ${ctx.input.prompt}`}",
+        "      </Task>",
+        "    )}",
+        "  </Workflow>",
+        "));",
+        "",
+    ].join("\n"));
+}
+
 describe("optimize suite helpers", () => {
     test("scores reports and creates GEPA prompt patches from failed-case hints", () => {
         const tasks = discoverOptimizablePromptTasks([
@@ -240,5 +280,59 @@ describe("smithers optimize command", () => {
             passed: 1,
             failed: 0,
         });
+    }, 120_000);
+
+    test("discovers prompt tasks across all eval cases before optimizing", () => {
+        const repo = createTempRepo();
+        writeConditionalOptimizableWorkflow(repo);
+        repo.write("evals/conditional.jsonl", [
+            JSON.stringify({
+                id: "primary-case",
+                input: { kind: "primary", prompt: "already good" },
+                expected: {
+                    status: "finished",
+                    outputContains: {
+                        result: [{ optimized: true }],
+                    },
+                },
+            }),
+            JSON.stringify({
+                id: "secondary-case",
+                input: { kind: "secondary", prompt: "needs optimization" },
+                expected: {
+                    status: "finished",
+                    outputContains: {
+                        result: [{ optimized: true }],
+                    },
+                },
+                metadata: {
+                    optimizationHints: {
+                        secondary: "Include the exact token OPTIMIZED_TOKEN so the secondary branch selects the optimized behavior.",
+                    },
+                },
+            }),
+        ].join("\n") + "\n");
+
+        const result = runSmithers([
+            "optimize",
+            "conditional-workflow.tsx",
+            "--cases",
+            "evals/conditional.jsonl",
+            "--suite",
+            "conditional-opt",
+            "--provider",
+            "heuristic",
+            "--artifact",
+            "artifacts/conditional-optimized.json",
+            "--report-dir",
+            "artifacts/reports",
+        ], { cwd: repo.dir, format: "json", timeoutMs: 60_000 });
+
+        if (result.exitCode !== 0) {
+            throw new Error(`smithers optimize conditional exited ${result.exitCode}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+        }
+        const artifact = JSON.parse(repo.read("artifacts/conditional-optimized.json"));
+        expect(artifact.promptPatches.secondary.prompt).toContain("OPTIMIZED_TOKEN");
+        expect(artifact.optimized.passed).toBe(2);
     }, 120_000);
 });

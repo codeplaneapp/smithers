@@ -5134,14 +5134,14 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 await workflowVersioning.flush();
                 graph.tasks = applyOptimizationArtifactToTasks(graph.tasks);
                 resolveTaskOutputs(graph.tasks, workflowRef);
-            attachSubflowComputeFns(graph.tasks, workflowRef, {
-                rootDir,
-                workflowPath: resolvedWorkflowPath ?? opts.workflowPath,
-            });
-            attachSandboxComputeFns(graph.tasks, workflowRef, {
-                rootDir,
-                workflowPath: resolvedWorkflowPath ?? opts.workflowPath,
-            });
+                attachSubflowComputeFns(graph.tasks, workflowRef, {
+                    rootDir,
+                    workflowPath: resolvedWorkflowPath ?? opts.workflowPath,
+                });
+                attachSandboxComputeFns(graph.tasks, workflowRef, {
+                    rootDir,
+                    workflowPath: resolvedWorkflowPath ?? opts.workflowPath,
+                });
                 lastGraph = graph;
                 descriptorMap = buildDescriptorMap(graph.tasks);
                 workflowName = getWorkflowNameFromXml(graph.xml);
