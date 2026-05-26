@@ -49,6 +49,7 @@ function writeWorkflowPackTypecheckHarness(repo) {
         "  export const Gateway: any;",
         "  export const ClaudeCodeAgent: any;",
         "  export const CodexAgent: any;",
+        "  export const OpenCodeAgent: any;",
         "  export const AntigravityAgent: any;",
         "  export const GeminiAgent: any;",
         "  export const tools: any;",
@@ -167,6 +168,7 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
     expect(repo.exists(".smithers/agents.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/claude-code.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/codex.ts")).toBe(true);
+    expect(repo.exists(".smithers/agents/opencode.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/antigravity.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/gemini.ts")).toBe(false);
     expect(repo.exists(".smithers/agents/index.ts")).toBe(true);
@@ -279,6 +281,7 @@ test("smithers init --agents-only creates only the user-owned agent scaffold", (
     expect(result.exitCode).toBe(0);
     expect(repo.exists(".smithers/agents/claude-code.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/codex.ts")).toBe(true);
+    expect(repo.exists(".smithers/agents/opencode.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/antigravity.ts")).toBe(true);
     expect(repo.exists(".smithers/agents/gemini.ts")).toBe(false);
     expect(repo.exists(".smithers/agents/index.ts")).toBe(true);

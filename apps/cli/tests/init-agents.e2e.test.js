@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeGeminiBinary, } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeGeminiBinary, writeFakeOpenCodeBinary, } from "../../../packages/smithers/tests/e2e-helpers.js";
 /**
  * @param {string} homeDir
  * @param {string} binDir
@@ -56,15 +56,35 @@ test("smithers init includes Codex implementation roles when Codex plus OPENAI_A
     expect(agentsSource).toContain("smartTool: Smithers would normally suggest Claude Code here");
     expect(agentsSource).toContain("cheapFast: Smithers would normally suggest Kimi here");
 });
+test("smithers init includes OpenCode roles when OpenCode CLI credentials are available", () => {
+    const repo = createTempRepo();
+    const binDir = createExecutableDir();
+    writeFakeOpenCodeBinary(binDir);
+    repo.write(".local/share/opencode/auth.json", "{}\n");
+    const result = runSmithers(["init"], {
+        cwd: repo.dir,
+        format: "json",
+        env: buildEnv(repo.dir, binDir),
+    });
+    expect(result.exitCode).toBe(0);
+    const agentsSource = repo.read(".smithers/agents.ts");
+    expect(agentsSource).toContain('export { OpenCodeAgent } from "./agents/opencode";');
+    expect(agentsSource).toContain("opencode: OpenCodeAgent");
+    expect(agentsSource).toContain("smart: [providers.opencode]");
+    expect(agentsSource).toContain("smartTool: [providers.opencode]");
+    expect(agentsSource).toContain("smart: Smithers would normally suggest Codex here");
+});
 test("smithers init orders role chains correctly when multiple local agent CLIs are available", () => {
     const repo = createTempRepo();
     const binDir = createExecutableDir();
     writeFakeClaudeBinary(binDir);
     writeFakeCodexBinary(binDir);
+    writeFakeOpenCodeBinary(binDir);
     writeFakeAntigravityBinary(binDir);
     writeFakeGeminiBinary(binDir);
     repo.write(".claude/.credentials.json", "{}\n");
     repo.write(".codex/auth.json", "{}\n");
+    repo.write(".local/share/opencode/auth.json", "{}\n");
     repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
     repo.write(".gemini/oauth_creds.json", "{}\n");
     repo.write(".gemini/trustedFolders.json", JSON.stringify({ [repo.dir]: "TRUST_FOLDER" }) + "\n");
@@ -76,8 +96,8 @@ test("smithers init orders role chains correctly when multiple local agent CLIs 
     expect(result.exitCode).toBe(0);
     const agentsSource = repo.read(".smithers/agents.ts");
     expect(agentsSource).toContain("cheapFast: [providers.claudeSonnet, providers.antigravity]");
-    expect(agentsSource).toContain("smart: [providers.codex, providers.claude, providers.antigravity]");
-    expect(agentsSource).toContain("smartTool: [providers.claude, providers.codex, providers.antigravity]");
+    expect(agentsSource).toContain("smart: [providers.codex, providers.opencode, providers.claude]");
+    expect(agentsSource).toContain("smartTool: [providers.claude, providers.codex, providers.opencode]");
     expect(agentsSource).not.toContain("providers.gemini");
 });
 test("smithers init exits with a typed error when no usable agents are detected", () => {
@@ -94,6 +114,7 @@ test("smithers init exits with a typed error when no usable agents are detected"
     });
     expect(JSON.stringify(result.json)).toContain("claude");
     expect(JSON.stringify(result.json)).toContain("codex");
+    expect(JSON.stringify(result.json)).toContain("opencode");
     expect(JSON.stringify(result.json)).toContain("antigravity");
     expect(JSON.stringify(result.json)).toContain("gemini");
     expect(JSON.stringify(result.json)).toContain("codex login");
@@ -114,6 +135,24 @@ test("smithers init rejects a CLI that is present but not authenticated", () => 
     });
     expect(JSON.stringify(result.json)).toContain("missing credentials");
     expect(JSON.stringify(result.json)).toContain("OPENAI_API_KEY");
+});
+
+test("smithers init rejects OpenCode CLI when it is present but not authenticated", () => {
+    const repo = createTempRepo();
+    const binDir = createExecutableDir();
+    writeFakeOpenCodeBinary(binDir);
+    const result = runSmithers(["init"], {
+        cwd: repo.dir,
+        format: "json",
+        env: buildEnv(repo.dir, binDir),
+    });
+    expect(result.exitCode).toBe(4);
+    expect(result.json).toMatchObject({
+        code: "NO_USABLE_AGENTS",
+    });
+    expect(JSON.stringify(result.json)).toContain("OpenCode");
+    expect(JSON.stringify(result.json)).toContain("missing credentials");
+    expect(JSON.stringify(result.json)).toContain("opencode/auth.json");
 });
 
 test("smithers init does not auto-select deprecated Gemini", () => {

@@ -28,6 +28,14 @@ const DETECTORS = [
         setupHint: "Install the Codex CLI and run `codex login`, or set `OPENAI_API_KEY`.",
     },
     {
+        id: "opencode",
+        displayName: "OpenCode",
+        binary: "opencode",
+        authSignals: (homeDir) => [join(homeDir, ".local", "share", "opencode", "auth.json")],
+        apiKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        setupHint: "Install the OpenCode CLI and run `opencode auth login`, or set a provider API key.",
+    },
+    {
         id: "antigravity",
         displayName: "Antigravity",
         binary: "agy",
@@ -93,12 +101,12 @@ const DETECTORS = [
     },
 ];
 const ROLE_PREFERENCES = {
-    spec: ["claude", "codex"],
-    research: ["antigravity", "kimi", "codex", "claude"],
-    plan: ["antigravity", "codex", "claude", "kimi"],
-    implement: ["codex", "amp", "antigravity", "claude", "kimi"],
-    validate: ["codex", "amp", "antigravity"],
-    review: ["claude", "amp", "codex"],
+    spec: ["claude", "codex", "opencode"],
+    research: ["antigravity", "kimi", "opencode", "codex", "claude"],
+    plan: ["antigravity", "codex", "opencode", "claude", "kimi"],
+    implement: ["codex", "opencode", "amp", "antigravity", "claude", "kimi"],
+    validate: ["codex", "opencode", "amp", "antigravity"],
+    review: ["claude", "amp", "codex", "opencode"],
 };
 const AGENT_VARIANTS = [
     {
@@ -114,11 +122,13 @@ const AGENT_VARIANTS = [
 const SCAFFOLDED_PROVIDERS = {
     claude: "ClaudeCodeAgent",
     codex: "CodexAgent",
+    opencode: "OpenCodeAgent",
     antigravity: "AntigravityAgent",
 };
 const SCAFFOLDED_PROVIDER_FILES = {
     claude: "claude-code",
     codex: "codex",
+    opencode: "opencode",
     antigravity: "antigravity",
 };
 const LEGACY_SCAFFOLDED_PROVIDERS = {
@@ -134,8 +144,8 @@ const LOCAL_SCAFFOLDED_PROVIDER_FILES = {
 };
 const TIER_PREFERENCES = {
     cheapFast: { order: ["kimi", "claudeSonnet", "antigravity", "pi"], maxSize: 2 },
-    smart: { order: ["codex", "claude", "kimi", "antigravity", "amp"], maxSize: 3 },
-    smartTool: { order: ["claude", "codex", "kimi", "antigravity", "amp"], maxSize: 3 },
+    smart: { order: ["codex", "opencode", "claude", "kimi", "antigravity", "amp"], maxSize: 3 },
+    smartTool: { order: ["claude", "codex", "opencode", "kimi", "antigravity", "amp"], maxSize: 3 },
 };
 const CONSTRUCTORS = {
     claude: {
@@ -145,6 +155,10 @@ const CONSTRUCTORS = {
     codex: {
         importName: "CodexAgent",
         expr: 'new SmithersCodexAgent({ model: "gpt-5.3-codex", cwd: process.cwd(), skipGitRepoCheck: true })',
+    },
+    opencode: {
+        importName: "OpenCodeAgent",
+        expr: 'new SmithersOpenCodeAgent({ model: "anthropic/claude-sonnet-4-5", cwd: process.cwd() })',
     },
     antigravity: {
         importName: "AntigravityAgent",

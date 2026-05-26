@@ -2,7 +2,7 @@ import { describe, expect, onTestFinished, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createExecutableDir, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeGeminiBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { createExecutableDir, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeGeminiBinary, writeFakeOpenCodeBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
 import { ask } from "../src/ask.js";
 // We test the exported pure-logic functions by importing the module.
 // detectAvailableAgents calls spawnSync so we test the scoring/status logic
@@ -36,12 +36,13 @@ describe("detectAvailableAgents", () => {
         const ids = results.map((r) => r.id);
         expect(ids).toContain("claude");
         expect(ids).toContain("codex");
+        expect(ids).toContain("opencode");
         expect(ids).toContain("antigravity");
         expect(ids).toContain("gemini");
         expect(ids).toContain("pi");
         expect(ids).toContain("kimi");
         expect(ids).toContain("amp");
-        expect(results.length).toBe(7);
+        expect(results.length).toBe(8);
     });
     test("each result has required fields", () => {
         const results = detectAvailableAgents({});
@@ -95,6 +96,32 @@ describe("detectAvailableAgents", () => {
         expect(codex.hasApiKeySignal).toBe(true);
         expect(codex.usable).toBe(false);
         expect(codex.unusableReasons.join(" ")).toContain("missing `codex`");
+    });
+    test("OpenCode detects opencode plus auth.json credentials", () => {
+        const home = tempHome();
+        const binDir = createExecutableDir();
+        writeFakeOpenCodeBinary(binDir);
+        mkdirSync(join(home, ".local", "share", "opencode"), { recursive: true });
+        writeFileSync(join(home, ".local", "share", "opencode", "auth.json"), "{}\n");
+        const results = detectAvailableAgents(envWithPath(home, binDir));
+        const opencode = results.find((r) => r.id === "opencode");
+        expect(opencode.hasBinary).toBe(true);
+        expect(opencode.hasAuthSignal).toBe(true);
+        expect(opencode.usable).toBe(true);
+    });
+    test("generated agents.ts can use OpenCode with the local scaffold file", () => {
+        const home = tempHome();
+        const binDir = createExecutableDir();
+        writeFakeOpenCodeBinary(binDir);
+        mkdirSync(join(home, ".local", "share", "opencode"), { recursive: true });
+        writeFileSync(join(home, ".local", "share", "opencode", "auth.json"), "{}\n");
+        const source = generateAgentsTs(envWithPath(home, binDir), {
+            cwd: home,
+        });
+        expect(source).toContain('import { OpenCodeAgent } from "./agents/opencode";');
+        expect(source).toContain('export { OpenCodeAgent } from "./agents/opencode";');
+        expect(source).toContain("opencode: OpenCodeAgent");
+        expect(source).not.toContain("OpenCodeAgent as SmithersOpenCodeAgent");
     });
     test("google api key detected for gemini", () => {
         const results = detectAvailableAgents({

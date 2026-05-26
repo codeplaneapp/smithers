@@ -248,6 +248,24 @@ export function writeFakeCodexBinary(dir, response = FAKE_AGENT_RESPONSE) {
 /**
  * @param {string} dir
  */
+export function writeFakeOpenCodeBinary(dir, response = FAKE_AGENT_RESPONSE) {
+    return writeExecutable(dir, "opencode", [
+        EXECUTABLE_SHEBANG,
+        "const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? " + JSON.stringify(response) + ";",
+        "process.stdout.write(JSON.stringify({",
+        '  type: "text",',
+        "  part: {",
+        '    type: "text",',
+        '    text: "```json\\n" + payload + "\\n```\\n",',
+        "  },",
+        "}) + \"\\n\");",
+        'process.stdout.write(JSON.stringify({ type: "step_finish", part: { type: "step-finish", reason: "done" } }) + "\\n");',
+        "",
+    ].join("\n"));
+}
+/**
+ * @param {string} dir
+ */
 export function writeFakeGeminiBinary(dir, response = FAKE_AGENT_RESPONSE) {
     return writeExecutable(dir, "gemini", [
         EXECUTABLE_SHEBANG,
