@@ -247,8 +247,7 @@ describe("smithers optimize command", () => {
         expect(optimization.improvement.absolute).toBeGreaterThan(0);
         expect(repo.exists("artifacts/optimized.json")).toBe(true);
         const artifact = JSON.parse(repo.read("artifacts/optimized.json"));
-        expect(artifact.optimizer.axCompatible).toBe(true);
-        expect(artifact.optimizer.axArtifactKind).toBe("AxGEPA.optimizedProgram");
+        expect(artifact.optimizer.name).toBe("smithers-gepa");
         expect(artifact.promptPatches.answer.prompt).toContain("OPTIMIZED_TOKEN");
 
         const baselineReport = JSON.parse(repo.read("artifacts/reports/opt-proof-baseline.json"));

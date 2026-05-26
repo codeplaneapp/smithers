@@ -554,11 +554,9 @@ export function writeOptimizationArtifact(input) {
         id,
         strategy: "gepa",
         optimizer: {
-            name: "smithers-ax-gepa",
+            name: "smithers-gepa",
             provider: input.provider,
             model: input.model,
-            axCompatible: true,
-            axArtifactKind: "AxGEPA.optimizedProgram",
         },
         workflowPath: input.workflowPath,
         createdAtMs: Date.now(),
@@ -598,9 +596,7 @@ export function writeCandidateOptimizationArtifact(root, promptPatches) {
         id: `candidate-${crypto.randomUUID()}`,
         strategy: "gepa",
         optimizer: {
-            name: "smithers-ax-gepa",
-            axCompatible: true,
-            axArtifactKind: "AxGEPA.optimizedProgram",
+            name: "smithers-gepa",
         },
         createdAtMs: Date.now(),
         promptPatches,
