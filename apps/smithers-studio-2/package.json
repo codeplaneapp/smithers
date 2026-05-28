@@ -11,6 +11,8 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@smithers-orchestrator/gateway-client": "workspace:*",
+    "@smithers-orchestrator/vcs": "workspace:*",
     "@uidotdev/usehooks": "^2.4.1",
     "@vitejs/plugin-react": "^6.0.2",
     "@wterm/dom": "0.3.0",
