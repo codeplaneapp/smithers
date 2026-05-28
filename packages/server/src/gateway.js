@@ -939,12 +939,8 @@ function verifyJwtToken(token, config) {
     if (!audiences.some((audience) => tokenAudiences.includes(audience))) {
         return { ok: false, message: "JWT audience did not match" };
     }
-    if (typeof exp !== "number") {
-        return { ok: false, message: "JWT is missing a valid exp claim" };
-    }
-    if (now - skew >= exp) {
-        return { ok: false, message: "JWT has expired" };
-    }
+    if (typeof exp !== "number") return { ok: false, message: "JWT is missing a valid exp claim" };
+    if (now - skew >= exp) return { ok: false, message: "JWT has expired" };
     if (typeof nbf === "number" && now + skew < nbf) {
         return { ok: false, message: "JWT is not active yet" };
     }
@@ -2493,9 +2489,7 @@ export class Gateway {
             }
         })
             .finally(() => {
-            this.runRegistry.delete(runId);
-            this.activeRuns.delete(runId);
-            this.inflightRuns.delete(runId);
+            for (const m of [this.runRegistry, this.activeRuns, this.inflightRuns]) m.delete(runId);
         });
         this.inflightRuns.set(runId, runPromise.then(() => undefined, () => undefined));
         return { runId, workflow: workflowKey };
@@ -2559,8 +2553,7 @@ export class Gateway {
         });
         ws.on("message", async (raw) => {
             this.recordMessageReceived("ws", "request");
-            /** @type {RequestFrame | undefined} */
-            let frame;
+            /** @type {RequestFrame | undefined} */ let frame;
             try {
                 frame = parseGatewayRequestFrame(raw, this.maxPayload);
                 const response = await this.executeRpc(connection, frame, async () => {
