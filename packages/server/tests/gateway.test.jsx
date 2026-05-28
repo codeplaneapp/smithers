@@ -763,4 +763,140 @@ describe("Gateway", () => {
         ]);
         await client.close();
     });
+    test("rejects token-mode bearer tokens that collide with Object prototype keys", async () => {
+        const dbPath = makeDbPath("proto-token");
+        dbPaths.push(dbPath);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["runs"],
+            heartbeatMs: 100,
+            auth: {
+                mode: "token",
+                tokens: {
+                    "op-token": {
+                        role: "operator",
+                        scopes: ["*"],
+                        userId: "user:will",
+                    },
+                },
+            },
+        });
+        gateway.register("basic", createValueWorkflow(dbPath));
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port = getPort(server);
+        // Magic prototype keys resolve to truthy inherited members on a plain
+        // object, so a direct `tokens[token]` lookup would treat them as valid
+        // grants. They must be rejected as unauthorized instead.
+        for (const magicToken of ["toString", "__proto__", "constructor", "hasOwnProperty"]) {
+            const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+            await new Promise((resolve, reject) => {
+                ws.once("open", () => resolve());
+                ws.once("error", reject);
+            });
+            const attacker = new GatewayClient(ws);
+            await attacker.waitFor((message) => message.type === "event" && message.event === "connect.challenge");
+            const hello = await attacker.request("connect", {
+                minProtocol: 1,
+                maxProtocol: 1,
+                client: {
+                    id: "proto-client",
+                    version: "1.0.0",
+                    platform: "bun-test",
+                },
+                auth: { token: magicToken },
+            });
+            expect(hello.ok).toBe(false);
+            expect(hello.error.code).toBe("UNAUTHORIZED");
+            await attacker.close();
+        }
+    });
+    test("rejects validly-signed JWTs that omit the exp claim", async () => {
+        const dbPath = makeDbPath("jwt-no-exp");
+        dbPaths.push(dbPath);
+        const secret = "super-secret";
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["runs"],
+            heartbeatMs: 100,
+            auth: {
+                mode: "jwt",
+                issuer: "https://auth.example.com",
+                audience: "smithers",
+                secret,
+                scopesClaim: "permissions",
+            },
+        });
+        gateway.register("basic", createValueWorkflow(dbPath));
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port = getPort(server);
+        // Same issuer/audience/signature as a valid token, but with no exp claim.
+        // Such a token would never expire, so it must be rejected outright.
+        const noExpToken = createJwtToken({
+            iss: "https://auth.example.com",
+            aud: "smithers",
+            sub: "user:jwt",
+            role: "operator",
+            permissions: ["runs.create", "runs.get"],
+        }, secret);
+        const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+        await new Promise((resolve, reject) => {
+            ws.once("open", () => resolve());
+            ws.once("error", reject);
+        });
+        const rejected = new GatewayClient(ws);
+        await rejected.waitFor((message) => message.type === "event" && message.event === "connect.challenge");
+        const hello = await rejected.request("connect", {
+            minProtocol: 1,
+            maxProtocol: 1,
+            client: {
+                id: "jwt-client",
+                version: "1.0.0",
+                platform: "bun-test",
+            },
+            auth: { token: noExpToken },
+        });
+        expect(hello.ok).toBe(false);
+        expect(hello.error.code).toBe("UNAUTHORIZED");
+        await rejected.close();
+    });
+    test("removes the runRegistry entry after a run completes", async () => {
+        const dbPath = makeDbPath("run-registry");
+        dbPaths.push(dbPath);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["streaming", "runs"],
+            heartbeatMs: 100,
+            auth: {
+                mode: "token",
+                tokens: {
+                    "op-token": {
+                        role: "operator",
+                        scopes: ["*"],
+                        userId: "user:will",
+                    },
+                },
+            },
+        });
+        gateway.register("basic", createValueWorkflow(dbPath));
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port = getPort(server);
+        const { client } = await connectGateway(port, "op-token");
+        const created = await client.request("runs.create", {
+            workflow: "basic",
+            input: { value: 3 },
+        });
+        expect(created.ok).toBe(true);
+        const runId = created.payload.runId;
+        // The registry holds the run while it is active.
+        expect(gateway.runRegistry.has(runId)).toBe(true);
+        await waitForRunStatus(client, runId, ["finished"]);
+        // The entry is deleted in the run promise's .finally(), which runs just
+        // after the run.completed broadcast, so poll briefly for the cleanup.
+        const started = Date.now();
+        while (gateway.runRegistry.has(runId) && Date.now() - started < 5_000) {
+            await sleep(10);
+        }
+        expect(gateway.runRegistry.has(runId)).toBe(false);
+        await client.close();
+    });
 });
