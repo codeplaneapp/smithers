@@ -129,6 +129,9 @@ function usePtySession(tabId: string, write: (data: string) => void) {
       ws.close();
       wsRef.current = null;
       sessionIdRef.current = null;
+      for (const cb of pendingRef.current.values()) {
+        cb.reject(new Error("terminal unmounted"));
+      }
       pendingRef.current.clear();
     };
   }, [tabId, write, rpcCall]);
