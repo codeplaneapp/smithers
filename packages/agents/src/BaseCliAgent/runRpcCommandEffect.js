@@ -108,6 +108,8 @@ export function runRpcCommandEffect(command, args, options) {
             if (settled)
                 return;
             settled = true;
+            inactivity.clear();
+            totalTimeout.clear();
             if (signal) {
                 signal.removeEventListener("abort", onAbort);
             }
@@ -131,6 +133,8 @@ export function runRpcCommandEffect(command, args, options) {
             if (settled)
                 return;
             settled = true;
+            inactivity.clear();
+            totalTimeout.clear();
             if (signal) {
                 signal.removeEventListener("abort", onAbort);
             }
