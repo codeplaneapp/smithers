@@ -11,5 +11,12 @@ import { mergeCorrelationContext } from "./mergeCorrelationContext.js";
  */
 export function withCorrelationContext(effect, patch) {
     const next = mergeCorrelationContext(correlationStorage.getStore(), patch);
-    return next ? effect.pipe(Effect.locally(correlationContextFiberRef, next)) : effect;
+    if (!next)
+        return effect;
+    const located = effect.pipe(Effect.locally(correlationContextFiberRef, next));
+    return Effect.acquireUseRelease(Effect.sync(() => {
+        const previous = correlationStorage.getStore();
+        correlationStorage.enterWith(next);
+        return previous;
+    }), () => located, (previous) => Effect.sync(() => correlationStorage.enterWith(previous)));
 }
