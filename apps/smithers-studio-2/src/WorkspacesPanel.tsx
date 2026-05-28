@@ -341,7 +341,7 @@ export function WorkspacesPanel() {
           </select>
           {mode === "workspaces" && (
             <>
-              <button onClick={() => setShowCreateWorkspace(true)} type="button">New Workspace</button>
+              <button onClick={() => { setRestoreSourceSnapshotId(null); setShowCreateWorkspace(true); }} type="button">New Workspace</button>
               <button onClick={openRestoreWorkspace} type="button">Restore from Snapshot</button>
             </>
           )}
@@ -541,7 +541,7 @@ export function WorkspacesPanel() {
       )}
 
       {showRestoreWorkspace && (
-        <div className="modal-overlay" onClick={() => setShowRestoreWorkspace(false)}>
+        <div className="modal-overlay" onClick={() => { setRestoreSourceSnapshotId(null); setShowRestoreWorkspace(false); }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h3>Restore Workspace from Snapshot</h3>
             <div className="form-group">
@@ -580,7 +580,7 @@ export function WorkspacesPanel() {
               >
                 Restore
               </button>
-              <button onClick={() => setShowRestoreWorkspace(false)} type="button">Cancel</button>
+              <button onClick={() => { setRestoreSourceSnapshotId(null); setShowRestoreWorkspace(false); }} type="button">Cancel</button>
             </div>
           </div>
         </div>
