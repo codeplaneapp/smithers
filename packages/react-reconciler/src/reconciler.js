@@ -116,6 +116,9 @@ const hostConfig = {
    * @returns {void}
    */
     appendChild(parent, child) {
+        const existing = parent.children.indexOf(child);
+        if (existing >= 0)
+            parent.children.splice(existing, 1);
         parent.children.push(child);
     },
     /**
@@ -150,6 +153,9 @@ const hostConfig = {
    * @returns {void}
    */
     insertBefore(parent, child, beforeChild) {
+        const existing = parent.children.indexOf(child);
+        if (existing >= 0)
+            parent.children.splice(existing, 1);
         const idx = parent.children.indexOf(beforeChild);
         if (idx >= 0)
             parent.children.splice(idx, 0, child);
