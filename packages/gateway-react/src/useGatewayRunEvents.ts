@@ -14,6 +14,7 @@ export function useGatewayRunEvents(runId: string | undefined, options: { afterS
       return;
     }
     const abort = new AbortController();
+    setEvents([]);
     setStreaming(true);
     setError(undefined);
     void (async () => {
