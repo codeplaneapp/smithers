@@ -100,29 +100,36 @@ function validateBashInvocation(cmd, args, opts, ctx) {
   }
 }
 
+function tokenExecutableName(token) {
+  const stripped = token.split(/[/\\]/).pop() ?? token;
+  return stripped;
+}
+
 function assertNetworkAllowed(cmd, args, allowNetwork) {
   if (allowNetwork) {
     return;
   }
-  const hay = [cmd, ...(args ?? [])].join(" ");
-  const networkCommands = [
-    "curl",
-    "wget",
-    "http://",
-    "https://",
-    "npm",
-    "bun",
-    "pip",
-  ];
-  if (networkCommands.some((fragment) => hay.includes(fragment))) {
+  const tokens = [cmd, ...(args ?? [])].flatMap((part) =>
+    String(part).split(/\s+/).filter(Boolean),
+  );
+  const executables = new Set(tokens.map(tokenExecutableName));
+  const networkExecutables = ["curl", "wget", "npm", "bun", "pip"];
+  const hasNetworkExecutable = networkExecutables.some((name) =>
+    executables.has(name),
+  );
+  const urlSchemes = ["http://", "https://"];
+  const hasUrlToken = tokens.some((token) =>
+    urlSchemes.some((scheme) => token.startsWith(scheme)),
+  );
+  if (hasNetworkExecutable || hasUrlToken) {
     throw new SmithersError(
       "TOOL_NETWORK_DISABLED",
       "Network access is disabled for bash tool",
     );
   }
-  if (hay.includes("git")) {
-    const gitRemoteOps = ["push", "pull", "fetch", "clone", "remote"];
-    if (gitRemoteOps.some((op) => hay.includes(op))) {
+  if (executables.has("git")) {
+    const gitRemoteOps = new Set(["push", "pull", "fetch", "clone", "remote"]);
+    if (tokens.some((token) => gitRemoteOps.has(token))) {
       throw new SmithersError(
         "TOOL_GIT_REMOTE_DISABLED",
         "Git remote operations are disabled for bash tool",
