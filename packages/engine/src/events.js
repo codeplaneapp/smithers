@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
@@ -110,11 +110,12 @@ export class EventBus extends EventEmitter {
    */
     enqueuePersist(event) {
         const task = this.persistTail.then(() => Effect.runPromise(this.persist(event)));
-        this.persistTail = task.catch((error) => {
+        const settled = task.catch((error) => {
             this.persistError = error;
         });
+        this.persistTail = settled;
         return Effect.tryPromise({
-            try: () => task,
+            try: () => settled,
             catch: (cause) => toSmithersError(cause, "enqueue event persistence"),
         });
     }
@@ -189,18 +190,7 @@ export class EventBus extends EventEmitter {
                 await mkdir(dir, { recursive: true });
                 const file = join(dir, "stream.ndjson");
                 const line = JSON.stringify(event) + "\n";
-                let prefix = "";
-                try {
-                    prefix = await readFile(file, "utf8");
-                }
-                catch (error) {
-                    if (!error ||
-                        typeof error !== "object" ||
-                        error.code !== "ENOENT") {
-                        throw error;
-                    }
-                }
-                await writeFile(file, prefix + line);
+                await appendFile(file, line);
             },
             catch: (cause) => toSmithersError(cause, "append event log"),
         });
