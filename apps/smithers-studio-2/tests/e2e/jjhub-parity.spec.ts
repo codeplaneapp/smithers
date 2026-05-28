@@ -218,6 +218,47 @@ test("workspaces support CRUD, suspend/resume, fork, snapshot, delete, and resto
   await expect(page.getByText(/Deleted workspace|Deleted snapshot/)).toBeVisible();
 });
 
+test("New Workspace after cancelling Restore does not pass a stale snapshotId", async ({ page }) => {
+  await installWorkspaceApi(page, defaultState());
+
+  // Record the snapshotId sent on each workspace-create POST so we can assert
+  // the intended-empty workspace is not silently created from a snapshot.
+  const createSnapshotIds: Array<string | null> = [];
+  await page.route("**/__smithers_studio/api/workspaces", async (route) => {
+    const request = route.request();
+    if (request.method() === "POST") {
+      const body = request.postDataJSON() as { name: string; snapshotId: string | null };
+      createSnapshotIds.push(body.snapshotId ?? null);
+      const workspace = { id: "ws-new", name: String(body.name), status: "running", createdAt: "2026-05-27T16:00:00Z" };
+      return route.fulfill({ json: { workspace } });
+    }
+    return route.fulfill({ json: { workspaces: defaultState().workspaces } });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Workspaces" }).click();
+  await expect(page.getByText("studio-main")).toBeVisible();
+
+  // Open the Restore modal from a snapshot (this sets restoreSourceSnapshotId).
+  await page.getByRole("combobox").selectOption("snapshots");
+  await page.getByRole("button", { name: "Restore" }).first().click();
+  await expect(page.getByText("Restore Workspace from Snapshot")).toBeVisible();
+
+  // Cancel/dismiss the Restore modal instead of completing the restore.
+  await page.locator(".modal-content").getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByText("Restore Workspace from Snapshot")).toHaveCount(0);
+
+  // Now create a plain New Workspace.
+  await page.getByRole("combobox").first().selectOption("workspaces");
+  await page.getByRole("button", { name: "New Workspace" }).click();
+  await page.getByPlaceholder("Workspace name").fill("empty-ws");
+  await page.getByRole("button", { name: "Create Workspace" }).click();
+  await expect(page.getByText("Created workspace empty-ws.")).toBeVisible();
+
+  // The create must not carry the snapshotId left over from the cancelled restore.
+  expect(createSnapshotIds).toEqual([null]);
+});
+
 test("JJHub missing-token states are visible", async ({ page }) => {
   const state = defaultState();
   state.auth = { loggedIn: false, tokenSet: false };

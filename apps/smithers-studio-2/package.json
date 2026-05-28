@@ -8,6 +8,7 @@
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "pnpm run typecheck && vite build",
+    "e2e": "playwright test",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
@@ -24,6 +25,7 @@
     "zustand": "^5.0.13"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3"
   }
