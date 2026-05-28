@@ -106,6 +106,26 @@ describe("diffSnapshots", () => {
         expect(diff.ralphChanged[0].from.iteration).toBe(0);
         expect(diff.ralphChanged[0].to.iteration).toBe(1);
     });
+    test("detects added ralph loop (present only in b)", () => {
+        const a = makeParsed({ ralph: {} });
+        const b = makeParsed({
+            ralph: { "main-loop": { ralphId: "main-loop", iteration: 0, done: false } },
+        });
+        const diff = diffSnapshots(a, b);
+        expect(diff.ralphAdded).toEqual(["main-loop"]);
+        expect(diff.ralphRemoved).toEqual([]);
+        expect(diff.ralphChanged).toEqual([]);
+    });
+    test("detects removed ralph loop (present only in a)", () => {
+        const a = makeParsed({
+            ralph: { "main-loop": { ralphId: "main-loop", iteration: 0, done: false } },
+        });
+        const b = makeParsed({ ralph: {} });
+        const diff = diffSnapshots(a, b);
+        expect(diff.ralphRemoved).toEqual(["main-loop"]);
+        expect(diff.ralphAdded).toEqual([]);
+        expect(diff.ralphChanged).toEqual([]);
+    });
     test("detects input changes", () => {
         const a = makeParsed();
         const b = makeParsed({ input: { prompt: "different" } });
@@ -165,6 +185,26 @@ describe("formatDiffForTui", () => {
         expect(output).toContain("implement::0");
         expect(output).toContain("pending");
         expect(output).toContain("running");
+    });
+    test("surfaces added ralph loop", () => {
+        const a = makeParsed({ ralph: {} });
+        const b = makeParsed({
+            ralph: { "main-loop": { ralphId: "main-loop", iteration: 0, done: false } },
+        });
+        const diff = diffSnapshots(a, b);
+        const output = formatDiffForTui(diff);
+        expect(output).toContain("Ralph (loops) added:");
+        expect(output).toContain("main-loop");
+    });
+    test("surfaces removed ralph loop", () => {
+        const a = makeParsed({
+            ralph: { "main-loop": { ralphId: "main-loop", iteration: 0, done: false } },
+        });
+        const b = makeParsed({ ralph: {} });
+        const diff = diffSnapshots(a, b);
+        const output = formatDiffForTui(diff);
+        expect(output).toContain("Ralph (loops) removed:");
+        expect(output).toContain("main-loop");
     });
 });
 describe("formatDiffAsJson", () => {
