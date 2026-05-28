@@ -183,7 +183,15 @@ export function diffSnapshots(a, b) {
     });
     /** @type {DevToolsDeltaOp[]} */
     const addOps = topLevelAddIds
-        .sort((leftId, rightId) => (to.get(leftId)?.node.depth ?? 0) - (to.get(rightId)?.node.depth ?? 0))
+        .sort((leftId, rightId) => {
+            const leftEntry = to.get(leftId);
+            const rightEntry = to.get(rightId);
+            const depthDiff = (leftEntry?.node.depth ?? 0) - (rightEntry?.node.depth ?? 0);
+            if (depthDiff !== 0) {
+                return depthDiff;
+            }
+            return (leftEntry?.index ?? 0) - (rightEntry?.index ?? 0);
+        })
         .map((id) => {
         const entry = to.get(id);
         return /** @type {DevToolsDeltaOp} */ ({
