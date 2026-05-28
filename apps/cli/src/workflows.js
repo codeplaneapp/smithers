@@ -226,7 +226,7 @@ export function renderWorkflowSkill(workflow, options = {}) {
     return [
         "---",
         `name: ${workflow.id}`,
-        `description: ${yamlString(defaultDescription(workflow.id))}`,
+        `description: ${yamlString(description)}`,
         "---",
         "",
         `# ${workflow.displayName}`,
