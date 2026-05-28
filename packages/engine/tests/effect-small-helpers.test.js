@@ -85,7 +85,7 @@ describe("event bus queued persistence", () => {
             runId: "run",
             workflowName: "workflow",
             timestampMs: Date.now(),
-        })).rejects.toThrow("persist failed");
+        })).resolves.toBeUndefined();
         expect(bus.persistError?.message).toBe("persist failed");
         await expect(Effect.runPromise(bus.flush())).rejects.toThrow("persist failed");
     });
