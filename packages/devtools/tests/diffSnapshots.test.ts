@@ -72,6 +72,25 @@ describe("diffSnapshots + applyDelta round trip", () => {
       to: snapshot(8, node(1, [node(3), node(2)])),
     },
     {
+      // Regression: reordering three siblings [6,1,5] -> [1,6,5] removes and
+      // re-adds all of them. applyDelta splices each addNode at its precomputed
+      // final index without re-indexing, so the addNode ops MUST be emitted in
+      // ascending-index order. Previously add ops were ordered only by depth,
+      // leaving equal-depth siblings in arbitrary Set-iteration order, which
+      // corrupted sibling order on reorders.
+      name: "reorder three siblings [6,2,5] -> [2,6,5]",
+      from: snapshot(70, node(1, [node(6), node(2, [], { x: 1 }), node(5)])),
+      to: snapshot(71, node(1, [node(2, [], { x: 1 }), node(6), node(5)])),
+    },
+    {
+      // Regression: reorder existing siblings while also inserting a brand-new
+      // sibling. The new add and the reorder-induced re-adds share the same
+      // depth, so ascending-index ordering must interleave them correctly.
+      name: "reverse siblings with a new insert [10,20,30] -> [30,40,20,10]",
+      from: snapshot(72, node(1, [node(10), node(20), node(30)])),
+      to: snapshot(73, node(1, [node(30), node(40), node(20), node(10)])),
+    },
+    {
       name: "change only props on a leaf",
       from: snapshot(9, node(1, [node(2, [node(3, [], { value: "a" })])])),
       to: snapshot(10, node(1, [node(2, [node(3, [], { value: "b" })])])),
