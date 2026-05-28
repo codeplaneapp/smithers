@@ -44,6 +44,40 @@ async function runGit(cwd, args, options) {
     });
 }
 /**
+ * @param {string} cwd
+ * @param {string[]} args
+ * @param {{ allowExitCodes?: ReadonlySet<number>; }} [options]
+ * @returns {Promise<Buffer>}
+ */
+async function runGitRaw(cwd, args, options) {
+    return new Promise((resolve, reject) => {
+        const child = spawn("git", args, {
+            cwd,
+            stdio: ["pipe", "pipe", "pipe"],
+        });
+        /** @type {Buffer[]} */
+        const stdoutChunks = [];
+        let stderr = "";
+        child.stderr.setEncoding("utf8");
+        child.stdout.on("data", (chunk) => {
+            stdoutChunks.push(chunk);
+        });
+        child.stderr.on("data", (chunk) => {
+            stderr += chunk;
+        });
+        child.once("error", reject);
+        child.once("close", (code) => {
+            const allowExitCodes = options?.allowExitCodes;
+            if (code === 0 || (typeof code === "number" && allowExitCodes?.has(code))) {
+                resolve(Buffer.concat(stdoutChunks));
+                return;
+            }
+            reject(new SmithersError("INVALID_INPUT", `git ${args.join(" ")} failed`, { cwd, args, code, stderr: stderr.trim() }));
+        });
+        child.stdin.end();
+    });
+}
+/**
  * @param {string} diff
  * @returns {string[]}
  */
@@ -179,11 +213,11 @@ async function computeUntrackedDiffs(currentDir) {
  */
 async function readBinaryContentAtRef(currentDir, targetRef, path) {
     try {
-        const { stdout } = await runGit(currentDir, [
+        const stdout = await runGitRaw(currentDir, [
             "show",
             `${targetRef}:${path}`,
         ]);
-        return Buffer.from(stdout, "binary").toString("base64");
+        return stdout.toString("base64");
     }
     catch {
         return undefined;
