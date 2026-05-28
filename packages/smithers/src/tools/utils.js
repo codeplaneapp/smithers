@@ -27,12 +27,25 @@ export function sha256Hex(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function utf8BoundaryLength(buf, byteLength) {
+  let end = Math.min(byteLength, buf.length);
+  if (end >= buf.length) {
+    return buf.length;
+  }
+  // If the cut lands on a continuation byte, back up to the lead byte of the
+  // partial sequence so we never decode an incomplete codepoint.
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) {
+    end -= 1;
+  }
+  return end;
+}
+
 export function truncateToBytes(text, maxBytes) {
   const buf = Buffer.from(text, "utf8");
   if (buf.length <= maxBytes) {
     return text;
   }
-  return buf.subarray(0, maxBytes).toString("utf8");
+  return buf.subarray(0, utf8BoundaryLength(buf, maxBytes)).toString("utf8");
 }
 
 export async function resolveToolPath(rootDir, inputPath) {
@@ -72,8 +85,11 @@ function appendLimited(chunks, state, chunk, maxBytes) {
     state.storedBytes += buffer.length;
     return;
   }
-  chunks.push(buffer.subarray(0, remaining));
-  state.storedBytes += remaining;
+  const accepted = utf8BoundaryLength(buffer, remaining);
+  if (accepted > 0) {
+    chunks.push(buffer.subarray(0, accepted));
+    state.storedBytes += accepted;
+  }
   state.truncated = true;
 }
 
@@ -91,7 +107,12 @@ export function captureProcess(
   return new Promise((resolve, reject) => {
     const stdoutChunks = [];
     const stderrChunks = [];
-    const state = {
+    const stdoutState = {
+      storedBytes: 0,
+      totalBytes: 0,
+      truncated: false,
+    };
+    const stderrState = {
       storedBytes: 0,
       totalBytes: 0,
       truncated: false,
@@ -149,10 +170,10 @@ export function captureProcess(
     }
 
     child.stdout.on("data", (chunk) => {
-      appendLimited(stdoutChunks, state, chunk, maxOutputBytes);
+      appendLimited(stdoutChunks, stdoutState, chunk, maxOutputBytes);
     });
     child.stderr.on("data", (chunk) => {
-      appendLimited(stderrChunks, state, chunk, maxOutputBytes);
+      appendLimited(stderrChunks, stderrState, chunk, maxOutputBytes);
     });
     child.on("error", (error) => {
       finish(() =>
@@ -167,7 +188,7 @@ export function captureProcess(
     });
     child.on("close", (exitCode, signal) => {
       finish(() => {
-        resolve({ exitCode: exitCode ?? (signal ? 1 : 0), signal, stdout: Buffer.concat(stdoutChunks).toString("utf8"), stderr: Buffer.concat(stderrChunks).toString("utf8"), truncated: state.truncated, totalBytes: state.totalBytes });
+        resolve({ exitCode: exitCode ?? (signal ? 1 : 0), signal, stdout: Buffer.concat(stdoutChunks).toString("utf8"), stderr: Buffer.concat(stderrChunks).toString("utf8"), truncated: stdoutState.truncated || stderrState.truncated, totalBytes: stdoutState.totalBytes + stderrState.totalBytes });
       });
     });
   });
