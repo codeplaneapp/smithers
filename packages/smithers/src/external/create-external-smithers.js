@@ -127,8 +127,9 @@ export function createExternalSmithers(config) {
             sqlite.close();
         }
         catch { }
+        process.removeListener("exit", closeDb);
     };
-    process.on("exit", closeDb);
+    process.once("exit", closeDb);
     const inputTable = sqliteTable("input", {
         runId: text("run_id").primaryKey(),
         payload: text("payload", { mode: "json" }).$type(),

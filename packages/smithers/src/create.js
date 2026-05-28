@@ -249,8 +249,9 @@ export function createSmithers(schemas, opts) {
             sqlite.close();
         }
         catch { }
+        process.removeListener("exit", closeDb);
     };
-    process.on("exit", closeDb);
+    process.once("exit", closeDb);
     // 3. Auto-create tables, and ALTER any existing tables to add columns the
     // current schema introduced (CREATE TABLE IF NOT EXISTS would silently
     // skip the columns and a later upsert would fail with "no column named X").
