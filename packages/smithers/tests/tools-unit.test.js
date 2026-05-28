@@ -404,6 +404,43 @@ describe("process helpers and bash tool", () => {
     );
   });
 
+  test("network guard matches whole tokens, not substrings", async () => {
+    const root = await makeRoot();
+
+    await withToolCtx(root, { allowNetwork: false }, async () => {
+      // Benign commands whose args merely contain a blocked substring
+      // ("bundle" contains "bun", "pipeline" contains "pip") must run.
+      expect((await bashTool("/bin/echo", ["bundle.js"])).trim()).toBe(
+        "bundle.js",
+      );
+      expect((await bashTool("/bin/echo", ["pipeline.txt"])).trim()).toBe(
+        "pipeline.txt",
+      );
+
+      // Real network commands must still be blocked.
+      await expectSmithersCode(
+        bashTool("curl", ["http://x"]),
+        "TOOL_NETWORK_DISABLED",
+      );
+      await expectSmithersCode(
+        bashTool("wget", ["http://x"]),
+        "TOOL_NETWORK_DISABLED",
+      );
+      await expectSmithersCode(
+        bashTool("npm", ["install"]),
+        "TOOL_NETWORK_DISABLED",
+      );
+      await expectSmithersCode(
+        bashTool("bun", ["add", "left-pad"]),
+        "TOOL_NETWORK_DISABLED",
+      );
+      await expectSmithersCode(
+        bashTool("pip", ["install", "requests"]),
+        "TOOL_NETWORK_DISABLED",
+      );
+    });
+  });
+
   test("resolves an explicit working directory inside the root", async () => {
     const root = await makeRoot();
     mkdirSync(join(root, "subdir"));
