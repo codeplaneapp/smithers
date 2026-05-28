@@ -137,7 +137,9 @@ describe("<Approval>", () => {
         expect(approvalRows[0]?.approved).toBe(false);
         expect(approvalRows[0]?.note).toBe("Needs another review");
         expect(approvalRows[0]?.decidedBy).toBe("qa-user");
-        expect(approvalRows[0]?.decidedAt).toBeNull();
+        const approvalRecord = await Effect.runPromise(adapter.getApproval(first.runId, "publish-gate", 0));
+        expect(approvalRecord?.decidedAtMs).not.toBeNull();
+        expect(approvalRows[0]?.decidedAt).toBe(new Date(approvalRecord.decidedAtMs).toISOString());
         const resultRows = await db.select().from(tables.result);
         expect(resultRows).toHaveLength(1);
         expect(resultRows[0]?.status).toBe("denied");
