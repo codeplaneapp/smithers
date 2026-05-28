@@ -10,7 +10,7 @@
 /** @typedef {import("./adapter/StaleRunRecord.ts").StaleRunRecord} StaleRunRecord */
 // @smithers-type-exports-end
 
-import { getTableName, sql } from "drizzle-orm";
+import { getTableName } from "drizzle-orm";
 import { Effect, Exit, FiberId, Metric } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { getSqlMessageStorage } from "./sql-message-storage.js";
@@ -1111,9 +1111,11 @@ export class SmithersDb {
    */
     getRawNodeOutput(tableName, runId, nodeId) {
         return runnableEffect(this.read(`get raw node output ${tableName}`, () => {
-            const query = sql.raw(`SELECT * FROM "${tableName}" WHERE run_id = '${runId}' AND node_id = '${nodeId}' ORDER BY iteration DESC LIMIT 1`);
-            const res = this.db.get(query);
-            return Promise.resolve(res ?? null);
+            const escaped = tableName.replaceAll(`"`, `""`);
+            const client = this.db.session.client;
+            const stmt = client.query(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`);
+            const row = stmt.get(runId, nodeId);
+            return Promise.resolve(row ?? null);
         }).pipe(Effect.catchAll(() => Effect.succeed(null))));
     }
     /**
