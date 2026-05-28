@@ -366,7 +366,30 @@ function truncateForHuman(text, maxBytes) {
     if (bytes.byteLength <= maxBytes) {
         return text;
     }
-    const clippedBytes = bytes.slice(0, maxBytes);
+    let cut = maxBytes;
+    while (cut > 0 && (bytes[cut] & 0xc0) === 0x80) {
+        cut -= 1;
+    }
+    if (cut > 0) {
+        let lead = cut - 1;
+        while (lead >= 0 && (bytes[lead] & 0xc0) === 0x80) {
+            lead -= 1;
+        }
+        if (lead >= 0) {
+            const leadByte = bytes[lead];
+            const expected = leadByte >= 0xf0
+                ? 4
+                : leadByte >= 0xe0
+                    ? 3
+                    : leadByte >= 0xc0
+                        ? 2
+                        : 1;
+            if (lead + expected > cut) {
+                cut = lead;
+            }
+        }
+    }
+    const clippedBytes = bytes.slice(0, cut);
     const clipped = clippedBytes.toString("utf8");
     return `${clipped}${suffix}`;
 }
