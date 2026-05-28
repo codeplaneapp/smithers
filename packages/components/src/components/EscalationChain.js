@@ -110,18 +110,22 @@ export function EscalationChain(props) {
             levelElements.push(gatedLevel);
         }
     }
-    // Append human fallback if requested. It only mounts when the final
-    // automated level escalated (i.e. all automated levels were exhausted).
+    // Append human fallback if requested. It only mounts when every automated
+    // level escalated (i.e. all automated levels were exhausted). A single
+    // level resolving without escalation stops the chain and the fallback, even
+    // if later levels never ran and therefore have no recorded result.
     if (humanFallback && levels.length > 0) {
         const humanId = `${prefix}-human-fallback`;
         const request = humanRequest ?? {
             title: "Escalation requires human review",
             summary: `All ${levels.length} automated levels have been exhausted.`,
         };
-        const lastLevel = levels[levels.length - 1];
-        const lastLevelId = `${prefix}-level-${levels.length - 1}`;
-        const lastResult = ctx?.outputMaybe(lastLevel.output, { nodeId: lastLevelId });
-        const lastEscalated = didEscalate(lastLevel, lastResult);
+        const allEscalated = levels.every((level, idx) => {
+            const levelResult = ctx?.outputMaybe(level.output, {
+                nodeId: `${prefix}-level-${idx}`,
+            });
+            return didEscalate(level, levelResult);
+        });
         const approvalEl = React.createElement(Approval, {
             id: humanId,
             output: escalationOutput,
@@ -130,7 +134,7 @@ export function EscalationChain(props) {
             label: request.title,
         });
         levelElements.push(React.createElement(Branch, {
-            if: lastEscalated,
+            if: allEscalated,
             then: approvalEl,
         }));
     }
