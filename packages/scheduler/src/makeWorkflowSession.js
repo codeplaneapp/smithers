@@ -286,6 +286,8 @@ export function makeWorkflowSession(options = {}) {
                     state.states.delete(key);
                 }
                 state.retryWait.delete(key);
+                state.approvals.delete(key);
+                state.retryCounts.delete(key);
             }
         }
         for (const ralph of ralphs) {
