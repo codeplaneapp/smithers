@@ -4,10 +4,42 @@
 // @smithers-type-exports-end
 
 import React from "react";
+import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
 import { Sequence } from "./Sequence.js";
 import { Branch } from "./Branch.js";
 import { Task } from "./Task.js";
 import { Approval } from "./Approval.js";
+/**
+ * Default escalation predicate: escalate when the previous level has no result
+ * yet, or its result signals a failure (`error`/`failed` truthy or `ok === false`).
+ * @param {unknown} result
+ * @returns {boolean}
+ */
+function defaultEscalateIf(result) {
+    if (result == null)
+        return true;
+    if (typeof result === "object") {
+        const row = /** @type {Record<string, unknown>} */ (result);
+        if (row.error != null && row.error !== false)
+            return true;
+        if (row.failed === true)
+            return true;
+        if (row.ok === false)
+            return true;
+    }
+    return false;
+}
+/**
+ * Resolve whether the previous level escalated by invoking its `escalateIf`
+ * predicate (or the default) against its actual result.
+ * @param {EscalationLevel} prevLevel
+ * @param {unknown} prevResult
+ * @returns {boolean}
+ */
+function didEscalate(prevLevel, prevResult) {
+    const predicate = prevLevel.escalateIf ?? defaultEscalateIf;
+    return Boolean(predicate(prevResult));
+}
 /**
  * Escalation chain: tries agents in order, escalating on failure or when
  * `escalateIf` returns `true`. Optionally ends with a human approval fallback.
@@ -18,6 +50,7 @@ import { Approval } from "./Approval.js";
 export function EscalationChain(props) {
     if (props.skipIf)
         return null;
+    const ctx = React.useContext(SmithersContext);
     const prefix = props.id ?? "escalation";
     const { levels, children, humanFallback, humanRequest, escalationOutput } = props;
     // Build the chain from the last level forward, nesting each level inside a
@@ -43,14 +76,14 @@ export function EscalationChain(props) {
         }
         else {
             // Subsequent levels are gated by a Branch that checks whether the
-            // previous level needs escalation. The `if` condition is `true` at
-            // render time when the previous level's `escalateIf` would trigger,
-            // but since we cannot evaluate the runtime result at component-render
-            // time, we rely on `continueOnFail` and use a compute Task to check
-            // the escalation predicate, then Branch on its output.
-            //
-            // For the composite pattern we wrap each subsequent level so it only
-            // mounts when the prior level signals escalation.
+            // previous level needs escalation. The chain re-renders reactively as
+            // outputs become available, so we read the previous level's actual
+            // result from the workflow context and run its `escalateIf` predicate
+            // (or the default failure predicate) to decide whether this level runs.
+            const prevLevel = levels[i - 1];
+            const prevLevelId = `${prefix}-level-${i - 1}`;
+            const prevResult = ctx?.outputMaybe(prevLevel.output, { nodeId: prevLevelId });
+            const escalated = didEscalate(prevLevel, prevResult);
             const checkId = `${prefix}-check-${i - 1}`;
             const checkTask = React.createElement(Task, {
                 id: checkId,
@@ -58,40 +91,47 @@ export function EscalationChain(props) {
                 continueOnFail: true,
                 label: `Check escalation from level ${i - 1}`,
                 children: () => {
-                    // This compute function runs at task execution time.
-                    // It evaluates the previous level's escalateIf predicate.
+                    // Record the escalation decision for the prior level so it is
+                    // visible in the escalation output stream.
                     return {
-                        escalated: true,
+                        escalated,
                         fromLevel: i - 1,
                         toLevel: i,
                     };
                 },
             });
-            // Gate the current level: it always mounts when we reach this point
-            // in the sequence because the previous level had continueOnFail.
-            // The Branch uses `true` here because the sequence only reaches this
-            // point if the previous task failed or escalateIf was configured.
+            // Gate the current level on the previous level's escalation decision:
+            // it only mounts when the prior level actually escalated.
             const gatedLevel = React.createElement(Branch, {
-                if: true,
+                if: escalated,
                 then: taskEl,
             });
             levelElements.push(checkTask);
             levelElements.push(gatedLevel);
         }
     }
-    // Append human fallback if requested.
-    if (humanFallback) {
+    // Append human fallback if requested. It only mounts when the final
+    // automated level escalated (i.e. all automated levels were exhausted).
+    if (humanFallback && levels.length > 0) {
         const humanId = `${prefix}-human-fallback`;
         const request = humanRequest ?? {
             title: "Escalation requires human review",
             summary: `All ${levels.length} automated levels have been exhausted.`,
         };
-        levelElements.push(React.createElement(Approval, {
+        const lastLevel = levels[levels.length - 1];
+        const lastLevelId = `${prefix}-level-${levels.length - 1}`;
+        const lastResult = ctx?.outputMaybe(lastLevel.output, { nodeId: lastLevelId });
+        const lastEscalated = didEscalate(lastLevel, lastResult);
+        const approvalEl = React.createElement(Approval, {
             id: humanId,
             output: escalationOutput,
             request,
             continueOnFail: true,
             label: request.title,
+        });
+        levelElements.push(React.createElement(Branch, {
+            if: lastEscalated,
+            then: approvalEl,
         }));
     }
     return React.createElement(Sequence, {}, ...levelElements);
