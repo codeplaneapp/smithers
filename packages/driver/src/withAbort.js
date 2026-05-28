@@ -16,18 +16,23 @@ function throwIfAborted(signal) {
 }
 /**
  * @param {AbortSignal} [signal]
- * @returns {Promise<never> | null}
+ * @returns {{ promise: Promise<never>, cleanup: () => void } | null}
  */
 function abortPromise(signal) {
     if (!signal)
         return null;
     if (signal.aborted)
-        return Promise.reject(makeAbortError());
-    return new Promise((_, reject) => {
-        signal.addEventListener("abort", () => reject(makeAbortError()), {
-            once: true,
-        });
+        return { promise: Promise.reject(makeAbortError()), cleanup: () => {} };
+    /** @type {() => void} */
+    let cleanup = () => {};
+    const promise = new Promise((_, reject) => {
+        function onAbort() {
+            reject(makeAbortError());
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+        cleanup = () => signal.removeEventListener("abort", onAbort);
     });
+    return { promise, cleanup };
 }
 /**
  * @template T
@@ -39,5 +44,12 @@ export async function withAbort(value, signal) {
     throwIfAborted(signal);
     const abort = abortPromise(signal);
     const promise = Promise.resolve(value);
-    return abort ? Promise.race([promise, abort]) : promise;
+    if (!abort)
+        return promise;
+    try {
+        return await Promise.race([promise, abort.promise]);
+    }
+    finally {
+        abort.cleanup();
+    }
 }
