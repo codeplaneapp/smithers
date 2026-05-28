@@ -57,7 +57,13 @@ export function buildUrl(baseUrl, path, pathParams, queryParams, options) {
     for (const [key, value] of Object.entries(pathParams)) {
         url = url.replace(`{${key}}`, encodeURIComponent(value));
     }
-    const fullUrl = new URL(url, baseUrl);
+    // Join the server base path with the operation path so a base URL with a
+    // path component (e.g. https://api.example.com/v2) is preserved. Passing an
+    // absolute path to `new URL` would otherwise discard the base path.
+    const fullUrl = new URL(baseUrl);
+    const basePath = fullUrl.pathname.replace(/\/+$/, "");
+    const opPath = url.replace(/^\/+/, "");
+    fullUrl.pathname = opPath ? `${basePath}/${opPath}` : basePath || "/";
     // Add query parameters
     for (const [key, value] of Object.entries(queryParams)) {
         fullUrl.searchParams.set(key, value);
