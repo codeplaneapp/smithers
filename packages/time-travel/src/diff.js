@@ -69,6 +69,8 @@ export function diffSnapshots(a, b) {
         }
     }
     // Ralph
+    const ralphAdded = [];
+    const ralphRemoved = [];
     const ralphChanged = [];
     const allRalphKeys = new Set([
         ...Object.keys(a.ralph),
@@ -78,9 +80,12 @@ export function diffSnapshots(a, b) {
         const aR = a.ralph[key];
         const bR = b.ralph[key];
         if (!aR || !bR) {
-            // One side missing — treat as changed if both exist
-            if (aR && bR) {
-                ralphChanged.push({ ralphId: key, from: aR, to: bR });
+            // One side missing — loop was added or removed between snapshots
+            if (!aR) {
+                ralphAdded.push(key);
+            }
+            else {
+                ralphRemoved.push(key);
             }
             continue;
         }
@@ -99,6 +104,8 @@ export function diffSnapshots(a, b) {
         outputsAdded,
         outputsRemoved,
         outputsChanged,
+        ralphAdded,
+        ralphRemoved,
         ralphChanged,
         inputChanged,
         vcsPointerChanged,
@@ -159,6 +166,18 @@ export function formatDiffForTui(diff) {
         lines.push(pc.bold("Outputs changed:"));
         for (const o of diff.outputsChanged) {
             lines.push(pc.yellow(`  ~ ${o.key}`));
+        }
+    }
+    if (diff.ralphAdded.length > 0) {
+        lines.push(pc.bold("Ralph (loops) added:"));
+        for (const r of diff.ralphAdded) {
+            lines.push(pc.green(`  + ${r}`));
+        }
+    }
+    if (diff.ralphRemoved.length > 0) {
+        lines.push(pc.bold("Ralph (loops) removed:"));
+        for (const r of diff.ralphRemoved) {
+            lines.push(pc.red(`  - ${r}`));
         }
     }
     if (diff.ralphChanged.length > 0) {

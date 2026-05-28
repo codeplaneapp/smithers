@@ -12,6 +12,8 @@ export type SnapshotDiff = {
   outputsAdded: string[];
   outputsRemoved: string[];
   outputsChanged: OutputChange[];
+  ralphAdded: string[];
+  ralphRemoved: string[];
   ralphChanged: RalphChange[];
   inputChanged: boolean;
   vcsPointerChanged: boolean;
