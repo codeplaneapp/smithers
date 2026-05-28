@@ -19,10 +19,15 @@ const PER_CHECK_TIMEOUT_MS = 5_000;
  */
 async function runCheck(check, ctx) {
     const start = performance.now();
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timeoutHandle;
     try {
         return await Promise.race([
             check.run(ctx),
-            new Promise((_, reject) => setTimeout(() => reject(new SmithersError("AGENT_DIAGNOSTIC_TIMEOUT", "diagnostic check timed out", { timeoutMs: PER_CHECK_TIMEOUT_MS })), PER_CHECK_TIMEOUT_MS)),
+            new Promise((_, reject) => {
+                timeoutHandle = setTimeout(() => reject(new SmithersError("AGENT_DIAGNOSTIC_TIMEOUT", "diagnostic check timed out", { timeoutMs: PER_CHECK_TIMEOUT_MS })), PER_CHECK_TIMEOUT_MS);
+                timeoutHandle.unref?.();
+            }),
         ]);
     }
     catch (err) {
@@ -32,6 +37,9 @@ async function runCheck(check, ctx) {
             message: err instanceof Error ? err.message : String(err),
             durationMs: performance.now() - start,
         };
+    }
+    finally {
+        clearTimeout(timeoutHandle);
     }
 }
 /**
