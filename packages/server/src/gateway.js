@@ -939,7 +939,10 @@ function verifyJwtToken(token, config) {
     if (!audiences.some((audience) => tokenAudiences.includes(audience))) {
         return { ok: false, message: "JWT audience did not match" };
     }
-    if (typeof exp === "number" && now - skew >= exp) {
+    if (typeof exp !== "number") {
+        return { ok: false, message: "JWT is missing a valid exp claim" };
+    }
+    if (now - skew >= exp) {
         return { ok: false, message: "JWT has expired" };
     }
     if (typeof nbf === "number" && now + skew < nbf) {
@@ -2490,6 +2493,7 @@ export class Gateway {
             }
         })
             .finally(() => {
+            this.runRegistry.delete(runId);
             this.activeRuns.delete(runId);
             this.inflightRuns.delete(runId);
         });
@@ -2555,8 +2559,10 @@ export class Gateway {
         });
         ws.on("message", async (raw) => {
             this.recordMessageReceived("ws", "request");
+            /** @type {RequestFrame | undefined} */
+            let frame;
             try {
-                const frame = parseGatewayRequestFrame(raw, this.maxPayload);
+                frame = parseGatewayRequestFrame(raw, this.maxPayload);
                 const response = await this.executeRpc(connection, frame, async () => {
                     if (!connection.authenticated && frame.method !== "connect") {
                         return responseError(frame.id, "UNAUTHORIZED", "Connect first");
@@ -2582,10 +2588,10 @@ export class Gateway {
                     ...gatewayErrorAnnotations(error),
                 }, "gateway:rpc:invalid");
                 if (isSmithersError(error)) {
-                    this.sendResponse(connection, responseError("invalid", error.code, error.summary));
+                    this.sendResponse(connection, responseError(frame?.id ?? "invalid", error.code, error.summary));
                     return;
                 }
-                this.sendResponse(connection, responseError("server", "SERVER_ERROR", error?.message ?? "Gateway request failed"));
+                this.sendResponse(connection, responseError(frame?.id ?? "server", "SERVER_ERROR", error?.message ?? "Gateway request failed"));
             }
         });
         let cleanedUp = false;
@@ -2750,7 +2756,7 @@ export class Gateway {
                     message: "A bearer token is required",
                 };
             }
-            const grant = this.auth.tokens[token];
+            const grant = Object.hasOwn(this.auth.tokens, token) ? this.auth.tokens[token] : undefined;
             if (!grant) {
                 return {
                     ok: false,
