@@ -123,16 +123,18 @@ export function Approval(props) {
     if ((mode === "select" || mode === "rank") && (!options || options.length === 0)) {
         throw new SmithersError("APPROVAL_OPTIONS_REQUIRED", `Approval ${props.id} requires options when mode="${mode}".`);
     }
+    const conditionMet = props.autoApprove
+        ? evaluateBooleanCallback(props.autoApprove.condition, ctx)
+        : undefined;
+    const revertOnMet = props.autoApprove
+        ? evaluateBooleanCallback(props.autoApprove.revertOn, ctx)
+        : undefined;
     const autoApprove = props.autoApprove
         ? {
             ...(typeof props.autoApprove.after === "number" ? { after: props.autoApprove.after } : {}),
             audit: props.autoApprove.audit !== false,
-            ...(evaluateBooleanCallback(props.autoApprove.condition, ctx) !== undefined
-                ? { conditionMet: evaluateBooleanCallback(props.autoApprove.condition, ctx) }
-                : {}),
-            ...(evaluateBooleanCallback(props.autoApprove.revertOn, ctx) !== undefined
-                ? { revertOnMet: evaluateBooleanCallback(props.autoApprove.revertOn, ctx) }
-                : {}),
+            ...(conditionMet !== undefined ? { conditionMet } : {}),
+            ...(revertOnMet !== undefined ? { revertOnMet } : {}),
         }
         : undefined;
     const requestMeta = {
@@ -177,7 +179,7 @@ export function Approval(props) {
             approved: approval?.status === "approved",
             note: approval?.note ?? null,
             decidedBy: approval?.decidedBy ?? null,
-            decidedAt: null,
+            decidedAt: approval?.decidedAtMs != null ? new Date(approval.decidedAtMs).toISOString() : null,
         };
     };
     return React.createElement("smithers:task", {
