@@ -497,6 +497,72 @@ describe("node detail aggregation", () => {
         expect(circularFallback.output.cacheKey).toBe("cache-circular");
     });
 
+    test("truncates multibyte tool output on a codepoint boundary", () => {
+        // Build a string whose 1024th byte (the truncation point for tool
+        // payloads) lands inside a 4-byte emoji. One ASCII lead byte plus
+        // emojis means byte index 1024 is a UTF-8 continuation byte, so the
+        // pre-fix byte slice would decode to a U+FFFD replacement character.
+        const emojiOutput = "x" + "😀".repeat(400);
+        expect(Buffer.byteLength(emojiOutput, "utf8")).toBeGreaterThan(1024);
+        expect((Buffer.from(emojiOutput, "utf8")[1024] & 0xc0)).toBe(0x80);
+
+        // CJK characters are 3 bytes each; an odd ASCII prefix again forces
+        // the cut to land mid-character.
+        const cjkOutput = "yy" + "字".repeat(400);
+        expect(Buffer.byteLength(cjkOutput, "utf8")).toBeGreaterThan(1024);
+
+        const detail = baseDetail({
+            attempts: [
+                attemptRow({
+                    attempt: 1,
+                    state: "finished",
+                    durationMs: 10,
+                    tokenUsage: emptyUsage(),
+                    toolCalls: [
+                        { name: "emoji", status: "success", durationMs: 1, input: null, output: emojiOutput, error: null },
+                        { name: "cjk", status: "success", durationMs: 2, input: null, output: cjkOutput, error: null },
+                    ],
+                }),
+            ],
+        });
+
+        const human = renderNodeDetailHuman(detail, {
+            expandAttempts: true,
+            expandTools: true,
+        });
+
+        // The fix backs the cut off to a codepoint boundary, so the rendered
+        // output must never contain the U+FFFD replacement character.
+        expect(human).toContain("truncated, use --json for full output");
+        expect(human).not.toContain("�");
+    });
+
+    test("returns within-limit payloads unchanged", () => {
+        const shortOutput = "résumé 😀 字"; // well under any byte limit
+        const detail = baseDetail({
+            attempts: [
+                attemptRow({
+                    attempt: 1,
+                    state: "finished",
+                    durationMs: 5,
+                    tokenUsage: emptyUsage(),
+                    toolCalls: [
+                        { name: "short", status: "success", durationMs: 1, input: null, output: shortOutput, error: null },
+                    ],
+                }),
+            ],
+        });
+
+        const human = renderNodeDetailHuman(detail, {
+            expandAttempts: true,
+            expandTools: true,
+        });
+
+        expect(human).toContain(shortOutput);
+        expect(human).not.toContain("truncated, use --json for full output");
+        expect(human).not.toContain("�");
+    });
+
     test("fails when node or iteration is missing", async () => {
         const missingNode = await aggregateExit(makeAdapter({ nodes: [] }));
         expect(Exit.isFailure(missingNode)).toBe(true);
