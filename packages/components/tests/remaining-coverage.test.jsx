@@ -207,7 +207,7 @@ describe("remaining component branch coverage", () => {
                 approved: true,
                 note: "approved note",
                 decidedBy: "carol",
-                decidedAt: null,
+                decidedAt: new Date(2).toISOString(),
             });
             await expect(
                 withTaskRuntime(runtimeFor(db, "run", "approval-invalid-json"), () => invalidJson.tasks[0].computeFn()),
