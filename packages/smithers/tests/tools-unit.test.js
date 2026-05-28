@@ -284,7 +284,11 @@ describe("process helpers and bash tool", () => {
       ["-e", "process.stdout.write('abc'); process.stderr.write('def')"],
       { cwd: root, maxOutputBytes: 3, timeoutMs: 1000 },
     );
-    expect(splitOutput.truncated).toBe(true);
+    // stdout and stderr each get their own 3-byte budget, so both fit
+    // exactly and nothing is dropped.
+    expect(splitOutput.stdout).toBe("abc");
+    expect(splitOutput.stderr).toBe("def");
+    expect(splitOutput.truncated).toBe(false);
     expect(splitOutput.totalBytes).toBe(6);
 
     await expectSmithersCode(
@@ -327,6 +331,70 @@ describe("process helpers and bash tool", () => {
     } finally {
       process.kill = originalKill;
     }
+  });
+
+  test("gives stdout and stderr independent byte budgets", async () => {
+    const root = await makeRoot();
+
+    // Noisy stderr (well over the limit) must not steal budget from a real
+    // stdout payload that fits comfortably under the limit. With a shared
+    // budget, the stderr flood would truncate or drop the stdout output.
+    const result = await captureProcess(
+      process.execPath,
+      [
+        "-e",
+        "process.stderr.write('e'.repeat(50)); process.stdout.write('keep-me')",
+      ],
+      { cwd: root, maxOutputBytes: 10, timeoutMs: 1000 },
+    );
+
+    expect(result.stdout).toBe("keep-me");
+    expect(result.stderr).toBe("e".repeat(10));
+    expect(result.truncated).toBe(true);
+    expect(result.totalBytes).toBe(57);
+  });
+
+  test("truncateToBytes never emits a replacement char mid-codepoint", async () => {
+    // U+1F600 (grinning face) encodes to 4 UTF-8 bytes.
+    const emoji = "\u{1F600}";
+    expect(Buffer.byteLength(emoji, "utf8")).toBe(4);
+
+    const text = `ab${emoji}cd`;
+    // Cutting at 3 bytes lands in the middle of the emoji's 4-byte sequence.
+    for (let maxBytes = 2; maxBytes <= 5; maxBytes += 1) {
+      const truncated = truncateToBytes(text, maxBytes);
+      expect(truncated).not.toContain("�");
+    }
+    // The partial emoji is dropped entirely rather than corrupted.
+    expect(truncateToBytes(text, 4)).toBe("ab");
+    expect(truncateToBytes(text, 5)).toBe("ab");
+    // A complete emoji is kept once enough bytes are available.
+    expect(truncateToBytes(text, 6)).toBe(`ab${emoji}`);
+
+    // CJK characters encode to 3 UTF-8 bytes each; a mid-character cut must
+    // not produce a replacement char either.
+    const cjk = "你好"; // 你好
+    expect(Buffer.byteLength(cjk, "utf8")).toBe(6);
+    expect(truncateToBytes(cjk, 4)).toBe("你");
+    expect(truncateToBytes(cjk, 4)).not.toContain("�");
+  });
+
+  test("captured output is not corrupted by a mid-codepoint byte limit", async () => {
+    const root = await makeRoot();
+
+    // Emit several multibyte codepoints, then cap the budget at a byte count
+    // that necessarily lands inside one of them.
+    const result = await captureProcess(
+      process.execPath,
+      ["-e", "process.stdout.write('\\u{1F600}\\u{1F600}\\u{1F600}')"],
+      { cwd: root, maxOutputBytes: 6, timeoutMs: 1000 },
+    );
+
+    expect(result.stdout).not.toContain("�");
+    // 6 bytes holds exactly the first emoji (4 bytes); the partial second one
+    // is dropped instead of corrupted.
+    expect(result.stdout).toBe("\u{1F600}");
+    expect(result.truncated).toBe(true);
   });
 
   test("executes commands and reports command failures", async () => {
