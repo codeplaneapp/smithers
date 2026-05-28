@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 type TerminalTab = { id: string; title: string; createdAt: Date };
 
+type ViewId = "terminal" | "issues" | "landings" | "workspaces";
+
 function createTerminal(index: number): TerminalTab {
   return { id: crypto.randomUUID(), title: `Terminal ${index}`, createdAt: new Date() };
 }
@@ -13,15 +15,27 @@ const firstTerminal: TerminalTab = {
 };
 
 type StudioState = {
+  // Terminal state
   tabs: TerminalTab[];
   activeTabId: string;
+
+  // View state
+  activeView: ViewId;
+
+  // Command palette state
   paletteOpen: boolean;
   paletteQuery: string;
   selectedPaletteIndex: number;
 
+  // Terminal actions
   openTerminal: () => void;
   closeTerminal: (tabId: string) => void;
   setActiveTabId: (id: string) => void;
+
+  // View actions
+  setActiveView: (view: ViewId) => void;
+
+  // Palette actions
   openPalette: () => void;
   closePalette: () => void;
   setPaletteQuery: (query: string) => void;
@@ -31,6 +45,7 @@ type StudioState = {
 export const useStudioStore = create<StudioState>((set, get) => ({
   tabs: [firstTerminal],
   activeTabId: firstTerminal.id,
+  activeView: "terminal",
   paletteOpen: false,
   paletteQuery: "",
   selectedPaletteIndex: 0,
@@ -38,7 +53,13 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   openTerminal: () => {
     const { tabs } = get();
     const next = createTerminal(tabs.length + 1);
-    set({ tabs: [...tabs, next], activeTabId: next.id, paletteOpen: false, paletteQuery: "" });
+    set({
+      tabs: [...tabs, next],
+      activeTabId: next.id,
+      activeView: "terminal",
+      paletteOpen: false,
+      paletteQuery: ""
+    });
   },
 
   closeTerminal: (tabId: string) => {
@@ -50,6 +71,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   setActiveTabId: (id: string) => set({ activeTabId: id }),
+
+  setActiveView: (view: ViewId) => set({ activeView: view, paletteOpen: false }),
 
   openPalette: () => set({ paletteOpen: true }),
 
