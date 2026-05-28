@@ -199,6 +199,12 @@ export function spawnCaptureEffect(command, args, options) {
         child.on("close", (code) => {
             finalize({ stdout, stderr, exitCode: code ?? null });
         });
+        child.stdin?.on("error", (error) => {
+            logWarning("child process stdin error", {
+                ...logAnnotations,
+                error: error instanceof Error ? error.message : String(error),
+            }, span);
+        });
         if (input) {
             child.stdin?.write(input);
         }
