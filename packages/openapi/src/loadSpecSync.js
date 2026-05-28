@@ -17,11 +17,12 @@ export function loadSpecSync(input) {
         return input;
     }
     const str = input;
+    let content;
     try {
-        const content = readFileSync(str, "utf8");
-        return parseSpecText(content);
+        content = readFileSync(str, "utf8");
     }
     catch {
         return parseSpecText(str);
     }
+    return parseSpecText(content);
 }

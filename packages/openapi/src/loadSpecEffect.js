@@ -37,14 +37,15 @@ export function loadSpecEffect(input) {
     return Effect.try({
         try: () => {
             // Try reading as file first
+            let content;
             try {
-                const content = readFileSync(str, "utf8");
-                return parseSpecText(content);
+                content = readFileSync(str, "utf8");
             }
             catch {
                 // Not a file — try parsing as raw text
                 return parseSpecText(str);
             }
+            return parseSpecText(content);
         },
         catch: (cause) => toSmithersError(cause, "openapi load spec"),
     });
