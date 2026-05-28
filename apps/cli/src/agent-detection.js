@@ -31,8 +31,12 @@ const DETECTORS = [
         id: "opencode",
         displayName: "OpenCode",
         binary: "opencode",
-        authSignals: (homeDir) => [join(homeDir, ".local", "share", "opencode", "auth.json")],
-        apiKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        authSignals: (homeDir) => [
+            join(homeDir, ".local", "share", "opencode", "auth.json"),
+            join(homeDir, ".config", "opencode"),
+            join(homeDir, ".local", "share", "opencode"),
+        ],
+        apiKeys: ["OPENCODE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"],
         setupHint: "Install the OpenCode CLI and run `opencode auth login`, or set a provider API key.",
     },
     {
@@ -77,17 +81,6 @@ const DETECTORS = [
         authSignals: (homeDir) => [join(homeDir, ".pi", "agent", "auth.json")],
         apiKeys: [],
         setupHint: "Install and authenticate the `pi` CLI.",
-    },
-    {
-        id: "opencode",
-        displayName: "OpenCode",
-        binary: "opencode",
-        authSignals: (homeDir) => [
-            join(homeDir, ".config", "opencode"),
-            join(homeDir, ".local", "share", "opencode"),
-        ],
-        apiKeys: ["OPENCODE_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
-        setupHint: "Install the OpenCode CLI and authenticate a provider, or set a provider API key.",
     },
     {
         id: "kimi",
@@ -169,7 +162,7 @@ const CONSTRUCTORS = {
     },
     opencode: {
         importName: "OpenCodeAgent",
-        expr: 'new SmithersOpenCodeAgent({ model: "anthropic/claude-sonnet-4-5", cwd: process.cwd() })',
+        expr: 'new SmithersOpenCodeAgent({ model: "anthropic/claude-opus-4-20250514", cwd: process.cwd() })',
     },
     antigravity: {
         importName: "AntigravityAgent",
@@ -182,10 +175,6 @@ const CONSTRUCTORS = {
     pi: {
         importName: "PiAgent",
         expr: 'new SmithersPiAgent({ provider: "openai", model: "gpt-5.3-codex" })',
-    },
-    opencode: {
-        importName: "OpenCodeAgent",
-        expr: 'new SmithersOpenCodeAgent({ model: "anthropic/claude-opus-4-20250514", cwd: process.cwd() })',
     },
     kimi: {
         importName: "KimiAgent",
