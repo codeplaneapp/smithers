@@ -297,6 +297,40 @@ describe("spawnCaptureEffect — external kill / spawn errors", () => {
   });
 });
 
+describe("spawnCaptureEffect — stdin EPIPE handling", () => {
+  test("large input to a child that closes stdin and exits does not crash with uncaught EPIPE", async () => {
+    // Child immediately closes its stdin and exits. Writing a large payload
+    // into the pipe after the reader is gone triggers an EPIPE error event on
+    // the parent's child.stdin stream. Without an "error" listener on stdin,
+    // that becomes an uncaught exception and crashes the process. The effect
+    // must instead settle (succeed/fail with a handled error).
+    let unhandled = null;
+    const onUnhandled = (err) => {
+      unhandled = err;
+    };
+    process.on("uncaughtException", onUnhandled);
+    try {
+      // ~1 MB payload, well over a pipe buffer, so the write cannot fully
+      // flush before the child has gone away.
+      const bigInput = "x".repeat(1_000_000);
+      const result = await run(
+        "node",
+        ["-e", "process.stdin.destroy(); process.exit(0)"],
+        { input: bigInput },
+      );
+      // The task settled cleanly rather than crashing.
+      expect(typeof result.exitCode === "number" || result.exitCode === null).toBe(
+        true,
+      );
+    } finally {
+      // Give any deferred error event a tick to land before asserting.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      process.removeListener("uncaughtException", onUnhandled);
+    }
+    expect(unhandled).toBeNull();
+  });
+});
+
 describe("spawnCaptureEffect — concurrency / fd hygiene", () => {
   test("spawns 20 cheap processes concurrently without leaking", async () => {
     const N = 20;
