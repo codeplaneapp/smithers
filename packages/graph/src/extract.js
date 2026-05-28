@@ -1,4 +1,5 @@
 import { isAbsolute, resolve as resolvePath } from "node:path";
+import { getTableName } from "drizzle-orm";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 /** @typedef {import("./TaskDescriptor.ts").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("./XmlNode.ts").XmlNode} XmlNode */
@@ -58,23 +59,18 @@ function isZodObject(value) {
 }
 /**
  * @param {unknown} value
- * @returns {string | undefined}
+ * @returns {boolean}
  */
-function maybeTableName(value) {
+function isDrizzleTable(value) {
     if (!value || typeof value !== "object")
-        return undefined;
-    const symbols = Object.getOwnPropertySymbols(value);
-    for (const symbol of symbols) {
-        const key = String(symbol);
-        if (key.includes("drizzle") || key.includes("Name")) {
-            const symbolValue = value[symbol];
-            if (typeof symbolValue === "string" && symbolValue.length > 0) {
-                return symbolValue;
-            }
-        }
+        return false;
+    try {
+        const name = getTableName(value);
+        return typeof name === "string" && name.length > 0;
     }
-    const named = value.name;
-    return typeof named === "string" && named.length > 0 ? named : undefined;
+    catch {
+        return false;
+    }
 }
 /**
  * @param {Record<string, unknown>} raw
@@ -90,13 +86,17 @@ function resolveOutput(raw) {
             outputSchema: undefined,
         };
     }
-    const outputRef = isZodObject(outputRaw) ? outputRaw : undefined;
-    const tableName = typeof outputRaw === "string" ? outputRaw : maybeTableName(outputRaw) ?? "";
-    const outputTable = outputRef ? null : typeof outputRaw === "string" ? null : outputRaw;
+    const outputTable = isDrizzleTable(outputRaw) ? outputRaw : null;
+    const outputTableName = outputTable
+        ? getTableName(outputTable)
+        : typeof outputRaw === "string"
+            ? outputRaw
+            : "";
+    const outputRef = !outputTable && isZodObject(outputRaw) ? outputRaw : undefined;
     const outputSchema = isZodObject(raw.outputSchema) ? raw.outputSchema : outputRef;
     return {
         outputTable,
-        outputTableName: tableName,
+        outputTableName,
         outputRef,
         outputSchema,
     };
