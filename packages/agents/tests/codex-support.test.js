@@ -43,6 +43,9 @@ process.stdout.write(JSON.stringify({ type: "turn.completed" }) + "\\n");
             process.env.CODEX_ARGS_FILE = argsFile;
             const agent = new CodexAgent({
                 env: { PATH: process.env.PATH },
+                sandbox: "danger-full-access",
+                dangerouslyBypassApprovalsAndSandbox: true,
+                skipGitRepoCheck: true,
             });
             const result = await agent.generate({
                 prompt: "continue the work",
@@ -50,8 +53,18 @@ process.stdout.write(JSON.stringify({ type: "turn.completed" }) + "\\n");
             });
             expect(result.text).toBe("done");
             const capturedArgs = JSON.parse(await readFile(argsFile, "utf8"));
-            expect(capturedArgs.slice(0, 3)).toEqual(["exec", "resume", "thread-1"]);
+            expect(capturedArgs.slice(0, 2)).toEqual(["exec", "resume"]);
+            expect(capturedArgs).not.toContain("--sandbox");
             expect(capturedArgs).toContain("--json");
+            expect(capturedArgs).toContain("--dangerously-bypass-approvals-and-sandbox");
+            expect(capturedArgs).toContain("--skip-git-repo-check");
+            const sessionIndex = capturedArgs.indexOf("thread-1");
+            expect(sessionIndex).toBeGreaterThan(1);
+            expect(capturedArgs.slice(-2)).toEqual(["thread-1", "-"]);
+            expect(capturedArgs.indexOf("--json")).toBeLessThan(sessionIndex);
+            expect(capturedArgs.indexOf("--output-last-message")).toBeLessThan(sessionIndex);
+            expect(capturedArgs.indexOf("--dangerously-bypass-approvals-and-sandbox")).toBeLessThan(sessionIndex);
+            expect(capturedArgs.indexOf("--skip-git-repo-check")).toBeLessThan(sessionIndex);
         }
         finally {
             await rm(fake.dir, { recursive: true, force: true });

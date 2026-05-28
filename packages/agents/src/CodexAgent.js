@@ -510,7 +510,7 @@ export class CodexAgent extends BaseCliAgent {
         const resumeSession = typeof params.options?.resumeSession === "string"
             ? params.options.resumeSession
             : undefined;
-        const args = resumeSession ? ["exec", "resume", resumeSession] : ["exec"];
+        const args = resumeSession ? ["exec", "resume"] : ["exec"];
         const yoloEnabled = this.opts.yolo ?? this.yolo;
         const configOverrides = normalizeCodexConfig(this.opts.config);
         for (const entry of configOverrides) {
@@ -520,21 +520,26 @@ export class CodexAgent extends BaseCliAgent {
         pushList(args, "--disable", this.opts.disable);
         pushList(args, "--image", this.opts.image);
         pushFlag(args, "--model", this.opts.model ?? this.model);
-        if (this.opts.oss)
+        if (!resumeSession && this.opts.oss)
             args.push("--oss");
-        pushFlag(args, "--local-provider", this.opts.localProvider);
-        pushFlag(args, "--sandbox", this.opts.sandbox);
-        pushFlag(args, "--profile", this.opts.profile);
-        if (this.opts.fullAuto) {
+        if (!resumeSession)
+            pushFlag(args, "--local-provider", this.opts.localProvider);
+        if (!resumeSession)
+            pushFlag(args, "--sandbox", this.opts.sandbox);
+        if (!resumeSession)
+            pushFlag(args, "--profile", this.opts.profile);
+        if (!resumeSession && this.opts.fullAuto) {
             args.push("--full-auto");
         }
         else if (yoloEnabled || this.opts.dangerouslyBypassApprovalsAndSandbox) {
             args.push("--dangerously-bypass-approvals-and-sandbox");
         }
-        pushFlag(args, "--cd", this.opts.cd);
+        if (!resumeSession)
+            pushFlag(args, "--cd", this.opts.cd);
         if (this.opts.skipGitRepoCheck)
             args.push("--skip-git-repo-check");
-        pushList(args, "--add-dir", this.opts.addDir);
+        if (!resumeSession)
+            pushList(args, "--add-dir", this.opts.addDir);
         if (!resumeSession) {
             pushFlag(args, "--output-schema", this.opts.outputSchema);
         }
@@ -562,6 +567,8 @@ export class CodexAgent extends BaseCliAgent {
         pushFlag(args, "--output-last-message", outputFile);
         if (this.extraArgs?.length)
             args.push(...this.extraArgs);
+        if (resumeSession)
+            args.push(resumeSession);
         const systemPrefix = params.systemPrompt
             ? `${params.systemPrompt}\n\n`
             : "";
