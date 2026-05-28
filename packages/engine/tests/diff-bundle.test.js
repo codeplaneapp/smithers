@@ -120,6 +120,50 @@ describe("diff bundle", () => {
         }
     });
 
+    test("reproduces exact binary bytes from a ref without UTF-8 corruption", async () => {
+        const repo = makeRepo();
+        try {
+            // Bytes that are NOT valid UTF-8: lone continuation bytes (0x80-0xBF),
+            // 0xFF/0xFE (never valid UTF-8), an overlong/truncated multibyte lead
+            // byte (0xC0 with no continuation), plus NUL. Decoding this as UTF-8
+            // (the old bug) replaces invalid sequences with U+FFFD, mangling the
+            // bytes; reading raw Buffers preserves them exactly.
+            const original = Buffer.from([
+                0x00, 0xff, 0xfe, 0x80, 0x81, 0xbf, 0xc0, 0xc1,
+                0xe2, 0x28, 0xa1, 0xf0, 0x28, 0x8c, 0x28, 0x7f,
+            ]);
+            writeFileSync(join(repo, "payload.bin"), original);
+            commitAll(repo, "add binary payload");
+
+            const base64 = await __diffBundleInternals.readBinaryContentAtRef(repo, "HEAD", "payload.bin");
+            expect(base64).toBe(original.toString("base64"));
+            // Round-trip the embedded content back to bytes and compare exactly.
+            expect(Buffer.from(base64 ?? "", "base64").equals(original)).toBe(true);
+
+            // The ref-based diff bundle must embed the same exact bytes.
+            const empty = await computeDiffBundleBetweenRefs("HEAD", "HEAD", repo, 1);
+            expect(empty.patches).toEqual([]);
+
+            // Modify the binary so the bundle includes a patch for it.
+            const modified = Buffer.from([
+                0x00, 0xff, 0xfe, 0x80, 0x90, 0xbf, 0xc0, 0xc1,
+                0xed, 0xa0, 0x80, 0xf4, 0x90, 0x80, 0x80, 0x00,
+            ]);
+            writeFileSync(join(repo, "payload.bin"), modified);
+            commitAll(repo, "modify binary payload");
+
+            const bundle = await computeDiffBundleBetweenRefs("HEAD~1", "HEAD", repo, 2);
+            const patch = bundle.patches.find((p) => p.path === "payload.bin");
+            expect(patch).toBeDefined();
+            expect(patch?.operation).toBe("modify");
+            expect(patch?.binaryContent).toBe(modified.toString("base64"));
+            expect(Buffer.from(patch?.binaryContent ?? "", "base64").equals(modified)).toBe(true);
+        }
+        finally {
+            cleanup(repo);
+        }
+    });
+
     test("exposes guarded internals for malformed diff and missing binary refs", async () => {
         const repo = makeRepo();
         try {
