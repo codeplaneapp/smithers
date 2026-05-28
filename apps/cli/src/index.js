@@ -682,6 +682,11 @@ async function* streamRunEventsCommand(c) {
                 },
             });
         }
+        let lastWaitingStatus = run.status === "waiting-approval" ||
+            run.status === "waiting-event" ||
+            run.status === "waiting-timer"
+            ? run.status
+            : undefined;
         while (true) {
             await new Promise((resolve) => setTimeout(resolve, 500));
             const newEvents = await adapter.listEvents(c.args.runId, lastSeq, 200);
@@ -691,6 +696,11 @@ async function* streamRunEventsCommand(c) {
             }
             const currentRun = await adapter.getRun(c.args.runId);
             const currentStatus = currentRun?.status;
+            if (currentStatus === "waiting-approval" ||
+                currentStatus === "waiting-event" ||
+                currentStatus === "waiting-timer") {
+                lastWaitingStatus = currentStatus;
+            }
             if (currentStatus !== "running" &&
                 currentStatus !== "waiting-approval" &&
                 currentStatus !== "waiting-event" &&
@@ -703,13 +713,13 @@ async function* streamRunEventsCommand(c) {
                 const ctaCommands = [
                     { command: `inspect ${c.args.runId}`, description: "Inspect run state" },
                 ];
-                if (currentStatus === "waiting-approval") {
+                if (lastWaitingStatus === "waiting-approval") {
                     ctaCommands.push({ command: `approve ${c.args.runId}`, description: "Approve run" });
                 }
-                if (currentStatus === "waiting-event") {
+                if (lastWaitingStatus === "waiting-event") {
                     ctaCommands.push({ command: `why ${c.args.runId}`, description: "Explain signal wait" });
                 }
-                if (currentStatus === "waiting-timer") {
+                if (lastWaitingStatus === "waiting-timer") {
                     ctaCommands.push({ command: `why ${c.args.runId}`, description: "Explain timer wait" });
                 }
                 return c.ok(undefined, { cta: { commands: ctaCommands } });
@@ -4293,7 +4303,7 @@ const cli = Cli.create({
     .command("down", {
     description: "Cancel all active runs. Like 'docker compose down' for workflows.",
     options: z.object({
-        force: z.boolean().default(false).describe("Cancel runs even if they appear stale"),
+        force: z.boolean().default(false).describe("Cancel runs even if they still appear live (default only cancels stale runs)"),
     }),
     async run(c) {
         const fail = (opts) => {
@@ -4318,7 +4328,13 @@ const cli = Cli.create({
                 }
                 const now = Date.now();
                 let cancelled = 0;
+                let skipped = 0;
                 for (const run of allActive) {
+                    if (isRunHeartbeatFresh(run) && !c.options.force) {
+                        process.stderr.write(`• Skipped (still live): ${run.runId}. Use --force to cancel anyway.\n`);
+                        skipped++;
+                        continue;
+                    }
                     const inProgress = await adapter.listInProgressAttempts(run.runId);
                     const attempts = await adapter.listAttemptsForRun(run.runId);
                     for (const attempt of inProgress) {
@@ -4337,7 +4353,10 @@ const cli = Cli.create({
                     process.stderr.write(`⊘ Cancelled: ${run.runId}\n`);
                     cancelled++;
                 }
-                return c.ok({ cancelled, runs: allActive.map((r) => r.runId) }, { cta: { commands: [{ command: `ps`, description: "Verify all runs stopped" }] } });
+                if (cancelled === 0 && skipped > 0) {
+                    return c.ok({ cancelled, skipped, message: "All active runs are still live. Use --force to cancel them." });
+                }
+                return c.ok({ cancelled, skipped, runs: allActive.map((r) => r.runId) }, { cta: { commands: [{ command: `ps`, description: "Verify all runs stopped" }] } });
             }
             finally {
                 cleanup();
