@@ -205,12 +205,12 @@ export function GhosttyTerminalPane({
       className={`terminal-pane ${active ? "active" : ""}`}
     >
       {status === "error" && (
-        <div className="terminal-status">
+        <div className="terminal-status" data-testid="terminal-status">
           PTY server unavailable — start with: bun scripts/dev.ts
         </div>
       )}
       {status === "exited" && (
-        <div className="terminal-status">Session ended</div>
+        <div className="terminal-status" data-testid="terminal-status">Session ended</div>
       )}
       <Terminal
         autoResize

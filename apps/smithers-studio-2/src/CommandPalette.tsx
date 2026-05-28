@@ -31,7 +31,7 @@ export function CommandPalette() {
 
   return (
     <div className="palette-backdrop" onMouseDown={(event) => event.target === event.currentTarget && closePalette()}>
-      <div aria-label="Command palette" className="command-palette" role="dialog">
+      <div aria-label="Command palette" className="command-palette" data-testid="command-palette" role="dialog">
         <input
           autoFocus
           onChange={(event) => setPaletteQuery(event.target.value)}
