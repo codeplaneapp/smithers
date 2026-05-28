@@ -196,9 +196,16 @@ describe("SmithersError", () => {
     expect(error).toBeInstanceOf(SmithersError);
   });
 
-  test("isSmithersError accepts Smithers-style objects", () => {
-    expect(isSmithersError({ code: "X", message: "Y" })).toBe(true);
+  test("isSmithersError accepts genuine SmithersErrors", () => {
+    expect(isSmithersError(new SmithersError("INVALID_INPUT", "Bad input"))).toBe(true);
+    expect(isSmithersError({ code: "INVALID_INPUT", message: "Y" })).toBe(true);
     expect(isSmithersError(new Error("plain"))).toBe(false);
+  });
+
+  test("isSmithersError rejects foreign errors and arbitrary objects", () => {
+    expect(isSmithersError({ code: "X", message: "Y" })).toBe(false);
+    expect(isSmithersError({ code: "ENOENT", message: "no such file" })).toBe(false);
+    expect(isSmithersError(Object.assign(new Error("fs"), { code: "ENOENT" }))).toBe(false);
   });
 });
 
