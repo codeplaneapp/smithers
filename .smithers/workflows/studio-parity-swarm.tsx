@@ -209,6 +209,9 @@ const repoRootProbe = spawnSync("jj", ["root"], { encoding: "utf8" });
 const repoRoot = repoRootProbe.status === 0 ? repoRootProbe.stdout.trim() : process.cwd();
 
 type ParityTicket = z.infer<typeof parityTicketSchema>;
+type TicketImplementation = z.infer<typeof ticketImplementationSchema>;
+type TicketValidation = z.infer<typeof ticketValidationSchema>;
+type TicketReview = z.infer<typeof ticketReviewSchema>;
 
 function latestForTicket<T extends { ticketId: string }>(rows: T[] | undefined, ticketId: string): T | undefined {
   return [...(rows ?? [])].reverse().find((row) => row.ticketId === ticketId);
@@ -271,16 +274,16 @@ function agentForTicket(ticket: ParityTicket, index: number): AgentLike[] {
 }
 
 function ticketDone(ticketId: string, ctx: any) {
-  const implementation = latestForTicket(ctx.outputs.implementation, ticketId);
-  const validation = latestForTicket(ctx.outputs.validation, ticketId);
-  const review = latestForTicket(ctx.outputs.review, ticketId);
+  const implementation = latestForTicket<TicketImplementation>(ctx.outputs.implementation, ticketId);
+  const validation = latestForTicket<TicketValidation>(ctx.outputs.validation, ticketId);
+  const review = latestForTicket<TicketReview>(ctx.outputs.review, ticketId);
   return Boolean(implementation?.status === "implemented" && validation?.allPassed && review?.approved);
 }
 
 function ticketFeedback(ticketId: string, ctx: any) {
-  const implementation = latestForTicket(ctx.outputs.implementation, ticketId);
-  const validation = latestForTicket(ctx.outputs.validation, ticketId);
-  const review = latestForTicket(ctx.outputs.review, ticketId);
+  const implementation = latestForTicket<TicketImplementation>(ctx.outputs.implementation, ticketId);
+  const validation = latestForTicket<TicketValidation>(ctx.outputs.validation, ticketId);
+  const review = latestForTicket<TicketReview>(ctx.outputs.review, ticketId);
   const parts: string[] = [];
   if (implementation && implementation.status !== "implemented") {
     parts.push([
