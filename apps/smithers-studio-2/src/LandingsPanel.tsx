@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   listJjhubLandings,
   getJjhubLanding,
@@ -67,6 +67,9 @@ export function LandingsPanel() {
   const effectiveSelectedLanding = selectedLanding ??
     (selectedId ? landings.find((landing) => landing.id === selectedId) ?? null : landings[0] ?? null);
 
+  const selectedLandingIdRef = useRef<string | null>(effectiveSelectedLanding?.id ?? null);
+  selectedLandingIdRef.current = effectiveSelectedLanding?.id ?? null;
+
   const refreshAuthStatus = useCallback(async () => {
     try {
       const loaded = await loadJjhubAuthStatus();
@@ -131,8 +134,10 @@ export function LandingsPanel() {
     if (landing.number == null) return;
     try {
       const diff = await getJjhubLandingDiff(landing.number);
+      if (selectedLandingIdRef.current !== landing.id) return;
       setDiffText(diff);
     } catch (error) {
+      if (selectedLandingIdRef.current !== landing.id) return;
       setMessage(errorMessage(error));
     }
   };
@@ -141,8 +146,10 @@ export function LandingsPanel() {
     if (landing.number == null) return;
     try {
       const checks = await getJjhubLandingChecks(landing.number);
+      if (selectedLandingIdRef.current !== landing.id) return;
       setChecksText(checks);
     } catch (error) {
+      if (selectedLandingIdRef.current !== landing.id) return;
       setMessage(errorMessage(error));
     }
   };
@@ -151,8 +158,10 @@ export function LandingsPanel() {
     if (landing.number == null) return;
     try {
       const landingConflicts = await getJjhubLandingConflicts(landing.number);
+      if (selectedLandingIdRef.current !== landing.id) return;
       setConflicts(landingConflicts);
     } catch (error) {
+      if (selectedLandingIdRef.current !== landing.id) return;
       setMessage(errorMessage(error));
     }
   };
