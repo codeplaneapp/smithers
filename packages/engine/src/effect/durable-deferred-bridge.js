@@ -172,7 +172,11 @@ const deferredResolutions = new Map();
  */
 const awaitBridgeDeferred = async (executionId, _deferred) => {
     const exit = deferredResolutions.get(executionId);
-    return exit ? { _tag: "Complete", exit } : { _tag: "Pending" };
+    if (!exit) {
+        return { _tag: "Pending" };
+    }
+    deferredResolutions.delete(executionId);
+    return { _tag: "Complete", exit };
 };
 /**
  * @template Success, Error
