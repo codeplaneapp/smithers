@@ -1,6 +1,6 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 /**
  * @param {string} dir
@@ -111,7 +111,7 @@ export async function resolveClaudeSessionFile(agent, cwd, sessionId) {
             if (info.isFile()) return direct;
         } catch {}
         const files = await listJsonlFiles(root);
-        const match = files.find((file) => file.endsWith(`/${sessionId}.jsonl`));
+        const match = files.find((file) => basename(file) === `${sessionId}.jsonl`);
         if (match) return match;
     }
     return null;
@@ -124,8 +124,13 @@ export async function resolveClaudeSessionFile(agent, cwd, sessionId) {
  * @returns {Promise<string | null>}
  */
 export async function resolveCodexSessionFile(agent, cwd, startedAtMs) {
-    const day = new Date(startedAtMs);
-    const dayRoots = buildCodexSessionRoots(agent).map((root) => join(root, String(day.getUTCFullYear()), String(day.getUTCMonth() + 1).padStart(2, "0"), String(day.getUTCDate()).padStart(2, "0")));
+    const dayFolders = new Set();
+    for (const offset of [-1, 0, 1]) {
+        const day = new Date(startedAtMs + offset * 24 * 60 * 60 * 1000);
+        dayFolders.add(join(String(day.getUTCFullYear()), String(day.getUTCMonth() + 1).padStart(2, "0"), String(day.getUTCDate()).padStart(2, "0")));
+        dayFolders.add(join(String(day.getFullYear()), String(day.getMonth() + 1).padStart(2, "0"), String(day.getDate()).padStart(2, "0")));
+    }
+    const dayRoots = buildCodexSessionRoots(agent).flatMap((root) => [...dayFolders].map((folder) => join(root, folder)));
     const candidates = (await Promise.all(dayRoots.map((root) => listJsonlFiles(root)))).flat();
     /** @type {{ file: string; delta: number } | null} */
     let best = null;
