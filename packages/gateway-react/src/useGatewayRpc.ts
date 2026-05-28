@@ -21,6 +21,7 @@ export function useGatewayRpc<Method extends GatewayRpcMethod>(
     deps: readonly unknown[];
   } | undefined>(undefined);
   paramsRef.current = params;
+  const generationRef = useRef(0);
   const [data, setData] = useState<GatewayRpcPayload<Method>>();
   const [error, setError] = useState<Error>();
   const [loading, setLoading] = useState(enabled);
@@ -29,14 +30,22 @@ export function useGatewayRpc<Method extends GatewayRpcMethod>(
     if (!enabled) {
       return;
     }
+    const generation = ++generationRef.current;
     setLoading(true);
     setError(undefined);
     try {
-      setData(await client.rpc(method, paramsRef.current));
+      const payload = await client.rpc(method, paramsRef.current);
+      if (generation === generationRef.current) {
+        setData(payload);
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause : new Error(String(cause)));
+      if (generation === generationRef.current) {
+        setError(cause instanceof Error ? cause : new Error(String(cause)));
+      }
     } finally {
-      setLoading(false);
+      if (generation === generationRef.current) {
+        setLoading(false);
+      }
     }
   }, [client, enabled, method]);
 
@@ -53,6 +62,12 @@ export function useGatewayRpc<Method extends GatewayRpcMethod>(
       void refetch();
     }
   });
+
+  useEffect(() => {
+    return () => {
+      generationRef.current += 1;
+    };
+  }, []);
 
   return { data, error, loading, refetch };
 }
