@@ -21,6 +21,32 @@ describe("extractUsageFromOutput", () => {
     expect(usage.cacheWriteTokens).toBe(200);
   });
 
+  test("does not double-count Claude stream-json terminal result event", () => {
+    const lines = [
+      JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 1523, cache_creation_input_tokens: 200, cache_read_input_tokens: 50, output_tokens: 1 } } }),
+      JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } }),
+      JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 42 } }),
+      JSON.stringify({ type: "message_stop" }),
+      JSON.stringify({ type: "result", subtype: "success", usage: { input_tokens: 1523, output_tokens: 42, cache_creation_input_tokens: 200, cache_read_input_tokens: 50 } }),
+    ];
+    const raw = lines.join("\n");
+    const usage = extractUsageFromOutput(raw);
+    expect(usage).toBeDefined();
+    expect(usage.inputTokens).toBe(1523);
+    expect(usage.outputTokens).toBe(42);
+    expect(usage.cacheReadTokens).toBe(50);
+    expect(usage.cacheWriteTokens).toBe(200);
+  });
+
+  test("falls back to result usage when no incremental events were seen", () => {
+    const raw = JSON.stringify({ type: "result", subtype: "success", usage: { input_tokens: 800, output_tokens: 90, cache_read_input_tokens: 30 } });
+    const usage = extractUsageFromOutput(raw);
+    expect(usage).toBeDefined();
+    expect(usage.inputTokens).toBe(800);
+    expect(usage.outputTokens).toBe(90);
+    expect(usage.cacheReadTokens).toBe(30);
+  });
+
   test("extracts tokens from Codex --json JSONL with turn.completed", () => {
     const lines = [
       JSON.stringify({ type: "turn.started", session_id: "sess-1" }),

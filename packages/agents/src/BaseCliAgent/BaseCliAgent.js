@@ -458,6 +458,7 @@ export function extractUsageFromOutput(raw) {
     const lines = stripOscSequences(raw).split(/\r?\n/).filter(Boolean);
     const usage = {};
     let found = false;
+    let countedIncremental = false;
     for (const line of lines) {
         let parsed;
         try {
@@ -480,6 +481,7 @@ export function extractUsageFromOutput(raw) {
                     (usage.cacheWriteTokens ?? 0) + u.cache_creation_input_tokens;
             }
             found = true;
+            countedIncremental = true;
             continue;
         }
         if (parsed.type === "message_delta" && parsed.usage) {
@@ -488,7 +490,18 @@ export function extractUsageFromOutput(raw) {
                     (usage.outputTokens ?? 0) + parsed.usage.output_tokens;
             }
             found = true;
+            countedIncremental = true;
             continue;
+        }
+        if (parsed.type === "result") {
+            // Claude Code stream-json emits a terminal "result" event whose
+            // top-level usage summarizes tokens already accumulated from the
+            // per-message message_start/message_delta events. If we counted
+            // those incrementally, skip this event to avoid double-counting.
+            // Otherwise fall through so the usage is still captured.
+            if (countedIncremental) {
+                continue;
+            }
         }
         if (parsed.type === "turn.completed" && parsed.usage) {
             const u = parsed.usage;
