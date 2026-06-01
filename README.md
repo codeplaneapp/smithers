@@ -136,6 +136,14 @@ The [`examples/`](./examples) folder has 90+ runnable workflows covering real pa
 | [`slo-breach-explainer`](./examples/slo-breach-explainer.jsx) | On an SLO alarm, pull traces/logs/changes and explain the cause. |
 | [`repo-janitor`](./examples/repo-janitor.jsx) | On a schedule, clean warnings, stale TODOs, and doc drift. |
 
+## Benchmarks
+
+[`benchmarks/swe-bench-pro`](./benchmarks/swe-bench-pro) runs ScaleAI's
+[SWE-Bench Pro](https://github.com/scaleapi/SWE-bench_Pro-os) end to end: a
+Smithers workflow (Claude Opus 4.8 implements → Codex 5.5 reviews) authors a
+patch for a real repository task, and ScaleAI's own Docker images score it. Every
+instance is gated by gold/empty integrity controls so the numbers can't be fudged.
+
 ## Author your own
 
 The built-in workflows are normal Smithers TSX files: run them as-is, have your agent
