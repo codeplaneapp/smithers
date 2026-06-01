@@ -393,7 +393,7 @@ function App() {
     const events = stream.events ?? [];
     let highestPassed = -1;
     for (const ev of events) {
-      const rec = isRecord(ev) ? ev : {};
+      const rec: Record<string, unknown> = isRecord(ev) ? ev : {};
       const nodeId = asString(rec.nodeId) ?? "";
       const match = nodeId.match(/^mission:milestone:(\d+):(validate|revalidate)$/);
       if (match && (asString(rec.type) ?? "").includes("complete")) {

@@ -27,6 +27,15 @@
 /** @typedef {import("./agent-contract/SmithersAgentToolCategory.ts").SmithersAgentToolCategory} SmithersAgentToolCategory */
 /** @typedef {import("./agent-contract/SmithersListedTool.ts").SmithersListedTool} SmithersListedTool */
 /** @typedef {import("./agent-contract/SmithersToolSurface.ts").SmithersToolSurface} SmithersToolSurface */
+/** @typedef {import("./cli-capabilities/CliAgentCapabilityAdapterId.ts").CliAgentCapabilityAdapterId} CliAgentCapabilityAdapterId */
+/** @typedef {import("./cli-capabilities/CliAgentCapabilityDoctorReport.ts").CliAgentCapabilityDoctorEntry} CliAgentCapabilityDoctorEntry */
+/** @typedef {import("./cli-capabilities/CliAgentCapabilityDoctorReport.ts").CliAgentCapabilityDoctorReport} CliAgentCapabilityDoctorReport */
+/** @typedef {import("./cli-capabilities/CliAgentCapabilityDoctorReport.ts").CliAgentCapabilityIssue} CliAgentCapabilityIssue */
+/** @typedef {import("./cli-capabilities/CliAgentCapabilityReportEntry.ts").CliAgentCapabilityReportEntry} CliAgentCapabilityReportEntry */
+/** @typedef {import("./cli-surface/CliAgentSurfaceTypes.ts").CliAgentSurfaceManifestEntry} CliAgentSurfaceManifestEntry */
+/** @typedef {import("./cli-surface/CliAgentSurfaceTypes.ts").CliAgentSurfaceOptionMapping} CliAgentSurfaceOptionMapping */
+/** @typedef {import("./cli-surface/CliAgentSurfaceTypes.ts").CliAgentSurfaceResumeContract} CliAgentSurfaceResumeContract */
+/** @typedef {import("./cli-surface/CliAgentSurfaceTypes.ts").CliAgentUnsupportedFlag} CliAgentUnsupportedFlag */
 // @smithers-type-exports-end
 
 export { BaseCliAgent } from "./BaseCliAgent/index.js";
@@ -35,6 +44,7 @@ export { AnthropicAgent } from "./AnthropicAgent.js";
 export { OpenAIAgent } from "./OpenAIAgent.js";
 export { HermesAgent } from "./HermesAgent.js";
 export { AmpAgent } from "./AmpAgent.js";
+export { createAmpCapabilityRegistry } from "./AmpAgent.js";
 export { AntigravityAgent, createAntigravityCapabilityRegistry } from "./AntigravityAgent.js";
 export { ClaudeCodeAgent } from "./ClaudeCodeAgent.js";
 export { CodexAgent } from "./CodexAgent.js";
@@ -42,7 +52,16 @@ export { GeminiAgent } from "./GeminiAgent.js";
 export { PiAgent } from "./PiAgent.js";
 export { KimiAgent } from "./KimiAgent.js";
 export { ForgeAgent } from "./ForgeAgent.js";
+export { createForgeCapabilityRegistry } from "./ForgeAgent.js";
 export { OpenCodeAgent } from "./OpenCodeAgent.js";
+export {
+  getCliAgentCapabilityReport,
+  getCliAgentCapabilityDoctorReport,
+  formatCliAgentCapabilityDoctorReport,
+  CLI_AGENT_SURFACE_MANIFEST,
+  getCliAgentSurfaceManifestEntry,
+  listCliAgentSurfaceManifests,
+} from "./cli-capabilities/index.js";
 export { createSmithersAgentContract } from "./agent-contract/createSmithersAgentContract.js";
 export { renderSmithersAgentPromptGuidance } from "./agent-contract/renderSmithersAgentPromptGuidance.js";
 export { zodToOpenAISchema } from "./zodToOpenAISchema.js";

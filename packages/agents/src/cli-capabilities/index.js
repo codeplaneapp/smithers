@@ -9,3 +9,8 @@
 export { getCliAgentCapabilityReport } from "./getCliAgentCapabilityReport.js";
 export { getCliAgentCapabilityDoctorReport } from "./getCliAgentCapabilityDoctorReport.js";
 export { formatCliAgentCapabilityDoctorReport } from "./formatCliAgentCapabilityDoctorReport.js";
+export {
+  CLI_AGENT_SURFACE_MANIFEST,
+  getCliAgentSurfaceManifestEntry,
+  listCliAgentSurfaceManifests,
+} from "../cli-surface/index.js";

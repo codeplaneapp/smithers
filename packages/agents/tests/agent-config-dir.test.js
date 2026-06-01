@@ -199,6 +199,7 @@ describe("AntigravityAgent configDir/apiKey", () => {
             const dumped = await readEnvDump(dumpFile);
             expect(dumped.ARGS).toContain("--gemini_dir");
             expect(dumped.ARGS).toContain("/tmp/smithers-test-antigravity-work");
+            expect(dumped.GEMINI_DIR).toBe("/tmp/smithers-test-antigravity-work");
             expect(dumped.GEMINI_API_KEY).toBe("antigravity-test-key");
         }
         finally {
@@ -227,8 +228,9 @@ describe("AntigravityAgent configDir/apiKey", () => {
             await agent.generate({ messages: [{ role: "user", content: "ping" }] });
             const args = (await readEnvDump(dumpFile)).ARGS;
 
-            // Corrected flags.
-            expect(args).toContain("--conversation=d1d8a55b-cc27-4dd4-bc62-2f73015960d2");
+            // Corrected flags. `resume` is mapped to `--conversation <id>`.
+            expect(args).toContain("--conversation");
+            expect(args).toContain("d1d8a55b-cc27-4dd4-bc62-2f73015960d2");
             expect(args).toContain("--add-dir");
             expect(args).toContain("/tmp/extra-root");
 

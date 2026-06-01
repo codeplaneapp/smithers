@@ -76,7 +76,7 @@ test("hijack reopens the latest Claude Code session for a finished run", async (
         sqlite.close();
     }
 });
-test("hijack reopens Antigravity sessions with agy resume", async () => {
+test("hijack reopens Antigravity sessions with agy conversation", async () => {
     const repo = createTempRepo();
     const { sqlite, adapter } = openRepoDb(repo);
     const argsFile = repo.path("antigravity-hijack.json");
@@ -129,7 +129,7 @@ test("hijack reopens Antigravity sessions with agy resume", async () => {
         expect(result.exitCode).toBe(0);
         const launched = JSON.parse(repo.read("antigravity-hijack.json"));
         expect(launched.cwd).toBe(repo.dir);
-        expect(launched.args).toEqual(["--resume", "agy-session-123"]);
+        expect(launched.args).toEqual(["--conversation", "agy-session-123"]);
     }
     finally {
         sqlite.close();

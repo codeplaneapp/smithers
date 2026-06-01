@@ -5,6 +5,31 @@ import { randomUUID } from "node:crypto";
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
 /** @typedef {import("./ForgeAgentOptions.ts").ForgeAgentOptions} ForgeAgentOptions */
 
+/**
+ * @returns {AgentCapabilityRegistry}
+ */
+export function createForgeCapabilityRegistry() {
+    return {
+        version: 1,
+        engine: "forge",
+        runtimeTools: {},
+        mcp: {
+            bootstrap: "unsupported",
+            supportsProjectScope: false,
+            supportsUserScope: false,
+        },
+        skills: {
+            supportsSkills: false,
+            smithersSkillIds: [],
+        },
+        humanInteraction: {
+            supportsUiRequests: false,
+            methods: [],
+        },
+        builtIns: ["default"],
+    };
+}
+
 export class ForgeAgent extends BaseCliAgent {
     opts;
     /** @type {AgentCapabilityRegistry} */
@@ -17,25 +42,7 @@ export class ForgeAgent extends BaseCliAgent {
     constructor(opts = {}) {
         super(opts);
         this.opts = opts;
-        this.capabilities = {
-            version: 1,
-            engine: "forge",
-            runtimeTools: {},
-            mcp: {
-                bootstrap: "unsupported",
-                supportsProjectScope: false,
-                supportsUserScope: false,
-            },
-            skills: {
-                supportsSkills: false,
-                smithersSkillIds: [],
-            },
-            humanInteraction: {
-                supportsUiRequests: false,
-                methods: [],
-            },
-            builtIns: ["default"],
-        };
+        this.capabilities = createForgeCapabilityRegistry();
     }
     /**
    * @returns {CliOutputInterpreter}

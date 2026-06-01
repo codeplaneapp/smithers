@@ -155,21 +155,38 @@ new CodexAgent({
 });
 ```
 
-`AntigravityAgent` wraps the Google `agy` CLI. Key additions: `extensions`, `allowedMcpServerNames`, `geminiDir`, `resume`.
+`AntigravityAgent` wraps the Google `agy` CLI. Key additions: `allowedMcpServerNames`, `geminiDir`, `conversation`, `continue`, and `resume`.
 
 ```ts
 import { AntigravityAgent } from "smithers-orchestrator";
 new AntigravityAgent({
-  debug?: boolean; model?: string; sandbox?: boolean;
+  model?: string; sandbox?: boolean;
   yolo?: boolean; dangerouslySkipPermissions?: boolean;
   allowedMcpServerNames?: string[]; allowedTools?: string[];
-  extensions?: string[]; listExtensions?: boolean;
-  resume?: string; listSessions?: boolean; deleteSession?: string;
-  includeDirectories?: string[]; screenReader?: boolean;
-  outputFormat?: "text" | "json" | "stream-json"; // default json
+  conversation?: string; continue?: boolean; resume?: string;
+  includeDirectories?: string[];
   binary?: string; configDir?: string; geminiDir?: string; apiKey?: string;
+  // Deprecated and rejected at runtime: debug, screenReader, outputFormat,
+  // extensions, listExtensions, listSessions, deleteSession.
 });
 ```
+
+Current `agy` builds changed several Gemini-era flags. Smithers treats that as a
+runtime contract, not a best-effort pass-through:
+
+| Smithers option | Emitted `agy` surface |
+|---|---|
+| `includeDirectories` | `--add-dir` |
+| `conversation` / `resume` | `--conversation <id>` |
+| `continue` | `--continue` |
+| `configDir` / `geminiDir` | `--gemini_dir <dir>` and `GEMINI_DIR=<dir>` |
+| prompt text | `-p <prompt>` |
+
+Smithers does not emit `--output-format`, `--include-directories`, `--resume`,
+`--screen-reader`, `--debug`, extension flags, session-list flags, or
+`--prompt` for Antigravity. Options that would require those removed flags fail
+fast with `AGENT_CONFIG_INVALID` and a replacement hint. Plugins are managed
+outside workflow launch through `agy plugin`.
 
 `PiAgent` wraps the Pi CLI and adds extension UI hook support. Key additions: `mode`, `onExtensionUiRequest`, `extension`, `thinking`.
 
@@ -249,7 +266,7 @@ Smithers persists the native session or conversation id on each task event. On h
 |---|---|
 | `ClaudeCodeAgent` | `claude --resume` |
 | `CodexAgent` | `codex resume` |
-| `AntigravityAgent` | `agy --resume` |
+| `AntigravityAgent` | `agy --conversation` |
 | `PiAgent` | `pi --session` |
 | `KimiAgent` | `kimi --session` |
 | `ForgeAgent` | `forge --conversation-id` |
@@ -262,5 +279,5 @@ On clean exit the workflow resumes in detached mode. OpenCode stream capture is 
 - **Yolo defaults.** `yolo: true` (default) maps to each CLI's "skip approvals" flag (`--dangerously-skip-permissions`, `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--dangerously-allow-all`). Set `yolo: false` or use the agent-specific approval option for tighter control.
 - **Pi rpc mode** sends prompts as JSON over stdin and is required for `onExtensionUiRequest` callbacks; text/json modes pass the prompt as a positional arg with `files` emitted as `@path`.
 - **Kimi share dir.** `KimiAgent` auto-creates an isolated `KIMI_SHARE_DIR` per invocation to prevent `kimi.json` corruption under concurrent runs. Set `env.KIMI_SHARE_DIR` to opt out.
-- **Antigravity config.** `AntigravityAgent` launches the `agy` binary and passes `configDir`/`geminiDir` as `--gemini_dir`, matching Antigravity's `~/.gemini/antigravity-cli` config root.
+- **Antigravity config.** `AntigravityAgent` launches the `agy` binary and passes `configDir`/`geminiDir` as both `--gemini_dir` and `GEMINI_DIR`, matching Antigravity's `~/.gemini/antigravity-cli` config root. Current `agy` prompts use `-p`, extra directories use `--add-dir`, and native resume uses `--conversation`.
 - **Non-idempotent retries.** When a `<Task>` retries, Smithers prepends a warning listing previously-called side-effect tools so the agent can verify external state before re-invoking them.

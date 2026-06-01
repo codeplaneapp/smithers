@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   REPO_ROOT,
@@ -38,6 +39,24 @@ import {
  */
 
 const DESCRIPTORS = JSON.parse(readFileSync(resolve(import.meta.dir, "workflow-ui-descriptors.json"), "utf8"));
+const require = createRequire(import.meta.url);
+const STUDIO_PLAYWRIGHT_ENTRY = resolve(REPO_ROOT, "apps/smithers-studio-2/node_modules/playwright/index.js");
+
+function resolveChromium() {
+  const entries = ["playwright"];
+  if (existsSync(STUDIO_PLAYWRIGHT_ENTRY)) entries.push(STUDIO_PLAYWRIGHT_ENTRY);
+  for (const entry of entries) {
+    try {
+      const chromium = require(entry).chromium;
+      const executablePath = chromium?.executablePath?.();
+      if (typeof executablePath === "string" && existsSync(executablePath)) return chromium;
+    } catch {}
+  }
+  return null;
+}
+
+const CHROMIUM = resolveChromium();
+const workflowUiTest = CHROMIUM ? test : test.skip;
 
 // A free port picked at run time, so rapid re-runs (or a lingering gateway from
 // a prior run) can't collide and leave the new gateway unable to bind.
@@ -53,11 +72,8 @@ function findOpenPort() {
 }
 
 async function loadChromium() {
-  try {
-    return (await import("playwright")).chromium;
-  } catch {
-    return (await import(resolve(REPO_ROOT, "apps/smithers-studio-2/node_modules/playwright/index.js"))).chromium;
-  }
+  if (!CHROMIUM) throw new Error("Playwright Chromium executable is not installed");
+  return CHROMIUM;
 }
 
 async function waitForHealth(base, timeoutMs = 60_000) {
@@ -97,7 +113,7 @@ async function checkUi(page, base, descriptor, runId) {
   return missing.length ? `rendered output missing: ${missing.join(" | ")}` : null;
 }
 
-test("every init-pack workflow UI builds + boots; the output-verified set renders real runs", async () => {
+workflowUiTest("every init-pack workflow UI builds + boots; the output-verified set renders real runs", async () => {
   const binDir = createExecutableDir();
   writeFakeClaudeBinary(binDir);
   writeFakeCodexBinary(binDir);

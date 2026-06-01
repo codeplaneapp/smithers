@@ -1,14 +1,22 @@
 import { hashCapabilityRegistry, normalizeCapabilityRegistry, } from "../capability-registry/index.js";
+import { createAmpCapabilityRegistry } from "../AmpAgent.js";
 import { createAntigravityCapabilityRegistry } from "../AntigravityAgent.js";
 import { createClaudeCodeCapabilityRegistry } from "../ClaudeCodeAgent.js";
 import { createCodexCapabilityRegistry } from "../CodexAgent.js";
+import { createForgeCapabilityRegistry } from "../ForgeAgent.js";
 import { createGeminiCapabilityRegistry } from "../GeminiAgent.js";
 import { createKimiCapabilityRegistry } from "../KimiAgent.js";
 import { createOpenCodeCapabilityRegistry } from "../OpenCodeAgent.js";
 import { createPiCapabilityRegistry } from "../PiAgent.js";
+import { getCliAgentSurfaceManifestEntry } from "../cli-surface/index.js";
 /** @typedef {import("./CliAgentCapabilityReportEntry.ts").CliAgentCapabilityReportEntry} CliAgentCapabilityReportEntry */
 
 const CLI_AGENT_CAPABILITY_ADAPTERS = [
+    {
+        id: "amp",
+        binary: "amp",
+        buildRegistry: () => createAmpCapabilityRegistry(),
+    },
     {
         id: "claude",
         binary: "claude",
@@ -28,6 +36,11 @@ const CLI_AGENT_CAPABILITY_ADAPTERS = [
         id: "gemini",
         binary: "gemini",
         buildRegistry: () => createGeminiCapabilityRegistry(),
+    },
+    {
+        id: "forge",
+        binary: "forge",
+        buildRegistry: () => createForgeCapabilityRegistry(),
     },
     {
         id: "kimi",
@@ -54,11 +67,16 @@ export function getCliAgentCapabilityReport() {
         if (!capabilities) {
             throw new Error(`Capability registry missing for adapter ${adapter.id}`);
         }
+        const surface = getCliAgentSurfaceManifestEntry(adapter.id);
+        if (!surface) {
+            throw new Error(`CLI surface manifest missing for adapter ${adapter.id}`);
+        }
         return {
             id: adapter.id,
             binary: adapter.binary,
             fingerprint: hashCapabilityRegistry(capabilities),
             capabilities,
+            surface,
         };
     });
 }

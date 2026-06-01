@@ -250,10 +250,12 @@ describe("smithers agents capabilities", () => {
         expect(result.exitCode).toBe(0);
         const report = JSON.parse(result.stdout);
         expect(report.map((entry) => entry.id)).toEqual([
+            "amp",
             "claude",
             "codex",
             "antigravity",
             "gemini",
+            "forge",
             "kimi",
             "opencode",
             "pi",

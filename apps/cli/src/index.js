@@ -2110,7 +2110,7 @@ const agentsCli = Cli.create({
     },
 })
     .command("doctor", {
-    description: "Validate built-in CLI agent capability registries for drift or contradictions.",
+    description: "Validate built-in CLI agent capability registries and command-surface contracts.",
     options: z.object({
         json: z.boolean().default(false).describe("Print the doctor report as JSON"),
     }),

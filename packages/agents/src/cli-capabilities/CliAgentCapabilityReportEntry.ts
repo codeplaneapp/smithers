@@ -1,4 +1,5 @@
 import type { AgentCapabilityRegistry } from "../capability-registry";
+import type { CliAgentSurfaceManifestEntry } from "../cli-surface/CliAgentSurfaceTypes";
 import type { CliAgentCapabilityAdapterId } from "./CliAgentCapabilityAdapterId";
 
 export type CliAgentCapabilityReportEntry = {
@@ -6,4 +7,5 @@ export type CliAgentCapabilityReportEntry = {
   binary: string;
   fingerprint: string;
   capabilities: AgentCapabilityRegistry;
+  surface: CliAgentSurfaceManifestEntry;
 };

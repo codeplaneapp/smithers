@@ -281,7 +281,7 @@ export function writeFakeAntigravityBinary(dir, response = FAKE_AGENT_RESPONSE) 
     return writeExecutable(dir, "agy", [
         EXECUTABLE_SHEBANG,
         "const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? " + JSON.stringify(response) + ";",
-        'process.stdout.write(JSON.stringify({ text: "```json\\n" + payload + "\\n```\\n" }) + "\\n");',
+        'process.stdout.write(payload + "\\n");',
         "",
     ].join("\n"));
 }

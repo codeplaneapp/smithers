@@ -1,7 +1,8 @@
 import { test } from "bun:test";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   REPO_ROOT,
@@ -16,11 +17,33 @@ import {
 // One-off screenshot capturer (NOT a real test — a generation tool). Boots a
 // real init-pack gateway with stub agents, executes the completable workflows
 // for real run data, then captures each UI from the live gateway in Chromium to
-// docs/images/workflow-ui/<key>.png. Run with: bun test <thisfile>; delete after.
+// docs/images/workflow-ui/<key>.png. Run with:
+// SMITHERS_CAPTURE_WORKFLOW_UI_SCREENSHOTS=1 bun test <thisfile>
 
 const DESCRIPTORS = JSON.parse(readFileSync(resolve(import.meta.dir, "workflow-ui-descriptors.json"), "utf8"));
 const OUT_DIR = resolve(REPO_ROOT, "docs/images/workflow-ui");
 const VIEWPORT = { width: 1280, height: 832 };
+const require = createRequire(import.meta.url);
+const STUDIO_PLAYWRIGHT_ENTRY = resolve(REPO_ROOT, "apps/smithers-studio-2/node_modules/playwright/index.js");
+
+function resolveChromium() {
+  const entries = ["playwright"];
+  if (existsSync(STUDIO_PLAYWRIGHT_ENTRY)) entries.push(STUDIO_PLAYWRIGHT_ENTRY);
+  for (const entry of entries) {
+    try {
+      const chromium = require(entry).chromium;
+      const executablePath = chromium?.executablePath?.();
+      if (typeof executablePath === "string" && existsSync(executablePath)) return chromium;
+    } catch {}
+  }
+  return null;
+}
+
+const CHROMIUM = resolveChromium();
+const captureTest =
+  process.env.SMITHERS_CAPTURE_WORKFLOW_UI_SCREENSHOTS === "1" && CHROMIUM
+    ? test
+    : test.skip;
 
 function findOpenPort() {
   return new Promise((res, rej) => {
@@ -30,8 +53,8 @@ function findOpenPort() {
   });
 }
 async function loadChromium() {
-  try { return (await import("playwright")).chromium; }
-  catch { return (await import(resolve(REPO_ROOT, "apps/smithers-studio-2/node_modules/playwright/index.js"))).chromium; }
+  if (!CHROMIUM) throw new Error("Playwright Chromium executable is not installed");
+  return CHROMIUM;
 }
 async function waitForHealth(base, timeoutMs = 60_000) {
   const start = Date.now();
@@ -42,7 +65,7 @@ async function waitForHealth(base, timeoutMs = 60_000) {
   return false;
 }
 
-test("capture workflow UI screenshots", async () => {
+captureTest("capture workflow UI screenshots", async () => {
   mkdirSync(OUT_DIR, { recursive: true });
   const binDir = createExecutableDir();
   writeFakeClaudeBinary(binDir);

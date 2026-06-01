@@ -45,6 +45,7 @@
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/server": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
+    "smithers-orchestrator": "workspace:*",
     "cron-parser": "^5.5.0",
     "drizzle-orm": "^0.45.2",
     "effect": "^3.21.1",

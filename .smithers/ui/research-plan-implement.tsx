@@ -280,7 +280,7 @@ function App() {
     if (!activeRunId) return;
     setBusy(true);
     try {
-      await actions.rewindRun({ runId: activeRunId, nodeId: "plan" });
+      await actions.rewindRun({ runId: activeRunId, frameNo: 0, confirm: true });
       await refresh();
     } finally {
       setBusy(false);
@@ -332,7 +332,7 @@ function App() {
           ) : null}
           {activeRunId && !running ? (
             <button className="button" data-testid="research-plan-implement-rewind" onClick={() => void rewind()} disabled={busy}>
-              Rewind to Plan
+              Rewind
             </button>
           ) : null}
           <button className="button primary" data-testid="research-plan-implement-launch" onClick={() => void launch()} disabled={busy}>

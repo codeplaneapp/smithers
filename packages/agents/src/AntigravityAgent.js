@@ -1,8 +1,50 @@
 import { BaseCliAgent, pushFlag, pushList, isRecord, asString, truncate, toolKindFromName, createSyntheticIdGenerator, } from "./BaseCliAgent/index.js";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { normalizeCapabilityStringList, } from "./capability-registry/index.js";
+import { getCliAgentSurfaceManifestEntry } from "./cli-surface/index.js";
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
 /** @typedef {import("./AntigravityAgentOptions.ts").AntigravityAgentOptions} AntigravityAgentOptions */
+
+const ANTIGRAVITY_SURFACE = getCliAgentSurfaceManifestEntry("antigravity");
+
+/**
+ * @param {string} option
+ * @param {string} flag
+ * @returns {SmithersError}
+ */
+function unsupportedAntigravityOption(option, flag) {
+    const rule = ANTIGRAVITY_SURFACE?.unsupportedFlags.find((entry) => entry.flag === flag);
+    const replacement = rule?.replacement ? ` Use ${rule.replacement} instead.` : "";
+    const reason = rule?.reason ? ` ${rule.reason}` : "";
+    return new SmithersError("AGENT_CONFIG_INVALID", `AntigravityAgent option "${option}" maps to unsupported agy flag ${flag}.${reason}${replacement}`, {
+        agentEngine: "antigravity",
+        option,
+        flag,
+        replacement: rule?.replacement,
+        failureRetryable: false,
+    });
+}
+
+/**
+ * @param {AntigravityAgentOptions} opts
+ */
+function assertSupportedAntigravityOptions(opts) {
+    if (opts.debug)
+        throw unsupportedAntigravityOption("debug", "--debug");
+    if (opts.screenReader)
+        throw unsupportedAntigravityOption("screenReader", "--screen-reader");
+    if (opts.outputFormat !== undefined)
+        throw unsupportedAntigravityOption("outputFormat", "--output-format");
+    if (opts.listSessions)
+        throw unsupportedAntigravityOption("listSessions", "--list-sessions");
+    if (opts.deleteSession !== undefined)
+        throw unsupportedAntigravityOption("deleteSession", "--delete-session");
+    if (opts.extensions?.length)
+        throw unsupportedAntigravityOption("extensions", "--extensions");
+    if (opts.listExtensions)
+        throw unsupportedAntigravityOption("listExtensions", "--list-extensions");
+}
 
 /**
  * @param {AntigravityAgentOptions} opts
@@ -209,15 +251,13 @@ export class AntigravityAgent extends BaseCliAgent {
    * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
    */
     async buildCommand(params) {
+        assertSupportedAntigravityOptions(this.opts);
         const args = [];
         const yoloEnabled = this.opts.dangerouslySkipPermissions ?? this.opts.yolo ?? this.yolo;
-        // The Antigravity CLI has no `--output-format` flag. This only selects
-        // how Smithers parses stdout; it is never forwarded to `agy`.
-        const outputFormat = this.opts.outputFormat ??
-            (params.options?.onEvent ? "stream-json" : "json");
-        const resumeConversation = typeof params.options?.resumeSession === "string"
+        const resumeSession = typeof params.options?.resumeSession === "string"
             ? params.options.resumeSession
-            : this.opts.resume;
+            : this.opts.conversation ?? this.opts.resume;
+        args.push("--cwd", params.cwd);
         pushFlag(args, "--model", this.opts.model ?? this.model);
         if (this.opts.sandbox)
             args.push("--sandbox");
@@ -232,16 +272,10 @@ export class AntigravityAgent extends BaseCliAgent {
                 pushList(args, "--allowed-tools", this.opts.allowedTools);
             }
         }
-        // Resume a prior conversation. `agy` uses `--conversation=<id>` (alias
-        // `-c`); there is no `--resume`. Listing/switching conversations is the
-        // in-session `/resume` command, so there is no list/delete-session flag.
-        if (resumeConversation)
-            args.push(`--conversation=${resumeConversation}`);
-        // Extra workspace roots: `agy` uses `--add-dir`, not `--include-directories`.
+        if (this.opts.continue)
+            args.push("--continue");
+        pushFlag(args, "--conversation", resumeSession);
         pushList(args, "--add-dir", this.opts.includeDirectories);
-        // Extensions are now Plugins, managed out-of-band via `agy plugin <action>`
-        // rather than per-invocation `--extensions`/`--list-extensions` flags.
-        // `--gemini_dir` still works even though it is no longer listed in `agy --help`.
         pushFlag(args, "--gemini_dir", this.opts.geminiDir ?? this.opts.configDir);
         if (this.extraArgs?.length)
             args.push(...this.extraArgs);
@@ -252,14 +286,16 @@ export class AntigravityAgent extends BaseCliAgent {
             ? "\n\nREMINDER: Your response MUST be ONLY the required raw JSON object. Do not include prose, markdown, or code fences. The first character must be `{` and the last character must be `}`.\n"
             : "";
         const fullPrompt = `${systemPrefix}${params.prompt ?? ""}${jsonReminder}`;
-        args.push("--prompt", fullPrompt);
+        args.push("-p", fullPrompt);
         const accountEnv = {};
+        if (this.opts.geminiDir ?? this.opts.configDir)
+            accountEnv.GEMINI_DIR = this.opts.geminiDir ?? this.opts.configDir;
         if (this.opts.apiKey)
             accountEnv.GEMINI_API_KEY = this.opts.apiKey;
         return {
             command: this.opts.binary ?? "agy",
             args,
-            outputFormat,
+            outputFormat: "text",
             env: Object.keys(accountEnv).length > 0 ? accountEnv : undefined,
         };
     }
