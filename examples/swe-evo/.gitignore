@@ -1,0 +1,8 @@
+# Downloaded dataset (regenerate with: bun dataset/load.ts) and run artifacts.
+dataset/data/
+.data/
+*.log
+.data-run.log
+swe-evo.db*
+__pycache__/
+*.pyc
