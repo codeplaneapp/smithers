@@ -1,20 +1,29 @@
 import type { BaseCliAgentOptions } from "./BaseCliAgent/BaseCliAgentOptions";
 
 export type AntigravityAgentOptions = BaseCliAgentOptions & {
-  debug?: boolean;
   model?: string;
   sandbox?: boolean;
   yolo?: boolean;
   dangerouslySkipPermissions?: boolean;
   allowedMcpServerNames?: string[];
   allowedTools?: string[];
-  extensions?: string[];
-  listExtensions?: boolean;
+  /**
+   * Conversation id to resume. Forwarded as `--conversation=<id>` (the
+   * Antigravity CLI also accepts the short `-c` form). There is no `--resume`
+   * flag, and listing/switching conversations is the in-session `/resume`
+   * command rather than a launch flag.
+   */
   resume?: string;
-  listSessions?: boolean;
-  deleteSession?: string;
+  /**
+   * Extra workspace directories to grant the agent. Forwarded as repeated
+   * `--add-dir` flags (the CLI has no `--include-directories`).
+   */
   includeDirectories?: string[];
-  screenReader?: boolean;
+  /**
+   * Parse mode for the CLI's print output. The Antigravity CLI has no
+   * `--output-format` flag, so this only selects how Smithers interprets
+   * stdout — it is not forwarded as a CLI argument.
+   */
   outputFormat?: "text" | "json" | "stream-json";
   /**
    * Antigravity CLI binary to execute. The official CLI currently installs

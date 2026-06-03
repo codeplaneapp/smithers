@@ -211,13 +211,13 @@ export class AntigravityAgent extends BaseCliAgent {
     async buildCommand(params) {
         const args = [];
         const yoloEnabled = this.opts.dangerouslySkipPermissions ?? this.opts.yolo ?? this.yolo;
+        // The Antigravity CLI has no `--output-format` flag. This only selects
+        // how Smithers parses stdout; it is never forwarded to `agy`.
         const outputFormat = this.opts.outputFormat ??
             (params.options?.onEvent ? "stream-json" : "json");
-        const resumeSession = typeof params.options?.resumeSession === "string"
+        const resumeConversation = typeof params.options?.resumeSession === "string"
             ? params.options.resumeSession
             : this.opts.resume;
-        if (this.opts.debug)
-            args.push("--debug");
         pushFlag(args, "--model", this.opts.model ?? this.model);
         if (this.opts.sandbox)
             args.push("--sandbox");
@@ -232,18 +232,17 @@ export class AntigravityAgent extends BaseCliAgent {
                 pushList(args, "--allowed-tools", this.opts.allowedTools);
             }
         }
-        pushList(args, "--extensions", this.opts.extensions);
-        if (this.opts.listExtensions)
-            args.push("--list-extensions");
-        pushFlag(args, "--resume", resumeSession);
-        if (this.opts.listSessions)
-            args.push("--list-sessions");
-        pushFlag(args, "--delete-session", this.opts.deleteSession);
-        pushList(args, "--include-directories", this.opts.includeDirectories);
-        if (this.opts.screenReader)
-            args.push("--screen-reader");
+        // Resume a prior conversation. `agy` uses `--conversation=<id>` (alias
+        // `-c`); there is no `--resume`. Listing/switching conversations is the
+        // in-session `/resume` command, so there is no list/delete-session flag.
+        if (resumeConversation)
+            args.push(`--conversation=${resumeConversation}`);
+        // Extra workspace roots: `agy` uses `--add-dir`, not `--include-directories`.
+        pushList(args, "--add-dir", this.opts.includeDirectories);
+        // Extensions are now Plugins, managed out-of-band via `agy plugin <action>`
+        // rather than per-invocation `--extensions`/`--list-extensions` flags.
+        // `--gemini_dir` still works even though it is no longer listed in `agy --help`.
         pushFlag(args, "--gemini_dir", this.opts.geminiDir ?? this.opts.configDir);
-        pushFlag(args, "--output-format", outputFormat);
         if (this.extraArgs?.length)
             args.push(...this.extraArgs);
         const systemPrefix = params.systemPrompt
