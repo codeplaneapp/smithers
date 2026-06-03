@@ -76,7 +76,7 @@
     },
     "apps/cli": {
       "name": "@smithers-orchestrator/cli",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@clack/prompts": "^0.10.1",
         "@effect/workflow": "^0.18.0",
@@ -103,6 +103,7 @@
         "incur": "^0.4.1",
         "picocolors": "^1.1.1",
         "react": "^19.2.5",
+        "yaml": "^2.8.3",
         "zod": "^4.3.6",
       },
       "devDependencies": {
@@ -112,7 +113,7 @@
     },
     "apps/observability": {
       "name": "@smithers-orchestrator/observability",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@effect/opentelemetry": "^0.63.0",
         "@effect/platform": "^0.96.0",
@@ -179,7 +180,7 @@
     },
     "packages/accounts": {
       "name": "@smithers-orchestrator/accounts",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@smithers-orchestrator/errors": "workspace:*",
       },
@@ -190,7 +191,7 @@
     },
     "packages/agents": {
       "name": "@smithers-orchestrator/agents",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@ai-sdk/anthropic": "^3.0.71",
         "@ai-sdk/openai": "^3.0.53",
@@ -209,7 +210,7 @@
     },
     "packages/components": {
       "name": "@smithers-orchestrator/components",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@smithers-orchestrator/agents": "workspace:*",
         "@smithers-orchestrator/db": "workspace:*",
@@ -235,7 +236,7 @@
     },
     "packages/control-plane": {
       "name": "@smithers-orchestrator/control-plane",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@smithers-orchestrator/errors": "workspace:*",
       },
@@ -246,7 +247,7 @@
     },
     "packages/db": {
       "name": "@smithers-orchestrator/db",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@effect/experimental": "^0.60.0",
         "@effect/sql": "^0.51.0",
@@ -266,7 +267,7 @@
     },
     "packages/devtools": {
       "name": "@smithers-orchestrator/devtools",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "~5.9.3",
@@ -274,7 +275,7 @@
     },
     "packages/driver": {
       "name": "@smithers-orchestrator/driver",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@smithers-orchestrator/db": "workspace:*",
         "@smithers-orchestrator/errors": "workspace:*",
@@ -291,7 +292,7 @@
     },
     "packages/engine": {
       "name": "@smithers-orchestrator/engine",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@effect/cluster": "^0.58.0",
         "@effect/experimental": "^0.60.0",
@@ -327,7 +328,7 @@
     },
     "packages/errors": {
       "name": "@smithers-orchestrator/errors",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "effect": "^3.21.1",
       },
@@ -338,7 +339,7 @@
     },
     "packages/gateway": {
       "name": "@smithers-orchestrator/gateway",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "~5.9.3",
@@ -346,7 +347,7 @@
     },
     "packages/gateway-client": {
       "name": "@smithers-orchestrator/gateway-client",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@smithers-orchestrator/gateway": "workspace:*",
       },
@@ -357,7 +358,7 @@
     },
     "packages/gateway-react": {
       "name": "@smithers-orchestrator/gateway-react",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@smithers-orchestrator/gateway": "workspace:*",
         "@smithers-orchestrator/gateway-client": "workspace:*",
@@ -378,7 +379,7 @@
     },
     "packages/graph": {
       "name": "@smithers-orchestrator/graph",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@smithers-orchestrator/errors": "workspace:*",
         "drizzle-orm": "^0.45.2",
@@ -391,7 +392,7 @@
     },
     "packages/memory": {
       "name": "@smithers-orchestrator/memory",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@smithers-orchestrator/db": "workspace:*",
         "@smithers-orchestrator/errors": "workspace:*",
@@ -409,7 +410,7 @@
     },
     "packages/openapi": {
       "name": "@smithers-orchestrator/openapi",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@smithers-orchestrator/errors": "workspace:*",
         "@smithers-orchestrator/observability": "workspace:*",
@@ -426,7 +427,7 @@
     },
     "packages/pi-plugin": {
       "name": "@smithers-orchestrator/pi-plugin",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@mariozechner/pi-coding-agent": "^0.70.2",
         "@mariozechner/pi-tui": "^0.70.2",
@@ -447,7 +448,7 @@
     },
     "packages/protocol": {
       "name": "@smithers-orchestrator/protocol",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "~5.9.3",
@@ -455,7 +456,7 @@
     },
     "packages/react-reconciler": {
       "name": "@smithers-orchestrator/react-reconciler",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@smithers-orchestrator/devtools": "workspace:*",
         "@smithers-orchestrator/driver": "workspace:*",
@@ -474,7 +475,7 @@
     },
     "packages/sandbox": {
       "name": "@smithers-orchestrator/sandbox",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@effect/cluster": "^0.58.0",
         "@effect/rpc": "^0.75.0",
@@ -492,7 +493,7 @@
     },
     "packages/scheduler": {
       "name": "@smithers-orchestrator/scheduler",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@smithers-orchestrator/errors": "workspace:*",
         "@smithers-orchestrator/graph": "workspace:*",
@@ -505,7 +506,7 @@
     },
     "packages/scorers": {
       "name": "@smithers-orchestrator/scorers",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@smithers-orchestrator/agents": "workspace:*",
         "@smithers-orchestrator/db": "workspace:*",
@@ -524,7 +525,7 @@
     },
     "packages/server": {
       "name": "@smithers-orchestrator/server",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@effect/workflow": "^0.18.0",
         "@smithers-orchestrator/components": "workspace:*",
@@ -554,7 +555,7 @@
     },
     "packages/smithers": {
       "name": "smithers-orchestrator",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "bin": {
         "smithers": "./src/bin/smithers.js",
       },
@@ -596,7 +597,7 @@
     },
     "packages/time-travel": {
       "name": "@smithers-orchestrator/time-travel",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@effect/platform": "^0.96.0",
         "@effect/platform-bun": "^0.89.0",
@@ -617,7 +618,7 @@
     },
     "packages/vcs": {
       "name": "@smithers-orchestrator/vcs",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "dependencies": {
         "@effect/platform": "^0.96.0",
         "@smithers-orchestrator/observability": "workspace:*",
