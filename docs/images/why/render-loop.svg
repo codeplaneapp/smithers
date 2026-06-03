@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 280" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#58a6ff"/>
+    </marker>
+  </defs>
+  <rect width="820" height="280" fill="#0b0f14"/>
+  <text x="410" y="40" fill="#e6edf3" font-size="20" font-weight="700" text-anchor="middle">The runtime loop</text>
+
+  <!-- boxes -->
+  <g font-size="15" font-weight="600">
+    <rect x="40"  y="80" width="160" height="64" rx="10" fill="#0d1b2e" stroke="#58a6ff" stroke-width="1.5"/>
+    <text x="120" y="108" fill="#58a6ff" text-anchor="middle">Render</text>
+    <text x="120" y="130" fill="#8b949e" font-size="12" text-anchor="middle">the workflow tree</text>
+
+    <rect x="240" y="80" width="160" height="64" rx="10" fill="#0d1b2e" stroke="#58a6ff" stroke-width="1.5"/>
+    <text x="320" y="108" fill="#58a6ff" text-anchor="middle">Extract</text>
+    <text x="320" y="130" fill="#8b949e" font-size="12" text-anchor="middle">ready tasks</text>
+
+    <rect x="440" y="80" width="160" height="64" rx="10" fill="#0d1b2e" stroke="#58a6ff" stroke-width="1.5"/>
+    <text x="520" y="108" fill="#58a6ff" text-anchor="middle">Execute</text>
+    <text x="520" y="130" fill="#8b949e" font-size="12" text-anchor="middle">run them</text>
+
+    <rect x="640" y="80" width="160" height="64" rx="10" fill="#0f2e1a" stroke="#3fb950" stroke-width="1.5"/>
+    <text x="720" y="108" fill="#3fb950" text-anchor="middle">Persist</text>
+    <text x="720" y="130" fill="#8b949e" font-size="12" text-anchor="middle">outputs → SQLite</text>
+  </g>
+
+  <!-- forward arrows -->
+  <line x1="200" y1="112" x2="236" y2="112" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="400" y1="112" x2="436" y2="112" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="600" y1="112" x2="636" y2="112" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- feedback loop -->
+  <path d="M720,144 L720,210 L120,210 L120,148" fill="none" stroke="#3fb950" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <text x="420" y="234" fill="#3fb950" font-size="13" text-anchor="middle" font-weight="600">re-render against the new state</text>
+  <text x="420" y="256" fill="#8b949e" font-size="12" text-anchor="middle">state is the source of truth · the plan is a pure function of state</text>
+</svg>
