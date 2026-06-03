@@ -1,0 +1,24 @@
+# Claw-Eval-Live config that points the benchmark's agent at the Smithers
+# mixture-of-agents gateway. Grading and the judge are the benchmark's own —
+# only the agent (model endpoint) is replaced. See README.md.
+model:
+  api_key: smithers-local            # unused by the gateway; client requires a value
+  base_url: http://127.0.0.1:8788/v1 # the Smithers mixture brain
+  model_id: smithers-mixture-opus48-gpt55
+  input_modalities: [text, image]    # gpt-5.5 (gather) is vision-capable
+
+# Neutral judge: Gemini — NOT one of the two contestant models (Opus 4.8 / gpt-5.5),
+# so the communication dimension cannot be self-graded. This is exactly the judge
+# the benchmark authors recommend (config_template.yaml -> gemini-3-flash-preview).
+judge:
+  api_key: ${GEMINI_API_KEY}
+  base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+  model_id: gemini-2.5-flash          # neutral (not a contestant). Judge model is rotated across fresh Gemini
+                                      # models on re-run passes (rerun-errored.sh) to spread free-tier RPD.
+  enabled: true
+  extra_body:
+    reasoning_effort: none           # disable thinking so the verdict fits the judge's 512-token budget
+
+defaults:
+  trace_dir: traces_smithers
+  tasks_dir: tasks
