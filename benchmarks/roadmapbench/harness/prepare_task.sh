@@ -34,8 +34,12 @@ CONTAINER="rmb_$(echo "$TASK_ID" | tr -c 'a-zA-Z0-9_.-' '_')"
 rm -rf "$CONTROL"; mkdir -p "$CONTROL"
 CONTROL="$(cd "$CONTROL" && pwd)"
 
-# isolated agent home far from the dataset tree
-AGENT_HOME="${RMB_AGENT_HOME:-$(mktemp -d -t "rmb-${TASK_ID}-XXXXXX")}"
+# isolated agent home far from the dataset tree. Use a persistent base (NOT
+# $TMPDIR — macOS purges /var/folders, which would destroy the post-run diff
+# before it can be audited). The base contains only agent homes, so there is
+# still no on-disk breadcrumb to the dataset.
+RMB_HOME_BASE="${RMB_HOME_BASE:-$HOME/.cache/roadmapbench/homes}"; mkdir -p "$RMB_HOME_BASE"
+AGENT_HOME="${RMB_AGENT_HOME:-$(mktemp -d "$RMB_HOME_BASE/rmb-${TASK_ID}-XXXXXX")}"
 rm -rf "$AGENT_HOME"; mkdir -p "$AGENT_HOME"
 AGENT_HOME="$(cd "$AGENT_HOME" && pwd)"
 REPO="$AGENT_HOME/repo"

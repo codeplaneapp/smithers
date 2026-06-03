@@ -111,10 +111,16 @@ python3 benchmarks/roadmapbench/harness/audit_run.py <events_dir> <repo_dir> <ta
 
 ## Results
 
-See [RESULTS.md](./RESULTS.md). On `opt-4.5.0-roadmap` (a `hard`, 3-target
-Optuna GP/CMA-ES upgrade) Smithers (Opus 4.8 + Codex 5.5) **fully resolved the
-task — reward 1.0 (3/3 targets)** — on a grader proven sound (oracle 1.0 /
-no-op 0.0), with the run audited clean (124 commands inspected, no
-leakage/fetch/subversion). The public leaderboard's best model is ~0.39 resolved
-rate over the full 115-task set; this is a fair, fully-audited subset demo, and
-the harness scales to the full set.
+See [RESULTS.md](./RESULTS.md). Curated 2-task subset (Python + TypeScript), every
+agent on **Opus 4.8 + Codex 5.5**, every grader fair-validated, every run audited
+untainted:
+
+| Task | Lang | Difficulty | Reward | Targets |
+|---|---|---|---|---|
+| `opt-4.5.0-roadmap` | Python | hard | **1.000** | 3/3 |
+| `vbt-1.2.0-roadmap` | TypeScript | medium | **0.714** | 2/3 |
+
+**Resolved Rate 0.50, Completion Score 0.857.** The public leaderboard's best
+model is ~0.39 RR / ~0.69 CS over the full 115-task set; both subset numbers sit
+above that bar, and `vbt`'s partial 0.714 shows the grader credits real partial
+progress. This is a fair, audited subset demo — the same harness scales to all 115.
