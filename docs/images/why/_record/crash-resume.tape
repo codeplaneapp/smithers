@@ -5,7 +5,7 @@
 # Mirrors the live durability demo in .smithers/workflows/demo.tsx:
 # kill the process while `plan` is in flight, then resume from the last frame.
 
-Output docs/images/why/crash-resume.gif
+Output "docs/images/why/crash-resume.gif"
 
 Set Shell "bash"
 Set FontSize 16
