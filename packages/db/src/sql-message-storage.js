@@ -748,6 +748,28 @@ export class SqlMessageStorage {
         return rows[0];
     }
     /**
+   * Like {@link queryAll} but returns rows with their on-disk column names (no
+   * snake→camel transform). Used for "raw" output-table reads where callers
+   * expect the storage column names verbatim.
+   * @template T
+   * @param {string} statement
+   * @param {ReadonlyArray<SqliteParam>} [params]
+   * @returns {Promise<Array<T>>}
+   */
+    queryAllRaw(statement, params = []) {
+        return this.withConnection((connection) => connection.execute(statement, params.map(encodeParam), undefined));
+    }
+    /**
+   * @template T
+   * @param {string} statement
+   * @param {ReadonlyArray<SqliteParam>} [params]
+   * @returns {Promise<T | undefined>}
+   */
+    async queryOneRaw(statement, params = []) {
+        const rows = await this.queryAllRaw(statement, params);
+        return rows[0];
+    }
+    /**
    * @param {string} statement
    * @param {ReadonlyArray<SqliteParam>} [params]
    * @returns {Promise<void>}

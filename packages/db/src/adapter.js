@@ -14,6 +14,7 @@ import { getTableName } from "drizzle-orm";
 import { Effect, Exit, FiberId, Metric } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { getSqlMessageStorage } from "./sql-message-storage.js";
+import { POSTGRES, beginTransactionSql } from "./dialect.js";
 import { alertsAcknowledgedTotal, alertsActive, alertsFiredTotal, dbQueryDuration, dbTransactionDuration, dbTransactionRollbacks, } from "@smithers-orchestrator/observability/metrics";
 import { assertOptionalStringMaxLength, assertPositiveFiniteNumber, } from "./input-bounds.js";
 import { FRAME_KEYFRAME_INTERVAL, applyFrameDeltaJson, encodeFrameDelta, normalizeFrameEncoding, serializeFrameDelta, } from "./frame-codec.js";
@@ -505,6 +506,9 @@ export class SmithersDb {
                 }),
             });
             return yield* self.read(`raw query ${validatedQuery.slice(0, 20)}`, () => {
+                if (self.internalStorage.dialect === POSTGRES) {
+                    return self.internalStorage.queryAllRaw(validatedQuery);
+                }
                 const client = self.db.session.client;
                 const stmt = client.query(validatedQuery);
                 return Promise.resolve(stmt.all());
@@ -648,7 +652,18 @@ export class SmithersDb {
             const transactionState = getSqliteTransactionState(resolveSqliteClientKey(self.db));
             const start = performance.now();
             return yield* Effect.gen(function* () {
-                const client = yield* self.getSqliteTransactionClient();
+                const isPostgres = self.internalStorage.dialect === POSTGRES;
+                const client = isPostgres ? null : yield* self.getSqliteTransactionClient();
+                /**
+                 * Run a transaction-control statement on the active connection,
+                 * dialect-appropriately: synchronous bun:sqlite client.run for
+                 * SQLite, async @effect/sql execute (same connection) for Postgres.
+                 * @param {string} sql
+                 * @returns {Promise<unknown>}
+                 */
+                const runControl = (sql) => isPostgres
+                    ? self.internalStorage.execute(sql)
+                    : Promise.resolve(client.run(sql));
                 /**
      * @param {"operation" | "commit"} phase
      * @param {unknown} error
@@ -660,18 +675,11 @@ export class SmithersDb {
                         phase,
                         error: String(error),
                     }));
-                    yield* Effect.sync(() => {
-                        try {
-                            client.run("ROLLBACK");
-                        }
-                        catch {
-                            // ignore rollback failures
-                        }
-                    });
+                    yield* Effect.promise(() => runControl("ROLLBACK").then(() => undefined, () => undefined));
                 });
-                yield* Effect.try({
-                    try: () => {
-                        client.run("BEGIN IMMEDIATE");
+                yield* Effect.tryPromise({
+                    try: async () => {
+                        await runControl(beginTransactionSql(self.internalStorage.dialect));
                         transactionState.depth += 1;
                         transactionState.ownerThread = currentFiberThread;
                         self.transactionDepth = transactionState.depth;
@@ -688,10 +696,8 @@ export class SmithersDb {
                     yield* rollback("operation", operationExit.cause);
                     return yield* Effect.failCause(operationExit.cause);
                 }
-                const commitExit = yield* Effect.exit(Effect.try({
-                    try: () => {
-                        client.run("COMMIT");
-                    },
+                const commitExit = yield* Effect.exit(Effect.tryPromise({
+                    try: () => runControl("COMMIT"),
                     catch: (cause) => toSmithersError(cause, "commit sqlite transaction", {
                         code: "DB_WRITE_FAILED",
                         details: { writeGroup, phase: "commit" },
@@ -1006,13 +1012,21 @@ export class SmithersDb {
             ? [cols.runId, cols.nodeId, cols.iteration]
             : [cols.runId, cols.nodeId];
         const tableName = table?.["_"]?.name ?? "output";
-        return this.write(`upsert output ${tableName}`, () => this.db
-            .insert(table)
-            .values(values)
-            .onConflictDoUpdate({
-            target: target,
-            set: values,
-        }));
+        const conflictColumns = cols.iteration
+            ? ["runId", "nodeId", "iteration"]
+            : ["runId", "nodeId"];
+        return this.write(`upsert output ${tableName}`, () => {
+            if (this.internalStorage.dialect === POSTGRES) {
+                return this.internalStorage.upsert(tableName, values, conflictColumns);
+            }
+            return this.db
+                .insert(table)
+                .values(values)
+                .onConflictDoUpdate({
+                target: target,
+                set: values,
+            });
+        });
     }
     /**
    * @param {Table} table
@@ -1030,6 +1044,14 @@ export class SmithersDb {
    */
     deleteOutputRow(tableName, key) {
         return this.write(`delete output ${tableName}`, () => {
+            if (this.internalStorage.dialect === POSTGRES) {
+                // PostgreSQL output tables are created from the Zod schema with
+                // snake_case run_id/node_id/iteration columns, so no PRAGMA-based
+                // column discovery is needed.
+                const escapedPg = tableName.replaceAll(`"`, `""`);
+                return this.internalStorage.execute(`DELETE FROM "${escapedPg}"
+             WHERE run_id = ? AND node_id = ? AND iteration = ?`, [key.runId, key.nodeId, key.iteration ?? 0]);
+            }
             const client = this.db.session.client;
             let resolvedTableName = tableName;
             let escapedTableName = resolvedTableName.replaceAll(`"`, `""`);
@@ -1112,6 +1134,11 @@ export class SmithersDb {
     getRawNodeOutput(tableName, runId, nodeId) {
         return runnableEffect(this.read(`get raw node output ${tableName}`, () => {
             const escaped = tableName.replaceAll(`"`, `""`);
+            if (this.internalStorage.dialect === POSTGRES) {
+                return this.internalStorage
+                    .queryOneRaw(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`, [runId, nodeId])
+                    .then((row) => row ?? null);
+            }
             const client = this.db.session.client;
             const stmt = client.query(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`);
             const row = stmt.get(runId, nodeId);
@@ -1128,6 +1155,11 @@ export class SmithersDb {
     getRawNodeOutputForIteration(tableName, runId, nodeId, iteration) {
         return runnableEffect(this.read(`get raw node output ${tableName} iteration ${iteration}`, () => {
             const escaped = tableName.replaceAll(`"`, `""`);
+            if (this.internalStorage.dialect === POSTGRES) {
+                return this.internalStorage
+                    .queryOneRaw(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? AND iteration = ? LIMIT 1`, [runId, nodeId, iteration])
+                    .then((row) => row ?? null);
+            }
             const client = this.db.session.client;
             const stmt = client.query(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? AND iteration = ? LIMIT 1`);
             const row = stmt.get(runId, nodeId, iteration);
