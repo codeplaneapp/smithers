@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
+import { POSTGRES, translateDdl } from "./dialect.js";
 import { smithersSchemaMigrations } from "./internal-schema/smithersSchemaMigrations.js";
 
 const MIGRATION_TABLE_SQL = `CREATE TABLE IF NOT EXISTS _smithers_schema_migrations (
@@ -477,5 +478,32 @@ export function runSmithersSchemaMigrations(sqlite, context) {
         logDestructiveMigration(migration, details);
         recordMigration(sqlite, migration, details);
         applied.add(migration.id);
+    }
+}
+
+/**
+ * PostgreSQL schema initialization. A fresh PostgreSQL database starts at the
+ * current schema, so it skips the SQLite-only legacy column/foreign-key
+ * migrations entirely and simply creates every current table and index
+ * idempotently, with DDL translated to PostgreSQL types. Tables are created in
+ * declaration order, which keeps foreign-key references valid (referenced
+ * tables precede their dependents).
+ *
+ * @param {{ query: (config: { text: string }) => Promise<unknown> }} pgConn
+ * @param {{
+ *   createTableStatements: readonly string[];
+ *   createIndexStatements: readonly string[];
+ * }} context
+ * @returns {Promise<void>}
+ */
+export async function runSmithersSchemaInitPostgres(pgConn, context) {
+    const statements = [
+        MIGRATION_TABLE_SQL,
+        ...context.createTableStatements,
+        ...context.createIndexStatements,
+        ...EXTRA_INDEX_STATEMENTS,
+    ];
+    for (const statement of statements) {
+        await pgConn.query({ text: translateDdl(POSTGRES, statement) });
     }
 }

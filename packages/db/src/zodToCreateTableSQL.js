@@ -1,4 +1,5 @@
 import { unwrapZodType } from "./unwrapZodType.js";
+import { columnType, SQLITE } from "./dialect.js";
 import { camelToSnake } from "./utils/camelToSnake.js";
 /**
  * Determines the Zod base type name from a (possibly unwrapped) Zod type.
@@ -34,18 +35,22 @@ export function zodSchemaColumns(schema) {
 }
 /**
  * Generates a CREATE TABLE IF NOT EXISTS SQL statement from a Zod schema.
- * Used for runtime table creation without Drizzle migrations.
+ * Used for runtime table creation without Drizzle migrations. Pass
+ * `opts.dialect` to emit PostgreSQL-compatible column types; the default
+ * (`sqlite`) is byte-identical to the historical output.
  */
 export function zodToCreateTableSQL(tableName, schema, opts) {
+    const dialect = opts?.dialect ?? SQLITE;
+    const integer = columnType(dialect, "INTEGER");
     const colDefs = opts?.isInput
         ? [`run_id TEXT NOT NULL PRIMARY KEY`]
         : [
             `run_id TEXT NOT NULL`,
             `node_id TEXT NOT NULL`,
-            `iteration INTEGER NOT NULL DEFAULT 0`,
+            `iteration ${integer} NOT NULL DEFAULT 0`,
         ];
     for (const { name, sqliteType } of zodSchemaColumns(schema)) {
-        colDefs.push(`"${name}" ${sqliteType}`);
+        colDefs.push(`"${name}" ${columnType(dialect, sqliteType)}`);
     }
     if (!opts?.isInput) {
         colDefs.push(`PRIMARY KEY (run_id, node_id, iteration)`);
