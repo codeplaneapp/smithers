@@ -1138,6 +1138,130 @@ function buildCarriedInputRow(inputTable, newRunId, sourceInputRow, continuation
     return row;
 }
 /**
+ * Postgres sibling of the synchronous bun:sqlite continue-as-new handoff. Runs
+ * the same sequence — spawn child run, carry input, copy run-scoped output rows,
+ * carry ralph state, record the branch, mark the source run `continued`, and
+ * append the RunContinuedAsNew event — atomically via the dialect-aware adapter
+ * transaction + @effect/sql storage (no bun:sqlite client).
+ *
+ * @param {{
+ *   adapter: SmithersDb;
+ *   inputTableName: string;
+ *   inputRow: Record<string, unknown>;
+ *   outputTables: Array<unknown>;
+ *   carriedRalphState: RalphStateMap;
+ *   runId: string;
+ *   targetRunId: string;
+ *   sourceRun: Record<string, unknown>;
+ *   workflowPath: string | null;
+ *   runMetadata: RunDurabilityMetadata;
+ *   currentFrameNo: number;
+ *   continuation: ContinueAsNewRequest;
+ *   nextConfigJson: string;
+ *   continuationEvent: Record<string, unknown>;
+ *   ts: number;
+ * }} params
+ * @returns {Promise<void>}
+ */
+async function continueRunAsNewPostgres(params) {
+    const { adapter, inputTableName, inputRow, outputTables, carriedRalphState, runId, targetRunId, sourceRun, workflowPath, runMetadata, currentFrameNo, continuation, nextConfigJson, continuationEvent, ts, } = params;
+    const storage = adapter.internalStorage;
+    await Effect.runPromise(adapter.withTransactionEffect("continue-as-new handoff", Effect.gen(function* () {
+        // Re-check cancellation inside the transaction (matches the sqlite path).
+        const cancelState = yield* Effect.tryPromise({
+            try: () => storage.queryOne("SELECT cancel_requested_at_ms AS cancelRequestedAtMs FROM _smithers_runs WHERE run_id = ? LIMIT 1", [runId]),
+            catch: (cause) => toSmithersError(cause, "check cancel state", { code: "DB_QUERY_FAILED", details: { runId } }),
+        });
+        if (cancelState?.cancelRequestedAtMs) {
+            return yield* Effect.fail(new SmithersError("RUN_CANCELLED", `Run ${runId} was cancelled before continue-as-new handoff`, { runId }));
+        }
+        // Spawn the child run (a brand-new runId, so insertIgnore is exact).
+        yield* adapter.insertRun({
+            runId: targetRunId,
+            parentRunId: runId,
+            workflowName: sourceRun.workflowName ?? "workflow",
+            workflowPath: workflowPath ?? sourceRun.workflowPath ?? null,
+            workflowHash: runMetadata.workflowHash ?? sourceRun.workflowHash ?? null,
+            status: "running",
+            createdAtMs: ts,
+            startedAtMs: ts,
+            finishedAtMs: null,
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            cancelRequestedAtMs: null,
+            hijackRequestedAtMs: null,
+            hijackTarget: null,
+            vcsType: runMetadata.vcsType ?? sourceRun.vcsType ?? null,
+            vcsRoot: runMetadata.vcsRoot ?? sourceRun.vcsRoot ?? null,
+            vcsRevision: runMetadata.vcsRevision ?? sourceRun.vcsRevision ?? null,
+            errorJson: null,
+            configJson: nextConfigJson,
+        });
+        // Carry the input row.
+        yield* Effect.tryPromise({
+            try: () => storage.insertIgnore(inputTableName, inputRow),
+            catch: (cause) => toSmithersError(cause, "carry continuation input", { code: "DB_WRITE_FAILED", details: { runId: targetRunId } }),
+        });
+        // Copy run-scoped output rows, remapping run_id to the child. INSERT…SELECT
+        // is valid in both dialects; column names are identical.
+        for (const table of outputTables) {
+            const tableName = getTableName(table);
+            const columnEntries = getTableColumnEntries(table);
+            const runIdColumn = columnEntries.find((entry) => entry.key === "runId");
+            if (!runIdColumn) continue;
+            const insertColumnsSql = columnEntries.map((entry) => quoteSqlIdent(entry.sqlName)).join(", ");
+            const selectColumnsSql = columnEntries
+                .map((entry) => (entry.key === "runId" ? "?" : quoteSqlIdent(entry.sqlName)))
+                .join(", ");
+            yield* Effect.tryPromise({
+                try: () => storage.execute(`INSERT INTO ${quoteSqlIdent(tableName)} (${insertColumnsSql}) SELECT ${selectColumnsSql} FROM ${quoteSqlIdent(tableName)} WHERE ${quoteSqlIdent(runIdColumn.sqlName)} = ?`, [targetRunId, runId]),
+                catch: (cause) => toSmithersError(cause, `copy output ${tableName}`, { code: "DB_WRITE_FAILED", details: { runId: targetRunId, tableName } }),
+            });
+        }
+        // Carry ralph state.
+        for (const [ralphId, state] of carriedRalphState.entries()) {
+            yield* adapter.insertOrUpdateRalph({
+                runId: targetRunId,
+                ralphId,
+                iteration: state.iteration,
+                done: Boolean(state.done),
+                updatedAtMs: ts,
+            });
+        }
+        // Record the fork relationship.
+        yield* Effect.tryPromise({
+            try: () => storage.upsert("_smithers_branches", {
+                runId: targetRunId,
+                parentRunId: runId,
+                parentFrameNo: currentFrameNo,
+                branchLabel: "continue-as-new",
+                forkDescription: `continue-as-new:${continuation.reason}`,
+                createdAtMs: ts,
+            }, ["runId"]),
+            catch: (cause) => toSmithersError(cause, "record continuation branch", { code: "DB_WRITE_FAILED", details: { runId: targetRunId } }),
+        });
+        // Mark the source run as continued.
+        yield* Effect.tryPromise({
+            try: () => storage.execute(`UPDATE _smithers_runs
+             SET status = ?, finished_at_ms = ?, heartbeat_at_ms = NULL, runtime_owner_id = NULL,
+                 cancel_requested_at_ms = NULL, hijack_requested_at_ms = NULL, hijack_target = NULL
+             WHERE run_id = ?`, ["continued", ts, runId]),
+            catch: (cause) => toSmithersError(cause, "mark run continued", { code: "DB_WRITE_FAILED", details: { runId } }),
+        });
+        // Append the RunContinuedAsNew event with the next sequence number.
+        const seqRow = yield* Effect.tryPromise({
+            try: () => storage.queryOne("SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_events WHERE run_id = ?", [runId]),
+            catch: (cause) => toSmithersError(cause, "compute next event seq", { code: "DB_QUERY_FAILED", details: { runId } }),
+        });
+        const nextEventSeq = Number(seqRow?.seq ?? 0);
+        yield* Effect.tryPromise({
+            try: () => storage.execute(`INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
+             VALUES (?, ?, ?, ?, ?)`, [runId, nextEventSeq, ts, continuationEvent.type, JSON.stringify(continuationEvent)]),
+            catch: (cause) => toSmithersError(cause, "append continuation event", { code: "DB_WRITE_FAILED", details: { runId } }),
+        });
+    })));
+}
+/**
  * @param {{ db: BunSQLiteDatabase; adapter: SmithersDb; schema: Record<string, unknown>; inputTable: SQLiteTable; runId: string; workflowPath: string | null; runMetadata: RunDurabilityMetadata; currentFrameNo: number; continuation: ContinueAsNewRequest; ralphState: RalphStateMap; }} params
  * @returns {Promise<ContinueAsNewTransition>}
  */
@@ -1215,6 +1339,30 @@ async function continueRunAsNew(params) {
         ancestryDepth: ancestryDepth + 1,
         timestampMs: ts,
     };
+    if (db && typeof db === "object" && db.dialect === "postgres") {
+        await continueRunAsNewPostgres({
+            adapter,
+            inputTableName,
+            inputRow,
+            outputTables,
+            carriedRalphState,
+            runId,
+            targetRunId,
+            sourceRun,
+            workflowPath,
+            runMetadata,
+            currentFrameNo,
+            continuation,
+            nextConfigJson,
+            continuationEvent,
+            ts,
+        });
+        return {
+            newRunId: targetRunId,
+            ancestryDepth: ancestryDepth + 1,
+            carriedStateBytes,
+        };
+    }
     await withSqliteWriteRetry(async () => {
         const client = db.$client;
         if (!client || typeof client.run !== "function" || typeof client.query !== "function") {

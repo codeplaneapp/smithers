@@ -175,7 +175,7 @@ export { AnthropicAgent, OpenAIAgent, HermesAgent, AmpAgent, AntigravityAgent, C
 // VCS
 export { runJj, getJjPointer, revertToJjPointer, isJjRepo, workspaceAdd, workspaceList, workspaceClose, } from "@smithers-orchestrator/vcs/jj";
 // Core API
-export { createSmithers } from "./create.js";
+export { createSmithers, createSmithersPostgres } from "./create.js";
 export {
   fragment,
   renderFrame,

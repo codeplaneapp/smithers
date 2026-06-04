@@ -14,6 +14,8 @@ import { Approval as BaseApproval, Workflow as BaseWorkflow, Task as BaseTask, S
 import { zodToTable } from "@smithers-orchestrator/db/zodToTable";
 import { zodToCreateTableSQL, syncZodTableSchema } from "@smithers-orchestrator/db/zodToCreateTableSQL";
 import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { POSTGRES } from "@smithers-orchestrator/db/dialect";
 import { resolve } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 /** @typedef {import("@smithers-orchestrator/components").ApprovalProps<any, any>} ApprovalProps */
@@ -173,43 +175,14 @@ function mergeAlertPolicies(base, override) {
     return merged;
 }
 /**
- * Schema-driven API — users define only Zod schemas, the framework owns the entire storage layer.
+ * Generate the Drizzle table metadata, schema registry, and output refs shared by
+ * every backend. The Drizzle tables carry only column/name metadata — the actual
+ * storage is created per-dialect by the caller; dialect-aware engine reads consult
+ * these objects via getTableColumns/getTableName, never to issue SQLite queries.
  *
- * @template {Record<string, import("zod").ZodObject<any>>} Schemas
- * @param {Schemas} schemas
- * @param {CreateSmithersOptions} [opts]
- * @returns {import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas>}
- *
- * @example
- * ```ts
- * const { Workflow, Task, smithers, outputs } = createSmithers({
- *   discover: discoverOutputSchema,
- *   research: researchOutputSchema,
- * });
- *
- * export default smithers((ctx) => (
- *   <Workflow name="my-workflow">
- *     <Task id="discover" output={outputs.discover} agent={myAgent}>...</Task>
- *   </Workflow>
- * ));
- * ```
+ * @param {Record<string, any>} schemas
  */
-export function createSmithers(schemas, opts) {
-    const dbPath = opts?.dbPath ?? "./smithers.db";
-    const absDbPath = resolve(process.cwd(), dbPath);
-    if (process.env.SMITHERS_HOT === "1") {
-        const sig = computeSchemaSig(schemas, absDbPath);
-        const cached = hotCache.get(absDbPath);
-        if (cached) {
-            if (cached.schemaSig !== sig) {
-                throw new SmithersError("SCHEMA_CHANGE_HOT", "[smithers hot] Schema change detected; restart required to apply schema changes.");
-            }
-            cached.setModuleAlertPolicy(opts?.alertPolicy);
-            return cached.api;
-        }
-        // Will cache after creating the API below
-    }
-    // 1. Generate Drizzle tables from Zod schemas
+function prepareSmithersTables(schemas) {
     const tables = {};
     const inputTable = schemas.input
         ? zodToTable("input", schemas.input, { isInput: true })
@@ -223,77 +196,38 @@ export function createSmithers(schemas, opts) {
         const tableName = camelToSnake(name);
         tables[name] = zodToTable(tableName, zodSchema);
     }
-    // 2. Create SQLite db
-    const sqlite = new Database(dbPath);
-    sqlite.run(`PRAGMA journal_mode = ${opts?.journalMode ?? "WAL"}`);
-    // 30s timeout: concurrent worktrees each spawn agent processes that all write
-    // to smithers.db simultaneously. 5s is too short and causes SQLITE_IOERR_VNODE
-    // on macOS when the VFS can't acquire the WAL shared-memory lock in time.
-    sqlite.run("PRAGMA busy_timeout = 30000");
-    // NORMAL is safe in WAL mode (no data loss on crash) and reduces fsync
-    // stalls that contribute to WAL checkpoint contention across processes.
-    sqlite.run("PRAGMA synchronous = NORMAL");
-    // Ensure no exclusive lock is held, allowing multiple readers/writers.
-    sqlite.run("PRAGMA locking_mode = NORMAL");
-    sqlite.run("PRAGMA foreign_keys = ON");
-    // Register a process-exit hook to explicitly close the Database.
-    // bun:sqlite's GC finalizer calls sqlite3_close() which fatally aborts if
-    // Drizzle's cached prepared statements haven't been finalized first.
-    // Calling close() ourselves lets sqlite3 finalize everything gracefully.
-    let dbClosed = false;
-    const closeDb = () => {
-        if (dbClosed)
-            return;
-        dbClosed = true;
-        try {
-            sqlite.close();
-        }
-        catch { }
-        process.removeListener("exit", closeDb);
-    };
-    process.once("exit", closeDb);
-    // 3. Auto-create tables, and ALTER any existing tables to add columns the
-    // current schema introduced (CREATE TABLE IF NOT EXISTS would silently
-    // skip the columns and a later upsert would fail with "no column named X").
-    if (schemas.input) {
-        syncZodTableSchema(sqlite, "input", schemas.input, { isInput: true });
-    }
-    else {
-        sqlite.exec(`CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`);
-        try {
-            const cols = sqlite.query(`PRAGMA table_info("input")`).all();
-            const hasPayload = cols.some((col) => col?.name === "payload");
-            if (!hasPayload) {
-                sqlite.run(`ALTER TABLE "input" ADD COLUMN payload TEXT`);
-            }
-        }
-        catch {
-            // ignore - older SQLite or permission issues; input payload remains best-effort
-        }
-    }
-    for (const [name, zodSchema] of Object.entries(schemas)) {
-        if (name === "input")
-            continue;
-        const tableName = camelToSnake(name);
-        syncZodTableSchema(sqlite, tableName, zodSchema);
-    }
-    // 4. Create Drizzle instance with all tables in the schema
     const drizzleSchema = { input: inputTable };
     for (const [key, table] of Object.entries(tables)) {
         drizzleSchema[key] = table;
     }
-    const db = drizzle(sqlite, { schema: drizzleSchema });
-    // 5. Build schema registry for engine resolution of string output keys
     const schemaRegistry = new Map();
     for (const [name, zodSchema] of Object.entries(schemas)) {
         if (name === "input")
             continue;
         schemaRegistry.set(name, { table: tables[name], zodSchema });
     }
-    // 6. Build output refs and reverse lookup: ZodObject reference → schema key name
     const { outputs, zodToKeyName, ambiguousZodSchemas } = prepareOutputSchemas(schemas);
-    // 7. Context + hooks
-    const { SmithersContext: RuntimeSmithersContext, useCtx, } = createSmithersContext();
+    return { tables, inputTable, drizzleSchema, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas };
+}
+/**
+ * Construct the public createSmithers API object around a prepared database
+ * handle and shared table metadata. Backend-agnostic: `db` is either a Drizzle
+ * bun:sqlite instance or a Postgres descriptor; every engine read/write below it
+ * is dialect-aware.
+ *
+ * @param {{
+ *   db: unknown;
+ *   tables: Record<string, unknown>;
+ *   schemaRegistry: Map<string, unknown>;
+ *   outputs: Record<string, unknown>;
+ *   zodToKeyName: Map<unknown, string>;
+ *   ambiguousZodSchemas: Set<unknown>;
+ *   opts?: CreateSmithersOptions;
+ * }} config
+ */
+function buildSmithersApi(config) {
+    const { db, tables, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas, opts } = config;
+    const { SmithersContext: RuntimeSmithersContext, useCtx } = createSmithersContext();
     const ctxRef = { current: null };
     let moduleAlertPolicy = opts?.alertPolicy;
     /**
@@ -352,9 +286,8 @@ export function createSmithers(schemas, opts) {
         });
     }
     /**
-   * @param {(ctx: SmithersCtx<Schemas>) => React.ReactElement} build
+   * @param {(ctx: SmithersCtx<any>) => React.ReactElement} build
    * @param {SmithersWorkflowOptions} [smithersOpts]
-   * @returns {SmithersWorkflow<Schemas>}
    */
     function boundSmithers(build, smithersOpts) {
         const workflowOpts = {
@@ -402,9 +335,116 @@ export function createSmithers(schemas, opts) {
         useCtx,
         smithers: boundSmithers,
         db,
-        tables: tables,
+        tables,
         outputs,
     };
+    return { api, setModuleAlertPolicy };
+}
+/**
+ * Schema-driven API — users define only Zod schemas, the framework owns the entire storage layer.
+ *
+ * @template {Record<string, import("zod").ZodObject<any>>} Schemas
+ * @param {Schemas} schemas
+ * @param {CreateSmithersOptions} [opts]
+ * @returns {import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas>}
+ *
+ * @example
+ * ```ts
+ * const { Workflow, Task, smithers, outputs } = createSmithers({
+ *   discover: discoverOutputSchema,
+ *   research: researchOutputSchema,
+ * });
+ *
+ * export default smithers((ctx) => (
+ *   <Workflow name="my-workflow">
+ *     <Task id="discover" output={outputs.discover} agent={myAgent}>...</Task>
+ *   </Workflow>
+ * ));
+ * ```
+ */
+export function createSmithers(schemas, opts) {
+    const dbPath = opts?.dbPath ?? "./smithers.db";
+    const absDbPath = resolve(process.cwd(), dbPath);
+    if (process.env.SMITHERS_HOT === "1") {
+        const sig = computeSchemaSig(schemas, absDbPath);
+        const cached = hotCache.get(absDbPath);
+        if (cached) {
+            if (cached.schemaSig !== sig) {
+                throw new SmithersError("SCHEMA_CHANGE_HOT", "[smithers hot] Schema change detected; restart required to apply schema changes.");
+            }
+            cached.setModuleAlertPolicy(opts?.alertPolicy);
+            return cached.api;
+        }
+        // Will cache after creating the API below
+    }
+    // 1. Generate Drizzle tables + schema metadata from Zod schemas.
+    const { tables, drizzleSchema, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas } = prepareSmithersTables(schemas);
+    // 2. Create SQLite db
+    const sqlite = new Database(dbPath);
+    sqlite.run(`PRAGMA journal_mode = ${opts?.journalMode ?? "WAL"}`);
+    // 30s timeout: concurrent worktrees each spawn agent processes that all write
+    // to smithers.db simultaneously. 5s is too short and causes SQLITE_IOERR_VNODE
+    // on macOS when the VFS can't acquire the WAL shared-memory lock in time.
+    sqlite.run("PRAGMA busy_timeout = 30000");
+    // NORMAL is safe in WAL mode (no data loss on crash) and reduces fsync
+    // stalls that contribute to WAL checkpoint contention across processes.
+    sqlite.run("PRAGMA synchronous = NORMAL");
+    // Ensure no exclusive lock is held, allowing multiple readers/writers.
+    sqlite.run("PRAGMA locking_mode = NORMAL");
+    sqlite.run("PRAGMA foreign_keys = ON");
+    // Register a process-exit hook to explicitly close the Database.
+    // bun:sqlite's GC finalizer calls sqlite3_close() which fatally aborts if
+    // Drizzle's cached prepared statements haven't been finalized first.
+    // Calling close() ourselves lets sqlite3 finalize everything gracefully.
+    let dbClosed = false;
+    const closeDb = () => {
+        if (dbClosed)
+            return;
+        dbClosed = true;
+        try {
+            sqlite.close();
+        }
+        catch { }
+        process.removeListener("exit", closeDb);
+    };
+    process.once("exit", closeDb);
+    // 3. Auto-create tables, and ALTER any existing tables to add columns the
+    // current schema introduced (CREATE TABLE IF NOT EXISTS would silently
+    // skip the columns and a later upsert would fail with "no column named X").
+    if (schemas.input) {
+        syncZodTableSchema(sqlite, "input", schemas.input, { isInput: true });
+    }
+    else {
+        sqlite.exec(`CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)`);
+        try {
+            const cols = sqlite.query(`PRAGMA table_info("input")`).all();
+            const hasPayload = cols.some((col) => col?.name === "payload");
+            if (!hasPayload) {
+                sqlite.run(`ALTER TABLE "input" ADD COLUMN payload TEXT`);
+            }
+        }
+        catch {
+            // ignore - older SQLite or permission issues; input payload remains best-effort
+        }
+    }
+    for (const [name, zodSchema] of Object.entries(schemas)) {
+        if (name === "input")
+            continue;
+        const tableName = camelToSnake(name);
+        syncZodTableSchema(sqlite, tableName, zodSchema);
+    }
+    // 4. Create Drizzle instance with all tables in the schema
+    const db = drizzle(sqlite, { schema: drizzleSchema });
+    // 5. Build the public API around the prepared db + table metadata.
+    const { api, setModuleAlertPolicy } = buildSmithersApi({
+        db,
+        tables,
+        schemaRegistry,
+        outputs,
+        zodToKeyName,
+        ambiguousZodSchemas,
+        opts,
+    });
     if (process.env.SMITHERS_HOT === "1") {
         const sig = computeSchemaSig(schemas, absDbPath);
         hotCache.set(absDbPath, {
@@ -414,4 +454,104 @@ export function createSmithers(schemas, opts) {
         });
     }
     return api;
+}
+/**
+ * PostgreSQL/PGlite-backed equivalent of {@link createSmithers}. Asynchronous
+ * because connecting and provisioning schema over the wire is async (unlike the
+ * synchronous bun:sqlite path). Boots a node-postgres connection (`provider:
+ * "postgres"`) or an embedded PGlite over a local socket (`provider: "pglite"`),
+ * provisions the durable engine schema + the per-Zod-schema output tables with
+ * Postgres-typed DDL, and returns the same createSmithers API surface plus a
+ * `close()` teardown for the connection.
+ *
+ * @template {Record<string, import("zod").ZodObject<any>>} Schemas
+ * @param {Schemas} schemas
+ * @param {CreateSmithersOptions & ({ provider: "postgres"; connectionString?: string; connection?: object } | { provider: "pglite"; dataDir?: string })} opts
+ * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & { close: () => Promise<void> }>}
+ */
+export async function createSmithersPostgres(schemas, opts) {
+    const provider = opts?.provider ?? "postgres";
+    // 1. Generate Drizzle tables + schema metadata from Zod schemas (shared).
+    const { tables, drizzleSchema, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas } = prepareSmithersTables(schemas);
+    // 2. Boot the Postgres/PGlite connection.
+    const pgModule = await import("pg");
+    const pg = pgModule.default ?? pgModule;
+    // BIGINT (ms timestamps, counters) → JS number, matching SQLite's behavior.
+    pg.types.setTypeParser(20, (value) => (value === null ? null : Number(value)));
+    /** @type {Array<() => Promise<void>>} */
+    const teardown = [];
+    let connectionString = opts?.connectionString;
+    if (provider === "pglite") {
+        const { PGlite } = await import("@electric-sql/pglite");
+        const { PGLiteSocketServer } = await import("@electric-sql/pglite-socket");
+        const pglite = await PGlite.create(opts?.dataDir || undefined);
+        const port = await findFreePgPort();
+        const server = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port, maxConnections: 5 });
+        await server.start();
+        teardown.push(async () => {
+            await server.stop().catch(() => {});
+            await pglite.close().catch(() => {});
+        });
+        connectionString = `postgres://postgres@127.0.0.1:${port}/postgres`;
+    }
+    const client = new pg.Client(connectionString ? { connectionString } : opts?.connection);
+    await client.connect();
+    teardown.push(async () => {
+        await client.end().catch(() => {});
+    });
+    // 3. Postgres descriptor consumed by the engine + adapter. The Drizzle table
+    // objects (snake_case columns identical to the DDL below) are attached only
+    // for column/name metadata; the engine's reads/writes against this descriptor
+    // are dialect-aware and go through the @effect/sql adapter or raw $n queries.
+    const descriptor = { dialect: "postgres", connection: client, schema: drizzleSchema };
+    const adapter = new SmithersDb(descriptor);
+    // 4. Durable engine schema (idempotent), then the input + output tables with
+    // Postgres-typed DDL derived from the Zod schemas.
+    await adapter.internalStorage.ensureSchema();
+    if (schemas.input) {
+        await client.query({ text: zodToCreateTableSQL("input", schemas.input, { isInput: true, dialect: POSTGRES }) });
+    }
+    else {
+        await client.query({ text: `CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)` });
+    }
+    for (const [name, zodSchema] of Object.entries(schemas)) {
+        if (name === "input")
+            continue;
+        const tableName = camelToSnake(name);
+        await client.query({ text: zodToCreateTableSQL(tableName, zodSchema, { dialect: POSTGRES }) });
+    }
+    // 5. Build the public API around the descriptor + table metadata.
+    const { api } = buildSmithersApi({
+        db: descriptor,
+        tables,
+        schemaRegistry,
+        outputs,
+        zodToKeyName,
+        ambiguousZodSchemas,
+        opts,
+    });
+    return {
+        ...api,
+        close: async () => {
+            for (const fn of teardown.reverse()) {
+                await fn();
+            }
+        },
+    };
+}
+/**
+ * @returns {Promise<number>}
+ */
+async function findFreePgPort() {
+    const net = await import("node:net");
+    return new Promise((resolveFn, reject) => {
+        const srv = net.createServer();
+        srv.unref();
+        srv.on("error", reject);
+        srv.listen(0, "127.0.0.1", () => {
+            const address = srv.address();
+            const port = typeof address === "object" && address ? address.port : 0;
+            srv.close(() => resolveFn(port));
+        });
+    });
 }
