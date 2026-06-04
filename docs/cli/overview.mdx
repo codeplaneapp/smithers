@@ -485,6 +485,21 @@ commands[63]:
     purpose: Revoke a locally issued Gateway bearer token
     args[1]{name,type,required,desc}:
       token,string,true,Bearer token to revoke
+  - name: gui
+    purpose: Open a directory as a workspace in Smithers GUI
+    args[1]{name,type,required,desc}:
+      path,string,false,Directory path; defaults to current working directory
+    flags[1]{name,short,type,default,desc}:
+      bundle-id,,string,com.smithers.SmithersGUI,Smithers GUI app bundle identifier
+  - name: ui
+    purpose: Open the custom UI for a workflow run in your browser
+    args[1]{name,type,required,desc}:
+      runId,string,false,Run to open; defaults to the most recent run
+    flags[4]{name,short,type,default,desc}:
+      gateway,g,string,,Gateway base URL; defaults to http://127.0.0.1:<port>
+      port,,number,7331,Gateway port when --gateway is not set
+      workflow,w,string,,Open this workflow's UI directly, skipping run lookup
+      open,,boolean,true,Open a browser; use --no-open to just print the URL
   - name: completions
     purpose: Generate shell completion scripts
     args[1]{name,type,required,desc}:

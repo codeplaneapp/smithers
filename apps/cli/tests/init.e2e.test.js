@@ -79,6 +79,7 @@ function writeWorkflowPackTypecheckHarness(repo) {
         "  export function useGatewayActions(): any;",
         "  export function useGatewayApprovals(...args: any[]): any;",
         "  export function useGatewayNodeOutput(...args: any[]): any;",
+        "  export function useGatewayRun(...args: any[]): any;",
         "  export function useGatewayRunEvents(...args: any[]): any;",
         "  export function useGatewayRuns(...args: any[]): any;",
         "}",

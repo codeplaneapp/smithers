@@ -155,18 +155,23 @@ new CodexAgent({
 });
 ```
 
-`AntigravityAgent` wraps the Google `agy` CLI. Key additions: `extensions`, `allowedMcpServerNames`, `geminiDir`, `resume`.
+`AntigravityAgent` wraps the Google `agy` CLI. Current `agy` launch-time support is narrower than Gemini CLI: Smithers maps workspace directories to `--add-dir`, resumable conversations to `--conversation`, one-shot prompts to `--print`, and config roots to `--gemini_dir`. Model selection, tool permissions, MCP servers, and plugins are managed through Antigravity settings/plugins rather than launch flags.
 
 ```ts
 import { AntigravityAgent } from "smithers-orchestrator";
 new AntigravityAgent({
-  debug?: boolean; model?: string; sandbox?: boolean;
+  debug?: boolean; // deprecated
+  model?: string; // deprecated
+  sandbox?: boolean;
   yolo?: boolean; dangerouslySkipPermissions?: boolean;
-  allowedMcpServerNames?: string[]; allowedTools?: string[];
-  extensions?: string[]; listExtensions?: boolean;
-  resume?: string; listSessions?: boolean; deleteSession?: string;
-  includeDirectories?: string[]; screenReader?: boolean;
-  outputFormat?: "text" | "json" | "stream-json"; // default json
+  allowedMcpServerNames?: string[]; // deprecated
+  allowedTools?: string[]; // deprecated
+  extensions?: string[]; listExtensions?: boolean; // deprecated
+  resume?: string | boolean;
+  listSessions?: boolean; deleteSession?: string; // deprecated
+  includeDirectories?: string[];
+  screenReader?: boolean; // deprecated
+  outputFormat?: "text" | "json" | "stream-json"; // Smithers parsing mode only; not passed to agy
   binary?: string; configDir?: string; geminiDir?: string; apiKey?: string;
 });
 ```
@@ -249,7 +254,7 @@ Smithers persists the native session or conversation id on each task event. On h
 |---|---|
 | `ClaudeCodeAgent` | `claude --resume` |
 | `CodexAgent` | `codex resume` |
-| `AntigravityAgent` | `agy --resume` |
+| `AntigravityAgent` | `agy --conversation` |
 | `PiAgent` | `pi --session` |
 | `KimiAgent` | `kimi --session` |
 | `ForgeAgent` | `forge --conversation-id` |
