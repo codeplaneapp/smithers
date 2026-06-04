@@ -545,8 +545,14 @@ function makeSqlClientLayer(sqlite) {
  */
 function toPostgresParam(value) {
     // node-postgres maps Buffer → bytea; a bare Uint8Array does not round-trip.
-    if (value instanceof Uint8Array && !Buffer.isBuffer(value)) {
-        return Buffer.from(value);
+    if (value instanceof Uint8Array || Buffer.isBuffer(value)) {
+        return Buffer.isBuffer(value) ? value : Buffer.from(value);
+    }
+    // Smithers mirrors SQLite's storage model on Postgres: JSON lives in TEXT
+    // columns. SQLite/Drizzle stringify objects automatically; node-postgres does
+    // not, so do it here to keep a single encoding contract across dialects.
+    if (value !== null && typeof value === "object" && !(value instanceof Date)) {
+        return JSON.stringify(value);
     }
     return value;
 }
