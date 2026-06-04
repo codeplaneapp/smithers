@@ -14,5 +14,12 @@ export function ensureSmithersTablesEffect(db) {
  * @param {_BunSQLiteDatabase<Record<string, unknown>>} db
  */
 export function ensureSmithersTables(db) {
+    // Postgres schema initialization is asynchronous and cannot be driven by
+    // runSync. The Postgres/PGlite entry points ensure the schema (awaited)
+    // before the engine starts, so this synchronous SQLite helper is a no-op
+    // for a Postgres connection descriptor.
+    if (db && typeof db === "object" && /** @type {any} */ (db).dialect === "postgres") {
+        return;
+    }
     Effect.runSync(ensureSmithersTablesEffect(db));
 }

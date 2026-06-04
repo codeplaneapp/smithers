@@ -837,6 +837,29 @@ function buildInputRow(inputTable, runId, input) {
     return { runId, ...input };
 }
 /**
+ * Insert the input row, ignoring an existing row (ON CONFLICT DO NOTHING).
+ * Dialect-aware: Drizzle/bun:sqlite for SQLite, the @effect/sql adapter for a
+ * Postgres connection descriptor (which exposes no Drizzle query builder).
+ * @param {any} db
+ * @param {SmithersDb} adapter
+ * @param {SQLiteTable} inputTable
+ * @param {Record<string, unknown>} inputRow
+ * @param {string} [label]
+ */
+async function insertInputRowIgnore(db, adapter, inputTable, inputRow, label = "insert input row") {
+    if (db && typeof db === "object" && db.dialect === "postgres") {
+        await adapter.internalStorage.insertIgnore(getTableName(inputTable), inputRow);
+        return;
+    }
+    const insertQuery = db.insert(inputTable).values(inputRow);
+    if (typeof insertQuery.onConflictDoNothing === "function") {
+        await withSqliteWriteRetry(() => db.insert(inputTable).values(inputRow).onConflictDoNothing(), { label });
+    }
+    else {
+        await withSqliteWriteRetry(() => db.insert(inputTable).values(inputRow), { label });
+    }
+}
+/**
  * @param {any} row
  * @returns {Record<string, unknown>}
  */
@@ -4996,15 +5019,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                     issues: validation.error?.issues,
                 });
             }
-            const insertQuery = db.insert(inputTable).values(inputRow);
-            if (typeof insertQuery.onConflictDoNothing === "function") {
-                await withSqliteWriteRetry(() => db.insert(inputTable).values(inputRow).onConflictDoNothing(), { label: "insert input row" });
-            }
-            else {
-                await withSqliteWriteRetry(() => db.insert(inputTable).values(inputRow), {
-                    label: "insert input row",
-                });
-            }
+            await insertInputRowIgnore(db, adapter, inputTable, inputRow);
         }
         else {
             let existingInput = await loadInput(db, inputTable, runId);
@@ -5019,7 +5034,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 // (run_id, payload) table. Insert an empty row so resume can proceed.
                 const fallbackRow = buildInputRow(inputTable, runId, {});
                 try {
-                    await withSqliteWriteRetry(() => db.insert(inputTable).values(fallbackRow).onConflictDoNothing(), { label: "insert fallback input row for resume" });
+                    await insertInputRowIgnore(db, adapter, inputTable, fallbackRow, "insert fallback input row for resume");
                     existingInput = await loadInput(db, inputTable, runId);
                 }
                 catch {
@@ -5553,15 +5568,7 @@ async function runWorkflowBodyLegacy(workflow, opts) {
                     issues: validation.error?.issues,
                 });
             }
-            const insertQuery = db.insert(inputTable).values(inputRow);
-            if (typeof insertQuery.onConflictDoNothing === "function") {
-                await withSqliteWriteRetry(() => db.insert(inputTable).values(inputRow).onConflictDoNothing(), { label: "insert input row" });
-            }
-            else {
-                await withSqliteWriteRetry(() => db.insert(inputTable).values(inputRow), {
-                    label: "insert input row",
-                });
-            }
+            await insertInputRowIgnore(db, adapter, inputTable, inputRow);
         }
         else {
             let existingInput = await loadInput(db, inputTable, runId);
@@ -5576,7 +5583,7 @@ async function runWorkflowBodyLegacy(workflow, opts) {
                 // (run_id, payload) table. Insert an empty row so resume can proceed.
                 const fallbackRow = buildInputRow(inputTable, runId, {});
                 try {
-                    await withSqliteWriteRetry(() => db.insert(inputTable).values(fallbackRow).onConflictDoNothing(), { label: "insert fallback input row for resume" });
+                    await insertInputRowIgnore(db, adapter, inputTable, fallbackRow, "insert fallback input row for resume");
                     existingInput = await loadInput(db, inputTable, runId);
                 }
                 catch {

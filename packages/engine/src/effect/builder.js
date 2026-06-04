@@ -708,11 +708,113 @@ function createBuilderDb(filename, handles) {
     };
 }
 /**
+ * @returns {Promise<number>}
+ */
+async function findFreePort() {
+    const net = await import("node:net");
+    return new Promise((resolve, reject) => {
+        const srv = net.createServer();
+        srv.unref();
+        srv.on("error", reject);
+        srv.listen(0, "127.0.0.1", () => {
+            const address = srv.address();
+            const port = typeof address === "object" && address ? address.port : 0;
+            srv.close(() => resolve(port));
+        });
+    });
+}
+/**
+ * PostgreSQL/PGlite equivalent of {@link createBuilderDb}. Boots a node-postgres
+ * connection (for `provider: "postgres"`) or an embedded PGlite exposed over the
+ * Postgres wire protocol by a local socket server (for `provider: "pglite"`),
+ * ensures the durable `_smithers_*` schema, and creates the input + per-handle
+ * output tables. Returns a dialect descriptor consumed by SmithersDb plus a
+ * teardown hook.
+ *
+ * @param {{ provider: "postgres" | "pglite"; connectionString?: string; connection?: object; dataDir?: string }} config
+ * @param {BuilderStepHandle[]} handles
+ */
+async function createBuilderDbPostgres(config, handles) {
+    const pgModule = await import("pg");
+    const pg = pgModule.default ?? pgModule;
+    // BIGINT (ms timestamps, counters) → JS number, matching SQLite's behavior.
+    pg.types.setTypeParser(20, (value) => (value === null ? null : Number(value)));
+    /** @type {Array<() => Promise<void>>} */
+    const teardown = [];
+    let connectionString = config.connectionString;
+    if (config.provider === "pglite") {
+        const { PGlite } = await import("@electric-sql/pglite");
+        const { PGLiteSocketServer } = await import("@electric-sql/pglite-socket");
+        const pglite = await PGlite.create(config.dataDir || undefined);
+        const port = await findFreePort();
+        const server = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port, maxConnections: 5 });
+        await server.start();
+        teardown.push(async () => {
+            await server.stop().catch(() => {});
+            await pglite.close().catch(() => {});
+        });
+        connectionString = `postgres://postgres@127.0.0.1:${port}/postgres`;
+    }
+    const client = new pg.Client(connectionString ? { connectionString } : config.connection);
+    await client.connect();
+    teardown.push(async () => {
+        await client.end().catch(() => {});
+    });
+    // Drizzle table metadata (used by the engine to resolve the input/output
+    // schema via resolveSchema). The connection is Postgres; these table objects
+    // are only consulted for their column/name metadata, never to issue SQLite
+    // queries against the descriptor.
+    const inputTable = createInputTable();
+    const schema = { input: inputTable };
+    for (const handle of handles) {
+        schema[handle.tableKey] = handle.table;
+    }
+    const descriptor = { dialect: "postgres", connection: client, schema };
+    // Durable engine schema (idempotent), then the builder's input + output tables.
+    const adapter = new SmithersDb(descriptor);
+    await adapter.internalStorage.ensureSchema();
+    await client.query({ text: `CREATE TABLE IF NOT EXISTS "input" (run_id TEXT PRIMARY KEY, payload TEXT)` });
+    for (const handle of handles) {
+        const escaped = handle.tableName.replaceAll(`"`, `""`);
+        await client.query({
+            text: `CREATE TABLE IF NOT EXISTS "${escaped}" (` +
+                `run_id TEXT NOT NULL, ` +
+                `node_id TEXT NOT NULL, ` +
+                `iteration BIGINT NOT NULL DEFAULT 0, ` +
+                `payload TEXT, ` +
+                `PRIMARY KEY (run_id, node_id, iteration)` +
+                `)`,
+        });
+    }
+    return {
+        db: descriptor,
+        connection: client,
+        close: async () => {
+            for (const fn of teardown.reverse()) {
+                await fn();
+            }
+        },
+    };
+}
+/**
  * @param {any} db
  * @param {string} runId
  * @param {BuilderStepHandle} handle
  */
 async function readLatestHandleResult(db, runId, handle) {
+    if (db && db.dialect === "postgres" && db.connection) {
+        const escaped = handle.tableName.replaceAll(`"`, `""`);
+        const result = await db.connection.query({
+            text: `SELECT payload FROM "${escaped}" WHERE run_id = $1 AND node_id = $2 ORDER BY iteration DESC LIMIT 1`,
+            values: [runId, handle.id],
+        });
+        const row = result.rows[0];
+        if (!row)
+            return undefined;
+        // The builder stores each handle's output as a JSON string in `payload`.
+        const payload = typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+        return decodeSchema(handle.output, payload);
+    }
     const rows = await db
         .select()
         .from(handle.table)
@@ -1044,9 +1146,13 @@ export function workflow(options) {
                     return Effect.gen(function* () {
                         const env = yield* Effect.context();
                         const sqliteConfig = yield* SmithersSqlite;
+                        const isPostgres = sqliteConfig?.provider === "postgres" ||
+                            sqliteConfig?.provider === "pglite";
                         const decodedInput = decodeSchema(options.input, input);
                         const encodedInput = JSON.parse(JSON.stringify(encodeSchema(options.input, decodedInput) ?? {}));
-                        return yield* Effect.acquireUseRelease(Effect.sync(() => createBuilderDb(sqliteConfig.filename, handles)), (runtime) => Effect.promise(async () => {
+                        return yield* Effect.acquireUseRelease(isPostgres
+                            ? Effect.promise(() => createBuilderDbPostgres(sqliteConfig, handles))
+                            : Effect.sync(() => createBuilderDb(sqliteConfig.filename, handles)), (runtime) => Effect.promise(async () => {
                             const wf = {
                                 db: runtime.db,
                                 build: (ctx) => React.createElement(Workflow, { name: options.name }, renderNode(root, ctx, decodedInput, env)),
@@ -1064,7 +1170,9 @@ export function workflow(options) {
                                 return result;
                             }
                             throw normalizeExecutionError(result);
-                        }), (runtime) => ignoreSyncError("close builder sqlite", () => runtime.sqlite.close()));
+                        }), (runtime) => isPostgres
+                            ? Effect.promise(() => runtime.close())
+                            : ignoreSyncError("close builder sqlite", () => runtime.sqlite.close()));
                     });
                 },
             };
@@ -1090,9 +1198,30 @@ function sqlite(options) {
     return Layer.succeed(SmithersSqlite, options);
 }
 
-/** @type {{ sqlite: typeof sqlite; workflow: typeof workflow; fragment: typeof fragment }} */
+/**
+ * Persist the workflow to a PostgreSQL database. `options.connectionString` (or
+ * a node-postgres `options.connection` config) selects the server.
+ * @param {{ connectionString?: string; connection?: object }} options
+ */
+function postgres(options) {
+    return Layer.succeed(SmithersSqlite, { ...options, provider: "postgres" });
+}
+
+/**
+ * Persist the workflow to an embedded PGlite database (Postgres-in-WASM),
+ * exposed to the engine over the Postgres wire protocol via a local socket
+ * server. `options.dataDir` persists to disk; omit it for an in-memory database.
+ * @param {{ dataDir?: string }} [options]
+ */
+function pglite(options) {
+    return Layer.succeed(SmithersSqlite, { ...(options ?? {}), provider: "pglite" });
+}
+
+/** @type {{ sqlite: typeof sqlite; postgres: typeof postgres; pglite: typeof pglite; workflow: typeof workflow; fragment: typeof fragment }} */
 export const Smithers = {
     sqlite,
+    postgres,
+    pglite,
     workflow,
     fragment,
 };
@@ -1110,6 +1239,7 @@ export const __builderInternals = {
     compileNeeds,
     createBuilder,
     createBuilderDb,
+    createBuilderDbPostgres,
     createInputTable,
     createPayloadTable,
     decodeSchema,
@@ -1134,5 +1264,7 @@ export const __builderInternals = {
     resolveHandleIteration,
     sanitizeIdentifier,
     sqlite,
+    postgres,
+    pglite,
     stripPersistedKeys,
 };

@@ -51,13 +51,15 @@ export function captureSnapshot(adapter, runId, frameNo, data) {
             createdAtMs: ts,
         };
         yield* Effect.tryPromise({
-            try: () => adapter.db
-                .insert(smithersSnapshots)
-                .values(row)
-                .onConflictDoUpdate({
-                target: [smithersSnapshots.runId, smithersSnapshots.frameNo],
-                set: row,
-            }),
+            try: () => adapter.internalStorage?.dialect === "postgres"
+                ? adapter.internalStorage.upsert("_smithers_snapshots", row, ["runId", "frameNo"])
+                : adapter.db
+                    .insert(smithersSnapshots)
+                    .values(row)
+                    .onConflictDoUpdate({
+                    target: [smithersSnapshots.runId, smithersSnapshots.frameNo],
+                    set: row,
+                }),
             catch: (cause) => toSmithersError(cause, "insert snapshot", {
                 code: "DB_WRITE_FAILED",
                 details: { frameNo, runId },
