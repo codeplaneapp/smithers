@@ -907,9 +907,34 @@ export class SmithersDb {
    */
     claimRunForResume(params) {
         return this.write(`claim stale run ${params.runId}`, () => {
-            const client = this.db.session.client;
             const expectedStatus = params.expectedStatus ?? "running";
             const requireStale = params.requireStale ?? expectedStatus === "running";
+            if (this.internalStorage.dialect === POSTGRES) {
+                // Null-safe heartbeat compare without wrapping the bigint param in a
+                // numeric COALESCE(?, -1): the int4 `-1` literal would force the
+                // ms-timestamp param to int4 and overflow. Compare against the
+                // bigint column directly so Postgres infers bigint.
+                return this.internalStorage
+                    .queryAllRaw(`UPDATE _smithers_runs
+             SET runtime_owner_id = ?, heartbeat_at_ms = ?
+             WHERE run_id = ?
+               AND status = ?
+               AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
+               AND (heartbeat_at_ms IS NOT DISTINCT FROM ?)
+               AND (? = 0 OR heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)
+             RETURNING run_id`, [
+                        params.claimOwnerId,
+                        params.claimHeartbeatAtMs,
+                        params.runId,
+                        expectedStatus,
+                        params.expectedRuntimeOwnerId,
+                        params.expectedHeartbeatAtMs,
+                        requireStale ? 1 : 0,
+                        params.staleBeforeMs,
+                    ])
+                    .then((rows) => rows.length > 0);
+            }
+            const client = this.db.session.client;
             client
                 .query(`UPDATE _smithers_runs
            SET runtime_owner_id = ?, heartbeat_at_ms = ?
@@ -947,19 +972,33 @@ export class SmithersDb {
     updateClaimedRun(params) {
         validateRunPatch(params.patch);
         return this.write(`update claimed run ${params.runId}`, () => {
-            const client = this.db.session.client;
             const patchEntries = Object.entries(params.patch);
             if (patchEntries.length === 0) {
                 return Promise.resolve(true);
             }
             const assignments = patchEntries.map(([key]) => `${camelToSnake(key)} = ?`);
+            const setArgs = patchEntries.map(([, value]) => value);
+            if (this.internalStorage.dialect === POSTGRES) {
+                // Null-safe heartbeat compare (see claimRunForResume): IS NOT
+                // DISTINCT FROM keeps the bigint param from being coerced to int4
+                // by an int4 `-1` sentinel.
+                return this.internalStorage
+                    .queryAllRaw(`UPDATE _smithers_runs
+             SET ${assignments.join(", ")}
+             WHERE run_id = ?
+               AND runtime_owner_id = ?
+               AND (heartbeat_at_ms IS NOT DISTINCT FROM ?)
+             RETURNING run_id`, [...setArgs, params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs])
+                    .then((rows) => rows.length > 0);
+            }
+            const client = this.db.session.client;
             client
                 .query(`UPDATE _smithers_runs
            SET ${assignments.join(", ")}
            WHERE run_id = ?
              AND runtime_owner_id = ?
              AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)`)
-                .run(...patchEntries.map(([, value]) => value), params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs);
+                .run(...setArgs, params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs);
             return this.internalStorage
                 .queryOne("SELECT changes() AS count")
                 .then((row) => Number(row?.count ?? 0) > 0);

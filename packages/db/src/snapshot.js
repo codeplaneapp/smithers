@@ -174,3 +174,42 @@ export function loadOutputsEffect(db, schema, runId) {
 export function loadOutputs(db, schema, runId) {
     return Effect.runPromise(loadOutputsEffect(db, schema, runId));
 }
+/**
+ * Read every row of a single output table for a run, returning Drizzle-shaped
+ * rows (camelCase keys, boolean columns coerced to JS booleans). Dialect-aware:
+ * Drizzle for bun:sqlite, a raw `$n` query for the Postgres descriptor.
+ * @param {unknown} db
+ * @param {_Table} table
+ * @param {string} [runId]
+ * @returns {Effect.Effect<Array<Record<string, unknown>>, SmithersError>}
+ */
+export function loadRunOutputRowsEffect(db, table, runId) {
+    return Effect.gen(function* () {
+        const cols = getTableColumns(table);
+        const runIdCol = cols.runId;
+        const tableName = getTableName(table);
+        const boolKeys = getBooleanColumnKeys(table);
+        const rawRows = yield* Effect.tryPromise({
+            try: () => {
+                if (isPostgresDb(db)) {
+                    const escaped = tableName.replaceAll(`"`, `""`);
+                    const text = runId && runIdCol
+                        ? `SELECT * FROM "${escaped}" WHERE run_id = $1`
+                        : `SELECT * FROM "${escaped}"`;
+                    const values = runId && runIdCol ? [runId] : [];
+                    return db.connection
+                        .query({ text, values })
+                        .then((result) => result.rows.map(pgRowToDrizzle));
+                }
+                return runId && runIdCol
+                    ? db.select().from(table).where(eq(runIdCol, runId))
+                    : db.select().from(table);
+            },
+            catch: (cause) => toSmithersError(cause, `load run output ${tableName}`, {
+                code: "DB_QUERY_FAILED",
+                details: { runId, tableName },
+            }),
+        });
+        return coerceBooleanColumns(rawRows, boolKeys);
+    }).pipe(Effect.annotateLogs({ runId: runId ?? "" }), Effect.withLogSpan("db:load-run-output"));
+}

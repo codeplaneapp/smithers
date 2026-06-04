@@ -8,17 +8,26 @@ import { smithersSnapshots } from "../schema.js";
 
 /**
  * @param {SmithersDb} adapter
+ * @returns {boolean}
+ */
+function isPostgres(adapter) {
+    return adapter.internalStorage?.dialect === "postgres";
+}
+/**
+ * @param {SmithersDb} adapter
  * @param {string} runId
  * @param {number} frameNo
  * @returns {Effect.Effect<Snapshot | undefined, SmithersError>}
  */
 export function loadSnapshot(adapter, runId, frameNo) {
     return Effect.tryPromise({
-        try: () => adapter.db
-            .select()
-            .from(smithersSnapshots)
-            .where(and(eq(smithersSnapshots.runId, runId), eq(smithersSnapshots.frameNo, frameNo)))
-            .limit(1),
+        try: () => isPostgres(adapter)
+            ? adapter.internalStorage.queryOne(`SELECT * FROM _smithers_snapshots WHERE run_id = ? AND frame_no = ? LIMIT 1`, [runId, frameNo]).then((row) => (row ? [row] : []))
+            : adapter.db
+                .select()
+                .from(smithersSnapshots)
+                .where(and(eq(smithersSnapshots.runId, runId), eq(smithersSnapshots.frameNo, frameNo)))
+                .limit(1),
         catch: (cause) => toSmithersError(cause, "load snapshot", {
             code: "DB_QUERY_FAILED",
             details: { frameNo, runId },
@@ -32,12 +41,14 @@ export function loadSnapshot(adapter, runId, frameNo) {
  */
 export function loadLatestSnapshot(adapter, runId) {
     return Effect.tryPromise({
-        try: () => adapter.db
-            .select()
-            .from(smithersSnapshots)
-            .where(eq(smithersSnapshots.runId, runId))
-            .orderBy(desc(smithersSnapshots.frameNo))
-            .limit(1),
+        try: () => isPostgres(adapter)
+            ? adapter.internalStorage.queryOne(`SELECT * FROM _smithers_snapshots WHERE run_id = ? ORDER BY frame_no DESC LIMIT 1`, [runId]).then((row) => (row ? [row] : []))
+            : adapter.db
+                .select()
+                .from(smithersSnapshots)
+                .where(eq(smithersSnapshots.runId, runId))
+                .orderBy(desc(smithersSnapshots.frameNo))
+                .limit(1),
         catch: (cause) => toSmithersError(cause, "load latest snapshot", {
             code: "DB_QUERY_FAILED",
             details: { runId },

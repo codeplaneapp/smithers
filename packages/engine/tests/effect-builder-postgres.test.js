@@ -78,4 +78,84 @@ describe("Smithers.workflow execute (postgres)", () => {
             ),
         ).rejects.toThrow('status "failed"');
     });
+
+    test("executes a sequence and returns the last step output", async () => {
+        const G = Smithers.workflow({ name: "pg-builder-sequence", input: inputSchema });
+        const first = G.step("first", {
+            output: outputSchema,
+            run: ({ input }) => ({ value: `first:${input.repo}` }),
+        });
+        const second = G.step("second", {
+            output: outputSchema,
+            needs: { first },
+            run: ({ first }) => ({ value: `${first.value}->second` }),
+        });
+        const wf = G.from(G.sequence(first, second));
+        const result = await Effect.runPromise(
+            wf
+                .execute({ repo: "smithers", sha: "abc123" }, { runId: uniqueRunId("pg-sequence") })
+                .pipe(Effect.provide(dbLayer())),
+        );
+        expect(result).toEqual({ value: "first:smithers->second" });
+    });
+
+    test("executes a parallel fan-out and returns each branch output", async () => {
+        const G = Smithers.workflow({ name: "pg-builder-parallel", input: inputSchema });
+        const a = G.step("a", { output: outputSchema, run: ({ input }) => ({ value: `a:${input.sha}` }) });
+        const b = G.step("b", { output: outputSchema, run: ({ input }) => ({ value: `b:${input.sha}` }) });
+        const wf = G.from(G.parallel(a, b, { maxConcurrency: 2 }));
+        const result = await Effect.runPromise(
+            wf
+                .execute({ repo: "smithers", sha: "xyz" }, { runId: uniqueRunId("pg-parallel") })
+                .pipe(Effect.provide(dbLayer())),
+        );
+        expect(result).toEqual([{ value: "a:xyz" }, { value: "b:xyz" }]);
+    });
+
+    test("takes the then-branch of a builder branch when the condition holds", async () => {
+        const G = Smithers.workflow({ name: "pg-builder-branch", input: inputSchema });
+        const decide = G.step("decide", { output: outputSchema, run: ({ input }) => ({ value: input.repo }) });
+        const yes = G.step("yes", { output: outputSchema, run: () => ({ value: "took-yes" }) });
+        const no = G.step("no", { output: outputSchema, run: () => ({ value: "took-no" }) });
+        const wf = G.from(
+            G.sequence(
+                decide,
+                G.branch({
+                    needs: { decide },
+                    condition: ({ decide }) => decide?.value === "smithers",
+                    then: yes,
+                    else: no,
+                }),
+            ),
+        );
+        const result = await Effect.runPromise(
+            wf
+                .execute({ repo: "smithers", sha: "abc" }, { runId: uniqueRunId("pg-branch") })
+                .pipe(Effect.provide(dbLayer())),
+        );
+        expect(result).toEqual({ value: "took-yes" });
+    });
+
+    test("iterates a builder loop until the output condition is met", async () => {
+        const G = Smithers.workflow({ name: "pg-builder-loop", input: inputSchema });
+        const counter = G.step("counter", {
+            output: outputSchema,
+            run: ({ iteration }) => ({ value: String(iteration) }),
+        });
+        const wf = G.from(
+            G.loop({
+                id: "count-loop",
+                children: counter,
+                until: ({ counter }) => counter?.value === "2",
+                maxIterations: 5,
+            }),
+        );
+        const result = await Effect.runPromise(
+            wf
+                .execute({ repo: "smithers", sha: "abc" }, { runId: uniqueRunId("pg-loop") })
+                .pipe(Effect.provide(dbLayer())),
+        );
+        // Loop runs iterations 0,1,2; exits once the iteration-2 output satisfies `until`.
+        expect(result).toEqual({ value: "2" });
+    });
 });

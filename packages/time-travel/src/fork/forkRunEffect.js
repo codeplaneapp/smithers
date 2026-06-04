@@ -120,15 +120,18 @@ export function forkRun(adapter, params) {
         };
         // 5. Persist the fork atomically: snapshot, optional run metadata, and
         // branch relationship must either all commit or all roll back.
+        const isPostgres = adapter.internalStorage?.dialect === "postgres";
         yield* adapter.withTransactionEffect("fork run", Effect.gen(function* () {
             yield* Effect.tryPromise({
-                try: () => adapter.db
-                    .insert(smithersSnapshots)
-                    .values(childSnapshot)
-                    .onConflictDoUpdate({
-                    target: [smithersSnapshots.runId, smithersSnapshots.frameNo],
-                    set: childSnapshot,
-                }),
+                try: () => isPostgres
+                    ? adapter.internalStorage.upsert("_smithers_snapshots", childSnapshot, ["runId", "frameNo"])
+                    : adapter.db
+                        .insert(smithersSnapshots)
+                        .values(childSnapshot)
+                        .onConflictDoUpdate({
+                        target: [smithersSnapshots.runId, smithersSnapshots.frameNo],
+                        set: childSnapshot,
+                    }),
                 catch: (cause) => toSmithersError(cause, "insert forked snapshot", {
                     code: "DB_WRITE_FAILED",
                     details: { frameNo: 0, runId: childRunId },
@@ -138,13 +141,15 @@ export function forkRun(adapter, params) {
                 yield* adapter.insertRun(childRun);
             }
             yield* Effect.tryPromise({
-                try: () => adapter.db
-                    .insert(smithersBranches)
-                    .values(branch)
-                    .onConflictDoUpdate({
-                    target: smithersBranches.runId,
-                    set: branch,
-                }),
+                try: () => isPostgres
+                    ? adapter.internalStorage.upsert("_smithers_branches", branch, ["runId"])
+                    : adapter.db
+                        .insert(smithersBranches)
+                        .values(branch)
+                        .onConflictDoUpdate({
+                        target: smithersBranches.runId,
+                        set: branch,
+                    }),
                 catch: (cause) => toSmithersError(cause, "insert branch", {
                     code: "DB_WRITE_FAILED",
                     details: { runId: childRunId },

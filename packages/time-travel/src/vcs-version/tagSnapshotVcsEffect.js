@@ -34,13 +34,15 @@ export function tagSnapshotVcs(adapter, runId, frameNo, opts = {}) {
             createdAtMs: ts,
         };
         yield* Effect.tryPromise({
-            try: () => adapter.db
-                .insert(smithersVcsTags)
-                .values(tag)
-                .onConflictDoUpdate({
-                target: [smithersVcsTags.runId, smithersVcsTags.frameNo],
-                set: tag,
-            }),
+            try: () => adapter.internalStorage?.dialect === "postgres"
+                ? adapter.internalStorage.upsert("_smithers_vcs_tags", tag, ["runId", "frameNo"])
+                : adapter.db
+                    .insert(smithersVcsTags)
+                    .values(tag)
+                    .onConflictDoUpdate({
+                    target: [smithersVcsTags.runId, smithersVcsTags.frameNo],
+                    set: tag,
+                }),
             catch: (cause) => toSmithersError(cause, "insert vcs tag", {
                 code: "DB_WRITE_FAILED",
                 details: { frameNo, runId },

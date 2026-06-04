@@ -2,7 +2,7 @@ import { makeWorkflowSession, } from "@smithers-orchestrator/scheduler";
 import { ReactWorkflowDriver } from "@smithers-orchestrator/react-reconciler/driver";
 import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
 import { SmithersCtx } from "@smithers-orchestrator/driver/SmithersCtx";
-import { loadInput, loadOutputs } from "@smithers-orchestrator/db/snapshot";
+import { loadInput, loadOutputs, loadRunOutputRowsEffect } from "@smithers-orchestrator/db/snapshot";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { selectOutputRow, validateOutput, validateExistingOutput, describeSchemaShape, buildOutputRow, stripAutoColumns, } from "@smithers-orchestrator/db/output";
@@ -919,13 +919,18 @@ async function restoreDurableStateFromSnapshot(adapter, db, schema, inputTable, 
         });
     }
     const inputCols = getTableColumns(inputTable);
-    await withSqliteWriteRetry(() => db
-        .insert(inputTable)
-        .values(inputRow)
-        .onConflictDoUpdate({
-        target: inputCols.runId,
-        set: inputRow,
-    }), { label: "restore input row from snapshot" });
+    if (db && typeof db === "object" && db.dialect === "postgres") {
+        await adapter.internalStorage.upsert(getTableName(inputTable), inputRow, ["runId"]);
+    }
+    else {
+        await withSqliteWriteRetry(() => db
+            .insert(inputTable)
+            .values(inputRow)
+            .onConflictDoUpdate({
+            target: inputCols.runId,
+            set: inputRow,
+        }), { label: "restore input row from snapshot" });
+    }
     for (const node of Object.values(parsed.nodes)) {
         await Effect.runPromise(adapter.insertNode({
             runId,
@@ -984,13 +989,21 @@ async function restoreDurableStateFromSnapshot(adapter, db, schema, inputTable, 
             const target = outputCols.iteration
                 ? [outputCols.runId, outputCols.nodeId, outputCols.iteration]
                 : [outputCols.runId, outputCols.nodeId];
-            await withSqliteWriteRetry(() => db
-                .insert(table)
-                .values(restoredRow)
-                .onConflictDoUpdate({
-                target: target,
-                set: restoredRow,
-            }), { label: `restore output ${tableName} from snapshot` });
+            if (db && typeof db === "object" && db.dialect === "postgres") {
+                const conflictColumns = outputCols.iteration
+                    ? ["runId", "nodeId", "iteration"]
+                    : ["runId", "nodeId"];
+                await adapter.internalStorage.upsert(tableName, restoredRow, conflictColumns);
+            }
+            else {
+                await withSqliteWriteRetry(() => db
+                    .insert(table)
+                    .values(restoredRow)
+                    .onConflictDoUpdate({
+                    target: target,
+                    set: restoredRow,
+                }), { label: `restore output ${tableName} from snapshot` });
+            }
         }
     }
     return true;
@@ -4923,18 +4936,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         const outputTable = schema.output;
         let output = undefined;
         if (outputTable) {
-            const cols = getTableColumns(outputTable);
-            const runIdCol = cols.runId;
-            if (runIdCol) {
-                const rows = await db
-                    .select()
-                    .from(outputTable)
-                    .where(eq(runIdCol, runId));
-                output = rows;
-            }
-            else {
-                output = await db.select().from(outputTable);
-            }
+            output = await Effect.runPromise(loadRunOutputRowsEffect(db, outputTable, runId));
         }
         return { runId, status: "finished", output };
     };
@@ -6930,18 +6932,7 @@ async function runWorkflowBodyLegacy(workflow, opts) {
                 const outputTable = schema.output;
                 let output = undefined;
                 if (outputTable) {
-                    const cols = getTableColumns(outputTable);
-                    const runIdCol = cols.runId;
-                    if (runIdCol) {
-                        const rows = await db
-                            .select()
-                            .from(outputTable)
-                            .where(eq(runIdCol, runId));
-                        output = rows;
-                    }
-                    else {
-                        output = await db.select().from(outputTable);
-                    }
+                    output = await Effect.runPromise(loadRunOutputRowsEffect(db, outputTable, runId));
                 }
                 return {
                     type: "return",
