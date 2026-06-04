@@ -33,14 +33,7 @@ function uniqueRunId(prefix) {
     return `${prefix}-${Date.now().toString(36)}-${process.pid}`;
 }
 
-// NOTE (WIP): The persistence dialect layer is proven against real PostgreSQL in
-// packages/db/tests/db-postgres-dialect.test.js (schema, upsert, bytea, json,
-// transactions). End-to-end Smithers.workflow().execute() additionally drives the
-// engine's task-execution path, which still has a small number of synchronous /
-// Drizzle-on-bun:sqlite touchpoints to convert before a full run completes on
-// Postgres. These execute() cases are skipped until that engine conversion lands;
-// the Smithers.postgres()/pglite() factories + createBuilderDbPostgres are in place.
-describe.skip("Smithers.workflow execute (postgres)", () => {
+describe("Smithers.workflow execute (postgres)", () => {
     test("executes a finished builder workflow and extracts the final output", async () => {
         const G = Smithers.workflow({ name: "pg-builder-finished", input: inputSchema });
         const step = G.step("build", {

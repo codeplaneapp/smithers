@@ -56,7 +56,7 @@ function coerceBooleanColumns(rows, boolKeys) {
  * @param {unknown} db
  * @returns {boolean}
  */
-function isPostgresDb(db) {
+export function isPostgresDb(db) {
     return Boolean(db && typeof db === "object" && /** @type {any} */ (db).dialect === "postgres" && /** @type {any} */ (db).connection);
 }
 /**
@@ -66,7 +66,7 @@ function isPostgresDb(db) {
  * @param {Record<string, unknown>} row
  * @returns {Record<string, unknown>}
  */
-function pgRowToDrizzle(row) {
+export function pgRowToDrizzle(row) {
     /** @type {Record<string, unknown>} */
     const out = {};
     for (const [columnName, value] of Object.entries(row)) {

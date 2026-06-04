@@ -1,10 +1,11 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, getTableName } from "drizzle-orm";
 import { getTableColumns } from "drizzle-orm/utils";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { Effect } from "effect";
 import { z } from "zod";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { isPostgresDb, pgRowToDrizzle } from "./snapshot.js";
 import { withSqliteWriteRetryEffect } from "./write-retry.js";
 /** @typedef {import("drizzle-orm").AnyColumn} AnyColumn */
 /** @typedef {import("./output/OutputKey.ts").OutputKey} _OutputKey */
@@ -76,9 +77,24 @@ export function buildKeyWhere(table, key) {
  * @returns {Effect.Effect<T | undefined, SmithersError>}
  */
 export function selectOutputRowEffect(db, table, key) {
-    const where = buildKeyWhere(table, key);
+    const cols = getKeyColumns(table);
+    const hasIteration = Boolean(cols.iteration);
     return Effect.tryPromise({
-        try: () => db.select().from(table).where(where).limit(1),
+        try: () => {
+            if (isPostgresDb(db)) {
+                const tableName = getTableName(table).replaceAll(`"`, `""`);
+                const clauses = ["run_id = $1", "node_id = $2"];
+                const values = [key.runId, key.nodeId];
+                if (hasIteration) {
+                    clauses.push("iteration = $3");
+                    values.push(key.iteration ?? 0);
+                }
+                return db.connection
+                    .query({ text: `SELECT * FROM "${tableName}" WHERE ${clauses.join(" AND ")} LIMIT 1`, values })
+                    .then((result) => (result.rows[0] ? [pgRowToDrizzle(result.rows[0])] : []));
+            }
+            return db.select().from(table).where(buildKeyWhere(table, key)).limit(1);
+        },
         catch: (cause) => toSmithersError(cause, `select output ${table["_"]?.name ?? "output"}`, {
             code: "DB_QUERY_FAILED",
             details: { outputTable: table["_"]?.name ?? "output" },

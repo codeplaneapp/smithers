@@ -411,6 +411,23 @@ function getSqliteTransactionState(client) {
     return state;
 }
 /**
+ * Resolve a Drizzle output table's on-disk name. The name lives on the
+ * `Symbol(drizzle:Name)` slot, which `getTableName` reads; `table["_"].name` is
+ * `undefined` for these tables, so the raw-SQL Postgres path must not depend on
+ * it. Mirrors how the Drizzle `db.insert(table)` path resolves the name on
+ * SQLite.
+ * @param {unknown} table
+ * @returns {string}
+ */
+function resolveOutputTableName(table) {
+    try {
+        return getTableName(/** @type {Table} */ (table));
+    }
+    catch {
+        return "output";
+    }
+}
+/**
  * @param {unknown} db
  * @returns {{ run: (sql: string) => unknown; query: (sql: string) => { run: (...args: unknown[]) => unknown; get: (...args: unknown[]) => Record<string, unknown> | null | undefined; all: () => Array<Record<string, unknown>> }; exec: (sql: string) => unknown; $client?: unknown }}
  */
@@ -1011,7 +1028,7 @@ export class SmithersDb {
         const target = cols.iteration
             ? [cols.runId, cols.nodeId, cols.iteration]
             : [cols.runId, cols.nodeId];
-        const tableName = table?.["_"]?.name ?? "output";
+        const tableName = resolveOutputTableName(table);
         const conflictColumns = cols.iteration
             ? ["runId", "nodeId", "iteration"]
             : ["runId", "nodeId"];
