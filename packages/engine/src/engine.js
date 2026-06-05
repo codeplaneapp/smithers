@@ -51,6 +51,7 @@ import { createWorkflowVersioningRuntime, getWorkflowPatchDecisions, withWorkflo
 import { runWithCorrelationContext, updateCurrentCorrelationContext, withCorrelationContext, } from "@smithers-orchestrator/observability/correlation";
 import { extractWorkflowImportSpecifiers, getWorkflowImportScanLoader, readWorkflowEntryHash, readWorkflowGraphHash, resolveWorkflowImport, sha256Hex, } from "./workflow-hash.js";
 import { applyOptimizationArtifactToTasks } from "./optimization-artifact.js";
+import { extractBalancedJson, extractLastBalancedJson } from "./json-extraction.js";
 /** @typedef {import("@smithers-orchestrator/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
 /** @typedef {import("@smithers-orchestrator/driver/RunOptions").RunOptions} RunOptions */
@@ -3184,62 +3185,6 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     }
                     catch {
                         // Not valid JSON, try extraction
-                    }
-                    // Helper to extract balanced JSON from text (first occurrence)
-                    /**
-           * @param {string} str
-           * @returns {string | null}
-           */
-                    function extractBalancedJson(str) {
-                        const start = str.indexOf("{");
-                        if (start === -1)
-                            return null;
-                        let depth = 0;
-                        let inString = false;
-                        let escape = false;
-                        for (let i = start; i < str.length; i++) {
-                            const c = str[i];
-                            if (escape) {
-                                escape = false;
-                                continue;
-                            }
-                            if (c === "\\") {
-                                escape = true;
-                                continue;
-                            }
-                            if (c === '"' && !escape) {
-                                inString = !inString;
-                                continue;
-                            }
-                            if (inString)
-                                continue;
-                            if (c === "{")
-                                depth++;
-                            else if (c === "}") {
-                                depth--;
-                                if (depth === 0) {
-                                    return str.slice(start, i + 1);
-                                }
-                            }
-                        }
-                        return null;
-                    }
-                    // Helper to extract the LAST balanced JSON object in text.
-                    // Agents like Kimi emit all intermediate tool output before the final
-                    // required JSON, so searching from the end finds the right object.
-                    /**
-           * @param {string} str
-           * @returns {string | null}
-           */
-                    function extractLastBalancedJson(str) {
-                        let pos = str.lastIndexOf("{");
-                        while (pos >= 0) {
-                            const json = extractBalancedJson(str.slice(pos));
-                            if (json !== null)
-                                return json;
-                            pos = str.lastIndexOf("{", pos - 1);
-                        }
-                        return null;
                     }
                     // Try to extract JSON from code fence (```json ... ```)
                     if (output === undefined) {
