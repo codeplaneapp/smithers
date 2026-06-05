@@ -21,16 +21,16 @@ import {
  * every UI from the live gateway.
  *
  * Two real, layered checks:
- *   - ALL 16 UIs: build + boot + mount in the browser (catches bundle errors,
- *     bad imports, and mount-time crashes — this is the check that caught the
- *     write-a-prd MDX failure and the gateway-wide crash).
+ *   - ALL 15 UIs: build + boot + mount in the browser (catches bundle errors,
+ *     bad imports, and mount-time crashes — this is the check that caught an
+ *     MDX import failure and a gateway-wide crash).
  *   - The OUTPUT-VERIFIED subset (workflows that complete deterministically with
  *     the stub agent): the workflow is EXECUTED for real and the UI is asserted
  *     to render that run's real node output.
  *
  * The remaining UIs are build+boot only — not as a shortcut, but because they
- * either loop forever / interview a human (ralph, grill-me, write-a-prd,
- * mission) or don't complete deterministically headless, and node OUTPUT cannot
+ * either loop forever / interview a human (ralph, grill-me, mission) or don't
+ * complete deterministically headless, and node OUTPUT cannot
  * be hand-seeded (it lives in per-node, schema-bound output tables). The agent
  * is the ONLY stub — the repo's standard e2e fixture — everything else is real.
  *

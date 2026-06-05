@@ -81,8 +81,8 @@ describe("starter gallery data", () => {
     });
 
     test("finds starters by ID and alias", () => {
-        expect(findStarterRecipe("idea-to-prd")?.id).toBe("idea-to-prd");
-        expect(findStarterRecipe("prd")?.id).toBe("idea-to-prd");
+        expect(findStarterRecipe("idea-to-tickets")?.id).toBe("idea-to-tickets");
+        expect(findStarterRecipe("tickets")?.id).toBe("idea-to-tickets");
         expect(findStarterRecipe("missing")).toBeUndefined();
     });
 
@@ -90,13 +90,13 @@ describe("starter gallery data", () => {
         expect(listStarterRecipes({ audience: "support" }).map((starter) => starter.id)).toContain("customer-incident");
         expect(listStarterRecipes({ goal: "quality" }).map((starter) => starter.id)).toContain("quality-audit");
         expect(listStarterRecipes({ workflow: "debug" }).map((starter) => starter.id)).toEqual(["customer-incident"]);
-        expect(listStarterRecipes({ tag: "launch" }).map((starter) => starter.id)).toEqual(["idea-to-prd", "launch-checklist"]);
+        expect(listStarterRecipes({ tag: "launch" }).map((starter) => starter.id)).toEqual(["launch-checklist"]);
     });
 
     test("renders a browsable overview and a detailed starter", () => {
         const overview = renderStarterGallery(buildStarterGallery({ audience: "product" }));
         expect(overview).toContain("Smithers starters");
-        expect(overview).toContain("idea-to-prd");
+        expect(overview).toContain("idea-to-tickets");
         expect(overview).toContain("Use `bunx smithers-orchestrator init --template <id>`");
 
         const detail = renderStarterGallery(buildStarterGallery({ id: "customer-incident" }));
@@ -116,19 +116,19 @@ describe("smithers starters command", () => {
         });
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("Smithers starters");
-        expect(result.stdout).toContain("idea-to-prd");
-        expect(result.stdout).toContain("bunx smithers-orchestrator workflow run write-a-prd");
+        expect(result.stdout).toContain("idea-to-tickets");
+        expect(result.stdout).toContain("bunx smithers-orchestrator workflow run tickets-create");
     });
 
     test("emits structured JSON for integrations", () => {
         const repo = createTempRepo();
-        const result = runSmithers(["starters", "prd"], {
+        const result = runSmithers(["starters", "tickets"], {
             cwd: repo.dir,
             format: "json",
         });
         expect(result.exitCode).toBe(0);
-        expect(result.json.selected.id).toBe("idea-to-prd");
-        expect(result.json.selected.workflow).toBe("write-a-prd");
+        expect(result.json.selected.id).toBe("idea-to-tickets");
+        expect(result.json.selected.workflow).toBe("tickets-create");
         expect(result.json.starters).toHaveLength(1);
     });
 

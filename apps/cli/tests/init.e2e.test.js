@@ -194,7 +194,6 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
     expect(repo.exists(".smithers/workflows/test-first.tsx")).toBe(false);
     expect(repo.exists(".smithers/workflows/debug.tsx")).toBe(true);
     expect(repo.exists(".smithers/workflows/grill-me.tsx")).toBe(true);
-    expect(repo.exists(".smithers/workflows/write-a-prd.tsx")).toBe(true);
     expect(repo.exists(".smithers/workflows/feature-enum.tsx")).toBe(true);
     expect(repo.exists(".smithers/workflows/audit.tsx")).toBe(true);
     expect(repo.exists(".smithers/workflows/mission.tsx")).toBe(true);
@@ -214,7 +213,6 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
     expect(repo.exists(".smithers/components/CommandProbe.tsx")).toBe(true);
     expect(repo.exists(".smithers/components/ForEachFeature.tsx")).toBe(true);
     expect(repo.exists(".smithers/components/FeatureEnum.tsx")).toBe(true);
-    expect(repo.exists(".smithers/components/WriteAPrd.tsx")).toBe(true);
     expect(repo.exists(".smithers/tickets/.gitkeep")).toBe(true);
     expect(repo.read(".smithers/workflows/feature-enum.tsx")).toContain("existingFeatures: z.record(z.string(), z.array(z.string())).nullable().default(null)");
     expect(repo.read(".smithers/workflows/audit.tsx")).toContain("features: z.record(z.string(), z.array(z.string())).default({})");
@@ -228,17 +226,17 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
 test("smithers init --template preserves the default scaffold and returns the selected starter", () => {
     const repo = createTempRepo();
     const env = buildInitEnv(repo.dir);
-    const result = runSmithers(["init", "--template", "idea-to-prd", "--no-install"], {
+    const result = runSmithers(["init", "--template", "idea-to-tickets", "--no-install"], {
         cwd: repo.dir,
         format: "json",
         env,
     });
     expect(result.exitCode).toBe(0);
-    expect(repo.exists(".smithers/workflows/write-a-prd.tsx")).toBe(true);
+    expect(repo.exists(".smithers/workflows/tickets-create.tsx")).toBe(true);
     expect(repo.exists(".smithers/workflows/implement.tsx")).toBe(true);
-    expect(result.json.template.id).toBe("idea-to-prd");
-    expect(result.json.template.workflow).toBe("write-a-prd");
-    expect(result.json.template.command).toStartWith("bunx smithers-orchestrator workflow run write-a-prd --");
+    expect(result.json.template.id).toBe("idea-to-tickets");
+    expect(result.json.template.workflow).toBe("tickets-create");
+    expect(result.json.template.command).toStartWith("bunx smithers-orchestrator workflow run tickets-create --");
     expect(result.json.install).toMatchObject({
         reason: "skip-install",
         status: "skipped",
@@ -265,7 +263,7 @@ test("smithers init rejects unknown templates in option validation before writin
 });
 test("smithers init rejects starter aliases before writing the scaffold", () => {
     const repo = createTempRepo();
-    const result = runSmithers(["init", "--template", "prd", "--no-install"], {
+    const result = runSmithers(["init", "--template", "tickets", "--no-install"], {
         cwd: repo.dir,
         format: "json",
     });

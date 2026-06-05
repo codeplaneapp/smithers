@@ -178,17 +178,6 @@
     "verifyOutput": false
   },
   {
-    "key": "write-a-prd",
-    "title": "Write a PRD",
-    "runnable": false,
-    "launchArgs": [],
-    "primaryTestId": "write-a-prd-ui",
-    "populatedTestId": "",
-    "expectedText": [],
-    "mountOnlyReason": "does not complete deterministically with a trivial stub prompt (interview/input-driven or errors on stub output); UI is asserted to mount + boot",
-    "verifyOutput": false
-  },
-  {
     "key": "feature-enum",
     "title": "Feature Enum",
     "runnable": false,
