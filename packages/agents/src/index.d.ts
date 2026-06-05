@@ -6,7 +6,7 @@ import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
 import * as zod_v4_core from 'zod/v4/core';
 
-type CliAgentCapabilityAdapterId$1 = "claude" | "amp" | "antigravity" | "codex" | "forge" | "gemini" | "kimi" | "opencode" | "pi";
+type CliAgentCapabilityAdapterId$1 = "claude" | "amp" | "antigravity" | "codex" | "forge" | "gemini" | "kimi" | "opencode" | "pi" | "vibe";
 
 type CliAgentSurfaceOptionMapping$1 = {
     option: string;
@@ -45,7 +45,7 @@ type AgentToolDescriptor$1 = {
 
 type AgentCapabilityRegistry$6 = {
     version: 1;
-    engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode";
+    engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode" | "vibe";
     runtimeTools: Record<string, AgentToolDescriptor$1>;
     mcp: {
         bootstrap: "inline-config" | "project-config" | "allow-list" | "unsupported";
@@ -306,6 +306,33 @@ declare class OpenCodeAgent extends BaseCliAgent {
         env?: Record<string, string>;
         stdoutBannerPatterns: RegExp[];
         stdoutErrorPatterns: RegExp[];
+    }>;
+}
+
+type VibeAgentOptions$1 = BaseCliAgentOptions$2 & {
+    agent?: string;
+    maxTurns?: number;
+    maxPrice?: number;
+    maxTokens?: number;
+    enabledTools?: string[];
+    sessionId?: string;
+    continueSession?: boolean;
+};
+declare class VibeAgent extends BaseCliAgent {
+    private readonly opts;
+    readonly capabilities: AgentCapabilityRegistry$4;
+    readonly cliEngine: "vibe";
+    constructor(opts?: VibeAgentOptions$1);
+    createOutputInterpreter(): CliOutputInterpreter$8;
+    buildCommand(params: {
+        prompt: string;
+        systemPrompt?: string;
+        cwd: string;
+        options: any;
+    }): Promise<{
+        command: string;
+        args: string[];
+        outputFormat: "stream-json";
     }>;
 }
 
@@ -935,13 +962,10 @@ declare function zodToOpenAISchema(zodSchema: any): Promise<zod_v4_core.ZodStand
  * OpenAI's `response_format` imposes constraints beyond standard JSON Schema:
  *
  * 1. Every object node **must** include `"type": "object"`.
- * 2. `additionalProperties` must be a boolean or a valid sub-schema with a
- *    `type` key -- bare `{}` is rejected.
- * 3. `additionalProperties: true` is accepted but tells the model it can
- *    return extra keys -- set to `false` if you want strict conformance.
+ * 2. Structured output object nodes must set `additionalProperties: false`.
  *
- * Zod v4's `toJSONSchema()` can violate (1) when `z.looseObject()` is used:
- * it emits `{ additionalProperties: true }` without `"type": "object"`.
+ * Zod v4's `toJSONSchema()` can violate these rules when loose/passthrough
+ * objects are used. Codex rejects those schemas unless they are strict.
  *
  * This function fixes these issues in-place so any agent (Codex, future
  * OpenAI-backed agents, etc.) can safely use a JSON Schema for OpenAI.
@@ -1187,6 +1211,12 @@ type CliOutputInterpreter = CliOutputInterpreter$a;
 type ForgeAgentOptions = ForgeAgentOptions$1;
 
 /**
+ * @returns {AgentCapabilityRegistry}
+ */
+declare function createVibeCapabilityRegistry(opts?: VibeAgentOptions$1): AgentCapabilityRegistry$6;
+type VibeAgentOptions = VibeAgentOptions$1;
+
+/**
  * @returns {CliAgentCapabilityReportEntry[]}
  */
 declare function getCliAgentCapabilityReport(): CliAgentCapabilityReportEntry$1[];
@@ -1252,4 +1282,4 @@ type CliAgentSurfaceOptionMapping = CliAgentSurfaceOptionMapping$1;
 type CliAgentSurfaceResumeContract = CliAgentSurfaceResumeContract$1;
 type CliAgentUnsupportedFlag = CliAgentUnsupportedFlag$1;
 
-export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, createAmpCapabilityRegistry, createAntigravityCapabilityRegistry, createForgeCapabilityRegistry, createSmithersAgentContract, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, VibeAgent, type VibeAgentOptions, createAmpCapabilityRegistry, createAntigravityCapabilityRegistry, createForgeCapabilityRegistry, createSmithersAgentContract, createVibeCapabilityRegistry, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };

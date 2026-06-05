@@ -1,0 +1,14 @@
+# Sandbox image for Claw-Eval-Live terminal (CTB_W*) tasks.
+#
+# Functionally equivalent to the upstream Dockerfile.agent (same Python base,
+# same sandbox HTTP server, same /workspace + :8080 ENTRYPOINT) but uses the
+# default Docker Hub + PyPI registries instead of the China mirrors, and drops
+# playwright/ffmpeg/poppler — the 5 terminal tasks only invoke `python`/`bash`.
+# Build:  docker build -f Dockerfile.sandbox -t liveclaw-500-agent:latest vendor/Claw-Eval-Live
+FROM python:3.11-slim
+WORKDIR /workspace
+COPY requirements-sandbox-server.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+COPY src/liveclaw_500/sandbox/ /opt/sandbox/
+EXPOSE 8080
+ENTRYPOINT ["python", "/opt/sandbox/server.py", "--port", "8080"]

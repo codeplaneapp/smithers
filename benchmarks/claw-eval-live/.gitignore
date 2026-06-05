@@ -1,0 +1,9 @@
+# Upstream benchmark is fetched by setup.sh, not vendored into git.
+vendor/
+# Local run artifacts
+*.db
+gateway/_smoke*.mjs
+gateway/node_modules/
+# Raw traces are large; we commit summaries + REPORT under results/, not traces.
+results/traces*/
+**/traces_smithers/

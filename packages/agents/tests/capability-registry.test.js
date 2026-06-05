@@ -259,6 +259,7 @@ describe("smithers agents capabilities", () => {
             "kimi",
             "opencode",
             "pi",
+            "vibe",
         ]);
         expect(report.find((entry) => entry.id === "codex")?.capabilities.mcp.bootstrap)
             .toBe("inline-config");

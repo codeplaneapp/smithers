@@ -135,6 +135,14 @@ type TaskProps$2<Row, Output extends OutputTarget$1 = OutputTarget$1, D extends 
     needs?: Record<string, string>;
     /** Render-time typed dependencies. Keys resolve from task ids of the same name, or from matching `needs` entries. */
     deps?: D;
+    /**
+     * Start this agent task from a copy of another task's final agent session context.
+     * The fork source becomes an implicit dependency: this task waits for it to complete,
+     * then copies its conversation snapshot into a fresh, independent session and submits
+     * its own prompt. The source is never mutated. Inside a `<Loop>`, resolves to the
+     * latest completed snapshot for that task id. Requires an agent task.
+     */
+    fork?: string;
     skipIf?: boolean;
     needsApproval?: boolean;
     /** When paired with `needsApproval`, do not block unrelated downstream flow while the approval is pending. */

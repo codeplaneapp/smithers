@@ -1,0 +1,10 @@
+{
+  "name": "@smithers-orchestrator/claw-eval-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenAI-compatible gateway exposing a Smithers mixture of Claude Opus 4.8 + gpt-5.5 as the agent brain for the Claw-Eval-Live benchmark.",
+  "scripts": {
+    "start": "bun src/server.ts"
+  }
+}

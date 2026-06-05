@@ -165,6 +165,10 @@ new AntigravityAgent({
   allowedMcpServerNames?: string[]; allowedTools?: string[];
   conversation?: string; continue?: boolean; resume?: string;
   includeDirectories?: string[];
+  extensions?: string[]; listExtensions?: boolean;
+  listSessions?: boolean; deleteSession?: string;
+  screenReader?: boolean; outputFormat?: "text" | "json" | "stream-json";
+  debug?: boolean;
   binary?: string; configDir?: string; geminiDir?: string; apiKey?: string;
   // Deprecated and rejected at runtime: debug, screenReader, outputFormat,
   // extensions, listExtensions, listSessions, deleteSession.

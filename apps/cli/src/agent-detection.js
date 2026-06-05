@@ -103,6 +103,20 @@ const DETECTORS = [
         apiKeys: [],
         setupHint: "Install and authenticate the `amp` CLI.",
     },
+    {
+        id: "vibe",
+        displayName: "Vibe",
+        binary: "vibe",
+        authSignals: (homeDir, env) => {
+            const vibeHome = env.VIBE_HOME ? resolve(env.VIBE_HOME) : join(homeDir, ".vibe");
+            return [
+                join(vibeHome, ".env"),
+                join(vibeHome, "config.toml"),
+            ];
+        },
+        apiKeys: ["MISTRAL_API_KEY"],
+        setupHint: "Install the Vibe CLI and run `vibe --setup` to configure an API key, or set `MISTRAL_API_KEY`.",
+    },
 ];
 const ROLE_PREFERENCES = {
     spec: ["claude", "codex", "opencode"],
@@ -147,7 +161,7 @@ const LOCAL_SCAFFOLDED_PROVIDER_FILES = {
     gemini: "gemini",
 };
 const TIER_PREFERENCES = {
-    cheapFast: { order: ["kimi", "claudeSonnet", "antigravity", "pi"], maxSize: 2 },
+    cheapFast: { order: ["kimi", "vibe", "claudeSonnet", "antigravity", "pi"], maxSize: 2 },
     smart: { order: ["codex", "opencode", "claude", "kimi", "antigravity", "amp"], maxSize: 3 },
     smartTool: { order: ["claude", "codex", "opencode", "kimi", "antigravity", "amp"], maxSize: 3 },
 };
@@ -183,6 +197,10 @@ const CONSTRUCTORS = {
     amp: {
         importName: "AmpAgent",
         expr: "new SmithersAmpAgent()",
+    },
+    vibe: {
+        importName: "VibeAgent",
+        expr: 'new SmithersVibeAgent({ agent: "auto-approve", cwd: process.cwd() })',
     },
 };
 /**

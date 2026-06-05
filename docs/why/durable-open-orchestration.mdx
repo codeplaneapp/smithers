@@ -1,0 +1,165 @@
+---
+title: Anthropic just shipped agent workflows. Here is the open, durable version.
+description: Dynamic Workflows proved the thesis Smithers was built on. Underneath every agent topology sits a durable orchestration layer that does not change. Ours is open source, runs on any model and any harness, and survives a crash.
+---
+
+Last week Anthropic shipped [Dynamic Workflows](https://code.claude.com/docs/en/workflows) into Claude Code. You describe a task, Claude writes a JavaScript orchestration script, and a runtime fans it out across as many as a thousand subagents that attack the problem from independent angles, refute each other, and converge on an answer. It is good work. It also validates a thesis we have been building on for a year: underneath every named agent topology sits a durable orchestration layer that does not change.
+
+Dynamic Workflows is closed, Claude-only, cloud-gated, and ephemeral. Smithers is the same idea, open source, running on any model and any harness, on your laptop, and it survives a crash. That last property is the one nobody demos, so the article starts there.
+
+## Background agents are a different shape
+
+Synchronous chat is forgiving. The user is staring at the screen, retries are free, an upstream Lambda with a five-minute timeout is fine. Background agents are a different shape. They run for hours. They survive deploys. They pause for a human approval that will not arrive until tomorrow morning, and they have to wake back up *at the right step* when the human finally shows up.
+
+|                | chat               | background            |
+| -------------- | ------------------ | --------------------- |
+| runtime        | seconds            | hours, days           |
+| user           | staring at screen  | offline               |
+| approval       | immediate          | tomorrow morning      |
+| crash          | page refresh       | lost work             |
+| deploy         | reconnect          | interrupted mid-task  |
+
+You cannot fake the right-hand column with a queue and a database. You can build it that way, but you will reinvent sixty percent of what an honest durable execution layer already does, and you will do it more poorly: a durable step state machine, heartbeats and stale-claim recovery, retry policies with backoff, suspension on approval, resume-at-the-right-step semantics, cancellation propagation. None of that is application code you want to write. It is the substrate.
+
+## The layer that does not change
+
+Every six months the right way to build an AI agent changes. Chains. ReAct. Tools. Plan-and-execute. Crews. Swarms. Background agents. Dynamic subagent fan-out, as of last week. If you coupled your infrastructure to any one of these, you have already rebuilt at least twice, and you will rebuild again.
+
+There are three layers, and they move at different speeds.
+
+<Frame caption="The model layer churns weekly and the topology layer churns quarterly. The orchestration layer underneath does not change. That is the layer Smithers is.">
+  <img src="/images/why/three-layer-stack.svg" alt="Three stacked layers: a volatile model layer, a fluid topology layer, and a stable orchestration layer" />
+</Frame>
+
+- **Model layer.** Volatile, changes weekly. GPT, Claude, Gemini, Kimi.
+- **Topology layer.** Fluid, changes quarterly. ReAct, crew, swarm, plan-execute, subagent swarm.
+- **Orchestration layer.** Stable. Durable steps, retries, state, events, observability.
+
+Anthropic's own framing of Dynamic Workflows lands on that bottom layer exactly. Their words: there is a layer that does not change. We agree so hard we wrote a runtime to be it. The disagreement is only about whether that layer should belong to one model vendor.
+
+## What Dynamic Workflows is, and the three things it is not
+
+Dynamic Workflows is a real product and a good one. It is also three things Smithers deliberately is not.
+
+It is **not open.** It is a research preview on Max, Team, and eligible Enterprise plans. You cannot read the runtime, fork it, or run it where you like.
+
+It is **not model-agnostic.** It orchestrates Claude subagents. The whole point of an orchestration layer that outlives the model is that you should be able to let a frontier model plan, a fast model fan out, and a specialized harness do the edits, and switch any of them next week without touching the workflow. Smithers runs Claude Code, Codex, Pi, Antigravity, and any model the Vercel AI SDK supports. You can mix them in one workflow.
+
+It is **not durable.** The script orchestrates subagents and returns an answer. Kill the process halfway and you start over. In Smithers, every completed step is persisted the moment it finishes, and a crash resumes from the last frame.
+
+## Durability you can watch
+
+This three-task workflow runs research, then plan, then implement. Sequence enforces order, so `plan` waits for `research` with no wiring.
+
+```tsx
+<Workflow name="ship-it">
+  <Sequence>
+    <Task id="research"  output={outputs.research}>  {/* fast */}  …</Task>
+    <Task id="plan"      output={outputs.plan}>      {/* slow  */} …</Task>
+    <Task id="implement" output={outputs.implement}>              …</Task>
+  </Sequence>
+</Workflow>
+```
+
+Start it. Kill the process while `plan` is running. Resume it:
+
+```bash
+smithers up ship-it.tsx --run-id r1
+# ^C while plan is in flight
+smithers up ship-it.tsx --run-id r1 --resume true
+```
+
+`research` is skipped because its output is already in the database. `plan` re-runs as attempt 2 because it was interrupted mid-flight. `implement` runs for the first time. No work is lost, and you wrote no recovery code.
+
+<Frame caption="Run 1 dies while `plan` is in flight. Run 2 skips the persisted `research`, retries `plan` as attempt 2, and runs `implement` for the first time.">
+  <img src="/images/why/crash-resume.gif" alt="A live run that crashes during plan, then resumes: research is skipped, plan re-runs as attempt 2, implement runs fresh" />
+</Frame>
+
+This falls out of one design choice: state is the source of truth, and the plan is a pure function of state. Render the workflow tree, extract the ready tasks, execute them, persist their outputs to SQLite, re-render against the new state. That is the entire model.
+
+<Frame caption="The whole runtime. Events update state, state is the source of truth, and the plan is a pure function of state.">
+  <img src="/images/why/render-loop.svg" alt="A four-stage loop: render, extract, execute, persist, then re-render against the new state" />
+</Frame>
+
+It buys three things for free. Resume, because re-rendering from current state needs no event log to replay. Time travel, because every render frame is a row, so forking a run is throwing away rows. SQL debugging, because state is queryable and an event chain is not.
+
+```bash
+smithers timeline r1        # every frame
+smithers fork r1 --frame 4  # branch an alternate timeline
+smithers diff r1 r1-fork    # compare two snapshots as a unified diff
+```
+
+Git history for agent runs, with the actual run state in every frame.
+
+<Frame caption="Fork a run from any frame and branch an alternate timeline. Because every frame is a row, this is just SQL.">
+  <img src="/images/why/task-fork.gif" alt="Forking a run from an earlier frame to branch an alternate timeline" />
+</Frame>
+
+## Human approvals are just suspension
+
+A background agent that cannot stop and ask a human is dangerous to run unattended. So suspension is a primitive.
+
+```tsx
+<Approval
+  id="ship"
+  request={{ title: "Ship this diff?", summary: diff?.summary }}
+  onDeny="fail"
+/>
+```
+
+`<Approval>` durably suspends the run. The process exits. It costs nothing while it waits. A reviewer answers tomorrow over CLI, web, or HTTP, and `smithers supervise` resumes any run whose heartbeat went stale after the machine died. The suspended run lives as a database row with nothing running.
+
+## Patterns are compositions on the substrate
+
+The test of whether you abstracted the primitives well enough is whether the topologies you keep rebuilding can stop being snowflakes. If the primitives are good, named patterns fall out as compositions.
+
+We surveyed every agentic orchestration framework we could find (LangGraph, Crew, Inngest, Temporal, AutoGen, Mastra, the papers, the vendor posts), and anything we saw more than once that earned promotion became a component. `ReviewLoop`. `Optimizer`. `ScanFixVerify`. `Panel`. `Debate`. `Supervisor`. `Saga`. `EscalationChain`. None of them are baked into the runtime. `<ReviewLoop>` is about twenty lines:
+
+```tsx
+<Loop until={review?.approved === true} maxIterations={3}>
+  <Sequence>
+    <Task id="produce" agent={producer} output={outputs.draft}>
+      Produce: {ctx.input.task}
+    </Task>
+    <Task id="review" agent={reviewer} output={outputs.review}>
+      Review the draft and decide whether to approve.
+    </Task>
+  </Sequence>
+</Loop>
+```
+
+That is the whole pattern. Read it, fork it, write your own. When the next pattern with no name yet shows up, and it will, you compose it from the same primitives, and it is durable and observable for free. Dynamic Workflows bakes its fan-out-and-refute topology into the runtime. We ship that as a component you can open up.
+
+## Why JSX, when a model could write a script
+
+In 2026 a lot of workflow code is written and re-tuned by other agents. Wrap a workflow in a self-improving outer loop, where one agent watches another's traces and edits the source, and by next Thursday the workflow your agent runs is one no human author ever wrote. The authoring surface has to be legible to the agents that edit it and the humans auditing what those agents wrote.
+
+So we picked the densest domain in any model's training corpus. TypeScript, because prompts are template strings that interpolate and refactor and type-check with no DSL. React, because agents write it fluently and humans review a declarative tree faster than they can simulate an imperative graph in their heads. A model can write a raw orchestration script, and Dynamic Workflows proves it writes a good one. The question is whether you can read it back, diff it, and hand it to another agent to extend six weeks later. A JSX tree you can. There is a lower-level Effect-ts API underneath for anyone who would rather think in `Effect.gen`.
+
+We took Gstack, an existing high-token agentic workflow, and cut roughly eighty percent of its lines by composing Smithers components instead of hand-writing the orchestration.
+
+## Any model, any harness
+
+This is the claim a skeptic should test first, so we will be specific. The same workflow runs Claude Code, Codex, Pi, and Antigravity through their own runtimes, and any model the Vercel AI SDK supports with tools, structured output, and MCP. Point a task at whichever agent is best for the job and switch freely. Agent fallback is an array: `agent={[claude, codex]}` runs Claude first and Codex on failure. The workflow does not change when the model does, which is the entire reason to have an orchestration layer in the first place.
+
+<Frame caption="One workflow, many harnesses. Let a frontier model plan, a fast model fan out, and a specialized harness do the edits. Swap any of them without touching the workflow.">
+  <img src="/images/why/any-agent.png" alt="A single Smithers workflow driving multiple different agent harnesses and models" />
+</Frame>
+
+```bash
+bunx smithers-orchestrator init        # scaffold the workflow pack
+smithers up workflow.tsx --serve --metrics   # HTTP API, SSE stream, Prometheus
+smithers observability up               # Grafana, Prometheus, Tempo, one command
+```
+
+<Frame caption="Live frames stream over the gateway as the run executes. Every state transition, every attempt, every retry is already a row you can scrub back through.">
+  <img src="/images/why/runs-live.gif" alt="A run streaming live frames into a tree and inspector as it executes" />
+</Frame>
+
+## Build the future you want this week
+
+You should not have to wait and see what one model company decides to ship next. Dynamic Workflows is a strong product and a sign of where everything is going. We think the layer it lives on is too important to belong to a single vendor, hidden behind a research-preview flag, on one model family, with no way to resume after a crash.
+
+Smithers is MIT-licensed. The slideshow we give this talk from is itself a Smithers workflow. The crash-resume in it is real. Kill it two slides in and resume, and it picks up where it left off.
+
+[github.com/smithersai/smithers](https://github.com/smithersai/smithers)

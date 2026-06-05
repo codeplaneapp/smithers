@@ -27,6 +27,7 @@
         "group": "But... Why?",
         "pages": [
           "why/background-agents",
+          "why/durable-open-orchestration",
           "why-react"
         ]
       },

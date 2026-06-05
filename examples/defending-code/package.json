@@ -1,0 +1,13 @@
+{
+  "name": "smithers-defending-code-example",
+  "private": true,
+  "type": "module",
+  "description": "Smithers port of Anthropic's defending-code-reference-harness: ASAN-driven vulnerability discovery and remediation as a durable workflow.",
+  "scripts": {
+    "build": "sh harness/build.sh",
+    "smoke": "sh targets/card-parser/smoke_test.sh",
+    "graph": "bun ../../apps/cli/src/index.js graph workflow.jsx",
+    "up": "bun ../../apps/cli/src/index.js up workflow.jsx -c 3",
+    "clean": "rm -rf runs targets/card-parser/build smithers.db smithers.db-shm smithers.db-wal"
+  }
+}
