@@ -3,6 +3,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CodexAgent } from "../src/index.js";
+import { z } from "zod";
 const originalPath = process.env.PATH ?? "";
 /**
  * @param {string} stdoutScript
@@ -20,6 +21,26 @@ afterEach(() => {
     delete process.env.CODEX_ARGS_FILE;
 });
 describe("Codex CLI agent", () => {
+    test("sanitizes z.looseObject outputSchema for Codex structured output", async () => {
+        const agent = new CodexAgent();
+        const command = await agent.buildCommand({
+            prompt: "extract the document",
+            cwd: process.cwd(),
+            options: {
+                outputSchema: z.looseObject({ document: z.string() }),
+            },
+        });
+        try {
+            const schemaPath = command.args[command.args.indexOf("--output-schema") + 1];
+            const schema = JSON.parse(await readFile(schemaPath, "utf8"));
+            expect(schema.type).toBe("object");
+            expect(schema.additionalProperties).toBe(false);
+            expect(schema.additionalProperties).not.toEqual({});
+        }
+        finally {
+            await command.cleanup?.();
+        }
+    });
     test("resumes an existing session when resumeSession is provided", async () => {
         const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-codex-args-"));
         const argsFile = join(argsFileDir, "args.json");

@@ -9,11 +9,11 @@ describe("zodToOpenAISchema", () => {
         expect(result.type).toBe("object");
         expect(result.properties?.name?.type).toBe("string");
     });
-    test("loose object has type: object", async () => {
+    test("loose object has type: object and strict additionalProperties", async () => {
         const schema = z.object({ document: z.string() }).catchall(z.unknown());
         const result = await zodToOpenAISchema(schema);
         expect(result.type).toBe("object");
-        expect(result.additionalProperties).toBeDefined();
+        expect(result.additionalProperties).toBe(false);
     });
     test("nested loose objects all have type: object", async () => {
         const inner = z.object({ value: z.number() }).catchall(z.unknown());
@@ -29,6 +29,19 @@ describe("zodToOpenAISchema", () => {
         const result = await zodToOpenAISchema(schema);
         const itemSchema = result.properties?.items?.items;
         expect(itemSchema?.type).toBe("object");
+    });
+    test("z.looseObject output schemas are strict enough for Codex structured output", async () => {
+        const schema = z.looseObject({ document: z.string() });
+        const result = await zodToOpenAISchema(schema);
+        expect(result.type).toBe("object");
+        expect(result.additionalProperties).toBe(false);
+        expect(result.additionalProperties).not.toEqual({});
+    });
+    test("ordinary strict object schemas keep additionalProperties false", async () => {
+        const schema = z.object({ document: z.string() });
+        const result = await zodToOpenAISchema(schema);
+        expect(result.type).toBe("object");
+        expect(result.additionalProperties).toBe(false);
     });
 });
 describe("sanitizeForOpenAI", () => {
@@ -48,22 +61,22 @@ describe("sanitizeForOpenAI", () => {
         sanitizeForOpenAI(schema);
         expect(schema.type).toBe("object");
     });
-    test("coerces empty object additionalProperties to true", () => {
+    test("coerces empty object additionalProperties to false", () => {
         const schema = {
             type: "object",
             additionalProperties: {},
         };
         sanitizeForOpenAI(schema);
-        expect(schema.additionalProperties).toBe(true);
+        expect(schema.additionalProperties).toBe(false);
     });
-    test("leaves non-empty additionalProperties schema alone", () => {
+    test("coerces non-empty additionalProperties schema to false", () => {
         const subSchema = { type: "string" };
         const schema = {
             type: "object",
             additionalProperties: subSchema,
         };
         sanitizeForOpenAI(schema);
-        expect(schema.additionalProperties).toEqual({ type: "string" });
+        expect(schema.additionalProperties).toBe(false);
     });
     test("recursively fixes deeply nested schemas", () => {
         const schema = {
