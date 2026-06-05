@@ -407,9 +407,15 @@ commands[65]:
       provider,,string,,Only report accounts for this provider
       fresh,,boolean,false,Bypass the short usage cache while respecting provider rate-limit floors
   - name: docs
-    purpose: Print published llms.txt from smithers.sh
+    purpose: Print llms.txt for this CLI version
+    flags[2]{name,short,type,default,desc}:
+      latest,,boolean,false,Fetch the latest docs from smithers.sh instead of docs for this CLI version
+      docs-version,,string,,Fetch docs for a specific Smithers version, e.g. 0.22.0 or v0.22.0
   - name: docs-full
-    purpose: Print published llms-full.txt from smithers.sh
+    purpose: Print llms-full.txt for this CLI version
+    flags[2]{name,short,type,default,desc}:
+      latest,,boolean,false,Fetch the latest docs from smithers.sh instead of docs for this CLI version
+      docs-version,,string,,Fetch docs for a specific Smithers version, e.g. 0.22.0 or v0.22.0
   - name: agents.capabilities
     purpose: Print JSON capability registry for built-in CLI agents
   - name: agents.doctor

@@ -19,9 +19,16 @@ Changelogs are not included; see /docs/changelogs/ on the docs site.
 
 ## Smithers
 
-> Durable control plane for long-running coding agents.
+> Orchestrate agents at scale with composable workflows.
 
-Smithers is a durable control plane for long-running coding agents. It gives TypeScript teams crash recovery, retries, human approvals, replay, evals, sandbox review, and Gateway APIs in one workflow runtime.
+<div style={{ fontSize: "1.35rem", fontWeight: 600, lineHeight: 1.4, marginBottom: "0.5rem" }}>
+  Orchestrate agents at scale with composable workflows.
+</div>
+
+Smithers is a durable runtime for long-running AI coding agents. Install a skill and your
+agent writes the workflow — a composable TypeScript tree — then runs it for minutes or
+days with crash recovery, retries, human approvals, replay, and full observability across
+any agent, any model, and any machine.
 
 ```tsx
 /** @jsxImportSource smithers-orchestrator */
@@ -43,25 +50,157 @@ export default smithers((ctx) => (
 ));
 ```
 
-Run it:
-
 ```bash
 bunx smithers-orchestrator init
 bunx smithers-orchestrator up workflow.tsx --input '{"name":"world"}'
 ```
 
-Outputs are validated by Zod, persisted to SQLite, and survive crashes. Resume with `--resume true`, or expose the [Gateway](/integrations/gateway) operator API and browser console with `new Gateway({ ui: true })`.
+Outputs are validated by Zod, persisted to SQLite, and survive crashes. Resume with
+`--resume true`, or drive everything from your coding agent with the
+[`smithers` skill](/installation#install-the-agent-skill).
+
+## What makes Smithers different
+
+<CardGroup cols={3}>
+  <Card title="Composable workflows" icon="puzzle-piece">
+    Sequence, fan out, branch, and loop tasks into workflows shaped to your task and your
+    project, not one giant one-size-fits-all agent.
+  </Card>
+  <Card title="Model- & harness-agnostic" icon="plug">
+    Claude Code, Codex, Pi, Antigravity, and more, plus any model through the AI SDK.
+    Swap the harness without rewriting the workflow.
+  </Card>
+  <Card title="Robust by default" icon="shield-check">
+    Durable execution, retries, replay, time-travel, evals, human approvals, and
+    Prometheus metrics. Guarantees no single agent gives you.
+  </Card>
+</CardGroup>
+
+## Why Smithers
+
+We build Smithers to put power in the hands of builders. You shouldn't have to wait and
+see what the model companies decide to ship next. With composable, model- and
+harness-agnostic workflows, you can build the future you want to see today, on whatever
+model and harness is best this week.
+
+Every decision in Smithers is about making builders **more** powerful, not replacing
+them. Where other tools race to swap human craftsmanship for slop, Smithers is built to
+get **higher-quality output** out of agents, with the review loops, approvals, evals,
+and structure that real work demands.
+
+And we don't believe in one-size-fits-all orchestration. The best results come from
+**task-specific and project-specific workflows**, so Smithers ships dozens of them ready
+to run, and treats having your agent author new ones as a first-class path.
+
+## Built-in workflows
+
+`bunx smithers-orchestrator init` scaffolds a `.smithers/` folder preloaded with
+production-ready workflows. Point your agent at one and go with
+`bunx smithers-orchestrator workflow run <id> --prompt "..."`:
+
+```bash
+# break a request into tickets, then implement them on a board
+bunx smithers-orchestrator workflow run tickets-create --prompt "add rate limiting and audit logging"
+bunx smithers-orchestrator workflow run kanban
+```
+
+<CardGroup cols={2}>
+  <Card title="Build" icon="hammer" href="/workflows/implement">
+    `implement` · `research-plan-implement` · `mission` · `kanban` · `ralph`. Turn a
+    request into validated, reviewed code, from a focused change to a long-horizon mission.
+  </Card>
+  <Card title="Plan" icon="map" href="/workflows/plan">
+    `research` · `plan` · `grill-me` · `write-a-prd` · `ticket-create` · `tickets-create`.
+    Gather context and shape the work before any code is written.
+  </Card>
+  <Card title="Quality" icon="circle-check" href="/workflows/review">
+    `review` · `debug` · `improve-test-coverage` · `feature-enum` · `audit`. Review
+    changes, fix bugs, raise coverage, and audit for gaps.
+  </Card>
+  <Card title="Browse the catalog" icon="list" href="/workflows/overview">
+    Every bundled workflow is a normal Smithers TSX file: run it as-is, edit it for your
+    repo, or fork it as a starting point.
+  </Card>
+</CardGroup>
+
+## Examples
+
+The [examples](/examples/hello-world) cover real patterns you can copy: multi-agent
+panels and debates, fan-out/fan-in, review and coverage loops, migrations, PR shepherding,
+canary judging, SLO breach explainers, repo janitors, and more.
+
+<CardGroup cols={2}>
+  <Card title="Multi-agent review" icon="users" href="/examples/multi-agent-review">
+    N specialists review in parallel; a moderator synthesizes the verdict.
+  </Card>
+  <Card title="Approval gates" icon="hand" href="/examples/approval-gate">
+    Pause a run for a human decision, then resume exactly where it left off.
+  </Card>
+  <Card title="Dynamic plans" icon="diagram-project" href="/examples/dynamic-plan">
+    Let an agent plan the work, then fan the plan out across worker tasks.
+  </Card>
+  <Card title="Loops" icon="repeat" href="/examples/loop">
+    Iterate until tests pass, coverage hits target, or a reviewer approves.
+  </Card>
+</CardGroup>
+
+## Any agent, any model
+
+Smithers doesn't bet on one lab or one harness. Point each task at whichever agent is best
+for the job, and switch freely:
+
+- **CLI agents**: [Claude Code](/integrations/cli-agents), Codex,
+  [Pi](/integrations/pi-integration), Antigravity, Kimi, and more, driven through their
+  own runtimes.
+- **SDK agents**: any model the [AI SDK](/integrations/sdk-agents) supports, with tools,
+  structured output, and MCP.
+- **Mix them in one workflow**: a frontier model plans, a fast model fans out, a
+  specialized harness does the edits. The workflow doesn't change when the model does.
+
+## Durable and observable
+
+Runs survive crashes, restarts, and flaky tools. Every completed step is persisted the
+moment it finishes, so the runtime always knows what's done and what to run next, and you
+can rewind, fork, and replay any run.
+
+```bash
+smithers up workflow.tsx --run-id abc123 --resume true   # resume after a crash
+smithers rewind abc123 --frame 4                         # time-travel to an earlier frame
+smithers observability up                                # Grafana + Prometheus + Tempo + OTLP
+smithers up workflow.tsx --serve --metrics               # HTTP API, SSE events, and /metrics
+```
+
+Every run emits Prometheus metrics and OpenTelemetry traces, so you can watch token spend,
+task latency, retries, and failures across thousands of runs. See
+[How It Works](/how-it-works) for the render → execute → persist loop.
+
+## Scale across machines
+
+Most workflows run fine on your laptop. When you need isolation, parallelism, or
+horizontal scale, the same [`<Sandbox>`](/components/sandbox) primitive runs a child
+workflow through an injectable provider (local or remote) with no change to the
+workflow:
+
+- **Local**: run agents in an isolated sandbox on your own machine.
+- **Remote**: gVisor, Kubernetes, [freestyle.sh](/examples/freestyle-sandbox-provider),
+  Daytona, and Cloudflare.
 
 ## Read next
 
-- [Install the agent skill](/installation#install-the-agent-skill) — make your coding agent drive Smithers for you.
-- [Tour](/tour) — a 6-step worked example that introduces every core feature.
-- [How It Works](/how-it-works) — the render → execute → persist loop.
-- [Components](/components/workflow) — JSX surface reference.
-- [CLI](/cli/overview) — every command in one table.
-- [Control Plane](/deployment/control-plane) — org/project, metering, secret-reference, and audit primitives.
-- [Recipes](/recipes) — common patterns.
-- [Types](/reference/types) — public TypeScript surface.
+<CardGroup cols={2}>
+  <Card title="Install the agent skill" icon="robot" href="/installation#install-the-agent-skill">
+    Make your coding agent drive Smithers for you.
+  </Card>
+  <Card title="Tour" icon="route" href="/tour">
+    A 6-step worked example that introduces every core feature.
+  </Card>
+  <Card title="How It Works" icon="gears" href="/how-it-works">
+    The render → execute → persist loop that makes runs durable.
+  </Card>
+  <Card title="Components" icon="cubes" href="/components/workflow">
+    The full JSX surface: tasks, sequences, loops, approvals, and more.
+  </Card>
+</CardGroup>
 
 ---
 
@@ -69,9 +208,9 @@ Outputs are validated by Zod, persisted to SQLite, and survive crashes. Resume w
 
 > What Smithers is and when to use it.
 
-Most workflow systems fail quietly — a crash mid-run means lost work and a manual restart from scratch. Smithers solves this with a render-loop execution model: every completed step is persisted immediately, so the runtime always knows exactly what has finished and what to run next.
+Smithers orchestrates AI coding agents at scale with composable, model- and harness-agnostic workflows. Most workflow systems fail quietly. A crash mid-run means lost work and a manual restart from scratch. Smithers solves this with a render-loop execution model: every completed step is persisted immediately, so the runtime always knows exactly what has finished and what to run next.
 
-You write a workflow as a JSX tree, and Smithers repeatedly renders it every "frame". Each render answers: given what has already finished, what can run now? Tasks produce outputs validated by Zod schemas; the runtime persists them to SQLite. Crashes, restarts, and approvals are first-class — the runtime resumes from the last persisted state without re-running completed work.
+Your agent writes the workflow as a JSX tree, and Smithers repeatedly renders it every "frame". Each render answers: given what has already finished, what can run now? Tasks produce outputs validated by Zod schemas; the runtime persists them to SQLite. Crashes, restarts, and approvals are first-class, and the runtime resumes from the last persisted state without re-running completed work.
 
 ```tsx
 <Workflow name="review">
@@ -94,9 +233,9 @@ Use Smithers when:
 - you need crash recovery
 - humans must approve or answer questions mid-run
 - different tasks need different models, tools, or policies
-- operators need the [Gateway](/integrations/gateway) operator API and browser console for active runs
+- operators need the [Gateway](/integrations/gateway) API to launch, stream, and approve runs programmatically
 
-Don't use it for a single prompt → single response. Use your model provider's SDK directly — Smithers adds no value there.
+Don't use it for a single prompt → single response. Use your model provider's SDK directly; Smithers adds no value there.
 
 ## Read next
 
@@ -177,6 +316,10 @@ For agents without a skills directory, point them at
 `bunx smithers-orchestrator docs-full` (prints the same bundle) or
 `bunx smithers-orchestrator ask "<question>"`.
 
+To install the skill **and** register the MCP server into every coding agent on
+your machine at once, see [Agent Support](/agents/overview) — it covers Claude
+Code, Codex, Cursor, Copilot, Pi, Hermes, OpenClaw, and ~20 more.
+
 ## When to Use Manual Installation
 
 Use manual installation when embedding Smithers into an existing TypeScript codebase to author a standalone [workflow project](/guides/project-structure) from scratch.
@@ -189,26 +332,10 @@ See [JSX Installation](/jsx/installation) for the package list, TypeScript confi
 - TypeScript >= 5
 - Model or provider credentials (e.g. [Anthropic](https://docs.anthropic.com) `ANTHROPIC_API_KEY`)
 
-## Desktop App (macOS)
-
-The Smithers desktop GUI is a separate download. It's a native macOS app (Apple Silicon) that includes the orchestrator, an embedded terminal, and workflow tooling.
-
-<a href="https://download.smithers.sh/SmithersGUI.dmg">Download SmithersGUI.dmg</a>
-
-Or from the terminal:
-
-```bash
-curl -LO https://download.smithers.sh/SmithersGUI.dmg
-open SmithersGUI.dmg
-```
-
-<Tip>
-The current build is unsigned. The first time you open it, right-click the app and choose **Open**, then confirm the Gatekeeper dialog. This only needs to be done once.
-</Tip>
-
 ## After Installation
 
 - [Quickstart](/quickstart) — run a seeded workflow immediately.
+- [Set up in your harness](/agents/setup) — wire Smithers into your agent and grab a copy-paste setup prompt.
 - [Install the Agent Skill](#install-the-agent-skill) — make your coding agent fluent in Smithers.
 - [CLI Quickstart](/cli/quickstart) — operational workflow.
 - [JSX Installation](/jsx/installation) — manual TSX authoring setup.
@@ -253,7 +380,7 @@ For a full worked example, see the [Tour](/tour). For every CLI command see the 
 
 > Choose a plain-English outcome and copy the Smithers command.
 
-Smithers ships with starter workflows for people who want a result before they want to write workflow code. Browse the starter gallery from any repo:
+Smithers ships with starter workflows for when you want a result before your agent writes any workflow code. Browse the starter gallery from any repo:
 
 ```bash
 bunx smithers-orchestrator starters
@@ -754,6 +881,17 @@ The supervisor auto-resumes runs whose owner process died:
 bunx smithers supervise --interval 30s --stale-threshold 1m
 ```
 
+## Session snapshots & fork
+
+Every agent task persists its conversation as a durable session snapshot alongside its output. A later task can start from a **copy** of that context with `fork`:
+
+```tsx
+<Task id="plan" agent={claude} output={outputs.plan}>Make a plan.</Task>
+<Task id="implement" agent={claude} fork="plan" output={outputs.patch}>Implement the plan.</Task>
+```
+
+`fork` is immutable: it copies the source conversation into a fresh, independent session and submits the new prompt — the source is never mutated, so many tasks can fork the same source in parallel, and a forked task can itself be forked. Because the snapshot is read from persisted state on each attempt, fork is resume-safe and the source is never re-executed. Inside a `<Loop>`, `fork` resolves to the latest completed snapshot for that task id. See [`<Task>` fork](/components/task#fork).
+
 ## Caching
 
 Per-Task caching with explicit invalidation:
@@ -952,7 +1090,7 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 - Global options: `--format toon|json|yaml|md|jsonl`, `--filter-output <key.path>`, `--full-output`, `--token-count`, `--token-limit N`, `--token-offset N`, `--schema`, `--llms`, `--llms-full`, `--mcp`, `--help`, `--version`.
 - MCP stdio mode: pass `--mcp` to start Smithers as an MCP server. Add `--surface semantic|raw|both` to choose the exposed tool surface.
 - Workflow resolution: `up`, `graph`, `revert`, `replay`, `fork`, `retry-task`, and `timetravel` take a workflow file path. `eval` accepts either a workflow path or a discovered workflow ID. `workflow run <name>` resolves IDs from `.smithers/workflows/<name>.tsx`.
-- Rewrites: `smithers workflow <id>` runs a discovered workflow when `<id>` resolves; `smithers workflow.tsx` behaves like `smithers up workflow.tsx`; `smithers chat create` behaves like `smithers chat-create`; `smithers .` opens the current directory in Smithers GUI.
+- Rewrites: `smithers workflow <id>` runs a discovered workflow when `<id>` resolves; `smithers workflow.tsx` behaves like `smithers up workflow.tsx`; `smithers chat create` behaves like `smithers chat-create`.
 - JSON arguments are preflighted before workflow modules load. `--input` and `--annotations` accept an inline JSON value or `-` to read JSON from stdin, capped at 1 MiB.
 
 ## Exit codes
@@ -1204,6 +1342,21 @@ commands[65]:
     flags[2]{name,short,type,default,desc}:
       run-id,r,string,graph,Run ID for context
       input,,string,,Input JSON; overrides persisted input
+  - name: gui
+    purpose: Open a directory as a workspace in Smithers GUI
+    args[1]{name,type,required,desc}:
+      path,string,false,Directory path (defaults to current working directory)
+    flags[1]{name,short,type,default,desc}:
+      bundle-id,,string,com.smithers.SmithersGUI,Smithers GUI app bundle identifier
+  - name: ui
+    purpose: Open the custom UI for a workflow run in your browser
+    args[1]{name,type,required,desc}:
+      runId,string,false,Run to open. Defaults to the most recent run.
+    flags[4]{name,short,type,default,desc}:
+      gateway,g,string,,Gateway base URL (default http://127.0.0.1:<port>)
+      port,,number,7331,Gateway port when --gateway is not set
+      workflow,w,string,,Open this workflow's UI directly skipping run lookup
+      open,,boolean,true,Open a browser; use --no-open to just print the URL
   - name: revert
     purpose: Revert the workspace to a previous task attempt's filesystem state
     args[1]{name,type,required,desc}:
@@ -1325,20 +1478,26 @@ commands[65]:
       runId,string,true,Run ID
     flags[1]{name,short,type,default,desc}:
       node,,string,,Filter scores to a specific node ID
-  - name: gui
-    purpose: Open a directory as a workspace in Smithers GUI
-    args[1]{name,type,required,desc}:
-      path,string,false,Directory path; current directory if omitted
-    flags[1]{name,short,type,default,desc}:
-      bundle-id,,string,com.smithers.SmithersGUI,macOS app bundle identifier
+  - name: usage
+    purpose: Show how much rate limit or subscription quota each registered account has used
+    flags[3]{name,short,type,default,desc}:
+      account,,string,,Only report this account label
+      provider,,string,,Only report accounts for this provider
+      fresh,,boolean,false,Bypass the short usage cache while respecting provider rate-limit floors
   - name: docs
-    purpose: Print published llms.txt from smithers.sh
+    purpose: Print llms.txt for this CLI version
+    flags[2]{name,short,type,default,desc}:
+      latest,,boolean,false,Fetch the latest docs from smithers.sh instead of docs for this CLI version
+      docs-version,,string,,Fetch docs for a specific Smithers version, e.g. 0.22.0 or v0.22.0
   - name: docs-full
-    purpose: Print published llms-full.txt from smithers.sh
+    purpose: Print llms-full.txt for this CLI version
+    flags[2]{name,short,type,default,desc}:
+      latest,,boolean,false,Fetch the latest docs from smithers.sh instead of docs for this CLI version
+      docs-version,,string,,Fetch docs for a specific Smithers version, e.g. 0.22.0 or v0.22.0
   - name: agents.capabilities
     purpose: Print JSON capability registry for built-in CLI agents
   - name: agents.doctor
-    purpose: Validate built-in CLI agent capability registries
+    purpose: Validate built-in CLI agent capability registries and command-surface contracts
     flags[1]{name,short,type,default,desc}:
       json,,boolean,false,Print doctor report as JSON
   - name: agents.add
@@ -1448,15 +1607,6 @@ commands[65]:
       no-global,,boolean,false,Install to project instead of globally
   - name: skills.list
     purpose: List available skills
-  - name: ui
-    purpose: Open the custom UI for a workflow run in your browser
-    args[1]{name,type,required,desc}:
-      runId,string,false,Run to open. Defaults to most recent run
-    flags[4]{name,short,type,default,desc}:
-      gateway,g,string,,Gateway base URL (default http://127.0.0.1:<port>)
-      port,,number,7331,Gateway port when --gateway is not set
-      workflow,w,string,,Open this workflow's UI directly
-      open,,boolean,true,Open a browser (use --no-open to print URL)
 ```
 
 ## Operational notes
@@ -1467,7 +1617,7 @@ commands[65]:
 - **DevTools commands**: `tree`, `diff`, `output`, and `rewind` intentionally use command-scoped `--json`/`-j` and return exit code `1` for parser/user errors.
 - **Account commands**: `agents add|list|remove|test` manage `~/.smithers/accounts.json`; subscription providers use CLI config directories, API providers use API keys.
 - **Output format**: all commands honour `--format toon|json|yaml|md|jsonl`; `--filter-output <key.path>` extracts a nested field from JSON output.
-- **Removed command**: `smithers tui` was removed in 0.20.2. Use `ps`, `events`, `chat`, `inspect`, `node`, `tree`, `diff`, `output`, `rewind`, or `gui` instead. See `tui.mdx` for migration details.
+- **Removed command**: `smithers tui` was removed in 0.20.2. Use `ps`, `events`, `chat`, `inspect`, `node`, `tree`, `diff`, `output`, or `rewind` instead. See `tui.mdx` for migration details.
 
 ---
 
@@ -1568,6 +1718,7 @@ type TaskProps = {
   dependsOn?: string[];
   needs?: Record<string, string>;
   deps?: Record<string, OutputTarget>; // typed render-time upstream outputs
+  fork?: string; // start from another task's final agent session snapshot
   allowTools?: string[]; // CLI-agent tool allowlist
   key?: string;
   skipIf?: boolean;
@@ -1618,9 +1769,68 @@ const codeAgent = new Agent({
 </Task>
 ```
 
+## Fork
+
+Every agent task produces a reusable session snapshot. Use `fork` to start a new task from any previous task's context.
+
+`<Task id={B} fork={A}>` means:
+
+- `B` depends on `A` and cannot run until `A` has completed.
+- `B` starts from a **copy** of `A`'s final agent session context, then submits its own prompt into that copy.
+- `B` produces its own output and its own session snapshot. `A` is never mutated.
+
+`fork` is immutable. It does not continue or mutate the source task — it copies the conversation into a fresh, independent session. Multiple tasks may fork the same source safely, and a forked task may itself be forked.
+
+```tsx
+const PLAN = "plan" as const;
+const IMPLEMENT = "implement" as const;
+const VERIFY = "verify" as const;
+
+<Task id={PLAN} agent={claude} output={outputs.plan}>
+  Make a plan.
+</Task>
+
+<Task id={IMPLEMENT} agent={claude} fork={PLAN} output={outputs.patch}>
+  Implement the plan.
+</Task>
+
+<Task id={VERIFY} agent={claude} fork={IMPLEMENT} output={outputs.result}>
+  Run tests and fix failures.
+</Task>
+```
+
+`VERIFY` forks `IMPLEMENT`, which forked `PLAN`, so `VERIFY` sees the whole `plan → implement` conversation.
+
+**Parallel branches** — fork the same source from sibling tasks; each gets its own copy and they never affect each other:
+
+```tsx
+<Task id="investigate" agent={claude} output={outputs.investigation}>
+  Understand the bug and identify possible fixes.
+</Task>
+
+<Parallel>
+  <Task id="minimal-fix" agent={claude} fork="investigate" output={outputs.patch}>
+    Try the minimal fix.
+  </Task>
+  <Task id="refactor-fix" agent={claude} fork="investigate" output={outputs.patch}>
+    Try the refactor fix.
+  </Task>
+</Parallel>
+```
+
+`fork` composes with `dependsOn`, `needs`, `deps`, `Sequence`, `Parallel`, `Branch`, and `Loop`. Inside a loop, `fork` resolves to the **latest completed** session snapshot for that task id — there is no iteration selector and no ambiguity.
+
+### Error cases
+
+- **`TASK_FORK_SOURCE_NOT_FOUND`** — `fork` points to a task id not present in the graph (including a source that exists only in an unselected `<Branch>`).
+- **`TASK_FORK_CYCLE`** — `fork` creates a cycle, directly or indirectly.
+- **`TASK_FORK_SESSION_UNAVAILABLE`** — the forking task is not an agent task, or the source completed but produced no usable session snapshot (e.g. a compute/static source, or a source that was skipped/cancelled).
+- **`TASK_FORK_SOURCE_NOT_COMPLETE`** — the source exists but has not completed; the forked task waits and does not run.
+
 ## Notes
 
 - Three modes by `children` shape: agent (with `agent`), compute (function, no agent), static (value, no agent).
+- `fork` requires an agent task; the source must be an agent task with a session snapshot. Forking copies the conversation into a new session and never reuses a native session id.
 - When `outputSchema` is set, JSON is extracted from agent text; schema-validation retries don't consume `retries`.
 - Auth errors short-circuit retries; non-idempotent tool reuse warns on the next attempt.
 
@@ -3794,6 +4004,27 @@ bunx smithers-orchestrator up workflow.tsx --hot
 
 Edits to the workflow source apply on the next render frame without losing in-flight task state. Schema changes still require a fresh run.
 
+## Fork agent session context
+
+Every agent task produces a reusable session snapshot. `fork` starts a new task from a copy of another task's final context — without mutating the source.
+
+```tsx
+<Task id="investigate" agent={claude} output={outputs.investigation}>
+  Understand the bug and identify possible fixes.
+</Task>
+
+<Parallel>
+  <Task id="minimal-fix" agent={claude} fork="investigate" output={outputs.patch}>
+    Try the minimal fix.
+  </Task>
+  <Task id="refactor-fix" agent={claude} fork="investigate" output={outputs.patch}>
+    Try the refactor fix.
+  </Task>
+</Parallel>
+```
+
+`fork` adds the source as a dependency (the forked task waits for it), copies its conversation into a fresh session, then submits the new prompt. Both branches above start from the same investigation and never affect each other. Chain it for follow-ups (`plan → implement → verify`); inside a `<Loop>` it forks the latest completed snapshot for that id. See [`<Task>` fork](/components/task#fork).
+
 ## Read next
 
 - [How It Works](/how-it-works) — the model these recipes plug into.
@@ -3984,6 +4215,7 @@ type TaskDescriptor = {
   ralphId?: string;
   dependsOn?: string[];
   needs?: Record<string, string>;
+  forkSource?: string;              // logical id of the task whose session this task forks
   worktreeId?: string;
   worktreePath?: string;
   worktreeBranch?: string;
@@ -4120,6 +4352,7 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   dependsOn?: string[];
   needs?: Record<string, string>;
   deps?: D;
+  fork?: string;                    // start from another task's final agent session snapshot
   skipIf?: boolean;
   needsApproval?: boolean;
   async?: boolean;                  // only with needsApproval
@@ -4413,7 +4646,6 @@ type GatewayOptions = {
   heartbeatMs?: number;
   auth?: GatewayAuthConfig;
   ui?: GatewayUiConfig;
-  operatorUi?: GatewayOperatorUiConfig | false;   // default { path: "/console" }
   defaults?: { cliAgentTools?: "all" | "explicit-only" };
   maxBodyBytes?: number;
   maxPayload?: number;
@@ -4628,7 +4860,13 @@ try {
 | `VCS_WORKSPACE_CREATE_FAILED` | Smithers fails to materialize a jj workspace for time-travel or replay. | `{ runId, frameNo, vcsPointer, workspacePath }` |
 | `TASK_TIMEOUT` | A task compute callback exceeds its configured timeout. | `{ nodeId, attempt, timeoutMs }` |
 | `TASK_HIJACK_UNSUPPORTED` | A task requests auto-hijack but its agent cannot provide a resumable session or conversation. | `{ nodeId, agentId? }` |
+| `TASK_FORK_SOURCE_NOT_COMPLETE` | A forked task began executing but its fork source has not completed, so no session snapshot exists yet. | `{ nodeId, forkSource }` |
+| `TASK_FORK_SESSION_UNAVAILABLE` | A `<Task fork>` cannot obtain a usable agent session snapshot from the source task. | `{ nodeId, forkSource }` |
 | `TASK_ABORTED` | A running task is aborted through an AbortSignal or shutdown path. | -- |
+| `TASK_FORK_SOURCE_NOT_FOUND` | A `<Task fork>` references a source task id that is not present in the workflow graph (including a source that exists only in an unselected branch). | `{ nodeId, forkSource }` |
+| `TASK_FORK_SOURCE_NOT_COMPLETE` | A forked task began executing but its fork source has not completed, so no session snapshot exists yet. | `{ nodeId, forkSource }` |
+| `TASK_FORK_SESSION_UNAVAILABLE` | A `<Task fork>` cannot obtain a usable agent session snapshot — the forking task is not an agent task, or the source completed without producing a forkable conversation (e.g. a compute/static, skipped, or cancelled source). | `{ nodeId, forkSource }` |
+| `TASK_FORK_CYCLE` | A `<Task fork>` introduces a dependency cycle, directly or indirectly. | `{ nodeId, forkSource }` |
 | `RUN_NOT_FOUND` | A CLI or engine command references a run ID that does not exist in the database. | `{ runId }` |
 | `NODE_NOT_FOUND` | A CLI command references a node ID that does not exist for the given run. | `{ runId, nodeId }` |
 | `SANDBOX_BUNDLE_INVALID` | A sandbox bundle fails validation (missing README, invalid manifest, etc.). | `{ bundlePath }` |
@@ -4658,6 +4896,8 @@ try {
 |---|---|---|
 | `TASK_ID_REQUIRED` | `<Task>` is missing a valid string id. | -- |
 | `TASK_MISSING_OUTPUT` | `<Task>` is missing its output prop. | `{ nodeId }` |
+| `TASK_FORK_SOURCE_NOT_FOUND` | A `<Task fork>` references a source task id that is not present in the workflow graph. | `{ nodeId, forkSource }` |
+| `TASK_FORK_CYCLE` | A `<Task fork>` introduces a dependency cycle, directly or indirectly. | `{ nodeId, forkSource }` |
 | `DUPLICATE_ID` | Two nodes with the same runtime id are mounted in one workflow graph. | `{ kind, id }` |
 | `NESTED_LOOP` | `<Loop>` or `<Ralph>` is nested inside another loop construct that Smithers does not support. | -- |
 | `WORKTREE_EMPTY_PATH` | `<Worktree>` is mounted with an empty path. | -- |
@@ -4844,10 +5084,12 @@ Most applications should import from `smithers-orchestrator`. The scoped workspa
 | `@smithers-orchestrator/scheduler` | Pure workflow state machine: task state, scheduler decisions, retry/cache policies, wait reasons, and workflow session services | [Workflow State](/concepts/workflow-state), [Suspend and Resume](/concepts/suspend-and-resume) |
 | `@smithers-orchestrator/scorers` | Scorer definitions, LLM judges, batch execution, aggregation, persistence schema, and metrics | [Evals](/concepts/evals), [Evals Quickstart](/guides/evals-quickstart) |
 | `@smithers-orchestrator/server` | HTTP, WebSocket, Gateway, cron, webhook, metrics, and single-workflow serving APIs | [Server](/integrations/server), [Serve](/integrations/serve) |
-| `@smithers-orchestrator/smithers-demo` | Private React Flow demo app for visual workflow generation and graph inspection | [Workflow Studio Demo](/examples/workflow-studio-demo) |
-| `@smithers-orchestrator/smithers-studio-2` | Private Vite and React Studio 2 shell for next-generation workflow UI experiments, terminal panes, and operator views | [Workflow Studio Demo](/examples/workflow-studio-demo) |
+| `@smithers-orchestrator/smithers` | Cerebras chat PWA and workflow graph demo application | [CLI Overview](/cli/overview) |
+| `@smithers-orchestrator/smithers-demo` | Interactive Smithers workflow generator demo with React Flow visualization | [CLI Overview](/cli/overview) |
+| `@smithers-orchestrator/smithers-studio-2` | Next Smithers Studio UI shell for browsing and driving workflow runs | [CLI Overview](/cli/overview) |
 | `@smithers-orchestrator/smithers-tui-demo` | Private React TUI demo app for terminal workflow interaction experiments | [CLI Overview](/cli/overview) |
 | `@smithers-orchestrator/time-travel` | Snapshots, diffs, forks, replay, timelines, VCS tags, rewind locks/audits, and time-travel metrics | [Time Travel](/concepts/time-travel), [Time Travel Quickstart](/guides/time-travel-quickstart) |
+| `@smithers-orchestrator/usage` | Account quota and rate-limit usage reporting for Smithers providers | [CLI Overview](/cli/overview) |
 | `@smithers-orchestrator/vcs` | VCS discovery and jj workspace operations such as `runJj`, `workspaceAdd`, `workspaceList`, and pointer reverts | [VCS Helpers](/reference/vcs-helpers), [VCS Guide](/guides/vcs) |
 
 ### Usage
@@ -4963,10 +5205,9 @@ Defined in the root `package.json` for development:
 | `lint` | `oxlint ... packages/*/src packages/*/tests` | Lint package source and tests with oxlint |
 | `lint:fix` | `oxlint ... --fix --fix-suggestions packages/*/src packages/*/tests` | Apply supported oxlint fixes |
 | `cli` | `bun run apps/cli/src/index.js` | Run the local development CLI entrypoint |
-| `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-architecture-budget.mjs && pnpm -r test` | Run three dependency/architecture guard checks and each package test script |
+| `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && pnpm -r test` | Run the dependency guard checks and each package test script |
 | `check:effect` | `node scripts/check-single-effect-version.mjs` | Verify the workspace resolves a single Effect version |
 | `check:deps` | `node scripts/check-dependency-boundaries.mjs` | Verify package dependency boundaries |
-| `check:architecture` | `node scripts/check-architecture-budget.mjs` | Verify the workspace stays within the architecture budget constraints |
 | `docs` | `cd docs && bunx mintlify dev` | Start the Mintlify docs dev server for local preview |
 | `version` | `node scripts/bump.mjs` | Bump package versions using the release helper |
 | `release` | `node scripts/publish.mjs` | Publish packages using the release helper |
@@ -5322,7 +5563,7 @@ where `adapter` is the `SmithersDb` instance for the run's database.
 
 > The single typed model for "what is this run doing right now?"
 
-Every Smithers surface — CLI, TUI, GUI, Gateway, DevTools — answers
+Every Smithers surface — CLI, Gateway, and programmatic clients — answers
 "what is this run doing right now?" by reading the same `RunStateView`,
 computed server-side from persisted state plus liveness signals.
 
@@ -5455,7 +5696,7 @@ A run id that does not exist is not a `RunState` — it's an error
 
 ## TUI Removed
 
-> The old smithers tui command is no longer shipped; use the CLI, GUI, or gateway surfaces instead.
+> The old smithers tui command is no longer shipped; use the CLI commands instead.
 
 `smithers tui` was removed in `0.20.2`. Use the commands in the table below instead.
 

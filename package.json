@@ -70,9 +70,11 @@
     "cli": "bun run apps/cli/src/index.js",
     "demo:smithers": "pnpm --filter @smithers-orchestrator/smithers-demo dev",
     "demo:smithers:tui": "pnpm --filter @smithers-orchestrator/smithers-tui-demo tui",
-    "test": "node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && pnpm -r test",
+    "test": "node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-llms.mjs && pnpm -r test",
     "check:effect": "node scripts/check-single-effect-version.mjs",
     "check:deps": "node scripts/check-dependency-boundaries.mjs",
+    "check:llms": "node scripts/check-llms.mjs",
+    "docs:llms": "bun scripts/generate-llms.ts && bun scripts/optimize-llms-full.ts",
     "docs": "cd docs && bunx mintlify dev",
     "version": "node scripts/bump.mjs",
     "release": "node scripts/publish.mjs"

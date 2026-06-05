@@ -1,0 +1,19 @@
+# Smithers
+
+Durable AI workflow orchestration as a JSX runtime.
+
+## Documentation
+
+- [Core docs](/llms-core.txt) — runtime, JSX surface, CLI, components, recipes, types, errors
+- [Memory fragment](/llms-memory.txt) — cross-run memory: facts, history, recall
+- [OpenAPI tools fragment](/llms-openapi.txt) — generate AI SDK tools from OpenAPI specs
+- [Observability fragment](/llms-observability.txt) — HTTP server, gateway, MCP, OpenTelemetry
+- [Effect fragment](/llms-effect.txt) — Effect-ts authoring API (no JSX)
+- [Integrations fragment](/llms-integrations.txt) — agent runtimes, tools, ecosystem
+- [Events fragment](/llms-events.txt) — full SmithersEvent discriminated union
+
+## Pointers
+
+- npm: smithers-orchestrator
+- github: github.com/smithersai/smithers
+- changelogs: docs/changelogs/ on the site (not duplicated in llms files)

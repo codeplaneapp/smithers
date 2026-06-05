@@ -23,10 +23,14 @@
  * Run: bun scripts/optimize-llms-full.ts
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
 const TARGET = resolve(import.meta.dir, "../docs/llms-full.txt");
+const MIRRORS = [
+  resolve(import.meta.dir, "../skills/smithers/llms-full.txt"),
+  resolve(import.meta.dir, "../apps/cli/docs/llms-full.txt"),
+];
 const before = readFileSync(TARGET, "utf8");
 let text = before;
 
@@ -392,6 +396,10 @@ if (text === before) {
 }
 
 writeFileSync(TARGET, text);
+for (const mirror of MIRRORS) {
+  mkdirSync(dirname(mirror), { recursive: true });
+  writeFileSync(mirror, text);
+}
 const beforeBytes = before.length;
 const afterBytes = text.length;
 const beforeTokens = Math.round(beforeBytes / 4);
@@ -400,3 +408,6 @@ const pct = (((beforeBytes - afterBytes) / beforeBytes) * 100).toFixed(1);
 console.log(`docs/llms-full.txt`);
 console.log(`  bytes:  ${beforeBytes.toLocaleString()} -> ${afterBytes.toLocaleString()}  (-${(beforeBytes - afterBytes).toLocaleString()}, -${pct}%)`);
 console.log(`  ~tokens: ${beforeTokens.toLocaleString()} -> ${afterTokens.toLocaleString()}  (-${(beforeTokens - afterTokens).toLocaleString()})`);
+for (const mirror of MIRRORS) {
+  console.log(`  mirrored: ${mirror.replace(resolve(import.meta.dir, "..") + "/", "")}`);
+}

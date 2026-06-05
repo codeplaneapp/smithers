@@ -3,7 +3,7 @@ import { setJsonMode } from "./util/logger.ts";
 import { findFirstPositionalIndex, parseMcpSurfaceArgv, rewriteBareResumeFlagArgv } from "./argv-utils.js";
 import { CLI_JSON_ARGUMENT_MAX_BYTES, parseJsonArgument, parseJsonInput } from "./json-args.js";
 import { resolve, dirname, basename } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { readFileSync, existsSync, openSync, statSync } from "node:fs";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Effect, Fiber } from "effect";
@@ -67,6 +67,7 @@ import { parseDurationMs, supervisorLoopEffect, } from "./supervisor.js";
 import { WATCH_MIN_INTERVAL_MS, runWatchLoop, watchIntervalSecondsToMs, } from "./watch.js";
 import { createSemanticMcpServer } from "./mcp/semantic-server.js";
 import { parseTokenScopes, readSmithersTokenStore, smithersTokenStorePath, writeSmithersTokenStore, } from "./token-store.js";
+import { resolveSmithersDocsSource } from "./docs-command.js";
 import pc from "picocolors";
 import crypto from "node:crypto";
 import React from "react";
@@ -422,36 +423,73 @@ function isRunStatusTerminal(status) {
         status !== "waiting-event");
 }
 /**
- * Fetch a docs file from smithers.sh and write it to stdout.
+ * Fetch a docs file and write it to stdout.
  * Honors --json (global) by emitting `{ url, content }`.
  *
  * @param {{ error: Function; ok: Function; format?: string; options?: { json?: boolean } }} c
- * @param {string} url
+ * @param {string} file
  * @param {string} errorCode
  */
-async function printSmithersDocs(c, url, errorCode) {
-    let body;
+async function printSmithersDocs(c, file, errorCode) {
+    const cliSourceRoot = dirname(fileURLToPath(import.meta.url));
+    const localDocsRoots = [
+        resolve(cliSourceRoot, "../docs"),
+        resolve(cliSourceRoot, "../../../docs"),
+    ];
+    let source;
     try {
-        const res = await fetch(url);
-        if (!res.ok) {
-            return c.error({
-                code: errorCode,
-                message: `Failed to fetch ${url}: HTTP ${res.status}`,
-                exitCode: 1,
-            });
-        }
-        body = await res.text();
+        source = resolveSmithersDocsSource({
+            file,
+            latest: Boolean(c.options?.latest),
+            version: typeof c.options?.docsVersion === "string" ? c.options.docsVersion : undefined,
+            packageVersion: readPackageVersion(),
+            localDocsRoots,
+        });
     }
     catch (err) {
         return c.error({
-            code: errorCode,
-            message: `Failed to fetch ${url}: ${err?.message ?? String(err)}`,
+            code: "DOCS_OPTIONS_INVALID",
+            message: err?.message ?? String(err),
             exitCode: 1,
         });
     }
+
+    let body;
+    if (source.kind === "local") {
+        try {
+            body = readFileSync(source.path, "utf8");
+        }
+        catch (err) {
+            return c.error({
+                code: errorCode,
+                message: `Failed to read ${source.path}: ${err?.message ?? String(err)}`,
+                exitCode: 1,
+            });
+        }
+    }
+    else {
+        try {
+            const res = await fetch(source.url);
+            if (!res.ok) {
+                return c.error({
+                    code: errorCode,
+                    message: `Failed to fetch ${source.url}: HTTP ${res.status}`,
+                    exitCode: 1,
+                });
+            }
+            body = await res.text();
+        }
+        catch (err) {
+            return c.error({
+                code: errorCode,
+                message: `Failed to fetch ${source.url}: ${err?.message ?? String(err)}`,
+                exitCode: 1,
+            });
+        }
+    }
     const wantsJson = Boolean(c.options?.json) || c.format === "json";
     if (wantsJson) {
-        return c.ok({ url, content: body });
+        return c.ok({ url: source.url, content: body });
     }
     process.stdout.write(body.endsWith("\n") ? body : `${body}\n`);
     return c.ok(undefined);
@@ -5219,18 +5257,26 @@ const cli = Cli.create({
 })
     // =========================================================================
     // smithers docs / smithers docs-full
-    // Print the published llms.txt / llms-full.txt from smithers.sh.
+    // Print the llms.txt / llms-full.txt docs for this CLI version by default.
     // =========================================================================
     .command("docs", {
-    description: "Print llms.txt (concise docs index for LLMs) from smithers.sh.",
+    description: "Print llms.txt (concise docs index for LLMs) for this CLI version.",
+    options: z.object({
+        latest: z.boolean().default(false).describe("Fetch the latest docs from smithers.sh instead of docs for this CLI version"),
+        docsVersion: z.string().optional().describe("Fetch docs for a specific Smithers version, e.g. 0.22.0 or v0.22.0"),
+    }),
     async run(c) {
-        return printSmithersDocs(c, "https://smithers.sh/llms.txt", "DOCS_FETCH_FAILED");
+        return printSmithersDocs(c, "llms.txt", "DOCS_FETCH_FAILED");
     },
 })
     .command("docs-full", {
-    description: "Print llms-full.txt (full docs bundle for LLMs) from smithers.sh.",
+    description: "Print llms-full.txt (full docs bundle for LLMs) for this CLI version.",
+    options: z.object({
+        latest: z.boolean().default(false).describe("Fetch the latest docs from smithers.sh instead of docs for this CLI version"),
+        docsVersion: z.string().optional().describe("Fetch docs for a specific Smithers version, e.g. 0.22.0 or v0.22.0"),
+    }),
     async run(c) {
-        return printSmithersDocs(c, "https://smithers.sh/llms-full.txt", "DOCS_FULL_FETCH_FAILED");
+        return printSmithersDocs(c, "llms-full.txt", "DOCS_FULL_FETCH_FAILED");
     },
 })
     .command("usage", {

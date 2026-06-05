@@ -378,71 +378,15 @@ ws.onopen = () => ws.send(JSON.stringify({
 }));
 ```
 
-## Operator Console
+## Gateway client SDK
 
-Gateway serves a built-in operator console at `/console`. It gives non-coding operators a same-origin surface for health, workflow launch, active runs, pending approvals, and run inspection. Selecting a run opens a Run Chronicle view backed by `streamDevTools`, `streamRunEvents`, `getNodeOutput`, and `getNodeDiff`, so operators can inspect the live task tree, event history, output, and diff without leaving the Gateway. The console uses the Gateway RPC API and accepts the same bearer tokens as programmatic clients.
-
-Disable or move it when embedding Smithers behind another app:
-
-```ts
-new Gateway({ operatorUi: false });
-new Gateway({ operatorUi: { path: "/ops", title: "Ops Console" } });
-```
-
-## Custom React UI
-
-Gateway can also serve a browser React app from the same origin as the RPC and WebSocket API. Use this when a workflow needs a custom operator surface instead of the built-in console.
-
-```tsx
-const gateway = new Gateway({
-  ui: {
-    entry: "./src/gateway-ui.tsx",
-    path: "/console",
-    title: "Operations Console",
-    props: { environment: "prod" },
-  },
-});
-
-gateway.register("deploy", deploy, {
-  ui: {
-    entry: "./src/deploy-ui.tsx",
-    title: "Deploy Workflow",
-  },
-});
-```
-
-Gateway-level UI defaults to `/`. Workflow-level UI defaults to `/workflows/<workflowKey>`, so the example above serves the workflow UI at `/workflows/deploy`. Gateway generates the HTML shell, bundles the entry with Bun for the browser, serves the bundle from `<mount>/__smithers_ui/client.js`, and injects `globalThis.__SMITHERS_GATEWAY_UI__` with the mount, workflow key, RPC path, WebSocket path, and `props`.
-
-Use the browser client SDK directly:
+Programmatic clients — bots, schedulers, dashboards — talk to the Gateway through the typed client SDK over the same RPC and WebSocket API.
 
 ```ts
 import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
 
 const gateway = new SmithersGatewayClient();
-const workflows = await gateway.listWorkflows({ filter: { hasUi: true } });
-```
-
-Or use the React hook package:
-
-```tsx
-import {
-  createGatewayReactRoot,
-  useGatewayActions,
-  useGatewayWorkflows,
-} from "smithers-orchestrator/gateway-react";
-
-function App() {
-  const workflows = useGatewayWorkflows();
-  const { launchRun } = useGatewayActions();
-
-  return (
-    <button onClick={() => launchRun({ workflow: "deploy", input: {} })}>
-      Run {workflows.data?.[0]?.key ?? "workflow"}
-    </button>
-  );
-}
-
-createGatewayReactRoot(<App />);
+const workflows = await gateway.listWorkflows();
 ```
 
 Gateway client exports:
@@ -450,7 +394,6 @@ Gateway client exports:
 | Package | Exports |
 |---|---|
 | `smithers-orchestrator/gateway-client` | `SmithersGatewayClient`, `SmithersGatewayConnection`, `GatewayRpcError`, RPC frame/type-map types, `GatewayUiBootConfig`, `SmithersGatewayClientOptions` |
-| `smithers-orchestrator/gateway-react` | `createGatewayReactRoot`, `SmithersGatewayContext`, `SmithersGatewayProvider`, `useSmithersGateway`, `useGatewayRpc`, `useGatewayActions`, `useGatewayRuns`, `useGatewayRun`, `useGatewayRunEvents`, `useGatewayNodeOutput`, `useGatewayApprovals`, `useGatewayWorkflows` |
 
 ## RPC methods (TOON)
 

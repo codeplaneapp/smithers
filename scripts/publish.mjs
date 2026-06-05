@@ -60,6 +60,9 @@ if (!SKIP_GIT) {
   }
 }
 
+log("llms", "pnpm check:llms");
+run("pnpm check:llms");
+
 if (!SKIP_BUILD) {
   log("build", "pnpm -r build");
   run("pnpm -r build");

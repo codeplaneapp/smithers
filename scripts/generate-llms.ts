@@ -23,6 +23,9 @@ const DOCS = resolve(import.meta.dir, "../docs");
 // The `smithers` agent skill bundles a copy of the full docs so an installed
 // skill is self-contained. Keep it generated here so it never drifts from docs.
 const SKILL_DIR = resolve(import.meta.dir, "../skills/smithers");
+// The CLI package carries the docs commands' default, version-matched output so
+// `bunx smithers-orchestrator@x docs-full` does not depend on the latest website.
+const CLI_DOCS_DIR = resolve(import.meta.dir, "../apps/cli/docs");
 
 // -----------------------------------------------------------------------------
 // Manifests
@@ -170,8 +173,7 @@ function exists(path: string): boolean {
 function renderPage(relPath: string): string {
   const abs = resolve(DOCS, relPath);
   if (!exists(abs)) {
-    console.warn(`  · skip (missing): ${relPath}`);
-    return "";
+    throw new Error(`Missing docs page in llms manifest: ${relPath}`);
   }
   const src = readFileSync(abs, "utf8");
   const { fm, body } = parseFrontmatter(src);
@@ -282,6 +284,10 @@ for (const b of builds) {
   mkdirSync(SKILL_DIR, { recursive: true });
   writeFileSync(resolve(SKILL_DIR, "llms-full.txt"), fullContent);
   console.log(`\n→ skills/smithers/llms-full.txt (bundled copy)`);
+
+  mkdirSync(CLI_DOCS_DIR, { recursive: true });
+  writeFileSync(resolve(CLI_DOCS_DIR, "llms-full.txt"), fullContent);
+  console.log(`\n→ apps/cli/docs/llms-full.txt (packaged CLI copy)`);
 }
 
 // -----------------------------------------------------------------------------
@@ -311,6 +317,11 @@ Durable AI workflow orchestration as a JSX runtime.
 
 writeFileSync(resolve(DOCS, "llms.txt"), indexContent);
 console.log(`\n→ llms.txt (index)`);
+console.log(`  ${indexContent.length.toLocaleString()} bytes`);
+
+mkdirSync(CLI_DOCS_DIR, { recursive: true });
+writeFileSync(resolve(CLI_DOCS_DIR, "llms.txt"), indexContent);
+console.log(`\n→ apps/cli/docs/llms.txt (packaged CLI copy)`);
 console.log(`  ${indexContent.length.toLocaleString()} bytes`);
 
 console.log(`\nTotal: ${totalBytes.toLocaleString()} bytes (~${Math.round(totalBytes / 4).toLocaleString()} tokens) across all fragments.`);
