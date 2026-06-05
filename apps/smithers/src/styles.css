@@ -992,6 +992,129 @@ button {
   font-weight: 600;
 }
 
+/* ---- Arc-style sidebar layout ----
+   The chat (transcript + composer) lives in a fixed-width left rail; the main
+   canvas to its right hosts whatever view is active (store, graph, …). */
+.app-shell[data-mode="sidebar"] {
+  flex-direction: row;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.chat-rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: clamp(280px, 25vw, 340px);
+  height: 100%;
+  border-right: 1px solid var(--border);
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+}
+
+.rail-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rail-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.rail-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+/* The transcript scrolls between the rail head and the docked composer. */
+.chat-rail .conversation {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.chat-rail .messages {
+  width: 100%;
+  gap: 14px;
+  padding: 16px 14px;
+}
+
+.chat-rail .composer-dock {
+  flex: none;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-rail .composer-card {
+  width: 100%;
+  padding: 12px;
+  border-radius: 16px;
+  box-shadow: none;
+}
+
+/* The rail is narrow — let the input keep its line and the controls wrap. */
+.chat-rail .composer-top-row {
+  flex-wrap: wrap;
+}
+
+/* The main canvas holds the active view and lets it own its scroll. */
+.main-canvas {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  animation: view-in 150ms ease-out both;
+}
+
+.main-canvas[data-dir="back"] {
+  animation-name: view-in-back;
+}
+
+.main-canvas .store {
+  flex: 1 1 auto;
+}
+
+.main-canvas .askme-graph-full {
+  flex: 1 1 auto;
+  height: auto;
+  border-bottom: 0;
+}
+
+/* Narrow screens: stack the rail above the canvas instead of side by side. */
+@media (max-width: 720px) {
+  .app-shell[data-mode="sidebar"] {
+    flex-direction: column;
+  }
+
+  .chat-rail {
+    flex: 1 1 55%;
+    width: 100%;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .main-canvas {
+    flex: 1 1 45%;
+    height: auto;
+  }
+}
+
 @media (max-width: 520px) {
   .messages {
     padding: 24px 14px 124px;

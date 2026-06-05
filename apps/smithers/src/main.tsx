@@ -93,6 +93,31 @@ function getSpeechRecognition(): SpeechRecognitionLike | null {
   return Recognition ? new Recognition() : null;
 }
 
+/** Panel-left glyph for the sidebar-layout toggle. */
+function PanelLeftIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <rect
+        x="3"
+        y="4"
+        width="18"
+        height="16"
+        rx="2.5"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <line
+        x1="9.5"
+        y1="4"
+        x2="9.5"
+        y2="20"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+    </svg>
+  );
+}
+
 function Composer() {
   const [query, setQuery] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -109,6 +134,22 @@ function Composer() {
       ? "dark"
       : "light";
   });
+  // The layout shell: "normal" keeps the centered → bottom-dock flow; "sidebar"
+  // is the Arc-style left rail (chat) + main canvas (any view). Persisted so a
+  // reload keeps the chosen shell.
+  const [layout, setLayout] = useState<"normal" | "sidebar">(() =>
+    window.localStorage.getItem("smithers.layout") === "sidebar"
+      ? "sidebar"
+      : "normal",
+  );
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("smithers.layout", layout);
+    } catch {
+      // Storage disabled (private mode); the layout still applies this session.
+    }
+  }, [layout]);
 
   // Apply the theme to <html> (CSS reads [data-theme]) and remember the choice.
   useEffect(() => {
@@ -138,6 +179,13 @@ function Composer() {
   const showStore = command === "store";
   // Ask Me (graph) and Store both dock the composer immediately.
   const isChat = messages.length > 0 || showGraph || showStore;
+  // Sidebar mode wins outright; otherwise it's the centered (home) vs
+  // bottom-docked (chat) flow.
+  const mode = layout === "sidebar" ? "sidebar" : isChat ? "chat" : "home";
+
+  const toggleLayout = useCallback(() => {
+    setLayout((value) => (value === "sidebar" ? "normal" : "sidebar"));
+  }, []);
 
   const goToIndex = useCallback(
     (index: number) => {
@@ -288,6 +336,18 @@ function Composer() {
       if (/^(open |show |go to )?(the )?store$/i.test(raw)) {
         setQuery("");
         goToCommand("store");
+        return;
+      }
+
+      // "/sidebar" (or "/dock") flips the Arc-style layout — the same view an
+      // agent can switch into from chat.
+      const layoutSlash = raw.match(/^\/(sidebar|rail|dock|full|normal)$/i);
+      if (layoutSlash) {
+        const keyword = layoutSlash[1].toLowerCase();
+        setLayout(
+          keyword === "sidebar" || keyword === "rail" ? "sidebar" : "normal",
+        );
+        setQuery("");
         return;
       }
 
@@ -449,6 +509,19 @@ function Composer() {
         <nav className="top-controls" aria-label="View navigation">
           <button
             aria-label={
+              layout === "sidebar"
+                ? "Exit sidebar layout"
+                : "Switch to sidebar layout"
+            }
+            aria-pressed={layout === "sidebar"}
+            className="nav-button"
+            type="button"
+            onClick={toggleLayout}
+          >
+            <PanelLeftIcon />
+          </button>
+          <button
+            aria-label={
               theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
             }
             className="nav-button"
@@ -580,76 +653,112 @@ function Composer() {
     </form>
   );
 
-  return (
-    <main
-      className="app-shell"
-      data-command={command}
-      data-mode={isChat ? "chat" : "home"}
+  // The scrolling transcript — shared by the bottom-dock view and the rail.
+  const messagesLog = (
+    <div
+      className="conversation"
+      ref={conversationRef}
+      role="log"
+      aria-live="polite"
     >
+      <div className="messages">
+        {messages.length === 0 && showGraph ? (
+          <p className="askme-hint">
+            Tell me what to grill you on — type a topic and hit Enter.
+          </p>
+        ) : null}
+        {messages.map((message) => (
+          <div className={`message ${message.role}`} key={message.id}>
+            <div className="bubble">
+              {message.role === "assistant" ? (
+                <Markdown content={message.text} />
+              ) : (
+                message.text
+              )}
+            </div>
+          </div>
+        ))}
+        {pending ? (
+          <div className="message assistant">
+            <div className="bubble typing" aria-label="Smithers is thinking">
+              <span />
+              <span />
+              <span />
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  // The sidebar's main canvas: the workflow graph for Ask Me, otherwise the
+  // workflow store (the demo view). Any view can be slotted in here.
+  const canvas = showGraph ? (
+    <div className="askme-graph askme-graph-full">
+      <WorkflowGraph nodes={GRILL_NODES} edges={GRILL_EDGES} theme={theme} />
+    </div>
+  ) : (
+    <WorkflowStore onOpen={openWorkflow} />
+  );
+
+  return (
+    <main className="app-shell" data-command={command} data-mode={mode}>
       <Toasts
         notifications={notifications}
         onDismiss={dismiss}
         onView={(notification) => goToCommand(notification.command ?? "askme")}
       />
 
-      <div className="view" data-dir={navDir} key={commandIndex}>
-        {showStore ? (
-          <WorkflowStore onOpen={openWorkflow} />
-        ) : isChat ? (
-          <>
-            {showGraph ? (
-              <div className="askme-graph">
-                <WorkflowGraph
-                  nodes={GRILL_NODES}
-                  edges={GRILL_EDGES}
-                  theme={theme}
-                />
-              </div>
-            ) : null}
-            <div
-              className="conversation"
-              ref={conversationRef}
-              role="log"
-              aria-live="polite"
-            >
-              <div className="messages">
-                {messages.length === 0 && showGraph ? (
-                  <p className="askme-hint">
-                    Tell me what to grill you on — type a topic and hit Enter.
-                  </p>
-                ) : null}
-                {messages.map((message) => (
-                  <div className={`message ${message.role}`} key={message.id}>
-                    <div className="bubble">
-                      {message.role === "assistant" ? (
-                        <Markdown content={message.text} />
-                      ) : (
-                        message.text
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {pending ? (
-                  <div className="message assistant">
-                    <div
-                      className="bubble typing"
-                      aria-label="Smithers is thinking"
-                    >
-                      <span />
-                      <span />
-                      <span />
-                    </div>
+      {layout === "sidebar" ? (
+        <>
+          <aside className="chat-rail">
+            <header className="rail-head">
+              <span className="rail-brand">
+                <span className="rail-dot" />
+                Smithers
+              </span>
+              <button
+                aria-label="Exit sidebar layout"
+                className="nav-button"
+                type="button"
+                onClick={toggleLayout}
+              >
+                <PanelLeftIcon />
+              </button>
+            </header>
+            {messagesLog}
+            <div className="composer-dock">{composer}</div>
+          </aside>
+          <section className="main-canvas" data-dir={navDir} key={commandIndex}>
+            {canvas}
+          </section>
+        </>
+      ) : (
+        <>
+          <div className="view" data-dir={navDir} key={commandIndex}>
+            {showStore ? (
+              <WorkflowStore onOpen={openWorkflow} />
+            ) : isChat ? (
+              <>
+                {showGraph ? (
+                  <div className="askme-graph">
+                    <WorkflowGraph
+                      nodes={GRILL_NODES}
+                      edges={GRILL_EDGES}
+                      theme={theme}
+                    />
                   </div>
                 ) : null}
-              </div>
-            </div>
-          </>
-        ) : (
-          <h1 className="composer-title">How can I help you?</h1>
-        )}
-      </div>
+                {messagesLog}
+              </>
+            ) : (
+              <h1 className="composer-title">How can I help you?</h1>
+            )}
+          </div>
 
-      <div className="composer-dock">{composer}</div>
+          <div className="composer-dock">{composer}</div>
+        </>
+      )}
     </main>
   );
 }
