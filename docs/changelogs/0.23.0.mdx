@@ -1,0 +1,113 @@
+# 0.23.0
+
+This release takes Smithers' durable engine to a production-grade database, ships two brand-new products, and grows the agent and benchmark surface. The persistence layer now runs unchanged on **PostgreSQL or an embedded PGlite** through a SQL dialect seam, so the same crash-and-resume guarantees that worked on SQLite hold on Postgres. Alongside it: **Smithers**, a streaming Cerebras chat PWA deployable to Cloudflare in one command; **UltraGrill**, an open-ended real-time collaboration workflow with a live custom UI; a `smithers usage` command that reports consumed quota per account across every provider; four new benchmark harnesses (SWE-Bench Pro, SWE-EVO, Claw-Eval-Live, RoadmapBench) plus a defending-code vulnerability-discovery example; a Vibe (Mistral) agent and a corrected Antigravity CLI; new Studio 2 chat overlay surfaces; an interactive `smithers init` ceremony; and a launch article positioning Smithers as the open, durable orchestration layer. A correctness sweep hardens JSON extraction, DevTools stream recovery, agent schemas, and the test gate.
+
+---
+
+## PostgreSQL & PGlite Persistence
+
+The headline of 0.23.0 is a **PostgreSQL and PGlite dialect for the persistence layer** (`packages/db/src/dialect.js`). Smithers' storage layer is hand-written SQL, and a new dialect seam lets that exact SQL run on SQLite or Postgres without rewriting a query. The dialect handles placeholder translation (`?` to `$1`), DDL type and autoincrement mapping (`INTEGER` to `BIGINT`, `BLOB` to `BYTEA`, `AUTOINCREMENT` to `BIGSERIAL`), `information_schema` introspection, `BEGIN` vs `BEGIN IMMEDIATE` transaction semantics, and `json_extract` to `->>` rewriting.
+
+<Frame caption="Durability is the whole point: a run that crashes mid-flight resumes from its last checkpoint. With 0.23.0 that same guarantee holds whether the snapshot store is SQLite, PGlite, or PostgreSQL.">
+  <img src="/images/why/crash-resume.gif" alt="A Smithers run crashing and resuming from its last durable checkpoint" />
+</Frame>
+
+- **`createSmithersPostgres` boots node-postgres or an embedded PGlite.** A new API stands up the engine against a real Postgres server or an in-process PGlite over a local socket, so you can develop against an embedded database and deploy against managed Postgres with the same code. `pg` and `pglite` are optional dependencies, and the synchronous `bun:sqlite` path is untouched, so existing SQLite users see no change.
+
+- **The dialect is exercised end to end on real PGlite.** New test suites boot an in-process PGlite and run the db dialect, the engine, and the time-travel fork/snapshot paths against it (`packages/db/tests/db-postgres-dialect.test.js`, `packages/engine/tests/create-smithers-postgres.test.jsx`, `effect-builder-postgres.test.js`, `time-travel-postgres.test.js`), so the snapshot, replay, and branch-listing Effects are verified on the new dialect rather than only on SQLite.
+
+## Smithers: a Cerebras Chat PWA
+
+This release introduces **Smithers** (`apps/smithers`), a streaming chat PWA powered by Cerebras `gpt-oss-120b` through TanStack AI and deployable to Cloudflare via Alchemy infrastructure-as-code. The browser streams replies from a Cloudflare Worker over Server-Sent Events and never holds the API key; the Worker runs Cerebras server-side with the key bound as a Worker secret. `bun dev` at the repo root now boots this app (the old Studio 2 dev script moved to `bun dev:studio`).
+
+<Frame caption="The Smithers chat PWA: a calm 'How can I help you?' hero, a composer that lays its input on the top line beside the theme, split, mode, and voice controls, and a live workflow toast. Dark mode resolves before first paint, so there is no flash.">
+  <img src="/images/0.23.0/smithers-pwa.png" alt="The Smithers Cerebras chat PWA in dark mode showing the welcome hero and composer" />
+</Frame>
+
+- **Streaming chat with a command menu, voice dictation, and a grill-workflow graph.** The frontend renders streaming Markdown replies, a Cmd-K command menu, toast notifications, voice dictation, and an "ask me" grill workflow graph drawn with ReactFlow. The chat backend is a single Cloudflare Worker route (`POST /api/chat`) that runs Cerebras through TanStack AI's `chat()` and returns a Server-Sent-Events response.
+
+- **Flash-free dark mode tokenized end to end.** Every color in the app is a semantic CSS custom property defined in `:root`, and dark mode ships two ways: the OS preference via `@media (prefers-color-scheme: dark)` and an explicit `[data-theme]` override. An inline script resolves the theme before first paint so there is no flash, `color-scheme` keeps native controls and scrollbars matched, and the workflow graph follows via ReactFlow's `colorMode`.
+
+- **Renamed and rebranded.** The app moved from `apps/search-pwa` to `apps/smithers` (package `@smithers-orchestrator/smithers`), and every remaining "Huey" string was rebranded to "Smithers" across UI text, the manifest, the Ask Me system prompt, the Alchemy app id, and the `localStorage` key prefix. The Alchemy deploy ships the Worker plus the built PWA as static assets with SPA routing.
+
+## UltraGrill: Real-Time Collaboration
+
+**UltraGrill** is a new durable, open-ended collaboration product built on real Smithers primitives and tested end to end. The workflow (`workflows/ultragrill.tsx`) runs two concurrent planes in one never-ending run: an intake `<Loop>` of `<WaitForEvent event="utterance">` that the UI feeds via signals, and dynamic worker dispatch that spawns one `<Task>` per directive, carries out the work, keeps a living Markdown spec in sync, and emits rolling clarifying questions. The run stays open until an `end` utterance arrives.
+
+- **A live custom UI over real gateway hooks.** `ui/ultragrill.tsx` is a first-class Gateway UI: a composer that turns text into an `utterance` signal, a conversation feed with live worker activity, the living-spec Markdown panel, and the question pool, all driven by the real `gateway-react` run/event/node-output hooks over live RPC. The dynamic `gateway.ts` discovers every `.smithers/workflows/*.tsx` and mounts `ui/<key>.tsx` by convention, isolating a broken workflow so it disables only itself.
+
+- **One-command launcher.** `bun .smithers/scripts/ultragrill.ts ["goal"]` boots the gateway, starts an open-ended session, opens the UI in the browser, and stays alive until Ctrl-C.
+
+- **Composed from reusable components, verified by a real e2e.** UltraGrill is one workflow assembled from two components: `VerifiableGoals` turns a proposal into independently shippable tickets on disk, and `ShipTickets` discovers the queue and ships each ticket through research, plan, implement, validate, and review in its own git worktree before committing and merging. The e2e executes the real workflow to completion (the repo's fake `claude` agent is the only stub) and then drives a headless browser to assert the real UI renders that real completed run. The generic decompose-to-ship pipeline was renamed `ship-pipeline` to free the `ultragrill` name for the product.
+
+## `smithers usage`: Per-Account Quota
+
+A new `smithers usage` command and a `packages/usage` engine report **how much rate limit or subscription quota each registered account has consumed**, normalized to one `UsageReport` / `UsageWindow` model. The command supports `--account` and `--provider` filters and `--fresh` to bypass the short usage cache, renders a human-readable table to stderr, and emits a structured envelope to stdout with `--format json`, matching `smithers agents list`.
+
+- **Real adapters per provider, credentials never leave the host.** `getAccountUsage` dispatches per provider: `claude-code` reads the OAuth usage endpoint, `codex` reads `wham/usage`, and `anthropic-api` and `openai-api` read live rate-limit headers. Credentials are read host-side from each account's config directory (Claude `.credentials.json` plus the macOS Keychain, Codex `auth.json` plus a JWT account id) and never leave the process. Google providers and Kimi report `source:"none"` honestly until local-estimate accounting lands. `getUsageForAccounts` fans out in parallel through an on-disk cache with a hard 180s floor for `claude-code`, whose usage endpoint rate-limits aggressively.
+
+## Benchmarks & Examples
+
+This release adds four self-contained benchmark harnesses and a vulnerability-discovery example, each driving real Smithers workflows.
+
+- **SWE-Bench Pro** (`benchmarks/swe-bench-pro`) runs ScaleAI's SWE-Bench Pro end to end via a Smithers workflow where Opus 4.8 implements and Codex reviews, scoring against ScaleAI's Docker images with gold and empty-patch integrity gating. A new Benchmarks section was added to the root README.
+
+- **SWE-EVO** (`examples/swe-evo`) is a benchmark harness with a dataset loader, a Python scoring harness, the workflow plus prompts, and a gold verifier, also pairing Opus 4.8 with Codex through the gateway.
+
+- **Claw-Eval-Live** (`benchmarks/claw-eval-live`) is a live evaluation harness with a mixture gateway, a Docker sandbox, batch and one-shot runners, and result aggregation.
+
+- **RoadmapBench** (`benchmarks/roadmapbench`) is a bash and Python harness (prepare, validate, launch, collect, score, audit) with a companion `.smithers/workflows/roadmapbench.tsx` workflow.
+
+- **defending-code** (`examples/defending-code`) ports Anthropic's vulnerability-discovery reference harness to a durable Smithers workflow: build, recon, find, verify, dedupe, report, patch, with AddressSanitizer crashes as the execution-verified signal. It runs on `ClaudeCodeAgent` (subscription auth), and a follow-up hardened it against fan-out id collisions and silent build failures so a broken build fails the run loudly instead of reporting a misleading all-zeros success.
+
+## Agents
+
+- **Vibe (Mistral) CLI agent.** A new `VibeAgent` (`packages/agents/src/VibeAgent.js`) drives Mistral's `vibe` CLI with stream-json output parsing, session resume, and the standard build-command flags, plus CLI detection via `VIBE_HOME` / `MISTRAL_API_KEY`, a capability-registry entry, and a surface-manifest entry.
+
+<Frame caption="Smithers stays agent-agnostic: a <Task> can be backed by Claude Code, Codex, Gemini, Antigravity, Hermes, and now Vibe (Mistral), each behind the same durable engine.">
+  <img src="/images/why/any-agent.png" alt="Smithers running any coding agent behind the same durable workflow engine" />
+</Frame>
+
+- **Antigravity (`agy`) launches correctly.** `AntigravityAgent` was forked from the Gemini agent and inherited flags the Antigravity CLI rejects, so `agy` exited immediately on an unknown flag. The flags now match the real CLI surface: `--include-directories` becomes `--add-dir`, `--resume` becomes `--conversation=<id>`, `--output-format` is dropped (the json/stream-json value only selects how Smithers parses stdout), and the nonexistent `--screen-reader`, `--debug`, `--list-sessions`, `--delete-session`, and `--extensions` flags are removed. A regression test asserts the emitted args never use the removed flags. (Closes #202.)
+
+- **Strict Codex output schemas.** OpenAI and Codex structured output requires every object node to set `additionalProperties:false`. `sanitizeForOpenAI` now coerces loose and passthrough objects to strict instead of leaving sub-schemas open or coercing an empty `{}` to `true`, so `z.looseObject` output schemas are accepted by Codex.
+
+- **Hardened CLI agent surface contracts** (#203) keeps the built-in adapter capability report stable across the new agents.
+
+## CLI, Studio & Workflows
+
+- **Interactive `smithers init` ceremony.** `smithers init` now reports scaffold and install progress through an `InitReporter` hook on `initWorkflowPack` and renders tailored next-steps after the pack lands, replacing the raw stderr skip lines with guidance on what to run next.
+
+- **Studio 2 chat overlay surfaces.** The chat-first shell's overlay system gained a Views menu and a set of surface overlays: dashboards (issues, runs, scores, search, triage, memory, workflows), tag filtering, a toast stack, a settings overlay, and a resizable split divider, all wired through the overlay store, slash actions, and sidebar. Studio 2's product, design, and engineering specs were also added under `apps/smithers-studio-2/docs/`.
+
+- **The `Task fork` prop is now in the public types.** `<Task fork="...">` already worked at runtime, but the hand-maintained components type declaration omitted the prop, so TypeScript rejected it. `TaskProps` now declares `fork?: string` with a doc comment and a JSX type-test.
+
+<Frame caption="Task fork starts a new agent task from a copy of another task's final session context, so plan to implement to verify chains and parallel branches all begin from the same base. The prop is now first-class in the TypeScript surface.">
+  <img src="/images/why/task-fork.gif" alt="A task forking from another task's session context into parallel follow-up branches" />
+</Frame>
+
+## Docs & Messaging
+
+- **Open, durable orchestration launch article.** A new article (`docs/why/durable-open-orchestration.mdx`, nav under "But... Why?") positions Smithers as the open, durable orchestration layer beneath any agent topology, with supporting diagrams and GIFs.
+
+- **Harness setup guide.** `docs/agents/setup.mdx` walks through wiring Smithers into an existing coding agent via the paste-a-prompt path or the three-command manual path, linked from the agents overview, the installation page, and the docs nav.
+
+- **Copy page / View as Markdown menu.** Every docs page now renders the Copy page button with Copy, View as Markdown, Open in ChatGPT, and Open in Claude. The `.md` and `llms.txt` backing already shipped; only the UI affordance was missing.
+
+- **Version-matched `smithers docs`.** The `docs` and `docs-full` commands now serve the llms documentation bundle that ships with the installed CLI version (`apps/cli/docs/llms.txt`, `llms-full.txt`) rather than always fetching the latest from `smithers.sh`, so the docs an agent reads match the binary it is driving. A `scripts/check-llms.mjs` gate keeps the bundled copy in sync. (#220)
+
+- **Reframed messaging around agent-authored workflows.** The README and docs landing, intro, and starters copy now lead with the idea that your agent writes the workflow via an installed skill rather than you writing it by hand. The usage command, the `@smithers-orchestrator/smithers` and `@smithers-orchestrator/usage` packages, the `ui` / `gui` commands, the Antigravity flags, and the four `TASK_FORK_*` error codes were all documented to keep the docs-coverage gate green.
+
+## Reliability & Correctness
+
+- **Extracted the outer final JSON object after prose.** `extractLastBalancedJson` scanned backward from the last `{`, which returned an inner nested object when the final JSON itself contained nested objects. It now picks the balanced object that ends latest (the true outer object), with the helpers moved to `packages/engine/src/json-extraction.js` and a regression test.
+
+- **Recovered DevTools stream gaps when route errors are wrapped.** `streamDevTools`' gap recovery detected a missing frame via `error instanceof DevToolsRouteError`, but `captureSnapshot` ran the route through `runPromise()`, which re-threw every failure as a `SmithersError` with the original `DevToolsRouteError` buried in its `cause` chain, so the `instanceof` checks silently stopped matching and the stream threw `FrameOutOfRange` instead of re-baselining. `captureSnapshot` now unwraps the cause chain and re-throws the original error, restoring all three gap-recovery paths.
+
+- **Stopped a global module mock from hanging the suite.** A timer test mocked `node:child_process` via `mock.module()`, which is process-wide under bun's concurrent runner and bled into other files (and is not undone by `mock.restore()`), hanging anything that spawned and timing out `pnpm release`. `runRpcCommandEffect` gained a `spawnFn` injection seam (defaulting to the real `spawn`) so the test passes its fake child through dependency injection without touching global state.
+
+- **Matched the canonical duplicate-id error wording.** The legacy-mode duplicate-task test asserted the stale message "Duplicate static id detected" while the canonical `SmithersError` text is "Duplicate Task id detected." The run correctly fails; only the assertion was out of date.
+
+- **Tolerated transient SQLite lock contention while polling a detached run.** The read-only poll in the detached-runs test could hit `database is locked` or `is busy` mid-write from the detached child, not just `no such table` during early init. The poll loop now treats all three as transient and keeps polling, so a lock race under CI load no longer fails the test.
+
+- **Type declarations and checks.** Regenerated the type declarations and removed the architecture line-budget check, and synced the workflow-pack tests with the shipped `ui` feature.
