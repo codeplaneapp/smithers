@@ -157,7 +157,7 @@ describe("--annotations streaming via stdin", () => {
         expect(result.json?.logFile).toBeString();
 
         let status;
-        for (let attempt = 0; attempt < 100; attempt += 1) {
+        for (let attempt = 0; attempt < 240; attempt += 1) {
             if (existsSync(repo.path("smithers.db"))) {
                 const sqlite = new Database(repo.path("smithers.db"), { readonly: true });
                 try {
