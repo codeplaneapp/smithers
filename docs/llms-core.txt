@@ -110,7 +110,7 @@ bunx smithers-orchestrator workflow run kanban
     request into validated, reviewed code, from a focused change to a long-horizon mission.
   </Card>
   <Card title="Plan" icon="map" href="/workflows/plan">
-    `research` · `plan` · `grill-me` · `write-a-prd` · `ticket-create` · `tickets-create`.
+    `research` · `plan` · `grill-me` · `ticket-create` · `tickets-create`.
     Gather context and shape the work before any code is written.
   </Card>
   <Card title="Quality" icon="circle-check" href="/workflows/review">
@@ -350,7 +350,7 @@ See [JSX Installation](/jsx/installation) for the package list, TypeScript confi
 
 ```bash
 bunx smithers-orchestrator init
-bunx smithers-orchestrator init --template idea-to-prd
+bunx smithers-orchestrator init --template idea-to-tickets
 bunx smithers-orchestrator workflow run implement --prompt "Add rate limiting"
 ```
 
@@ -395,7 +395,7 @@ bunx smithers-orchestrator init --add-agents
 Or initialize with guided next steps for one template:
 
 ```bash
-bunx smithers-orchestrator init --template idea-to-prd
+bunx smithers-orchestrator init --template idea-to-tickets
 ```
 
 Template IDs:
@@ -404,7 +404,6 @@ Pass any ID from this table to `init --template <id>` to scaffold that starter.
 
 | Starter | Best for | Workflow | Command |
 | --- | --- | --- | --- |
-| `idea-to-prd` | founders, product, marketing | `write-a-prd` | `bunx smithers-orchestrator init --template idea-to-prd` |
 | `idea-to-tickets` | founders, product, operations, engineering | `tickets-create` | `bunx smithers-orchestrator init --template idea-to-tickets` |
 | `launch-checklist` | launch owners and operators | `plan` | `bunx smithers-orchestrator init --template launch-checklist` |
 | `customer-incident` | support escalations | `debug` | `bunx smithers-orchestrator init --template customer-incident` |
@@ -1631,7 +1630,7 @@ commands[65]:
 
 ```bash
 bunx smithers-orchestrator init                                       # scaffold .smithers/
-bunx smithers-orchestrator init --template idea-to-prd                 # scaffold with guided template next steps
+bunx smithers-orchestrator init --template idea-to-tickets            # scaffold with guided template next steps
 bunx smithers-orchestrator starters                                   # browse template IDs
 ```
 

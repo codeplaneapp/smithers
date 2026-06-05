@@ -3,7 +3,7 @@ title: grill-me
 description: Stress-test a vague idea with agent-led questions.
 ---
 
-`grill-me` runs an interview loop. The agent asks questions using `.smithers/scripts/ask-user.ts`, records answers, and keeps iterating until the request is clear enough to act on. Answers accumulate in the run context and are available to subsequent tasks in the same run, or can be passed as input to `write-a-prd` or `tickets-create`.
+`grill-me` runs an interview loop. The agent asks questions using `.smithers/scripts/ask-user.ts`, records answers, and keeps iterating until the request is clear enough to act on. Answers accumulate in the run context and are available to subsequent tasks in the same run, or can be passed as input to `tickets-create`.
 
 ```bash
 bunx smithers-orchestrator workflow run grill-me --prompt "I want to improve onboarding"
@@ -16,4 +16,4 @@ bunx smithers-orchestrator workflow run grill-me --prompt "I want to improve onb
 | `prompt` | string | `"Describe what you want to get grilled on."` |
 | `maxIterations` | number | `30` |
 
-Use this before `write-a-prd`, `plan`, or `tickets-create` when requirements are under-specified.
+Use this before `plan` or `tickets-create` when requirements are under-specified.

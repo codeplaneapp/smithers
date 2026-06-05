@@ -109,7 +109,6 @@ for the job and switch freely:
 | `audit` | Audit feature groups for tests, docs, observability, and maintainability gaps. |
 | `feature-enum` | Build or refine a code-backed feature inventory for a repository. |
 | `grill-me` | Ask targeted questions until vague requirements become actionable. |
-| `write-a-prd` | Turn a product or feature idea into a detailed PRD. |
 | `ticket-create` / `tickets-create` | Turn a request into one or many structured implementation tickets. |
 | `kanban` | Implement ticket files in worktree branches, board-style. |
 | `ralph` | Keep working continuously on an open-ended maintenance prompt. |
