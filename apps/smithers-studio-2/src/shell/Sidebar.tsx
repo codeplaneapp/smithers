@@ -21,7 +21,7 @@ export function Sidebar({ registry }: SidebarProps) {
   const activeView = useStudioStore((s) => s.activeView);
   const tabs = useStudioStore((s) => s.tabs);
   const activeTabId = useStudioStore((s) => s.activeTabId);
-  const { setActiveView, setActiveTabId, openTerminal, openPalette } = useStudioStore.getState();
+  const { setActiveView, setActiveTabId, openTerminal, openPalette, setShellMode } = useStudioStore.getState();
 
   const [moreExpanded, toggleMore] = useSidebarSectionExpansion("more", false);
   const [terminalsExpanded, toggleTerminals] = useSidebarSectionExpansion("terminals", true);
@@ -37,6 +37,15 @@ export function Sidebar({ registry }: SidebarProps) {
           {"\u{1F528}"}
         </span>
         <strong className="sidebar-brand-name">Smithers Studio</strong>
+        <button
+          className="sidebar-back-to-chat"
+          data-testid="back-to-chat"
+          onClick={() => setShellMode("chat")}
+          title="Back to the chat shell"
+          type="button"
+        >
+          ← Chat
+        </button>
       </div>
 
       <nav className="sidebar-nav">

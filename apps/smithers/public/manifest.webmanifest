@@ -1,0 +1,18 @@
+{
+  "name": "Smithers",
+  "short_name": "Smithers",
+  "description": "Smithers — describe what you want to build.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

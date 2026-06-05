@@ -8,6 +8,7 @@ import { WorkspacesPanel } from "../../workspaces/WorkspacesPanel";
 import { Memory } from "../../memory/Memory";
 import { Scores } from "../../scores/Scores";
 import { Search } from "../../search/Search";
+import { DevTools } from "../../developer/DevTools";
 
 /**
  * Renders an existing Studio surface verbatim inside an overlay — "the default
@@ -37,6 +38,8 @@ function renderSurface(surface: ViewId): ReactNode {
       return <Scores />;
     case "search":
       return <Search />;
+    case "devtools":
+      return <DevTools />;
     default:
       return <div className="overlay-surface-empty">No default view for “{surface}”.</div>;
   }

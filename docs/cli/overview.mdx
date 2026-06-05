@@ -32,7 +32,7 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[63]:
+commands[65]:
   - name: init
     purpose: Install the local workflow pack into .smithers/
     flags[5]{name,short,type,default,desc}:
@@ -264,6 +264,21 @@ commands[63]:
     flags[2]{name,short,type,default,desc}:
       run-id,r,string,graph,Run ID for context
       input,,string,,Input JSON; overrides persisted input
+  - name: gui
+    purpose: Open a directory as a workspace in Smithers GUI
+    args[1]{name,type,required,desc}:
+      path,string,false,Directory path (defaults to current working directory)
+    flags[1]{name,short,type,default,desc}:
+      bundle-id,,string,com.smithers.SmithersGUI,Smithers GUI app bundle identifier
+  - name: ui
+    purpose: Open the custom UI for a workflow run in your browser
+    args[1]{name,type,required,desc}:
+      runId,string,false,Run to open. Defaults to the most recent run.
+    flags[4]{name,short,type,default,desc}:
+      gateway,g,string,,Gateway base URL (default http://127.0.0.1:<port>)
+      port,,number,7331,Gateway port when --gateway is not set
+      workflow,w,string,,Open this workflow's UI directly skipping run lookup
+      open,,boolean,true,Open a browser; use --no-open to just print the URL
   - name: revert
     purpose: Revert the workspace to a previous task attempt's filesystem state
     args[1]{name,type,required,desc}:
@@ -385,6 +400,12 @@ commands[63]:
       runId,string,true,Run ID
     flags[1]{name,short,type,default,desc}:
       node,,string,,Filter scores to a specific node ID
+  - name: usage
+    purpose: Show how much rate limit or subscription quota each registered account has used
+    flags[3]{name,short,type,default,desc}:
+      account,,string,,Only report this account label
+      provider,,string,,Only report accounts for this provider
+      fresh,,boolean,false,Bypass the short usage cache while respecting provider rate-limit floors
   - name: docs
     purpose: Print published llms.txt from smithers.sh
   - name: docs-full
@@ -392,7 +413,7 @@ commands[63]:
   - name: agents.capabilities
     purpose: Print JSON capability registry for built-in CLI agents
   - name: agents.doctor
-    purpose: Validate built-in CLI agent capability registries
+    purpose: Validate built-in CLI agent capability registries and command-surface contracts
     flags[1]{name,short,type,default,desc}:
       json,,boolean,false,Print doctor report as JSON
   - name: agents.add
@@ -485,21 +506,6 @@ commands[63]:
     purpose: Revoke a locally issued Gateway bearer token
     args[1]{name,type,required,desc}:
       token,string,true,Bearer token to revoke
-  - name: gui
-    purpose: Open a directory as a workspace in Smithers GUI
-    args[1]{name,type,required,desc}:
-      path,string,false,Directory path; defaults to current working directory
-    flags[1]{name,short,type,default,desc}:
-      bundle-id,,string,com.smithers.SmithersGUI,Smithers GUI app bundle identifier
-  - name: ui
-    purpose: Open the custom UI for a workflow run in your browser
-    args[1]{name,type,required,desc}:
-      runId,string,false,Run to open; defaults to the most recent run
-    flags[4]{name,short,type,default,desc}:
-      gateway,g,string,,Gateway base URL; defaults to http://127.0.0.1:<port>
-      port,,number,7331,Gateway port when --gateway is not set
-      workflow,w,string,,Open this workflow's UI directly, skipping run lookup
-      open,,boolean,true,Open a browser; use --no-open to just print the URL
   - name: completions
     purpose: Generate shell completion scripts
     args[1]{name,type,required,desc}:

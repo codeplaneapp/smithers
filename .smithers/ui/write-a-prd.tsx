@@ -250,7 +250,12 @@ function App() {
     if (!activeRunId || text.trim() === "") return;
     setBusy(true);
     try {
-      await actions.submitSignal({ runId: activeRunId, signal: "answer", payload: { answer: text } });
+      await actions.submitSignal({
+        runId: activeRunId,
+        correlationKey: "answer",
+        signalName: "answer",
+        payload: { answer: text },
+      });
       setAnswer("");
       await refresh();
     } finally {

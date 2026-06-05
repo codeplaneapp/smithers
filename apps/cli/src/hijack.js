@@ -165,7 +165,7 @@ export function buildHijackLaunchSpec(candidate) {
     if (candidate.engine === "antigravity") {
         return {
             command: "agy",
-            args: ["--resume", candidate.resume],
+            args: ["--conversation", candidate.resume],
             cwd: candidate.cwd,
             env,
         };

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root{
+    --bg:#0C0E16; --surface-1:#141826; --surface-2:#1A2030;
+    --text-primary:rgba(255,255,255,.88); --text-secondary:rgba(255,255,255,.60); --text-tertiary:rgba(255,255,255,.45);
+    --border:rgba(255,255,255,.08);
+    --accent:#4C8DFF; --success:#34D399; --warning:#FBBF24; --danger:#F87171;
+    --accent-fill:rgba(76,141,255,.12); --accent-stroke:rgba(76,141,255,.35);
+    --font-sans:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --font-mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#000;font-family:var(--font-sans);-webkit-font-smoothing:antialiased}
+  .card{
+    width:1600px;height:900px;position:relative;overflow:hidden;
+    background:radial-gradient(1200px 700px at 78% -10%, rgba(76,141,255,.10), transparent 60%), var(--bg);
+    color:var(--text-primary);padding:84px 96px;display:none;flex-direction:column;
+  }
+  .card.active{display:flex}
+  .kicker{font-family:var(--font-mono);font-size:22px;letter-spacing:.28em;text-transform:uppercase;color:var(--accent);margin-bottom:26px}
+  h2{font-size:64px;line-height:1.02;font-weight:800;letter-spacing:-.015em}
+  .brand{position:absolute;left:96px;bottom:60px;display:flex;align-items:center;gap:16px;color:var(--text-tertiary);font-size:24px}
+  .brand .dot{width:14px;height:14px;border-radius:3px;background:var(--accent)}
+  .ver{position:absolute;right:96px;bottom:60px;font-family:var(--font-mono);font-size:24px;color:var(--text-tertiary)}
+  .spacer{flex:1}
+
+  .reveal{opacity:0;transform:translateY(14px);transition:opacity .45s cubic-bezier(.2,.8,.2,1),transform .45s cubic-bezier(.2,.8,.2,1)}
+  .reveal.on{opacity:1;transform:none}
+
+  /* fork */
+  .flow{display:flex;align-items:center;gap:0;margin-top:70px}
+  .node{background:var(--surface-1);border:1px solid var(--border);border-radius:14px;padding:34px 40px;min-width:330px}
+  .node.lit{border-color:var(--accent-stroke);box-shadow:0 0 0 4px var(--accent-fill)}
+  .node .tag{font-family:var(--font-mono);font-size:22px;color:var(--accent);margin-bottom:14px}
+  .node .title{font-size:40px;font-weight:800}
+  .node .meta{font-size:24px;color:var(--text-tertiary);margin-top:12px;font-family:var(--font-mono)}
+  .arrow{flex:1;position:relative;height:60px;margin:0 8px;display:flex;align-items:center}
+  .arrow .line{height:4px;background:linear-gradient(90deg,var(--accent-stroke),var(--accent));width:100%;transform:scaleX(0);transform-origin:left;transition:transform .4s cubic-bezier(.2,.8,.2,1)}
+  .arrow.on .line{transform:scaleX(1)}
+  .arrow .head{position:absolute;right:-2px;top:50%;margin-top:-11px;border-left:20px solid var(--accent);border-top:11px solid transparent;border-bottom:11px solid transparent;opacity:0;transition:opacity .2s ease .35s}
+  .arrow.on .head{opacity:1}
+  .arrow .alabel{position:absolute;top:-30px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:20px;color:var(--text-tertiary);white-space:nowrap}
+  .code{margin-top:64px;font-family:var(--font-mono);font-size:30px;color:var(--text-secondary);background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:30px 36px;display:inline-block}
+  .code b{color:var(--accent);font-weight:700}
+
+  /* chat */
+  .chatwrap{display:flex;gap:24px;margin-top:54px;flex:1}
+  .chatcol{flex:1.1;display:flex;flex-direction:column;gap:18px}
+  .overcol{flex:1;background:var(--surface-1);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+  .overhead{padding:18px 24px;border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:20px;color:var(--text-tertiary);display:flex;gap:10px;align-items:center}
+  .overbody{padding:26px;display:flex;flex-direction:column;gap:14px}
+  .runrow{display:flex;align-items:center;gap:16px;font-size:24px}
+  .runrow .s{width:12px;height:12px;border-radius:50%}
+  .runrow .tag{font-family:var(--font-mono);font-size:18px;padding:4px 12px;border-radius:5px;margin-left:auto}
+  .bubble{border-radius:14px;padding:24px 28px;font-size:27px;line-height:1.45;max-width:88%}
+  .me{align-self:flex-end;background:var(--accent-fill);border:1px solid var(--accent-stroke)}
+  .ai{align-self:flex-start;background:var(--surface-1);border:1px solid var(--border);color:var(--text-secondary)}
+  .ai b{color:var(--text-primary)}
+  .slash{font-family:var(--font-mono);color:var(--accent)}
+  .dots span{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--text-tertiary);margin-right:6px;animation:bl 1s infinite}
+  .dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}
+  @keyframes bl{0%,100%{opacity:.3}50%{opacity:1}}
+  .inputbar{margin-top:auto;background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:22px 26px;font-size:26px;color:var(--text-tertiary);display:flex;align-items:center;gap:14px;min-height:74px}
+  .inputbar .cur{width:3px;height:30px;background:var(--accent);display:inline-block;animation:cur 1s steps(1) infinite}
+  @keyframes cur{0%,49%{opacity:1}50%,100%{opacity:0}}
+</style>
+</head>
+<body>
+
+<!-- FORK -->
+<div class="card" id="cardFork">
+  <div class="kicker">New primitive · &lt;Task fork="…"&gt;</div>
+  <h2>Fork the agent's whole mind, context included.</h2>
+  <div class="flow">
+    <div class="node lit" id="fk-plan"><div class="tag">source</div><div class="title">plan</div><div class="meta">full session context</div></div>
+    <div class="arrow" id="fk-a1"><div class="line"></div><div class="head"></div><div class="alabel reveal">copies the session</div></div>
+    <div class="node reveal" id="fk-impl"><div class="tag">fork="plan"</div><div class="title">implement</div><div class="meta">fresh, independent</div></div>
+    <div class="arrow" id="fk-a2"><div class="line"></div><div class="head"></div><div class="alabel reveal">fork again</div></div>
+    <div class="node reveal" id="fk-verify"><div class="tag">fork="implement"</div><div class="title">verify</div><div class="meta">source never mutated</div></div>
+  </div>
+  <div class="code reveal" id="fk-code">&lt;Task id="implement" <b>fork="plan"</b>&gt;…&lt;/Task&gt;</div>
+  <div class="spacer"></div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">parallel branches share one base context</div>
+</div>
+
+<!-- CHAT -->
+<div class="card" id="cardChat">
+  <div class="kicker">New default · Chat-first shell</div>
+  <h2>Tell it what you want. It runs the rest.</h2>
+  <div class="chatwrap">
+    <div class="chatcol">
+      <div class="bubble me reveal" id="ch-me">Open a review on the current branch and show me the verdicts.</div>
+      <div class="bubble ai reveal" id="ch-typing"><span class="dots"><span></span><span></span><span></span></span></div>
+      <div class="bubble ai reveal" id="ch-ai" style="display:none">Launching <span class="slash">/review</span> over your diff. Opening the live verdict board beside us. Three reviewers running. <b>I'll surface the gate when they finish.</b></div>
+      <div class="inputbar"><span class="slash">/</span><span id="ch-input"></span><span class="cur"></span></div>
+    </div>
+    <div class="overcol reveal" id="ch-over">
+      <div class="overhead"><span style="color:var(--accent)">▣</span> overlay · Runs</div>
+      <div class="overbody">
+        <div class="runrow reveal" id="ch-r1"><span class="s" style="background:var(--success)"></span> plan <span class="tag" style="color:var(--success);background:rgba(52,211,153,.12)">done</span></div>
+        <div class="runrow reveal" id="ch-r2"><span class="s" style="background:var(--accent)"></span> review:1 <span class="tag" style="color:var(--accent);background:var(--accent-fill)">running</span></div>
+        <div class="runrow reveal" id="ch-r3"><span class="s" style="background:var(--success)"></span> review:2 <span class="tag" style="color:var(--success);background:rgba(52,211,153,.12)">approved</span></div>
+        <div class="runrow reveal" id="ch-r4"><span class="s" style="background:var(--warning)"></span> gate <span class="tag" style="color:var(--warning);background:rgba(251,191,36,.12)">approval</span></div>
+        <div class="runrow reveal" id="ch-r5"><span class="s" style="background:var(--accent)"></span> implement <span class="tag" style="color:var(--accent);background:var(--accent-fill)">running</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="brand"><span class="dot"></span>smithers.sh</div>
+  <div class="ver">studio 2 · /studio toggles the tabbed shell</div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  function activate(id){ document.querySelectorAll('.card').forEach(c=>c.classList.remove('active')); $(id).classList.add('active'); }
+  function on(id){ $(id).classList.add('on'); }
+  function onReveals(el){ el.querySelectorAll('.reveal').forEach(r=>r.classList.add('on')); }
+
+  window.forkStep = (n) => {
+    if(n>=1){ on('fk-a1'); onReveals($('fk-a1')); $('fk-impl').classList.add('on'); }
+    if(n>=2){ on('fk-a2'); onReveals($('fk-a2')); $('fk-verify').classList.add('on'); }
+    if(n>=3){ $('fk-code').classList.add('on'); }
+  };
+
+  // typed-input timeline for chat (returns the full string progressively)
+  window.chatType = (frac) => {
+    const full = "ship the fix once review passes";
+    const n = Math.round(full.length * Math.min(1, Math.max(0, frac)));
+    $('ch-input').textContent = full.slice(0, n);
+  };
+  window.chatStep = (n) => {
+    if(n>=1){ $('ch-me').classList.add('on'); }
+    if(n>=2){ $('ch-typing').classList.add('on'); }
+    if(n>=3){ $('ch-typing').style.display='none'; $('ch-ai').style.display='block'; $('ch-ai').classList.add('on'); $('ch-over').classList.add('on'); }
+    if(n>=4){ $('ch-r1').classList.add('on'); }
+    if(n>=5){ $('ch-r2').classList.add('on'); }
+    if(n>=6){ $('ch-r3').classList.add('on'); }
+    if(n>=7){ $('ch-r4').classList.add('on'); }
+    if(n>=8){ $('ch-r5').classList.add('on'); }
+  };
+  window.__activate = activate;
+</script>
+</body>
+</html>

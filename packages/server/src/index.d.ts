@@ -665,7 +665,7 @@ declare class Gateway {
         runs: any[];
         approvals: {
             runId: any;
-            workflowKey: any;
+            workflowKey: string;
             nodeId: any;
             iteration: any;
             requestTitle: any;
@@ -684,13 +684,30 @@ declare class Gateway {
    * @returns {SmithersDb}
    */
     adapterForWorkflow(workflow: SmithersWorkflow): SmithersDb$4;
+    adapterCache: Map<any, any> | undefined;
+    /**
+   * Resolve the true gateway workflow key for a stored run row. A run started
+   * THROUGH the gateway records its key in config; a run started elsewhere (e.g.
+   * the CLI) does not, so we fall back to the row's own `workflowName` when that
+   * matches a registered key, and only then to the adapter's first owner. This
+   * is what keeps runs correctly attributed when many workflows share one DB —
+   * the adapter that finds a row is no longer assumed to own it.
+   * @param {{ configJson?: string; workflowName?: string }} row
+   * @param {Set<string>} registeredKeys
+   * @param {string} fallbackKey
+   * @returns {string}
+   */
+    resolveRunWorkflowKey(row: {
+        configJson?: string;
+        workflowName?: string;
+    }, registeredKeys: Set<string>, fallbackKey: string): string;
     /**
    * @param {string} [status]
    */
     listRunsAcrossWorkflows(limit?: number, status?: string): Promise<any[]>;
     listPendingApprovals(): Promise<{
         runId: any;
-        workflowKey: any;
+        workflowKey: string;
         nodeId: any;
         iteration: any;
         requestTitle: any;

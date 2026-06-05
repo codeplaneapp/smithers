@@ -16,4 +16,5 @@ export const slashCommands: SlashCommand[] = [
   { name: "sandbox", summary: "Spin up a sandbox", feature: "sandbox / JJHub", argHint: "" },
   { name: "web", summary: "Open a site the agent can use", feature: "agent browse", argHint: "<url>" },
   { name: "studio", summary: "Switch to the classic tabbed shell", feature: "—", argHint: "" },
+  { name: "chat", summary: "Switch to the chat shell", feature: "—", argHint: "" },
 ];

@@ -6,7 +6,10 @@ import { fileURLToPath } from "node:url";
 import { generateAgentsTs } from "./agent-detection.js";
 import { WORKFLOW_UI_SOURCES } from "./workflowUiSources.js";
 /**
- * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; agentsOnly?: boolean; }} InitOptions
+ * @typedef {{ onSkip?: (relPath: string) => void; scaffolded?: (counts: { writtenCount: number; skippedCount: number; preservedCount: number }) => void; installStart?: () => void; installDone?: (result: InitInstallResult, captured?: { stdout: string; stderr: string }) => void; }} InitReporter
+ */
+/**
+ * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; agentsOnly?: boolean; reporter?: InitReporter; }} InitOptions
  */
 /**
  * @typedef {{ status: "ok" | "skipped" | "failed"; reason?: string; }} InitInstallResult
@@ -2301,17 +2304,24 @@ function renderKanbanUiFile() {
  * Honors ?runId= (set by the studio embed and `smithers ui`) for deep-linking.
  */
 function renderPlanUiFile() {
+    // Emit the import header from quoted strings (not raw template-literal
+    // lines) so the published-deps-declared test's start-of-line import scan
+    // doesn't mistake this generated UI source for a real CLI import — matching
+    // how workflowUiSources.js and the kanban renderer emit their imports.
+    const planUiHeader = [
+        "/** @jsxImportSource react */",
+        'import { useMemo, useState } from "react";',
+        "import {",
+        "  createGatewayReactRoot,",
+        "  useGatewayActions,",
+        "  useGatewayNodeOutput,",
+        "  useGatewayRunEvents,",
+        "  useGatewayRuns,",
+        '} from "smithers-orchestrator/gateway-react";',
+    ].join("\n");
     return {
         path: ".smithers/ui/plan.tsx",
-        contents: `/** @jsxImportSource react */
-import { useMemo, useState } from "react";
-import {
-  createGatewayReactRoot,
-  useGatewayActions,
-  useGatewayNodeOutput,
-  useGatewayRunEvents,
-  useGatewayRuns,
-} from "smithers-orchestrator/gateway-react";
+        contents: `${planUiHeader}
 
 const WORKFLOW_KEY = "plan";
 
@@ -3938,16 +3948,22 @@ export function initWorkflowPack(options = {}) {
         if (existsSync(absolutePath) && (file.preserveExisting || !options.force)) {
             skippedFiles.push(absolutePath);
             if (file.preserveExisting) {
-                process.stderr.write(`[smithers:init] ${file.path} skipped: already exists\n`);
+                if (options.reporter) options.reporter.onSkip?.(file.path);
+                else process.stderr.write(`[smithers:init] ${file.path} skipped: already exists\n`);
             }
             continue;
         }
         writeFileSync(absolutePath, file.contents, "utf8");
         writtenFiles.push(absolutePath);
     }
+    options.reporter?.scaffolded?.({
+        writtenCount: writtenFiles.length,
+        skippedCount: skippedFiles.length,
+        preservedCount: preservedPaths.length,
+    });
     const install = options.agentsOnly
         ? { status: "skipped", reason: "agents-only" }
-        : runBunInstall(rootDir, options.skipInstall ?? false);
+        : runBunInstall(rootDir, options.skipInstall ?? false, options.reporter);
     return {
         rootDir,
         writtenFiles,
@@ -3961,29 +3977,44 @@ export function initWorkflowPack(options = {}) {
  * on a cold install. Failures here don't fail init: the scaffold is on disk,
  * the user can always re-run `bun install` by hand.
  *
+ * When a reporter is supplied (the interactive `init` ceremony), bun's output
+ * is captured instead of inherited so the flow stays clean; the captured tail
+ * is handed back on failure. Without a reporter (piped/agent runs) the install
+ * inherits stdio exactly as before.
+ *
  * @param {string} rootDir
  * @param {boolean} skip
+ * @param {InitReporter} [reporter]
  * @returns {InitInstallResult}
  */
-function runBunInstall(rootDir, skip) {
+function runBunInstall(rootDir, skip, reporter) {
     if (skip) return { status: "skipped", reason: "skip-install" };
+    reporter?.installStart?.();
+    const quiet = Boolean(reporter);
     const result = spawnSync("bun", ["install"], {
         cwd: rootDir,
-        stdio: "inherit",
+        stdio: quiet ? ["ignore", "pipe", "pipe"] : "inherit",
+        encoding: quiet ? "utf8" : undefined,
     });
+    /** @type {InitInstallResult} */
+    let installResult;
     if (result.error && /** @type {NodeJS.ErrnoException} */ (result.error).code === "ENOENT") {
-        return {
+        installResult = {
             status: "failed",
             reason: "`bun` not found on PATH; run `bun install` inside .smithers/ manually",
         };
     }
-    if (result.status !== 0) {
-        return {
+    else if (result.status !== 0) {
+        installResult = {
             status: "failed",
             reason: `bun install exited with status ${result.status ?? "unknown"}; run it manually inside .smithers/`,
         };
     }
-    return { status: "ok" };
+    else {
+        installResult = { status: "ok" };
+    }
+    reporter?.installDone?.(installResult, quiet ? { stdout: result.stdout ?? "", stderr: result.stderr ?? "" } : undefined);
+    return installResult;
 }
 const WORKFLOW_FOLLOW_UPS = {
     "research": [

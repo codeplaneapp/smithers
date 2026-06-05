@@ -226,7 +226,7 @@ function App() {
     setBusy(true);
     try {
       if (typeof actions.rewindRun === "function") {
-        await actions.rewindRun({ runId: activeRunId });
+        await actions.rewindRun({ runId: activeRunId, frameNo: 0, confirm: true });
       } else {
         await actions.launchRun({ workflow: WORKFLOW_KEY, input: { prompt: queryPrompt ?? prompt } });
       }

@@ -1,17 +1,20 @@
 import { useState } from "react";
 import { useProjects } from "./projects/useProjects";
 import { ProjectSwitcher } from "./projects/ProjectSwitcher";
-import { StatsStrip } from "./StatsStrip";
-import { useStudioStore } from "../useStudioStore";
+import { TagFilterBar } from "./tags/TagFilterBar";
+import { ViewsMenu } from "./ViewsMenu";
+import { useOverlayStore } from "./overlay/overlayStore";
+import type { Tag } from "./tags/Tag";
 
 /**
- * The top bar: current project (colored, click to switch), stats, and the gear
- * that drops back to the classic tabbed shell. Deliberately minimal — project,
- * a few numbers, settings.
+ * The TopBar — the only persistent chrome in the chat shell (Product spec §3,
+ * Design spec §2). Left: project chip (click to switch). Center: tag filter bar
+ * (display + filter only). Right: Views ▾ dropdown, History (past workflows),
+ * and the Settings gear. No tabbed-shell chrome lives here.
  */
-export function ProjectBar() {
+export function ProjectBar({ tags }: { tags: Tag[] }) {
   const { current } = useProjects();
-  const setShellMode = useStudioStore((s) => s.setShellMode);
+  const openOverlay = useOverlayStore((s) => s.open);
   const [switcherOpen, setSwitcherOpen] = useState(false);
 
   return (
@@ -32,17 +35,29 @@ export function ProjectBar() {
         {switcherOpen && <ProjectSwitcher onClose={() => setSwitcherOpen(false)} />}
       </div>
 
-      <StatsStrip projectId={current.id} />
+      <TagFilterBar tags={tags} />
 
-      <button
-        className="project-bar-gear"
-        data-testid="shell-gear"
-        onClick={() => setShellMode("studio")}
-        title="Classic Studio view"
-        type="button"
-      >
-        ⚙
-      </button>
+      <div className="project-bar-right">
+        <ViewsMenu />
+        <button
+          className="topbar-btn"
+          data-testid="history-button"
+          onClick={() => openOverlay({ kind: "dashboard", title: "History", dashboard: "workflows" }, "split")}
+          title="Past workflows"
+          type="button"
+        >
+          History
+        </button>
+        <button
+          className="project-bar-gear"
+          data-testid="settings-gear"
+          onClick={() => openOverlay({ kind: "settings", title: "Settings" }, "split")}
+          title="Settings"
+          type="button"
+        >
+          ⚙
+        </button>
+      </div>
     </header>
   );
 }

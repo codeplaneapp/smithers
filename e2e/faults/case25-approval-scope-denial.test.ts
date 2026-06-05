@@ -8,7 +8,7 @@ import { createSmithers } from "smithers-orchestrator";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
-import { Gateway } from "@smithers-orchestrator/server/gateway";
+import { Gateway, type SmithersWorkflow } from "@smithers-orchestrator/server/gateway";
 
 // case25 — approval scope denial against the REAL gateway.
 //
@@ -37,17 +37,23 @@ function makeDbPath(name: string): string {
 
 function createApprovalWorkflow(dbPath: string) {
   const { smithers, Workflow, Task, outputs, db } = createSmithers(
-    { deploy: z.object({ value: z.number() }) },
+    {
+      input: z.object({ value: z.number().optional() }),
+      deploy: z.object({ value: z.number() }),
+    },
     { dbPath },
   );
-  const workflow = smithers((ctx: { input: { value?: number } }) =>
+  const workflow = smithers((ctx) =>
     React.createElement(
       Workflow,
       { name: "case25-workflow" },
       React.createElement(
         Task,
-        { id: NODE_ID, output: outputs.deploy },
-        { value: Number(ctx.input.value ?? 1) },
+        {
+          id: NODE_ID,
+          output: outputs.deploy,
+          children: { value: Number(ctx.input.value ?? 1) },
+        },
       ),
     ),
   );
@@ -176,7 +182,7 @@ describe("case25 approval scope denial", () => {
           },
         },
       });
-      gateway.register("case25-workflow", workflow);
+      gateway.register("case25-workflow", workflow as SmithersWorkflow);
       server = (await gateway.listen({ port: 0, host: "127.0.0.1" })) as { address(): unknown };
       port = getPort(server);
     });

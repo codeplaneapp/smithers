@@ -32,6 +32,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@smithers-orchestrator/accounts": "workspace:*",
     "@smithers-orchestrator/agents": "workspace:*",
+    "@smithers-orchestrator/usage": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/devtools": "workspace:*",

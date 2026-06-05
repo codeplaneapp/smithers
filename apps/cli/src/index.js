@@ -40,6 +40,7 @@ import { aggregateNodeDetailEffect, renderNodeDetailHuman, } from "./node-detail
 import { diagnoseRunEffect, diagnosisCtaCommands, renderWhyDiagnosisHuman, } from "./why-diagnosis.js";
 import { detectAvailableAgents } from "./agent-detection.js";
 import { listAccounts, removeAccount } from "@smithers-orchestrator/accounts";
+import { getUsageForAccounts, formatUsageReports } from "@smithers-orchestrator/usage";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
@@ -2110,7 +2111,7 @@ const agentsCli = Cli.create({
     },
 })
     .command("doctor", {
-    description: "Validate built-in CLI agent capability registries for drift or contradictions.",
+    description: "Validate built-in CLI agent capability registries and command-surface contracts.",
     options: z.object({
         json: z.boolean().default(false).describe("Print the doctor report as JSON"),
     }),
@@ -2585,6 +2586,9 @@ const cli = Cli.create({
     .command("init", {
     description: "Install the local Smithers workflow pack into .smithers/.",
     options: initOptions,
+    // The interactive run narrates its own progress + next steps; suppress the
+    // raw result dump in a human TTY while keeping full JSON for piped/agent use.
+    outputPolicy: "agent-only",
     async run(c) {
         const fail = (opts) => {
             commandExitOverride = opts.exitCode ?? 1;
@@ -5227,6 +5231,28 @@ const cli = Cli.create({
     description: "Print llms-full.txt (full docs bundle for LLMs) from smithers.sh.",
     async run(c) {
         return printSmithersDocs(c, "https://smithers.sh/llms-full.txt", "DOCS_FULL_FETCH_FAILED");
+    },
+})
+    .command("usage", {
+    description: "Show how much rate limit / subscription quota each registered account has used.",
+    options: z.object({
+        account: z.string().optional().describe("Only report this account label"),
+        provider: z.string().optional().describe("Only report accounts for this provider"),
+        fresh: z.boolean().default(false).describe("Bypass the short usage cache (still respects provider rate-limit floors)"),
+    }),
+    async run(c) {
+        let accounts = listAccounts();
+        if (c.options.account) {
+            accounts = accounts.filter((a) => a.label === c.options.account);
+        }
+        if (c.options.provider) {
+            accounts = accounts.filter((a) => a.provider === c.options.provider);
+        }
+        const reports = await getUsageForAccounts(accounts, { fresh: c.options.fresh });
+        // Human-readable table to stderr; the structured envelope (--format json/toon)
+        // goes to stdout, matching `smithers agents list`.
+        process.stderr.write(`${formatUsageReports(reports)}\n`);
+        return c.ok({ reports });
     },
 })
     .command(workflowCli)

@@ -2,10 +2,10 @@
 
 **Orchestrate agents at scale with composable workflows.**
 
-Smithers is a durable runtime for long-running AI coding agents. Write a workflow once
-as a composable TypeScript tree, then run it for minutes or days with crash recovery,
-retries, human approvals, replay, and full observability across any agent, any model,
-and any machine.
+Smithers is a durable runtime for long-running AI coding agents. Install a skill and your
+agent writes the workflow — a composable TypeScript tree — then runs it for minutes or
+days with crash recovery, retries, human approvals, replay, and full observability across
+any agent, any model, and any machine.
 
 - 🧩 **Composable workflows**: sequence, fan out, branch, and loop tasks into workflows
   shaped to your task and your project. Not one giant one-size-fits-all agent.
@@ -29,7 +29,7 @@ and structure that real work demands.
 
 And we don't believe in one-size-fits-all orchestration. The best results come from
 **task-specific and project-specific workflows**, so Smithers ships dozens of them
-ready to run, and treats authoring your own as a first-class path.
+ready to run, and treats having your agent author new ones as a first-class path.
 
 ## Quick start
 
@@ -138,8 +138,9 @@ The [`examples/`](./examples) folder has 90+ runnable workflows covering real pa
 
 ## Author your own
 
-The built-in workflows are normal Smithers TSX files: run them as-is, edit them for your
-repo, or write your own from the same primitives. A workflow is a JSX tree of tasks:
+The built-in workflows are normal Smithers TSX files: run them as-is, have your agent
+adapt them to your repo, or have it write new ones from the same primitives. A workflow
+is a JSX tree of tasks:
 
 ```tsx
 import { createSmithers, Sequence } from "smithers-orchestrator";

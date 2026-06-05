@@ -202,7 +202,7 @@ describe("legacy engine mode", () => {
             const result = await runLegacy(workflow, LEGACY_RUN_OPTIONS);
 
             expect(result.status).toBe("failed");
-            expect(result.error?.message).toContain("Duplicate static id detected");
+            expect(result.error?.message).toContain("Duplicate Task id detected");
         }
         finally {
             cleanup();

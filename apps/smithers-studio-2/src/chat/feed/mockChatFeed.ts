@@ -90,7 +90,22 @@ export const mockChatFeed: ChatItem[] = [
     body: {
       kind: "overlay",
       summary: "Here's the live run board while CI finishes.",
-      overlay: { kind: "surface", title: "Runs", surface: "runs" },
+      overlay: { kind: "dashboard", title: "Runs", dashboard: "runs" },
+    },
+  },
+  {
+    id: "seed-5b",
+    role: "assistant",
+    projectId: "acme-web",
+    timestampMs: 1_716_900_090_000,
+    tags: [
+      { id: "wf-triage", label: "triage", kind: "workflow" },
+      { id: "auth", label: "auth", kind: "topic" },
+    ],
+    body: {
+      kind: "overlay",
+      summary: "The triage workflow ships a live dashboard — open it to watch progress.",
+      overlay: { kind: "dashboard", title: "Triage dashboard", dashboard: "triage" },
     },
   },
   {

@@ -1,6 +1,8 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
+import { Effect } from "effect";
+import { runRpcCommandEffect } from "../src/BaseCliAgent/runRpcCommandEffect.js";
 
 /**
  * Builds a fake child process object that satisfies the surface area
@@ -63,30 +65,25 @@ describe("runRpcCommandEffect timer cleanup", () => {
     /** @type {(() => any) | undefined} */
     let nextChild;
 
+    // Inject a controllable fake child via the spawnFn seam. This avoids
+    // mock.module("node:child_process", …): a global module mock is process-
+    // wide and bun runs test files concurrently, so the stub (and its fake
+    // child that never closes) would bleed into other files and hang them —
+    // and mock.restore() does not undo mock.module().
+    const spawnFn = /** @type {any} */ (
+        () => (nextChild ? nextChild() : makeFakeChild())
+    );
+
     beforeEach(() => {
         timers = installTimerSpy();
         nextChild = undefined;
-        // Replace spawn so the effect uses our controllable fake child.
-        mock.module("node:child_process", () => ({
-            spawn: () => {
-                const child = nextChild ? nextChild() : makeFakeChild();
-                return child;
-            },
-        }));
     });
 
     afterEach(() => {
         timers?.restore();
-        mock.restore();
     });
 
     test("clears total-timeout and inactivity timers when settling via handleError (stdin unavailable)", async () => {
-        // Re-import after the mock so spawn is the mocked one.
-        const { runRpcCommandEffect } = await import(
-            "../src/BaseCliAgent/runRpcCommandEffect.js?handleError"
-        );
-        const { Effect } = await import("effect");
-
         nextChild = () => makeFakeChild({ stdin: false });
 
         const effect = runRpcCommandEffect("fake-cli", [], {
@@ -96,6 +93,7 @@ describe("runRpcCommandEffect timer cleanup", () => {
             // Non-trivial timeouts so real setTimeout timers are created.
             timeoutMs: 1_000_000,
             idleTimeoutMs: 1_000_000,
+            spawnFn,
         });
 
         await expect(Effect.runPromise(effect)).rejects.toThrow(
@@ -112,11 +110,6 @@ describe("runRpcCommandEffect timer cleanup", () => {
     });
 
     test("clears total-timeout and inactivity timers when a queued line handler rejects (handleError via lineQueue)", async () => {
-        const { runRpcCommandEffect } = await import(
-            "../src/BaseCliAgent/runRpcCommandEffect.js?lineQueue"
-        );
-        const { Effect } = await import("effect");
-
         const child = makeFakeChild({ stdin: true });
         nextChild = () => child;
 
@@ -126,6 +119,7 @@ describe("runRpcCommandEffect timer cleanup", () => {
             prompt: "hello",
             timeoutMs: 1_000_000,
             idleTimeoutMs: 1_000_000,
+            spawnFn,
             // Throwing while handling an extension_ui_request makes the queued
             // handleLine() promise reject, settling the effect through the
             // lineQueue .catch -> handleError() path (never reaching the child

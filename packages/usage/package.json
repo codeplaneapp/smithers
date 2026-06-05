@@ -1,0 +1,35 @@
+{
+  "name": "@smithers-orchestrator/usage",
+  "version": "0.22.0",
+  "description": "Report how much rate limit or subscription quota each registered Smithers account has consumed, across Claude, Codex, OpenAI, Anthropic, and Google providers.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./*": {
+      "types": "./src/index.d.ts",
+      "import": "./src/*.js",
+      "default": "./src/*.js"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsup --dts-only"
+  },
+  "dependencies": {
+    "@smithers-orchestrator/accounts": "workspace:*",
+    "@smithers-orchestrator/errors": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "~5.9.3"
+  }
+}

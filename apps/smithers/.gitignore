@@ -1,0 +1,2 @@
+# Alchemy writes local state and a wrangler.json containing plaintext secrets here.
+.alchemy/

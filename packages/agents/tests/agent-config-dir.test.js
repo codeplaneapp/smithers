@@ -199,7 +199,55 @@ describe("AntigravityAgent configDir/apiKey", () => {
             const dumped = await readEnvDump(dumpFile);
             expect(dumped.ARGS).toContain("--gemini_dir");
             expect(dumped.ARGS).toContain("/tmp/smithers-test-antigravity-work");
+            expect(dumped.GEMINI_DIR).toBe("/tmp/smithers-test-antigravity-work");
             expect(dumped.GEMINI_API_KEY).toBe("antigravity-test-key");
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+            await rm(dumpDir, { recursive: true, force: true });
+        }
+    });
+
+    // Regression for #202: the Antigravity CLI (`agy`) rejects unknown flags and
+    // exits immediately, so the args must match the real CLI surface.
+    test("emits only flags the agy CLI actually accepts", async () => {
+        const dumpDir = await mkdtemp(join(tmpdir(), "smithers-env-dump-"));
+        const dumpFile = join(dumpDir, "env.json");
+        const fake = await makeFakeCliWithEnvDump(
+            "agy",
+            'process.stdout.write(JSON.stringify({ text: "```json\\n{\\"summary\\":\\"ok\\"}\\n```\\n" }) + "\\n");',
+        );
+        try {
+            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.SMITHERS_ENV_DUMP_FILE = dumpFile;
+            const agent = new AntigravityAgent({
+                resume: "d1d8a55b-cc27-4dd4-bc62-2f73015960d2",
+                includeDirectories: ["/tmp/extra-root"],
+                env: { PATH: process.env.PATH, SMITHERS_ENV_DUMP_FILE: dumpFile },
+            });
+            await agent.generate({ messages: [{ role: "user", content: "ping" }] });
+            const args = (await readEnvDump(dumpFile)).ARGS;
+
+            // Corrected flags. `resume` is mapped to `--conversation <id>`.
+            expect(args).toContain("--conversation");
+            expect(args).toContain("d1d8a55b-cc27-4dd4-bc62-2f73015960d2");
+            expect(args).toContain("--add-dir");
+            expect(args).toContain("/tmp/extra-root");
+
+            // Flags that do not exist on `agy` must never be passed.
+            for (const dead of [
+                "--output-format",
+                "--include-directories",
+                "--resume",
+                "--screen-reader",
+                "--debug",
+                "--extensions",
+                "--list-extensions",
+                "--list-sessions",
+                "--delete-session",
+            ]) {
+                expect(args).not.toContain(dead);
+            }
         }
         finally {
             await rm(fake.dir, { recursive: true, force: true });

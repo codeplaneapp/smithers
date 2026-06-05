@@ -13,7 +13,7 @@ import { truncateToBytes } from "./truncateToBytes.js";
 
 /** @typedef {import("./PiExtensionUiRequest.ts").PiExtensionUiRequest} PiExtensionUiRequest */
 /**
- * @typedef {{ cwd: string; env: Record<string, string>; prompt: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onJsonEvent?: (event: Record<string, unknown>) => Promise<void> | void; onExtensionUiRequest?: (request: PiExtensionUiRequest) => Promise<PiExtensionUiResponse | null> | PiExtensionUiResponse | null; }} RunRpcCommandOptions
+ * @typedef {{ cwd: string; env: Record<string, string>; prompt: string; timeoutMs?: number; idleTimeoutMs?: number; signal?: AbortSignal; maxOutputBytes?: number; onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onJsonEvent?: (event: Record<string, unknown>) => Promise<void> | void; onExtensionUiRequest?: (request: PiExtensionUiRequest) => Promise<PiExtensionUiResponse | null> | PiExtensionUiResponse | null; spawnFn?: typeof spawn; }} RunRpcCommandOptions
  */
 
 /**
@@ -61,7 +61,7 @@ function createInactivityTimer(timeoutMs, onTimeout) {
  * @returns {Effect.Effect<{ text: string; output: unknown; stderr: string; exitCode: number | null; usage?: any; }, SmithersError>}
  */
 export function runRpcCommandEffect(command, args, options) {
-    const { cwd, env, prompt, timeoutMs, idleTimeoutMs, signal, maxOutputBytes, onStdout, onStderr, onJsonEvent, onExtensionUiRequest, } = options;
+    const { cwd, env, prompt, timeoutMs, idleTimeoutMs, signal, maxOutputBytes, onStdout, onStderr, onJsonEvent, onExtensionUiRequest, spawnFn = spawn, } = options;
     const span = `agent:${command}:rpc`;
     const logAnnotations = {
         agentCommand: command,
@@ -82,7 +82,7 @@ export function runRpcCommandEffect(command, args, options) {
         let extractedUsage = undefined;
         let stderrTruncated = false;
         logDebug("starting agent RPC command", logAnnotations, span);
-        const child = spawn(command, args, {
+        const child = spawnFn(command, args, {
             cwd,
             env,
             detached: true,

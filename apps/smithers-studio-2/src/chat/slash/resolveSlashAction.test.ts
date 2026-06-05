@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { resolveSlashAction } from "./resolveSlashAction";
 
 describe("resolveSlashAction", () => {
-  test("/runs opens the Runs surface overlay", () => {
+  test("/runs opens the populated Runs dashboard overlay", () => {
     const action = resolveSlashAction({ name: "runs", args: "" });
     expect(action.kind).toBe("open-overlay");
     if (action.kind !== "open-overlay") throw new Error("expected overlay");
-    expect(action.overlay).toEqual({ kind: "surface", title: "Runs", surface: "runs" });
+    expect(action.overlay).toEqual({ kind: "dashboard", title: "Runs", dashboard: "runs" });
     expect(action.presentation).toBe("split");
   });
 
@@ -41,6 +41,13 @@ describe("resolveSlashAction", () => {
     expect(action.kind).toBe("shell-mode");
     if (action.kind !== "shell-mode") throw new Error("expected shell-mode");
     expect(action.mode).toBe("studio");
+  });
+
+  test("/chat switches back to the chat shell", () => {
+    const action = resolveSlashAction({ name: "chat", args: "" });
+    expect(action.kind).toBe("shell-mode");
+    if (action.kind !== "shell-mode") throw new Error("expected shell-mode");
+    expect(action.mode).toBe("chat");
   });
 
   test("unknown commands fall through", () => {

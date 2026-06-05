@@ -3,6 +3,7 @@ import { ProjectBar } from "./ProjectBar";
 import { ChatStream } from "./ChatStream";
 import { ChatComposer } from "./ChatComposer";
 import { OverlayHost } from "./overlay/OverlayHost";
+import { SplitDivider } from "./overlay/SplitDivider";
 import { useOverlayStore } from "./overlay/overlayStore";
 import { useProjects } from "./projects/useProjects";
 import { useChatFeed } from "./feed/useChatFeed";
@@ -10,6 +11,11 @@ import type { ChatItem } from "./feed/ChatItem";
 import { parseSlash } from "./slash/parseSlash";
 import { resolveSlashAction } from "./slash/resolveSlashAction";
 import { useStudioStore } from "../useStudioStore";
+import { useChatStore } from "./chatStore";
+import { collectTags } from "./tags/collectTags";
+import { filterByTags } from "./tags/filterByTags";
+import { ToastStack } from "./toasts/ToastStack";
+import type { Tag } from "./tags/Tag";
 
 /**
  * The chat-first shell: project bar on top, one long chat, and an overlay that
@@ -23,8 +29,16 @@ export function ChatShell() {
   const feed = useChatFeed(current.id);
   const overlay = useOverlayStore((s) => s.overlay);
   const presentation = useOverlayStore((s) => s.presentation);
+  const splitFraction = useOverlayStore((s) => s.splitFraction);
   const openOverlay = useOverlayStore((s) => s.open);
   const setShellMode = useStudioStore((s) => s.setShellMode);
+  const activeTagFilters = useChatStore((s) => s.activeTagFilters);
+  const toggleTagFilter = useChatStore((s) => s.toggleTagFilter);
+
+  // Derived during render (no useEffect): the unique tags in the feed drive the
+  // filter bar, and the active filter narrows the visible stream.
+  const tags: Tag[] = collectTags(feed.items);
+  const visibleItems = filterByTags(feed.items, activeTagFilters);
 
   const handleSubmit = (text: string) => {
     const parsed = parseSlash(text);
@@ -59,17 +73,25 @@ export function ChatShell() {
   };
 
   const layout = overlay ? `chat-shell--overlay chat-shell--${presentation}` : "";
+  const isSplit = Boolean(overlay) && presentation === "split";
+  // Derive the grid template from the persisted split fraction (chat | divider |
+  // overlay). Only meaningful in split mode; otherwise the CSS owns the layout.
+  const mainStyle = isSplit
+    ? { gridTemplateColumns: `minmax(0, ${splitFraction}fr) auto minmax(0, ${1 - splitFraction}fr)` }
+    : undefined;
 
   return (
     <div className={`chat-shell ${layout}`.trim()} data-testid="chat-shell">
-      <ProjectBar />
-      <div className="chat-main">
+      <ProjectBar tags={tags} />
+      <div className="chat-main" style={mainStyle}>
         <section className="chat-pane" data-testid="chat-pane">
-          <ChatStream items={feed.items} />
+          <ChatStream items={visibleItems} onTagClick={(tag) => toggleTagFilter(tag.label)} />
           <ChatComposer onSubmit={handleSubmit} />
         </section>
+        {isSplit && <SplitDivider />}
         <OverlayHost />
       </div>
+      <ToastStack />
     </div>
   );
 }

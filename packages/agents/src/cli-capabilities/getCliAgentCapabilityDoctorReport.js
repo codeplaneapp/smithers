@@ -1,5 +1,8 @@
 import { getCliAgentCapabilityReport } from "./getCliAgentCapabilityReport.js";
 /** @typedef {import("./CliAgentCapabilityDoctorReport.ts").CliAgentCapabilityDoctorReport} CliAgentCapabilityDoctorReport */
+/** @typedef {import("./CliAgentCapabilityDoctorReport.ts").CliAgentCapabilityIssue} CliAgentCapabilityIssue */
+/** @typedef {import("./CliAgentCapabilityReportEntry.ts").CliAgentCapabilityReportEntry} CliAgentCapabilityReportEntry */
+/** @typedef {import("../capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 
 /**
  * @param {AgentCapabilityRegistry} registry
@@ -71,12 +74,56 @@ function diagnoseCapabilityRegistry(registry) {
     }
     return issues;
 }
+
+/**
+ * @param {CliAgentCapabilityReportEntry} entry
+ * @returns {CliAgentCapabilityIssue[]}
+ */
+function diagnoseSurfaceContract(entry) {
+    const issues = [];
+    const emitted = new Set(entry.surface.emittedFlags);
+    for (const unsupported of entry.surface.unsupportedFlags) {
+        if (emitted.has(unsupported.flag)) {
+            issues.push({
+                code: "unsupported-flag-emitted",
+                message: `${entry.id} emits ${unsupported.flag}, but the surface manifest marks it unsupported.${unsupported.replacement ? ` Replacement: ${unsupported.replacement}.` : ""}`,
+                severity: "error",
+            });
+        }
+    }
+    if (entry.surface.binary !== entry.binary) {
+        issues.push({
+            code: "surface-binary-mismatch",
+            message: `${entry.id} capability binary is ${entry.binary}, but the surface manifest says ${entry.surface.binary}.`,
+            severity: "error",
+        });
+    }
+    if (entry.surface.docsUrls.length === 0) {
+        issues.push({
+            code: "missing-surface-docs",
+            message: `${entry.id} has no source URL recorded for its CLI surface.`,
+            severity: "warning",
+        });
+    }
+    if (entry.surface.resume.kind !== "none" && entry.surface.resume.emitted.length === 0) {
+        issues.push({
+            code: "missing-resume-emission",
+            message: `${entry.id} declares ${entry.surface.resume.kind} resume support but no emitted resume tokens.`,
+            severity: "warning",
+        });
+    }
+    return issues;
+}
+
 /**
  * @returns {CliAgentCapabilityDoctorReport}
  */
 export function getCliAgentCapabilityDoctorReport() {
     const agents = getCliAgentCapabilityReport().map((entry) => {
-        const issues = diagnoseCapabilityRegistry(entry.capabilities);
+        const issues = [
+            ...diagnoseCapabilityRegistry(entry.capabilities),
+            ...diagnoseSurfaceContract(entry),
+        ];
         return {
             ...entry,
             ok: issues.length === 0,

@@ -1,0 +1,99 @@
+---
+title: Set up in your harness
+description: Wire Smithers into the coding agent you already drive (Claude Code, Codex, Cursor, and the rest), then paste one prompt so the agent installs and starts using Smithers for you.
+---
+
+Smithers is driven by an agent, not clicked by a human. You ask your coding
+agent for an outcome and it reaches for Smithers to run the work, watch it, and
+clear approvals on your behalf. Setting up takes one of two paths: paste a prompt
+and let your agent wire everything, or run three commands yourself.
+
+## Fastest path: let your agent do it
+
+Paste this into your harness of choice (Claude Code, Codex, Cursor, Copilot, or
+any agent with shell access). It installs the workflow pack, the skill, and the
+MCP server, then reports which starter fits your next task.
+
+```text Setup prompt
+Set up Smithers (a durable AI workflow orchestrator) in this repo for me.
+
+1. Run `bunx smithers-orchestrator init` to scaffold `.smithers/`.
+2. Install the Smithers skill and register its MCP server for the agent you are:
+   `bunx smithers-orchestrator skills add`
+   `bunx smithers-orchestrator mcp add`
+3. Read `bunx smithers-orchestrator docs` so you know the CLI verbs and components.
+4. Run `bunx smithers-orchestrator starters` and tell me which workflow fits the
+   task I describe next.
+
+From now on, when I ask for multi-step, long-running, or human-in-the-loop work,
+use Smithers to orchestrate it instead of doing it inline.
+```
+
+`init` prints what it scaffolds, which coding agents it detected on your machine,
+and the next commands to try. `skills add` and `mcp add` reach every agent they
+detect, so a single run wires up Claude Code, Codex, Cursor, Copilot, Gemini,
+OpenCode, Amp, Windsurf, and ~20 more at once.
+
+## Or wire it by hand
+
+```bash
+# 1. Scaffold the workflow pack into .smithers/
+bunx smithers-orchestrator init
+
+# 2. Teach every detected agent the Smithers skill set
+bunx smithers-orchestrator skills add
+
+# 3. Register Smithers as an MCP server in every detected agent
+bunx smithers-orchestrator mcp add
+```
+
+Scope either install with `--agent <name>` for one harness, or `--no-global` to
+write into the current repo instead of your home directory:
+
+```bash
+bunx smithers-orchestrator mcp add --agent cursor
+bunx smithers-orchestrator skills add --no-global
+```
+
+<Note>
+No skills directory in your agent? Point it at `bunx smithers-orchestrator docs-full`
+(prints the full docs bundle) or `bunx smithers-orchestrator ask "<question>"`,
+and add a few standing lines to `AGENTS.md` or `CLAUDE.md` so it remembers
+Smithers is available.
+</Note>
+
+## Pick your harness
+
+Each page covers the exact paths, config files, and any harness-specific steps.
+
+| Harness | Setup page |
+|---|---|
+| Claude Code | [agents/claude-code](/agents/claude-code) |
+| Codex | [agents/codex](/agents/codex) |
+| Cursor | [agents/cursor](/agents/cursor) |
+| GitHub Copilot | [agents/copilot](/agents/copilot) |
+| Pi | [agents/pi](/agents/pi) |
+| Hermes | [agents/hermes](/agents/hermes) |
+| OpenClaw | [agents/openclaw](/agents/openclaw) |
+
+The full support matrix and the three integration surfaces (skill, MCP server,
+standing instructions) live in [Agent Support](/agents/overview).
+
+## Verify it worked
+
+Ask your agent to list the workflows, or run it yourself:
+
+```bash
+bunx smithers-orchestrator workflow list
+bunx smithers-orchestrator starters
+```
+
+If the MCP server registered, the agent can now call `list_workflows`,
+`run_workflow`, `watch_run`, and `resolve_approval` directly. See the
+[MCP Server reference](/integrations/mcp-server) for every tool.
+
+## Next steps
+
+- [Quickstart](/quickstart) runs a seeded workflow immediately.
+- [Installation](/installation) covers the `.smithers/` layout in detail.
+- [Agent Support](/agents/overview) is the per-harness hub.

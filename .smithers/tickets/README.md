@@ -24,6 +24,11 @@ Phase 0.5 — 2026-04-25 hardening review (CI honesty + import contracts):
 - [0026](smithers/0026-smithers-workspace-typecheck-and-agentlike.md) — `.smithers` workspace fails `tsc`; `AgentLike` contract diverges
 - [0027](smithers/0027-root-validation-scope-gaps.md) — Root `typecheck`/`lint` scope too narrow — false-green CI
 
+Studio 2 / context:
+
+- [0028](smithers/0028-vector-memories-context-management.md) — Vector memories: background-embedded agent memories + cross-session semantic recall (lights up `_smithers_vectors` + `SemanticRecallConfig`)
+- [0029](smithers/0029-global-settings-and-global-workflows.md) — Global settings + global workflows (OS-convention config home, à la Claude Code / Codex)
+
 ## `jjhub/` — `/Users/williamcory/jjhub`
 
 Make JJHub the blessed Smithers runtime:

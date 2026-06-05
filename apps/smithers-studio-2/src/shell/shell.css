@@ -46,6 +46,22 @@
   color: var(--text-primary);
 }
 
+.sidebar-back-to-chat {
+  margin-left: auto;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: var(--text-mono-sm);
+  transition: background var(--motion-fast) var(--ease);
+}
+
+.sidebar-back-to-chat:hover {
+  background: var(--fill-hover);
+  color: var(--text-primary);
+}
+
 .sidebar-nav {
   display: flex;
   flex-direction: column;

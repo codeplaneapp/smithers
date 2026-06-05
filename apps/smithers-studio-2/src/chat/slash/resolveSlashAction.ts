@@ -18,14 +18,14 @@ export function resolveSlashAction(parsed: ParsedSlash): SlashAction {
   const { name, args } = parsed;
   switch (name) {
     case "workflow":
-      return overlay({ kind: "surface", title: "Workflows", surface: "workflows" }, `Running workflow ${args || "(pick one)"}.`);
+      return overlay({ kind: "dashboard", title: "Workflows", dashboard: "workflows" }, `Running workflow ${args || "(pick one)"}.`);
     case "runs":
     case "ps":
-      return overlay({ kind: "surface", title: "Runs", surface: "runs" }, "Showing the run board.");
+      return overlay({ kind: "dashboard", title: "Runs", dashboard: "runs" }, "Showing the run board.");
     case "issue":
-      return overlay({ kind: "surface", title: "Issues", surface: "issues" }, `Opening issues ${args ? `for "${args}"` : ""}.`.trim());
+      return overlay({ kind: "dashboard", title: "Issues", dashboard: "issues" }, `Opening issues ${args ? `for "${args}"` : ""}.`.trim());
     case "memory":
-      return overlay({ kind: "surface", title: "Memory", surface: "memory" }, "Browsing cross-run memory.");
+      return overlay({ kind: "dashboard", title: "Memory", dashboard: "memory" }, "Browsing cross-run memory.");
     case "pr":
       return overlay({ kind: "pr", title: `PR ${prRef(args)}`, pr: mockPr(args) }, `Opening pull request ${prRef(args)}.`);
     case "terminal":
@@ -39,6 +39,8 @@ export function resolveSlashAction(parsed: ParsedSlash): SlashAction {
       return { kind: "prompt", text: args };
     case "studio":
       return { kind: "shell-mode", mode: "studio" as ShellMode, note: "Switched to the classic tabbed shell." };
+    case "chat":
+      return { kind: "shell-mode", mode: "chat" as ShellMode, note: "Switched to the chat shell." };
     default:
       return { kind: "unknown", input: `/${name}${args ? ` ${args}` : ""}` };
   }

@@ -1,0 +1,1119 @@
+:root {
+  color-scheme: light;
+
+  /* Color tokens. Dark-mode overrides live in the prefers-color-scheme block
+     and under :root[data-theme="dark"] further down. */
+  --bg: #ffffff;
+  --text: #0a0a0a;
+  --text-muted: #525252;
+  --text-faint: #8a8a8a;
+  --text-placeholder: #a3a3a3;
+  --surface: #ffffff;
+  --surface-glass: rgba(255, 255, 255, 0.72);
+  --surface-glass-strong: rgba(255, 255, 255, 0.85);
+  --border: rgba(10, 10, 10, 0.08);
+  --border-strong: rgba(10, 10, 10, 0.14);
+  --border-solid: #ededed;
+  --hover: #f4f4f4;
+  --hover-subtle: rgba(10, 10, 10, 0.03);
+  --bubble-user-bg: #0a0a0a;
+  --bubble-user-text: #ffffff;
+  --bubble-assistant-bg: #f4f4f4;
+  --bubble-assistant-text: #0a0a0a;
+  --inverse-bg: #0a0a0a;
+  --inverse-bg-hover: #262626;
+  --inverse-text: #ffffff;
+  --code-bg: #0a0a0a;
+  --code-text: #f4f4f4;
+  --inline-code-bg: rgba(10, 10, 10, 0.07);
+  --brand: #6d56d8;
+  --success: #0f8f78;
+  --danger: #e5484d;
+  /* Space-separated channels so shadows can vary alpha via rgb(... / a). */
+  --shadow-rgb: 10 10 10;
+  --graph-bg: #fafbfc;
+  --graph-border: #eef0f3;
+  --graph-dots: #e2e7ef;
+  --node-bg: #ffffff;
+  --node-border: #d7e0eb;
+  --node-title: #182230;
+  --node-muted: #607087;
+  --node-shadow: rgb(30 42 60 / 10%);
+
+  color: var(--text);
+  background: var(--bg);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+input,
+button {
+  font: inherit;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+/* Home (empty): heading + composer centered as a group in the viewport. */
+.app-shell[data-mode="home"] {
+  justify-content: center;
+}
+
+/* Chat state: scrollable transcript with the composer floating over the bottom. */
+.conversation {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: min(100%, 720px);
+  margin: 0 auto;
+  /* Bottom padding clears the floating composer so the last message is visible. */
+  padding: 36px 24px 140px;
+}
+
+.message {
+  display: flex;
+  animation: message-in 140ms ease-out both;
+}
+
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.message.user {
+  justify-content: flex-end;
+}
+
+.message.assistant {
+  justify-content: flex-start;
+}
+
+.bubble {
+  max-width: 80%;
+  padding: 11px 15px;
+  border-radius: 18px;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message.user .bubble {
+  color: var(--bubble-user-text);
+  background: var(--bubble-user-bg);
+  border-bottom-right-radius: 6px;
+}
+
+.message.assistant .bubble {
+  color: var(--bubble-assistant-text);
+  background: var(--bubble-assistant-bg);
+  border-bottom-left-radius: 6px;
+}
+
+.bubble.typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 15px;
+}
+
+.bubble.typing span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-placeholder);
+  animation: typing-blink 1.3s ease-in-out infinite;
+}
+
+.bubble.typing span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.bubble.typing span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typing-blink {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+/* Assistant replies are rendered Markdown — let the block elements flow
+   normally instead of inheriting the bubble's pre-wrap. */
+.message.assistant .bubble {
+  white-space: normal;
+}
+
+.bubble > :first-child {
+  margin-top: 0;
+}
+
+.bubble > :last-child {
+  margin-bottom: 0;
+}
+
+.md-p {
+  margin: 0 0 0.65em;
+}
+
+.md-heading {
+  margin: 0.5em 0 0.35em;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.md-h1 {
+  font-size: 1.15rem;
+}
+
+.md-h2 {
+  font-size: 1.08rem;
+}
+
+.md-h3,
+.md-h4,
+.md-h5,
+.md-h6 {
+  font-size: 1rem;
+}
+
+.md-list {
+  margin: 0 0 0.65em;
+  padding-left: 1.4em;
+}
+
+.md-list li {
+  margin: 0.15em 0;
+}
+
+.md-inline-code {
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  background: var(--inline-code-bg);
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.86em;
+}
+
+.md-code-block {
+  margin: 0 0 0.65em;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--code-bg);
+  color: var(--code-text);
+  overflow-x: auto;
+}
+
+.md-code-block code {
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.composer-dock {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 16px 24px;
+  background: transparent;
+}
+
+/* Chat: lift the composer off the bottom edge and let messages scroll behind
+   its frosted glass. No bar dividing the transcript from the input. */
+.app-shell[data-mode="chat"] .composer-dock {
+  position: fixed;
+  right: 0;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  left: 0;
+  padding: 0 24px;
+}
+
+.composer-title {
+  margin: 0 0 22px;
+  color: var(--text);
+  font-size: clamp(1.6rem, 1.2rem + 1.6vw, 2.1rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-align: center;
+}
+
+.composer-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(100%, 720px);
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow:
+    0 1px 2px rgb(var(--shadow-rgb) / 0.04),
+    0 16px 40px rgb(var(--shadow-rgb) / 0.1);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.composer-card:focus-within {
+  border-color: var(--border-strong);
+  box-shadow:
+    0 1px 2px rgb(var(--shadow-rgb) / 0.05),
+    0 20px 48px rgb(var(--shadow-rgb) / 0.14);
+}
+
+/* The input shares the top line with the theme toggle + command pill: input
+   grows to fill the row, the controls sit right-aligned beside it. */
+.composer-top-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+}
+
+.composer-input input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.composer-input input::placeholder {
+  color: var(--text-placeholder);
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ghost-pill,
+.mic-button {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  background: transparent;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.ghost-pill {
+  gap: 6px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.ghost-pill:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.chevron {
+  width: 15px;
+  height: 15px;
+  color: var(--text-placeholder);
+}
+
+.project-control {
+  position: relative;
+}
+
+.project-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid var(--border-solid);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow:
+    0 1px 2px rgb(var(--shadow-rgb) / 0.04),
+    0 12px 32px rgb(var(--shadow-rgb) / 0.12);
+}
+
+.project-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--text);
+  background: transparent;
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.project-option:hover {
+  background: var(--hover);
+}
+
+.project-option .check {
+  width: 15px;
+  height: 15px;
+  color: var(--text);
+}
+
+.mic-button {
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: var(--inverse-text);
+  background: var(--inverse-bg);
+}
+
+.mic-button svg {
+  width: 17px;
+  height: 17px;
+}
+
+.mic-button:hover {
+  background: var(--inverse-bg-hover);
+}
+
+.mic-button.is-listening {
+  background: var(--danger);
+  animation: mic-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(229, 72, 77, 0);
+  }
+}
+
+/* Corner toast stack: workflow + background-run notifications. */
+.toast-stack {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(320px, calc(100vw - 32px));
+}
+
+.toast {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-glass-strong);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  backdrop-filter: blur(18px) saturate(180%);
+  box-shadow:
+    0 1px 2px rgb(var(--shadow-rgb) / 0.05),
+    0 14px 36px rgb(var(--shadow-rgb) / 0.14);
+  animation: toast-in 160ms ease-out both;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.toast-main {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.toast-main:hover {
+  background: var(--hover-subtle);
+}
+
+.toast-spinner {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, var(--brand) 25%, transparent);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: toast-spin 0.7s linear infinite;
+}
+
+@keyframes toast-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.toast-check {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.toast-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.toast-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toast-detail {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: toast-text-in 240ms ease-out both;
+}
+
+@keyframes toast-text-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.toast-status {
+  flex: none;
+  color: var(--brand);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.toast-done .toast-status {
+  color: var(--success);
+}
+
+.toast-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  padding: 6px;
+  border: 1px solid var(--border-solid);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow:
+    0 1px 2px rgb(var(--shadow-rgb) / 0.04),
+    0 12px 32px rgb(var(--shadow-rgb) / 0.14);
+}
+
+.toast-action {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text);
+  background: transparent;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.toast-action:hover {
+  background: var(--hover);
+}
+
+/* View controls (theme toggle + command pill) sit right-aligned on the input's
+   top line, beside the text. */
+.top-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  backdrop-filter: blur(12px) saturate(160%);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    transform 0.08s ease;
+}
+
+.nav-button svg {
+  width: 17px;
+  height: 17px;
+}
+
+.nav-button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.nav-button:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+.nav-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Colored command dropdown pill. */
+.command-menu {
+  position: relative;
+}
+
+.command-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--cmd-color) 35%, transparent);
+  border-radius: 999px;
+  color: var(--cmd-color);
+  background: color-mix(in srgb, var(--cmd-color) 12%, var(--surface));
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    transform 0.08s ease;
+}
+
+.command-pill:hover {
+  background: color-mix(in srgb, var(--cmd-color) 18%, var(--surface));
+}
+
+.command-pill:active {
+  transform: scale(0.96);
+}
+
+.command-pill .chevron {
+  color: var(--cmd-color);
+  opacity: 0.65;
+}
+
+.command-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cmd-color);
+}
+
+.command-list {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 240px;
+  padding: 6px;
+  border: 1px solid var(--border-solid);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow:
+    0 1px 2px rgb(var(--shadow-rgb) / 0.04),
+    0 12px 32px rgb(var(--shadow-rgb) / 0.14);
+}
+
+.command-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.command-option:hover {
+  background: var(--hover);
+}
+
+.command-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.command-label {
+  color: var(--text);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.command-hint {
+  color: var(--text-faint);
+  font-size: 0.75rem;
+}
+
+.command-option .check {
+  width: 15px;
+  height: 15px;
+  margin-left: auto;
+  color: var(--cmd-color);
+}
+
+/* View transition: each back/forward/select replays a fast directional slide. */
+.view {
+  display: flex;
+  flex-direction: column;
+  animation: view-in 150ms ease-out both;
+}
+
+.view[data-dir="back"] {
+  animation-name: view-in-back;
+}
+
+.app-shell[data-mode="chat"] .view {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes view-in-back {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Ask Me workflow graph panel. */
+.askme-graph {
+  flex: none;
+  height: clamp(200px, 30vh, 300px);
+  border-bottom: 1px solid var(--graph-border);
+  background: var(--graph-bg);
+}
+
+.askme-graph .react-flow {
+  height: 100%;
+}
+
+.askme-hint {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--text-faint);
+  font-size: 0.95rem;
+  text-align: center;
+}
+
+/* Smithers workflow nodes (from the smithers-demo POC). */
+.smithers-node {
+  display: grid;
+  gap: 6px;
+  align-content: center;
+  width: 220px;
+  min-height: 96px;
+  padding: 14px 16px;
+  border: 1px solid var(--node-border);
+  border-left-width: 5px;
+  border-radius: 7px;
+  background: var(--node-bg);
+  box-shadow: 0 8px 18px var(--node-shadow);
+}
+
+.smithers-node-agent {
+  border-left-color: #0f8f78;
+}
+
+.smithers-node-approval {
+  border-left-color: #bf5b16;
+}
+
+.smithers-node-compute {
+  border-left-color: #356fd2;
+}
+
+.smithers-node-loop {
+  border-left-color: #6d56d8;
+}
+
+.smithers-node-branch,
+.smithers-node-signal {
+  border-left-color: #61738a;
+}
+
+.smithers-node-merge {
+  border-left-color: #2670a9;
+}
+
+.smithers-node-human {
+  border-left-color: #a34d9f;
+}
+
+.node-kicker {
+  color: var(--node-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.node-title {
+  color: var(--node-title);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.node-output {
+  overflow: hidden;
+  color: var(--node-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Workflow store: an app-store-style grid of workflow cards. */
+.store {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.store-inner {
+  width: min(100%, 860px);
+  margin: 0 auto;
+  /* Bottom padding clears the floating composer. */
+  padding: 36px 24px 140px;
+}
+
+.store-header {
+  margin-bottom: 22px;
+}
+
+.store-title {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: clamp(1.5rem, 1.2rem + 1.4vw, 2rem);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.store-subtitle {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 0.95rem;
+}
+
+.store-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+  gap: 14px;
+}
+
+.store-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.store-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--card-color) 45%, var(--border));
+  box-shadow: 0 10px 28px rgb(var(--shadow-rgb) / 0.12);
+}
+
+.store-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  font-size: 24px;
+  background: color-mix(in srgb, var(--card-color) 16%, var(--surface));
+}
+
+.store-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.store-name {
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.store-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--card-color);
+  background: color-mix(in srgb, var(--card-color) 14%, transparent);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.store-desc {
+  flex: 1;
+  color: var(--text-faint);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.store-open {
+  color: var(--card-color);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+@media (max-width: 520px) {
+  .messages {
+    padding: 24px 14px 124px;
+  }
+
+  .askme-graph {
+    height: clamp(170px, 26vh, 230px);
+  }
+
+  .composer-dock {
+    padding: 14px;
+  }
+
+  .app-shell[data-mode="chat"] .composer-dock {
+    padding: 0 14px;
+  }
+
+  .composer-card {
+    border-radius: 18px;
+    padding: 14px;
+  }
+
+  .bubble {
+    max-width: 88%;
+  }
+
+  .ghost-pill {
+    padding: 0 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message,
+  .bubble.typing span,
+  .mic-button.is-listening,
+  .view,
+  .toast,
+  .toast-detail {
+    animation: none;
+  }
+}
+
+/* ---- Dark theme ----
+   Follows the OS by default; the in-app toggle sets data-theme="dark|light" on
+   <html> to force a choice. The token list is duplicated so it applies both
+   from the OS preference and from an explicit toggle. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b0b0d;
+  --text: #f4f4f5;
+  --text-muted: #a1a1aa;
+  --text-faint: #8b8b93;
+  --text-placeholder: #6b6b73;
+  --surface: #18181b;
+  --surface-glass: rgba(24, 24, 27, 0.72);
+  --surface-glass-strong: rgba(24, 24, 27, 0.85);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --border-solid: #2a2a2e;
+  --hover: #26262b;
+  --hover-subtle: rgba(255, 255, 255, 0.05);
+  --bubble-user-bg: #f4f4f5;
+  --bubble-user-text: #0a0a0a;
+  --bubble-assistant-bg: #26262b;
+  --bubble-assistant-text: #f4f4f5;
+  --inverse-bg: #f4f4f5;
+  --inverse-bg-hover: #d4d4d8;
+  --inverse-text: #0a0a0a;
+  --code-bg: #09090b;
+  --code-text: #e4e4e7;
+  --inline-code-bg: rgba(255, 255, 255, 0.1);
+  --brand: #8b78e6;
+  --success: #2ec9a8;
+  --danger: #f2555a;
+  --shadow-rgb: 0 0 0;
+  --graph-bg: #0e0e11;
+  --graph-border: #2a2a2e;
+  --graph-dots: #2a2a2e;
+  --node-bg: #18181b;
+  --node-border: #2a2a2e;
+  --node-title: #f4f4f5;
+  --node-muted: #9a9aa6;
+  --node-shadow: rgb(0 0 0 / 45%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0b0b0d;
+    --text: #f4f4f5;
+    --text-muted: #a1a1aa;
+    --text-faint: #8b8b93;
+    --text-placeholder: #6b6b73;
+    --surface: #18181b;
+    --surface-glass: rgba(24, 24, 27, 0.72);
+    --surface-glass-strong: rgba(24, 24, 27, 0.85);
+    --border: rgba(255, 255, 255, 0.1);
+    --border-strong: rgba(255, 255, 255, 0.18);
+    --border-solid: #2a2a2e;
+    --hover: #26262b;
+    --hover-subtle: rgba(255, 255, 255, 0.05);
+    --bubble-user-bg: #f4f4f5;
+    --bubble-user-text: #0a0a0a;
+    --bubble-assistant-bg: #26262b;
+    --bubble-assistant-text: #f4f4f5;
+    --inverse-bg: #f4f4f5;
+    --inverse-bg-hover: #d4d4d8;
+    --inverse-text: #0a0a0a;
+    --code-bg: #09090b;
+    --code-text: #e4e4e7;
+    --inline-code-bg: rgba(255, 255, 255, 0.1);
+    --brand: #8b78e6;
+    --success: #2ec9a8;
+    --danger: #f2555a;
+    --shadow-rgb: 0 0 0;
+    --graph-bg: #0e0e11;
+    --graph-border: #2a2a2e;
+    --graph-dots: #2a2a2e;
+    --node-bg: #18181b;
+    --node-border: #2a2a2e;
+    --node-title: #f4f4f5;
+    --node-muted: #9a9aa6;
+    --node-shadow: rgb(0 0 0 / 45%);
+  }
+}

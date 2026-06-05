@@ -1,0 +1,13 @@
+{
+  "sessionId": "studio-chat-1780436562275-lefv8v99trp",
+  "model": "claude",
+  "mode": "default",
+  "blocks": [
+    {
+      "id": "chat-system",
+      "role": "system",
+      "content": "Workspace agent ready.",
+      "timestampMs": 1780436562439
+    }
+  ]
+}

@@ -7,6 +7,31 @@ import { BaseCliAgent, pushFlag, isRecord, asString, toolKindFromName, createSyn
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
 
 /**
+ * @returns {AgentCapabilityRegistry}
+ */
+export function createAmpCapabilityRegistry() {
+    return {
+        version: 1,
+        engine: "amp",
+        runtimeTools: {},
+        mcp: {
+            bootstrap: "project-config",
+            supportsProjectScope: true,
+            supportsUserScope: false,
+        },
+        skills: {
+            supportsSkills: false,
+            smithersSkillIds: [],
+        },
+        humanInteraction: {
+            supportsUiRequests: false,
+            methods: [],
+        },
+        builtIns: ["default"],
+    };
+}
+
+/**
  * Agent implementation that wraps the 'amp' CLI executable.
  * It translates generation requests into CLI arguments and executes the process.
  */
@@ -23,25 +48,7 @@ export class AmpAgent extends BaseCliAgent {
     constructor(opts = {}) {
         super(opts);
         this.opts = opts;
-        this.capabilities = {
-            version: 1,
-            engine: "amp",
-            runtimeTools: {},
-            mcp: {
-                bootstrap: "project-config",
-                supportsProjectScope: true,
-                supportsUserScope: false,
-            },
-            skills: {
-                supportsSkills: false,
-                smithersSkillIds: [],
-            },
-            humanInteraction: {
-                supportsUiRequests: false,
-                methods: [],
-            },
-            builtIns: ["default"],
-        };
+        this.capabilities = createAmpCapabilityRegistry();
     }
     /**
    * @returns {CliOutputInterpreter}

@@ -155,26 +155,42 @@ new CodexAgent({
 });
 ```
 
-`AntigravityAgent` wraps the Google `agy` CLI. Current `agy` launch-time support is narrower than Gemini CLI: Smithers maps workspace directories to `--add-dir`, resumable conversations to `--conversation`, one-shot prompts to `--print`, and config roots to `--gemini_dir`. Model selection, tool permissions, MCP servers, and plugins are managed through Antigravity settings/plugins rather than launch flags.
+`AntigravityAgent` wraps the Google `agy` CLI. Key additions: `allowedMcpServerNames`, `geminiDir`, `conversation`, `continue`, and `resume`.
 
 ```ts
 import { AntigravityAgent } from "smithers-orchestrator";
 new AntigravityAgent({
-  debug?: boolean; // deprecated
-  model?: string; // deprecated
-  sandbox?: boolean;
+  model?: string; sandbox?: boolean;
   yolo?: boolean; dangerouslySkipPermissions?: boolean;
-  allowedMcpServerNames?: string[]; // deprecated
-  allowedTools?: string[]; // deprecated
-  extensions?: string[]; listExtensions?: boolean; // deprecated
-  resume?: string | boolean;
-  listSessions?: boolean; deleteSession?: string; // deprecated
+  allowedMcpServerNames?: string[]; allowedTools?: string[];
+  conversation?: string; continue?: boolean; resume?: string;
   includeDirectories?: string[];
-  screenReader?: boolean; // deprecated
-  outputFormat?: "text" | "json" | "stream-json"; // Smithers parsing mode only; not passed to agy
+  extensions?: string[]; listExtensions?: boolean;
+  listSessions?: boolean; deleteSession?: string;
+  screenReader?: boolean; outputFormat?: "text" | "json" | "stream-json";
+  debug?: boolean;
   binary?: string; configDir?: string; geminiDir?: string; apiKey?: string;
+  // Deprecated and rejected at runtime: debug, screenReader, outputFormat,
+  // extensions, listExtensions, listSessions, deleteSession.
 });
 ```
+
+Current `agy` builds changed several Gemini-era flags. Smithers treats that as a
+runtime contract, not a best-effort pass-through:
+
+| Smithers option | Emitted `agy` surface |
+|---|---|
+| `includeDirectories` | `--add-dir` |
+| `conversation` / `resume` | `--conversation <id>` |
+| `continue` | `--continue` |
+| `configDir` / `geminiDir` | `--gemini_dir <dir>` and `GEMINI_DIR=<dir>` |
+| prompt text | `-p <prompt>` |
+
+Smithers does not emit `--output-format`, `--include-directories`, `--resume`,
+`--screen-reader`, `--debug`, extension flags, session-list flags, or
+`--prompt` for Antigravity. Options that would require those removed flags fail
+fast with `AGENT_CONFIG_INVALID` and a replacement hint. Plugins are managed
+outside workflow launch through `agy plugin`.
 
 `PiAgent` wraps the Pi CLI and adds extension UI hook support. Key additions: `mode`, `onExtensionUiRequest`, `extension`, `thinking`.
 
@@ -267,5 +283,5 @@ On clean exit the workflow resumes in detached mode. OpenCode stream capture is 
 - **Yolo defaults.** `yolo: true` (default) maps to each CLI's "skip approvals" flag (`--dangerously-skip-permissions`, `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--dangerously-allow-all`). Set `yolo: false` or use the agent-specific approval option for tighter control.
 - **Pi rpc mode** sends prompts as JSON over stdin and is required for `onExtensionUiRequest` callbacks; text/json modes pass the prompt as a positional arg with `files` emitted as `@path`.
 - **Kimi share dir.** `KimiAgent` auto-creates an isolated `KIMI_SHARE_DIR` per invocation to prevent `kimi.json` corruption under concurrent runs. Set `env.KIMI_SHARE_DIR` to opt out.
-- **Antigravity config.** `AntigravityAgent` launches the `agy` binary and passes `configDir`/`geminiDir` as `--gemini_dir`, matching Antigravity's `~/.gemini/antigravity-cli` config root.
+- **Antigravity config.** `AntigravityAgent` launches the `agy` binary and passes `configDir`/`geminiDir` as both `--gemini_dir` and `GEMINI_DIR`, matching Antigravity's `~/.gemini/antigravity-cli` config root. Current `agy` prompts use `-p`, extra directories use `--add-dir`, and native resume uses `--conversation`.
 - **Non-idempotent retries.** When a `<Task>` retries, Smithers prepends a warning listing previously-called side-effect tools so the agent can verify external state before re-invoking them.

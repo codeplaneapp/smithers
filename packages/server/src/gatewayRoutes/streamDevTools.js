@@ -49,6 +49,26 @@ async function withSpan(spanName, attrs, run) {
 }
 
 /**
+ * runPromise() re-throws any failure as a SmithersError, burying a thrown
+ * DevToolsRouteError in its `cause` chain. The stream's gap-recovery logic
+ * relies on `error instanceof DevToolsRouteError`, so walk the cause chain and
+ * surface the original route error when present.
+ *
+ * @param {unknown} error
+ * @returns {DevToolsRouteError | null}
+ */
+function findDevToolsRouteError(error) {
+    let current = error;
+    for (let depth = 0; current != null && depth < 8; depth += 1) {
+        if (current instanceof DevToolsRouteError) {
+            return current;
+        }
+        current = /** @type {{ cause?: unknown }} */ (current).cause;
+    }
+    return null;
+}
+
+/**
  * @param {SmithersDb} adapter
  * @param {string} runId
  * @returns {Promise<{ frameNo: number } | null>}
@@ -277,16 +297,26 @@ export async function* streamDevToolsRoute(input) {
    * @param {number} frameNo
    * @returns {Promise<DevToolsSnapshot>}
    */
-    const captureSnapshot = async (frameNo) => withSpan(
-        "devtools.captureSnapshot",
-        { runId, frameNo },
-        () => getDevToolsSnapshotRoute({
-            adapter: input.adapter,
-            runId,
-            frameNo,
-            onWarning: input.onWarning,
-        }),
-    );
+    const captureSnapshot = async (frameNo) => {
+        try {
+            return await withSpan(
+                "devtools.captureSnapshot",
+                { runId, frameNo },
+                () => getDevToolsSnapshotRoute({
+                    adapter: input.adapter,
+                    runId,
+                    frameNo,
+                    onWarning: input.onWarning,
+                }),
+            );
+        }
+        catch (error) {
+            // Unwrap the SmithersError runPromise() wraps around route errors so
+            // callers can detect FrameOutOfRange gaps via instanceof checks.
+            const routeError = findDevToolsRouteError(error);
+            throw routeError ?? error;
+        }
+    };
     const producer = withSpan(
         "devtools.streamDevTools",
         {

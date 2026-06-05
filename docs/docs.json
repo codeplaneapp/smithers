@@ -7,6 +7,9 @@
     "primary": "#00D2A0"
   },
   "favicon": "/favicon.svg",
+  "contextual": {
+    "options": ["copy", "view", "chatgpt", "claude"]
+  },
   "navigation": {
     "groups": [
       {
@@ -213,6 +216,7 @@
         "group": "Agent Support",
         "pages": [
           "agents/overview",
+          "agents/setup",
           "agents/claude-code",
           "agents/codex",
           "agents/cursor",

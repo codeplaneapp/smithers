@@ -1,5 +1,6 @@
 import type { ViewId } from "../../useStudioStore";
 import type { PrSummary } from "./PrSummary";
+import type { DashboardKey } from "./dashboard/dashboards";
 
 /**
  * Something rendered over — or split beside — the chat. The agent opens an
@@ -13,7 +14,9 @@ export type Overlay =
   | { kind: "terminal"; title: string }
   | { kind: "sandbox"; title: string; url: string }
   | { kind: "surface"; title: string; surface: ViewId }
+  | { kind: "dashboard"; title: string; dashboard: DashboardKey }
   | { kind: "workflow-ui"; title: string; url: string }
+  | { kind: "settings"; title: string }
   | { kind: "html"; title: string; html: string };
 
 /** Whether an overlay sits beside the chat (`split`) or covers it (`full`). */
