@@ -415,7 +415,7 @@ export const CLI_AGENT_SURFACE_MANIFEST = [
     binary: "vibe",
     packageExport: "VibeAgent",
     defaultOutputFormat: "stream-json",
-    docsUrls: [],
+    docsUrls: ["https://docs.mistral.ai/mistral-vibe/terminal"],
     emittedFlags: [
       "--agent",
       "--max-turns",
