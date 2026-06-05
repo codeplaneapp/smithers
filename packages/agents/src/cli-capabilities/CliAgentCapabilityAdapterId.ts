@@ -7,4 +7,5 @@ export type CliAgentCapabilityAdapterId =
   | "gemini"
   | "kimi"
   | "opencode"
-  | "pi";
+  | "pi"
+  | "vibe";

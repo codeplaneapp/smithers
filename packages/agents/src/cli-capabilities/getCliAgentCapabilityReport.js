@@ -8,6 +8,7 @@ import { createGeminiCapabilityRegistry } from "../GeminiAgent.js";
 import { createKimiCapabilityRegistry } from "../KimiAgent.js";
 import { createOpenCodeCapabilityRegistry } from "../OpenCodeAgent.js";
 import { createPiCapabilityRegistry } from "../PiAgent.js";
+import { createVibeCapabilityRegistry } from "../VibeAgent.js";
 import { getCliAgentSurfaceManifestEntry } from "../cli-surface/index.js";
 /** @typedef {import("./CliAgentCapabilityReportEntry.ts").CliAgentCapabilityReportEntry} CliAgentCapabilityReportEntry */
 
@@ -56,6 +57,11 @@ const CLI_AGENT_CAPABILITY_ADAPTERS = [
         id: "pi",
         binary: "pi",
         buildRegistry: () => createPiCapabilityRegistry(),
+    },
+    {
+        id: "vibe",
+        binary: "vibe",
+        buildRegistry: () => createVibeCapabilityRegistry(),
     },
 ];
 /**

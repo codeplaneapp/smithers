@@ -42,7 +42,8 @@ describe("detectAvailableAgents", () => {
         expect(ids).toContain("pi");
         expect(ids).toContain("kimi");
         expect(ids).toContain("amp");
-        expect(results.length).toBe(8);
+        expect(ids).toContain("vibe");
+        expect(results.length).toBe(9);
     });
     test("each result has required fields", () => {
         const results = detectAvailableAgents({});

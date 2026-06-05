@@ -22,6 +22,7 @@
 /** @typedef {import("./BaseCliAgent/PiExtensionUiRequest.ts").PiExtensionUiRequest} PiExtensionUiRequest */
 /** @typedef {import("./BaseCliAgent/PiExtensionUiResponse.ts").PiExtensionUiResponse} PiExtensionUiResponse */
 /** @typedef {import("./OpenCodeAgent.ts").OpenCodeAgentOptions} OpenCodeAgentOptions */
+/** @typedef {import("./VibeAgentOptions.ts").VibeAgentOptions} VibeAgentOptions */
 /** @typedef {import("./agent-contract/SmithersAgentContract.ts").SmithersAgentContract} SmithersAgentContract */
 /** @typedef {import("./agent-contract/SmithersAgentContractTool.ts").SmithersAgentContractTool} SmithersAgentContractTool */
 /** @typedef {import("./agent-contract/SmithersAgentToolCategory.ts").SmithersAgentToolCategory} SmithersAgentToolCategory */
@@ -54,6 +55,7 @@ export { KimiAgent } from "./KimiAgent.js";
 export { ForgeAgent } from "./ForgeAgent.js";
 export { createForgeCapabilityRegistry } from "./ForgeAgent.js";
 export { OpenCodeAgent } from "./OpenCodeAgent.js";
+export { VibeAgent, createVibeCapabilityRegistry } from "./VibeAgent.js";
 export {
   getCliAgentCapabilityReport,
   getCliAgentCapabilityDoctorReport,
