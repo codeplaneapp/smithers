@@ -4,11 +4,13 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "bun test ./tests/open-code-review.test.ts ./tests/open-code-review-ui.e2e.test.ts",
     "lint": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path ../.gitignore .",
     "lint:fix": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path ../.gitignore --fix .",
     "workflow:list": "smithers workflow list",
     "workflow:run": "smithers workflow run",
-    "workflow:implement": "smithers workflow implement"
+    "workflow:implement": "smithers workflow implement",
+    "test:open-code-review": "bun test ./tests/open-code-review.test.ts ./tests/open-code-review-ui.e2e.test.ts"
   },
   "dependencies": {
     "@smithers-orchestrator/scorers": "workspace:*",
