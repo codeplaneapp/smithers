@@ -66,27 +66,6 @@ export const STARTER_GOALS = [
 /** @type {StarterRecipe[]} */
 export const STARTER_RECIPES = [
     {
-        id: "idea-to-prd",
-        aliases: ["prd", "product-brief"],
-        title: "Turn a rough idea into a product brief",
-        audience: ["founder", "product", "marketing"],
-        goals: ["plan"],
-        workflow: "write-a-prd",
-        outcome: "A structured PRD with goals, users, scope, risks, launch notes, and open questions.",
-        setup: [
-            "Collect any notes, customer quotes, links, screenshots, or constraints in the prompt.",
-            "Name the user, business goal, and deadline if those are known.",
-        ],
-        prompt: "Draft a PRD for a self-serve onboarding flow that helps new customers finish setup in under ten minutes.",
-        followUps: [
-            workflowPromptCommand("tickets-create", "Break this PRD into implementation tickets"),
-            workflowPromptCommand("grill-me", "Interview me until the unclear PRD requirements are actionable"),
-        ],
-        goodFor: ["new feature ideas", "executive alignment", "scope decisions"],
-        avoidWhen: "You already have implementation-ready tickets.",
-        tags: ["product", "requirements", "launch"],
-    },
-    {
         id: "idea-to-tickets",
         aliases: ["tickets", "project-plan"],
         title: "Break a project into implementation tickets",
@@ -168,7 +147,6 @@ export const STARTER_RECIPES = [
         ],
         prompt: "Research whether we should add a public template gallery. Compare user value, maintenance cost, and launch risk.",
         followUps: [
-            workflowPromptCommand("write-a-prd", "Turn this research into a PRD"),
             workflowPromptCommand("plan", "Make a practical execution plan from this research"),
         ],
         goodFor: ["strategy questions", "competitive scans", "before-build decisions"],
@@ -189,7 +167,6 @@ export const STARTER_RECIPES = [
         ],
         prompt: "We need a better admin experience for enterprise customers, but the scope is unclear.",
         followUps: [
-            workflowPromptCommand("write-a-prd", "Turn the clarified requirements into a PRD"),
             workflowPromptCommand("tickets-create", "Create tickets from the clarified requirements"),
         ],
         goodFor: ["ambiguous stakeholder asks", "sales feedback", "pre-ticket discovery"],
