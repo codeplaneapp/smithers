@@ -67,6 +67,32 @@ describe("DevToolsStore", () => {
       .toBe(stable(fresh));
   });
 
+  test("accepts enriched equal-sequence snapshots", () => {
+    const first = snapshot(1, [task(2, "task:a", "running")]);
+    const enriched = snapshot(1, [task(2, "task:a", "running", { output: { summary: "ready" } })]);
+    const store = new DevToolsStore({ ghostNodeCap: 8 });
+
+    store.connect("run-test");
+    store.applyEvent({ version: 1, kind: "snapshot", snapshot: first });
+    store.applyEvent({ version: 1, kind: "snapshot", snapshot: enriched });
+
+    expect(store.tree?.children[0]?.props.output).toEqual({ summary: "ready" });
+    store.disconnect();
+  });
+
+  test("accepts snapshots that omit runId when already connected", () => {
+    const first = snapshot(1, [task(2, "task:a", "running")]);
+    const { runId: _runId, ...withoutRunId } = first;
+    const store = new DevToolsStore({ ghostNodeCap: 8 });
+
+    store.connect("run-test");
+    store.applyEvent({ version: 1, kind: "snapshot", snapshot: withoutRunId as DevToolsSnapshot });
+
+    expect(store.tree?.children[0]?.task?.nodeId).toBe("task:a");
+    expect(store.runId).toBe("run-test");
+    store.disconnect();
+  });
+
   test("GapResync keeps the old displayed tree, discards deltas, then accepts a snapshot", () => {
     const first = snapshot(1, [task(2, "task:a", "running")]);
     const ignored = diffSnapshots(first, snapshot(3, [task(2, "task:a", "failed")]));
@@ -153,10 +179,7 @@ describe("DevToolsClient integration", () => {
     await waitFor(() => store.seq === 1);
 
     const inspector = new RunInspector(store, client, { workflowName: "fixture" });
-    const lines = inspector.render(100, 20, {
-      fg: (_color, value) => value,
-      bold: (value) => value,
-    }).join("\n");
+    const lines = inspector.render(100, 20).join("\n");
 
     expect(lines).toContain("task:a");
     expect(lines).toContain("finished");

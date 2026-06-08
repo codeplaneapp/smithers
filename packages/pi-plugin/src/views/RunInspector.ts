@@ -15,11 +15,13 @@ type FocusPane = "tree" | "inspector" | "scrubber";
 
 type RunInspectorOptions = {
   workflowName?: string;
+  theme?: Theme;
   onClose?: () => void;
   onNotify?: (message: string, level?: "info" | "warning" | "error") => void;
+  requestRender?: () => void;
 };
 
-function paint(theme: Theme, color: string, value: string) {
+function paint(theme: Theme = {}, color: string, value: string) {
   return theme.fg ? theme.fg(color, value) : value;
 }
 
@@ -46,6 +48,10 @@ export class RunInspector {
   private focus: FocusPane = "tree";
   private cachedLines: string[] | undefined;
   private cachedWidth = 0;
+  private readonly theme: Theme;
+  private readonly requestRender: () => void;
+  private readonly unsubscribe: () => void;
+  private pendingAction: string | undefined;
 
   constructor(
     private readonly store: DevToolsStore,
@@ -56,9 +62,14 @@ export class RunInspector {
     this.scrubber = new FrameScrubber(store);
     this.tree = new RunTree(store);
     this.inspector = new NodeInspector(store);
+    this.theme = options.theme ?? {};
     this.onClose = options.onClose ?? (() => undefined);
     this.onNotify = options.onNotify ?? (() => undefined);
-    store.subscribe(() => this.invalidate());
+    this.requestRender = options.requestRender ?? (() => undefined);
+    this.unsubscribe = store.subscribe(() => {
+      this.invalidate();
+      this.requestRender();
+    });
   }
 
   handleInput(data: string) {
@@ -114,7 +125,7 @@ export class RunInspector {
     }
   }
 
-  render(width: number, height = 34, theme: Theme) {
+  render(width: number, height = 34, theme: Theme = this.theme) {
     if (this.cachedLines && this.cachedWidth === width) {
       return this.cachedLines;
     }
@@ -138,12 +149,13 @@ export class RunInspector {
     }
 
     const focusLabel = paint(theme, "accent", this.focus);
+    const working = this.pendingAction ? `  working:${this.pendingAction}` : "";
     lines.push(
       truncateToWidth(
         paint(
           theme,
           "dim",
-          ` focus:${stripAnsi(focusLabel)}  tab:focus  arrows/jk:tree  1-3:tabs  s:frames  a/d:approve/deny  w:rewind  c:cancel  q:close`,
+          ` focus:${stripAnsi(focusLabel)}${working}  tab:focus  arrows/jk:tree  1-3:tabs  s:frames  a/d:approve/deny  w:rewind  c:cancel  q:close`,
         ),
         W,
       ),
@@ -159,7 +171,7 @@ export class RunInspector {
   }
 
   dispose() {
-    this.store.disconnect();
+    this.unsubscribe();
   }
 
   private cycleFocus(delta: number) {
@@ -179,7 +191,25 @@ export class RunInspector {
       runId,
       nodeId,
       iteration: node.task?.iteration ?? 0,
+      state: typeof node.props.state === "string" ? node.props.state : "unknown",
     };
+  }
+
+  private async runExclusive(label: string, task: () => Promise<void>) {
+    if (this.pendingAction) {
+      this.onNotify(`${this.pendingAction} already in progress.`, "warning");
+      return;
+    }
+    this.pendingAction = label;
+    this.invalidate();
+    this.requestRender();
+    try {
+      await task();
+    } finally {
+      this.pendingAction = undefined;
+      this.invalidate();
+      this.requestRender();
+    }
   }
 
   private async approveSelected() {
@@ -188,12 +218,19 @@ export class RunInspector {
       this.onNotify("No task node selected.", "warning");
       return;
     }
-    try {
-      await this.client.approve(task.runId, task.nodeId, task.iteration);
-      this.onNotify(`Approved ${task.nodeId}.`, "info");
-    } catch (error) {
-      this.onNotify(error instanceof Error ? error.message : String(error), "error");
+    if (task.state !== "waiting-approval") {
+      this.onNotify("Selected node is not waiting for approval.", "warning");
+      return;
     }
+    await this.runExclusive("approve", async () => {
+      try {
+        await this.client.approve(task.runId, task.nodeId, task.iteration);
+        this.onNotify(`Approved ${task.nodeId}.`, "info");
+        this.store.connect(task.runId);
+      } catch (error) {
+        this.onNotify(error instanceof Error ? error.message : String(error), "error");
+      }
+    });
   }
 
   private async denySelected() {
@@ -202,24 +239,35 @@ export class RunInspector {
       this.onNotify("No task node selected.", "warning");
       return;
     }
-    try {
-      await this.client.deny(task.runId, task.nodeId, task.iteration);
-      this.onNotify(`Denied ${task.nodeId}.`, "warning");
-    } catch (error) {
-      this.onNotify(error instanceof Error ? error.message : String(error), "error");
+    if (task.state !== "waiting-approval") {
+      this.onNotify("Selected node is not waiting for approval.", "warning");
+      return;
     }
+    await this.runExclusive("deny", async () => {
+      try {
+        await this.client.deny(task.runId, task.nodeId, task.iteration);
+        this.onNotify(`Denied ${task.nodeId}.`, "warning");
+        this.store.connect(task.runId);
+      } catch (error) {
+        this.onNotify(error instanceof Error ? error.message : String(error), "error");
+      }
+    });
   }
 
   private async cancelRun() {
     if (!this.store.runId) {
       return;
     }
-    try {
-      await this.client.cancel(this.store.runId);
-      this.onNotify(`Cancelling ${this.store.runId.slice(0, 8)}.`, "warning");
-    } catch (error) {
-      this.onNotify(error instanceof Error ? error.message : String(error), "error");
-    }
+    const runId = this.store.runId;
+    await this.runExclusive("cancel", async () => {
+      try {
+        await this.client.cancel(runId);
+        this.onNotify(`Cancelling ${runId.slice(0, 8)}.`, "warning");
+        this.store.connect(runId);
+      } catch (error) {
+        this.onNotify(error instanceof Error ? error.message : String(error), "error");
+      }
+    });
   }
 
   private async rewindDisplayedFrame() {

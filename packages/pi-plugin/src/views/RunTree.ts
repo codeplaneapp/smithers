@@ -12,11 +12,11 @@ type TreeRow = {
   depth: number;
 };
 
-function paint(theme: Theme, color: string, value: string) {
+function paint(theme: Theme = {}, color: string, value: string) {
   return theme.fg ? theme.fg(color, value) : value;
 }
 
-function bold(theme: Theme, value: string) {
+function bold(theme: Theme = {}, value: string) {
   return theme.bold ? theme.bold(value) : value;
 }
 
@@ -47,6 +47,7 @@ function stateIcon(node: DevToolsNode) {
     case "blocked":
     case "waitingapproval":
     case "waiting-approval":
+    case "waiting-event":
     case "waiting-timer":
       return "!";
     case "cancelled":
@@ -245,7 +246,7 @@ export class RunTree {
     return "unhandled";
   }
 
-  render(width: number, height: number, theme: Theme) {
+  render(width: number, height: number, theme: Theme = {}) {
     const W = Math.max(28, width);
     const H = Math.max(3, height);
     this.rebuildAutoExpansion();
@@ -298,7 +299,7 @@ export class RunTree {
     const line =
       `${marker}${indent}${chevron} ${paint(theme, stateColor(node), stateIcon(node))} ` +
       `${paint(theme, selected ? "accent" : "muted", `<${node.type}>`)} ` +
-      `${paint(theme, selected ? "accent" : "default", label)} ` +
+      `${paint(theme, selected ? "accent" : "muted", label)} ` +
       `${paint(theme, dim, summary)}${failedBubble}${ghost}`;
     return truncateToWidth(line, width);
   }
@@ -312,7 +313,8 @@ export class RunTree {
     this.expandedIds.add(root.id);
     const running = collectPathIds(root, (node) => stateIcon(node) === ">");
     const failed = collectPathIds(root, (node) => stateIcon(node) === "x");
-    for (const id of [...running, ...failed]) {
+    const waiting = collectPathIds(root, (node) => stateIcon(node) === "!");
+    for (const id of [...running, ...failed, ...waiting]) {
       if (!this.userCollapsedIds.has(id)) {
         this.expandedIds.add(id);
       }

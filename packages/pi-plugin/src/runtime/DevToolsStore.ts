@@ -56,6 +56,17 @@ function cloneSnapshot(snapshot: SnapshotWithRunState) {
   return structuredClone(snapshot);
 }
 
+function sameSnapshot(left: SnapshotWithRunState | undefined, right: SnapshotWithRunState) {
+  if (!left) {
+    return false;
+  }
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
 function findNode(root: DevToolsNode | undefined, id: number): DevToolsNode | undefined {
   if (!root) {
     return undefined;
@@ -113,6 +124,10 @@ function runStatusForRoot(root: DevToolsNode | undefined, fallback: string) {
     case "waiting-approval":
     case "blocked":
       return "waiting-approval";
+    case "waiting-event":
+      return "waiting-event";
+    case "waiting-timer":
+      return "waiting-timer";
     case "finished":
     case "complete":
     case "completed":
@@ -581,11 +596,15 @@ export class DevToolsStore {
   }
 
   private applySnapshotToLiveState(snapshot: SnapshotWithRunState) {
-    if (this.runId && snapshot.runId !== this.runId) {
+    const snapshotRunId = snapshot.runId ?? (snapshot as SnapshotWithRunState & { run_id?: string }).run_id;
+    if (this.runId && snapshotRunId && snapshotRunId !== this.runId) {
       this.disconnect();
       return false;
     }
-    if (snapshot.seq <= (this.liveSnapshot?.seq ?? 0) && this.liveSnapshot && !this.awaitingSnapshotAfterGapResync) {
+    if (snapshot.seq < (this.liveSnapshot?.seq ?? 0) && this.liveSnapshot && !this.awaitingSnapshotAfterGapResync) {
+      return false;
+    }
+    if (snapshot.seq === this.liveSnapshot?.seq && sameSnapshot(this.liveSnapshot, snapshot) && !this.awaitingSnapshotAfterGapResync) {
       return false;
     }
 
@@ -605,8 +624,10 @@ export class DevToolsStore {
     this.runStatus = runStatusForSnapshot(snapshot, this.runStatus);
     this.recordMountedFrames(snapshot.root, snapshot.frameNo);
     this.pruneGhostNodesNowActive(snapshot.root);
-    this.stateRunId = snapshot.runId;
-    this.lastSeqSeenByRunId.set(snapshot.runId, snapshot.seq);
+    this.stateRunId = snapshotRunId ?? this.runId;
+    if (this.stateRunId) {
+      this.lastSeqSeenByRunId.set(this.stateRunId, snapshot.seq);
+    }
     return true;
   }
 

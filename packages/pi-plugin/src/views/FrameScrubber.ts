@@ -6,7 +6,7 @@ type Theme = {
   bold?: (value: string) => string;
 };
 
-function paint(theme: Theme, color: string, value: string) {
+function paint(theme: Theme = {}, color: string, value: string) {
   return theme.fg ? theme.fg(color, value) : value;
 }
 
@@ -33,7 +33,7 @@ export class FrameScrubber {
     return false;
   }
 
-  render(width: number, theme: Theme) {
+  render(width: number, theme: Theme = {}) {
     const W = Math.max(24, width);
     const latest = Math.max(0, this.store.latestFrameNo);
     const current = Math.min(this.store.displayedFrameNo, latest);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { jsonSchemaToTypebox, jsonSchemaTypeToTypebox } from "../src/extension.js";
+import { jsonSchemaToTypebox, jsonSchemaTypeToTypebox, parseRunIdArg } from "../src/extension.js";
 
 describe("jsonSchemaToTypebox", () => {
   test("maps object-typed params to a record instead of coercing to string (#223)", () => {
@@ -43,6 +43,14 @@ describe("jsonSchemaToTypebox", () => {
 
     expect(result.rows.type).toBe("array");
     expect(result.rows.items.type).toBe("object");
+  });
+});
+
+describe("parseRunIdArg", () => {
+  test("extracts run ids from malformed slash command args", () => {
+    expect(parseRunIdArg("thers run-1780959222920")).toBe("run-1780959222920");
+    expect(parseRunIdArg("run-abc_123-extra")).toBe("run-abc_123-extra");
+    expect(parseRunIdArg("plain-value")).toBe("plain-value");
   });
 });
 

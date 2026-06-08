@@ -472,6 +472,9 @@ describe("semantic tool definitions", () => {
             runId: "run-1",
             nodeId: "gate",
             workflowName: "demo",
+            request: { question: "ship?" },
+            decision: "not json",
+            autoApproved: false,
         });
         const node = await harness.call("get_node_detail", {
             runId: "run-1",

@@ -420,6 +420,9 @@ describe("SmithersDb adapter", () => {
             status: "requested",
             requestedAtMs: now - 2000,
             note: "needs operator review",
+            requestJson: JSON.stringify({ title: "Deploy?", summary: "Review deployment" }),
+            decisionJson: JSON.stringify({ option: "approve" }),
+            autoApproved: false,
         });
         await adapter.insertOrUpdateApproval({
             runId: "r2",
@@ -445,6 +448,9 @@ describe("SmithersDb adapter", () => {
             nodeLabel: "Deploy gate",
             status: "requested",
             note: "needs operator review",
+            requestJson: JSON.stringify({ title: "Deploy?", summary: "Review deployment" }),
+            decisionJson: JSON.stringify({ option: "approve" }),
+            autoApproved: false,
         });
     });
     test("insertCache and getCache", async () => {

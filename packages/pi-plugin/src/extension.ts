@@ -47,6 +47,15 @@ type TrackedRun = {
   store: DevToolsStore;
 };
 
+type SmithersRunSummary = {
+  runId?: string;
+  id?: string;
+  workflowName?: string | null;
+  workflow?: string | null;
+  status?: string;
+  state?: string;
+};
+
 const DEFAULT_BASE = "http://127.0.0.1:7331";
 const requireFromHere = createRequire(import.meta.url);
 
@@ -55,9 +64,10 @@ let smithersDocs: string | undefined;
 let mcpClient: Client | undefined;
 let mcpTransport: StdioClientTransport | undefined;
 let smithersToolContract: SmithersAgentContract | undefined;
-let pollInterval: ReturnType<typeof setInterval> | undefined;
 let activeRunId: string | undefined;
+let activeSessionToken: symbol | undefined;
 
+const pollIntervals = new Set<ReturnType<typeof setInterval>>();
 const runs = new Map<string, TrackedRun>();
 
 function getBase() {
@@ -222,8 +232,52 @@ function statusIcon(status: string) {
   }
 }
 
-function stripAnsi(value: string) {
-  return value.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "");
+export function parseRunIdArg(args: string) {
+  const trimmed = args.trim();
+  const match = trimmed.match(/\brun-[A-Za-z0-9_-]+\b/);
+  return match?.[0] ?? trimmed;
+}
+
+function parseMcpJsonPayload(text: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(text);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function mcpData(payload: Record<string, unknown> | undefined) {
+  const data = payload?.data;
+  return typeof data === "object" && data !== null && !Array.isArray(data) ? data as Record<string, unknown> : undefined;
+}
+
+async function listSmithersRunsFromMcp() {
+  const result = await callMcpTool("list_runs", { limit: 100 });
+  if (result.isError) {
+    throw new SmithersError("PI_MCP_ERROR", result.text);
+  }
+  const data = mcpData(parseMcpJsonPayload(result.text));
+  return Array.isArray(data?.runs) ? data.runs as SmithersRunSummary[] : [];
+}
+
+function runDisplayName(run: TrackedRun) {
+  return run.store.tree?.name ?? run.workflowName;
+}
+
+function runDisplayStatus(run: TrackedRun, fallback?: string) {
+  return run.store.runStatus !== "unknown" ? run.store.runStatus : fallback ?? "unknown";
+}
+
+function isStaleContextError(error: unknown) {
+  return error instanceof Error && /ctx is stale|Extension ctx is stale/i.test(error.message);
+}
+
+function clearPollIntervals() {
+  for (const interval of pollIntervals) {
+    clearInterval(interval);
+  }
+  pollIntervals.clear();
 }
 
 function collectNodeStates(run: TrackedRun) {
@@ -258,8 +312,12 @@ function collectErrors(run: TrackedRun) {
 }
 
 function trackRun(runId: string, workflowName = "workflow") {
+  runId = parseRunIdArg(runId);
   const existing = runs.get(runId);
   if (existing) {
+    if (existing.workflowName === "workflow" && workflowName !== "workflow") {
+      existing.workflowName = workflowName;
+    }
     activeRunId = runId;
     return existing;
   }
@@ -273,16 +331,23 @@ function trackRun(runId: string, workflowName = "workflow") {
 }
 
 function updateStatusBar(ctx: ExtensionContext) {
-  const active = [...runs.values()].filter((run) => !run.store.isRunFinished);
-  const failed = [...runs.values()].filter((run) => run.store.runStatus === "failed");
-  const parts: string[] = [];
-  if (active.length > 0) {
-    parts.push(`${active.length} active`);
+  try {
+    const active = [...runs.values()].filter((run) => !run.store.isRunFinished);
+    const failed = [...runs.values()].filter((run) => run.store.runStatus === "failed");
+    const parts: string[] = [];
+    if (active.length > 0) {
+      parts.push(`${active.length} active`);
+    }
+    if (failed.length > 0) {
+      parts.push(`${failed.length} failed`);
+    }
+    ctx.ui.setStatus?.("smithers", `smithers: ${parts.length > 0 ? parts.join("  ") : "idle"}`);
+  } catch (error) {
+    if (!isStaleContextError(error)) {
+      throw error;
+    }
+    clearPollIntervals();
   }
-  if (failed.length > 0) {
-    parts.push(`${failed.length} failed`);
-  }
-  ctx.ui.setStatus?.("smithers", parts.length > 0 ? `smithers: ${parts.join("  ")}` : undefined);
 }
 
 async function openInspector(ctx: ExtensionContext, run: TrackedRun) {
@@ -290,11 +355,16 @@ async function openInspector(ctx: ExtensionContext, run: TrackedRun) {
     ctx.ui.notify("/smithers requires interactive mode", "error");
     return;
   }
+  if (run.store.runId !== run.runId || run.store.connectionState.kind === "disconnected" || run.store.connectionState.kind === "error") {
+    run.store.connect(run.runId);
+  }
   await ctx.ui.custom((_tui: unknown, theme: unknown, _kb: unknown, done: () => void) =>
     new RunInspector(run.store, run.client, {
       workflowName: run.workflowName,
+      theme: (theme ?? {}) as any,
       onClose: done,
       onNotify: (message, level) => ctx.ui.notify(message, level),
+      requestRender: () => (_tui as { requestRender?: () => void }).requestRender?.(),
     }),
   );
 }
@@ -355,7 +425,13 @@ async function registerMcpTools(pi: ExtensionAPI, ctx: ExtensionContext) {
       });
     }
   } catch (error) {
-    ctx.ui.notify(`Smithers MCP: ${error instanceof Error ? error.message : String(error)}`, "warning");
+    try {
+      ctx.ui.notify(`Smithers MCP: ${error instanceof Error ? error.message : String(error)}`, "warning");
+    } catch (notifyError) {
+      if (!isStaleContextError(notifyError)) {
+        throw notifyError;
+      }
+    }
   }
 }
 
@@ -374,40 +450,28 @@ export function extension(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
-    // Clear any timer left over from a previous session before re-arming, so a
-    // reload/session-replacement never leaves a timer holding a stale ctx.
-    if (pollInterval) {
-      clearInterval(pollInterval);
-    }
-    pollInterval = setInterval(() => {
-      // ctx becomes stale after reload/newSession/fork/switchSession; touching
-      // ctx.ui then throws. Stop polling instead of crashing the Pi process.
-      try {
-        updateStatusBar(ctx);
-      } catch {
-        if (pollInterval) {
-          clearInterval(pollInterval);
-          pollInterval = undefined;
-        }
+    clearPollIntervals();
+    const sessionToken = Symbol("smithers-session");
+    activeSessionToken = sessionToken;
+    const interval = setInterval(() => {
+      if (activeSessionToken !== sessionToken) {
+        clearInterval(interval);
+        pollIntervals.delete(interval);
+        return;
       }
+      updateStatusBar(ctx);
     }, 5_000);
+    pollIntervals.add(interval);
     await registerMcpTools(pi, ctx);
+    if (activeSessionToken !== sessionToken) {
+      return;
+    }
     if (ctx.hasUI) {
       ctx.ui.setHeader?.((_tui: unknown, theme: any) => ({
         render(width: number) {
-          return [truncateToWidth(` ${theme.fg("accent", theme.bold("smithers"))} ${theme.fg("muted", "PI inspector")}`, width)];
-        },
-        invalidate() {},
-      }));
-      ctx.ui.setFooter?.((_tui: unknown, theme: any, footerData: any) => ({
-        render(width: number) {
-          const statuses = footerData.getExtensionStatuses?.();
-          const smithersStatus = statuses?.get?.("smithers") ?? "smithers: idle";
-          const branch = footerData.getGitBranch?.();
-          const left = ` ${theme.fg("muted", smithersStatus)}`;
-          const right = branch ? theme.fg("dim", ` ${branch}`) : "";
-          const gap = Math.max(0, width - stripAnsi(left).length - stripAnsi(right).length);
-          return [truncateToWidth(left + " ".repeat(gap) + right, width)];
+          const fg = typeof theme?.fg === "function" ? theme.fg.bind(theme) : (_color: string, value: string) => value;
+          const bold = typeof theme?.bold === "function" ? theme.bold.bind(theme) : (value: string) => value;
+          return [truncateToWidth(` ${fg("accent", bold("smithers"))} ${fg("muted", "PI inspector")}`, width)];
         },
         invalidate() {},
       }));
@@ -416,9 +480,8 @@ export function extension(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
-    if (pollInterval) {
-      clearInterval(pollInterval);
-    }
+    activeSessionToken = undefined;
+    clearPollIntervals();
     for (const run of runs.values()) {
       run.store.disconnect();
     }
@@ -456,7 +519,7 @@ export function extension(pi: ExtensionAPI) {
   pi.registerCommand("smithers", {
     description: "Open the Smithers live run inspector",
     handler: async (args: string, ctx: ExtensionContext) => {
-      const requested = args.trim();
+      const requested = parseRunIdArg(args);
       let run = requested ? trackRun(requested) : activeRunId ? runs.get(activeRunId) : undefined;
       if (!run) {
         const runId = await ctx.ui.input("Run ID", "Enter the Smithers run ID to inspect");
@@ -465,6 +528,7 @@ export function extension(pi: ExtensionAPI) {
         }
         run = trackRun(runId);
       }
+      updateStatusBar(ctx);
       await openInspector(ctx, run);
     },
   });
@@ -477,34 +541,53 @@ export function extension(pi: ExtensionAPI) {
         .map((run) => ({ value: run.runId, label: `${run.workflowName} (${run.runId.slice(0, 8)})` }));
     },
     handler: async (args: string, ctx: ExtensionContext) => {
-      const runId = args.trim() || (await ctx.ui.input("Run ID", "Enter the Smithers run ID to watch"));
+      const runId = parseRunIdArg(args) || (await ctx.ui.input("Run ID", "Enter the Smithers run ID to watch"));
       if (!runId) {
         return;
       }
       const run = trackRun(runId);
-      ctx.ui.notify(`Watching run ${runId.slice(0, 8)}`, "info");
+      ctx.ui.notify(`Watching run ${run.runId.slice(0, 8)}`, "info");
       updateStatusBar(ctx);
       await openInspector(ctx, run);
     },
   });
 
   pi.registerCommand("smithers-runs", {
-    description: "List tracked Smithers runs",
+    description: "List Smithers runs",
     handler: async (_args: string, ctx: ExtensionContext) => {
+      ctx.ui.notify("Loading Smithers runs...", "info");
+      const discoveredRuns = await listSmithersRunsFromMcp().catch((error) => {
+        ctx.ui.notify(`Unable to list Smithers runs: ${error instanceof Error ? error.message : String(error)}`, "warning");
+        return [];
+      });
+      for (const discovered of discoveredRuns) {
+        const runId = discovered.runId ?? discovered.id;
+        if (!runId) {
+          continue;
+        }
+        trackRun(runId, discovered.workflowName ?? discovered.workflow ?? "workflow");
+      }
       if (runs.size === 0) {
-        ctx.ui.notify("No runs tracked", "info");
+        ctx.ui.notify("No Smithers runs found", "info");
         return;
       }
-      const runList = [...runs.values()];
-      const options = runList.map(
-        (run) => `${statusIcon(run.store.runStatus)} ${run.workflowName} (${run.runId.slice(0, 8)}) - ${run.store.runStatus}`,
-      );
+      const discoveredById = new Map(discoveredRuns.map((run) => [run.runId ?? run.id, run]));
+      const runList = [...runs.values()].sort((a, b) => b.runId.localeCompare(a.runId));
+      const options = runList.map((run) => {
+        const discovered = discoveredById.get(run.runId);
+        const status = runDisplayStatus(run, discovered?.status ?? discovered?.state);
+        const workflowName = runDisplayName(run) === "workflow"
+          ? discovered?.workflowName ?? discovered?.workflow ?? "workflow"
+          : runDisplayName(run);
+        return `${statusIcon(status)} ${workflowName} (${run.runId}) - ${status}`;
+      });
       const selected = await ctx.ui.select("Smithers Runs", options);
       if (!selected) {
         return;
       }
       const run = runList[options.indexOf(selected)];
       activeRunId = run.runId;
+      updateStatusBar(ctx);
       await openInspector(ctx, run);
     },
   });

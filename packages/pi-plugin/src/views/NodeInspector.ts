@@ -9,11 +9,11 @@ type Theme = {
 
 type InspectorTab = "output" | "diff" | "logs";
 
-function paint(theme: Theme, color: string, value: string) {
+function paint(theme: Theme = {}, color: string, value: string) {
   return theme.fg ? theme.fg(color, value) : value;
 }
 
-function bold(theme: Theme, value: string) {
+function bold(theme: Theme = {}, value: string) {
   return theme.bold ? theme.bold(value) : value;
 }
 
@@ -51,6 +51,19 @@ function firstPresent(node: DevToolsNode, keys: string[]) {
     }
   }
   return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function approvalRequest(node: DevToolsNode) {
+  const approval = node.props.approval;
+  if (!isRecord(approval)) {
+    return undefined;
+  }
+  const request = approval.request;
+  return isRecord(request) ? request : undefined;
 }
 
 function renderJsonLines(value: unknown, fallback: string) {
@@ -123,7 +136,7 @@ export class NodeInspector {
     return "unhandled";
   }
 
-  render(width: number, height: number, theme: Theme) {
+  render(width: number, height: number, theme: Theme = {}) {
     const W = Math.max(28, width);
     const H = Math.max(4, height);
     const node = this.store.selectedNode;
@@ -172,11 +185,16 @@ export class NodeInspector {
 
   private bodyLines(node: DevToolsNode) {
     const calls = toolCalls(node);
+    const approval = isRecord(node.props.approval) ? node.props.approval : undefined;
     const taskLines = [
       ` task.nodeId: ${node.task?.nodeId ?? "-"}`,
       ` task.kind: ${node.task?.kind ?? "-"}`,
       ` task.agent: ${node.task?.agent ?? "-"}`,
       ` task.iteration: ${node.task?.iteration ?? 0}`,
+      ` state: ${nodeState(node)}`,
+      ...(typeof node.task?.label === "string" ? [` label: ${node.task.label}`] : []),
+      ...(typeof approval?.status === "string" ? [` approval.status: ${approval.status}`] : []),
+      ...(typeof approval?.requestedAt === "string" ? [` approval.requestedAt: ${approval.requestedAt}`] : []),
     ];
     const callLines = calls.length > 0 ? ["", " tool calls:", ...calls.map((call) => `  - ${call}`)] : [];
     switch (this.tab) {
@@ -186,7 +204,7 @@ export class NodeInspector {
           ...callLines,
           "",
           " output:",
-          ...renderJsonLines(firstPresent(node, ["output", "row", "result", "value"]), " (no output captured)"),
+          ...renderJsonLines(firstPresent(node, ["output", "row", "result", "value"]) ?? approvalRequest(node), " (no output captured)"),
         ];
       case "diff":
         return [

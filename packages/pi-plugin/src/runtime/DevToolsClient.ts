@@ -1,4 +1,9 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import type { DevToolsDelta, DevToolsSnapshot } from "@smithers-orchestrator/protocol";
@@ -75,6 +80,8 @@ type PendingRequest = {
 };
 
 const DEFAULT_BASE = "http://127.0.0.1:7331";
+const requireFromHere = createRequire(import.meta.url);
+const execFileAsync = promisify(execFile);
 const AUDIT_ROW_ID_KEYS = new Set([
   "auditRowId",
   "audit_row_id",
@@ -84,6 +91,38 @@ const AUDIT_ROW_ID_KEYS = new Set([
   "audit_log_id",
 ]);
 const NESTED_AUDIT_CONTAINERS = ["result", "data", "mutation", "ack", "payload", "meta"];
+
+function resolveCliPath() {
+  try {
+    return requireFromHere.resolve("@smithers-orchestrator/cli");
+  } catch {
+    return resolve(dirname(fileURLToPath(import.meta.url)), "../../../../apps/cli/src/index.js");
+  }
+}
+
+function parseJsonObjectFromStdout(stdout: string) {
+  for (const line of stdout.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) {
+      continue;
+    }
+    try {
+      return JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+  }
+  return JSON.parse(stdout) as Record<string, unknown>;
+}
+
+async function runCli(args: string[]) {
+  const { stdout } = await execFileAsync("bun", ["run", resolveCliPath(), ...args], {
+    cwd: process.cwd(),
+    maxBuffer: 20 * 1024 * 1024,
+    timeout: 15_000,
+  });
+  return stdout;
+}
 
 function toWsUrl(baseUrl: string) {
   const url = new URL(baseUrl);
@@ -139,8 +178,16 @@ function normalizeEvent(raw: unknown): DevToolsRuntimeEvent {
   throw new SmithersError("PI_DEVTOOLS_DECODE_ERROR", "Unknown DevTools event kind.");
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function errorCode(error: unknown) {
+  return error instanceof SmithersError ? error.code : undefined;
+}
+
 function unsupportedRpc(error: unknown) {
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  const message = errorMessage(error).toLowerCase();
   return [
     "method not found",
     "unknown method",
@@ -149,6 +196,17 @@ function unsupportedRpc(error: unknown) {
     "unrecognized method",
     "not_found",
   ].some((phrase) => message.includes(phrase));
+}
+
+function gatewayUnavailable(error: unknown) {
+  const code = errorCode(error);
+  const message = errorMessage(error).toLowerCase();
+  return code === "PI_GATEWAY_HTTP_ERROR" ||
+    message.includes("fetch failed") ||
+    message.includes("econnrefused") ||
+    message.includes("connection refused") ||
+    message.includes("failed to connect") ||
+    message.includes("socket hang up");
 }
 
 function auditRowId(value: unknown): string | undefined {
@@ -325,7 +383,13 @@ export class DevToolsClient {
   ): AsyncGenerator<DevToolsRuntimeEvent> {
     let afterSeqCursor = afterSeq ?? this.lastSeqSeenByRunId.get(runId);
     while (!signal?.aborted) {
-      const connection = await GatewayWsConnection.open(toWsUrl(this.baseUrl));
+      let connection: GatewayWsConnection;
+      try {
+        connection = await GatewayWsConnection.open(toWsUrl(this.baseUrl));
+      } catch {
+        yield { version: 1, kind: "snapshot", snapshot: await this.getDevToolsSnapshot(runId) };
+        return;
+      }
       const abort = () => connection.close();
       signal?.addEventListener("abort", abort, { once: true });
       try {
@@ -398,14 +462,21 @@ export class DevToolsClient {
   }
 
   async getDevToolsSnapshot(runId: string, frameNo?: number) {
-    const snapshot = await this.rpc("getDevToolsSnapshot", {
-      runId,
-      ...(typeof frameNo === "number" ? { frameNo } : {}),
-    });
-    if (isRecord(snapshot) && typeof snapshot.seq === "number") {
-      this.lastSeqSeenByRunId.set(runId, Math.max(this.lastSeqSeenByRunId.get(runId) ?? 0, snapshot.seq));
+    try {
+      const snapshot = await this.rpc("getDevToolsSnapshot", {
+        runId,
+        ...(typeof frameNo === "number" ? { frameNo } : {}),
+      });
+      if (isRecord(snapshot) && typeof snapshot.seq === "number") {
+        this.lastSeqSeenByRunId.set(runId, Math.max(this.lastSeqSeenByRunId.get(runId) ?? 0, snapshot.seq));
+      }
+      return snapshot as DevToolsSnapshot & { runState?: RunStateView };
+    } catch (error) {
+      if (!gatewayUnavailable(error)) {
+        throw error;
+      }
+      return this.getCliDevToolsSnapshot(runId, frameNo, error);
     }
-    return snapshot as DevToolsSnapshot & { runState?: RunStateView };
   }
 
   async getNodeOutput(runId: string, nodeId: string, iteration?: number) {
@@ -425,25 +496,41 @@ export class DevToolsClient {
   }
 
   async approve(runId: string, nodeId: string, iteration = 0, note?: string) {
-    const payload = await this.rpc("approvals.decide", {
-      runId,
-      nodeId,
-      iteration,
-      approved: true,
-      note,
-    });
-    return { auditRowId: auditRowId(payload) } satisfies GatewayMutationResult;
+    try {
+      const payload = await this.rpc("approvals.decide", {
+        runId,
+        nodeId,
+        iteration,
+        approved: true,
+        note,
+      });
+      return { auditRowId: auditRowId(payload) } satisfies GatewayMutationResult;
+    } catch (error) {
+      if (!gatewayUnavailable(error)) {
+        throw error;
+      }
+      await this.cliMutation(["approve", runId, "--node", nodeId, "--iteration", String(iteration), ...(note ? ["--note", note] : [])], error);
+      return {} satisfies GatewayMutationResult;
+    }
   }
 
   async deny(runId: string, nodeId: string, iteration = 0, note?: string) {
-    const payload = await this.rpc("approvals.decide", {
-      runId,
-      nodeId,
-      iteration,
-      approved: false,
-      note,
-    });
-    return { auditRowId: auditRowId(payload) } satisfies GatewayMutationResult;
+    try {
+      const payload = await this.rpc("approvals.decide", {
+        runId,
+        nodeId,
+        iteration,
+        approved: false,
+        note,
+      });
+      return { auditRowId: auditRowId(payload) } satisfies GatewayMutationResult;
+    } catch (error) {
+      if (!gatewayUnavailable(error)) {
+        throw error;
+      }
+      await this.cliMutation(["deny", runId, "--node", nodeId, "--iteration", String(iteration), ...(note ? ["--note", note] : [])], error);
+      return {} satisfies GatewayMutationResult;
+    }
   }
 
   async signal(runId: string, signal: string, payload?: unknown, correlationId?: string) {
@@ -457,8 +544,16 @@ export class DevToolsClient {
   }
 
   async cancel(runId: string) {
-    const payload = await this.rpc("runs.cancel", { runId });
-    return { auditRowId: auditRowId(payload) } satisfies GatewayMutationResult;
+    try {
+      const payload = await this.rpc("runs.cancel", { runId });
+      return { auditRowId: auditRowId(payload) } satisfies GatewayMutationResult;
+    } catch (error) {
+      if (!gatewayUnavailable(error)) {
+        throw error;
+      }
+      await this.cliMutation(["cancel", runId], error);
+      return {} satisfies GatewayMutationResult;
+    }
   }
 
   async resume(runId: string) {
@@ -490,6 +585,40 @@ export class DevToolsClient {
     throw lastUnsupportedError instanceof Error
       ? lastUnsupportedError
       : new SmithersError("PI_UNSUPPORTED_MUTATION", "No supported gateway mutation RPC found.");
+  }
+
+  private async getCliDevToolsSnapshot(runId: string, frameNo: number | undefined, gatewayError: unknown) {
+    try {
+      const stdout = await runCli([
+        "tree",
+        runId,
+        "--json",
+        "--format",
+        "json",
+        ...(typeof frameNo === "number" ? ["--frame", String(frameNo)] : []),
+      ]);
+      const snapshot = parseJsonObjectFromStdout(stdout) as DevToolsSnapshot & { runState?: RunStateView };
+      if (typeof snapshot.seq === "number") {
+        this.lastSeqSeenByRunId.set(runId, Math.max(this.lastSeqSeenByRunId.get(runId) ?? 0, snapshot.seq));
+      }
+      return snapshot;
+    } catch (cliError) {
+      const gatewayMessage = errorMessage(gatewayError);
+      const cliMessage = errorMessage(cliError);
+      throw new SmithersError("PI_DEVTOOLS_SNAPSHOT_ERROR", `Gateway snapshot failed (${gatewayMessage}); CLI fallback failed (${cliMessage}).`, {
+        runId,
+      });
+    }
+  }
+
+  private async cliMutation(args: string[], gatewayError: unknown) {
+    try {
+      await runCli(args);
+    } catch (cliError) {
+      const gatewayMessage = errorMessage(gatewayError);
+      const cliMessage = errorMessage(cliError);
+      throw new SmithersError("PI_GATEWAY_MUTATION_ERROR", `Gateway mutation failed (${gatewayMessage}); CLI fallback failed (${cliMessage}).`);
+    }
   }
 
   private async rpc(method: string, params?: unknown) {

@@ -6,11 +6,11 @@ type Theme = {
   bold?: (value: string) => string;
 };
 
-function paint(theme: Theme, color: string, value: string) {
+function paint(theme: Theme = {}, color: string, value: string) {
   return theme.fg ? theme.fg(color, value) : value;
 }
 
-function bold(theme: Theme, value: string) {
+function bold(theme: Theme = {}, value: string) {
   return theme.bold ? theme.bold(value) : value;
 }
 
@@ -90,7 +90,7 @@ export class Header {
     private readonly workflowName = "workflow",
   ) {}
 
-  render(width: number, theme: Theme) {
+  render(width: number, theme: Theme = {}) {
     const W = Math.max(40, width);
     const runId = this.store.runId ?? "no-run";
     const state = this.store.runStatus;
@@ -122,10 +122,12 @@ export class Header {
     const connection =
       this.store.connectionState.kind === "streaming"
         ? ""
-        : ` ${paint(theme, "warning", this.store.connectionState.kind)}`;
+        : this.store.connectionState.kind === "error"
+          ? ` ${paint(theme, "warning", `error:${this.store.connectionState.error.message}`)}`
+          : ` ${paint(theme, "warning", this.store.connectionState.kind)}`;
     const left = [
       paint(theme, stateColor(state), bold(theme, state.toUpperCase())),
-      paint(theme, "muted", this.workflowName),
+      paint(theme, "muted", this.store.tree?.name === "workflow" ? this.workflowName : this.store.tree?.name ?? this.workflowName),
       paint(theme, "dim", runId.slice(0, 12)),
       runStateLabel ? paint(theme, "muted", runStateLabel) : "",
     ].filter(Boolean).join("  ");
