@@ -53,6 +53,8 @@ let smithersDocs: string | undefined;
 let mcpClient: Client | undefined;
 let mcpTransport: StdioClientTransport | undefined;
 let smithersToolContract: SmithersAgentContract | undefined;
+let mcpToolsRegistered = false;
+let mcpToolsRegistration: Promise<void> | undefined;
 let pollInterval: ReturnType<typeof setInterval> | undefined;
 let activeRunId: string | undefined;
 
@@ -295,6 +297,19 @@ async function openInspector(ctx: ExtensionContext, run: TrackedRun) {
 }
 
 async function registerMcpTools(pi: ExtensionAPI, ctx: ExtensionContext) {
+  if (mcpToolsRegistered) {
+    return;
+  }
+  if (mcpToolsRegistration) {
+    return mcpToolsRegistration;
+  }
+  mcpToolsRegistration = registerMcpToolsInner(pi, ctx).finally(() => {
+    mcpToolsRegistration = undefined;
+  });
+  return mcpToolsRegistration;
+}
+
+async function registerMcpToolsInner(pi: ExtensionAPI, ctx: ExtensionContext) {
   try {
     const client = await ensureMcpClient();
     const { tools } = await client.listTools();
@@ -349,6 +364,7 @@ async function registerMcpTools(pi: ExtensionAPI, ctx: ExtensionContext) {
         },
       });
     }
+    mcpToolsRegistered = true;
   } catch (error) {
     ctx.ui.notify(`Smithers MCP: ${error instanceof Error ? error.message : String(error)}`, "warning");
   }
@@ -386,7 +402,7 @@ export function extension(pi: ExtensionAPI) {
         }
       }
     }, 5_000);
-    await registerMcpTools(pi, ctx);
+    void registerMcpTools(pi, ctx);
     updateStatusBar(ctx);
   });
 
@@ -398,12 +414,6 @@ export function extension(pi: ExtensionAPI) {
       run.store.disconnect();
     }
     runs.clear();
-    if (mcpTransport) {
-      await mcpTransport.close().catch(() => undefined);
-    }
-    mcpTransport = undefined;
-    mcpClient = undefined;
-    smithersToolContract = undefined;
   });
 
   pi.on("before_agent_start", async (event: { systemPrompt: string }) => {
