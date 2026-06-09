@@ -8,15 +8,16 @@ Most teams should start with the workflow pack. It gives you a working `.smither
 ## Always Run with `bunx`
 
 <Warning>
-  Every CLI invocation in these docs is `bunx smithers-orchestrator <command>`. Do **not**
-  install Smithers globally and do **not** use the bare `smithers` or `bunx smithers`
-  shorthand. The bare name `smithers` is a different npm package, so `bunx smithers` runs
+  Agents, MCP configs, and docs should use `bunx smithers-orchestrator <command>`.
+  Do **not** use `bunx smithers`: `smithers` is only the installed binary alias. On
+  npm, `smithers` is an unrelated package, so `bunx smithers` can download and run
   something else entirely.
 </Warning>
 
-- `bunx` resolves the package locally if your project depends on it, otherwise it pulls and runs the latest published version.
 - The published npm package is [`smithers-orchestrator`](https://www.npmjs.com/package/smithers-orchestrator).
-- A global install creates version-drift problems across machines, CI, and contributors. With `bunx`, every project pins Smithers through its own `package.json`.
+- `bunx smithers-orchestrator ...` works from any directory and uses the project-pinned dependency when one exists.
+- The package also installs a `smithers` binary alias. Use `smithers ...` only when the current environment intentionally provides that binary, such as a project script that resolves `node_modules/.bin/smithers`.
+- Avoid global installs: a global `smithers` on PATH can drift from the project version and shadow the project-pinned binary.
 
 If you previously ran `npm i -g smithers-orchestrator`, uninstall it (`npm rm -g smithers-orchestrator`) and switch to `bunx`.
 

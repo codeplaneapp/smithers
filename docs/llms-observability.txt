@@ -731,7 +731,7 @@ Use the MCP server when an AI agent should drive Smithers autonomously. Use the 
 ### Start the server
 
 ```bash
-smithers --mcp
+bunx smithers-orchestrator --mcp
 ```
 
 This starts the semantic surface: a stable, structured tool set for AI agent consumption, documented on this page.
@@ -740,13 +740,13 @@ Two additional surfaces are available via `--surface`:
 
 ```bash
 # Semantic tools only (default)
-smithers --mcp --surface semantic
+bunx smithers-orchestrator --mcp --surface semantic
 
 # Raw CLI-mirroring tools only
-smithers --mcp --surface raw
+bunx smithers-orchestrator --mcp --surface raw
 
 # Both surfaces registered on the same server
-smithers --mcp --surface both
+bunx smithers-orchestrator --mcp --surface both
 ```
 
 Use `--surface raw` only for direct CLI parity. Prefer the semantic surface for new integrations: every tool returns a `{ ok, data, error }` envelope with Zod-validated input and output schemas.

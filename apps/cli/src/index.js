@@ -2661,6 +2661,7 @@ const cli = Cli.create({
     name: "smithers",
     description: "Durable AI workflow orchestrator. Run, monitor, and manage workflow executions.",
     version: readPackageVersion(),
+    mcp: { command: "bunx smithers-orchestrator --mcp" },
 })
     // =========================================================================
     // smithers init
