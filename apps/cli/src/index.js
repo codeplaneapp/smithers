@@ -493,7 +493,9 @@ async function printSmithersDocs(c, file, errorCode) {
     if (wantsJson) {
         return c.ok({ url: source.url, content: body });
     }
-    process.stdout.write(body.endsWith("\n") ? body : `${body}\n`);
+    // Synchronous write: the docs bundle exceeds the OS pipe buffer (~64KB), so a
+    // plain async write would be truncated when the process exits. See writeStdoutSync.
+    writeStdoutSync(body.endsWith("\n") ? body : `${body}\n`);
     return c.ok(undefined);
 }
 /**
@@ -5950,6 +5952,31 @@ function rewriteChatCreateArgv(argv) {
         ...argv.slice(subcommandIndex + 1),
     ];
 }
+/**
+ * Write to stdout synchronously so large outputs are fully flushed before the
+ * process exits. incur writes command results via an async `process.stdout.write`
+ * and the framework then calls process.exit(); on a pipe the OS buffer is only
+ * ~64KB, so anything larger (e.g. `docs-full --json`, whose JSON payload exceeds
+ * 64KB) is truncated mid-write. A blocking writeSync — the same approach already
+ * used for the ask-human prompt on fd 2 — guarantees every byte lands first.
+ * Handles partial writes plus a backpressured (EAGAIN) or closed (EPIPE) pipe.
+ * @param {string} s
+ */
+function writeStdoutSync(s) {
+    const buf = Buffer.from(s, "utf8");
+    let offset = 0;
+    while (offset < buf.length) {
+        try {
+            offset += writeSync(1, buf, offset, buf.length - offset);
+        }
+        catch (err) {
+            const code = /** @type {NodeJS.ErrnoException} */ (err)?.code;
+            if (code === "EAGAIN") continue;
+            if (code === "EPIPE") return;
+            throw err;
+        }
+    }
+}
 async function main() {
     const rawArgv = process.argv.slice(2);
     let argv = rawArgv.map((arg) => (arg === "-v" ? "--version" : arg));
@@ -6012,6 +6039,9 @@ async function main() {
     let exitCodeFromServe;
     try {
         await cli.serve(argv, {
+            stdout(s) {
+                writeStdoutSync(s);
+            },
             exit(code) {
                 exitCodeFromServe = code;
             },
