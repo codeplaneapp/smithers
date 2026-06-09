@@ -151,6 +151,7 @@ const nodeDetailSchema = z.object({
         source: z.enum(["cache", "output-table", "none"]),
         cacheKey: z.string().nullable(),
     }),
+    approval: pendingApprovalSchema.nullable().optional(),
     limits: z.object({
         toolPayloadBytesHuman: z.number().int(),
         validatedOutputBytesHuman: z.number().int(),
@@ -752,6 +753,41 @@ function parsePendingApproval(row) {
     };
 }
 /**
+ * @param {SmithersDb} adapter
+ * @param {any} event
+ */
+async function parseEventWithApprovalRequest(adapter, event) {
+    const payload = parseJsonValue(event.payloadJson);
+    if ((event.type !== "ApprovalRequested" && event.type !== "NodeWaitingApproval") ||
+        !payload ||
+        typeof payload !== "object" ||
+        payload.request != null) {
+        return payload;
+    }
+    const eventPayload = payload;
+    const nodeId = typeof eventPayload.nodeId === "string"
+        ? eventPayload.nodeId
+        : typeof event.nodeId === "string"
+            ? event.nodeId
+            : null;
+    const iteration = typeof eventPayload.iteration === "number"
+        ? eventPayload.iteration
+        : typeof event.iteration === "number"
+            ? event.iteration
+            : null;
+    if (!nodeId || iteration == null) {
+        return payload;
+    }
+    const approval = await runPromise(adapter.getApproval(event.runId, nodeId, iteration));
+    if (!approval) {
+        return payload;
+    }
+    return {
+        ...eventPayload,
+        request: parseJsonValue(approval.requestJson),
+    };
+}
+/**
  * @param {any[]} approvals
  * @param {{ runId?: string; workflowName?: string; nodeId?: string; iteration?: number; }} filters
  */
@@ -1324,13 +1360,13 @@ export function createSemanticToolDefinitions(options = {}) {
                 });
                 return {
                     runId: input.runId,
-                    events: events.map((event) => ({
+                    events: await Promise.all(events.map(async (event) => ({
                         runId: event.runId,
                         seq: event.seq,
                         timestampMs: event.timestampMs,
                         type: event.type,
-                        payload: parseJsonValue(event.payloadJson),
-                    })),
+                        payload: await parseEventWithApprovalRequest(adapter, event),
+                    }))),
                 };
             })),
         },

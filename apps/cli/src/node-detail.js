@@ -444,6 +444,7 @@ export function aggregateNodeDetailEffect(adapter, params) {
                 ? adapter.listCacheByNodeEffect(params.nodeId, node.outputTable, 20)
                 : Effect.succeed([]),
         ]);
+        const approvalRow = yield* adapter.getApproval(params.runId, params.nodeId, resolvedIteration);
         const attemptsDesc = attemptRows;
         const attempts = [...attemptsDesc].sort((left, right) => left.attempt - right.attempt);
         const toolCallsRaw = toolCallRows;
@@ -574,6 +575,21 @@ export function aggregateNodeDetailEffect(adapter, params) {
                 source: validatedOutput.source,
                 cacheKey: validatedOutput.cacheKey,
             },
+            approval: approvalRow
+                ? {
+                    runId: approvalRow.runId,
+                    nodeId: approvalRow.nodeId,
+                    iteration: approvalRow.iteration ?? 0,
+                    status: approvalRow.status,
+                    requestedAtMs: approvalRow.requestedAtMs ?? null,
+                    decidedAtMs: approvalRow.decidedAtMs ?? null,
+                    note: approvalRow.note ?? null,
+                    decidedBy: approvalRow.decidedBy ?? null,
+                    request: parseJsonValue(approvalRow.requestJson),
+                    decision: parseJsonValue(approvalRow.decisionJson),
+                    autoApproved: Boolean(approvalRow.autoApproved),
+                }
+                : null,
             limits: {
                 toolPayloadBytesHuman: MAX_TOOL_PAYLOAD_BYTES_HUMAN,
                 validatedOutputBytesHuman: MAX_VALIDATED_OUTPUT_BYTES_HUMAN,

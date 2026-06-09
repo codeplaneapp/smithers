@@ -1159,6 +1159,7 @@ async function resolveApprovalTaskStateBridge(adapter, db, runId, desc, eventBus
                 runId,
                 nodeId: desc.nodeId,
                 iteration: desc.iteration,
+                request: JSON.parse(requestJson),
                 timestampMs: requestedAtMs,
             }));
             await Effect.runPromise(eventBus.emitEventWithPersist({
@@ -1166,6 +1167,7 @@ async function resolveApprovalTaskStateBridge(adapter, db, runId, desc, eventBus
                 runId,
                 nodeId: desc.nodeId,
                 iteration: desc.iteration,
+                request: JSON.parse(requestJson),
                 timestampMs: requestedAtMs,
             }));
             await ensurePendingHumanRequest(adapter, runId, desc, requestedAtMs);

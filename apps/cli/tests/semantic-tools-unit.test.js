@@ -215,6 +215,15 @@ function makeSemanticAdapter(overrides = {}) {
         historyEvents: [
             eventRow({ seq: 10, type: "RunStarted", payloadJson: JSON.stringify({ ok: true }) }),
             eventRow({ seq: 11, type: "RawPayload", payloadJson: "not json" }),
+            eventRow({
+                seq: 12,
+                type: "ApprovalRequested",
+                payloadJson: JSON.stringify({
+                    runId: "run-1",
+                    nodeId: "gate",
+                    iteration: 0,
+                }),
+            }),
         ],
         latestChildByRunId: new Map([
             ["run-1", { runId: "child-run" }],
@@ -248,6 +257,9 @@ function makeSemanticAdapter(overrides = {}) {
         listRunAncestry: async () => [baseRun, runRow({ runId: "parent-run", workflowName: "parent" })],
         getLatestChildRun: async (runId) => state.latestChildByRunId.get(runId),
         listAllPendingApprovals: async () => state.approvals,
+        getApproval: (runId, nodeId, iteration) => Effect.succeed(state.approvals.find((approval) => approval.runId === runId &&
+            approval.nodeId === nodeId &&
+            (approval.iteration ?? 0) === iteration)),
         listNodeIterationsEffect: (_runId, nodeId) => Effect.succeed(state.nodes.filter((node) => node.nodeId === nodeId)),
         listAttemptsEffect: (_runId, nodeId, iteration = 0) => Effect.succeed(state.attempts
             .filter((attempt) => attempt.nodeId === nodeId && (attempt.iteration ?? 0) === iteration)),
@@ -472,6 +484,16 @@ describe("semantic tool definitions", () => {
             runId: "run-1",
             nodeId: "gate",
             workflowName: "demo",
+            request: { question: "ship?" },
+        });
+        const gateNode = await harness.call("get_node_detail", {
+            runId: "run-1",
+            nodeId: "gate",
+        });
+        expect(gateNode.structuredContent.data.detail.approval).toMatchObject({
+            runId: "run-1",
+            nodeId: "gate",
+            request: { question: "ship?" },
         });
         const node = await harness.call("get_node_detail", {
             runId: "run-1",
@@ -551,6 +573,12 @@ describe("semantic tool definitions", () => {
         expect(events.structuredContent.data.events.map((event) => event.payload)).toEqual([
             { ok: true },
             "not json",
+            {
+                runId: "run-1",
+                nodeId: "gate",
+                iteration: 0,
+                request: { question: "ship?" },
+            },
         ]);
 
         expect(harness.state.cleanupCalls).toBeGreaterThanOrEqual(8);

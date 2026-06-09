@@ -53,6 +53,19 @@ export type EnrichedNodeDetail = {
         source: "cache" | "output-table" | "none";
         cacheKey: string | null;
     };
+    approval: {
+        runId: string;
+        nodeId: string;
+        iteration: number;
+        status: string;
+        requestedAtMs: number | null;
+        decidedAtMs: number | null;
+        note: string | null;
+        decidedBy: string | null;
+        request: unknown | null;
+        decision: unknown | null;
+        autoApproved: boolean;
+    } | null;
     limits: {
         toolPayloadBytesHuman: number;
         validatedOutputBytesHuman: number;

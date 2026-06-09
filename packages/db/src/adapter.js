@@ -2134,8 +2134,12 @@ export class SmithersDb {
            a.iteration,
            a.status,
            a.requested_at_ms,
+           a.decided_at_ms,
            a.note,
            a.decided_by,
+           a.request_json,
+           a.decision_json,
+           a.auto_approved,
            r.workflow_name,
            r.status AS run_status,
            n.label AS node_label
@@ -2146,7 +2150,7 @@ export class SmithersDb {
           AND a.node_id = n.node_id
           AND a.iteration = n.iteration
          WHERE a.status = ?
-         ORDER BY COALESCE(a.requested_at_ms, 0) ASC, a.run_id, a.node_id, a.iteration`, ["requested"]));
+         ORDER BY COALESCE(a.requested_at_ms, 0) ASC, a.run_id, a.node_id, a.iteration`, ["requested"], { booleanColumns: ["autoApproved"] }));
     }
     /**
    * @param {string} workflowName

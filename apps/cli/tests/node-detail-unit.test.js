@@ -109,6 +109,7 @@ function makeAdapter(state = {}) {
         listScorerResultsEffect: () => Effect.succeed(data.scorers),
         getRawNodeOutputForIterationEffect: () => Effect.succeed(data.rawOutput),
         listCacheByNodeEffect: () => Effect.succeed(data.cacheRows),
+        getApproval: () => Effect.succeed(data.approval),
     };
 }
 
