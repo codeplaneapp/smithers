@@ -100,6 +100,25 @@ describe("DevToolsStore", () => {
     expect(store.selectedNode?.props.output).toBe("last value");
     expect(store.selectedGhostRecord?.unmountedFrameNo).toBe(1);
   });
+
+  test("RunInspector render matches Pi TUI width-only component calls", () => {
+    const store = new DevToolsStore({ ghostNodeCap: 8 });
+    store.applyEvent({ version: 1, kind: "snapshot", snapshot: snapshot(1, [task(2, "task:a", "running")]) });
+    const client = new DevToolsClient({ baseUrl: "http://127.0.0.1:1" });
+    const inspector = new RunInspector(store, client, {
+      workflowName: "fixture",
+      theme: {
+        fg: (_color, value) => value,
+        bold: (value) => value,
+      },
+    });
+
+    const lines = inspector.render(80).join("\n");
+
+    expect(lines).toContain("task:a");
+    expect(lines).toContain("RUNNING");
+    store.disconnect();
+  });
 });
 
 describe("DevToolsClient integration", () => {

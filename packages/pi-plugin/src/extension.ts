@@ -290,9 +290,10 @@ async function openInspector(ctx: ExtensionContext, run: TrackedRun) {
     ctx.ui.notify("/smithers requires interactive mode", "error");
     return;
   }
-  await ctx.ui.custom((_tui: unknown, theme: unknown, _kb: unknown, done: () => void) =>
+  await ctx.ui.custom((_tui: unknown, theme: any, _kb: unknown, done: () => void) =>
     new RunInspector(run.store, run.client, {
       workflowName: run.workflowName,
+      theme,
       onClose: done,
       onNotify: (message, level) => ctx.ui.notify(message, level),
     }),

@@ -382,6 +382,7 @@ type Theme$1 = {
 };
 type RunInspectorOptions = {
     workflowName?: string;
+    theme?: Theme$1;
     onClose?: () => void;
     onNotify?: (message: string, level?: "info" | "warning" | "error") => void;
 };
@@ -392,6 +393,7 @@ declare class RunInspector {
     private readonly scrubber;
     private readonly tree;
     private readonly inspector;
+    private readonly theme;
     private readonly onClose;
     private readonly onNotify;
     private focus;
@@ -399,7 +401,7 @@ declare class RunInspector {
     private cachedWidth;
     constructor(store: DevToolsStore, client: DevToolsClient, options?: RunInspectorOptions);
     handleInput(data: string): void;
-    render(width: number, height: number | undefined, theme: Theme$1): string[];
+    render(width: number, height?: number, theme?: Theme$1): string[];
     invalidate(): void;
     dispose(): void;
     private cycleFocus;

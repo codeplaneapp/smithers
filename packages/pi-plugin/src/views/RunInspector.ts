@@ -15,6 +15,7 @@ type FocusPane = "tree" | "inspector" | "scrubber";
 
 type RunInspectorOptions = {
   workflowName?: string;
+  theme?: Theme;
   onClose?: () => void;
   onNotify?: (message: string, level?: "info" | "warning" | "error") => void;
 };
@@ -41,6 +42,7 @@ export class RunInspector {
   private readonly scrubber: FrameScrubber;
   private readonly tree: RunTree;
   private readonly inspector: NodeInspector;
+  private readonly theme: Theme;
   private readonly onClose: () => void;
   private readonly onNotify: (message: string, level?: "info" | "warning" | "error") => void;
   private focus: FocusPane = "tree";
@@ -56,6 +58,7 @@ export class RunInspector {
     this.scrubber = new FrameScrubber(store);
     this.tree = new RunTree(store);
     this.inspector = new NodeInspector(store);
+    this.theme = options.theme ?? {};
     this.onClose = options.onClose ?? (() => undefined);
     this.onNotify = options.onNotify ?? (() => undefined);
     store.subscribe(() => this.invalidate());
@@ -114,7 +117,7 @@ export class RunInspector {
     }
   }
 
-  render(width: number, height = 34, theme: Theme) {
+  render(width: number, height = 34, theme: Theme = this.theme) {
     if (this.cachedLines && this.cachedWidth === width) {
       return this.cachedLines;
     }
