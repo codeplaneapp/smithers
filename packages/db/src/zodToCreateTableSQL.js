@@ -18,6 +18,21 @@ function sqliteTypeFor(zodFieldSchema) {
     }
     return "TEXT";
 }
+function sqliteKindFor(zodFieldSchema) {
+    const baseType = unwrapZodType(zodFieldSchema);
+    const baseTypeName = getZodBaseTypeName(baseType);
+    if (baseTypeName === "boolean")
+        return "boolean";
+    if (baseTypeName === "number" ||
+        baseTypeName === "int" ||
+        baseTypeName === "float")
+        return "number";
+    if (baseTypeName === "string" ||
+        baseTypeName === "enum" ||
+        baseTypeName === "literal")
+        return "string";
+    return "json";
+}
 function quoteIdentifier(identifier) {
     return `"${String(identifier).replaceAll(`"`, `""`)}"`;
 }
@@ -29,7 +44,7 @@ export function zodSchemaColumns(schema) {
     const out = [];
     const shape = schema.shape;
     for (const [key] of Object.entries(shape)) {
-        out.push({ name: camelToSnake(key), sqliteType: sqliteTypeFor(shape[key]) });
+        out.push({ name: camelToSnake(key), sqliteType: sqliteTypeFor(shape[key]), kind: sqliteKindFor(shape[key]) });
     }
     return out;
 }
@@ -68,6 +83,18 @@ export function zodToCreateTableSQL(tableName, schema, opts) {
  */
 export function syncZodTableSchema(sqlite, tableName, schema, opts) {
     sqlite.run(zodToCreateTableSQL(tableName, schema, opts));
+    if (!opts?.isInput) {
+        try {
+            sqlite.run(`CREATE TABLE IF NOT EXISTS _smithers_output_schema_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, kind TEXT NOT NULL, PRIMARY KEY (table_name, column_name))`);
+            const stmt = sqlite.query(`INSERT INTO _smithers_output_schema_columns (table_name, column_name, kind) VALUES (?, ?, ?) ON CONFLICT(table_name, column_name) DO UPDATE SET kind = excluded.kind`);
+            for (const { name, kind } of zodSchemaColumns(schema)) {
+                stmt.run(tableName, name, kind);
+            }
+        }
+        catch {
+            // Schema metadata is best-effort; table creation remains the source of truth.
+        }
+    }
     let existing;
     const quotedTable = quoteIdentifier(tableName);
     try {

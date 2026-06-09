@@ -11,6 +11,7 @@
 // @smithers-type-exports-end
 
 import { getTableName } from "drizzle-orm";
+import { getTableColumns } from "drizzle-orm/utils";
 import { Effect, Exit, FiberId, Metric } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { getSqlMessageStorage } from "./sql-message-storage.js";
@@ -25,6 +26,7 @@ import { camelToSnake } from "./utils/camelToSnake.js";
 /** @typedef {import("./adapter/AlertStatus.ts").AlertStatus} AlertStatus */
 /** @typedef {import("./adapter/AttemptRow.ts").AttemptRow} AttemptRow */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
+/** @typedef {import("drizzle-orm").Table} Table */
 /** @typedef {import("./adapter/EventHistoryQuery.ts").EventHistoryQuery} EventHistoryQuery */
 /** @typedef {import("./adapter/HumanRequestRow.ts").HumanRequestRow} HumanRequestRow */
 /** @typedef {import("./output/OutputKey.ts").OutputKey} OutputKey */
@@ -425,6 +427,85 @@ function resolveOutputTableName(table) {
     }
     catch {
         return "output";
+    }
+}
+/**
+ * @param {unknown} db
+ * @param {string} tableName
+ * @returns {unknown | null}
+ */
+function findDrizzleTableByName(db, tableName) {
+    const schema = /** @type {{ _?: { fullSchema?: Record<string, unknown> } }} */ (db)?._?.fullSchema;
+    if (!schema) return null;
+    for (const table of Object.values(schema)) {
+        try {
+            if (getTableName(/** @type {Table} */ (table)) === tableName) return table;
+        }
+        catch {
+            // Ignore non-table schema entries.
+        }
+    }
+    return null;
+}
+/**
+ * @param {unknown} table
+ * @returns {string[]}
+ */
+function getPhysicalBooleanColumnNames(table) {
+    try {
+        const cols = getTableColumns(/** @type {Table} */ (table));
+        const names = [];
+        for (const col of Object.values(cols)) {
+            const c = /** @type {Record<string, unknown> & { config?: { mode?: string }; mapFromDriverValue?: unknown; name?: unknown }} */ (/** @type {unknown} */ (col));
+            const mapFn = /** @type {{ toString?: () => string } | undefined} */ (c?.mapFromDriverValue);
+            if (c?.columnType === "SQLiteBoolean" ||
+                c?.config?.mode === "boolean" ||
+                c?.mode === "boolean" ||
+                c?.dataType === "boolean" ||
+                mapFn?.toString?.().includes("Boolean")) {
+                const name = typeof c.name === "string" ? c.name : null;
+                if (name) names.push(name);
+            }
+        }
+        return names;
+    }
+    catch {
+        return [];
+    }
+}
+/**
+ * @param {Record<string, unknown> | null | undefined} row
+ * @param {readonly string[]} columnNames
+ * @returns {Record<string, unknown> | null | undefined}
+ */
+function coerceRawBooleanColumns(row, columnNames) {
+    if (!row || columnNames.length === 0) return row;
+    const next = { ...row };
+    for (const columnName of columnNames) {
+        const value = next[columnName];
+        if (columnName in next && typeof value !== "boolean") {
+            if (value === 0 || value === 0n || value === "0") next[columnName] = false;
+            else if (value === 1 || value === 1n || value === "1") next[columnName] = true;
+        }
+    }
+    return next;
+}
+/**
+ * @param {unknown} client
+ * @param {string} tableName
+ * @returns {string[]}
+ */
+function getPersistedBooleanColumnNames(client, tableName) {
+    try {
+        const rows = /** @type {{ query: (sql: string) => { all: (...args: unknown[]) => Array<Record<string, unknown>> } }} */ (client)
+            .query(`SELECT column_name FROM _smithers_output_schema_columns WHERE table_name = ? AND kind = 'boolean'`)
+            .all(tableName);
+        return rows
+            .map((row) => row.column_name)
+            .filter((name) => typeof name === "string");
+    }
+    catch {
+        return [];
     }
 }
 /**
@@ -1191,14 +1272,19 @@ export class SmithersDb {
         return runnableEffect(this.read(`get raw node output ${tableName}`, () => {
             const escaped = tableName.replaceAll(`"`, `""`);
             if (this.internalStorage.dialect === POSTGRES) {
+                const boolColumns = getPhysicalBooleanColumnNames(findDrizzleTableByName(this.db, tableName));
                 return this.internalStorage
                     .queryOneRaw(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`, [runId, nodeId])
-                    .then((row) => row ?? null);
+                    .then((row) => coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
             }
             const client = this.db.session.client;
+            const boolColumns = [
+                ...getPersistedBooleanColumnNames(client, tableName),
+                ...getPhysicalBooleanColumnNames(findDrizzleTableByName(this.db, tableName)),
+            ];
             const stmt = client.query(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? ORDER BY iteration DESC LIMIT 1`);
             const row = stmt.get(runId, nodeId);
-            return Promise.resolve(row ?? null);
+            return Promise.resolve(coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
         }).pipe(Effect.catchAll(() => Effect.succeed(null))));
     }
     /**
@@ -1212,14 +1298,19 @@ export class SmithersDb {
         return runnableEffect(this.read(`get raw node output ${tableName} iteration ${iteration}`, () => {
             const escaped = tableName.replaceAll(`"`, `""`);
             if (this.internalStorage.dialect === POSTGRES) {
+                const boolColumns = getPhysicalBooleanColumnNames(findDrizzleTableByName(this.db, tableName));
                 return this.internalStorage
                     .queryOneRaw(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? AND iteration = ? LIMIT 1`, [runId, nodeId, iteration])
-                    .then((row) => row ?? null);
+                    .then((row) => coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
             }
             const client = this.db.session.client;
+            const boolColumns = [
+                ...getPersistedBooleanColumnNames(client, tableName),
+                ...getPhysicalBooleanColumnNames(findDrizzleTableByName(this.db, tableName)),
+            ];
             const stmt = client.query(`SELECT * FROM "${escaped}" WHERE run_id = ? AND node_id = ? AND iteration = ? LIMIT 1`);
             const row = stmt.get(runId, nodeId, iteration);
-            return Promise.resolve(row ?? null);
+            return Promise.resolve(coerceRawBooleanColumns(row ?? null, boolColumns) ?? null);
         }).pipe(Effect.catchAll(() => Effect.succeed(null))));
     }
     /**

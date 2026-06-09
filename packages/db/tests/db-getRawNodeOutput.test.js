@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { SmithersDb } from "../src/adapter.js";
 import { zodToTable } from "../src/zodToTable.js";
-import { zodToCreateTableSQL } from "../src/zodToCreateTableSQL.js";
+import { syncZodTableSchema } from "../src/zodToCreateTableSQL.js";
 import { z } from "zod";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -16,9 +16,9 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 function createDbWithOutputTable(tableName, schema) {
     const table = zodToTable(tableName, schema);
     const sqlite = new Database(":memory:");
-    sqlite.exec(zodToCreateTableSQL(tableName, schema));
+    syncZodTableSchema(sqlite, tableName, schema);
     const db = drizzle(sqlite, { schema: { [tableName]: table } });
-    return { adapter: new SmithersDb(db), table };
+    return { adapter: new SmithersDb(db), db, sqlite, table };
 }
 
 describe("getRawNodeOutput", () => {
@@ -73,5 +73,41 @@ describe("getRawNodeOutput", () => {
         expect(row).not.toBeNull();
         expect(row?.iteration).toBe(1);
         expect(row?.title).toBe("second");
+    });
+
+    test("preserves persisted boolean schema metadata without a live drizzle schema", async () => {
+        const tableName = "boolean_results";
+        const { db, sqlite, table } = createDbWithOutputTable(tableName, z.object({
+            approved: z.boolean(),
+            declined: z.boolean(),
+            reviewed: z.boolean().nullable(),
+            generatedAt: z.string(),
+            count: z.number(),
+        }));
+        const schemaAdapter = new SmithersDb(db);
+        await schemaAdapter.upsertOutputRow(table, { runId: "run-1", nodeId: "gate", iteration: 0 }, {
+            approved: false,
+            declined: true,
+            reviewed: null,
+            generatedAt: "2026-06-09T00:00:00.000Z",
+            count: 1,
+        });
+
+        const rawAdapter = new SmithersDb(drizzle(sqlite));
+        const row = await rawAdapter.getRawNodeOutputForIteration(tableName, "run-1", "gate", 0);
+
+        expect(row).toMatchObject({
+            run_id: "run-1",
+            node_id: "gate",
+            iteration: 0,
+            approved: false,
+            declined: true,
+            reviewed: null,
+            generated_at: "2026-06-09T00:00:00.000Z",
+            count: 1,
+        });
+        expect(typeof row?.approved).toBe("boolean");
+        expect(typeof row?.declined).toBe("boolean");
+        expect(row?.reviewed).toBeNull();
     });
 });
