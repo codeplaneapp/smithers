@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { ExtensionAPI as PiExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text, truncateToWidth } from "@mariozechner/pi-tui";
+import { Text } from "@mariozechner/pi-tui";
 import { Type, type TSchema } from "@sinclair/typebox";
 import {
   createSmithersAgentContract,
@@ -34,8 +34,6 @@ type ExtensionContext = {
     input: (title: string, placeholder?: string) => Promise<string | undefined>;
     select: (title: string, options: string[]) => Promise<string | undefined>;
     confirm: (title: string, message?: string) => Promise<boolean>;
-    setHeader?: (factory: (...args: any[]) => unknown) => void;
-    setFooter?: (factory: (...args: any[]) => unknown) => void;
     setStatus?: (name: string, status: string | undefined) => void;
   };
 };
@@ -222,10 +220,6 @@ function statusIcon(status: string) {
   }
 }
 
-function stripAnsi(value: string) {
-  return value.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "");
-}
-
 function collectNodeStates(run: TrackedRun) {
   const states: Array<{ nodeId: string; state: string }> = [];
   const walk = (node: any) => {
@@ -392,26 +386,6 @@ export function extension(pi: ExtensionAPI) {
       }
     }, 5_000);
     await registerMcpTools(pi, ctx);
-    if (ctx.hasUI) {
-      ctx.ui.setHeader?.((_tui: unknown, theme: any) => ({
-        render(width: number) {
-          return [truncateToWidth(` ${theme.fg("accent", theme.bold("smithers"))} ${theme.fg("muted", "PI inspector")}`, width)];
-        },
-        invalidate() {},
-      }));
-      ctx.ui.setFooter?.((_tui: unknown, theme: any, footerData: any) => ({
-        render(width: number) {
-          const statuses = footerData.getExtensionStatuses?.();
-          const smithersStatus = statuses?.get?.("smithers") ?? "smithers: idle";
-          const branch = footerData.getGitBranch?.();
-          const left = ` ${theme.fg("muted", smithersStatus)}`;
-          const right = branch ? theme.fg("dim", ` ${branch}`) : "";
-          const gap = Math.max(0, width - stripAnsi(left).length - stripAnsi(right).length);
-          return [truncateToWidth(left + " ".repeat(gap) + right, width)];
-        },
-        invalidate() {},
-      }));
-    }
     updateStatusBar(ctx);
   });
 
