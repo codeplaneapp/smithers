@@ -12,12 +12,12 @@ type TreeRow = {
   depth: number;
 };
 
-function paint(theme: Theme, color: string, value: string) {
-  return theme.fg ? theme.fg(color, value) : value;
+function paint(theme: Theme | undefined, color: string, value: string) {
+  return theme?.fg ? theme.fg(color, value) : value;
 }
 
-function bold(theme: Theme, value: string) {
-  return theme.bold ? theme.bold(value) : value;
+function bold(theme: Theme | undefined, value: string) {
+  return theme?.bold ? theme.bold(value) : value;
 }
 
 function stateOf(node: DevToolsNode) {

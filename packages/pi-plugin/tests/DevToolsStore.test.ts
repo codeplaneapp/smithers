@@ -153,10 +153,7 @@ describe("DevToolsClient integration", () => {
     await waitFor(() => store.seq === 1);
 
     const inspector = new RunInspector(store, client, { workflowName: "fixture" });
-    const lines = inspector.render(100, 20, {
-      fg: (_color, value) => value,
-      bold: (value) => value,
-    }).join("\n");
+    const lines = inspector.render(100).join("\n");
 
     expect(lines).toContain("task:a");
     expect(lines).toContain("finished");

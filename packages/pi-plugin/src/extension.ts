@@ -293,6 +293,7 @@ async function openInspector(ctx: ExtensionContext, run: TrackedRun) {
   await ctx.ui.custom((_tui: unknown, theme: unknown, _kb: unknown, done: () => void) =>
     new RunInspector(run.store, run.client, {
       workflowName: run.workflowName,
+      theme: theme as { fg?: (color: string, value: string) => string; bold?: (value: string) => string },
       onClose: done,
       onNotify: (message, level) => ctx.ui.notify(message, level),
     }),

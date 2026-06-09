@@ -6,8 +6,8 @@ type Theme = {
   bold?: (value: string) => string;
 };
 
-function paint(theme: Theme, color: string, value: string) {
-  return theme.fg ? theme.fg(color, value) : value;
+function paint(theme: Theme | undefined, color: string, value: string) {
+  return theme?.fg ? theme.fg(color, value) : value;
 }
 
 export class FrameScrubber {
