@@ -12,7 +12,7 @@ describe("SmithersCtx edge cases", () => {
             input: {},
             outputs: { tbl: [row] },
         });
-        expect(ctx.output("tbl", { nodeId: "n" })).toBe(row);
+        expect(ctx.output("tbl", { nodeId: "n" })).toEqual({ v: 1 });
     });
     test("output falls back to ctx.iteration when key.iteration is undefined", () => {
         const row = { nodeId: "n", iteration: 2, v: "val" };
@@ -22,7 +22,7 @@ describe("SmithersCtx edge cases", () => {
             input: {},
             outputs: { tbl: [row] },
         });
-        expect(ctx.output("tbl", { nodeId: "n" })).toBe(row);
+        expect(ctx.output("tbl", { nodeId: "n" })).toEqual({ v: "val" });
     });
     test("output throws descriptive error on missing row", () => {
         const ctx = new SmithersCtx({
@@ -169,7 +169,7 @@ describe("SmithersCtx edge cases", () => {
             input: {},
             outputs: { my_table: [row] },
         });
-        expect(ctx.output("my_table", { nodeId: "n" })).toBe(row);
+        expect(ctx.output("my_table", { nodeId: "n" })).toEqual({});
     });
 });
 describe("createSmithersContext", () => {

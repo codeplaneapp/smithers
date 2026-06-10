@@ -14,7 +14,7 @@ describe("SmithersCtx", () => {
             input: {},
             outputs: { tbl: [row] },
         });
-        expect(ctx.output("tbl", { nodeId: "a" })).toBe(row);
+        expect(ctx.output("tbl", { nodeId: "a" })).toEqual({ value: 42 });
     });
     test("output matches explicit iteration over default", () => {
         const row0 = { nodeId: "a", iteration: 0, v: 1 };
@@ -25,7 +25,7 @@ describe("SmithersCtx", () => {
             input: {},
             outputs: { tbl: [row0, row1] },
         });
-        expect(ctx.output("tbl", { nodeId: "a", iteration: 1 })).toBe(row1);
+        expect(ctx.output("tbl", { nodeId: "a", iteration: 1 })).toEqual({ v: 2 });
     });
     test("outputMaybe returns undefined for missing row", () => {
         const ctx = new SmithersCtx({ runId: "r1", iteration: 0, input: {}, outputs: {} });
@@ -39,7 +39,7 @@ describe("SmithersCtx", () => {
             input: {},
             outputs: { tbl: [row] },
         });
-        expect(ctx.outputMaybe("tbl", { nodeId: "n" })).toBe(row);
+        expect(ctx.outputMaybe("tbl", { nodeId: "n" })).toEqual({});
     });
     test("latest returns highest iteration row", () => {
         const rows = [
@@ -219,6 +219,6 @@ describe("SmithersCtx", () => {
             outputs: { myOutput: [row] },
             zodToKeyName,
         });
-        expect(ctx.output(schema, { nodeId: "n" })).toBe(row);
+        expect(ctx.output(schema, { nodeId: "n" })).toEqual({ v: 1 });
     });
 });
