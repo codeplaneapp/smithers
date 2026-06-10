@@ -1,4 +1,5 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { stripAutoColumns } from "@smithers-orchestrator/db/output";
 import { buildCurrentScopes } from "./buildCurrentScopes.js";
 import { filterRowsByNodeId } from "./filterRowsByNodeId.js";
 import { normalizeInputRow } from "./normalizeInputRow.js";
@@ -9,7 +10,7 @@ import { withLogicalIterationShortcuts } from "./withLogicalIterationShortcuts.j
 /** @typedef {import("./RunAuthContext.ts").RunAuthContext} RunAuthContext */
 /** @typedef {import("./SmithersRuntimeConfig.ts").SmithersRuntimeConfig} SmithersRuntimeConfig */
 /** @typedef {unknown} TableRef */
-/** @typedef {Record<string, unknown> & { iteration?: number; nodeId?: string }} OutputRow */
+/** @typedef {Record<string, unknown>} OutputRow User-visible output row — harness metadata fields (runId, nodeId, iteration) are stripped. */
 /**
  * @template Schema
  * @typedef {import("./OutputAccessor.ts").OutputAccessor<Schema>} OutputAccessor
@@ -90,7 +91,7 @@ export class SmithersCtx {
         if (!row) {
             throw new SmithersError("MISSING_OUTPUT", `Missing output for nodeId=${key.nodeId} iteration=${key.iteration ?? 0}`, { nodeId: key.nodeId, iteration: key.iteration ?? 0 });
         }
-        return row;
+        return /** @type {OutputRow} */ (stripAutoColumns(row));
     }
     /**
      * @param {TableRef} table
@@ -98,7 +99,8 @@ export class SmithersCtx {
      * @returns {OutputRow | undefined}
      */
     outputMaybe(table, key) {
-        return this.resolveRow(table, key);
+        const row = this.resolveRow(table, key);
+        return row !== undefined ? /** @type {OutputRow} */ (stripAutoColumns(row)) : undefined;
     }
     /**
      * @param {TableRef} table

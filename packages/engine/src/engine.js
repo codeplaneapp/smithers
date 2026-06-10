@@ -3066,6 +3066,14 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 let effectivePrompt = desc.prompt ?? "";
                 supportsNativeStructuredOutput = effectiveAgent.supportsNativeStructuredOutput === true;
                 if (desc.outputTable && !supportsNativeStructuredOutput) {
+                    const engineName = typeof attemptMeta.agentEngine === "string"
+                        ? attemptMeta.agentEngine
+                        : (effectiveAgent.constructor?.name ?? "unknown");
+                    console.warn(
+                        `[smithers] Task "${desc.nodeId}" has an output schema but engine "${engineName}" does not support native structured output. ` +
+                        `Falling back to prompt-injection + text JSON extraction. Schema validity does not guarantee meaningful output — ` +
+                        `consider switching to an engine that declares supportsNativeStructuredOutput=true (Anthropic, OpenAI).`
+                    );
                     const schemaDesc = describeSchemaShape(desc.outputTable, desc.outputSchema);
                     const jsonInstructions = [
                         "**REQUIRED OUTPUT** — You MUST return ONLY a raw JSON object matching this schema:",

@@ -253,10 +253,8 @@ type SmithersCtxOptions$1 = SmithersCtxOptions$2;
 type RunAuthContext$1 = RunAuthContext$2;
 type SmithersRuntimeConfig = SmithersRuntimeConfig$1;
 type TableRef = unknown;
-type OutputRow = Record<string, unknown> & {
-    iteration?: number;
-    nodeId?: string;
-};
+/** User-visible output row — harness metadata fields (runId, nodeId, iteration) are stripped. */
+type OutputRow = Record<string, unknown>;
 type OutputAccessor$1<Schema> = OutputAccessor$2<Schema>;
 
 type WorkflowElement = {
