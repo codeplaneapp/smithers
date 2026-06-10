@@ -6,4 +6,5 @@ export type WhyBlockerKind =
     | "retry-backoff"
     | "retries-exhausted"
     | "stale-heartbeat"
-    | "dependency-failed";
+    | "dependency-failed"
+    | "approval-decided-resume-required";

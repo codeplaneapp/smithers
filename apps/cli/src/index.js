@@ -4315,12 +4315,30 @@ const cli = Cli.create({
                     nodeId = pending[0].nodeId;
                 }
                 await Effect.runPromise(approveNode(adapter, c.args.runId, nodeId, c.options.iteration, c.options.note, c.options.by));
-                return c.ok({ runId: c.args.runId, nodeId, status: "approved" }, {
+                const runAfterApproval = await adapter.getRun(c.args.runId);
+                const isDetached = !runAfterApproval ||
+                    runAfterApproval.status === "waiting-event" ||
+                    runAfterApproval.status === "waiting-approval";
+                const ctaCommands = [
+                    { command: `logs ${c.args.runId}`, description: "Tail run logs" },
+                    { command: `ps`, description: "List all runs" },
+                ];
+                if (isDetached && runAfterApproval?.workflowPath) {
+                    ctaCommands.unshift({
+                        command: `up ${runAfterApproval.workflowPath} --resume --run-id ${c.args.runId}`,
+                        description: "Resume the paused run",
+                    });
+                }
+                return c.ok({
+                    runId: c.args.runId,
+                    nodeId,
+                    status: "approved",
+                    ...(isDetached
+                        ? { note: `Approval recorded. If running detached, resume the run to continue: smithers workflow run --resume ${c.args.runId}` }
+                        : {}),
+                }, {
                     cta: {
-                        commands: [
-                            { command: `logs ${c.args.runId}`, description: "Tail run logs" },
-                            { command: `ps`, description: "List all runs" },
-                        ],
+                        commands: ctaCommands,
                     },
                 });
             }

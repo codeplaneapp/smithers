@@ -698,6 +698,28 @@ function buildDiagnosis(params) {
                 : {}),
         });
     }
+    // Detect runs stuck in waiting-event with no actual waiting-event nodes but
+    // with pending nodes — this happens when an approval decision is recorded
+    // while the run is detached. The node transitions to "pending" but no engine
+    // is alive to execute it. The supervisor auto-resumes these, but diagnose
+    // them explicitly so users get a clear action.
+    if (status === "waiting-event") {
+        const hasWaitingEventNodes = nodes.some((node) => node.state === "waiting-event");
+        const pendingNodes = nodes.filter((node) => node.state === "pending");
+        if (!hasWaitingEventNodes && pendingNodes.length > 0) {
+            for (const node of pendingNodes) {
+                blockers.push({
+                    kind: "approval-decided-resume-required",
+                    nodeId: node.nodeId,
+                    iteration: node.iteration ?? 0,
+                    reason: "Approval decision recorded — run must be resumed to continue",
+                    waitingSince: waitingSinceFallback(nowMs, node.updatedAtMs, run.startedAtMs, run.createdAtMs),
+                    unblocker: buildResumeUnblocker(run),
+                    context: "The approval gate was decided while the run was detached. Resume the run to execute the next step.",
+                });
+            }
+        }
+    }
     for (const node of nodes.filter((entry) => entry.state === "waiting-timer")) {
         const key = nodeKey(node.nodeId, node.iteration ?? 0);
         const snapshot = computeTimerSnapshot(node, attemptsByNode.get(key) ?? [], parsedEvents);
@@ -973,6 +995,7 @@ export function diagnosisCtaCommands(diagnosis) {
         "retries-exhausted": "Resume run after fixing failure",
         "stale-heartbeat": "Force resume orphaned run",
         "dependency-failed": "Resume after dependency fix",
+        "approval-decided-resume-required": "Resume run after recorded approval",
     };
     const unique = new Map();
     for (const blocker of diagnosis.blockers) {

@@ -96,6 +96,20 @@ function parseTimerFiresAtMs(metaJson) {
     }
 }
 /**
+ * Returns true if the given waiting-event run has at least one pending node
+ * that was unblocked by a recorded approval decision but never resumed.
+ *
+ * @param {NormalizedSupervisorOptions} options
+ * @param {string} runId
+ * @returns {Effect.Effect<boolean, never>}
+ */
+function runHasDecidedApprovalEffect(options, runId) {
+    return Effect.gen(function* () {
+        const nodes = yield* options.adapter.listNodesEffect(runId).pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to list nodes for approval-decided run ${runId}: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as([]))));
+        return nodes.some((node) => node.state === "pending");
+    });
+}
+/**
  * @param {NormalizedSupervisorOptions} options
  * @param {string} runId
  * @param {number} now
@@ -323,6 +337,95 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
     }).pipe(Effect.annotateLogs(runAnnotations))).pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed while processing timer run ${run.runId}: ${String(error)}`).pipe(Effect.as("skipped"))));
 }
 /**
+ * Resume a waiting-event run whose approval decision was recorded while the
+ * run was detached. The node is already "pending" in the DB; we just need a
+ * fresh engine process to pick it up.
+ *
+ * @param {NormalizedSupervisorOptions} options
+ * @param {any} run
+ * @param {number} staleBeforeMs
+ * @returns {Effect.Effect<"resumed" | "skipped", never>}
+ */
+function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
+    const workflowPath = resolveWorkflowPath(run.workflowPath ?? null);
+    const runAnnotations = {
+        runId: run.runId,
+        status: run.status ?? null,
+        runtimeOwnerId: run.runtimeOwnerId ?? null,
+    };
+    return Effect.withLogSpan("supervisor:approval-decided-resume")(Effect.gen(function* () {
+        if (!workflowPath || !options.deps.workflowExists(workflowPath)) {
+            yield* Effect.logWarning(`Skipping approval-decided run ${run.runId}: workflow file not found at ${workflowPath ?? "(missing path)"}`);
+            yield* emitSkipEventEffect(options, run.runId, "missing-workflow");
+            return "skipped";
+        }
+        const ownerPid = options.deps.parseRuntimeOwnerPid(run.runtimeOwnerId);
+        if (ownerPid !== null && options.deps.isPidAlive(ownerPid)) {
+            yield* Effect.logDebug(`Skipping approval-decided run ${run.runId}: runtime owner pid ${ownerPid} is still alive`);
+            yield* emitSkipEventEffect(options, run.runId, "pid-alive");
+            return "skipped";
+        }
+        if (options.dryRun) {
+            yield* Effect.logInfo(`Dry-run: would resume approval-decided run ${run.runId}`);
+            return "skipped";
+        }
+        const claimOwnerId = `supervisor:${options.supervisorId}`;
+        const claimHeartbeatAtMs = options.deps.now();
+        const claimed = yield* options.adapter
+            .claimRunForResumeEffect({
+            runId: run.runId,
+            expectedStatus: "waiting-event",
+            expectedRuntimeOwnerId: run.runtimeOwnerId ?? null,
+            expectedHeartbeatAtMs: run.heartbeatAtMs ?? null,
+            staleBeforeMs,
+            claimOwnerId,
+            claimHeartbeatAtMs,
+            requireStale: true,
+        })
+            .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to claim approval-decided run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as(false))));
+        if (!claimed) {
+            yield* Effect.logDebug(`Skipping approval-decided run ${run.runId}: claim not acquired`);
+            return "skipped";
+        }
+        const spawnResult = yield* Effect.try({
+            try: () => options.deps.spawnResumeDetached(workflowPath, run.runId, {
+                claimOwnerId,
+                claimHeartbeatAtMs,
+                restoreRuntimeOwnerId: run.runtimeOwnerId ?? null,
+                restoreHeartbeatAtMs: run.heartbeatAtMs ?? null,
+            }),
+            catch: (cause) => toSmithersError(cause, `resume approval-decided run ${run.runId}`, {
+                code: "PROCESS_SPAWN_FAILED",
+                details: { runId: run.runId, workflowPath },
+            }),
+        }).pipe(Effect.either);
+        if (spawnResult._tag === "Left") {
+            yield* Effect.logWarning(`[supervisor] failed to resume approval-decided run ${run.runId}: ${spawnResult.left.message}`);
+            yield* options.adapter
+                .releaseRunResumeClaimEffect({
+                runId: run.runId,
+                claimOwnerId,
+                restoreRuntimeOwnerId: run.runtimeOwnerId ?? null,
+                restoreHeartbeatAtMs: run.heartbeatAtMs ?? null,
+            })
+                .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to release approval-decided claim for run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`)));
+            return "skipped";
+        }
+        const resumePid = spawnResult.right;
+        yield* Effect.logInfo(`Resuming approval-decided run ${run.runId}${resumePid ? ` with pid ${resumePid}` : ""}`);
+        yield* emitEventEffect(options.adapter, {
+            type: "RunAutoResumed",
+            runId: run.runId,
+            lastHeartbeatAtMs: run.heartbeatAtMs ?? null,
+            staleDurationMs: typeof run.heartbeatAtMs === "number"
+                ? Math.max(0, options.deps.now() - run.heartbeatAtMs)
+                : 0,
+            timestampMs: options.deps.now(),
+        });
+        return "resumed";
+    }).pipe(Effect.annotateLogs(runAnnotations))).pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed while processing approval-decided run ${run.runId}: ${String(error)}`).pipe(Effect.as("skipped"))));
+}
+/**
  * @param {NormalizedSupervisorOptions} options
  * @returns {Effect.Effect<SupervisorPollSummary, never>}
  */
@@ -361,11 +464,31 @@ function pollEffect(options) {
             yield* emitSkipEventEffect(options, run.runId, "rate-limited");
         }
         const timerResults = yield* Effect.all(timerResumable.map((run) => processTimerCandidateEffect(options, run, staleBeforeMs)), { concurrency: options.maxConcurrent });
+        const timerResumedCount = timerResults.filter((result) => result === "resumed").length;
+        // --- approval-decided runs ---
+        // waiting-event runs whose approval was recorded while detached: the node
+        // is already "pending" in the DB but no engine is running to execute it.
+        const waitingEventRuns = yield* options.adapter
+            .listRunsEffect(500, "waiting-event")
+            .pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] waiting-event query failed: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as([]))));
+        const claimableEventRuns = waitingEventRuns.filter((run) => run.heartbeatAtMs == null || run.heartbeatAtMs < staleBeforeMs);
+        const approvalDecidedChecks = yield* Effect.all(claimableEventRuns.map((run) => runHasDecidedApprovalEffect(options, run.runId)), { concurrency: options.maxConcurrent });
+        const approvalDecidedRuns = claimableEventRuns.filter((_run, index) => approvalDecidedChecks[index]);
+        const approvalSlots = Math.max(0, options.maxConcurrent - staleResumedCount - timerResumedCount);
+        const approvalResumable = approvalDecidedRuns.slice(0, approvalSlots);
+        const approvalRateLimited = approvalDecidedRuns.slice(approvalSlots);
+        for (const run of approvalRateLimited) {
+            yield* emitSkipEventEffect(options, run.runId, "rate-limited");
+        }
+        const approvalResults = yield* Effect.all(approvalResumable.map((run) => processApprovalDecidedCandidateEffect(options, run, staleBeforeMs)), { concurrency: options.maxConcurrent });
         const resumedCount = staleResumedCount +
-            timerResults.filter((result) => result === "resumed").length;
+            timerResumedCount +
+            approvalResults.filter((result) => result === "resumed").length;
         const skippedCount = staleSkippedCount +
             timerRateLimited.length +
-            timerResults.filter((result) => result === "skipped").length;
+            timerResults.filter((result) => result === "skipped").length +
+            approvalRateLimited.length +
+            approvalResults.filter((result) => result === "skipped").length;
         const durationMs = Math.max(0, options.deps.now() - pollStartedAtMs);
         yield* emitEventEffect(options.adapter, {
             type: "SupervisorPollCompleted",
