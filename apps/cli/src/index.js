@@ -5432,7 +5432,7 @@ const cli = Cli.create({
     // and opens <gateway><uiPath>?runId=<runId>.
     // =========================================================================
     .command("ui", {
-    description: "Open the custom UI for a workflow run in your browser.",
+    description: "Open the custom UI for a workflow run in your browser. Requires a running Gateway with a registered workflow UI (start one with `smithers up <workflow.tsx> --serve ...`).",
     args: z.object({
         runId: z.string().optional().describe("Run to open. Defaults to the most recent run."),
     }),
@@ -5449,7 +5449,7 @@ const cli = Cli.create({
         // The Gateway serves the UI and owns the uiPath mapping, so it must be up.
         const reachable = await fetch(`${base}/health`).then((r) => r.ok, () => false);
         if (!reachable) {
-            return fail("GATEWAY_UNREACHABLE", `No Smithers Gateway reachable at ${base}. Start one with \`smithers gateway\`, or pass --gateway <url>.`);
+            return fail("GATEWAY_UNREACHABLE", `No Smithers Gateway reachable at ${base}. Start one with \`smithers up <workflow.tsx> --serve ...\`, or pass --gateway <url> to point at a running Gateway.`);
         }
         const rpc = async (method, params = {}) => {
             const res = await fetch(`${base}/v1/rpc/${method}`, {
