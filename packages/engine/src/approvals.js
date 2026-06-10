@@ -118,13 +118,25 @@ export function approveNode(adapter, runId, nodeId, iteration, note, decidedBy, 
         });
         yield* trackEvent(event);
         yield* Effect.logInfo(autoApproved ? "approval auto-approved" : "approval granted");
-        yield* Effect.promise(() => bridgeApprovalResolve(adapter, runId, nodeId, iteration, {
-            approved: true,
-            note: note ?? null,
-            decidedBy: decidedBy ?? null,
-            decisionJson: serializeDecision(decision),
-            autoApproved,
-        }));
+        yield* Effect.promise(() =>
+            bridgeApprovalResolve(adapter, runId, nodeId, iteration, {
+                approved: true,
+                note: note ?? null,
+                decidedBy: decidedBy ?? null,
+                decisionJson: serializeDecision(decision),
+                autoApproved,
+            }).catch((bridgeError) => {
+                // The approval is already durably committed in the DB. A bridge
+                // failure here is non-fatal: the in-process deferred will not be
+                // signalled, but the run will recover on its next heartbeat/resume
+                // because the persisted approval row drives re-hydration. Failing
+                // the Effect here would strand the caller with an INTERNAL_ERROR
+                // while the approval is already consumed — worse than the bridge
+                // being a no-op.
+                const message = bridgeError instanceof Error ? bridgeError.message : String(bridgeError);
+                Effect.runSync(Effect.logWarning(`[approvals] post-commit bridgeApprovalResolve failed (non-fatal, run will re-drive on resume): ${message}`));
+            })
+        );
     }).pipe(Effect.annotateLogs({
         runId,
         nodeId,
@@ -203,12 +215,24 @@ export function denyNode(adapter, runId, nodeId, iteration, note, decidedBy, dec
         });
         yield* trackEvent(event);
         yield* Effect.logInfo("approval denied");
-        yield* Effect.promise(() => bridgeApprovalResolve(adapter, runId, nodeId, iteration, {
-            approved: false,
-            note: note ?? null,
-            decidedBy: decidedBy ?? null,
-            decisionJson: serializeDecision(decision),
-        }));
+        yield* Effect.promise(() =>
+            bridgeApprovalResolve(adapter, runId, nodeId, iteration, {
+                approved: false,
+                note: note ?? null,
+                decidedBy: decidedBy ?? null,
+                decisionJson: serializeDecision(decision),
+            }).catch((bridgeError) => {
+                // The denial is already durably committed in the DB. A bridge
+                // failure here is non-fatal: the in-process deferred will not be
+                // signalled, but the run will recover on its next heartbeat/resume
+                // because the persisted approval row drives re-hydration. Failing
+                // the Effect here would strand the caller with an INTERNAL_ERROR
+                // while the denial is already consumed — worse than the bridge
+                // being a no-op.
+                const message = bridgeError instanceof Error ? bridgeError.message : String(bridgeError);
+                Effect.runSync(Effect.logWarning(`[approvals] post-commit bridgeApprovalResolve failed (non-fatal, run will re-drive on resume): ${message}`));
+            })
+        );
     }).pipe(Effect.annotateLogs({
         runId,
         nodeId,

@@ -1068,10 +1068,22 @@ export function createSemanticToolDefinitions(options = {}) {
                 }
                 const approval = matches[0];
                 if (input.action === "approve") {
-                    await Effect.runPromise(approveNode(adapter, approval.runId, approval.nodeId, approval.iteration ?? 0, input.note, input.decidedBy, input.decision));
+                    await Effect.runPromise(approveNode(adapter, approval.runId, approval.nodeId, approval.iteration ?? 0, input.note, input.decidedBy, input.decision)).catch((error) => {
+                        // Re-throw real failures (e.g. INVALID_INPUT from validateNodeWaitingForApproval).
+                        // Post-commit bridge errors are already swallowed in approveNode and will not
+                        // reach here — the durable approval state was committed before any bridge call.
+                        // If this catch fires, the approval was NOT committed and the run is still gated.
+                        throw error;
+                    });
                 }
                 else {
-                    await Effect.runPromise(denyNode(adapter, approval.runId, approval.nodeId, approval.iteration ?? 0, input.note, input.decidedBy, input.decision));
+                    await Effect.runPromise(denyNode(adapter, approval.runId, approval.nodeId, approval.iteration ?? 0, input.note, input.decidedBy, input.decision)).catch((error) => {
+                        // Re-throw real failures (e.g. INVALID_INPUT from validateNodeWaitingForApproval).
+                        // Post-commit bridge errors are already swallowed in denyNode and will not
+                        // reach here — the durable denial state was committed before any bridge call.
+                        // If this catch fires, the denial was NOT committed and the run is still gated.
+                        throw error;
+                    });
                 }
                 const run = await adapter.getRun(approval.runId);
                 return {
