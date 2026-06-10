@@ -25,6 +25,10 @@ import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 /**
  * @typedef {{ cwd: () => string; openDb: typeof findAndOpenDb; }} SemanticToolContext
  */
+/**
+ * @template T
+ * @typedef {(adapter: SmithersDb, dbPath: string) => Promise<T>} WithDbCallback
+ */
 /** @typedef {import("./SemanticToolDefinition.ts").SemanticToolDefinition} SemanticToolDefinition */
 
 export const SEMANTIC_TOOL_NAMES = [
@@ -542,9 +546,10 @@ async function buildRunSummary(adapter, run) {
 /**
  * @param {SmithersDb} adapter
  * @param {string} runId
+ * @param {string} [dbPath]
  */
-async function buildRunDetail(adapter, runId) {
-    const run = await requireRun(adapter, runId);
+async function buildRunDetail(adapter, runId, dbPath) {
+    const run = await requireRun(adapter, runId, dbPath);
     const [summary, nodes, approvals, loops, ancestry] = await Promise.all([
         buildRunSummary(adapter, run),
         adapter.listNodes(runId),
@@ -608,12 +613,15 @@ async function buildRunDetail(adapter, runId) {
 /**
  * @param {SmithersDb} adapter
  * @param {string} runId
+ * @param {string} [dbPath]
  */
-async function requireRun(adapter, runId) {
+async function requireRun(adapter, runId, dbPath) {
     const run = await adapter.getRun(runId);
     if (!run) {
-        throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`, {
+        const dbHint = dbPath ? ` (db: ${dbPath})` : "";
+        throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}${dbHint}`, {
             runId,
+            dbPath,
         });
     }
     return run;
@@ -721,12 +729,12 @@ function toolFailure(error) {
 /**
  * @template T
  * @param {SemanticToolContext} context
- * @param {(adapter: SmithersDb) => Promise<T>} run
+ * @param {WithDbCallback<T>} run
  */
 async function withDb(context, run) {
-    const { adapter, cleanup } = await context.openDb(context.cwd());
+    const { adapter, dbPath, cleanup } = await context.openDb(context.cwd());
     try {
-        return await run(adapter);
+        return await run(adapter, dbPath);
     }
     finally {
         cleanup();
@@ -958,8 +966,8 @@ export function createSemanticToolDefinitions(options = {}) {
             inputSchema: getRunInputSchema,
             outputSchema: resultSchema(getRunDataSchema),
             annotations: { readOnlyHint: true },
-            handler: (input) => executeSemanticTool("get_run", async () => withDb(context, async (adapter) => ({
-                run: await buildRunDetail(adapter, input.runId),
+            handler: (input) => executeSemanticTool("get_run", async () => withDb(context, async (adapter, dbPath) => ({
+                run: await buildRunDetail(adapter, input.runId, dbPath),
             }))),
         },
         {
@@ -968,7 +976,7 @@ export function createSemanticToolDefinitions(options = {}) {
             inputSchema: watchRunInputSchema,
             outputSchema: resultSchema(watchRunDataSchema),
             annotations: { readOnlyHint: true },
-            handler: (input) => executeSemanticTool("watch_run", async () => withDb(context, async (adapter) => {
+            handler: (input) => executeSemanticTool("watch_run", async () => withDb(context, async (adapter, dbPath) => {
                 const intervalMs = Math.max(WATCH_MIN_INTERVAL_MS, input.intervalMs);
                 const deadline = Date.now() + input.timeoutMs;
                 const snapshots = [];
@@ -976,8 +984,10 @@ export function createSemanticToolDefinitions(options = {}) {
                 while (true) {
                     const run = await adapter.getRun(input.runId);
                     if (!run) {
-                        throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${input.runId}`, {
+                        const dbHint = dbPath ? ` (db: ${dbPath})` : "";
+                        throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${input.runId}${dbHint}`, {
                             runId: input.runId,
+                            dbPath,
                         });
                     }
                     const summary = await buildRunSummary(adapter, run);
@@ -1201,8 +1211,8 @@ export function createSemanticToolDefinitions(options = {}) {
             inputSchema: listArtifactsInputSchema,
             outputSchema: resultSchema(listArtifactsDataSchema),
             annotations: { readOnlyHint: true },
-            handler: (input) => executeSemanticTool("list_artifacts", async () => withDb(context, async (adapter) => {
-                await requireRun(adapter, input.runId);
+            handler: (input) => executeSemanticTool("list_artifacts", async () => withDb(context, async (adapter, dbPath) => {
+                await requireRun(adapter, input.runId, dbPath);
                 const nodes = await adapter.listNodes(input.runId);
                 const selectedNodes = nodes.filter((node) => {
                     if (input.nodeId && node.nodeId !== input.nodeId)
@@ -1242,8 +1252,8 @@ export function createSemanticToolDefinitions(options = {}) {
             inputSchema: getChatTranscriptInputSchema,
             outputSchema: resultSchema(getChatTranscriptDataSchema),
             annotations: { readOnlyHint: true },
-            handler: (input) => executeSemanticTool("get_chat_transcript", async () => withDb(context, async (adapter) => {
-                await requireRun(adapter, input.runId);
+            handler: (input) => executeSemanticTool("get_chat_transcript", async () => withDb(context, async (adapter, dbPath) => {
+                await requireRun(adapter, input.runId, dbPath);
                 const attempts = await adapter.listAttemptsForRun(input.runId);
                 const events = await listAllEvents(adapter, input.runId);
                 const knownOutputAttemptKeys = new Set();
@@ -1350,8 +1360,8 @@ export function createSemanticToolDefinitions(options = {}) {
             inputSchema: getRunEventsInputSchema,
             outputSchema: resultSchema(getRunEventsDataSchema),
             annotations: { readOnlyHint: true },
-            handler: (input) => executeSemanticTool("get_run_events", async () => withDb(context, async (adapter) => {
-                await requireRun(adapter, input.runId);
+            handler: (input) => executeSemanticTool("get_run_events", async () => withDb(context, async (adapter, dbPath) => {
+                await requireRun(adapter, input.runId, dbPath);
                 const events = await adapter.listEventHistory(input.runId, {
                     afterSeq: input.afterSeq,
                     limit: input.limit,

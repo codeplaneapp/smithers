@@ -16,7 +16,8 @@ import { zodToCreateTableSQL, syncZodTableSchema } from "@smithers-orchestrator/
 import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { POSTGRES } from "@smithers-orchestrator/db/dialect";
-import { resolve } from "node:path";
+import { resolve, dirname, join } from "node:path";
+import { existsSync, statSync } from "node:fs";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 /** @typedef {import("@smithers-orchestrator/components").ApprovalProps<any, any>} ApprovalProps */
 /** @typedef {import("@smithers-orchestrator/components").SandboxProps} SandboxProps */
@@ -341,6 +342,29 @@ function buildSmithersApi(config) {
     return { api, setModuleAlertPolicy };
 }
 /**
+ * Walk upward from `from` and return the nearest directory that contains a
+ * `.smithers/` subdirectory, or `undefined` if none is found before the
+ * filesystem root. Used to anchor smithers.db at the project root.
+ *
+ * @param {string} from
+ * @returns {string | undefined}
+ */
+function findSmithersAnchorDir(from) {
+    let dir = resolve(from);
+    const fsRoot = resolve("/");
+    while (true) {
+        const candidate = join(dir, ".smithers");
+        if (existsSync(candidate) && statSync(candidate).isDirectory()) {
+            return dir;
+        }
+        if (dir === fsRoot) {
+            return undefined;
+        }
+        dir = dirname(dir);
+    }
+}
+
+/**
  * Schema-driven API — users define only Zod schemas, the framework owns the entire storage layer.
  *
  * @template {Record<string, import("zod").ZodObject<any>>} Schemas
@@ -363,7 +387,12 @@ function buildSmithersApi(config) {
  * ```
  */
 export function createSmithers(schemas, opts) {
-    const dbPath = opts?.dbPath ?? "./smithers.db";
+    // Resolve the DB path from the nearest .smithers/ anchor so that running a
+    // workflow from a subdirectory always creates/uses the project-root DB, not
+    // a new one at CWD. An explicit opts.dbPath overrides this entirely.
+    const anchorDir = findSmithersAnchorDir(process.cwd());
+    const defaultDbPath = anchorDir ? join(anchorDir, "smithers.db") : "./smithers.db";
+    const dbPath = opts?.dbPath ?? defaultDbPath;
     const absDbPath = resolve(process.cwd(), dbPath);
     if (process.env.SMITHERS_HOT === "1") {
         const sig = computeSchemaSig(schemas, absDbPath);
