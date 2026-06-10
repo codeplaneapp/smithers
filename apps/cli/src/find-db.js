@@ -10,13 +10,23 @@ import { SmithersError } from "@smithers-orchestrator/errors";
  * `.smithers/` subdirectory, or `undefined` if none is found before the
  * filesystem root.
  *
+ * Directories at or above $HOME are excluded: a `~/.smithers` global pack
+ * must not be treated as a project anchor, so the DB would incorrectly land
+ * in the user's home directory.
+ *
  * @param {string} from
  * @returns {string | undefined}
  */
 function findSmithersAnchorDir(from) {
     let dir = resolve(from);
     const fsRoot = resolve("/");
+    const home = process.env.HOME ? resolve(process.env.HOME) : undefined;
     while (true) {
+        // Stop before reaching HOME — anchors must be proper project directories
+        // below the user's home directory.
+        if (home && (dir === home || dir.length < home.length)) {
+            return undefined;
+        }
         const candidate = join(dir, ".smithers");
         if (existsSync(candidate) && statSync(candidate).isDirectory()) {
             return dir;
@@ -71,7 +81,14 @@ export function findSmithersDb(from) {
     // Prefer the smithers.db that sits at the project anchor (nearest .smithers/).
     const anchorDir = findSmithersAnchorDir(startDir);
     const anchorDb = anchorDir ? resolve(anchorDir, "smithers.db") : undefined;
-    const chosen = (anchorDb && existsSync(anchorDb)) ? anchorDb : allCandidates[0];
+    // If an anchor directory was found but its DB hasn't been created yet, do NOT
+    // fall back to a stray smithers.db from a parent or sibling directory — that
+    // would silently cross the project boundary.  Instead throw CLI_DB_NOT_FOUND so
+    // the caller (or waitForSmithersDb) can retry until the anchor DB appears.
+    if (anchorDb && !existsSync(anchorDb)) {
+        throw new SmithersError("CLI_DB_NOT_FOUND", `No smithers.db found at project anchor ${anchorDir}. Run 'smithers up <workflow>' to start a run first.`);
+    }
+    const chosen = anchorDb ?? allCandidates[0];
 
     if (allCandidates.length > 1) {
         const others = allCandidates.filter((p) => p !== chosen);
