@@ -11,7 +11,10 @@ import { agents } from "../agents";
 import RenderPrompt from "../prompts/report-slideshow-render.mdx";
 
 const inputSchema = z.object({
-  runId: z
+  // Named targetRunId (not runId): the engine reserves input.runId for the
+  // run's own id, so a workflow that reports on ANOTHER run must use a
+  // different field name.
+  targetRunId: z
     .string()
     .describe("The Smithers run id to build a slideshow report from."),
   title: z
@@ -87,7 +90,7 @@ function flattenNodes(parsed: Record<string, unknown>): Array<{ id: string; type
 }
 
 export default smithers((ctx) => {
-  const runId = ctx.input.runId;
+  const runId = ctx.input.targetRunId;
 
   // Gate the render step on the gather output being present.
   const gather = ctx.outputMaybe("gather", { nodeId: "gather" });
@@ -106,20 +109,28 @@ export default smithers((ctx) => {
             const stdout = res.stdout?.toString() ?? "";
             const stderr = res.stderr?.toString() ?? "";
 
-            let parsed: Record<string, unknown> = {};
+            let envelope: Record<string, unknown> = {};
             let ok = false;
             if (res.exitCode === 0 && stdout.trim().length > 0) {
               try {
-                parsed = JSON.parse(stdout) as Record<string, unknown>;
+                envelope = JSON.parse(stdout) as Record<string, unknown>;
                 ok = true;
               } catch {
                 ok = false;
               }
             }
 
+            // --full-output wraps the payload in { ok, data, meta }, and the
+            // payload nests the run record under `run` / `runState` (older
+            // shapes had status at the top level) — probe all of them.
+            const parsed = (
+              typeof envelope.data === "object" && envelope.data !== null ? envelope.data : envelope
+            ) as Record<string, unknown>;
+            const runRecord = (parsed.run ?? {}) as Record<string, unknown>;
+            const runStateRecord = (parsed.runState ?? {}) as Record<string, unknown>;
             const nodes = ok ? flattenNodes(parsed) : [];
             const state = ok
-              ? asString(parsed.status ?? parsed.state ?? "unknown") || "unknown"
+              ? asString(runRecord.status ?? runStateRecord.state ?? parsed.status ?? parsed.state ?? "unknown") || "unknown"
               : "unknown";
             const summary = ok
               ? `Run ${runId} is "${state}" with ${nodes.length} node(s).`

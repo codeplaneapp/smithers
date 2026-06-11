@@ -13,15 +13,21 @@ import ScaffoldSkillPrompt from "../prompts/extract-skill-scaffold-skill.mdx";
 
 const SKILLS_DIR = ".smithers/skills";
 
+const DEFAULT_PROMPT =
+  "Describe the pattern or run you want to harvest into a reusable skill, workflow, or memory.";
+
 const inputSchema = z.object({
-  runId: z
+  // Named targetRunId (not runId): the engine reserves input.runId for the
+  // run's own id, so a workflow that harvests ANOTHER run must use a
+  // different field name.
+  targetRunId: z
     .string()
     .nullable()
     .default(null)
     .describe("Run to harvest from. Null analyses the prompt/context alone, with no run state."),
   prompt: z
     .string()
-    .default("Describe the pattern or run you want to harvest into a reusable skill, workflow, or memory.")
+    .default(DEFAULT_PROMPT)
     .describe("What to harvest, plus any context the analysis should ground itself in."),
 });
 
@@ -79,6 +85,9 @@ const { Workflow, Task, Sequence, Branch, smithers, outputs } = createSmithers({
 });
 
 export default smithers((ctx) => {
+  // Input fields arrive null (not the zod default) when unsupplied — coalesce
+  // so the analyze prompt never sees an empty harvest section.
+  const prompt = ctx.input.prompt ?? DEFAULT_PROMPT;
   const analyze = ctx.outputMaybe("analyze", { nodeId: "analyze" });
   const propose = ctx.outputMaybe("propose", { nodeId: "propose" });
 
@@ -97,13 +106,13 @@ export default smithers((ctx) => {
           agent={agents.smartTool}
           heartbeatTimeoutMs={600_000}
         >
-          <AnalyzePrompt prompt={ctx.input.prompt} runId={ctx.input.runId} skillsDir={SKILLS_DIR} />
+          <AnalyzePrompt prompt={prompt} runId={ctx.input.targetRunId} skillsDir={SKILLS_DIR} />
         </Task>
 
         {/* 2 — Turn the analysis into a concrete skill/workflow proposal + memory. */}
         {analyze ? (
           <Task id="propose" output={outputs.propose} agent={agents.smart}>
-            <ProposePrompt analysis={analyze} prompt={ctx.input.prompt} skillsDir={SKILLS_DIR} />
+            <ProposePrompt analysis={analyze} prompt={prompt} skillsDir={SKILLS_DIR} />
           </Task>
         ) : null}
 

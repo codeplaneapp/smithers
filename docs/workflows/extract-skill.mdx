@@ -10,10 +10,10 @@ when you notice yourself doing the same thing again.
 
 ```bash
 bunx smithers-orchestrator workflow run extract-skill \
-  --input '{"runId":"RUN_ID","prompt":"Harvest the way we triage flaky tests into a reusable skill"}'
+  --input '{"targetRunId":"RUN_ID","prompt":"Harvest the way we triage flaky tests into a reusable skill"}'
 ```
 
-Pass `runId` to let the analysis read the real run state (`bunx smithers-orchestrator inspect`,
+Pass `targetRunId` to let the analysis read the real run state (`bunx smithers-orchestrator inspect`,
 `events`, `node`); leave it `null` to harvest purely from the `prompt` and
 context. When the pattern is skill-shaped, the workflow writes the skill to
 `.smithers/skills/<name>.md`.
@@ -28,13 +28,13 @@ context. When the pattern is skill-shaped, the workflow writes the skill to
 
 | Input | Type | Default |
 | --- | --- | --- |
-| `runId` | string or null | `null` (analyze the prompt/context alone) |
+| `targetRunId` | string or null | `null` (analyze the prompt/context alone) |
 | `prompt` | string | `"Describe the pattern or run you want to harvest into a reusable skill, workflow, or memory."` |
 
 ## Monitor it
 
 ```bash
-bunx smithers-orchestrator workflow run extract-skill --input '{"runId":"RUN_ID","prompt":"…"}' -d   # detach
+bunx smithers-orchestrator workflow run extract-skill --input '{"targetRunId":"RUN_ID","prompt":"…"}' -d   # detach
 bunx smithers-orchestrator ps                                                                       # active / paused / recent
 bunx smithers-orchestrator logs RUN_ID -f                                                          # follow events
 bunx smithers-orchestrator inspect RUN_ID                                                          # full run state

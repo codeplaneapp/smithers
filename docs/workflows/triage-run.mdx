@@ -9,14 +9,17 @@ rewind, retry, or escalate. Reach for it when a run failed or stalled and you
 want a grounded read plus a concrete command instead of eyeballing the logs.
 
 ```bash
-bunx smithers-orchestrator workflow run triage-run --input '{"runId":"RUN_ID"}'
+bunx smithers-orchestrator workflow run triage-run --input '{"targetRunId":"RUN_ID"}'
 ```
+
+The input is `targetRunId`, not `runId` — the engine reserves `input.runId` for
+a run's own id, so a workflow that inspects another run needs a distinct name.
 
 ## Stages
 
-1. **gather**: deterministic (no agent): shells `inspect <runId> --json` and `events <runId>`, returning the run `state`, its `failingNodes`, the tail of `lastEvents`, and a one-line `summary`.
-2. **diagnose**: an agent reads the gathered evidence and names the single most likely `rootCauseHypothesis`, with supporting `evidence` and a `confidence` level.
-3. **recommend**: an agent proposes one `recommendedAction` (`fix` \| `rewind` \| `retry` \| `escalate`), the exact `command` to run next, and a `rationale`.
+1. **gather**: deterministic (no agent): shells `inspect <targetRunId> --format json` and `events <targetRunId>`, returning the run `state`, its run-level `runError`, its `failingNodes`, any `pendingApprovals` the run is suspended on, the tail of `lastEvents`, an `ok` flag (false when inspect could not be read), and a one-line `summary`.
+2. **diagnose**: an agent reads the gathered evidence and names the single most likely `rootCauseHypothesis`, with supporting `evidence` and a `confidence` level. Pending approvals are read as a stuck state, not a failure; recurring identical errors point at a persistent defect, one-off network resets at a transient one.
+3. **recommend**: an agent proposes one `recommendedAction` (`fix` \| `rewind` \| `retry` \| `escalate`), the exact `command` to run next, and a `rationale`. A run waiting on an approval is always escalated, never rewound or retried.
 
 It does not mutate the run. Every stage is read-only, so the recommended command is yours to run.
 
@@ -24,13 +27,13 @@ It does not mutate the run. Every stage is read-only, so the recommended command
 
 | Input | Type | Default |
 | --- | --- | --- |
-| `runId` | string | (required) the failed or stuck run to triage |
+| `targetRunId` | string | (required) the failed or stuck run to triage |
 
 ## Monitor it
 
 ```bash
-bunx smithers-orchestrator workflow run triage-run --input '{"runId":"RUN_ID"}' -d   # detach
-bunx smithers-orchestrator ps                                                          # active / paused / recent
-bunx smithers-orchestrator logs RUN_ID -f                                             # follow events
-bunx smithers-orchestrator output RUN_ID --node recommend                             # read the recommendation
+bunx smithers-orchestrator workflow run triage-run --input '{"targetRunId":"RUN_ID"}' -d   # detach
+bunx smithers-orchestrator ps                                                              # active / paused / recent
+bunx smithers-orchestrator logs RUN_ID -f                                                  # follow events
+bunx smithers-orchestrator output RUN_ID --node recommend                                  # read the recommendation
 ```

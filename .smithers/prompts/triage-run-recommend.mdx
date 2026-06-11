@@ -1,9 +1,9 @@
 # Recommend the next move
 
 You are the final step of the "triage one Smithers run" pipeline. You have the
-deterministic evidence and a diagnosis of the most likely root cause. Decide the
-single best next action for this run and give the exact command to run. Plan
-only — do not execute anything.
+deterministic evidence and a diagnosis of the most likely root cause. Decide
+the single best next action for this run and give the exact command to run.
+Plan only — do not execute anything.
 
 ## Run under triage
 
@@ -11,41 +11,70 @@ Run id: {props.runId}
 
 ## Evidence (run state + event tail)
 
-{JSON.stringify(props.evidence, null, 2)}
+{`\`\`\`json
+${JSON.stringify(props.evidence, null, 2)}
+\`\`\``}
 
 ## Diagnosis
 
-{JSON.stringify(props.diagnosis, null, 2)}
+{`\`\`\`json
+${JSON.stringify(props.diagnosis, null, 2)}
+\`\`\``}
 
-## Choose ONE action
+## Choose ONE action — check in this order
 
-- **fix** — the run failed because of a real bug in the code or the workflow
-  (a task errored, a command exited non-zero, an output failed validation). The
-  underlying defect must be changed before the run can succeed. The `command`
-  should point at the follow-up (for example a `bunx smithers-orchestrator node
-  <runId> <nodeId>` to inspect the failing node, then an edit-and-`retry-task`).
-- **rewind** — earlier frames were fine but the run went off the rails after a
-  specific point; roll back to a known-good frame with
-  `bunx smithers-orchestrator rewind <runId>` (target the frame just before the
-  failure).
-- **retry** — the failure looks transient (a flaky agent, a heartbeat timeout, a
-  rate limit) and re-running the failing node should clear it:
+Work down the list; the first rule that matches wins.
+
+1. **escalate** — `pendingApprovals` is non-empty OR `state` is
+   `waiting-approval`. The run is suspended on a human gate. Full stop: never
+   `rewind` or `retry` a run that is waiting on a human — only a person can
+   resolve the gate. The `command` clears or surfaces it, e.g.
+   `bunx smithers-orchestrator approve <runId> --node <nodeId>` (or `deny`),
+   or `bunx smithers-orchestrator human inbox`. Also escalate when the right
+   call is genuinely a judgement a person must make.
+2. **fix** — persistent error: the same failure on every attempt (an output
+   failing schema validation each retry, an exception thrown by code, a
+   command that exits non-zero deterministically). Retrying will reproduce it;
+   the defect must change first. The `command` points at the follow-up:
+   inspect with `bunx smithers-orchestrator node <runId> <nodeId>`, edit, then
+   `retry-task`.
+3. **retry** — transient error (connection reset, rate limit, heartbeat
+   timeout, provider 5xx) AND no durable state was mutated by the failed
+   attempt: `bunx smithers-orchestrator retry-task <runId> --node <nodeId>`.
+4. **rewind** — ONLY when the run progressed past a known-good point, then
+   corrupted durable state, AND the evidence names a target frame to roll back
+   to: `bunx smithers-orchestrator rewind <runId>` (frame just before the
+   corruption). If either condition is missing, never pick `rewind` — prefer
+   `fix` or `escalate`.
+
+Safety rule: if the diagnosis `confidence` is `low` or the evidence has
+`ok: false`, prefer `escalate` or a read-only inspect command
+(`bunx smithers-orchestrator inspect <runId>`,
+`bunx smithers-orchestrator node <runId> <nodeId>`) over anything that mutates
+the run. `rewind` is the most destructive option; `retry` re-executes work;
+inspect changes nothing.
+
+## Worked examples (schematic — substitute the real ids)
+
+- Connection reset on a network call, node wrote nothing before failing →
+  **retry**: `bunx smithers-orchestrator retry-task <runId> --node <nodeId>`.
+- Node output fails schema validation on every attempt → **fix**: inspect via
+  `bunx smithers-orchestrator node <runId> <nodeId>`, edit the node, then
   `bunx smithers-orchestrator retry-task <runId> --node <nodeId>`.
-- **escalate** — the run is *stuck* waiting on a human (an `Approval` or
-  `HumanTask`), or the right call is genuinely a judgement a person must make.
-  The `command` should clear or surface the gate (for example
-  `bunx smithers-orchestrator approve <runId> --node <nodeId>` or
-  `bunx smithers-orchestrator human inbox`).
+- `pendingApprovals` has a node with status `requested` → **escalate**:
+  `bunx smithers-orchestrator approve <runId> --node <nodeId>` (or `deny`), or
+  surface it with `bunx smithers-orchestrator human inbox`.
 
 ## Produce
 
-1. **recommendedAction** — exactly one of `fix`, `rewind`, `retry`, `escalate`.
-2. **command** — the exact CLI command to run next. Fill in the real `<runId>`
-   and the specific failing/blocking `<nodeId>` from the evidence; do not leave
-   placeholders if the evidence names the node.
-3. **rationale** — why this action over the alternatives, tied back to the
-   diagnosis and confidence. If confidence was `low`, prefer `escalate` or a
-   read-only inspect command over a destructive `rewind`.
+1. **recommendedAction** — exactly one of `fix`, `rewind`, `retry`,
+   `escalate`.
+2. **command** — the exact CLI command to run next. Fill in the real run id
+   (from "Run under triage" above) and the specific failing/blocking node id
+   from the evidence; do not leave placeholders if the evidence names the
+   node.
+3. **rationale** — why this action over the alternatives: name the precedence
+   rule that matched and tie it back to the diagnosis and its confidence.
 
 Pick the safest action that actually moves the run forward. When in doubt,
 inspect before you mutate.

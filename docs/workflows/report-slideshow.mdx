@@ -11,8 +11,11 @@ event log.
 
 ```bash
 bunx smithers-orchestrator workflow run report-slideshow \
-  --input '{"runId":"RUN_ID","title":"Nightly build report"}'
+  --input '{"targetRunId":"RUN_ID","title":"Nightly build report"}'
 ```
+
+The input is `targetRunId`, not `runId` — the engine reserves `input.runId` for
+a run's own id, so a workflow that reports on another run needs a distinct name.
 
 It first captures the run deterministically with `bunx smithers-orchestrator inspect`, then an
 agent renders a dependency-free HTML document (inline CSS, no scripts) you can
@@ -27,7 +30,7 @@ open or attach anywhere.
 
 | Input | Type | Default |
 | --- | --- | --- |
-| `runId` | string | (required) the Smithers run id to report on |
+| `targetRunId` | string | (required) the Smithers run id to report on |
 | `title` | string or null | `null` (the render step derives a title from the run) |
 
 The rendered HTML is the `html` field of the `render` node output. Read it with
