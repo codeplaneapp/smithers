@@ -18,16 +18,16 @@ bunx smithers-orchestrator workflow run context-doctor \
 ## Stages
 
 1. **check**: deterministic (no agent), `JSON.parse` the contract and run the structural checks, returning `{ issues, summary, score }`.
-2. **advise**: an agent reads the diagnosis and writes one concrete fix per non-ok issue, ordered error → warning → info.
+2. **advise**: an agent reads the diagnosis and writes one `{ check, fix }` pair per non-ok issue — `check` is the check id being resolved — ordered error → warning → info.
 
 ## Checks
 
 - **hasGoal**: a non-empty `goal` is declared.
 - **hasOutputSpec**: an `outputSpec` (or `output`) describes the produced artifact.
 - **hasAcceptanceCriteria**: at least one acceptance criterion is listed.
-- **allBlockingCriteriaHaveVerification**: every criterion marked `blocking` names a `verification`.
+- **allBlockingCriteriaHaveVerification**: every criterion marked `blocking` names a `verification`. Plain-string criteria are flagged as a warning — a string cannot declare `blocking` or `verification`, so use `{text, blocking, verification}` objects.
 - **allRequiredInputsHaveSource**: every input marked `required` declares a `source`.
-- **allSideEffectsHaveApproval**: every entry in `sideEffects` is gated by an `approval`.
+- **allSideEffectsHaveApproval**: every entry in `sideEffects` is gated by an `approval`. Plain-string entries count as unguarded — use `{name, approval}` objects.
 - **reportSpecExists**: a `reportSpec` describes how results are reported.
 
 ## Inputs

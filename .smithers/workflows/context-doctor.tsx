@@ -32,9 +32,18 @@ const checkSchema = z.looseObject({
   score: z.number().describe("0–100 health score; 100 means every check passed."),
 });
 
-// 2. Agent advice on how to resolve each non-ok finding.
+// 2. Agent advice on how to resolve each non-ok finding. Each fix is paired
+//    to the check id it resolves so remediation is verifiable per finding.
 const adviseSchema = z.looseObject({
-  fixes: z.array(z.string()).default([]).describe("Concrete suggestions, one per non-ok issue."),
+  fixes: z
+    .array(
+      z.object({
+        check: z.string().describe("The check id of the issue this fix resolves."),
+        fix: z.string().describe("One concrete, imperative suggestion resolving that issue."),
+      }),
+    )
+    .default([])
+    .describe("One {check, fix} pair per non-ok issue, ordered error → warning → info."),
   summary: z.string(),
 });
 
@@ -116,25 +125,35 @@ function diagnose(raw: string): z.infer<typeof checkSchema> {
     issues.push(fail("hasAcceptanceCriteria", "error", "Missing `acceptanceCriteria`; no way to know when the work is done."));
   }
 
-  // allBlockingCriteriaHaveVerification — every blocking criterion names a verification.
+  // allBlockingCriteriaHaveVerification — every blocking criterion names a
+  // verification. Plain-string criteria cannot declare `blocking` or
+  // `verification` at all, so they are flagged rather than silently passing.
+  const stringCriteria = acceptanceCriteria.filter((c) => typeof c === "string");
   const blocking = acceptanceCriteria.filter((c) => isObject(c) && c.blocking === true);
-  if (blocking.length === 0) {
+  const unverified = blocking.filter(
+    (c) => isObject(c) && !isNonEmptyString(c.verification) && !isNonEmptyString(c.verify),
+  );
+  if (unverified.length > 0) {
+    issues.push(
+      fail(
+        "allBlockingCriteriaHaveVerification",
+        "error",
+        unverified.length + " blocking criterion/criteria lack a `verification` step.",
+      ),
+    );
+  } else if (stringCriteria.length > 0) {
+    issues.push(
+      fail(
+        "allBlockingCriteriaHaveVerification",
+        "warning",
+        stringCriteria.length +
+          " plain-string acceptance criteria cannot declare `blocking` or `verification`; convert them to {text, blocking, verification} objects.",
+      ),
+    );
+  } else if (blocking.length === 0) {
     issues.push(ok("allBlockingCriteriaHaveVerification", "No blocking acceptance criteria to verify."));
   } else {
-    const unverified = blocking.filter(
-      (c) => isObject(c) && !isNonEmptyString(c.verification) && !isNonEmptyString(c.verify),
-    );
-    if (unverified.length === 0) {
-      issues.push(ok("allBlockingCriteriaHaveVerification", "Every blocking criterion names a verification."));
-    } else {
-      issues.push(
-        fail(
-          "allBlockingCriteriaHaveVerification",
-          "error",
-          unverified.length + " blocking criterion/criteria lack a `verification` step.",
-        ),
-      );
-    }
+    issues.push(ok("allBlockingCriteriaHaveVerification", "Every blocking criterion names a verification."));
   }
 
   // allRequiredInputsHaveSource — every required input declares where it comes from.
@@ -158,12 +177,13 @@ function diagnose(raw: string): z.infer<typeof checkSchema> {
   }
 
   // allSideEffectsHaveApproval — every side effect declares an approval gate.
+  // Plain-string entries cannot declare `approval`, so they count as unguarded.
   const sideEffects = asArray(contract.sideEffects ?? contract.side_effects);
   if (sideEffects.length === 0) {
     issues.push(ok("allSideEffectsHaveApproval", "No declared side effects."));
   } else {
     const unguarded = sideEffects.filter(
-      (s) => isObject(s) && s.approval !== true && !isNonEmptyString(s.approval),
+      (s) => !isObject(s) || (s.approval !== true && !isNonEmptyString(s.approval)),
     );
     if (unguarded.length === 0) {
       issues.push(ok("allSideEffectsHaveApproval", "Every side effect is gated by an approval."));
@@ -172,7 +192,8 @@ function diagnose(raw: string): z.infer<typeof checkSchema> {
         fail(
           "allSideEffectsHaveApproval",
           "warning",
-          unguarded.length + " side effect(s) have no `approval` gate.",
+          unguarded.length +
+            " side effect(s) have no `approval` gate (plain-string entries cannot declare one; use {name, approval} objects).",
         ),
       );
     }
@@ -213,9 +234,12 @@ export default smithers((ctx) => {
   return (
     <Workflow name="context-doctor">
       <Sequence>
-        {/* 1 — Deterministic diagnosis of the contract (pure JS, no agent). */}
+        {/* 1 — Deterministic diagnosis of the contract (pure JS, no agent).
+            Input fields arrive null when unsupplied — coalesce to the
+            documented default so a bare invocation diagnoses an empty
+            contract instead of the string "null". */}
         <Task id="check" output={outputs.check}>
-          {() => diagnose(ctx.input.contract)}
+          {() => diagnose(ctx.input.contract ?? "{}")}
         </Task>
 
         {/* 2 — Agent advice for resolving every non-ok finding. */}

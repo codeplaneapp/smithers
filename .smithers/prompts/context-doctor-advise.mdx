@@ -1,8 +1,9 @@
 # Advise on the context contract diagnosis
 
 The deterministic checker has already diagnosed a context contract. Your job is
-to turn its findings into concrete, actionable advice. Do NOT re-run the checks
-or invent new findings — only address what the checker reported.
+to turn its findings into concrete, actionable advice. Do NOT re-run the checks,
+re-grade severities, or invent findings — every fix must trace back to exactly
+one issue the checker reported.
 
 ## Diagnosis summary
 
@@ -12,28 +13,66 @@ Health score: {props.score} / 100
 
 ## Issues
 
-{JSON.stringify(props.issues, null, 2)}
+{`\`\`\`json
+${JSON.stringify(props.issues, null, 2)}
+\`\`\``}
 
 Each issue has a `check` id, a `severity` (`ok`, `warning`, `error`, or `info`),
 and a `message`.
 
 ## What to produce
 
-1. For every issue whose severity is NOT `ok`, write one concrete `fix` — a short
-   imperative suggestion for how to resolve it. Prefer naming the exact contract
-   field to add or change. For example, if `hasOutputSpec` failed, suggest adding
-   an `outputSpec` field describing the produced artifact.
-2. Order `fixes` by severity: `error` first, then `warning`, then `info`.
-3. If there are no non-ok issues, return an empty `fixes` array and say the
-   contract is healthy in your `summary`.
+1. For every issue whose severity is NOT `ok`, emit exactly one object
+   `{check, fix}`:
+   - `check` — the issue's check id, copied VERBATIM. Never rename, abbreviate,
+     or merge ids.
+   - `fix` — one imperative sentence naming the exact contract field to add or
+     change.
+2. One non-ok issue → one object. Do not emit fixes for checks that passed, and
+   do not split one issue into several fixes.
+3. Order `fixes` by severity: `error` first, then `warning`, then `info`.
+   Within the same severity, keep the checker's issue order.
+4. If every issue is `ok`, return an empty `fixes` array and say the contract
+   is healthy in your `summary`.
 
-Keep each fix to a single sentence. Be specific and practical — no marketing
-copy, no restating the problem without a remedy.
+## What a good fix names, per check
+
+- `hasGoal` — add a `goal` stating the intended outcome.
+- `hasOutputSpec` — add an `outputSpec` naming the produced artifact.
+- `hasAcceptanceCriteria` — add `acceptanceCriteria` as `{text, blocking,
+  verification}` objects.
+- `allBlockingCriteriaHaveVerification` — give each blocking criterion a
+  `verification` (convert plain-string criteria to objects so they can declare
+  one).
+- `allRequiredInputsHaveSource` — add a `source` to each required input.
+- `allSideEffectsHaveApproval` — add an `approval` to each side effect (convert
+  plain-string side effects to objects so they can declare one).
+- `reportSpecExists` — add a `reportSpec` describing how results are reported.
+- `parse` — make the contract valid JSON with an object at the top level.
+
+Note: the checker also flags acceptance criteria and side effects written as
+plain strings — a string cannot declare `blocking`, `verification`, or
+`approval`, so the fix is to convert it to an object that can.
+
+## Worked examples
+
+```
+Issue: {"check": "hasGoal", "severity": "error", "message": "Missing a non-empty `goal` describing the intended outcome."}
+Fix:   {"check": "hasGoal", "fix": "Add a goal field stating the outcome this contract is meant to achieve."}
+
+Issue: {"check": "allSideEffectsHaveApproval", "severity": "warning", "message": "2 side effect(s) have no `approval` gate."}
+Fix:   {"check": "allSideEffectsHaveApproval", "fix": "Add an approval gate to each of the 2 unguarded side effects, converting plain-string entries to objects."}
+
+Every issue ok → {"fixes": [], "summary": "Contract is healthy; no fixes needed."}
+```
+
+Keep each fix to one sentence. Ground it in the issue's `message` — reuse its
+counts and field names; do not invent details the checker did not report.
 
 ## Output
 
-Return `fixes` (one string per non-ok issue) and a one-line `summary` of the
-overall remediation.
+Return `fixes` (one `{check, fix}` object per non-ok issue, ordered
+error → warning → info) and a one-line `summary` of the overall remediation.
 
 REQUIRED OUTPUT:
 {props.schema}
