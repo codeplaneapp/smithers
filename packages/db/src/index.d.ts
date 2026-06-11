@@ -961,6 +961,11 @@ declare class SmithersDb {
    * @param {string} runId
    * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
    */
+    listDecidedApprovals(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
     listAllDecidedApprovals(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
