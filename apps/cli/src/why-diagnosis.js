@@ -719,6 +719,44 @@ function buildDiagnosis(params) {
                 });
             }
         }
+        // Detect failed nodes that have a decided (denied) approval — the engine
+        // processed the denial and left the node in "failed", but if the run is
+        // still waiting-event (e.g. detached / try-catch path) a resume is needed.
+        const failedNodesWithDecidedApproval = nodes.filter(
+            (node) =>
+                node.state === "failed" &&
+                approvals.some(
+                    (a) =>
+                        a.runId === node.runId &&
+                        a.nodeId === node.nodeId &&
+                        a.iteration === (node.iteration ?? 0) &&
+                        (a.status === "approved" || a.status === "denied")
+                )
+        );
+        if (!hasWaitingEventNodes && failedNodesWithDecidedApproval.length > 0) {
+            for (const node of failedNodesWithDecidedApproval) {
+                const approval = approvals.find(
+                    (a) =>
+                        a.runId === node.runId &&
+                        a.nodeId === node.nodeId &&
+                        a.iteration === (node.iteration ?? 0)
+                );
+                const isDenied = approval?.status === "denied";
+                blockers.push({
+                    kind: "approval-decided-resume-required",
+                    nodeId: node.nodeId,
+                    iteration: node.iteration ?? 0,
+                    reason: isDenied
+                        ? "Approval denied — run must be resumed to handle the denial"
+                        : "Approval decision recorded — run must be resumed to continue",
+                    waitingSince: waitingSinceFallback(nowMs, node.updatedAtMs, run.startedAtMs, run.createdAtMs),
+                    unblocker: buildResumeUnblocker(run),
+                    context: isDenied
+                        ? "The approval gate was denied while the run was detached. Resume the run to propagate the failure."
+                        : "The approval gate was decided while the run was detached. Resume the run to execute the next step.",
+                });
+            }
+        }
     }
     for (const node of nodes.filter((entry) => entry.state === "waiting-timer")) {
         const key = nodeKey(node.nodeId, node.iteration ?? 0);
