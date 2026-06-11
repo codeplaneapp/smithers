@@ -24,14 +24,14 @@ describe("fallbackStory", () => {
       "The proof: tests",
       "The paper trail: docs",
     ]);
-    expect(story.chapters[0].files.map((entry) => entry.path)).toEqual([
-      "apps/web/src/app.ts",
-      "apps/web/src/router.ts",
-    ]);
+    expect(story.chapters[0].blocks[0].kind).toBe("prose");
+    expect(
+      story.chapters[0].blocks.filter((block) => block.kind === "diff").map((block) => block.path),
+    ).toEqual(["apps/web/src/app.ts", "apps/web/src/router.ts"]);
     expect(story.headline).toContain("6 file(s) changed");
   });
 
-  test("covers every file exactly once", () => {
+  test("covers every file in exactly one diff block", () => {
     const files = [
       file("apps/web/src/a.ts", 1),
       file("packages/x/b.ts", 2),
@@ -40,7 +40,9 @@ describe("fallbackStory", () => {
       file("e2e/flow.spec.ts", 5),
     ];
     const story = fallbackStory(files);
-    const covered = story.chapters.flatMap((chapter) => chapter.files.map((entry) => entry.path));
+    const covered = story.chapters.flatMap((chapter) =>
+      chapter.blocks.filter((block) => block.kind === "diff").map((block) => block.path),
+    );
     expect([...covered].sort()).toEqual(files.map((entry) => entry.path).sort());
     expect(new Set(covered).size).toBe(covered.length);
   });

@@ -1,7 +1,7 @@
 import type { ChangedFile } from "./changedFileSchema";
 import { classifyChangeRole } from "./classifyChangeRole";
 import { describeChange } from "./describeChange";
-import type { Story, StoryChapter } from "./storySchema";
+import type { Story, StoryBlock, StoryChapter } from "./storySchema";
 
 const groupedRoots = new Set(["apps", "packages", "examples", "src"]);
 
@@ -29,19 +29,26 @@ function byChurnDesc(a: ChangedFile, b: ChangedFile): number {
   return churn !== 0 ? churn : a.path.localeCompare(b.path);
 }
 
+function proseBlock(text: string): StoryBlock {
+  return { kind: "prose", text, path: "", intro: "", title: "", mermaid: "" };
+}
+
+function diffBlock(file: ChangedFile): StoryBlock {
+  return { kind: "diff", path: file.path, intro: describeChange(file), text: "", title: "", mermaid: "" };
+}
+
 function chapter(title: string, narrative: string, files: ChangedFile[]): StoryChapter {
   return {
     title,
-    narrative,
-    files: [...files].sort(byChurnDesc).map((file) => ({ path: file.path, role: describeChange(file), narrative: "" })),
+    blocks: [proseBlock(narrative), ...[...files].sort(byChurnDesc).map(diffBlock)],
   };
 }
 
 /**
  * Deterministic story used when no narrator agent ran (or its output was
- * unusable): code areas by churn, then configuration, tests, and docs. Not as
- * good as a narrated story, but already a logical reading order instead of an
- * alphabetical file list.
+ * unusable): code areas by churn, then configuration, tests, and docs — one
+ * prose block then diff blocks per chapter. Not as good as a narrated story,
+ * but already a logical reading order instead of an alphabetical file list.
  */
 export function fallbackStory(files: ChangedFile[]): Story {
   const code = new Map<string, ChangedFile[]>();

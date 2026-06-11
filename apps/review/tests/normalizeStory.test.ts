@@ -8,8 +8,12 @@ function file(path: string, insertions = 1): ChangedFile {
 
 const files = [file("src/a.ts", 10), file("src/b.ts", 5), file("src/c.ts", 1)];
 
+function diffPaths(story: ReturnType<typeof normalizeStory>): string[] {
+  return story.chapters.flatMap((chapter) => chapter.blocks.filter((b) => b.kind === "diff").map((b) => b.path));
+}
+
 describe("normalizeStory", () => {
-  test("keeps narrator order, drops unknown paths, dedupes, appends missing files", () => {
+  test("keeps block order, drops unknown paths and dupes, appends missing files", () => {
     const story = normalizeStory(
       {
         headline: "Adds the thing",
@@ -17,16 +21,20 @@ describe("normalizeStory", () => {
         chapters: [
           {
             title: "The core",
-            narrative: "Start here.",
-            files: [
-              { path: "src/b.ts", role: "the heart", narrative: " Replaces the old heart with a stronger one. " },
-              { path: "src/invented.ts", role: "does not exist" },
+            blocks: [
+              { kind: "prose", text: "Start here: the heart of the change." },
+              { kind: "diff", path: "src/b.ts", intro: "the heart" },
+              { kind: "prose", text: "Having read the heart, now its consumer." },
+              { kind: "diff", path: "src/invented.ts", intro: "does not exist" },
+              { kind: "diagram", title: "Flow", mermaid: "graph TD; A-->B" },
             ],
           },
           {
             title: "Repeat",
-            narrative: "Mentions b again.",
-            files: [{ path: "src/b.ts", role: "duplicate" }, { path: "src/a.ts", role: "support" }],
+            blocks: [
+              { kind: "diff", path: "src/b.ts", intro: "duplicate" },
+              { kind: "diff", path: "src/a.ts", intro: "support" },
+            ],
           },
         ],
       },
@@ -35,35 +43,49 @@ describe("normalizeStory", () => {
 
     expect(story.headline).toBe("Adds the thing");
     expect(story.chapters.map((chapter) => chapter.title)).toEqual(["The core", "Repeat", "Everything else"]);
-    expect(story.chapters[0].files).toEqual([{ path: "src/b.ts", role: "the heart", narrative: "Replaces the old heart with a stronger one." }]);
-    expect(story.chapters[1].files).toEqual([{ path: "src/a.ts", role: "support", narrative: "" }]);
-    expect(story.chapters[2].files.map((entry) => entry.path)).toEqual(["src/c.ts"]);
+    expect(story.chapters[0].blocks.map((block) => block.kind)).toEqual(["prose", "diff", "prose", "diagram"]);
+    expect(story.chapters[0].blocks[1].path).toBe("src/b.ts");
+    expect(story.chapters[1].blocks).toEqual([
+      { kind: "diff", path: "src/a.ts", intro: "support", text: "", title: "", mermaid: "" },
+    ]);
+    expect(diffPaths(story).sort()).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
   });
 
-  test("every changed file ends up in exactly one chapter", () => {
+  test("every changed file ends up in exactly one diff block", () => {
     const story = normalizeStory(
-      { headline: "", synopsis: "", chapters: [{ title: "Partial", narrative: "", files: [{ path: "src/c.ts", role: "" }] }] },
+      { chapters: [{ title: "Partial", blocks: [{ kind: "diff", path: "src/c.ts" }] }] },
       files,
     );
-    const covered = story.chapters.flatMap((chapter) => chapter.files.map((entry) => entry.path));
-    expect([...covered].sort()).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
-    expect(new Set(covered).size).toBe(covered.length);
+    const paths = diffPaths(story);
+    expect([...paths].sort()).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
+    expect(new Set(paths).size).toBe(paths.length);
   });
 
-  test("falls back when the story is null, malformed, or covers nothing", () => {
-    for (const candidate of [null, "not a story", { chapters: [{ title: "x", narrative: "", files: [{ path: "nope.ts", role: "" }] }] }]) {
+  test("drops empty prose and sourceless diagrams; falls back when nothing survives", () => {
+    for (const candidate of [
+      null,
+      "not a story",
+      { chapters: [{ title: "x", blocks: [{ kind: "prose", text: "  " }, { kind: "diagram", mermaid: "" }] }] },
+      { chapters: [{ title: "x", blocks: [{ kind: "diff", path: "nope.ts" }] }] },
+    ]) {
       const story = normalizeStory(candidate, files);
       expect(story.chapters.length).toBeGreaterThan(0);
-      const covered = story.chapters.flatMap((chapter) => chapter.files.map((entry) => entry.path));
-      expect([...covered].sort()).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
+      expect(diffPaths(story).sort()).toEqual(["src/a.ts", "src/b.ts", "src/c.ts"]);
     }
   });
 
-  test("fills empty headline and synopsis from the fallback", () => {
+  test("unknown block kinds degrade to prose; empty headline/synopsis fall back", () => {
     const story = normalizeStory(
-      { headline: " ", synopsis: "", chapters: [{ title: "Core", narrative: "", files: [{ path: "src/a.ts", role: "" }] }] },
+      {
+        headline: " ",
+        synopsis: "",
+        chapters: [
+          { title: "Core", blocks: [{ kind: "mystery", text: "keep this text" }, { kind: "diff", path: "src/a.ts" }] },
+        ],
+      },
       files,
     );
+    expect(story.chapters[0].blocks[0]).toMatchObject({ kind: "prose", text: "keep this text" });
     expect(story.headline).toContain("3 file(s) changed");
     expect(story.synopsis.length).toBeGreaterThan(0);
   });

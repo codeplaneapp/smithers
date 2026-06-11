@@ -36,15 +36,22 @@ const files: ChangedFile[] = [
   { path: "assets/logo.png", status: "binary", insertions: 0, deletions: 0, diff: "", reviewed: false, excludeReason: "binary" },
 ];
 
+function block(partial: Record<string, string>) {
+  return { kind: "prose", text: "", path: "", intro: "", title: "", mermaid: "", ...partial };
+}
+
 const story = {
   headline: "Replaces removed with added <script>",
   synopsis: "A tiny arc.",
   chapters: [
-    { title: "The change & its core", narrative: "Read me first.", files: [
-      { path: "src/a.ts", role: "the actual change", narrative: "Swaps removed for added & adds more; check the constant values." },
-      { path: "src/b.ts", role: "supporting tweak", narrative: "" },
+    { title: "The change & its core", blocks: [
+      block({ kind: "prose", text: "Read me first: we swap `removed` for **added**." }),
+      block({ kind: "diff", path: "src/a.ts", intro: "Swaps removed for added & adds more; check the constant values." }),
+      block({ kind: "prose", text: "Having read that, the supporting tweak follows." }),
+      block({ kind: "diff", path: "src/b.ts" }),
+      block({ kind: "diagram", title: "The flow", mermaid: "graph TD; A-->B" }),
     ] },
-    { title: "Assets", narrative: "", files: [{ path: "assets/logo.png", role: "binary asset", narrative: "" }] },
+    { title: "Assets", blocks: [block({ kind: "diff", path: "assets/logo.png", intro: "binary asset" })] },
   ],
 };
 
@@ -81,28 +88,50 @@ describe("renderWalkthroughHtml", () => {
     expect(html).not.toContain("<b>unescaped</b>");
   });
 
-  test("renders chapters in order with every file and its findings", async () => {
+  test("interleaves prose, diffs, and diagrams in story order", async () => {
     const html = await render();
     expect(html).toContain("The change &amp; its core");
-    expect(html.indexOf("src/a.ts")).toBeLessThan(html.indexOf("src/b.ts"));
-    expect(html).toContain("the actual change");
+    const prose1 = html.indexOf("Read me first: we swap <code>removed</code> for <strong>added</strong>.");
+    const diffA = html.indexOf('id="file-1"');
+    const prose2 = html.indexOf("Having read that, the supporting tweak follows.");
+    const diffB = html.indexOf('id="file-2"');
+    expect(prose1).toBeGreaterThan(-1);
+    expect(prose1).toBeLessThan(diffA);
+    expect(diffA).toBeLessThan(prose2);
+    expect(prose2).toBeLessThan(diffB);
     expect(html).toContain("Swaps removed for added &amp; adds more; check the constant values.");
-    expect(html).toContain("file-narrative");
     expect(html).toContain("const added = safe();");
     expect(html).toContain("Review findings (1)");
   });
 
-  test("embeds Pierre diffs with shared assets hoisted once", async () => {
+  test("renders the diagram and inlines the mermaid runtime only when present", async () => {
+    const html = await render();
+    expect(html).toContain('<pre class="mermaid">graph TD; A--&gt;B</pre>');
+    expect(html).toContain("The flow");
+    expect(html).toContain("mermaid.initialize");
+
+    const plain = await renderWalkthroughHtml({
+      title: "Nothing",
+      story: { headline: "", synopsis: "x", chapters: [{ title: "c", blocks: [{ kind: "diff", path: "src/a.ts", intro: "", text: "", title: "", mermaid: "" }] }] },
+      files,
+      comments: [],
+      repoDir: "/tmp/repo",
+      mode: "workspace",
+      ref: "workspace",
+      generatedAt: "2026-06-10T00:00:00.000Z",
+    });
+    expect(plain).not.toContain("mermaid.initialize");
+  });
+
+  test("embeds Pierre diffs with shared assets hoisted once and shows the overview chart", async () => {
     const html = await render();
     expect(html.startsWith("<!doctype html>")).toBe(true);
     expect(html).toContain("</html>");
     expect(html).toContain('data-line-type="change-addition"');
-    expect(html).toContain('data-line-type="change-deletion"');
     expect(html).toContain("--diffs-token-light");
-    // Two Pierre-rendered files share one set of assets: page css + 2 pierre
-    // styles, one sprite sheet.
+    expect(html).toContain('class="overview-chart"');
+    // Two Pierre-rendered files share one set of assets: page css + 2 pierre styles.
     expect((html.match(/<style/g) ?? []).length).toBe(3);
-    expect((html.match(/diffs-icon-symbol/g) ?? []).length).toBeGreaterThan(0);
   });
 
   test("binary files fall back to the plain note", async () => {

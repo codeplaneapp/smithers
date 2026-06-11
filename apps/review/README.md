@@ -43,16 +43,19 @@ One durable smithers workflow, run in-process through the engine:
 2. `collect-changes` loads the full diff for every changed file, including
    files the review filters skip (tests, docs, configs). The walkthrough shows
    everything.
-3. `narrate` (an agent) organizes the change set into chapters: the central
-   change first, supporting code in dependency order, tests with what they
-   prove, chores last. Every file also gets a narrative paragraph the reader
-   sees right before its diff, walking through what the diff does.
-   `normalizeStory` enforces that every changed file appears in exactly one
-   chapter; a deterministic fallback story covers agent failure and
-   `--no-narrate`.
+3. `narrate` (an agent) writes the story as block streams: prose explanation
+   (markdown), diff blocks that embed each file's diff at the right point in
+   the narrative, and Mermaid diagrams wherever structure or flow changed.
+   Chapters open with the central change and follow dependency order; prose
+   between diffs carries the thread. `normalizeStory` enforces that every
+   changed file appears in exactly one diff block; a deterministic fallback
+   story covers agent failure and `--no-narrate`.
 4. `walkthrough` renders self-contained HTML (inline CSS, no external assets)
-   and writes it to `--out`. Diffs are rendered with `@pierre/diffs`: syntax
-   highlighting, word-level diffs, line numbers, unified or `--split` view.
+   and writes it to `--out`. Diffs are rendered with `@pierre/diffs` (syntax
+   highlighting, word-level diffs, line numbers, unified or `--split` view);
+   diagrams render via an inlined Mermaid runtime (only included when the
+   story has diagrams); the header shows a deterministic change-overview SVG
+   chart of additions/deletions by area.
 
 Review findings never change the exit code; smithers review reports, humans
 decide.

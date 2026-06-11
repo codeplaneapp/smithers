@@ -58,9 +58,11 @@ fork their logic. New lib exports added for smithers review: `loadDiffs`,
 `narrate` runs with `continueOnFail`; if it fails or is disabled the
 walkthrough falls back to the deterministic story.
 
-## Story schema
+## Story schema (block streams)
 
-The narrator returns structured output:
+The narrator returns structured output. Each chapter is an ordered stream of
+blocks, so the explanation IS the document: prose flows, and diffs and
+diagrams appear at the exact point in the story where the reader needs them.
 
 ```ts
 story = {
@@ -68,15 +70,16 @@ story = {
   synopsis: string,    // short paragraph: the arc of the change
   chapters: [{
     title: string,
-    narrative: string, // why this chapter exists, what to look for
-    files: [{
-      path: string,
-      role: string,      // one-line label for the chapter listing
-      narrative: string, // 2-4 sentences read right before the diff: what
-                         // the diff actually does, walking the reader
-                         // through the change (new functions, behavior
-                         // shifts, what to check)
-    }],
+    blocks: [
+      // explanation prose (markdown subset: paragraphs, **bold**, `code`,
+      // ``` fences, lists, ### headings). As long as it needs to be.
+      { kind: "prose", text: string },
+      // embed this file's diff HERE in the story; intro is the 1-3 sentence
+      // lead-in shown with the file card (and in PR review bodies)
+      { kind: "diff", path: string, intro: string },
+      // agent-authored Mermaid (sequence/flow/state/architecture)
+      { kind: "diagram", title: string, mermaid: string },
+    ],
   }],
 }
 ```
@@ -84,19 +87,22 @@ story = {
 Narrator ordering contract: open with the motivating or central change, follow
 it through supporting code in dependency order, keep related files together,
 put tests next to what they prove, end with chores. Every changed file appears
-in exactly one chapter.
+in exactly one diff block. Prose between diffs carries the thread: each prose
+block may assume the reader just read the previous diff. Diagrams are
+encouraged whenever structure, sequence, or data flow changed.
 
-`normalizeStory` repairs agent output before rendering: drops paths that are
-not in the change set, dedupes files across chapters (first chapter wins),
-drops empty chapters, and appends an "Everything else" chapter for any changed
-file the story missed. The invariant after normalization: every changed file
-appears in exactly one chapter. If nothing survives, the fallback story is
-used.
+`normalizeStory` repairs agent output before rendering: drops diff blocks for
+paths not in the change set, dedupes diff blocks (first occurrence wins),
+drops prose blocks with no text and diagram blocks with no mermaid source,
+drops empty chapters, and appends an "Everything else" chapter of diff blocks
+for any changed file the story missed. The invariant after normalization:
+every changed file appears in exactly one diff block. If nothing survives,
+the fallback story is used.
 
 `fallbackStory` is deterministic: code files grouped by workspace area
 (`apps/x`, `packages/y`, top-level dir otherwise), ordered by churn descending,
-then configuration, then tests, then docs. It needs no agent, so the
-walkthrough works offline and in tests.
+then configuration, then tests, then docs — one prose block then diff blocks
+per chapter. It needs no agent, so the walkthrough works offline and in tests.
 
 ## Walkthrough HTML
 
@@ -112,6 +118,19 @@ order:
   existing/suggested code), and the rendered diff in a `<details>` block
 - binary files get a note instead of a diff; very long diffs are truncated
   with a line count notice
+
+Visuals: the header includes a deterministic change-overview SVG (additions/
+deletions by workspace area, no agent involved). Narrator `diagram` blocks
+render via Mermaid; the Mermaid runtime (~3MB) is inlined into the HTML only
+when the story contains at least one diagram, keeping the no-external-assets
+guarantee (works from file://). Diagram sources are HTML-escaped and rendered
+client-side with securityLevel "strict"; if Mermaid fails to parse one, the
+source is shown as a code block.
+
+Prose blocks render through a built-in escape-first markdown subset
+(paragraphs, bold, inline code, fenced code, lists, headings, blockquotes) —
+input is escaped before any markup transformation, so narrator output cannot
+inject HTML into the published page.
 
 All dynamic text is HTML-escaped. Diff rendering is display-only and lives in
 the app, not the review lib.

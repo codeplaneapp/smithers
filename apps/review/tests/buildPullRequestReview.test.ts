@@ -7,8 +7,11 @@ const story = {
   chapters: [
     {
       title: "The core",
-      narrative: "Start here; the widget is born.",
-      files: [{ path: "src/widget.ts", role: "the widget itself", narrative: "Adds makeWidget()." }],
+      blocks: [
+        { kind: "prose", text: "Start here; the widget is born.", path: "", intro: "", title: "", mermaid: "" },
+        { kind: "diff", path: "src/widget.ts", intro: "the widget itself", text: "", title: "", mermaid: "" },
+        { kind: "diagram", title: "Flow", mermaid: "graph TD; A-->B", text: "", path: "", intro: "" },
+      ],
     },
   ],
 };
@@ -53,6 +56,8 @@ describe("buildPullRequestReview", () => {
     expect(payload.body).toContain("**📖 Full walkthrough:** https://review.jjhub.tech/w/xyz");
     expect(payload.body).toContain("**1. The core**");
     expect(payload.body).toContain("`src/widget.ts` — the widget itself");
+    expect(payload.body).toContain("Start here; the widget is born.");
+    expect(payload.body).toContain("📊 1 diagram(s) in the full walkthrough");
     expect(payload.body).toContain("Findings without inline anchors (2)");
     expect(payload.body).toContain("No line numbers.");
     expect(payload.body).toContain("Outside the PR.");

@@ -73,13 +73,20 @@ export function buildPullRequestReview(args: {
     lines.push("", "### Reading order");
     args.story.chapters.forEach((chapter, index) => {
       lines.push("", `**${index + 1}. ${chapter.title}**`);
-      if (chapter.narrative) lines.push("", chapter.narrative);
-      const shown = chapter.files.slice(0, MAX_FILES_PER_CHAPTER);
-      for (const file of shown) {
-        lines.push(`- \`${file.path}\`${file.role ? ` — ${file.role}` : ""}`);
+      const firstProse = chapter.blocks.find((block) => block.kind === "prose");
+      if (firstProse?.text) {
+        const summary = firstProse.text.split("\n\n")[0];
+        lines.push("", summary.length > 400 ? `${summary.slice(0, 400)}…` : summary);
       }
-      const hidden = chapter.files.length - shown.length;
+      const diffBlocks = chapter.blocks.filter((block) => block.kind === "diff");
+      const shown = diffBlocks.slice(0, MAX_FILES_PER_CHAPTER);
+      for (const block of shown) {
+        lines.push(`- \`${block.path}\`${block.intro ? ` — ${block.intro}` : ""}`);
+      }
+      const hidden = diffBlocks.length - shown.length;
       if (hidden > 0) lines.push(`- …and ${hidden} more file(s)`);
+      const diagrams = chapter.blocks.filter((block) => block.kind === "diagram").length;
+      if (diagrams > 0) lines.push(`- 📊 ${diagrams} diagram(s) in the full walkthrough`);
     });
   }
 
