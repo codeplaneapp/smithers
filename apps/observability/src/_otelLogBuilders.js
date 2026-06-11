@@ -58,11 +58,17 @@ export function buildOtelLogRecord(body, attributes, severity) {
  * @returns {OtelLogSeverity}
  */
 export function inferCanonicalSeverity(event) {
-    return event.event.kind === "capture.error"
-        ? "ERROR"
-        : event.event.kind === "capture.warning" || event.event.kind === "stderr"
-            ? "WARN"
-            : "INFO";
+    if (event.event.kind === "capture.error") {
+        // Truncated output is a non-fatal capture issue, not an error
+        if (event.payload?.reason === "truncated-json-stream") {
+            return "WARN";
+        }
+        return "ERROR";
+    }
+    if (event.event.kind === "capture.warning" || event.event.kind === "stderr") {
+        return "WARN";
+    }
+    return "INFO";
 }
 
 /**
