@@ -10,10 +10,12 @@ import { agents } from "../agents";
 import ExtractCriteriaPrompt from "../prompts/backpressure-plan-extract-criteria.mdx";
 import PlanGatesPrompt from "../prompts/backpressure-plan-plan-gates.mdx";
 
+const DEFAULT_PROMPT = "Describe the goal and its acceptance criteria in plain English.";
+
 const inputSchema = z.object({
   prompt: z
     .string()
-    .default("Describe the goal and its acceptance criteria in plain English.")
+    .default(DEFAULT_PROMPT)
     .describe("The goal / acceptance criteria to turn into a backpressure gate matrix."),
 });
 
@@ -63,28 +65,90 @@ const gatesSchema = z.looseObject({
   summary: z.string().default("").describe("2-3 sentence overview of the backpressure plan."),
 });
 
+// 3. Deterministic parity check: the matrix is only trustworthy when every
+//    extracted criterion has exactly one gate, in order, verbatim.
+const verifySchema = z.object({
+  match: z.boolean().describe("True when gates cover every criterion, one each, same order, verbatim."),
+  criteriaCount: z.number(),
+  gateCount: z.number(),
+  missing: z.array(z.string()).default([]).describe("Criteria with no verbatim gate."),
+  unverifiedBlocking: z
+    .array(z.string())
+    .default([])
+    .describe("Blocking gates whose verificationMethod is manual_check with no named checker."),
+  summary: z.string(),
+});
+
 const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
   input: inputSchema,
   extractCriteria: criteriaSchema,
   planGates: gatesSchema,
+  verify: verifySchema,
 });
 
 export default smithers((ctx) => {
+  // Input fields arrive null (not the zod default) when unsupplied — coalesce
+  // so the prompts never see an empty goal section.
+  const prompt = ctx.input.prompt ?? DEFAULT_PROMPT;
+
   // Gate the plan-gates stage on the extracted criteria being available.
   const criteria = ctx.outputMaybe("extractCriteria", { nodeId: "extract-criteria" });
+  const gates = ctx.outputMaybe("planGates", { nodeId: "plan-gates" });
 
   return (
     <Workflow name="backpressure-plan">
       <Sequence>
         {/* 1 — Pull the prompt apart into atomic, verifiable acceptance criteria. */}
         <Task id="extract-criteria" output={outputs.extractCriteria} agent={agents.smart}>
-          <ExtractCriteriaPrompt prompt={ctx.input.prompt} />
+          <ExtractCriteriaPrompt prompt={prompt} />
         </Task>
 
+        {/* 1b — Backpressure on the plan itself: a goal with no verifiable
+            criteria must fail loudly, not produce an empty gate matrix. */}
+        {criteria && criteria.criteria.length === 0 ? (
+          <Task id="no-verifiable-acceptance-criteria" output={outputs.verify} retries={0}>
+            {() => {
+              throw new Error(
+                "The goal contains no verifiable acceptance criteria — nothing to plan gates for. " +
+                  "Restate the goal with at least one criterion a person or check could mark pass or fail.",
+              );
+            }}
+          </Task>
+        ) : null}
+
         {/* 2 — Map each criterion to a verification method + enforcement gate. */}
-        {criteria ? (
+        {criteria && criteria.criteria.length > 0 ? (
           <Task id="plan-gates" output={outputs.planGates} agent={agents.smart}>
-            <PlanGatesPrompt criteria={criteria.criteria} prompt={ctx.input.prompt} />
+            <PlanGatesPrompt criteria={criteria.criteria} prompt={prompt} />
+          </Task>
+        ) : null}
+
+        {/* 3 — Deterministic parity check of the matrix against the criteria. */}
+        {criteria && criteria.criteria.length > 0 && gates ? (
+          <Task id="verify" output={outputs.verify}>
+            {() => {
+              const wanted = criteria.criteria;
+              const produced = gates.gates.map((gate) => gate.criterion);
+              const missing = wanted.filter((criterion) => !produced.includes(criterion));
+              const orderedMatch =
+                produced.length === wanted.length &&
+                wanted.every((criterion, index) => produced[index] === criterion);
+              const unverifiedBlocking = gates.gates
+                .filter((gate) => gate.gateType === "blocking" && gate.verificationMethod === "manual_check" && gate.checkedBy.trim().length === 0)
+                .map((gate) => gate.criterion);
+              const match = orderedMatch && unverifiedBlocking.length === 0;
+              const summary = match
+                ? `All ${wanted.length} criteria are covered by one gate each, in order.`
+                : `Gate matrix mismatch: ${missing.length} criteria missing, ${produced.length}/${wanted.length} gates, ${unverifiedBlocking.length} unverified blocking gate(s).`;
+              return {
+                match,
+                criteriaCount: wanted.length,
+                gateCount: produced.length,
+                missing,
+                unverifiedBlocking,
+                summary,
+              };
+            }}
           </Task>
         ) : null}
       </Sequence>

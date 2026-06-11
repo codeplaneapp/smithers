@@ -12,15 +12,40 @@ Do NOT plan gates, write code, or run anything yet — only extract the criteria
 
 ## How to extract
 
-- Produce one entry per **atomic** criterion. If a sentence bundles two checks
-  (e.g. "fast and correct"), split it into separate entries.
+- Produce one entry per **atomic** criterion. If a sentence bundles two checks,
+  split it into separate entries — a gate can only pass or fail one thing.
 - Each criterion must be **verifiable** — something a person or a check could mark
-  pass or fail. Rewrite vague wishes into testable statements where you can.
+  pass or fail. Rewrite vague wishes into testable statements only when the goal's
+  own context makes the intended check clear; quote the goal's intent, do not
+  invent your own.
 - Make implicit-but-clearly-intended criteria explicit (for example, "the endpoint
   returns valid JSON" implies a response-shape criterion), but do not invent scope
-  the goal does not justify.
+  the goal does not justify. If the goal never mentions it, it is not a criterion.
+- If the goal includes an explicit human sign-off or approval requirement (e.g.
+  "a maintainer must approve before release"), keep it as its **own** criterion.
+  Never fold a sign-off into another criterion — it becomes its own gate downstream.
 - Keep each entry a single short sentence. No numbering, no markdown, no `TODO`
   markers — just the criterion text.
+
+## Worked examples
+
+- **Split bundled checks.** "The login form validates email format and shows an
+  error on bad input" → two entries: "The login form validates email format." and
+  "The login form shows an error message on invalid input."
+- **Rewrite vague-but-grounded wishes.** "The log parser should be robust to bad
+  lines" → "The log parser processes malformed lines without crashing." The goal
+  named the failure mode, so the testable form is justified.
+- **Do not invent scope.** Goal: "The sort function returns the input in ascending
+  order." Extract exactly that — do NOT add "the sort is stable" or "the sort
+  handles a million elements"; the goal never asked for either.
+
+## When there is nothing to extract
+
+If the goal contains **no** verifiable acceptance criteria — pure vibes like
+"make it nicer" or "clean things up" — return an **empty** `criteria` array.
+Do not fabricate criteria to have something to show. The pipeline fails loudly
+downstream on an empty list, so the empty array is the honest answer here, not
+a failure of this step.
 
 REQUIRED OUTPUT:
 {props.schema}
