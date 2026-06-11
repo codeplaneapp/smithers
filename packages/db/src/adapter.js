@@ -2227,8 +2227,8 @@ export class SmithersDb {
           AND a.node_id = n.node_id
           AND a.iteration = n.iteration
          WHERE a.run_id = ?
-           AND (a.status = ? OR a.status = ?)
-           AND n.state = ?`, [runId, "approved", "denied", "waiting-approval"], { booleanColumns: ["autoApproved"] }));
+           AND a.status IN ('approved', 'denied')
+           AND n.state IN ('pending', 'failed')`, [runId], { booleanColumns: ["autoApproved"] }));
     }
     /**
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
