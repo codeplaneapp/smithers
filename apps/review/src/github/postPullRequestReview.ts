@@ -24,6 +24,11 @@ export async function postPullRequestReview(
     return { url: result.html_url ?? pr.url, inline: payload.comments.length };
   } catch (error) {
     if (payload.comments.length === 0) throw error;
+    // Surface why the inline batch failed before falling back, or the reason
+    // (rate limit, bad anchor, transient 5xx) is unrecoverable afterwards.
+    console.error(
+      `smithers-review: inline comment batch failed, folding ${payload.comments.length} finding(s) into the body: ${(error as Error).message.slice(0, 300)}`,
+    );
     const folded = payload.comments
       .map((comment) => `- \`${comment.path}:${comment.start_line ?? comment.line}\`\n\n${comment.body}`)
       .join("\n\n");

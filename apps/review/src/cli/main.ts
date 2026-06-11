@@ -78,13 +78,18 @@ async function main() {
   let pr: PullRequestTarget | null = null;
   if (args.pr) {
     pr = await resolvePullRequest(repoDir, args.pr);
+    if (!refExists(repoDir, pr.headSha)) {
+      // The PR head may not exist locally (reviewing someone else's PR);
+      // fetch it so the review diff can resolve.
+      execFileSync("git", ["fetch", "origin", pr.headSha], { cwd: repoDir, stdio: "pipe" });
+    }
     if (!args.from && !args.to && !args.commit) {
       // Prefer the remote-tracking base: the local base branch may be stale
       // and would drag unrelated commits into the review diff.
       args.from = refExists(repoDir, `origin/${pr.baseRefName}`) ? `origin/${pr.baseRefName}` : pr.baseRefName;
       args.to = pr.headSha;
+      console.error(`[smithers-review] PR #${pr.number} (${pr.baseRefName}…${pr.headRefName}) → ${args.from}..${args.to}`);
     }
-    console.error(`[smithers-review] PR #${pr.number} (${pr.baseRefName}…${pr.headRefName}) → ${args.from}..${args.to}`);
   }
 
   const agents = args.review || args.narrate ? createReviewAgents(repoDir) : { review: [], narrate: [] };

@@ -16,6 +16,9 @@ export function runGh(repoDir: string, args: string[], stdin?: string): Promise<
       },
     );
     if (stdin != null) {
+      // EPIPE from a gh process that exits before reading stdin must not
+      // crash the CLI; the execFile callback already reports the failure.
+      child.stdin?.on("error", () => {});
       child.stdin?.write(stdin);
       child.stdin?.end();
     }
