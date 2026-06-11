@@ -79,6 +79,18 @@ describe("format helpers", () => {
             ["TaskHeartbeatTimeout", { nodeId: "n", timeoutMs: 500 }, "n heartbeat timeout (500ms)"],
             ["NodeFinished", { nodeId: "n", attempt: 2 }, "n (attempt 2)"],
             ["NodeFailed", { nodeId: "n", attempt: 2, error: "abcdef" }, "abcdef"],
+            // Engine events serialize Error objects; the line must carry the
+            // message, not "[object Object]".
+            [
+                "NodeFailed",
+                { nodeId: "n", attempt: 1, error: { name: "Error", message: "connect ECONNRESET", stack: "..." } },
+                "connect ECONNRESET",
+            ],
+            [
+                "RunFailed",
+                { error: { name: "Error", message: "Task failed: export", stack: "..." } },
+                "Run failed: Task failed: export",
+            ],
             ["NodeCancelled", { nodeId: "n" }, "n cancelled"],
             ["NodeSkipped", { nodeId: "n" }, "n skipped"],
             ["NodeRetrying", { nodeId: "n", attempt: 4 }, "n retrying (attempt 4)"],

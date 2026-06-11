@@ -122,6 +122,25 @@ function truncateText(value, maxLength) {
     return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 /**
+ * Render an event error payload as its message. Engine events carry serialized
+ * Error objects ({ name, message, stack }); String() on those yields
+ * "[object Object]" and loses the one line a triager actually needs.
+ *
+ * @param {unknown} error
+ * @returns {string}
+ */
+function formatErrorPayload(error) {
+    if (typeof error === "string")
+        return error;
+    if (error && typeof error === "object") {
+        const record = /** @type {Record<string, unknown>} */ (error);
+        if (typeof record.message === "string" && record.message.length > 0)
+            return record.message;
+        return JSON.stringify(error);
+    }
+    return String(error ?? "failed");
+}
+/**
  * @param {unknown} payload
  * @param {string} rawPayloadJson
  * @param {number} maxLength
@@ -159,7 +178,7 @@ export function formatEventLine(event, baseMs, options) {
         case "RunFinished":
             return `${prefix}✓ Run finished`;
         case "RunFailed":
-            return `${prefix}✗ Run failed: ${truncateText(String(payload?.error ?? "unknown"), truncatePayloadAt)}`;
+            return `${prefix}✗ Run failed: ${truncateText(formatErrorPayload(payload?.error ?? "unknown"), truncatePayloadAt)}`;
         case "RunCancelled":
             return `${prefix}⊘ Run cancelled`;
         case "RunContinuedAsNew":
@@ -199,7 +218,7 @@ export function formatEventLine(event, baseMs, options) {
         case "NodeFinished":
             return `${prefix}✓ ${payload?.nodeId ?? "?"} (attempt ${payload?.attempt ?? 1})`;
         case "NodeFailed":
-            return `${prefix}✗ ${payload?.nodeId ?? "?"} (attempt ${payload?.attempt ?? 1}): ${truncateText(String(payload?.error ?? "failed"), truncatePayloadAt)}`;
+            return `${prefix}✗ ${payload?.nodeId ?? "?"} (attempt ${payload?.attempt ?? 1}): ${truncateText(formatErrorPayload(payload?.error ?? "failed"), truncatePayloadAt)}`;
         case "NodeCancelled":
             return `${prefix}⊘ ${payload?.nodeId ?? "?"} cancelled`;
         case "NodeSkipped":
