@@ -3,6 +3,8 @@ import { setJsonMode } from "./util/logger.ts";
 import { findFirstPositionalIndex, parseMcpSurfaceArgv, rewriteBareResumeFlagArgv } from "./argv-utils.js";
 import { CLI_JSON_ARGUMENT_MAX_BYTES, parseJsonArgument, parseJsonInput } from "./json-args.js";
 import { resolve, dirname, basename } from "node:path";
+import { createReadlineInterface as createReadlineInterface_impl } from "node:readline";
+const createReadlineInterface = createReadlineInterface_impl;
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readFileSync, existsSync, openSync, statSync, writeSync } from "node:fs";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -1390,6 +1392,7 @@ const approveOptions = z.object({
     iteration: z.number().int().min(0).default(0).describe("Loop iteration number"),
     note: z.string().optional().describe("Approval/denial note"),
     by: z.string().optional().describe("Name or identifier of the approver"),
+    yes: z.boolean().default(false).describe("Skip confirmation prompt"),
 });
 const humanArgs = z.object({
     action: z.string().describe("Human request action: inbox, answer, or cancel"),
@@ -2653,6 +2656,87 @@ function devtoolsUsage(cmd) {
         ].join("\n");
     }
     return `usage: smithers ${cmd} ...`;
+}
+
+// ---------------------------------------------------------------------------
+// Approval confirmation helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {any} approvalRow - ApprovalRow from adapter
+ * @returns {string}
+ */
+function renderApprovalContent(approvalRow) {
+    const lines = [];
+    lines.push(`Approval for node: ${approvalRow.nodeId}`);
+    if (approvalRow.iteration != null && approvalRow.iteration > 0) {
+        lines.push(`  Iteration: ${approvalRow.iteration}`);
+    }
+    if (approvalRow.requestedAtMs) {
+        const date = new Date(approvalRow.requestedAtMs).toISOString();
+        lines.push(`  Requested at: ${date}`);
+    }
+    
+    // Parse and render the request
+    let request;
+    try {
+        request = approvalRow.requestJson ? JSON.parse(approvalRow.requestJson) : null;
+    } catch (e) {
+        request = null;
+    }
+    
+    if (request && typeof request === "object") {
+        // Try to extract human-friendly fields
+        if (request.title) {
+            lines.push(`  Title: ${request.title}`);
+        }
+        if (request.message) {
+            lines.push(`  Message: ${request.message}`);
+        }
+        if (request.requestedScopes) {
+            lines.push(`  Requested scopes: ${Array.isArray(request.requestedScopes) ? request.requestedScopes.join(", ") : request.requestedScopes}`);
+        }
+        if (request.options && Array.isArray(request.options)) {
+            lines.push(`  Options: ${request.options.map(o => o.label || o.value).join(", ")}`);
+        }
+        // If nothing was extracted, show the JSON
+        if (request.title == null && request.message == null && request.requestedScopes == null && !request.options) {
+            lines.push(`  Request: ${JSON.stringify(request, null, 2).split("\n").map((l, i) => i === 0 ? l : "    " + l).join("\n")}`);
+        }
+    } else if (request) {
+        lines.push(`  Request: ${JSON.stringify(request)}`);
+    }
+    
+    if (approvalRow.note) {
+        lines.push(`  Note: ${approvalRow.note}`);
+    }
+    
+    return lines.join("\n");
+}
+
+/**
+ * Default confirmation prompt for approval decisions.
+ * 
+ * @param {string} decision - "approve" or "deny"
+ * @param {any} approvalRow - ApprovalRow from adapter
+ * @param {object} io - { stdin, stderr }
+ * @returns {Promise<boolean>} - true if user confirms, false if user declines
+ */
+async function defaultApprovalConfirm(decision, approvalRow, io) {
+    // Show the request content
+    io.stderr.write("\n" + renderApprovalContent(approvalRow) + "\n\n");
+    
+    // Prompt for confirmation
+    const rl = createReadlineInterface({ input: io.stdin, output: io.stderr });
+    try {
+        const prompt = `${decision.charAt(0).toUpperCase() + decision.slice(1)} this gate? [y/N] `;
+        const answer = await new Promise((resolve) => {
+            rl.question(prompt, (raw) => resolve(raw ?? ""));
+        });
+        return /^y(es)?$/i.test(answer.trim());
+    } finally {
+        rl.close();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4314,6 +4398,33 @@ const cli = Cli.create({
                     }
                     nodeId = pending[0].nodeId;
                 }
+                
+                // Find the selected approval row
+                const selectedApproval = pending.find((a) => a.nodeId === nodeId);
+                if (!selectedApproval) {
+                    return fail({ code: "APPROVAL_NOT_FOUND", message: `Approval not found for node: ${nodeId}`, exitCode: 4 });
+                }
+                
+                // Check if confirmation is needed
+                if (!c.options.yes) {
+                    // TTY check happens once, here
+                    if (!process.stdin.isTTY) {
+                        return fail({
+                            code: "CONFIRMATION_REQUIRED",
+                            message: "Approval requires confirmation. Use --yes to skip confirmation in non-interactive contexts.",
+                            exitCode: 3,
+                        });
+                    }
+                    // Request interactive confirmation
+                    const confirmed = await defaultApprovalConfirm("approve", selectedApproval, {
+                        stdin: process.stdin,
+                        stderr: process.stderr,
+                    });
+                    if (!confirmed) {
+                        return fail({ code: "APPROVAL_CANCELLED", message: "Approval cancelled.", exitCode: 3 });
+                    }
+                }
+                
                 await Effect.runPromise(approveNode(adapter, c.args.runId, nodeId, c.options.iteration, c.options.note, c.options.by));
                 const runAfterApproval = await adapter.getRun(c.args.runId);
                 const isDetached = !runAfterApproval ||
@@ -4329,10 +4440,26 @@ const cli = Cli.create({
                         description: "Resume the paused run",
                     });
                 }
+                // Parse the request for output
+                let parsedRequest = null;
+                try {
+                    parsedRequest = selectedApproval.requestJson ? JSON.parse(selectedApproval.requestJson) : null;
+                } catch (e) {
+                    // If parsing fails, include raw JSON string
+                    parsedRequest = selectedApproval.requestJson || null;
+                }
+                
                 return c.ok({
                     runId: c.args.runId,
                     nodeId,
                     status: "approved",
+                    pendingApproval: {
+                        nodeId: selectedApproval.nodeId,
+                        iteration: selectedApproval.iteration,
+                        requestedAtMs: selectedApproval.requestedAtMs,
+                        note: selectedApproval.note,
+                        request: parsedRequest,
+                    },
                     ...(isDetached
                         ? { note: `Approval recorded. If running detached, resume the run to continue: smithers workflow run --resume ${c.args.runId}` }
                         : {}),
@@ -4448,8 +4575,51 @@ const cli = Cli.create({
                     }
                     nodeId = pending[0].nodeId;
                 }
+                
+                // Find the selected approval row
+                const selectedApproval = pending.find((a) => a.nodeId === nodeId);
+                if (!selectedApproval) {
+                    return fail({ code: "APPROVAL_NOT_FOUND", message: `Approval not found for node: ${nodeId}`, exitCode: 4 });
+                }
+                
+                // Check if confirmation is needed
+                if (!c.options.yes) {
+                    // TTY check happens once, here
+                    if (!process.stdin.isTTY) {
+                        return fail({
+                            code: "CONFIRMATION_REQUIRED",
+                            message: "Denial requires confirmation. Use --yes to skip confirmation in non-interactive contexts.",
+                            exitCode: 3,
+                        });
+                    }
+                    // Request interactive confirmation
+                    const confirmed = await defaultApprovalConfirm("deny", selectedApproval, {
+                        stdin: process.stdin,
+                        stderr: process.stderr,
+                    });
+                    if (!confirmed) {
+                        return fail({ code: "DENIAL_CANCELLED", message: "Denial cancelled.", exitCode: 3 });
+                    }
+                }
+                
                 await Effect.runPromise(denyNode(adapter, c.args.runId, nodeId, c.options.iteration, c.options.note, c.options.by));
-                return c.ok({ runId: c.args.runId, nodeId, status: "denied" }, {
+                
+                // Parse the request for output
+                let parsedRequest = null;
+                try {
+                    parsedRequest = selectedApproval.requestJson ? JSON.parse(selectedApproval.requestJson) : null;
+                } catch (e) {
+                    // If parsing fails, include raw JSON string
+                    parsedRequest = selectedApproval.requestJson || null;
+                }
+                
+                return c.ok({ runId: c.args.runId, nodeId, status: "denied", pendingApproval: {
+                    nodeId: selectedApproval.nodeId,
+                    iteration: selectedApproval.iteration,
+                    requestedAtMs: selectedApproval.requestedAtMs,
+                    note: selectedApproval.note,
+                    request: parsedRequest,
+                } }, {
                     cta: {
                         commands: [
                             { command: `logs ${c.args.runId}`, description: "Tail run logs" },
