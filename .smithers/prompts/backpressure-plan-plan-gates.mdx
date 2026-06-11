@@ -38,8 +38,11 @@ For **every** criterion, emit one gate object:
   - `integration_test` — behavior across components or against a real backend.
   - `trace` — assert on recorded execution/telemetry (what actually ran).
   - `eval` — quality judgments that need an LLM judge or scorer.
-  - `review` — code/diff quality that an agent reviewer can assess.
-  - `approval` — a durable human decision or sign-off is required.
+  - `review` — code/diff quality assessed by a reviewer. Any criterion whose
+    check IS reviewing an artifact's content (a code review, a diff review —
+    human or agent) is `review`, even when phrased as "before merge".
+  - `approval` — a durable human decision that is not itself a content review:
+    authorizing a deploy, releasing money, accepting a risk.
   - `manual_check` — a human eyeballs it; last resort when nothing automatable fits.
 
   Pick the cheapest rung that actually proves the criterion. Do not climb the
