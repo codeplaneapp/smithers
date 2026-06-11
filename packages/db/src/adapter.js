@@ -2220,9 +2220,15 @@ export class SmithersDb {
    * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
    */
     listDecidedApprovals(runId) {
-        return this.read(`list decided approvals ${runId}`, () => this.internalStorage.queryAll(`SELECT *
-         FROM _smithers_approvals
-         WHERE run_id = ? AND (status = ? OR status = ?)`, [runId, "approved", "denied"], { booleanColumns: ["autoApproved"] }));
+        return this.read(`list decided approvals ${runId}`, () => this.internalStorage.queryAll(`SELECT a.*
+         FROM _smithers_approvals a
+         JOIN _smithers_nodes n
+           ON a.run_id = n.run_id
+          AND a.node_id = n.node_id
+          AND a.iteration = n.iteration
+         WHERE a.run_id = ?
+           AND (a.status = ? OR a.status = ?)
+           AND n.state = ?`, [runId, "approved", "denied", "waiting-approval"], { booleanColumns: ["autoApproved"] }));
     }
     /**
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
