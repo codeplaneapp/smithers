@@ -5,10 +5,18 @@ snapshot of the currently-known runs. Sort every run into exactly one health
 bucket. Do NOT take any action, run any command, or write any files — only
 produce the classification.
 
-## Stale threshold
+## Staleness is an age-based heuristic
 
-A run is "stale" once it has had no activity for at least {props.staleMinutes}
-minutes. Use that to tell a healthy long-running job apart from a stuck one.
+The stale threshold is {props.staleMinutes} minutes. Each run's `ageMinutes` is
+measured from the run's START time, not its last activity, and `lastEvent` is a
+step name with no timestamp — so this is an age-based heuristic, not a
+last-activity measure. Apply it like this:
+
+- Runs with a terminal status (`completed`, `cancelled`) are healthy regardless
+  of age — they are done, not stuck.
+- Runs whose status indicates an error are failed regardless of age.
+- Only NON-terminal runs (running, waiting, etc.) older than the stale threshold
+  are candidates for `stuck`.
 
 ## Poll summary
 
@@ -16,19 +24,19 @@ minutes. Use that to tell a healthy long-running job apart from a stuck one.
 
 ## Runs
 
-```json
-{JSON.stringify(props.runs, null, 2)}
-```
+{`\`\`\`json
+${JSON.stringify(props.runs, null, 2)}
+\`\`\``}
 
 ## Buckets
 
-Place each run's `runId` into exactly ONE of these arrays. Every run must land
-in exactly one bucket; never drop or duplicate a run.
+Place each run's `runId` into exactly ONE of these arrays:
 
-- **healthy** — running or recently finished and making progress; under the
-  stale threshold and not blocked, failed, or over budget.
-- **stuck** — running or waiting but past the stale threshold with no recent
-  activity (its `lastEvent` looks frozen). It appears alive but is not moving.
+- **healthy** — terminal (`completed`, `cancelled`) at any age; or non-terminal,
+  under the stale threshold, and not blocked, failed, or over budget.
+- **stuck** — non-terminal (running or waiting) and older than the stale
+  threshold. By the age heuristic it is presumed frozen even though it appears
+  alive.
 - **blocked** — paused waiting on a human: an approval gate or a question. Status
   strings like `waiting-approval` or `waiting-event` are the tell, or a
   `lastEvent` mentioning approval, gate, signal, or question.
@@ -38,8 +46,12 @@ in exactly one bucket; never drop or duplicate a run.
   e.g. a `lastEvent` mentioning budget, cost, token limit, max iterations, or
   timeout.
 
-When a run could fit two buckets, prefer the most urgent one in this order:
-failed, then blocked, then overBudget, then stuck, then healthy.
+## Partition rules
+
+1. Every run id from the snapshot appears in exactly one bucket — never drop a
+   run, never list it twice, and never invent an id that is not in the snapshot.
+2. When a run could fit two buckets, prefer the most urgent one in this order:
+   failed, then blocked, then overBudget, then stuck, then healthy.
 
 Write a one-line `summary` of the fleet's overall health (counts per bucket and
 the single most pressing concern, if any).

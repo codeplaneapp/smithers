@@ -156,7 +156,9 @@ const { Workflow, Task, Sequence, Branch, Loop, Approval, smithers, outputs } = 
 });
 
 export default smithers((ctx) => {
-  const review = ctx.input.review;
+  // Input fields arrive null (not the zod default) when unsupplied, and the
+  // approval gate is documented as default-ON — coalesce so it actually is.
+  const review = ctx.input.review ?? true;
 
   const clarify = ctx.outputMaybe("clarify", { nodeId: "clarify" });
   const provision = ctx.outputMaybe("provision", { nodeId: "provision" });
@@ -184,7 +186,10 @@ export default smithers((ctx) => {
       <Sequence>
         {/* 1 — Turn the freeform ask into a structured, buildable spec. */}
         <Task id="clarify" output={outputs.clarify} agent={agents.smart}>
-          <ClarifyPrompt request={ctx.input.prompt} name={ctx.input.name} />
+          <ClarifyPrompt
+            request={ctx.input.prompt ?? "Describe the workflow you want to build, in plain English."}
+            name={ctx.input.name}
+          />
         </Task>
 
         {/* 2 — Docs & skills: decide and ACTUALLY install/gather what the new

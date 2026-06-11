@@ -62,7 +62,11 @@ export default smithers((ctx) => {
       <Sequence>
         {/* 1 — Turn the acceptance criteria into a structured eval suite. */}
         <Task id="derive" output={outputs.derive} agent={agents.smart}>
-          <DerivePrompt criteria={ctx.input.prompt} workflow={ctx.input.workflow} evalsDir={EVALS_DIR} />
+          <DerivePrompt
+            criteria={ctx.input.prompt ?? "Describe the acceptance criteria / goal to turn into eval cases."}
+            workflow={ctx.input.workflow}
+            evalsDir={EVALS_DIR}
+          />
         </Task>
 
         {/* 2 — Write the JSONL fixture to disk and report the run command. */}

@@ -21,11 +21,14 @@ own `.mdx` file, one per prompt named in the design.
 1. **Start from the closest example** named in the provisioning manifest — copy
    its structure, then adapt. Don't invent API; if unsure, re-read the example or
    `bunx smithers-orchestrator docs`.
-2. **Workflow file header** — begin with the two seed comments and the JSX pragma,
+2. **Workflow file header** — begin with the seed comments and the JSX pragma,
    exactly like the other workflows in `{props.workflowsDir}`:
    ```
    // smithers-source: seeded
+   // smithers-metadata-version: 1
    // smithers-display-name: <Title Case Name>
+   // smithers-description: <one sentence: what the workflow does>
+   // smithers-tags: <comma-separated tags, e.g. ops, reporting>
    /** @jsxImportSource smithers-orchestrator */
    ```
 3. **Imports** — `import { createSmithers } from "smithers-orchestrator"`,

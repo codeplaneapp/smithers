@@ -17,8 +17,8 @@ Fixtures directory: {props.evalsDir}
 
 1. **Filename.** Let `SUITE` be the suite's `suiteName`, lowercased and
    kebab-cased (letters, digits, and single dashes only). Write the fixture to
-   `{props.evalsDir}/SUITE.jsonl`. Create the `{props.evalsDir}` directory first
-   if it does not exist (e.g. `mkdir -p {props.evalsDir}`).
+   {props.evalsDir}/SUITE.jsonl. Create the {props.evalsDir} directory first
+   if it does not exist (e.g. mkdir -p {props.evalsDir}).
 2. **Format — one JSON object per line, no trailing commas.** Each line is one
    case with exactly the keys `id`, `input`, and `expected`. Do NOT write the
    `rubric` field into the fixture — it is review guidance, not a runnable
@@ -27,6 +27,9 @@ Fixtures directory: {props.evalsDir}
    {"id":"happy-path","input":{"prompt":"Draft release notes"},"expected":{"status":"finished"}}
    {"id":"quality-gate","input":{"prompt":"Find risky changes"},"expected":{"status":"finished","outputContains":{"analysis":[{"riskLevel":"low"}]}}}
    ```
+   `expected` accepts a CLOSED whitelist of assertion keys: `status`, `output`,
+   `outputContains`, `errorContains`. `status` defaults to `finished` when
+   omitted. Any other key is invalid and will be rejected at runtime.
 3. **Use the suite's cases verbatim.** Copy each case's `input` and `expected`
    straight from the suite; do not invent new cases or alter the assertions. If a
    case is missing an `expected`, default it to `{"status":"finished"}`.
@@ -39,9 +42,9 @@ Build the command a user runs to execute the suite. Let `WORKFLOW` be the target
 workflow path or id if one was given, otherwise the literal placeholder
 `` `<workflow>` ``. The command shape is:
 
-```
-smithers eval WORKFLOW --cases {props.evalsDir}/SUITE.jsonl --suite SUITE
-```
+{`\`\`\`
+smithers eval WORKFLOW --cases ${props.evalsDir}/SUITE.jsonl --suite SUITE
+\`\`\``}
 
 ## Output
 

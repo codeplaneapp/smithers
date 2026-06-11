@@ -8,15 +8,15 @@ on-call human.
 
 ## Health buckets (runIds)
 
-```json
-{JSON.stringify(props.buckets, null, 2)}
-```
+{`\`\`\`json
+${JSON.stringify(props.buckets, null, 2)}
+\`\`\``}
 
 ## Run details
 
-```json
-{JSON.stringify(props.runs, null, 2)}
-```
+{`\`\`\`json
+${JSON.stringify(props.runs, null, 2)}
+\`\`\``}
 
 ## Classifier summary
 
@@ -29,18 +29,21 @@ Produce one entry in `actions` for every run in the `stuck`, `blocked`,
 one-line `problem` and a one-line `recommendedAction`:
 
 - **blocked** — surface what it is waiting on. If it is a question, point the
-  human at `smithers why <runId>` to see the prompt and then answer it; if it is
-  an approval gate, point them at `smithers approve <runId>` (or
-  `smithers deny <runId>` to reject). Name the pending approval or question in
-  the `problem`.
+  human at `bunx smithers-orchestrator why <runId>` to see the prompt and then
+  answer it; if it is an approval gate, point them at
+  `bunx smithers-orchestrator approve <runId>` (or
+  `bunx smithers-orchestrator deny <runId>` to reject). Name the pending
+  approval or question in the `problem`.
 - **stuck** — it appears frozen past the stale threshold. Recommend running the
-  `triage-run` workflow against it to diagnose, after checking `smithers logs
-  <runId> -f` and `smithers inspect <runId>` for the last activity.
+  `triage-run` workflow against it to diagnose, after checking
+  `bunx smithers-orchestrator logs <runId> -f` and
+  `bunx smithers-orchestrator inspect <runId>` for the last activity.
 - **failed** — it errored or crashed. Recommend running the `triage-run`
   workflow against it to find the root cause, citing the failing step from its
   `lastEvent` if known.
 - **overBudget** — it blew a token, cost, time, or iteration budget. Recommend
-  cancelling it with `smithers cancel <runId>` and note which budget it tripped.
+  cancelling it with `bunx smithers-orchestrator cancel <runId>` and note which
+  budget it tripped.
 
 Then write a short `digest` (2–4 sentences) the human can read at a glance: how
 many runs need attention, which are most urgent, and what to do first.

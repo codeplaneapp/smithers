@@ -15,9 +15,9 @@ contract in reality, not guesses. Then report the contract.
 
 ## Classification (from the intake step)
 
-```json
-{JSON.stringify(props.classification, null, 2)}
-```
+{`\`\`\`json
+${JSON.stringify(props.classification, null, 2)}
+\`\`\``}
 
 Local skills directory: {props.skillsDir}
 Local workflows directory: {props.workflowsDir}
@@ -28,9 +28,9 @@ Local workflows directory: {props.workflowsDir}
   project is and what conventions apply.
 - Inventory tools: which commands and capabilities are actually available to do
   this work (build/test runners, CLIs, `bunx smithers-orchestrator ...`).
-- Inventory skills: list `{props.skillsDir}` and note the skills relevant to this
+- Inventory skills: list {props.skillsDir} and note the skills relevant to this
   script in `availableSkills`.
-- Inventory workflows: glance at `{props.workflowsDir}` for durable workflows the
+- Inventory workflows: glance at {props.workflowsDir} for durable workflows the
   router might reuse.
 
 Use real findings — a `goal` and `availableSkills` you confirmed beat ones you
@@ -48,7 +48,7 @@ Produce a context contract with these fields:
 - `missingInputs` — inputs the script is missing. Be honest: these become the
   questions a later grilling step asks the user.
 - `availableTools` — tools/commands you confirmed are available.
-- `availableSkills` — relevant skills found under `{props.skillsDir}`.
+- `availableSkills` — relevant skills found under {props.skillsDir}.
 - `constraints` — hard constraints the work must respect (style rules, "only jj",
   "don't modify file X", etc.).
 - `risks` — risks or side effects to guard against.

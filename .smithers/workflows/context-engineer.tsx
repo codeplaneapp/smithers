@@ -173,7 +173,10 @@ const { Workflow, Task, Sequence, Branch, Ralph, Approval, smithers, outputs } =
 });
 
 export default smithers((ctx) => {
-  const review = ctx.input.review;
+  // Input fields arrive null (not the zod default) when unsupplied, and the
+  // approval gate is documented as default-ON — coalesce so it actually is.
+  const review = ctx.input.review ?? true;
+  const prompt = ctx.input.prompt ?? "Describe what you want Smithers to do, in plain English.";
 
   const classify = ctx.outputMaybe("classify", { nodeId: "classify-script" });
   const contract = ctx.outputMaybe("inventory", { nodeId: "inventory-context" });
@@ -201,7 +204,7 @@ export default smithers((ctx) => {
       <Sequence>
         {/* 1 — Classify the vague script into modes + a durability call. */}
         <Task id="classify-script" output={outputs.classify} agent={agents.cheapFast}>
-          <ClassifyPrompt prompt={ctx.input.prompt} workflows={SEEDED_WORKFLOWS} />
+          <ClassifyPrompt prompt={prompt} workflows={SEEDED_WORKFLOWS} />
         </Task>
 
         {/* 2 — Inventory the repo/tools/skills into a context contract draft. */}
@@ -213,7 +216,7 @@ export default smithers((ctx) => {
             heartbeatTimeoutMs={600_000}
           >
             <InventoryPrompt
-              prompt={ctx.input.prompt}
+              prompt={prompt}
               classification={classify}
               skillsDir={SKILLS_DIR}
               workflowsDir={WORKFLOWS_DIR}
@@ -226,7 +229,7 @@ export default smithers((ctx) => {
         {contract ? (
           <GrillMe
             idPrefix="context-engineer"
-            context={`We are turning a vague user script into a context contract before executing it. Grill me only on the BLOCKING ambiguities that would change the work — prefer the contract's missingInputs and openest assumptions. Ask one question at a time with a recommended answer, and mark resolved: true once the remaining ambiguity no longer changes the plan.\n\n## Original script\n${ctx.input.prompt}\n\n## Context contract draft\n\`\`\`json\n${JSON.stringify(contract, null, 2)}\n\`\`\``}
+            context={`We are turning a vague user script into a context contract before executing it. Grill me only on the BLOCKING ambiguities that would change the work — prefer the contract's missingInputs and openest assumptions. Ask one question at a time with a recommended answer, and mark resolved: true once the remaining ambiguity no longer changes the plan.\n\n## Original script\n${prompt}\n\n## Context contract draft\n\`\`\`json\n${JSON.stringify(contract, null, 2)}\n\`\`\``}
             currentDraft={lastGrill ?? null}
             agent={agents.smart}
             output={outputs.grill}
@@ -239,7 +242,7 @@ export default smithers((ctx) => {
         {contract ? (
           <Task id="route" output={outputs.route} agent={agents.smart}>
             <RoutePrompt
-              prompt={ctx.input.prompt}
+              prompt={prompt}
               classification={classify}
               contract={contract}
               sharedUnderstanding={lastGrill?.sharedUnderstanding ?? null}
@@ -251,7 +254,7 @@ export default smithers((ctx) => {
         {/* 5 — Turn the success criteria into a backpressure gate matrix. */}
         {route ? (
           <Task id="build-backpressure" output={outputs.backpressure} agent={agents.smart}>
-            <BackpressurePrompt prompt={ctx.input.prompt} contract={contract} route={route} />
+            <BackpressurePrompt prompt={prompt} contract={contract} route={route} />
           </Task>
         ) : null}
 
@@ -263,7 +266,7 @@ export default smithers((ctx) => {
               id="approve-contract"
               output={outputs.approval}
               request={{
-                title: `Approve context contract: ${contract?.goal ?? ctx.input.prompt}`.slice(0, 120),
+                title: `Approve context contract: ${contract?.goal ?? prompt}`.slice(0, 120),
                 summary:
                   backpressure?.summary ??
                   "Review the context contract, route, and backpressure gates before any work is executed.",
@@ -283,7 +286,7 @@ export default smithers((ctx) => {
               heartbeatTimeoutMs={900_000}
             >
               <ExecutePrompt
-                prompt={ctx.input.prompt}
+                prompt={prompt}
                 contract={contract}
                 route={route}
                 backpressure={backpressure}
@@ -297,7 +300,7 @@ export default smithers((ctx) => {
         {proceed && executed ? (
           <Task id="report" output={outputs.report} agent={agents.smart}>
             <ReportPrompt
-              prompt={ctx.input.prompt}
+              prompt={prompt}
               classification={classify}
               contract={contract}
               route={route}
