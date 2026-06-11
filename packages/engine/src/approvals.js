@@ -134,7 +134,7 @@ export function approveNode(adapter, runId, nodeId, iteration, note, decidedBy, 
                 // while the approval is already consumed — worse than the bridge
                 // being a no-op.
                 const message = bridgeError instanceof Error ? bridgeError.message : String(bridgeError);
-                Effect.runSync(Effect.logWarning(`[approvals] post-commit bridgeApprovalResolve failed (non-fatal, run will re-drive on resume): ${message}`));
+                console.warn(`[approvals] post-commit bridgeApprovalResolve failed (non-fatal, run will re-drive on resume): ${message}`);
             })
         );
     }).pipe(Effect.annotateLogs({
@@ -230,7 +230,7 @@ export function denyNode(adapter, runId, nodeId, iteration, note, decidedBy, dec
                 // while the denial is already consumed — worse than the bridge
                 // being a no-op.
                 const message = bridgeError instanceof Error ? bridgeError.message : String(bridgeError);
-                Effect.runSync(Effect.logWarning(`[approvals] post-commit bridgeApprovalResolve failed (non-fatal, run will re-drive on resume): ${message}`));
+                console.warn(`[approvals] post-commit bridgeApprovalResolve failed (non-fatal, run will re-drive on resume): ${message}`);
             })
         );
     }).pipe(Effect.annotateLogs({
