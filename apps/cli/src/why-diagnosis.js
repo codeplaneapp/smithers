@@ -941,7 +941,7 @@ export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
             adapter.getRunEffect(runId),
             adapter.listNodesEffect(runId),
             adapter.listPendingApprovalsEffect(runId),
-            adapter.listDecidedApprovalsEffect(runId),
+            adapter.listAllDecidedApprovalsEffect(runId),
             adapter.listAttemptsForRunEffect(runId),
             adapter.getLastEventSeqEffect(runId),
             adapter.getLastFrameEffect(runId),

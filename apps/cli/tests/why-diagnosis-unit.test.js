@@ -115,6 +115,7 @@ function makeAdapter(state = {}) {
         getRunEffect: () => Effect.succeed(data.run),
         listNodesEffect: () => Effect.succeed(data.nodes),
         listPendingApprovalsEffect: () => Effect.succeed(data.approvals),
+        listAllDecidedApprovalsEffect: () => Effect.succeed([]),
         listAttemptsForRunEffect: () => Effect.succeed(data.attempts),
         getLastEventSeqEffect: () => Effect.succeed(data.lastSeq),
         getLastFrameEffect: () => Effect.succeed(data.lastFrame),

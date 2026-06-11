@@ -958,6 +958,11 @@ declare class SmithersDb {
    */
     listPendingApprovals(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+    listAllDecidedApprovals(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
+    /**
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listAllPendingApprovals(): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
@@ -1182,6 +1187,11 @@ declare class SmithersDb {
    * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
    */
     listDecidedApprovalsEffect(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+    listAllDecidedApprovalsEffect(runId: string): RunnableEffect<ApprovalRow[], SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<FrameRow | undefined, SmithersError>}

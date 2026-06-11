@@ -2231,6 +2231,19 @@ export class SmithersDb {
            AND n.state = 'pending'`, [runId], { booleanColumns: ["autoApproved"] }));
     }
     /**
+   * Returns all decided approvals for a run (approved or denied), regardless of
+   * node state. Used by why-diagnosis so denied gates (node state = 'failed')
+   * are included in the diagnosis output.
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+    listAllDecidedApprovals(runId) {
+        return this.read(`list all decided approvals ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_approvals
+         WHERE run_id = ?
+           AND status IN ('approved', 'denied')`, [runId], { booleanColumns: ["autoApproved"] }));
+    }
+    /**
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listAllPendingApprovals() {
@@ -2672,6 +2685,13 @@ export class SmithersDb {
    */
     listDecidedApprovalsEffect(runId) {
         return this.listDecidedApprovals(runId);
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+    listAllDecidedApprovalsEffect(runId) {
+        return this.listAllDecidedApprovals(runId);
     }
     /**
    * @param {string} runId
