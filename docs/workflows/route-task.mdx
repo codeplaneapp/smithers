@@ -25,7 +25,11 @@ classifier is cheap and fast; only the chosen path spends a smart agent.
 3. **recommend**: durable path. A smart agent points at the single best-fit
    seeded workflow (`implement`, `research-plan-implement`, `review`, `plan`,
    `research`, `grill-me`, `ralph`, `debug`, `audit`, `create-workflow`,
-   `context-doctor`, `monitor-smithers`) and explains why.
+   `create-skill`, `extract-skill`, `context-doctor`, `monitor-smithers`,
+   `triage-run`, `report-slideshow`, `eval-author`, `improve-test-coverage`)
+   and explains why. The recommendation is schema-enforced to one of those
+   ids, so a hallucinated workflow id fails validation instead of flowing
+   downstream.
 
 Only one of `execute` or `recommend` runs, gated on the classifier's `durable`
 verdict.

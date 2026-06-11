@@ -24,20 +24,29 @@ const SEEDED_WORKFLOWS = [
   "debug",
   "audit",
   "create-workflow",
+  "create-skill",
+  "extract-skill",
   "context-doctor",
   "monitor-smithers",
+  "triage-run",
+  "report-slideshow",
+  "eval-author",
+  "improve-test-coverage",
 ] as const;
+
+const DEFAULT_PROMPT = "Describe the task you want Smithers to handle, in plain English.";
 
 const inputSchema = z.object({
   prompt: z
     .string()
-    .default("Describe the task you want Smithers to handle, in plain English.")
+    .default(DEFAULT_PROMPT)
     .describe("Plain-English description of the task to route — run directly or hand to a durable workflow."),
 });
 
 // 1. The classifier's verdict: what kind of task this is, and whether it needs a
 //    durable workflow (ordering, crash-recovery, approvals, loops) or can run as
-//    a single one-shot task.
+//    a single one-shot task. recommendedWorkflow is enum-enforced so a
+//    hallucinated workflow id fails validation instead of flowing downstream.
 const classifySchema = z.looseObject({
   mode: z
     .enum([
@@ -55,10 +64,10 @@ const classifySchema = z.looseObject({
     .boolean()
     .describe("True when the task needs ordering, crash-recovery, approvals, or loops — i.e. a real workflow."),
   recommendedWorkflow: z
-    .string()
+    .enum(SEEDED_WORKFLOWS)
     .nullable()
     .default(null)
-    .describe("If durable, the best-fit seeded workflow id; otherwise null."),
+    .describe("If durable, the best-fit seeded workflow id from the catalog; otherwise null."),
   reason: z.string().describe("One or two sentences justifying the mode + durable call."),
 });
 
@@ -70,10 +79,12 @@ const executeSchema = z.looseObject({
 
 // 2b. Durable path: a pointer at the right seeded workflow to run instead.
 const recommendSchema = z.looseObject({
-  recommendedWorkflow: z.string().describe("The single best-fit seeded workflow id to run."),
+  recommendedWorkflow: z
+    .enum(SEEDED_WORKFLOWS)
+    .describe("The single best-fit seeded workflow id to run."),
   why: z.string().describe("Why this workflow fits the task — what durable behaviour it provides."),
   alternativeWorkflows: z
-    .array(z.string())
+    .array(z.enum(SEEDED_WORKFLOWS))
     .default([])
     .describe("Other seeded workflows that could also fit, best-first."),
 });
@@ -86,6 +97,9 @@ const { Workflow, Task, Sequence, Branch, smithers, outputs } = createSmithers({
 });
 
 export default smithers((ctx) => {
+  // Input fields arrive null (not the zod default) when unsupplied — coalesce
+  // so the classifier never sees an empty task section.
+  const prompt = ctx.input.prompt ?? DEFAULT_PROMPT;
   const classify = ctx.outputMaybe("classify", { nodeId: "classify" });
 
   // Gate the two paths on the classifier's verdict. Only one branch runs.
@@ -97,7 +111,7 @@ export default smithers((ctx) => {
       <Sequence>
         {/* 1 — Classify the script into a mode and decide whether it needs a durable workflow. */}
         <Task id="classify" output={outputs.classify} agent={agents.cheapFast}>
-          <ClassifyPrompt prompt={ctx.input.prompt} workflows={SEEDED_WORKFLOWS} />
+          <ClassifyPrompt prompt={prompt} workflows={SEEDED_WORKFLOWS} />
         </Task>
 
         {/* 2 — Branch: run it directly (non-durable) or recommend a durable workflow. */}
@@ -107,7 +121,7 @@ export default smithers((ctx) => {
             then={
               <Task id="recommend" output={outputs.recommend} agent={agents.smart}>
                 <RecommendPrompt
-                  prompt={ctx.input.prompt}
+                  prompt={prompt}
                   classification={classify}
                   workflows={SEEDED_WORKFLOWS}
                 />
@@ -115,7 +129,7 @@ export default smithers((ctx) => {
             }
             else={
               <Task id="execute" output={outputs.execute} agent={agents.smartTool}>
-                <ExecutePrompt prompt={ctx.input.prompt} classification={classify} />
+                <ExecutePrompt prompt={prompt} classification={classify} />
               </Task>
             }
           />

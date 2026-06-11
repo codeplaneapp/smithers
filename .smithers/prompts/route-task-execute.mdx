@@ -10,9 +10,9 @@ You have file and shell tools: actually **do the work**, then report what you di
 
 ## Classifier verdict
 
-```json
-{JSON.stringify(props.classification, null, 2)}
-```
+{`\`\`\`json
+${JSON.stringify(props.classification, null, 2)}
+\`\`\``}
 
 ## How to do it
 
@@ -23,14 +23,19 @@ You have file and shell tools: actually **do the work**, then report what you di
    change or shortest answer that fully satisfies the ask. Run commands with the
    tools you have rather than guessing at output.
 3. Do not over-build. If the task turns out to be larger than a single task can
-   responsibly finish — it really needs ordering, approvals, or loops — stop,
-   leave the workspace clean, and say so in the `summary` with `done` set to
-   `false` so the caller can route it to a durable workflow instead.
+   responsibly finish, stop and leave the workspace clean. Set `done` to `false`
+   and make the `summary` name which durable behaviour the task turned out to
+   need — **ordering** (dependent stages), **recovery** (must survive
+   interruption), **approval** (a human gate), or **loops** (iterate until a
+   condition holds) — plus what, if anything, you completed before stopping.
+   The caller uses this to route it to a durable workflow instead.
 4. Never leave half-finished edits, stray files, or `TODO` stubs behind.
 
 ## Produce
 
-1. `summary` — a sentence or two on what you did (and where, if you touched files).
+1. `summary` — a sentence or two on what you did (and where, if you touched
+   files). When `done` is `false`, it must name the durable behaviour needed
+   (ordering, recovery, approval, or loops).
 2. `done` — `true` only if the task was fully completed in this single step;
    `false` if it needs a durable workflow or could not be finished here.
 

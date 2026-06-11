@@ -11,33 +11,51 @@ Plan only — do NOT do the work, run any command, or write any files.
 
 ## Classifier verdict
 
-```json
-{JSON.stringify(props.classification, null, 2)}
-```
+{`\`\`\`json
+${JSON.stringify(props.classification, null, 2)}
+\`\`\``}
 
 ## Seeded workflows you can recommend
 
 You may ONLY recommend ids from this list — these are the durable workflows that
 actually exist in this `.smithers/` pack:
 
-```json
-{JSON.stringify(props.workflows, null, 2)}
-```
+{`\`\`\`json
+${JSON.stringify(props.workflows, null, 2)}
+\`\`\``}
 
 Rough guide to what each is for:
 
 - `implement` — build a feature or change from a clear ask, with review.
 - `research-plan-implement` — research, then plan, then implement end-to-end.
-- `review` — review a diff or change before landing it.
+- `review` — review a specific diff or change before landing it.
 - `plan` — produce a plan or design without building yet.
 - `research` — gather and synthesize information about a topic.
 - `grill-me` — adversarially stress-test an idea, plan, or PRD with hard questions.
 - `ralph` — long-running autonomous loop that keeps working until a goal is met.
-- `debug` — investigate and fix the root cause of a defect.
-- `audit` — systematically audit a feature, surface, or area for gaps.
+- `debug` — investigate and fix the root cause of a defect in the user's own code.
+- `audit` — read-only sweep of a feature, surface, or area; deliverable is findings, not fixes.
 - `create-workflow` — author a brand-new Smithers workflow from a description.
 - `context-doctor` — diagnose and repair an agent's working context.
 - `monitor-smithers` — watchdog that detects stuck, blocked, failed, or over-budget runs.
+- `triage-run` — diagnose one failed or stuck Smithers run and recommend fix, rewind, retry, or escalate.
+- `report-slideshow` — turn a finished run into a self-contained HTML slideshow report.
+- `eval-author` — turn acceptance criteria into a runnable eval suite.
+- `create-skill` — author a new reusable agent skill.
+- `extract-skill` — harvest a reusable skill or workflow sketch from a finished run.
+- `improve-test-coverage` — raise test coverage until a target holds.
+
+## Tie-breaking
+
+Prefer the most SPECIFIC workflow that covers the ask over a general one:
+
+- Diagnosing a failed or stuck **Smithers run** goes to `triage-run`, not
+  `debug` — `debug` is for defects in the user's own code.
+- A read-only findings sweep is `audit`; reviewing a specific diff is `review`.
+- Ongoing watching of many runs is `monitor-smithers`; one run's post-mortem is
+  `triage-run`.
+- If two workflows fit equally, pick the narrower one and list the broader one
+  in `alternativeWorkflows`.
 
 ## Produce
 
