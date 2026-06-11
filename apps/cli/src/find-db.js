@@ -1,42 +1,10 @@
-import { resolve, dirname, join } from "node:path";
-import { existsSync, statSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { existsSync } from "node:fs";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersError } from "@smithers-orchestrator/errors";
+import { findSmithersAnchorDir } from "smithers-orchestrator/findSmithersAnchorDir";
 /** @typedef {import("./FindDbWaitOptions.ts").FindDbWaitOptions} FindDbWaitOptions */
-
-/**
- * Walk upward from `from` and return the nearest directory that contains a
- * `.smithers/` subdirectory, or `undefined` if none is found before the
- * filesystem root.
- *
- * Directories at or above $HOME are excluded: a `~/.smithers` global pack
- * must not be treated as a project anchor, so the DB would incorrectly land
- * in the user's home directory.
- *
- * @param {string} from
- * @returns {string | undefined}
- */
-function findSmithersAnchorDir(from) {
-    let dir = resolve(from);
-    const fsRoot = resolve("/");
-    const home = process.env.HOME ? resolve(process.env.HOME) : undefined;
-    while (true) {
-        // Stop before reaching HOME — anchors must be proper project directories
-        // below the user's home directory.
-        if (home && (dir === home || dir.length < home.length)) {
-            return undefined;
-        }
-        const candidate = join(dir, ".smithers");
-        if (existsSync(candidate) && statSync(candidate).isDirectory()) {
-            return dir;
-        }
-        if (dir === fsRoot) {
-            return undefined;
-        }
-        dir = dirname(dir);
-    }
-}
 
 /**
  * Walk from `from` (default: cwd) upward looking for smithers.db.
@@ -66,11 +34,12 @@ export function findSmithersDb(from) {
     const allCandidates = [];
     let dir = startDir;
     while (true) {
+        // Stop at the filesystem root — never add /smithers.db as a candidate.
+        if (dir === root) break;
         const candidate = resolve(dir, "smithers.db");
         if (existsSync(candidate)) {
             allCandidates.push(candidate);
         }
-        if (dir === root) break;
         dir = dirname(dir);
     }
 

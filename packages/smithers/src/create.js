@@ -16,9 +16,9 @@ import { zodToCreateTableSQL, syncZodTableSchema } from "@smithers-orchestrator/
 import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { POSTGRES } from "@smithers-orchestrator/db/dialect";
-import { resolve, dirname, join } from "node:path";
-import { existsSync, statSync } from "node:fs";
+import { resolve, join } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
 /** @typedef {import("@smithers-orchestrator/components").ApprovalProps<any, any>} ApprovalProps */
 /** @typedef {import("@smithers-orchestrator/components").SandboxProps} SandboxProps */
 /** @typedef {import("@smithers-orchestrator/components").SignalProps<any>} SignalProps */
@@ -341,39 +341,6 @@ function buildSmithersApi(config) {
     };
     return { api, setModuleAlertPolicy };
 }
-/**
- * Walk upward from `from` and return the nearest directory that contains a
- * `.smithers/` subdirectory, or `undefined` if none is found before the
- * filesystem root. Used to anchor smithers.db at the project root.
- *
- * Directories at or above $HOME are excluded: a `~/.smithers` global pack
- * must not be treated as a project anchor, so the DB would incorrectly land
- * in the user's home directory.
- *
- * @param {string} from
- * @returns {string | undefined}
- */
-function findSmithersAnchorDir(from) {
-    let dir = resolve(from);
-    const fsRoot = resolve("/");
-    const home = process.env.HOME ? resolve(process.env.HOME) : undefined;
-    while (true) {
-        // Stop before reaching HOME — anchors must be proper project directories
-        // below the user's home directory.
-        if (home && (dir === home || dir.length < home.length)) {
-            return undefined;
-        }
-        const candidate = join(dir, ".smithers");
-        if (existsSync(candidate) && statSync(candidate).isDirectory()) {
-            return dir;
-        }
-        if (dir === fsRoot) {
-            return undefined;
-        }
-        dir = dirname(dir);
-    }
-}
-
 /**
  * Schema-driven API — users define only Zod schemas, the framework owns the entire storage layer.
  *
