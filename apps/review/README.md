@@ -20,6 +20,9 @@ bun apps/review/src/cli/main.ts --from main --to HEAD --open
 # publish the walkthrough to the share service and print the URL
 bun apps/review/src/cli/main.ts --from main --to HEAD --publish
 
+# review a GitHub PR and post the review onto it (summary + inline findings)
+bun apps/review/src/cli/main.ts --pr 123 --publish
+
 # review one commit
 bun apps/review/src/cli/main.ts --commit abc1234
 
@@ -42,15 +45,28 @@ One durable smithers workflow, run in-process through the engine:
    everything.
 3. `narrate` (an agent) organizes the change set into chapters: the central
    change first, supporting code in dependency order, tests with what they
-   prove, chores last. `normalizeStory` enforces that every changed file
-   appears in exactly one chapter; a deterministic fallback story covers agent
-   failure and `--no-narrate`.
+   prove, chores last. Every file also gets a narrative paragraph the reader
+   sees right before its diff, walking through what the diff does.
+   `normalizeStory` enforces that every changed file appears in exactly one
+   chapter; a deterministic fallback story covers agent failure and
+   `--no-narrate`.
 4. `walkthrough` renders self-contained HTML (inline CSS, no external assets)
    and writes it to `--out`. Diffs are rendered with `@pierre/diffs`: syntax
    highlighting, word-level diffs, line numbers, unified or `--split` view.
 
 Review findings never change the exit code; smithers review reports, humans
 decide.
+
+## Reviewing GitHub PRs
+
+`--pr <number|url>` resolves the PR via the `gh` CLI, defaults the review
+range to `origin/<base>..<headSha>`, and after the run posts one PR review:
+the narrative summary (headline, synopsis, reading order, walkthrough link
+when `--publish` ran) as the body, and every anchorable finding as an inline
+comment with a ` ```suggestion ` fence when replacement code exists. If
+GitHub rejects the inline batch, the findings are folded into the body and
+the review still posts. The PR's head must exist locally (check out the
+branch or fetch it first).
 
 ## Rendering diffs anywhere else
 

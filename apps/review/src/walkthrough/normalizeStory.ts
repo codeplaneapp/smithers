@@ -24,7 +24,7 @@ export function normalizeStory(candidate: unknown, files: ChangedFile[]): Story 
       const path = file.path.trim();
       if (!known.has(path) || seen.has(path)) continue;
       seen.add(path);
-      kept.push({ path, role: file.role.trim() });
+      kept.push({ path, role: file.role.trim(), narrative: file.narrative.trim() });
     }
     if (kept.length === 0) continue;
     chapters.push({
@@ -40,7 +40,7 @@ export function normalizeStory(candidate: unknown, files: ChangedFile[]): Story 
     chapters.push({
       title: "Everything else",
       narrative: "Changes the story above did not cover.",
-      files: missing.map((file) => ({ path: file.path, role: describeChange(file) })),
+      files: missing.map((file) => ({ path: file.path, role: describeChange(file), narrative: "" })),
     });
   }
 

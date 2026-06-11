@@ -32,6 +32,9 @@ const walkthroughOutputSchema = z.object({
   files: z.number().int().nonnegative(),
   findings: z.number().int().nonnegative(),
   message: z.string().default(""),
+  // JSON of the normalized story, so the CLI can compose PR review bodies
+  // without re-deriving it.
+  story: z.string().default(""),
 });
 
 export function createReviewWorkflow(opts: {
@@ -196,6 +199,7 @@ export function createReviewWorkflow(opts: {
                 files: changesOut.files.length,
                 findings: reviewOut.comments.length,
                 message: `Walkthrough written to ${outPath} (${story.chapters.length} chapter(s), ${reviewOut.comments.length} finding(s)).`,
+                story: JSON.stringify(story),
               };
             }}
           </Task>

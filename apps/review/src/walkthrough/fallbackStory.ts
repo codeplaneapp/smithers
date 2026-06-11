@@ -33,7 +33,7 @@ function chapter(title: string, narrative: string, files: ChangedFile[]): StoryC
   return {
     title,
     narrative,
-    files: [...files].sort(byChurnDesc).map((file) => ({ path: file.path, role: describeChange(file) })),
+    files: [...files].sort(byChurnDesc).map((file) => ({ path: file.path, role: describeChange(file), narrative: "" })),
   };
 }
 

@@ -69,7 +69,14 @@ story = {
   chapters: [{
     title: string,
     narrative: string, // why this chapter exists, what to look for
-    files: [{ path: string, role: string }],  // role: one line per file
+    files: [{
+      path: string,
+      role: string,      // one-line label for the chapter listing
+      narrative: string, // 2-4 sentences read right before the diff: what
+                         // the diff actually does, walking the reader
+                         // through the change (new functions, behavior
+                         // shifts, what to check)
+    }],
   }],
 }
 ```
@@ -191,10 +198,38 @@ custom hostname, add the Vercel CNAME, redeploy with the flag and
 Agents still run locally; the service stores and serves artifacts only. It
 never sees repo contents beyond the HTML you choose to publish.
 
+## GitHub PR reviews (--pr)
+
+`--pr <number|url>` reviews a GitHub pull request and posts the result onto
+the PR as one review (event `COMMENT`), CodeRabbit-style:
+
+- The review body is the narrative summary: headline, synopsis, the reading
+  order (chapter titles, chapter narratives, per-file role lines), a link to
+  the published walkthrough when `--publish` ran, and any findings that could
+  not be anchored inline. Bodies are capped under GitHub's 64KB limit.
+- Each anchorable finding becomes an inline review comment: `path` +
+  `line`/`start_line` in new-file numbering (side `RIGHT`), with a
+  ` ```suggestion ` fence when the finding carries replacement code.
+  Anchorable means the finding has resolved line numbers and its path is in
+  the PR's changed-file list.
+- Posting goes through the `gh` CLI (`gh api`), so auth is whatever `gh` is
+  logged in as. If GitHub rejects the batch (422 — e.g. a line fell outside
+  the PR diff), the poster retries once with all findings folded into the
+  body, so a review is always posted.
+
+When `--pr` is given and no explicit target, the review range defaults to
+`origin/<baseRef>`..`<headSha>` (falling back to `<baseRef>` if the remote
+ref is absent). Posting happens CLI-side after the run, like `--publish`;
+the workflow itself stays GitHub-free. The PR's head must be checked out or
+fetched locally, since review runs against the local repo.
+
+The walkthrough output row gains a `story` column (JSON of the normalized
+story) so the CLI can compose the PR body without re-deriving the story.
+
 ## Non-goals (for now)
 
-- No GitHub App, webhooks, or PR comment posting. Output is local HTML
-  (optionally published).
-- No incremental re-review state. Each run is a fresh review of the target.
+- No GitHub App or webhooks; PR posting is CLI-side via `gh`.
+- No incremental re-review state or in-place summary updates. Each run posts
+  a fresh review.
 - No chat replies on findings.
 - No walkthrough listing/index endpoint; URLs are unlisted capability links.

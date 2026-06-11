@@ -13,6 +13,7 @@ export type ReviewArgs = {
   timeout: number;
   split: boolean;
   publish: boolean;
+  pr: string;
   open: boolean;
   help: boolean;
 };
@@ -33,6 +34,7 @@ export function parseReviewArgs(argv: string[]): ReviewArgs {
     timeout: 10,
     split: false,
     publish: false,
+    pr: "",
     open: false,
     help: false,
   };
@@ -56,6 +58,7 @@ export function parseReviewArgs(argv: string[]): ReviewArgs {
     else if (arg === "--timeout") args.timeout = Number(next());
     else if (arg === "--split") args.split = true;
     else if (arg === "--publish") args.publish = true;
+    else if (arg === "--pr") args.pr = next();
     else if (arg === "--open") args.open = true;
     else if (arg === "--help" || arg === "-h") args.help = true;
     else if (arg.startsWith("-")) throw new Error(`Unknown option: ${arg}`);

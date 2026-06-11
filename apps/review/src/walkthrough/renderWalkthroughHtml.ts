@@ -53,7 +53,8 @@ article.file .file-head code { font-size: 13.5px; font-weight: 600; word-break: 
 .stat .plus { color: #1a7f37; font-weight: 600; }
 .stat .minus { color: #cf222e; font-weight: 600; }
 .not-reviewed { font-size: 11.5px; color: #8c959f; margin-left: auto; }
-article.file .role { margin: 10px 14px 0; color: #59636e; font-size: 14px; }
+article.file .role { margin: 10px 14px 0; color: #59636e; font-size: 13px; text-transform: uppercase; letter-spacing: 0.02em; }
+article.file .file-narrative { margin: 8px 14px 12px; max-width: 80ch; font-size: 15px; white-space: pre-wrap; }
 aside.finding { margin: 12px 14px; border: 1px solid #d4a72c66; border-left: 4px solid #bf8700; background: #fff8c5; border-radius: 6px; padding: 10px 14px; }
 aside.finding .loc { font-size: 12px; color: #7d4e00; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 aside.finding p { margin: 6px 0; white-space: pre-wrap; }
@@ -105,7 +106,7 @@ function findingCard(comment: ReviewComment): string {
 
 function fileSection(
   file: ChangedFile,
-  role: string,
+  entry: { role: string; narrative: string },
   comments: ReviewComment[],
   anchor: string,
   diffBody: string,
@@ -116,7 +117,8 @@ function fileSection(
   return [
     `<article class="file" id="${anchor}">`,
     `<div class="file-head"><code>${escapeHtml(file.path)}</code><span class="badge ${escapeHtml(file.status)}">${escapeHtml(file.status)}</span>${statChip(file.insertions, file.deletions)}${notReviewed}</div>`,
-    role ? `<p class="role">${escapeHtml(role)}</p>` : "",
+    entry.role ? `<p class="role">${escapeHtml(entry.role)}</p>` : "",
+    entry.narrative ? `<p class="file-narrative">${escapeHtml(entry.narrative)}</p>` : "",
     ...comments.map(findingCard),
     `<details${open ? " open" : ""}><summary>Diff (+${file.insertions} −${file.deletions})</summary><div class="pierre-diff">${diffBody}</div></details>`,
     `</article>`,
@@ -223,7 +225,7 @@ export async function renderWalkthroughHtml(opts: {
           if (!file) return "";
           return fileSection(
             file,
-            entry.role,
+            entry,
             commentsByPath.get(entry.path) ?? [],
             anchorByPath.get(entry.path) ?? "",
             bodies.get(entry.path) ?? renderFallbackDiffHtml(file.diff),

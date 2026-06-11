@@ -19,7 +19,7 @@ describe("normalizeStory", () => {
             title: "The core",
             narrative: "Start here.",
             files: [
-              { path: "src/b.ts", role: "the heart" },
+              { path: "src/b.ts", role: "the heart", narrative: " Replaces the old heart with a stronger one. " },
               { path: "src/invented.ts", role: "does not exist" },
             ],
           },
@@ -35,8 +35,8 @@ describe("normalizeStory", () => {
 
     expect(story.headline).toBe("Adds the thing");
     expect(story.chapters.map((chapter) => chapter.title)).toEqual(["The core", "Repeat", "Everything else"]);
-    expect(story.chapters[0].files).toEqual([{ path: "src/b.ts", role: "the heart" }]);
-    expect(story.chapters[1].files).toEqual([{ path: "src/a.ts", role: "support" }]);
+    expect(story.chapters[0].files).toEqual([{ path: "src/b.ts", role: "the heart", narrative: "Replaces the old heart with a stronger one." }]);
+    expect(story.chapters[1].files).toEqual([{ path: "src/a.ts", role: "support", narrative: "" }]);
     expect(story.chapters[2].files.map((entry) => entry.path)).toEqual(["src/c.ts"]);
   });
 

@@ -1,13 +1,40 @@
 #!/usr/bin/env bun
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { join, resolve } from "node:path";
 import { loadOutputs } from "@smithers-orchestrator/db/snapshot";
 import { runWorkflow } from "@smithers-orchestrator/engine";
 import { Effect } from "effect";
+import { buildPullRequestReview } from "../github/buildPullRequestReview";
+import { listPullRequestFiles } from "../github/listPullRequestFiles";
+import { postPullRequestReview } from "../github/postPullRequestReview";
+import { resolvePullRequest, type PullRequestTarget } from "../github/resolvePullRequest";
+import { storySchema } from "../walkthrough/storySchema";
 import { createReviewAgents } from "../workflow/createReviewAgents";
 import { createReviewWorkflow } from "../workflow/createReviewWorkflow";
 import { parseReviewArgs, type ReviewArgs } from "./parseReviewArgs";
 import { publishWalkthrough } from "./publishWalkthrough";
+
+function refExists(repoDir: string, ref: string): boolean {
+  try {
+    execFileSync("git", ["rev-parse", "--verify", "--quiet", ref], { cwd: repoDir, stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+type Finding = Parameters<typeof buildPullRequestReview>[0]["findings"][number];
+
+// Output rows store array columns as JSON strings.
+function parseFindings(value: unknown): Finding[] {
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? (parsed as Finding[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 const USAGE = `smithers review — code review + story-form HTML walkthrough
 
@@ -26,6 +53,7 @@ Usage: smithers-review [repo] [options]
   --timeout <min>           per-agent-task timeout in minutes (default 10)
   --split                   side-by-side diffs instead of unified
   --publish                 upload to review.smithers.sh and print the share URL
+  --pr <number|url>         review a GitHub PR and post the review onto it (via gh)
   --open                    open the walkthrough in the default browser
   -h, --help                show this help`;
 
@@ -46,6 +74,19 @@ async function main() {
 
   const repoDir = resolve(args.repo);
   const dbPath = args.db ? resolve(args.db) : join(repoDir, ".smithers-review", "review.db");
+
+  let pr: PullRequestTarget | null = null;
+  if (args.pr) {
+    pr = await resolvePullRequest(repoDir, args.pr);
+    if (!args.from && !args.to && !args.commit) {
+      // Prefer the remote-tracking base: the local base branch may be stale
+      // and would drag unrelated commits into the review diff.
+      args.from = refExists(repoDir, `origin/${pr.baseRefName}`) ? `origin/${pr.baseRefName}` : pr.baseRefName;
+      args.to = pr.headSha;
+    }
+    console.error(`[smithers-review] PR #${pr.number} (${pr.baseRefName}…${pr.headRefName}) → ${args.from}..${args.to}`);
+  }
+
   const agents = args.review || args.narrate ? createReviewAgents(repoDir) : { review: [], narrate: [] };
   const { workflow, db, tables } = createReviewWorkflow({
     dbPath,
@@ -94,13 +135,35 @@ async function main() {
   console.log(String(walkthrough.message ?? `Walkthrough written to ${String(walkthrough.path)}`));
 
   let publishFailed = false;
+  let shareUrl = "";
   if (args.publish) {
     try {
-      const shareUrl = await publishWalkthrough(String(walkthrough.path));
+      shareUrl = await publishWalkthrough(String(walkthrough.path));
       console.log(`Published: ${shareUrl}`);
     } catch (error) {
       publishFailed = true;
       console.error(`smithers-review: ${(error as Error).message}`);
+    }
+  }
+
+  let prFailed = false;
+  if (pr) {
+    try {
+      const story = storySchema.parse(JSON.parse(String(walkthrough.story || "{}")));
+      const findings = parseFindings(review?.comments);
+      const prPaths = await listPullRequestFiles(repoDir, pr);
+      const payload = buildPullRequestReview({
+        story,
+        findings,
+        prPaths,
+        headSha: pr.headSha,
+        walkthroughUrl: shareUrl || undefined,
+      });
+      const posted = await postPullRequestReview(repoDir, pr, payload);
+      console.log(`PR review posted (${posted.inline} inline comment(s)): ${posted.url}`);
+    } catch (error) {
+      prFailed = true;
+      console.error(`smithers-review: PR review failed: ${(error as Error).message}`);
     }
   }
 
@@ -109,7 +172,7 @@ async function main() {
     spawn(opener, [String(walkthrough.path)], { stdio: "ignore", detached: true }).unref();
   }
 
-  const failed = result.status === "failed" || result.status === "cancelled" || publishFailed;
+  const failed = result.status === "failed" || result.status === "cancelled" || publishFailed || prFailed;
   process.exit(failed ? 1 : 0);
 }
 

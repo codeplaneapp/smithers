@@ -41,10 +41,10 @@ const story = {
   synopsis: "A tiny arc.",
   chapters: [
     { title: "The change & its core", narrative: "Read me first.", files: [
-      { path: "src/a.ts", role: "the actual change" },
-      { path: "src/b.ts", role: "supporting tweak" },
+      { path: "src/a.ts", role: "the actual change", narrative: "Swaps removed for added & adds more; check the constant values." },
+      { path: "src/b.ts", role: "supporting tweak", narrative: "" },
     ] },
-    { title: "Assets", narrative: "", files: [{ path: "assets/logo.png", role: "binary asset" }] },
+    { title: "Assets", narrative: "", files: [{ path: "assets/logo.png", role: "binary asset", narrative: "" }] },
   ],
 };
 
@@ -86,6 +86,8 @@ describe("renderWalkthroughHtml", () => {
     expect(html).toContain("The change &amp; its core");
     expect(html.indexOf("src/a.ts")).toBeLessThan(html.indexOf("src/b.ts"));
     expect(html).toContain("the actual change");
+    expect(html).toContain("Swaps removed for added &amp; adds more; check the constant values.");
+    expect(html).toContain("file-narrative");
     expect(html).toContain("const added = safe();");
     expect(html).toContain("Review findings (1)");
   });

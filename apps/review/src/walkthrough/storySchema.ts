@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 const storyFileSchema = z.object({
   path: z.string().default(""),
   role: z.string().default(""),
+  narrative: z.string().default(""),
 });
 
 const storyChapterSchema = z.object({
