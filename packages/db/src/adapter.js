@@ -2216,6 +2216,15 @@ export class SmithersDb {
          WHERE run_id = ? AND status = ?`, [runId, "requested"], { booleanColumns: ["autoApproved"] }));
     }
     /**
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+    listDecidedApprovals(runId) {
+        return this.read(`list decided approvals ${runId}`, () => this.internalStorage.queryAll(`SELECT *
+         FROM _smithers_approvals
+         WHERE run_id = ? AND (status = ? OR status = ?)`, [runId, "approved", "denied"], { booleanColumns: ["autoApproved"] }));
+    }
+    /**
    * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
    */
     listAllPendingApprovals() {
@@ -2650,6 +2659,13 @@ export class SmithersDb {
    */
     listPendingApprovalsEffect(runId) {
         return this.listPendingApprovals(runId);
+    }
+    /**
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+    listDecidedApprovalsEffect(runId) {
+        return this.listDecidedApprovals(runId);
     }
     /**
    * @param {string} runId

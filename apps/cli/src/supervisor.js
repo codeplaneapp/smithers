@@ -96,8 +96,10 @@ function parseTimerFiresAtMs(metaJson) {
     }
 }
 /**
- * Returns true if the given waiting-event run has at least one pending node
- * that was unblocked by a recorded approval decision but never resumed.
+ * Returns true if the given waiting-event run has at least one approval record
+ * with a recorded decision (status "approved" or "denied"). This catches the
+ * case where an approval was decided while the run was detached and no engine
+ * process is alive to resume it.
  *
  * @param {NormalizedSupervisorOptions} options
  * @param {string} runId
@@ -105,8 +107,8 @@ function parseTimerFiresAtMs(metaJson) {
  */
 function runHasDecidedApprovalEffect(options, runId) {
     return Effect.gen(function* () {
-        const nodes = yield* options.adapter.listNodesEffect(runId).pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to list nodes for approval-decided run ${runId}: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as([]))));
-        return nodes.some((node) => node.state === "pending");
+        const approvals = yield* options.adapter.listDecidedApprovalsEffect(runId).pipe(Effect.catchAll((error) => Effect.logWarning(`[supervisor] failed to list decided approvals for run ${runId}: ${error instanceof Error ? error.message : String(error)}`).pipe(Effect.as([]))));
+        return approvals.length > 0;
     });
 }
 /**
