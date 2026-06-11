@@ -937,14 +937,16 @@ function buildDiagnosis(params) {
  */
 export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
     return Effect.withLogSpan("why:diagnose")(Effect.gen(function* () {
-        const [run, nodes, approvals, attempts, lastSeq, lastFrame] = yield* Effect.all([
+        const [run, nodes, pendingApprovals, decidedApprovals, attempts, lastSeq, lastFrame] = yield* Effect.all([
             adapter.getRunEffect(runId),
             adapter.listNodesEffect(runId),
             adapter.listPendingApprovalsEffect(runId),
+            adapter.listDecidedApprovalsEffect(runId),
             adapter.listAttemptsForRunEffect(runId),
             adapter.getLastEventSeqEffect(runId),
             adapter.getLastFrameEffect(runId),
         ]);
+        const approvals = [...(pendingApprovals ?? []), ...(decidedApprovals ?? [])];
         if (!run) {
             return yield* Effect.fail(new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`));
         }
@@ -956,7 +958,7 @@ export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
         const diagnosis = buildDiagnosis({
             run: run,
             nodes: nodes ?? [],
-            approvals: approvals ?? [],
+            approvals: approvals,
             attempts: attempts ?? [],
             events: events ?? [],
             lastFrame: lastFrame,
