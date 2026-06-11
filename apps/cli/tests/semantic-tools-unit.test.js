@@ -271,6 +271,8 @@ function makeSemanticAdapter(overrides = {}) {
         getRunEffect: (runId) => Effect.succeed(state.runs.find((run) => run.runId === runId)),
         listNodesEffect: (runId) => Effect.succeed(state.nodes.filter((node) => node.runId === runId)),
         listPendingApprovalsEffect: (runId) => Effect.succeed(state.approvals.filter((approval) => approval.runId === runId)),
+        listDecidedApprovalsEffect: () => Effect.succeed([]),
+        listAllDecidedApprovalsEffect: () => Effect.succeed([]),
         listAttemptsForRunEffect: (runId) => Effect.succeed(state.attempts.filter((attempt) => attempt.runId === runId)),
         getLastEventSeqEffect: () => Effect.succeed(0),
         getLastFrameEffect: () => Effect.succeed(undefined),
