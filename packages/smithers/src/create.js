@@ -224,10 +224,11 @@ function prepareSmithersTables(schemas) {
  *   zodToKeyName: Map<unknown, string>;
  *   ambiguousZodSchemas: Set<unknown>;
  *   opts?: CreateSmithersOptions;
+ *   inputSchema?: unknown;
  * }} config
  */
 function buildSmithersApi(config) {
-    const { db, tables, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas, opts } = config;
+    const { db, tables, schemaRegistry, outputs, zodToKeyName, ambiguousZodSchemas, opts, inputSchema } = config;
     const { SmithersContext: RuntimeSmithersContext, useCtx } = createSmithersContext();
     const ctxRef = { current: null };
     let moduleAlertPolicy = opts?.alertPolicy;
@@ -306,6 +307,7 @@ function buildSmithersApi(config) {
                 return React.createElement(RuntimeSmithersContext.Provider, { value: ctxRef.current }, React.createElement(GlobalSmithersContext.Provider, { value: ctxRef.current }, build(ctx)));
             },
             opts: workflowOpts,
+            inputSchema,
             schemaRegistry,
             zodToKeyName,
             ambiguousZodSchemas,
@@ -450,6 +452,7 @@ export function createSmithers(schemas, opts) {
         zodToKeyName,
         ambiguousZodSchemas,
         opts,
+        inputSchema: schemas.input,
     });
     if (process.env.SMITHERS_HOT === "1") {
         const sig = computeSchemaSig(schemas, absDbPath);
@@ -538,6 +541,7 @@ export async function createSmithersPostgres(schemas, opts) {
             zodToKeyName,
             ambiguousZodSchemas,
             opts,
+            inputSchema: schemas.input,
         });
     }
     catch (e) {

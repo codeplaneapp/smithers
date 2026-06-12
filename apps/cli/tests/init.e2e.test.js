@@ -380,6 +380,13 @@ test("workflow inspect and skills use seeded workflow metadata", () => {
         tags: ["coding", "implementation", "review"],
     });
     expect(inspect.json.skillPreview).toContain("smithers workflow run implement");
+    expect(inspect.json.inputSchema.fields).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+            name: "prompt",
+            type: "string",
+            default: "Implement the requested change.",
+        }),
+    ]));
 
     const skills = runSmithers(["workflow", "skills", "implement", "--output", "docs/implement-skill.md"], {
         cwd: repo.dir,
@@ -389,6 +396,27 @@ test("workflow inspect and skills use seeded workflow metadata", () => {
     expect(skills.json.writtenFiles).toHaveLength(1);
     expect(repo.read("docs/implement-skill.md")).toContain("name: implement");
     expect(repo.read("docs/implement-skill.md")).toContain("Implement a focused change");
+    expect(repo.read("docs/implement-skill.md")).toContain("| `prompt` | `string` |");
+
+    const reportInspect = runSmithers(["workflow", "inspect", "report-slideshow"], {
+        cwd: repo.dir,
+        format: "json",
+    });
+    expect(reportInspect.exitCode).toBe(0);
+    expect(reportInspect.json.inputSchema.fields).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+            name: "runId",
+            type: "string",
+            required: true,
+        }),
+        expect.objectContaining({
+            name: "title",
+            type: "string | null",
+            default: null,
+        }),
+    ]));
+    expect(reportInspect.json.skillPreview).toContain("| `runId` | `string` | required |");
+    expect(reportInspect.json.skillPreview).toContain("| `title` | `string | null` | default: `null` |");
 }, 15_000);
 test("seeded workflows reuse the shared review substrate", () => {
     const repo = createTempRepo();

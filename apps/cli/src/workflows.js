@@ -123,6 +123,121 @@ function yamlString(value) {
     return JSON.stringify(value);
 }
 /**
+ * @param {unknown} schema
+ * @returns {Record<string, unknown> | undefined}
+ */
+export function workflowInputJsonSchema(schema) {
+    if (!schema || typeof schema !== "object") return undefined;
+    const candidate = /** @type {{ toJSONSchema?: () => unknown }} */ (schema);
+    if (typeof candidate.toJSONSchema !== "function") return undefined;
+    const jsonSchema = candidate.toJSONSchema();
+    return jsonSchema && typeof jsonSchema === "object" && !Array.isArray(jsonSchema)
+        ? /** @type {Record<string, unknown>} */ (jsonSchema)
+        : undefined;
+}
+/**
+ * @param {unknown} value
+ * @returns {Record<string, unknown> | undefined}
+ */
+function objectSchema(value) {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? /** @type {Record<string, unknown>} */ (value)
+        : undefined;
+}
+/**
+ * @param {unknown[]} values
+ * @returns {unknown[]}
+ */
+function uniqueValues(values) {
+    const seen = new Set();
+    return values.filter((value) => {
+        const key = JSON.stringify(value);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+/**
+ * @param {Record<string, unknown>} field
+ * @returns {{ types: string[]; enumValues: unknown[] }}
+ */
+function summarizeJsonSchemaField(field) {
+    const types = [];
+    const enumValues = Array.isArray(field.enum) ? [...field.enum] : [];
+    if (typeof field.type === "string") {
+        types.push(field.type);
+    }
+    else if (Array.isArray(field.type)) {
+        types.push(...field.type.filter((type) => typeof type === "string"));
+    }
+    for (const key of ["anyOf", "oneOf", "allOf"]) {
+        const members = field[key];
+        if (!Array.isArray(members)) continue;
+        for (const member of members) {
+            const schema = objectSchema(member);
+            if (!schema) continue;
+            const summary = summarizeJsonSchemaField(schema);
+            types.push(...summary.types);
+            enumValues.push(...summary.enumValues);
+        }
+    }
+    return {
+        types: [...new Set(types)],
+        enumValues: uniqueValues(enumValues),
+    };
+}
+/**
+ * @param {Record<string, unknown> | undefined} jsonSchema
+ * @returns {{ name: string; type: string; required: boolean; default?: unknown; enum?: unknown[]; description?: string }[]}
+ */
+export function workflowInputSchemaFields(jsonSchema) {
+    const properties = jsonSchema?.properties;
+    if (!properties || typeof properties !== "object" || Array.isArray(properties)) return [];
+    const required = new Set(Array.isArray(jsonSchema.required) ? jsonSchema.required.filter((key) => typeof key === "string") : []);
+    return Object.entries(/** @type {Record<string, Record<string, unknown>>} */ (properties)).map(([name, field]) => {
+        const summary = summarizeJsonSchemaField(field);
+        return {
+            name,
+            type: summary.types.length > 0 ? summary.types.join(" | ") : "unknown",
+            required: required.has(name),
+            ...(Object.prototype.hasOwnProperty.call(field, "default") ? { default: field.default } : {}),
+            ...(summary.enumValues.length > 0 ? { enum: summary.enumValues } : {}),
+            ...(typeof field.description === "string" ? { description: field.description } : {}),
+        };
+    });
+}
+/**
+ * @param {Record<string, unknown> | undefined} jsonSchema
+ * @returns {{ jsonSchema?: Record<string, unknown>; fields: ReturnType<typeof workflowInputSchemaFields> }}
+ */
+export function summarizeWorkflowInputSchema(jsonSchema) {
+    return {
+        ...(jsonSchema ? { jsonSchema } : {}),
+        fields: workflowInputSchemaFields(jsonSchema),
+    };
+}
+/**
+ * @param {{ jsonSchema?: Record<string, unknown>; fields: ReturnType<typeof workflowInputSchemaFields> } | undefined} inputSchema
+ * @returns {string}
+ */
+export function renderWorkflowInputSchemaMarkdown(inputSchema) {
+    const fields = inputSchema?.fields ?? [];
+    if (fields.length === 0) return "No structured input fields declared.";
+    return [
+        "| Field | Type | Required / Default | Enum | Description |",
+        "| --- | --- | --- | --- | --- |",
+        ...fields.map((field) => {
+            const status = Object.prototype.hasOwnProperty.call(field, "default")
+                ? `default: \`${JSON.stringify(field.default)}\``
+                : field.required
+                    ? "required"
+                    : "optional";
+            const enumValues = field.enum?.length ? field.enum.map((value) => `\`${String(value)}\``).join(", ") : "-";
+            return `| \`${field.name}\` | \`${field.type}\` | ${status} | ${enumValues} | ${field.description ?? "-"} |`;
+        }),
+    ].join("\n");
+}
+/**
  * @param {string} source
  * @param {string} id
  */
@@ -307,7 +422,7 @@ function assertSkillFileName(id) {
 }
 /**
  * @param {DiscoveredWorkflow} workflow
- * @param {{ root?: string }} [options]
+ * @param {{ root?: string; inputSchema?: ReturnType<typeof summarizeWorkflowInputSchema> }} [options]
  * @returns {string}
  */
 export function renderWorkflowSkill(workflow, options = {}) {
@@ -318,6 +433,13 @@ export function renderWorkflowSkill(workflow, options = {}) {
     const workflowAliases = workflow.aliases ?? [];
     const tags = workflowTags.length > 0 ? workflowTags.join(", ") : "workflow";
     const aliases = workflowAliases.length > 0 ? workflowAliases.join(", ") : "none";
+    const inputFields = options.inputSchema?.fields ?? [];
+    const runCommand = inputFields.length === 0
+        ? `smithers workflow run ${workflow.id} --prompt "<request>"`
+        : `smithers workflow run ${workflow.id} --input '${JSON.stringify(Object.fromEntries(inputFields.map((field) => [
+        field.name,
+        Object.prototype.hasOwnProperty.call(field, "default") ? field.default : `<${field.type}>`,
+    ])))}'`;
     return [
         "---",
         `name: ${workflow.id}`,
@@ -336,16 +458,20 @@ export function renderWorkflowSkill(workflow, options = {}) {
         `- Tags: ${tags}`,
         `- Aliases: ${aliases}`,
         "",
+        "## Input Schema",
+        "",
+        renderWorkflowInputSchemaMarkdown(options.inputSchema),
+        "",
         "## Run",
         "",
         "```bash",
-        `smithers workflow run ${workflow.id} --prompt "<request>"`,
+        runCommand,
         "```",
         "",
-        "For structured inputs, pass JSON explicitly:",
+        "If the workflow defines a `prompt` field, `--prompt` is shorthand for `--input '{\"prompt\":\"...\"}'`.",
         "",
         "```bash",
-        `smithers workflow run ${workflow.id} --input '{"prompt":"<request>"}'`,
+        `smithers workflow inspect ${workflow.id} --format json`,
         "```",
         "",
         "## Operating Notes",
@@ -359,7 +485,7 @@ export function renderWorkflowSkill(workflow, options = {}) {
 }
 /**
  * @param {string} root
- * @param {{ workflowId?: string; output?: string; force?: boolean; global?: boolean }} [options]
+ * @param {{ workflowId?: string; output?: string; force?: boolean; global?: boolean; inputSchemas?: Map<string, ReturnType<typeof summarizeWorkflowInputSchema>> }} [options]
  */
 export function writeWorkflowSkillFiles(root, options = {}) {
     const workflowId = options.workflowId ?? "all";
@@ -393,7 +519,7 @@ export function writeWorkflowSkillFiles(root, options = {}) {
             continue;
         }
         mkdirSync(dirname(target), { recursive: true });
-        writeFileSync(target, renderWorkflowSkill(workflow, { root }));
+        writeFileSync(target, renderWorkflowSkill(workflow, { root, inputSchema: options.inputSchemas?.get(workflow.id) }));
         writtenFiles.push(target);
     }
     return {

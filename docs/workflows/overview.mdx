@@ -38,6 +38,6 @@ Most prompt-driven workflows accept `--prompt` as shorthand for `--input '{"prom
 
 - Default workflow files are user-owned after scaffold. `bunx smithers-orchestrator init` will not overwrite edited files unless you pass `--force`.
 - Agent pools are defined in `.smithers/agents.ts`; edit that file to change which models each workflow uses.
-- Run `bunx smithers-orchestrator workflow list` to see the workflows in the current repo, `bunx smithers-orchestrator workflow inspect WORKFLOW_ID` to see metadata, and `bunx smithers-orchestrator workflow skills` to generate agent-facing docs under `.smithers/skills/`.
+- Run `bunx smithers-orchestrator workflow list` to see the workflows in the current repo, `bunx smithers-orchestrator workflow inspect WORKFLOW_ID` to see metadata and the workflow input schema, and `bunx smithers-orchestrator workflow skills` to generate agent-facing docs under `.smithers/skills/`.
 - Workflows can carry optional metadata comments (`smithers-display-name`, `smithers-description`, `smithers-tags`, `smithers-aliases`) that `bunx smithers-orchestrator workflow list` and `workflow-skill` use for display and discovery.
 - Inspect and resume runs with the normal CLI: `inspect`, `logs`, `chat`, `events`, `why`, `approve`, and `up --resume`.

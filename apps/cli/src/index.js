@@ -46,7 +46,7 @@ import { getUsageForAccounts, formatUsageReports } from "@smithers-orchestrator/
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
-import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs } from "./workflows.js";
+import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
 import {
     assertEvalRunIdsAvailable,
     assertEvalReportWritable,
@@ -1982,11 +1982,14 @@ const workflowCli = Cli.create({
     .command("inspect", {
     description: "Show workflow metadata and an agent-facing skill preview.",
     args: workflowPathArgs,
-    run(c) {
+    async run(c) {
         const workflow = resolveWorkflow(c.args.name, process.cwd());
+        const loaded = await loadWorkflow(workflow.entryFile);
+        const inputSchema = summarizeWorkflowInputSchema(workflowInputJsonSchema(loaded.inputSchema));
         return c.ok({
             workflow,
-            skillPreview: renderWorkflowSkill(workflow, { root: process.cwd() }),
+            inputSchema,
+            skillPreview: renderWorkflowSkill(workflow, { root: process.cwd(), inputSchema }),
         });
     },
 })
@@ -1994,17 +1997,27 @@ const workflowCli = Cli.create({
     description: "Generate agent-facing skill docs for local workflows.",
     args: workflowSkillArgs,
     options: workflowSkillOptions,
-    run(c) {
+    async run(c) {
         const fail = (opts) => {
             commandExitOverride = opts.exitCode ?? 1;
             return c.error(opts);
         };
         try {
+            const workflowId = c.args.name ?? "all";
+            const workflows = workflowId === "all"
+                ? discoverWorkflows(process.cwd()).filter((workflow) => workflow.id !== "workflow-skill")
+                : [resolveWorkflow(workflowId, process.cwd())];
+            const inputSchemas = new Map();
+            for (const workflow of workflows) {
+                const loaded = await loadWorkflow(workflow.entryFile);
+                inputSchemas.set(workflow.id, summarizeWorkflowInputSchema(workflowInputJsonSchema(loaded.inputSchema)));
+            }
             return c.ok(writeWorkflowSkillFiles(process.cwd(), {
-                workflowId: c.args.name ?? "all",
+                workflowId,
                 output: c.options.output,
                 force: c.options.force,
                 global: c.options.global,
+                inputSchemas,
             }));
         }
         catch (err) {
