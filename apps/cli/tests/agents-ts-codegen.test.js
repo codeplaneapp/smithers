@@ -41,10 +41,9 @@ describe("generateAgentsTs (account-driven)", () => {
         // pools group by engine family
         expect(generated).toContain("claude: [providers.claudeWork, providers.claudePersonal]");
         expect(generated).toContain("codex: [providers.codexWork]");
-        // Smart pools are role-ordered: Claude/Fable first for planning/review,
-        // Codex/GPT first for implementation/tooling.
+        // Smart pools lead with subscription Claude so failover is not on the hot path.
         expect(generated).toContain("smart: [providers.claudeWork, providers.claudePersonal, providers.codexWork]");
-        expect(generated).toContain("smartTool: [providers.codexWork, providers.claudeWork, providers.claudePersonal]");
+        expect(generated).toContain("smartTool: [providers.claudeWork, providers.claudePersonal, providers.codexWork]");
     });
 
     test("path.join(homedir(), ...) is used for paths under $HOME", () => {
@@ -89,6 +88,26 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).toContain("// smithers-source: generated");
         // Detection-based output does NOT pull in the accounts.json header.
         expect(generated).not.toContain("~/.smithers/accounts.json");
+    });
+
+    test("detection smart pools lead with Claude and skip opencode", () => {
+        const env = newSmithersHome();
+        const generated = generateAgentsTs(env, {
+            preserveProviderIds: ["claude", "codex", "opencode"],
+        });
+
+        expect(generated).not.toContain("gpt-5.3-codex");
+        expect(generated).toContain("smart: [providers.claude, providers.claudeOpus, providers.codex]");
+        expect(generated).toContain("smartTool: [providers.claude, providers.claudeOpus, providers.codex]");
+        expect(generated).not.toContain("smart: [providers.claude, providers.claudeOpus, providers.codex, providers.opencode]");
+        expect(generated).not.toContain("smartTool: [providers.codex");
+    });
+
+    test("detection smart pools do not fall back to opencode-only", () => {
+        const env = newSmithersHome();
+        expect(() => generateAgentsTs(env, {
+            preserveProviderIds: ["opencode"],
+        })).toThrow("required default pools");
     });
 
     test("preserves generated detection providers when adding accounts in a different shell", () => {

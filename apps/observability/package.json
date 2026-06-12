@@ -22,7 +22,13 @@
     }
   },
   "files": [
-    "src/"
+    "src/",
+    "docker-compose.otel.yml",
+    "otel-collector-config.yml",
+    "prometheus/",
+    "tempo/",
+    "loki/",
+    "grafana/"
   ],
   "scripts": {
     "build": "tsup --dts-only",
