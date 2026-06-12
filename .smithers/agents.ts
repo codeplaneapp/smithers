@@ -17,8 +17,11 @@ export const providers = {
   gemini1: new SmithersGeminiAgent({ model: "gemini-3.1-pro-preview", configDir: path.join(homedir(), ".gemini"), cwd: process.cwd() }),
 } as const;
 
+// kimi providers stay out of the default pools: a kimi auth-setup error is
+// fatal (the engine fails the run instead of failing over), so an expired
+// kimi OAuth in a failover chain kills runs. Re-add deliberately if needed.
 export const agents = {
   cheapFast: [providers.claudeSonnet, providers.claude],
-  smart: [providers.claude, providers.claudeSonnet, providers.codex, providers.kimi1, providers.codex1, providers.gemini1],
-  smartTool: [providers.claude, providers.claudeSonnet, providers.codex, providers.kimi1, providers.codex1, providers.gemini1],
+  smart: [providers.claude, providers.claudeSonnet, providers.codex, providers.codex1, providers.gemini1],
+  smartTool: [providers.claude, providers.claudeSonnet, providers.codex, providers.codex1, providers.gemini1],
 } as const satisfies Record<string, AgentLike[]>;
