@@ -52,7 +52,7 @@ Usage: smithers-review [repo] [options]
   --concurrency <n>         parallel file reviews (default 8)
   --timeout <min>           per-agent-task timeout in minutes (default 10)
   --split                   side-by-side diffs instead of unified
-  --publish                 upload to review.smithers.sh and print the share URL
+  --publish                 upload to the share service and print the share URL
   --pr <number|url>         review a GitHub PR and post the review onto it (via gh)
   --open                    open the walkthrough in the default browser
   -h, --help                show this help`;
