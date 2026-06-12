@@ -477,6 +477,63 @@ export function makeWorkflowSession(options = {}) {
         if (existingWait) {
             return { _tag: "Wait", reason: existingWait };
         }
+        if (schedule.readyRalphs.length > 0 && !unhandledFailureDecision(recoveryKeys)) {
+            // A ralph is ready only when every task in its own subtree is
+            // terminal, so pending or in-flight work elsewhere in the graph must
+            // not starve its next iteration (#267). Run-level continue-as-new
+            // handoffs stay quiescence-only: tearing down the run while sibling
+            // tasks are mid-flight is not safe, so those ralphs are deferred.
+            // An unhandled task failure keeps its precedence over further loop
+            // iterations (decide() already returns it at the top; this guard
+            // makes the ordering explicit).
+            const hasInProgress = [...state.states.values()].some((taskState) => taskState === "in-progress");
+            let advanced = false;
+            for (const ralph of schedule.readyRalphs) {
+                const current = state.ralphState.get(ralph.id) ?? {
+                    iteration: 0,
+                    done: false,
+                };
+                if (ralph.until) {
+                    state.ralphState.set(ralph.id, { ...current, done: true });
+                    advanced = true;
+                    continue;
+                }
+                const nextIteration = current.iteration + 1;
+                if (nextIteration >= ralph.maxIterations) {
+                    if (ralph.onMaxReached === "fail") {
+                        return {
+                            _tag: "Failed",
+                            error: new SmithersError("RALPH_MAX_REACHED", `Ralph ${ralph.id} reached maxIterations ${ralph.maxIterations}.`, { ralphId: ralph.id, maxIterations: ralph.maxIterations }),
+                        };
+                    }
+                    state.ralphState.set(ralph.id, { iteration: current.iteration, done: true });
+                    advanced = true;
+                    continue;
+                }
+                const wantsContinueAsNew = ralph.continueAsNewEvery != null &&
+                    ralph.continueAsNewEvery > 0 &&
+                    nextIteration > 0 &&
+                    nextIteration % ralph.continueAsNewEvery === 0;
+                if (wantsContinueAsNew && (hasInProgress || schedule.pendingExists)) {
+                    continue;
+                }
+                state.ralphState.set(ralph.id, { iteration: nextIteration, done: false });
+                if (wantsContinueAsNew) {
+                    return {
+                        _tag: "ContinueAsNew",
+                        transition: {
+                            reason: "loop-threshold",
+                            iteration: nextIteration,
+                            statePayload: ralphStatePayload(),
+                        },
+                    };
+                }
+                advanced = true;
+            }
+            if (advanced) {
+                return { _tag: "ReRender", context: renderContext(state) };
+            }
+        }
         if (schedule.pendingExists) {
             if (schedule.nextRetryAtMs != null) {
                 return {
@@ -495,44 +552,6 @@ export function makeWorkflowSession(options = {}) {
         failure = unhandledFailureDecision(recoveryKeys);
         if (failure) {
             return failure;
-        }
-        if (schedule.readyRalphs.length > 0) {
-            for (const ralph of schedule.readyRalphs) {
-                const current = state.ralphState.get(ralph.id) ?? {
-                    iteration: 0,
-                    done: false,
-                };
-                if (ralph.until) {
-                    state.ralphState.set(ralph.id, { ...current, done: true });
-                    continue;
-                }
-                const nextIteration = current.iteration + 1;
-                if (nextIteration >= ralph.maxIterations) {
-                    if (ralph.onMaxReached === "fail") {
-                        return {
-                            _tag: "Failed",
-                            error: new SmithersError("RALPH_MAX_REACHED", `Ralph ${ralph.id} reached maxIterations ${ralph.maxIterations}.`, { ralphId: ralph.id, maxIterations: ralph.maxIterations }),
-                        };
-                    }
-                    state.ralphState.set(ralph.id, { iteration: current.iteration, done: true });
-                    continue;
-                }
-                state.ralphState.set(ralph.id, { iteration: nextIteration, done: false });
-                if (ralph.continueAsNewEvery != null &&
-                    ralph.continueAsNewEvery > 0 &&
-                    nextIteration > 0 &&
-                    nextIteration % ralph.continueAsNewEvery === 0) {
-                    return {
-                        _tag: "ContinueAsNew",
-                        transition: {
-                            reason: "loop-threshold",
-                            iteration: nextIteration,
-                            statePayload: ralphStatePayload(),
-                        },
-                    };
-                }
-            }
-            return { _tag: "ReRender", context: renderContext(state) };
         }
         if (options.requireStableFinish && state.graph) {
             const signature = mountedSignature(state.graph);

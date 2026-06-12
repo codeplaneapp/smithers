@@ -6573,7 +6573,257 @@ async function runWorkflowBodyLegacy(workflow, opts) {
                 .filter((task) => !schedulerTaskKeys.has(makeSchedulerTaskKey(task)))
                 .slice(0, localCapacity);
             void Effect.runPromise(Metric.set(schedulerQueueDepth, schedule.runnable.length - runnable.length));
+            const advanceReadyRalphs = async ({ allowContinueAsNew }) => {
+                    // Re-evaluate each ralph's `until` with the correct per-ralph
+                    // iteration context.  The plan tree's `until` was rendered with
+                    // `defaultIteration` which may not reflect each ralph's own
+                    // iteration (especially with multiple parallel loops).  When
+                    // there is a single ralph, `defaultIteration` already tracks
+                    // it correctly, so skip the extra work.
+                    const freshUntilMap = new Map();
+                    if (!singleRalphId) {
+                        const freshOutputs = await loadOutputs(db, schema, runId);
+                        const evalRenderer = new SmithersRenderer();
+                        for (const ralph of schedule.readyRalphs) {
+                            const rState = ralphState.get(ralph.id);
+                            const ralphIteration = rState?.iteration ?? 0;
+                            const perRalphCtx = new SmithersCtx({
+                                runId,
+                                iteration: ralphIteration,
+                                iterations: ralphIterationsObject(ralphState),
+                                input: inputRow,
+                                auth: runAuth,
+                                outputs: freshOutputs,
+                                zodToKeyName: workflow.zodToKeyName,
+                            });
+                            const { xml: freshXml } = await evalRenderer.render(workflowRef.build(perRalphCtx), {
+                                ralphIterations: ralphIterationsFromState(ralphState),
+                                defaultIteration: ralphIteration,
+                                baseRootDir: rootDir,
+                                workflowPath: resolvedWorkflowPath,
+                            });
+                            const { ralphs: freshRalphs } = buildPlanTree(freshXml, ralphState);
+                            const freshRalph = freshRalphs.find((r) => r.id === ralph.id);
+                            freshUntilMap.set(ralph.id, freshRalph?.until ?? ralph.until);
+                        }
+                    }
+                    let advancedAnyRalph = false;
+                    for (const ralph of schedule.readyRalphs) {
+                        const state = ralphState.get(ralph.id) ?? {
+                            iteration: defaultIteration,
+                            done: false,
+                        };
+                        const freshUntil = freshUntilMap.get(ralph.id) ?? ralph.until;
+                        if (state.done || freshUntil) {
+                            // Fresh re-evaluation says the condition is now met — mark done.
+                            if (freshUntil && !state.done) {
+                                ralphState.set(ralph.id, { ...state, done: true });
+                                advancedAnyRalph = true;
+                                await Effect.runPromise(adapter.insertOrUpdateRalph({
+                                    runId,
+                                    ralphId: ralph.id,
+                                    iteration: state.iteration,
+                                    done: true,
+                                    updatedAtMs: nowMs(),
+                                }));
+                            }
+                            continue;
+                        }
+                        const continueAsNewEvery = ralph.continueAsNewEvery;
+                        const nextIteration = state.iteration + 1;
+                        const shouldContinueAsNew = typeof continueAsNewEvery === "number" &&
+                            continueAsNewEvery > 0 &&
+                            nextIteration % continueAsNewEvery === 0;
+                        if (shouldContinueAsNew) {
+                            if (!allowContinueAsNew) {
+                                // Defer the run-level loop-threshold handoff until
+                                // the run is quiescent (#267).
+                                continue;
+                            }
+                            if (continueAsNewEvery === 1) {
+                                logWarning("continue-as-new threshold is 1; this can create high handoff overhead", {
+                                    runId,
+                                    ralphId: ralph.id,
+                                    continueAsNewEvery,
+                                    iteration: state.iteration,
+                                }, "engine:continue-as-new");
+                            }
+                            if (runAbortController.signal.aborted) {
+                                continue;
+                            }
+                            const latestRun = await Effect.runPromise(adapter.getRun(runId));
+                            if (latestRun?.cancelRequestedAtMs) {
+                                runAbortController.abort();
+                                continue;
+                            }
+                            const nextRalphState = cloneRalphStateMap(ralphState);
+                            nextRalphState.set(ralph.id, {
+                                iteration: nextIteration,
+                                done: false,
+                            });
+                            const continuationIteration = state.iteration;
+                            let transition;
+                            try {
+                                transition = await Effect.runPromise(Effect.tryPromise({
+                                    try: () => continueRunAsNew({
+                                        db,
+                                        adapter,
+                                        schema,
+                                        inputTable,
+                                        runId,
+                                        workflowPath: resolvedWorkflowPath ??
+                                            opts.workflowPath ??
+                                            latestRun?.workflowPath ??
+                                            null,
+                                        runMetadata,
+                                        currentFrameNo: frameNo,
+                                        continuation: {
+                                            reason: "loop-threshold",
+                                            iteration: continuationIteration,
+                                            loopId: ralph.id,
+                                            continueAsNewEvery,
+                                            statePayload: {
+                                                loopId: ralph.id,
+                                                continueAsNewEvery,
+                                                nextIteration,
+                                            },
+                                            nextRalphState,
+                                        },
+                                        ralphState,
+                                    }),
+                                    catch: (cause) => toSmithersError(cause, "continue-as-new loop transition"),
+                                }).pipe(Effect.annotateLogs({
+                                    runId,
+                                    ralphId: ralph.id,
+                                    iteration: continuationIteration,
+                                    continueAsNewEvery,
+                                }), Effect.withLogSpan("engine:continue-as-new")));
+                            }
+                            catch (error) {
+                                if (error?.code === "RUN_CANCELLED") {
+                                    runAbortController.abort();
+                                    continue;
+                                }
+                                throw error;
+                            }
+                            const continuationEvent = {
+                                type: "RunContinuedAsNew",
+                                runId,
+                                newRunId: transition.newRunId,
+                                iteration: continuationIteration,
+                                carriedStateSize: transition.carriedStateBytes,
+                                ancestryDepth: transition.ancestryDepth,
+                                timestampMs: nowMs(),
+                            };
+                            eventBus.emit("event", continuationEvent);
+                            Effect.runSync(trackEvent(continuationEvent));
+                            logInfo(`Continuing run ${runId} as ${transition.newRunId} at iteration ${continuationIteration}`, {
+                                runId,
+                                newRunId: transition.newRunId,
+                                iteration: continuationIteration,
+                                carriedStateBytes: transition.carriedStateBytes,
+                            }, "engine:continue-as-new");
+                            void Effect.runPromise(Metric.update(runDuration, performance.now() - runStartPerformanceMs));
+                            await annotateRunSpan({
+                                status: "continued",
+                            });
+                            return {
+                                type: "return",
+                                result: {
+                                    runId,
+                                    status: "continued",
+                                    nextRunId: transition.newRunId,
+                                },
+                            };
+                        }
+                        if (state.iteration + 1 < ralph.maxIterations) {
+                            state.iteration += 1;
+                            advancedAnyRalph = true;
+                            ralphState.set(ralph.id, { ...state, done: false });
+                            if (singleRalphId && ralph.id === singleRalphId) {
+                                defaultIteration = state.iteration;
+                            }
+                            await Effect.runPromise(adapter.insertOrUpdateRalph({
+                                runId,
+                                ralphId: ralph.id,
+                                iteration: state.iteration,
+                                done: false,
+                                updatedAtMs: nowMs(),
+                            }));
+                            continue;
+                        }
+                        if (ralph.onMaxReached === "fail") {
+                            await Effect.runPromise(adapter.updateRun(runId, {
+                                status: "failed",
+                                finishedAtMs: nowMs(),
+                                heartbeatAtMs: null,
+                                runtimeOwnerId: null,
+                                cancelRequestedAtMs: null,
+                                hijackRequestedAtMs: null,
+                                hijackTarget: null,
+                                errorJson: JSON.stringify({
+                                    code: "RALPH_MAX_REACHED",
+                                    ralphId: ralph.id,
+                                }),
+                            }));
+                            await Effect.runPromise(eventBus.emitEventWithPersist({
+                                type: "RunFailed",
+                                runId,
+                                error: { code: "RALPH_MAX_REACHED", ralphId: ralph.id },
+                                timestampMs: nowMs(),
+                            }));
+                            await annotateRunSpan({
+                                status: "failed",
+                            });
+                            return {
+                                type: "return",
+                                result: {
+                                    runId,
+                                    status: "failed",
+                                    error: { code: "RALPH_MAX_REACHED", ralphId: ralph.id },
+                                },
+                            };
+                        }
+                        ralphState.set(ralph.id, { ...state, done: true });
+                        advancedAnyRalph = true;
+                        await Effect.runPromise(adapter.insertOrUpdateRalph({
+                            runId,
+                            ralphId: ralph.id,
+                            iteration: state.iteration,
+                            done: true,
+                            updatedAtMs: nowMs(),
+                        }));
+                    }
+                    if (!advancedAnyRalph) {
+                        return null;
+                    }
+                    offerSchedulerTrigger({
+                        type: "external-event",
+                        source: "render",
+                    });
+                    return { type: "continue" };
+            };
             if (runnable.length === 0) {
+                if (schedule.readyRalphs.length > 0 && !schedule.fatalError) {
+                    // Advance ready loops even while unrelated work is in flight
+                    // or pending elsewhere — a ralph is ready only when its own
+                    // subtree is terminal, so other pipelines must not starve its
+                    // next iteration (#267). Run-level continue-as-new handoffs
+                    // remain quiescence-only, and an unhandled task failure keeps
+                    // its precedence over further loop iterations.
+                    const hasUnhandledFailedTask = tasks.some((t) => {
+                        const state = stateMap.get(buildStateKey(t.nodeId, t.iteration));
+                        return state === "failed" && !t.continueOnFail;
+                    });
+                    if (!hasUnhandledFailedTask) {
+                        const ralphDecision = await advanceReadyRalphs({
+                            allowContinueAsNew: schedulerTaskKeys.size === 0 && !schedule.pendingExists,
+                        });
+                        if (ralphDecision) {
+                            return ralphDecision;
+                        }
+                    }
+                }
                 if (schedulerTaskKeys.size > 0) {
                     return { type: "await-trigger" };
                 }
@@ -6852,224 +7102,6 @@ async function runWorkflowBodyLegacy(workflow, opts) {
                             waitMs,
                         };
                     }
-                    return { type: "continue" };
-                }
-                if (schedule.readyRalphs.length > 0) {
-                    // Re-evaluate each ralph's `until` with the correct per-ralph
-                    // iteration context.  The plan tree's `until` was rendered with
-                    // `defaultIteration` which may not reflect each ralph's own
-                    // iteration (especially with multiple parallel loops).  When
-                    // there is a single ralph, `defaultIteration` already tracks
-                    // it correctly, so skip the extra work.
-                    const freshUntilMap = new Map();
-                    if (!singleRalphId) {
-                        const freshOutputs = await loadOutputs(db, schema, runId);
-                        const evalRenderer = new SmithersRenderer();
-                        for (const ralph of schedule.readyRalphs) {
-                            const rState = ralphState.get(ralph.id);
-                            const ralphIteration = rState?.iteration ?? 0;
-                            const perRalphCtx = new SmithersCtx({
-                                runId,
-                                iteration: ralphIteration,
-                                iterations: ralphIterationsObject(ralphState),
-                                input: inputRow,
-                                auth: runAuth,
-                                outputs: freshOutputs,
-                                zodToKeyName: workflow.zodToKeyName,
-                            });
-                            const { xml: freshXml } = await evalRenderer.render(workflowRef.build(perRalphCtx), {
-                                ralphIterations: ralphIterationsFromState(ralphState),
-                                defaultIteration: ralphIteration,
-                                baseRootDir: rootDir,
-                                workflowPath: resolvedWorkflowPath,
-                            });
-                            const { ralphs: freshRalphs } = buildPlanTree(freshXml, ralphState);
-                            const freshRalph = freshRalphs.find((r) => r.id === ralph.id);
-                            freshUntilMap.set(ralph.id, freshRalph?.until ?? ralph.until);
-                        }
-                    }
-                    for (const ralph of schedule.readyRalphs) {
-                        const state = ralphState.get(ralph.id) ?? {
-                            iteration: defaultIteration,
-                            done: false,
-                        };
-                        const freshUntil = freshUntilMap.get(ralph.id) ?? ralph.until;
-                        if (state.done || freshUntil) {
-                            // Fresh re-evaluation says the condition is now met — mark done.
-                            if (freshUntil && !state.done) {
-                                ralphState.set(ralph.id, { ...state, done: true });
-                                await Effect.runPromise(adapter.insertOrUpdateRalph({
-                                    runId,
-                                    ralphId: ralph.id,
-                                    iteration: state.iteration,
-                                    done: true,
-                                    updatedAtMs: nowMs(),
-                                }));
-                            }
-                            continue;
-                        }
-                        const continueAsNewEvery = ralph.continueAsNewEvery;
-                        const nextIteration = state.iteration + 1;
-                        const shouldContinueAsNew = typeof continueAsNewEvery === "number" &&
-                            continueAsNewEvery > 0 &&
-                            nextIteration % continueAsNewEvery === 0;
-                        if (shouldContinueAsNew) {
-                            if (continueAsNewEvery === 1) {
-                                logWarning("continue-as-new threshold is 1; this can create high handoff overhead", {
-                                    runId,
-                                    ralphId: ralph.id,
-                                    continueAsNewEvery,
-                                    iteration: state.iteration,
-                                }, "engine:continue-as-new");
-                            }
-                            if (runAbortController.signal.aborted) {
-                                continue;
-                            }
-                            const latestRun = await Effect.runPromise(adapter.getRun(runId));
-                            if (latestRun?.cancelRequestedAtMs) {
-                                runAbortController.abort();
-                                continue;
-                            }
-                            const nextRalphState = cloneRalphStateMap(ralphState);
-                            nextRalphState.set(ralph.id, {
-                                iteration: nextIteration,
-                                done: false,
-                            });
-                            const continuationIteration = state.iteration;
-                            let transition;
-                            try {
-                                transition = await Effect.runPromise(Effect.tryPromise({
-                                    try: () => continueRunAsNew({
-                                        db,
-                                        adapter,
-                                        schema,
-                                        inputTable,
-                                        runId,
-                                        workflowPath: resolvedWorkflowPath ??
-                                            opts.workflowPath ??
-                                            latestRun?.workflowPath ??
-                                            null,
-                                        runMetadata,
-                                        currentFrameNo: frameNo,
-                                        continuation: {
-                                            reason: "loop-threshold",
-                                            iteration: continuationIteration,
-                                            loopId: ralph.id,
-                                            continueAsNewEvery,
-                                            statePayload: {
-                                                loopId: ralph.id,
-                                                continueAsNewEvery,
-                                                nextIteration,
-                                            },
-                                            nextRalphState,
-                                        },
-                                        ralphState,
-                                    }),
-                                    catch: (cause) => toSmithersError(cause, "continue-as-new loop transition"),
-                                }).pipe(Effect.annotateLogs({
-                                    runId,
-                                    ralphId: ralph.id,
-                                    iteration: continuationIteration,
-                                    continueAsNewEvery,
-                                }), Effect.withLogSpan("engine:continue-as-new")));
-                            }
-                            catch (error) {
-                                if (error?.code === "RUN_CANCELLED") {
-                                    runAbortController.abort();
-                                    continue;
-                                }
-                                throw error;
-                            }
-                            const continuationEvent = {
-                                type: "RunContinuedAsNew",
-                                runId,
-                                newRunId: transition.newRunId,
-                                iteration: continuationIteration,
-                                carriedStateSize: transition.carriedStateBytes,
-                                ancestryDepth: transition.ancestryDepth,
-                                timestampMs: nowMs(),
-                            };
-                            eventBus.emit("event", continuationEvent);
-                            Effect.runSync(trackEvent(continuationEvent));
-                            logInfo(`Continuing run ${runId} as ${transition.newRunId} at iteration ${continuationIteration}`, {
-                                runId,
-                                newRunId: transition.newRunId,
-                                iteration: continuationIteration,
-                                carriedStateBytes: transition.carriedStateBytes,
-                            }, "engine:continue-as-new");
-                            void Effect.runPromise(Metric.update(runDuration, performance.now() - runStartPerformanceMs));
-                            await annotateRunSpan({
-                                status: "continued",
-                            });
-                            return {
-                                type: "return",
-                                result: {
-                                    runId,
-                                    status: "continued",
-                                    nextRunId: transition.newRunId,
-                                },
-                            };
-                        }
-                        if (state.iteration + 1 < ralph.maxIterations) {
-                            state.iteration += 1;
-                            ralphState.set(ralph.id, { ...state, done: false });
-                            if (singleRalphId && ralph.id === singleRalphId) {
-                                defaultIteration = state.iteration;
-                            }
-                            await Effect.runPromise(adapter.insertOrUpdateRalph({
-                                runId,
-                                ralphId: ralph.id,
-                                iteration: state.iteration,
-                                done: false,
-                                updatedAtMs: nowMs(),
-                            }));
-                            continue;
-                        }
-                        if (ralph.onMaxReached === "fail") {
-                            await Effect.runPromise(adapter.updateRun(runId, {
-                                status: "failed",
-                                finishedAtMs: nowMs(),
-                                heartbeatAtMs: null,
-                                runtimeOwnerId: null,
-                                cancelRequestedAtMs: null,
-                                hijackRequestedAtMs: null,
-                                hijackTarget: null,
-                                errorJson: JSON.stringify({
-                                    code: "RALPH_MAX_REACHED",
-                                    ralphId: ralph.id,
-                                }),
-                            }));
-                            await Effect.runPromise(eventBus.emitEventWithPersist({
-                                type: "RunFailed",
-                                runId,
-                                error: { code: "RALPH_MAX_REACHED", ralphId: ralph.id },
-                                timestampMs: nowMs(),
-                            }));
-                            await annotateRunSpan({
-                                status: "failed",
-                            });
-                            return {
-                                type: "return",
-                                result: {
-                                    runId,
-                                    status: "failed",
-                                    error: { code: "RALPH_MAX_REACHED", ralphId: ralph.id },
-                                },
-                            };
-                        }
-                        ralphState.set(ralph.id, { ...state, done: true });
-                        await Effect.runPromise(adapter.insertOrUpdateRalph({
-                            runId,
-                            ralphId: ralph.id,
-                            iteration: state.iteration,
-                            done: true,
-                            updatedAtMs: nowMs(),
-                        }));
-                    }
-                    offerSchedulerTrigger({
-                        type: "external-event",
-                        source: "render",
-                    });
                     return { type: "continue" };
                 }
                 // Guard against premature completion when conditional children

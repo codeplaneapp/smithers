@@ -229,6 +229,10 @@ export class WorkflowDriver {
     outputTablesByNodeId = new Map();
     /** @type {OutputSnapshot} */
     baseOutputs = {};
+    /** @type {Map<string, Promise<{ key: string; task: TaskDescriptor; kind: "completed" | "failed" | "cancelled"; output?: unknown; error?: unknown }>>} */
+    inflightTasks = new Map();
+    /** @type {Array<{ key: string; task: TaskDescriptor; kind: "completed" | "failed" | "cancelled"; output?: unknown; error?: unknown }>} */
+    settledTasks = [];
     /**
      * @param {import("./WorkflowDriverOptions.ts").WorkflowDriverOptions<Schema>} options
      */
@@ -298,10 +302,12 @@ export class WorkflowDriver {
                     break;
                 }
                 case "ContinueAsNew":
+                    await this.drainInflight();
                     return this.continueAsNew(decision.transition);
                 case "Finished":
                     return decision.result;
                 case "Failed":
+                    await this.drainInflight();
                     return { runId, status: "failed", error: decision.error };
                 default:
                     return {
@@ -386,47 +392,98 @@ export class WorkflowDriver {
         if (context.signal?.aborted) {
             return this.cancelRun();
         }
-        let latestDecision;
-        let cancelled = false;
+        for (const task of tasks) {
+            this.startInflightTask(task, context);
+        }
+        return this.nextCompletionDecision();
+    }
+    /**
+   * Start a task without blocking the driver loop on its completion. Settled
+   * tasks queue in `settledTasks` and are reported to the session one at a
+   * time from `nextCompletionDecision`, so each decision is computed against
+   * fresh session state and a slow task never blocks scheduling work that
+   * became ready elsewhere in the graph (#267).
+   * @param {TaskDescriptor} task
+   * @param {{ runId: string; options: RunOptions; signal?: AbortSignal }} context
+   */
+    startInflightTask(task, context) {
+        const key = `${task.nodeId}::${task.iteration}`;
+        if (this.inflightTasks.has(key)) {
+            return;
+        }
+        const promise = (async () => {
+            try {
+                const output = await withAbort(Promise.resolve().then(() => this.executeTask(task, context)), context.signal);
+                return { key, task, kind: /** @type {const} */ ("completed"), output };
+            }
+            catch (error) {
+                if (context.signal?.aborted || isAbortError(error)) {
+                    return { key, task, kind: /** @type {const} */ ("cancelled") };
+                }
+                return { key, task, kind: /** @type {const} */ ("failed"), error };
+            }
+        })().then((settled) => {
+            this.inflightTasks.delete(key);
+            this.settledTasks.push(settled);
+            return settled;
+        });
+        this.inflightTasks.set(key, promise);
+    }
+    /**
+   * Wait for the next settled task (or an optional deadline) and report it to
+   * the session for a fresh decision. Completions that landed while a previous
+   * one was being processed drain from `settledTasks` first.
+   * @param {number | null} [deadlineMs]
+   * @returns {Promise<EngineDecision | RunResult>}
+   */
+    async nextCompletionDecision(deadlineMs = null) {
+        if (!this.session) {
+            throw new Error("WorkflowSession is not initialized.");
+        }
         const waitStart = performance.now();
         try {
-            await Promise.all(tasks.map(async (task) => {
-                let report;
-                try {
-                    const output = await withAbort(Promise.resolve().then(() => this.executeTask(task, context)), context.signal);
-                    report = await this.runEffect(this.session.taskCompleted({
-                        nodeId: task.nodeId,
-                        iteration: task.iteration,
-                        output,
-                    }));
+            if (this.settledTasks.length === 0 && this.inflightTasks.size > 0) {
+                const racers = [...this.inflightTasks.values()];
+                if (deadlineMs != null) {
+                    racers.push(sleepWithAbort(deadlineMs, this.activeOptions?.signal).then(() => null));
                 }
-                catch (error) {
-                    if (context.signal?.aborted || isAbortError(error)) {
-                        cancelled = true;
-                        return;
-                    }
-                    report = await this.runEffect(this.session.taskFailed({
-                        nodeId: task.nodeId,
-                        iteration: task.iteration,
-                        error,
-                    }));
-                }
-                if (isEngineDecision(report)) {
-                    latestDecision = report;
-                }
-            }));
+                await Promise.race(racers);
+            }
         }
         finally {
             await this.onSchedulerWait?.(performance.now() - waitStart, {
                 runId: this.activeRunId,
-                tasks,
+                tasks: [],
             });
         }
-        if (cancelled || context.signal?.aborted) {
+        if (this.activeOptions?.signal?.aborted) {
             return this.cancelRun();
         }
-        if (latestDecision) {
-            return latestDecision;
+        const settled = this.settledTasks.shift();
+        if (!settled) {
+            // Deadline elapsed (retry backoff / timer) without a completion —
+            // re-submit the last graph for a fresh decision.
+            if (this.lastGraph) {
+                return this.runEffect(this.session.submitGraph(this.lastGraph));
+            }
+            return { runId: this.activeRunId, status: "waiting-event" };
+        }
+        if (settled.kind === "cancelled") {
+            return this.cancelRun();
+        }
+        const report = settled.kind === "completed"
+            ? await this.runEffect(this.session.taskCompleted({
+                nodeId: settled.task.nodeId,
+                iteration: settled.task.iteration,
+                output: settled.output,
+            }))
+            : await this.runEffect(this.session.taskFailed({
+                nodeId: settled.task.nodeId,
+                iteration: settled.task.iteration,
+                error: settled.error,
+            }));
+        if (isEngineDecision(report)) {
+            return report;
         }
         if (typeof this.session.getNextDecision === "function") {
             return this.runEffect(this.session.getNextDecision());
@@ -434,10 +491,36 @@ export class WorkflowDriver {
         throw new Error("WorkflowSession did not provide the next EngineDecision.");
     }
     /**
+   * Await every in-flight task without reporting further decisions. Used
+   * before run-level exits (failure, continue-as-new) so task executors are
+   * not abandoned mid-write. This matches the pre-#267 barrier semantics:
+   * failure reporting waits for in-flight siblings (bounded by their
+   * timeouts), trading latency for the invariant that no executor writes
+   * after the run is terminal. Fail-fast would need a per-run abort threaded
+   * through executors.
+   */
+    async drainInflight() {
+        while (this.inflightTasks.size > 0) {
+            await Promise.allSettled([...this.inflightTasks.values()]);
+        }
+        this.settledTasks.length = 0;
+    }
+    /**
    * @param {WaitReason} reason
    * @returns {Promise<EngineDecision | RunResult>}
    */
     async handleWait(reason) {
+        if (this.inflightTasks.size > 0 || this.settledTasks.length > 0) {
+            // Work is still in flight — consume the next completion instead of
+            // suspending the run. Deadline-style waits keep their deadline so a
+            // retry backoff or timer elsewhere in the graph still fires on time.
+            const deadlineMs = reason._tag === "RetryBackoff"
+                ? Math.max(0, reason.waitMs)
+                : reason._tag === "Timer"
+                    ? Math.max(0, reason.resumeAtMs - Date.now())
+                    : null;
+            return this.nextCompletionDecision(deadlineMs);
+        }
         if (this.onWait) {
             return this.onWait(reason, {
                 runId: this.activeRunId,
