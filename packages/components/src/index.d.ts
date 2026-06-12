@@ -799,35 +799,41 @@ type BranchProps$2 = {
 
 /**
  * Token budget configuration for Aspects.
+ *
+ * Runtime enforcement is not implemented yet; this is declarative metadata.
  */
 type TokenBudgetConfig = {
     /** Maximum total tokens across all tasks within the Aspects scope. */
     max: number;
     /** Optional per-task token limit. */
     perTask?: number;
-    /** Behavior when the budget is exceeded. Default: "fail". */
+    /** Requested future behavior when the budget is exceeded. Default: "fail". */
     onExceeded?: "fail" | "warn" | "skip-remaining";
 };
 
 /**
  * Latency SLO configuration for Aspects.
+ *
+ * Runtime enforcement is not implemented yet; this is declarative metadata.
  */
 type LatencySloConfig = {
     /** Maximum total latency in milliseconds across all tasks. */
     maxMs: number;
     /** Optional per-task latency limit in milliseconds. */
     perTask?: number;
-    /** Behavior when the SLO is exceeded. Default: "fail". */
+    /** Requested future behavior when the SLO is exceeded. Default: "fail". */
     onExceeded?: "fail" | "warn";
 };
 
 /**
  * Cost budget configuration for Aspects.
+ *
+ * Runtime enforcement is not implemented yet; this is declarative metadata.
  */
 type CostBudgetConfig = {
     /** Maximum total cost in USD across all tasks within the Aspects scope. */
     maxUsd: number;
-    /** Behavior when the budget is exceeded. Default: "fail". */
+    /** Requested future behavior when the budget is exceeded. Default: "fail". */
     onExceeded?: "fail" | "warn" | "skip-remaining";
 };
 
@@ -844,11 +850,11 @@ type TrackingConfig = {
 };
 
 type AspectsProps$2 = {
-    /** Token budget — max total tokens, optional per-task limit, and exceeded behavior. */
+    /** Token budget metadata. Runtime enforcement is not implemented yet. */
     tokenBudget?: TokenBudgetConfig;
-    /** Latency SLO — max total latency, optional per-task limit, and exceeded behavior. */
+    /** Latency SLO metadata. Runtime enforcement is not implemented yet. */
     latencySlo?: LatencySloConfig;
-    /** Cost budget — max total USD, and exceeded behavior. */
+    /** Cost budget metadata. Runtime enforcement is not implemented yet. */
     costBudget?: CostBudgetConfig;
     /** Which metrics to track. Defaults to all enabled. */
     tracking?: TrackingConfig;
@@ -1414,7 +1420,8 @@ type AspectContextValue = {
  *
  * Wraps a section of the workflow tree and propagates token budgets,
  * latency SLOs, and cost budgets to all descendant Task components
- * without modifying individual tasks.
+ * without modifying individual tasks. Runtime budget enforcement is not
+ * implemented yet.
  *
  * ```tsx
  * <Aspects tokenBudget={{ max: 100_000, perTask: 20_000, onExceeded: "warn" }}>

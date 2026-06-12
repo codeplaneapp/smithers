@@ -128,7 +128,7 @@ try {
 | `CONTEXT_OUTSIDE_WORKFLOW` | Workflow context access happens outside an active Smithers workflow render. | -- |
 | `MISSING_OUTPUT` | Code calls `ctx.output()` for a node result that does not exist. | `{ nodeId, iteration }` |
 | `DEP_NOT_SATISFIED` | A typed dep on `<Task>` references an upstream output that has not been produced yet. | `{ taskId, depKey, resolvedNodeId }` |
-| `ASPECT_BUDGET_EXCEEDED` | An Aspects budget (tokens, latency, or cost) has been exceeded. | `{ kind, limit, current }` |
+| `ASPECT_BUDGET_EXCEEDED` | Reserved for future Aspects budget enforcement; the runtime does not emit this code yet. | `{ kind, limit, current }` |
 | `APPROVAL_OUTSIDE_TASK` | `<Approval>` is resolved outside the active task runtime. | -- |
 | `APPROVAL_OPTIONS_REQUIRED` | An approval mode that requires explicit options is missing them. | -- |
 | `WORKFLOW_MISSING_DEFAULT` | A workflow module does not export a default Smithers workflow. | -- |

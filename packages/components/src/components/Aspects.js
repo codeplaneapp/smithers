@@ -9,7 +9,8 @@ import { AspectContext, createAccumulator, } from "../aspects/AspectContext.js";
  *
  * Wraps a section of the workflow tree and propagates token budgets,
  * latency SLOs, and cost budgets to all descendant Task components
- * without modifying individual tasks.
+ * without modifying individual tasks. Runtime budget enforcement is not
+ * implemented yet.
  *
  * ```tsx
  * <Aspects tokenBudget={{ max: 100_000, perTask: 20_000, onExceeded: "warn" }}>

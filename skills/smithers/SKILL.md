@@ -226,7 +226,7 @@ below).
 The same substrate carries the concerns you'd otherwise bolt on later:
 
 - **Isolation**: `<Worktree>` (per-agent git worktrees), `<Sandbox>` (freestyle / docker / process), `<Subflow>` & `<SuperSmithers>` (nest a workflow as a node).
-- **Budgets**: `<Aspects>` propagates token / latency / cost budgets to a subtree (`fail` | `warn` | `skip-remaining`).
+- **Budgets**: `<Aspects>` propagates token / latency / cost budget metadata to a subtree, but runtime enforcement is not implemented yet.
 - **Scorers / evals**: attach `faithfulness`, `relevancy`, `schemaAdherence`, or `llmJudge(...)` to any `<Task>`; inspect with `smithers scores <run>`.
 - **Memory**: cross-run facts + history per namespace; `memory={{ recall, save }}` auto-injects the top-K relevant facts; query with `smithers memory`.
 - **Hot mode**: `--hot true` re-renders against persisted state when you edit the workflow or an `.mdx` prompt mid-run; finished tasks stay put.

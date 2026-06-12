@@ -218,8 +218,8 @@ export function Task(props) {
         // This is normal reactive behavior; the task will re-render once deps are ready.
         return null;
     }
-    // Build aspect metadata to attach to the task element so the engine can
-    // enforce budgets and tracking at execution time.
+    // Build aspect metadata to attach to the task element. Budget metadata is
+    // declarative only until runtime enforcement is implemented.
     const aspectMeta = aspectCtx ? buildAspectMeta(aspectCtx) : undefined;
     const agentChain = Array.isArray(agent)
         ? fallbackAgent
@@ -282,8 +282,8 @@ export function Task(props) {
 }
 /**
  * Build the __aspects metadata object from the current AspectContext.
- * This is attached to the smithers:task element props so the engine
- * can read budgets and tracking config at execution time.
+ * This is attached to the smithers:task element props. Budget metadata is not
+ * enforced by the runtime yet.
  * @param {{
  *     tokenBudget?: unknown;
  *     latencySlo?: unknown;

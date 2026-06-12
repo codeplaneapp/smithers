@@ -5,11 +5,11 @@ import type { CostBudgetConfig } from "../aspects/CostBudgetConfig.ts";
 import type { TrackingConfig } from "../aspects/TrackingConfig.ts";
 
 export type AspectsProps = {
-	/** Token budget — max total tokens, optional per-task limit, and exceeded behavior. */
+	/** Token budget metadata. Runtime enforcement is not implemented yet. */
 	tokenBudget?: TokenBudgetConfig;
-	/** Latency SLO — max total latency, optional per-task limit, and exceeded behavior. */
+	/** Latency SLO metadata. Runtime enforcement is not implemented yet. */
 	latencySlo?: LatencySloConfig;
-	/** Cost budget — max total USD, and exceeded behavior. */
+	/** Cost budget metadata. Runtime enforcement is not implemented yet. */
 	costBudget?: CostBudgetConfig;
 	/** Which metrics to track. Defaults to all enabled. */
 	tracking?: TrackingConfig;

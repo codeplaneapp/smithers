@@ -1,6 +1,6 @@
 ---
 title: <Aspects>
-description: Propagate token, latency, and cost budgets to descendant tasks.
+description: Declare token, latency, and cost budgets for descendant tasks.
 ---
 
 ```ts
@@ -54,5 +54,6 @@ type AspectsProps = {
 ## Notes
 
 - Nested `<Aspects>` inherit outer budget configs wholesale. If an inner `<Aspects>` sets `tokenBudget`, `latencySlo`, or `costBudget`, that field's entire parent config object is replaced (no per-field merge). The `tracking` config is the exception: `tokens`, `latency`, and `cost` each fall back to the parent value independently.
-- Budgets enforce regardless of `tracking`; `tracking` controls metric emission only.
+- Budget props are not enforced by the runtime yet. They are currently declarative metadata reserved for future token, latency, and cost enforcement.
+- `tracking` controls metric emission only.
 - Accumulator is per-run and resets on resume.

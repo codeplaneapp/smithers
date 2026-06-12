@@ -10,7 +10,7 @@
 import React from "react";
 /**
  * React context that propagates Aspects configuration down the component tree.
- * Tasks read from this context to enforce budgets and track metrics.
+ * Budget configuration is declarative metadata and is not enforced yet.
  * @type {React.Context<AspectContextValue | null>}
  */
 export const AspectContext = React.createContext(/** @type {AspectContextValue | null} */ (null));
