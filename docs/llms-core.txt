@@ -1627,7 +1627,7 @@ Always invoke as `bunx smithers-orchestrator <command>` (see [Installation](/ins
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[70]:
+commands[71]:
   - name: init
     purpose: Install the workflow pack into .smithers/ (local) or ~/.smithers/ (--global)
     flags[6]{name,short,type,default,desc}:
@@ -1729,6 +1729,11 @@ commands[70]:
       interval,i,string,10s,Poll interval
       stale-threshold,t,string,30s,Heartbeat staleness threshold before resume
       max-concurrent,c,number,3,Max runs resumed per poll
+  - name: gateway
+    purpose: Serve the multi-run Gateway RPC/WS control plane for the workspace DB; unlike up --serve, this is not tied to one run
+    flags[2]{name,short,type,default,desc}:
+      host,H,string,127.0.0.1,Gateway bind address
+      port,p,number,7331,Gateway port
   - name: ps
     purpose: List active, paused, and recently completed runs
     flags[5]{name,short,type,default,desc}:

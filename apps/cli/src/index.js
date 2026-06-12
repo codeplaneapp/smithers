@@ -29,7 +29,7 @@ import { spawn } from "node:child_process";
 import { buildAgentAskRequestRow, isHumanRequestPastTimeout, validateHumanRequestValue, waitForHumanAnswer, } from "@smithers-orchestrator/engine/human-requests";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { assertMaxBytes, assertMaxStringLength } from "@smithers-orchestrator/db/input-bounds";
-import { findAndOpenDb } from "./find-db.js";
+import { findAndOpenDb, findSmithersDb } from "./find-db.js";
 import { buildAskKindFields, buildAskPromptText, buildAskUniqueToken, formatAskHumanResolveHelp, parseChoices, resolveAskHumanContext, } from "./ask-human.js";
 import { chatAttemptKey, formatChatAttemptHeader, formatChatBlock, parseAgentEvent, parseChatAttemptMeta, parseNodeOutputEvent, selectChatAttempts, } from "./chat.js";
 import { buildHijackLaunchSpec, isNativeHijackCandidate, launchHijackSession, resolveHijackCandidate, waitForHijackCandidate, } from "./hijack.js";
@@ -1322,6 +1322,10 @@ const superviseOptions = z.object({
     staleThreshold: z.string().default("30s").describe("Heartbeat staleness threshold before resume"),
     maxConcurrent: z.number().int().min(1).default(3).describe("Max runs resumed per poll"),
 });
+const gatewayOptions = z.object({
+    host: z.string().default("127.0.0.1").describe("Gateway bind address"),
+    port: z.number().int().min(1).default(7331).describe("Gateway port"),
+});
 const psOptions = z.object({
     status: z.string().optional().describe("Filter by status: running, waiting-approval, waiting-event, waiting-timer, continued, finished, failed, cancelled"),
     limit: z.number().int().min(1).default(20).describe("Maximum runs to return"),
@@ -1896,6 +1900,65 @@ async function executeUpCommand(c, workflowPath, options, fail) {
     catch (err) {
         return fail({ code: "RUN_FAILED", message: err?.message ?? String(err), exitCode: 1 });
     }
+}
+/**
+ * @param {{ host: string; port: number }} options
+ * @returns {Promise<{ url: string; workspace: string; dbPath: string; workflows: string[] }>}
+ */
+async function runGatewayCommand(options) {
+    const localPackDir = resolvePackDirs(process.cwd()).find((dir) => dir.scope === "local")?.packDir;
+    const localWorkspace = localPackDir ? dirname(localPackDir) : undefined;
+    const dbPath = localWorkspace
+        ? resolve(localWorkspace, "smithers.db")
+        : findSmithersDb(process.cwd());
+    const workspace = localWorkspace ?? dirname(dbPath);
+    process.chdir(workspace);
+    const [{ Gateway }, { createSmithers }] = await Promise.all([
+        import("@smithers-orchestrator/server/gateway"),
+        import("smithers-orchestrator"),
+    ]);
+    const gateway = new Gateway({ heartbeatMs: 15_000 });
+    const workspaceApi = createSmithers({}, { dbPath });
+    const workspaceWorkflow = workspaceApi.smithers(() => React.createElement(workspaceApi.Workflow, { name: "workspace" }));
+    ensureSmithersTables(workspaceWorkflow.db);
+    setupSqliteCleanup(workspaceWorkflow);
+    const workflows = [];
+    for (const discovered of discoverWorkflows(workspace)) {
+        try {
+            const workflow = await loadWorkflow(discovered.entryFile);
+            ensureSmithersTables(workflow.db);
+            setupSqliteCleanup(workflow);
+            gateway.register(discovered.id, workflow);
+            workflows.push(discovered.id);
+        }
+        catch (error) {
+            process.stderr.write(`[smithers] Skipping workflow ${discovered.id}: ${error?.message ?? String(error)}\n`);
+        }
+    }
+    if (workflows.length === 0) {
+        gateway.register("workspace", workspaceWorkflow);
+        workflows.push("workspace");
+    }
+    const server = await gateway.listen({ host: options.host, port: options.port });
+    const address = server.address();
+    const port = address && typeof address === "object" ? address.port : options.port;
+    const url = `http://${options.host}:${port}`;
+    process.stderr.write(`[smithers] Gateway listening on ${url}\n`);
+    process.stderr.write(`[smithers] Workspace: ${workspace}\n`);
+    process.stderr.write(`[smithers] Database: ${dbPath}\n`);
+    process.stderr.write(`[smithers] Registered workflows: ${workflows.join(", ")}\n`);
+    await new Promise((resolvePromise) => {
+        const shutdown = () => {
+            gateway.close()
+                .catch((error) => {
+                process.stderr.write(`[smithers] Gateway shutdown error: ${error?.message ?? String(error)}\n`);
+            })
+                .finally(resolvePromise);
+        };
+        process.once("SIGINT", shutdown);
+        process.once("SIGTERM", shutdown);
+    });
+    return { url, workspace, dbPath, workflows };
 }
 const workflowCli = Cli.create({
     name: "workflow",
@@ -2711,6 +2774,30 @@ const cli = Cli.create({
             return c.error(opts);
         };
         return executeUpCommand(c, c.args.workflow, c.options, fail);
+    },
+})
+    // =========================================================================
+    // smithers gateway
+    // =========================================================================
+    .command("gateway", {
+    description: "Serve the multi-run Gateway RPC/WS control plane for the workspace DB; unlike up --serve, this is not tied to one run.",
+    options: gatewayOptions,
+    alias: { host: "H", port: "p" },
+    async run(c) {
+        const fail = (opts) => {
+            commandExitOverride = opts.exitCode ?? 1;
+            return c.error(opts);
+        };
+        try {
+            const result = await runGatewayCommand(c.options);
+            return c.ok(result);
+        }
+        catch (err) {
+            if (err instanceof SmithersError) {
+                return fail({ code: err.code, message: err.message, exitCode: 4 });
+            }
+            return fail({ code: "GATEWAY_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+        }
     },
 })
     // =========================================================================
