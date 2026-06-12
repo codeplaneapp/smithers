@@ -110,19 +110,15 @@ describe("detectAvailableAgents", () => {
         expect(opencode.hasAuthSignal).toBe(true);
         expect(opencode.usable).toBe(true);
     });
-    test("generated agents.ts can use OpenCode with the local scaffold file", () => {
+    test("generated agents.ts rejects OpenCode-only defaults", () => {
         const home = tempHome();
         const binDir = createExecutableDir();
         writeFakeOpenCodeBinary(binDir);
         mkdirSync(join(home, ".local", "share", "opencode"), { recursive: true });
         writeFileSync(join(home, ".local", "share", "opencode", "auth.json"), "{}\n");
-        const source = generateAgentsTs(envWithPath(home, binDir), {
+        expect(() => generateAgentsTs(envWithPath(home, binDir), {
             cwd: home,
-        });
-        expect(source).toContain('import { OpenCodeAgent } from "./agents/opencode";');
-        expect(source).toContain('export { OpenCodeAgent } from "./agents/opencode";');
-        expect(source).toContain("opencode: OpenCodeAgent");
-        expect(source).not.toContain("OpenCodeAgent as SmithersOpenCodeAgent");
+        })).toThrow("required default pools");
     });
     test("google api key detected for gemini", () => {
         const results = detectAvailableAgents({

@@ -309,7 +309,7 @@ composite patterns. See [Components](https://smithers.sh/components/workflow).
 ## Deeper capabilities
 
 - **Observability**: every run emits Prometheus metrics and OpenTelemetry traces. Bring up
-  the local stack with `bunx smithers-orchestrator observability up` (Grafana, Prometheus, Tempo, OTLP
+  the local stack with `bunx smithers-orchestrator observability --detach` (Grafana, Prometheus, Tempo, OTLP
   collector) and serve metrics with `bunx smithers-orchestrator up workflow.tsx --serve --metrics`.
 - **Evals**: run repeatable workflow regressions from JSON/JSONL cases with
   `bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke`; the command exits
