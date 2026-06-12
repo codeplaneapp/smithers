@@ -55,11 +55,11 @@ Fixes [#240](https://github.com/smithersai/smithers/issues/240).
 
 ## Change: default model ids refreshed to the current generation
 
-The built-in provider defaults now point at the current model generation. `smithers init` scaffolding, the `ask` and `optimize` flows, and the documentation examples were all updated:
+The built-in provider defaults now point at the current model generation. `bunx smithers-orchestrator init` scaffolding, the `ask` and `optimize` flows, and the documentation examples were all updated:
 
 - Anthropic, Claude Code, and OpenCode-via-Anthropic default to `claude-fable-5`.
 - OpenAI, Codex, and Pi default to `gpt-5.5`.
 - Cerebras defaults to `zai-glm-4.7`.
 - Kimi and Moonshot default to `kimi-k2.6`.
 
-`smithers init` also scaffolds a Claude Opus (`claude-opus-4-8`) variant alongside Claude Sonnet, and derives the `smart`, `smartTool`, and `cheapFast` agent pools from provider families instead of placing every detected account in `smart`. If you pin models explicitly in your `.smithers/agents.ts`, nothing changes; the new ids only affect freshly scaffolded projects and unpinned defaults.
+`bunx smithers-orchestrator init` also scaffolds a Claude Opus (`claude-opus-4-8`) variant alongside Claude Sonnet, and derives the `smart`, `smartTool`, and `cheapFast` agent pools from provider families instead of placing every detected account in `smart`. If you pin models explicitly in your `.smithers/agents.ts`, nothing changes; the new ids only affect freshly scaffolded projects and unpinned defaults.
