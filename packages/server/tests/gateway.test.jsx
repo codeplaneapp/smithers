@@ -899,4 +899,86 @@ describe("Gateway", () => {
         expect(gateway.runRegistry.has(runId)).toBe(false);
         await client.close();
     });
+    test("streams persisted events from detached runs through the built-in bridge", async () => {
+        const dbPath = makeDbPath("detached-events");
+        dbPaths.push(dbPath);
+        const workflow = createValueWorkflow(dbPath);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["streaming", "runs"],
+            heartbeatMs: 100,
+            outOfProcessEventBridgePollMs: 25,
+            auth: {
+                mode: "token",
+                tokens: {
+                    "op-token": {
+                        role: "operator",
+                        scopes: ["*"],
+                        userId: "user:will",
+                    },
+                },
+            },
+        });
+        gateway.register("basic", workflow);
+        const adapter = gateway.adapterForWorkflow(workflow);
+        await adapter.insertRun({
+            runId: "detached-run",
+            workflowName: "gateway-basic",
+            status: "running",
+            createdAtMs: Date.now(),
+        });
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port = getPort(server);
+        const { client } = await connectGateway(port, "op-token");
+        const subscribed = await client.request("streamRunEvents", { runId: "detached-run" });
+        expect(subscribed.ok).toBe(true);
+        await adapter.insertEventWithNextSeq({
+            runId: "detached-run",
+            timestampMs: Date.now(),
+            type: "NodeStarted",
+            payloadJson: JSON.stringify({
+                type: "NodeStarted",
+                runId: "detached-run",
+                nodeId: "task1",
+            }),
+        });
+        const event = await client.waitFor((message) => message.type === "event" && message.event === "node.started");
+        expect(event.payload.runId).toBe("detached-run");
+        expect(event.payload.nodeId).toBe("task1");
+        await client.close();
+    });
+    test("does not replay persisted copies for in-process runs after registry cleanup", async () => {
+        const dbPath = makeDbPath("in-process-bridge-skip");
+        dbPaths.push(dbPath);
+        const workflow = createValueWorkflow(dbPath);
+        gateway = new Gateway({ heartbeatMs: 100 });
+        gateway.register("basic", workflow);
+        const adapter = gateway.adapterForWorkflow(workflow);
+        await adapter.insertRun({
+            runId: "in-process-run",
+            workflowName: "gateway-basic",
+            status: "running",
+            createdAtMs: Date.now(),
+        });
+        await adapter.insertEventWithNextSeq({
+            runId: "in-process-run",
+            timestampMs: Date.now(),
+            type: "NodeStarted",
+            payloadJson: JSON.stringify({
+                type: "NodeStarted",
+                runId: "in-process-run",
+                nodeId: "task1",
+            }),
+        });
+        let fed = 0;
+        gateway.handleSmithersEvent = () => {
+            fed += 1;
+        };
+        gateway.runRegistry.set("in-process-run", {});
+        await gateway.pollOutOfProcessRunEvents();
+        gateway.runRegistry.delete("in-process-run");
+        await adapter.updateRun("in-process-run", { status: "finished" });
+        await gateway.pollOutOfProcessRunEvents();
+        expect(fed).toBe(0);
+    });
 });

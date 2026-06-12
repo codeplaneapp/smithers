@@ -8644,11 +8644,17 @@ type GatewayOptions = {
   auth?: GatewayAuthConfig;
   ui?: GatewayUiConfig;              // custom gateway UI; true mounts the built-in console
   operatorUi?: GatewayOperatorUiConfig | false; // default { path: "/console" }; false disables
-  defaults?: { cliAgentTools?: "all" | "explicit-only" };
+  defaults?: {
+    cliAgentTools?: "all" | "explicit-only";
+    outOfProcessEventBridge?: boolean;
+    outOfProcessEventBridgePollMs?: number;
+  };
   maxBodyBytes?: number;             // default 1_048_576 for POST /rpc
   maxPayload?: number;               // default 1_048_576 for WebSocket frames
   maxConnections?: number;           // default 1_000
   eventWindowSize?: number;          // default 10_000 per-run replay frames
+  outOfProcessEventBridge?: boolean; // default true; streams persisted events from detached runs
+  outOfProcessEventBridgePollMs?: number; // default 1_000
   headersTimeout?: number;           // default 30_000
   requestTimeout?: number;           // default 60_000
 };

@@ -117,6 +117,8 @@ type GatewayAuthConfig$1 = {
 
 type GatewayDefaults$1 = {
     cliAgentTools?: "all" | "explicit-only";
+    outOfProcessEventBridge?: boolean;
+    outOfProcessEventBridgePollMs?: number;
 };
 
 type GatewayOperatorUiConfig$1 = {
@@ -177,6 +179,17 @@ type GatewayOptions$1 = {
      * @default 10000
      */
     eventWindowSize?: number;
+    /**
+     * Bridge persisted run events from the workspace DB into live Gateway streams
+     * for runs executed by another process.
+     * @default true
+     */
+    outOfProcessEventBridge?: boolean;
+    /**
+     * Poll interval (in milliseconds) for the out-of-process event bridge.
+     * @default 1000
+     */
+    outOfProcessEventBridgePollMs?: number;
     /**
      * Maximum time (in milliseconds) allowed for the HTTP parser to receive the
      * complete headers of a single request. Helps mitigate slowloris attacks.

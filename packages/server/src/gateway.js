@@ -134,7 +134,10 @@ const DEFAULT_MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_MAX_CONNECTIONS = 1_000;
 const DEFAULT_HEADERS_TIMEOUT = 30_000;
 const DEFAULT_REQUEST_TIMEOUT = 60_000;
+const DEFAULT_OUT_OF_PROCESS_EVENT_BRIDGE_POLL_MS = 1_000;
+const OUT_OF_PROCESS_EVENT_BRIDGE_PAGE_LIMIT = 500;
 const RUN_EVENT_HEARTBEAT_MS = 1_000;
+const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "continued"]);
 export const GATEWAY_RPC_MAX_PAYLOAD_BYTES = DEFAULT_MAX_BODY_BYTES;
 export const GATEWAY_RPC_MAX_DEPTH = 32;
 export const GATEWAY_RPC_MAX_ARRAY_LENGTH = 256;
@@ -1257,6 +1260,8 @@ export class Gateway {
     maxPayload;
     maxConnections;
     eventWindowSize;
+    outOfProcessEventBridge;
+    outOfProcessEventBridgePollMs;
     headersTimeout;
     requestTimeout;
     auth;
@@ -1303,6 +1308,10 @@ export class Gateway {
     server = null;
     wsServer = null;
     schedulerTimer = null;
+    outOfProcessEventBridgeTimer = null;
+    outOfProcessEventBridgeStopped = true;
+    outOfProcessEventBridgeLastFedSeq = new Map();
+    outOfProcessEventBridgeDrainedRuns = new Set();
     stateVersion = 0;
     startedAtMs = nowMs();
     /**
@@ -1324,6 +1333,10 @@ export class Gateway {
         this.eventWindowSize = options.eventWindowSize === undefined
             ? GATEWAY_EVENT_WINDOW_DEFAULT
             : Math.floor(assertPositiveFiniteInteger("eventWindowSize", Number(options.eventWindowSize)));
+        this.outOfProcessEventBridge = options.outOfProcessEventBridge ?? options.defaults?.outOfProcessEventBridge ?? true;
+        this.outOfProcessEventBridgePollMs = options.outOfProcessEventBridgePollMs === undefined && options.defaults?.outOfProcessEventBridgePollMs === undefined
+            ? DEFAULT_OUT_OF_PROCESS_EVENT_BRIDGE_POLL_MS
+            : Math.floor(assertPositiveFiniteInteger("outOfProcessEventBridgePollMs", Number(options.outOfProcessEventBridgePollMs ?? options.defaults?.outOfProcessEventBridgePollMs)));
         this.headersTimeout = options.headersTimeout === undefined
             ? DEFAULT_HEADERS_TIMEOUT
             : Math.floor(assertPositiveFiniteInteger("headersTimeout", Number(options.headersTimeout)));
@@ -2327,6 +2340,7 @@ export class Gateway {
         this.wsServer = wsServer;
         await this.syncRegisteredSchedules();
         this.startScheduler();
+        this.startOutOfProcessEventBridge();
         return server;
     }
     async close() {
@@ -2352,6 +2366,7 @@ export class Gateway {
             clearInterval(this.schedulerTimer);
             this.schedulerTimer = null;
         }
+        this.stopOutOfProcessEventBridge();
         if (this.server) {
             const server = this.server;
             this.server = null;
@@ -2388,6 +2403,121 @@ export class Gateway {
             void this.processDueCrons();
             void this.processDueTimers();
         }, intervalMs);
+    }
+    startOutOfProcessEventBridge() {
+        this.stopOutOfProcessEventBridge();
+        if (!this.outOfProcessEventBridge) {
+            return;
+        }
+        this.outOfProcessEventBridgeStopped = false;
+        const loop = () => {
+            if (this.outOfProcessEventBridgeStopped) {
+                return;
+            }
+            void this.pollOutOfProcessRunEvents()
+                .catch((error) => {
+                emitGatewayLog("warning", "Out-of-process event bridge poll failed", {
+                    error: errorToJson(error),
+                }, "gateway:events");
+            })
+                .finally(() => {
+                if (!this.outOfProcessEventBridgeStopped) {
+                    this.outOfProcessEventBridgeTimer = setTimeout(loop, this.outOfProcessEventBridgePollMs);
+                    this.outOfProcessEventBridgeTimer.unref?.();
+                }
+            });
+        };
+        loop();
+    }
+    stopOutOfProcessEventBridge() {
+        this.outOfProcessEventBridgeStopped = true;
+        if (this.outOfProcessEventBridgeTimer) {
+            clearTimeout(this.outOfProcessEventBridgeTimer);
+            this.outOfProcessEventBridgeTimer = null;
+        }
+        this.outOfProcessEventBridgeLastFedSeq.clear();
+        this.outOfProcessEventBridgeDrainedRuns.clear();
+    }
+    async pollOutOfProcessRunEvents() {
+        const seenAdapters = new Set();
+        const liveRunIds = new Set();
+        for (const entry of this.workflows.values()) {
+            const adapter = this.adapterForWorkflow(entry.workflow);
+            if (seenAdapters.has(adapter)) {
+                continue;
+            }
+            seenAdapters.add(adapter);
+            const runs = await adapter.listRuns(1_000);
+            for (const run of runs) {
+                const runId = asString(run.runId);
+                if (!runId) {
+                    continue;
+                }
+                liveRunIds.add(runId);
+                if (this.outOfProcessEventBridgeDrainedRuns.has(runId)) {
+                    continue;
+                }
+                const terminal = TERMINAL_RUN_STATUSES.has(asString(run.status) ?? "");
+                await this.feedOutOfProcessRunEvents(adapter, runId, terminal);
+            }
+        }
+        for (const runId of [...this.outOfProcessEventBridgeDrainedRuns]) {
+            if (!liveRunIds.has(runId)) {
+                this.outOfProcessEventBridgeDrainedRuns.delete(runId);
+            }
+        }
+        for (const runId of [...this.outOfProcessEventBridgeLastFedSeq.keys()]) {
+            if (!liveRunIds.has(runId)) {
+                this.outOfProcessEventBridgeLastFedSeq.delete(runId);
+            }
+        }
+    }
+    async feedOutOfProcessRunEvents(adapter, runId, terminal) {
+        if (this.runRegistry.has(runId)) {
+            this.outOfProcessEventBridgeDrainedRuns.add(runId);
+            this.outOfProcessEventBridgeLastFedSeq.delete(runId);
+            return;
+        }
+        let afterSeq = this.outOfProcessEventBridgeLastFedSeq.get(runId) ?? -1;
+        for (;;) {
+            const rows = await adapter.listEventHistory(runId, {
+                afterSeq,
+                limit: OUT_OF_PROCESS_EVENT_BRIDGE_PAGE_LIMIT,
+            });
+            let maxSeq = afterSeq;
+            for (const row of rows) {
+                const seq = typeof row.seq === "number" ? row.seq : Number(row.seq);
+                if (Number.isFinite(seq) && seq > maxSeq) {
+                    maxSeq = seq;
+                }
+                const payloadJson = typeof row.payloadJson === "string"
+                    ? row.payloadJson
+                    : typeof row.payload_json === "string"
+                        ? row.payload_json
+                        : undefined;
+                if (!payloadJson) {
+                    continue;
+                }
+                try {
+                    this.handleSmithersEvent(JSON.parse(payloadJson));
+                }
+                catch {
+                    continue;
+                }
+            }
+            const advanced = maxSeq > afterSeq;
+            if (advanced) {
+                afterSeq = maxSeq;
+                this.outOfProcessEventBridgeLastFedSeq.set(runId, maxSeq);
+            }
+            if (!terminal || rows.length < OUT_OF_PROCESS_EVENT_BRIDGE_PAGE_LIMIT || !advanced) {
+                break;
+            }
+        }
+        if (terminal) {
+            this.outOfProcessEventBridgeDrainedRuns.add(runId);
+            this.outOfProcessEventBridgeLastFedSeq.delete(runId);
+        }
     }
     async syncRegisteredSchedules() {
         for (const entry of this.workflows.values()) {
