@@ -12,7 +12,7 @@ want a grounded read plus a concrete command instead of eyeballing the logs.
 bunx smithers-orchestrator workflow run triage-run --input '{"targetRunId":"RUN_ID"}'
 ```
 
-The input is `targetRunId`, not `runId` — the engine reserves `input.runId` for
+The input is `targetRunId`, not `runId`: the engine reserves `input.runId` for
 a run's own id, so a workflow that inspects another run needs a distinct name.
 
 ## Stages

@@ -18,7 +18,7 @@ bunx smithers-orchestrator workflow run backpressure-plan \
 
 1. **extract-criteria**: pull the prompt apart into a flat list of atomic, verifiable acceptance criteria. A goal with no verifiable criteria fails the run loudly instead of producing an empty gate matrix.
 2. **plan-gates**: map each criterion to a `verificationMethod`, `gateType` (blocking / warning / informational), who checks it, the failure action, the evidence required, and whether a human approval is needed. Every blocking criterion must map to a real verification method.
-3. **verify**: deterministic (no agent) parity check of the matrix against the extracted criteria — one gate per criterion, same order, verbatim text — returning `{ match, criteriaCount, gateCount, missing, unverifiedBlocking, summary }`.
+3. **verify**: deterministic (no agent) parity check of the matrix against the extracted criteria (one gate per criterion, same order, verbatim text), returning `{ match, criteriaCount, gateCount, missing, unverifiedBlocking, summary }`.
 
 ## Inputs
 

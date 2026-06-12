@@ -14,7 +14,7 @@ bunx smithers-orchestrator workflow run report-slideshow \
   --input '{"targetRunId":"RUN_ID","title":"Nightly build report"}'
 ```
 
-The input is `targetRunId`, not `runId` — the engine reserves `input.runId` for
+The input is `targetRunId`, not `runId`: the engine reserves `input.runId` for
 a run's own id, so a workflow that reports on another run needs a distinct name.
 
 It first captures the run deterministically with `bunx smithers-orchestrator inspect`, then an
