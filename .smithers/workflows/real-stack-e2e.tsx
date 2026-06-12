@@ -140,7 +140,7 @@ function chatUpstream(): { provider: "cerebras" | "gemini"; key: string; baseUrl
  *  (binding names, not a mock — the Worker code reads these). */
 function verifyEnv(): Record<string, string> {
   const up = chatUpstream();
-  const chat = up
+  const chat: Record<string, string> = up
     ? {
         CEREBRAS_API_KEY: up.key,
         CEREBRAS_BASE_URL: up.baseUrl,
