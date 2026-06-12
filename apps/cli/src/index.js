@@ -4929,12 +4929,21 @@ const cli = Cli.create({
             commandExitOverride = opts.exitCode ?? 1;
             return c.error(opts);
         };
-        const composeDir = resolve(dirname(new URL(import.meta.url).pathname), "../../observability");
+        const moduleDir = dirname(fileURLToPath(import.meta.url));
+        const composeDirCandidates = [
+            resolve(moduleDir, "../../observability"),
+            resolve(moduleDir, "../../../observability"),
+        ];
+        const composeDir = composeDirCandidates.find((dir) => existsSync(resolve(dir, "docker-compose.otel.yml"))) ?? composeDirCandidates[0];
         const composeFile = resolve(composeDir, "docker-compose.otel.yml");
         if (!existsSync(composeFile)) {
             return fail({
                 code: "COMPOSE_NOT_FOUND",
-                message: `Docker Compose file not found at ${composeFile}. Ensure the smithers-orchestrator package includes the observability/ directory.`,
+                message: [
+                    `Docker Compose file not found. Checked ${composeDirCandidates.map((dir) => resolve(dir, "docker-compose.otel.yml")).join(", ")}.`,
+                    `Reinstall smithers-orchestrator or upgrade @smithers-orchestrator/observability to a version that ships the local stack assets, then run "smithers observability --detach".`,
+                    `Docker with Compose support is required.`,
+                ].join(" "),
                 exitCode: 1,
             });
         }

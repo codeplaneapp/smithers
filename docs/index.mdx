@@ -204,7 +204,7 @@ can rewind, fork, and replay any run.
 ```bash
 bunx smithers-orchestrator up workflow.tsx --run-id abc123 --resume true   # resume after a crash
 bunx smithers-orchestrator rewind abc123 --frame 4                         # time-travel to an earlier frame
-bunx smithers-orchestrator observability up                                # Grafana + Prometheus + Tempo + OTLP
+bunx smithers-orchestrator observability --detach                          # Grafana + Prometheus + Tempo + OTLP
 bunx smithers-orchestrator up workflow.tsx --serve --metrics               # HTTP API, SSE events, and /metrics
 ```
 

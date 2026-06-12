@@ -231,7 +231,7 @@ The same substrate carries the concerns you'd otherwise bolt on later:
 - **Memory**: cross-run facts + history per namespace; `memory={{ recall, save }}` auto-injects the top-K relevant facts; query with `smithers memory`.
 - **Hot mode**: `--hot true` re-renders against persisted state when you edit the workflow or an `.mdx` prompt mid-run; finished tasks stay put.
 - **Time travel**: every render is a frame: `smithers timeline | fork | replay | rewind | diff | timetravel | retry-task`.
-- **Observability / serving**: `smithers observability up` (Grafana/Prometheus/Tempo/OTLP); `smithers up … --serve --metrics` exposes an HTTP API, SSE event stream, and `/metrics`. A workflow can even serve its own React front-end.
+- **Observability / serving**: `smithers observability --detach` (Grafana/Prometheus/Tempo/OTLP); `smithers observability --down` stops it; `smithers up … --serve --metrics` exposes an HTTP API, SSE event stream, and `/metrics`. A workflow can even serve its own React front-end.
 - **Agents**: pluggable runtimes (claude, codex, antigravity, kimi, amp, forge, Effect-native) configured in `agents.ts`; `agent={[primary, fallback]}` falls back on failure.
 - **Tools**: built-in `read`/`write`/`edit`/`bash`/`grep`/`ls` with path containment (`--root`); `smithers openapi <spec>` generates typed AI SDK tools from an OpenAPI spec.
 - **Integrations**: run Smithers itself as an MCP server (`smithers mcp add`), sync skills into agent dirs (`smithers skills add`), durable schedules (`smithers cron`), pager-style `smithers alerts`, a structured `<HumanTask>` queue (`smithers human`), and `smithers hijack` to hand off a live agent session.
