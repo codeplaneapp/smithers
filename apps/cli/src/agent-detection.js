@@ -171,9 +171,10 @@ const LOCAL_SCAFFOLDED_PROVIDER_FILES = {
 };
 const TIER_PREFERENCES = {
     cheapFast: { order: ["claudeSonnet", "kimi", "vibe", "antigravity", "pi"], maxSize: 2 },
-    smart: { order: ["claude", "claudeOpus", "codex", "opencode", "kimi", "antigravity", "amp"], maxSize: 3 },
-    smartTool: { order: ["codex", "opencode", "claude", "claudeOpus", "kimi", "antigravity", "amp"], maxSize: 3 },
+    smart: { order: ["claude", "claudeOpus", "codex", "kimi", "antigravity", "amp"], maxSize: 3 },
+    smartTool: { order: ["claude", "claudeOpus", "codex", "kimi", "antigravity", "amp"], maxSize: 3 },
 };
+const REQUIRED_DEFAULT_TIERS = ["smart", "smartTool"];
 const CONSTRUCTORS = {
     claude: {
         importName: "ClaudeCodeAgent",
@@ -627,7 +628,7 @@ function generateAccountsAgentsTs(accounts, env) {
         return members;
     };
     poolLines.push(`  smart: [${membersForFamilies("claude", "codex").map((m) => `providers.${m}`).join(", ")}],`);
-    poolLines.push(`  smartTool: [${membersForFamilies("codex", "claude").map((m) => `providers.${m}`).join(", ")}],`);
+    poolLines.push(`  smartTool: [${membersForFamilies("claude", "codex").map((m) => `providers.${m}`).join(", ")}],`);
     poolLines.push(`  cheapFast: [${membersForFamilies("kimi", "gemini", "codex", "claude").slice(0, 2).map((m) => `providers.${m}`).join(", ")}],`);
     return [
         "// smithers-source: generated",
@@ -792,24 +793,42 @@ export function generateAgentsTs(env = process.env, options = {}) {
     const fallbackIds = orderedProviders.map((p) => p.id);
     // Tier lines: detection-resolved members, then accounts whose engine
     // family is in the tier's preference order get appended.
-    const tierLines = Object.entries(TIER_PREFERENCES).flatMap(([tier, { order, maxSize }]) => {
+    const resolvedTiers = Object.entries(TIER_PREFERENCES).map(([tier, { order, maxSize }]) => {
         let resolved = order
             .filter((id) => allProviderIds.has(id))
             .slice(0, maxSize);
         if (resolved.length === 0) {
-            resolved = fallbackIds.slice(0, maxSize);
+            const fallbackPool = tier === "smart" || tier === "smartTool"
+                ? fallbackIds.filter((id) => id !== "opencode")
+                : fallbackIds;
+            resolved = fallbackPool.slice(0, maxSize);
         }
         const tierFamilies = new Set(order);
         const tierAccounts = registeredAccounts
             .filter((account) => tierFamilies.has(ACCOUNT_PROVIDER_POOL[account.provider]))
             .map((account) => labelToCamel(account.label));
         const merged = [...resolved, ...tierAccounts];
-        return renderTierLine(
+        return {
             tier,
-            merged,
-            renderUnavailablePreferenceComments(tier, order, allProviderIds, detectionsById),
-        );
+            members: merged,
+            lines: renderTierLine(
+                tier,
+                merged,
+                renderUnavailablePreferenceComments(tier, order, allProviderIds, detectionsById),
+            ),
+        };
     });
+    const missingRequiredTiers = REQUIRED_DEFAULT_TIERS.filter((tier) => {
+        const resolved = resolvedTiers.find((entry) => entry.tier === tier);
+        return !resolved || resolved.members.length === 0;
+    });
+    if (missingRequiredTiers.length > 0) {
+        throw new SmithersError(
+            "NO_USABLE_AGENTS",
+            `${formatNoUsableAgentsMessage(detections)} Detected agents cannot populate required default pools: ${missingRequiredTiers.join(", ")}.`,
+        );
+    }
+    const tierLines = resolvedTiers.flatMap((entry) => entry.lines);
     return [
         "// smithers-source: generated",
         ...(hasAccounts ? ["// Account providers (camelCase labels) come from ~/.smithers/accounts.json — managed via `smithers agent add|list|remove`."] : []),

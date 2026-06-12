@@ -149,7 +149,7 @@ This is the claim a skeptic should test first, so we will be specific. The same 
 ```bash
 bunx smithers-orchestrator init        # scaffold the workflow pack
 bunx smithers-orchestrator up workflow.tsx --serve --metrics   # HTTP API, SSE stream, Prometheus
-bunx smithers-orchestrator observability up               # Grafana, Prometheus, Tempo, one command
+bunx smithers-orchestrator observability --detach         # Grafana, Prometheus, Tempo, one command
 ```
 
 <Frame caption="Live frames stream over the gateway as the run executes. Every state transition, every attempt, every retry is already a row you can scrub back through.">
