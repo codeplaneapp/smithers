@@ -154,3 +154,7 @@ failover). Override with `SMITHERS_REVIEW_MODEL` /
 pnpm -C apps/review test        # bun test: real git fixtures + agentless engine e2e
 pnpm -C apps/review typecheck
 ```
+
+## smithers review
+
+This repo dogfoods `apps/review` on every PR via `.github/workflows/pr-review.yml`, running the agents on a ChatGPT (Codex) subscription. See `apps/review/README.md`.
