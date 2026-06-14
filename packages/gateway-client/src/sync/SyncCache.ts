@@ -2,6 +2,10 @@ import type { SyncKey } from "./SyncKey.ts";
 import { syncKeyFingerprint, syncKeyMatches } from "./SyncKey.ts";
 
 /**
+ * TRANSITIONAL SHIM. Kept exported so unmigrated consumers keep compiling while
+ * they move onto TanStack DB collections (`createGatewayCollection`). See
+ * `SyncClient.ts` for the migration note.
+ *
  * The in-memory cache that backs every query, mutation, and stream subscription
  * in the sync SDK. Responsibilities:
  *

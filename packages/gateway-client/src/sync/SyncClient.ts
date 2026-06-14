@@ -4,6 +4,13 @@ import type { SyncStreamFrame, SyncTransport } from "./SyncTransport.ts";
 import { SyncSubscriptionHub, type SyncSubscriptionOptions } from "./SyncSubscriptionHub.ts";
 
 /**
+ * TRANSITIONAL SHIM. The bespoke sync core (`SyncClient` / `SyncCache` /
+ * `SyncSubscriptionHub`) is being replaced by TanStack DB collections built with
+ * `createGatewayCollection`. It is kept exported so `@smithers-orchestrator/gateway-react`
+ * and `apps/smithers` keep compiling while they migrate onto the new collection
+ * hooks. Build new code on `createGatewayCollection` + `gatewayCollectionDefs`;
+ * remove this once every consumer is off it.
+ *
  * The top-level handle a consumer holds. `SyncClient` owns:
  *
  *  - one `SyncCache` (the source of truth)

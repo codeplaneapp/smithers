@@ -5,6 +5,10 @@ import type { SyncStreamFrame, SyncTransport } from "./SyncTransport.ts";
 import { syncBackoffDelay, type SyncBackoffOptions } from "./SyncBackoff.ts";
 
 /**
+ * TRANSITIONAL SHIM. Kept exported so unmigrated consumers keep compiling while
+ * they move onto TanStack DB collections (`createGatewayCollection`). See
+ * `SyncClient.ts` for the migration note.
+ *
  * Streaming subscriptions in Smithers are expensive — every WebSocket is one
  * round-trip + one server-side journal cursor. The hub multiplexes any number
  * of observers onto a single underlying stream per key. Responsibilities:
