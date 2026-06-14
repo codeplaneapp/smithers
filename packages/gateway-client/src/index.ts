@@ -58,22 +58,3 @@ export {
   type CreateSmithersGatewayTransportOptions,
   type SmithersGatewayStreamScope,
 } from "./sync/createSmithersGatewayTransport.ts";
-
-// Transitional shim: the bespoke sync core is superseded by the TanStack DB
-// collections above, but stays exported so `@smithers-orchestrator/gateway-react`
-// and `apps/smithers` keep compiling until they migrate onto the collection
-// hooks. Remove once every consumer is off it.
-export { SyncCache } from "./sync/SyncCache.ts";
-export type { SyncCacheEntry, SyncCacheOptions, SyncCacheStatus } from "./sync/SyncCache.ts";
-export { SyncClient } from "./sync/SyncClient.ts";
-export type {
-  SyncClientOptions,
-  SyncFetcher,
-  SyncMutationOptions,
-  SyncQueryOptions,
-} from "./sync/SyncClient.ts";
-export { SyncSubscriptionHub } from "./sync/SyncSubscriptionHub.ts";
-export type {
-  SyncSubscriptionListener,
-  SyncSubscriptionOptions,
-} from "./sync/SyncSubscriptionHub.ts";

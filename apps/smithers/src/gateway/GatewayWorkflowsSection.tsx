@@ -1,30 +1,97 @@
+import { useMemo } from "react";
+import { useGatewayMutation, useGatewayRuns, useGatewayWorkflows } from "@smithers-orchestrator/gateway-react";
+import { gatewayKeys } from "@smithers-orchestrator/gateway-client";
 import { openSurface } from "../app/navigation";
 import { StatusPill } from "../cards/StatusPill";
-import { useGatewayStore } from "./gatewayStore";
+import { useGatewayConnectionStatus } from "../sync/useGatewayConnectionStatus";
+import type { GatewayRun, GatewayWorkflow } from "./gatewayTypes";
+import { toNodeStatus } from "./toNodeStatus";
 import "./gateway.css";
 
-/**
- * The Store's "Live workflows" section: the workflows on a connected gateway
- * that ship a custom UI, each with its recent runs. Launch a run or open one to
- * land on the gateway run inspector — where the custom UI ⇄ native toggle lives.
- *
- * Renders nothing unless a gateway is reachable or explicitly rejected auth, so
- * the gateway-less deployed PWA stays quiet while remote mode can explain why
- * live workflows did not load.
- */
+type LaunchRunVars = {
+  workflow: string;
+  input: Record<string, unknown>;
+};
+
+type LaunchRunData = {
+  runId?: string;
+};
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function asNumber(value: unknown): number {
+  return typeof value === "number" ? value : 0;
+}
+
+function parseWorkflows(payload: unknown): GatewayWorkflow[] {
+  if (!Array.isArray(payload)) return [];
+  const workflows: GatewayWorkflow[] = [];
+  for (const raw of payload) {
+    const record = asRecord(raw);
+    const key = asString(record.key);
+    const uiPath = asString(record.uiPath);
+    if (key && record.hasUi === true && uiPath) {
+      workflows.push({
+        key,
+        readableName: asString(record.readableName) || key,
+        description: asString(record.description),
+        uiPath,
+      });
+    }
+  }
+  return workflows;
+}
+
+function parseRuns(payload: unknown): GatewayRun[] {
+  if (!Array.isArray(payload)) return [];
+  return payload
+    .map((raw) => {
+      const record = asRecord(raw);
+      return {
+        runId: asString(record.runId),
+        workflowKey: asString(record.workflowKey),
+        status: toNodeStatus(asString(record.status)),
+        createdAtMs: asNumber(record.createdAtMs),
+      };
+    })
+    .filter((run) => run.runId.length > 0);
+}
+
 export function GatewayWorkflowsSection() {
-  const status = useGatewayStore((state) => state.status);
-  const workflows = useGatewayStore((state) => state.workflows);
-  const runs = useGatewayStore((state) => state.runs);
-  const launch = useGatewayStore((state) => state.launch);
+  const connection = useGatewayConnectionStatus();
+  const workflowsState = useGatewayWorkflows({ filter: { hasUi: true } });
+  const runsState = useGatewayRuns({});
+  const launch = useGatewayMutation<LaunchRunVars, LaunchRunData>(
+    "launchRun",
+    { invalidate: [gatewayKeys.runs({})] },
+  );
+  const workflows = useMemo(
+    () => parseWorkflows(workflowsState.data),
+    [workflowsState.data],
+  );
+  const runs = useMemo(
+    () => parseRuns(runsState.data),
+    [runsState.data],
+  );
+  const status = connection.status;
 
   if (status !== "online" && status !== "connecting" && status !== "unauthorized") {
     return null;
   }
 
   const launchAndOpen = (workflowKey: string): void => {
-    void launch(workflowKey).then((runId) => {
+    void launch.mutateSafe({ workflow: workflowKey, input: {} }).then((payload) => {
+      const runId = asString(payload?.runId);
       if (runId) {
+        void runsState.refetch();
         openSurface({ kind: "gatewayRun", runId, workflowKey });
       }
     });
@@ -66,9 +133,10 @@ export function GatewayWorkflowsSection() {
                 <button
                   className="gw-btn gw-btn-primary"
                   type="button"
+                  disabled={launch.isLoading}
                   onClick={() => launchAndOpen(workflow.key)}
                 >
-                  Launch
+                  {launch.isLoading ? "Launching" : "Launch"}
                 </button>
               </div>
 

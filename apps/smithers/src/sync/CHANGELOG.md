@@ -1,5 +1,30 @@
 # apps/smithers sync glue changelog
 
+## 0.3.0 — TanStack DB migration (2026-06-14)
+
+### Changed
+
+- The bespoke sync core (`SyncClient` / `SyncCache` / `SyncSubscriptionHub`) is
+  replaced by TanStack DB collections. `packages/gateway-client` now ships
+  `createGatewayCollection`, a collection-options-creator that initial-loads via
+  `client.rpc(method, params)` and applies stream frames through the collection
+  sync writer's `begin()`→`write()`→`commit()`. The existing gateway
+  WebSocket+RPC transport (`SyncTransport` / `createSmithersGatewayTransport`)
+  is unchanged.
+- `packages/gateway-react` reimplements the sync hooks over
+  `@tanstack/react-db` (`useLiveQuery`), keeping every public hook name and
+  signature stable, and adds `useGatewayRunTree` (a devtools-snapshot live
+  query) plus `useGatewayConnectionStatus`.
+- `apps/smithers/src/sync/appSyncClient.ts` is replaced by
+  `appGatewayCollections.ts`, which builds the `GatewayCollections` registry via
+  `createGatewayCollections` over the instrumented `getGatewayClient()`
+  transport (auth, CSRF, same-origin proxy, observability preserved). `main.tsx`
+  passes that registry to `<SyncProvider>`.
+- The hand-rolled `gatewayStore` (zustand) and its `bindGateway` bridge are
+  deleted; consumers read from the gateway-react hooks. Node outputs
+  (`getNodeOutput`) and diffs (`getNodeDiff`) stay fetched on-demand by id,
+  never synced into a collection.
+
 ## 0.2.0 — slice C.1 (2026-06-07)
 
 ### Changed

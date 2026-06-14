@@ -1,35 +1,49 @@
-import { StrictMode } from "react";
+import { StrictMode, useMemo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
+import { SmithersGatewayProvider, SyncProvider } from "@smithers-orchestrator/gateway-react";
 import { bindRouteStore } from "./app/bindRouteStore";
 import { router } from "./app/router";
 import { useAuthStore } from "./auth/authStore";
 import { bindDock } from "./apps/bindDock";
-import { bindGateway } from "./gateway/bindGateway";
+import { getGatewayClient } from "./gateway/gatewayClient";
 import { startApprovalWatcher } from "./runs/watchApprovals";
 import { registerServiceWorker } from "./registerServiceWorker";
-import { SyncProvider } from "@smithers-orchestrator/gateway-react";
-import { appSyncClient } from "./sync/appSyncClient";
+import { appGatewayCollections } from "./sync/appGatewayCollections";
 import { platformFetch } from "./jjhub/platformFetch";
 import { platformJson, PlatformError } from "./jjhub/platformJson";
 import "./styles.css";
 
 // Wire the router into the route store and bridge run gates to the chat before
-// the first paint, so every store is live when the shell mounts. bindGateway
-// runs after bindRouteStore so the first resolved route already drives the
-// gateway link (lazy connect, run selection).
+// the first paint, so every store is live when the shell mounts.
 bindRouteStore(router);
 bindDock();
-bindGateway();
 startApprovalWatcher();
 // Kick the auth check once at boot (not from an AuthStatus mount effect).
 void useAuthStore.getState().bootstrap();
 
+function GatewayProviders({ children }: { children: ReactNode }) {
+  const gatewayBaseUrl = useAuthStore((state) => state.gatewayBaseUrl);
+  const hasToken = useAuthStore((state) => state.hasToken);
+  const authStatus = useAuthStore((state) => state.status);
+  const client = useMemo(
+    () => getGatewayClient(),
+    [authStatus, gatewayBaseUrl, hasToken],
+  );
+  return (
+    <SmithersGatewayProvider client={client}>
+      <SyncProvider client={appGatewayCollections}>
+        {children}
+      </SyncProvider>
+    </SmithersGatewayProvider>
+  );
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <SyncProvider client={appSyncClient}>
+    <GatewayProviders>
       <RouterProvider router={router} />
-    </SyncProvider>
+    </GatewayProviders>
   </StrictMode>,
 );
 
