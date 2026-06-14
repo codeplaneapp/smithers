@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useRef } from "react";
-import { useGatewayWorkflows } from "@smithers-orchestrator/gateway-react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useSyncClient } from "@smithers-orchestrator/gateway-react";
 import {
   connectionStateValue,
   gatewayConnectionState,
 } from "../observability/uiMetrics";
-import { isAuthError } from "../gateway/gatewayClient";
 import type { GatewayStatus } from "../gateway/gatewayTypes";
 
 type GatewayConnectionStatus = {
@@ -13,22 +12,28 @@ type GatewayConnectionStatus = {
   reconnectingSince?: number;
 };
 
+/**
+ * Connection status derived from the registry's connection observer, which the
+ * instrumented transport drives off real traffic (RPC resolves, stream frames,
+ * auth/transport errors). This replaces an earlier `useGatewayWorkflows` probe
+ * that could never surface an error (collection-backed hooks return
+ * `error: undefined`), so offline/unauthorized links were reported as `online`.
+ */
 export function useGatewayConnectionStatus(): GatewayConnectionStatus {
-  const probe = useGatewayWorkflows({ filter: { hasUi: true } });
-  const status: GatewayStatus = probe.loading
-    ? "connecting"
-    : probe.error
-      ? isAuthError(probe.error) ? "unauthorized" : "offline"
-      : probe.data
-        ? "online"
-        : "idle";
-  const reconnectingSinceRef = useRef<number | undefined>(undefined);
+  const registry = useSyncClient();
+  const state = useSyncExternalStore(
+    registry.subscribeConnection,
+    registry.connection,
+    registry.connection,
+  );
 
-  if (status === "connecting" || status === "offline") {
-    reconnectingSinceRef.current ??= Date.now();
-  } else {
-    reconnectingSinceRef.current = undefined;
-  }
+  // Probe once on mount so an otherwise idle link leaves `idle`; the observer
+  // flips to online/offline/unauthorized off the result.
+  useEffect(() => {
+    void registry.connect();
+  }, [registry]);
+
+  const status = state.status as GatewayStatus;
 
   useEffect(() => {
     gatewayConnectionState.set(connectionStateValue(status));
@@ -38,10 +43,10 @@ export function useGatewayConnectionStatus(): GatewayConnectionStatus {
     () => ({
       status,
       isOnline: status === "online",
-      ...(reconnectingSinceRef.current === undefined
+      ...(state.reconnectingSince === undefined
         ? {}
-        : { reconnectingSince: reconnectingSinceRef.current }),
+        : { reconnectingSince: state.reconnectingSince }),
     }),
-    [status],
+    [status, state.reconnectingSince],
   );
 }
