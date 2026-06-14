@@ -5,8 +5,8 @@ import { GatewayRunInspector } from "./GatewayRunInspector";
 /**
  * A gateway-backed run inspector (`/gw/$workflowKey/$runId`). Distinct from the
  * local-engine inspector at `/runs/$runId`: this surface drives a real run on a
- * connected gateway and can embed the workflow's own custom UI. The route
- * binding (bindGateway) selects the run and starts its snapshot poll.
+ * connected gateway and can embed the workflow's own custom UI. Mounting the
+ * inspector starts the run-tree subscription; unmounting tears it down.
  */
 function GatewayRunPage() {
   const { workflowKey, runId } = gatewayRunRoute.useParams();
