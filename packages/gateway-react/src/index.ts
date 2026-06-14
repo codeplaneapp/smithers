@@ -15,17 +15,28 @@ export { useGatewayExtensionAction } from "./useGatewayExtensionAction.ts";
 export { useGatewayExtensionStream, type GatewayExtensionStreamState } from "./useGatewayExtensionStream.ts";
 export type { GatewayAsyncState } from "./GatewayAsyncState.ts";
 
-// Declarative sync SDK React surface. The vanilla core lives in
+// Declarative sync SDK React surface. The TanStack DB collection options live in
 // `@smithers-orchestrator/gateway-client`; this layer adds the React context,
-// provider, and hooks (`useSyncQuery` / `useSyncMutation` / `useSyncSubscription`
-// + typed gateway shortcuts) backed by `useSyncExternalStore`.
+// the `GatewayCollections` registry, and the hooks (`useSyncQuery` /
+// `useSyncMutation` / `useSyncSubscription` + typed gateway shortcuts) backed by
+// `@tanstack/react-db`'s `useLiveQuery`.
 export { SyncContext } from "./sync/SyncContext.ts";
 export { SyncProvider } from "./sync/SyncProvider.ts";
 export { useSyncClient } from "./sync/useSyncClient.ts";
+export { createGatewayCollections, type CreateGatewayCollectionsOptions } from "./sync/createGatewayCollections.ts";
+export type {
+  GatewayCollections,
+  GatewayQueryHandle,
+  GatewayQueryRow,
+  GatewayStreamHandle,
+  GatewayStreamRow,
+} from "./sync/GatewayCollections.ts";
+export type { GatewayConnectionState, GatewayConnectionStatus } from "./sync/GatewayConnectionState.ts";
 export { useSyncQuery } from "./sync/useSyncQuery.ts";
 export type { UseSyncQueryOptions, UseSyncQueryResult } from "./sync/useSyncQuery.ts";
 export { useSyncMutation } from "./sync/useSyncMutation.ts";
 export type {
+  SyncMutationOptions,
   UseSyncMutationResult,
   UseSyncMutationStatus,
 } from "./sync/useSyncMutation.ts";
@@ -37,3 +48,8 @@ export type {
 export { useGatewayQuery } from "./sync/useGatewayQuery.ts";
 export { useGatewayMutation } from "./sync/useGatewayMutation.ts";
 export { useGatewayRunStream } from "./sync/useGatewayRunStream.ts";
+export { useGatewayRunTree, type NodeStatus, type UseGatewayRunTreeResult } from "./sync/useGatewayRunTree.ts";
+export {
+  useGatewayConnectionStatus,
+  type UseGatewayConnectionStatusResult,
+} from "./sync/useGatewayConnectionStatus.ts";

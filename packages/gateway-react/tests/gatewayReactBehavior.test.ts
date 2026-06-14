@@ -11,13 +11,12 @@ try { GlobalRegistrator.register(); } catch { /* already registered */ }
 import { describe, expect, test } from "bun:test";
 import { act, createElement, useEffect, useState, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { GatewayEventFrame, SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
+import type { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
 import { SmithersGatewayClient as RealSmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
 import {
   SmithersGatewayContext,
   SmithersGatewayProvider,
   useGatewayRpc,
-  useGatewayRunEvents,
 } from "../src/index.ts";
 
 // React's act() requires this flag so updates are flushed synchronously and
@@ -51,102 +50,9 @@ async function mountHarness(): Promise<Harness> {
   };
 }
 
-function eventFrame(seq: number, event = "run.event"): GatewayEventFrame {
-  return {
-    type: "event",
-    event,
-    payload: { seq },
-    seq,
-    stateVersion: seq,
-    apiVersion: "v1",
-  };
-}
-
-function heartbeatFrame(seq: number): GatewayEventFrame {
-  return {
-    type: "event",
-    event: "run.heartbeat",
-    payload: { seq },
-    seq,
-    stateVersion: seq,
-    apiVersion: "v1",
-  };
-}
-
-describe("useGatewayRunEvents", () => {
-  test("filters heartbeats into lastHeartbeat and ring-buffer caps the events array", async () => {
-    const maxEvents = 5;
-    const yielded: GatewayEventFrame[] = [];
-    // 8 real run.event frames interleaved with 2 heartbeats. With maxEvents=5,
-    // only the last 5 run.event frames may remain; heartbeats never enter events.
-    for (let seq = 1; seq <= 8; seq += 1) {
-      yielded.push(eventFrame(seq));
-      if (seq === 3) yielded.push(heartbeatFrame(100 + seq));
-      if (seq === 6) yielded.push(heartbeatFrame(100 + seq));
-    }
-
-    const client = {
-      async *streamRunEventsResilient() {
-        for (const frame of yielded) {
-          yield frame;
-        }
-      },
-    } as unknown as SmithersGatewayClient;
-
-    let snapshot: ReturnType<typeof useGatewayRunEvents> | undefined;
-    function Probe() {
-      snapshot = useGatewayRunEvents("run-1", { maxEvents });
-      return null;
-    }
-
-    const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
-    );
-
-    expect(snapshot).toBeDefined();
-    // Heartbeats are surfaced separately, never buffered into events.
-    expect(snapshot?.events.every((frame) => frame.event !== "run.heartbeat")).toBe(true);
-    // Ring buffer never grows beyond maxEvents.
-    expect(snapshot?.events.length).toBe(maxEvents);
-    // It retains the most recent run.event frames (seqs 4..8), dropping older ones.
-    expect(snapshot?.events.map((frame) => frame.seq)).toEqual([4, 5, 6, 7, 8]);
-    // The latest heartbeat (seq 106, emitted after run.event seq 6) is surfaced.
-    expect(snapshot?.lastHeartbeat?.event).toBe("run.heartbeat");
-    expect(snapshot?.lastHeartbeat?.seq).toBe(106);
-    expect(snapshot?.error).toBeUndefined();
-
-    await harness.unmount();
-  });
-
-  test("the events array stays capped even when the stream emits far more than maxEvents", async () => {
-    const maxEvents = 10;
-    const total = 250;
-    const client = {
-      async *streamRunEventsResilient() {
-        for (let seq = 1; seq <= total; seq += 1) {
-          yield eventFrame(seq);
-        }
-      },
-    } as unknown as SmithersGatewayClient;
-
-    let snapshot: ReturnType<typeof useGatewayRunEvents> | undefined;
-    function Probe() {
-      snapshot = useGatewayRunEvents("run-flood", { maxEvents });
-      return null;
-    }
-
-    const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
-    );
-
-    expect(snapshot?.events.length).toBe(maxEvents);
-    expect(snapshot?.events.map((frame) => frame.seq)).toEqual([241, 242, 243, 244, 245, 246, 247, 248, 249, 250]);
-
-    await harness.unmount();
-  });
-});
+// `useGatewayRunEvents` is now backed by the `SyncProvider` registry's
+// `runEvents` collection; its heartbeat-filtering + ring-cap behavior is covered
+// in `tests/sync/sync.test.ts`.
 
 describe("SmithersGatewayProvider", () => {
   test("an inline options literal does not recreate the client across renders (memoized on baseUrl/token)", async () => {

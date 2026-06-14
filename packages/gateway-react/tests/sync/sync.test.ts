@@ -1,11 +1,11 @@
 // Drives the real sync hooks through React's real reconciler under a real DOM
-// (happy-dom) so that useSyncExternalStore actually re-renders. The cache and
-// transport are the real ones; the transport's request/stream handlers are the
-// only seam — they return real promises and real async iterables.
+// (happy-dom) so TanStack DB's `useLiveQuery` actually subscribes and
+// re-renders. The collections, registry, and reconcile logic are the real ones;
+// the only seam is a fake `SyncTransport` whose rpc/stream handlers return real
+// promises and real async iterables (no hook logic is faked).
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-// happy-dom errors if registered twice across test files in the same bun run;
-// guard so this file composes with `gatewayReactBehavior.test.ts`.
+// happy-dom errors if registered twice across test files in the same bun run.
 if (typeof globalThis.document === "undefined") {
   GlobalRegistrator.register();
 }
@@ -14,22 +14,28 @@ import { describe, expect, test } from "bun:test";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
-  SyncClient,
+  gatewayKeys,
   type SyncStreamFrame,
-  type SyncStreamOptions,
   type SyncTransport,
 } from "@smithers-orchestrator/gateway-client";
 import {
   SyncProvider,
+  createGatewayCollections,
+  useGatewayApprovals,
+  useGatewayConnectionStatus,
   useGatewayQuery,
+  useGatewayRun,
+  useGatewayRunEvents,
+  useGatewayRunTree,
+  useGatewayRuns,
+  useGatewayWorkflows,
   useSyncMutation,
   useSyncQuery,
   useSyncSubscription,
+  type GatewayCollections,
   type UseSyncSubscriptionResult,
 } from "../../src/index.ts";
 
-// React's act() needs this flag to flush updates synchronously and silence
-// warnings under bun + happy-dom.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 type Harness = {
@@ -59,144 +65,148 @@ async function mountHarness(): Promise<Harness> {
   };
 }
 
-async function flush(): Promise<void> {
+async function settle(times = 8): Promise<void> {
   await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let i = 0; i < times; i += 1) await Promise.resolve();
   });
 }
 
-function rpcTransport(handlers: Record<string, (params: unknown) => unknown>): SyncTransport {
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let i = 0; i < 50; i += 1) {
+    if (predicate()) return;
+    await settle(2);
+  }
+  expect(predicate()).toBe(true);
+}
+
+/** A controllable fake transport: rpc dispatch + per-(scope,runId) stream channels. */
+function makeTransport(rpc: SyncTransport["rpc"]) {
+  type Channel = { queue: SyncStreamFrame[]; waiters: Array<() => void>; ended: boolean };
+  const channels = new Map<string, Channel>();
+  const opens: Array<{ scope: string; params: unknown; afterSeq?: number; signal?: AbortSignal }> = [];
+  const channel = (key: string): Channel => {
+    let chan = channels.get(key);
+    if (!chan) {
+      chan = { queue: [], waiters: [], ended: false };
+      channels.set(key, chan);
+    }
+    return chan;
+  };
+  const runIdOf = (params: unknown): string =>
+    params && typeof params === "object" ? String((params as { runId?: unknown }).runId ?? "") : "";
+
+  const transport: SyncTransport = {
+    rpc,
+    stream(scope, params, options) {
+      const key = `${scope}:${runIdOf(params)}`;
+      opens.push({ scope, params, afterSeq: options.afterSeq, signal: options.signal });
+      const chan = channel(key);
+      return {
+        async *[Symbol.asyncIterator]() {
+          while (true) {
+            if (options.signal?.aborted) return;
+            const frame = chan.queue.shift();
+            if (frame) {
+              yield frame;
+              continue;
+            }
+            if (chan.ended) return;
+            await new Promise<void>((resolve) => {
+              chan.waiters.push(resolve);
+              options.signal?.addEventListener("abort", () => resolve(), { once: true });
+            });
+          }
+        },
+      };
+    },
+  };
+
   return {
-    rpc(method, params) {
-      const handler = handlers[method];
-      if (!handler) return Promise.reject(new Error(`unknown ${method}`));
-      try {
-        return Promise.resolve(handler(params));
-      } catch (cause) {
-        return Promise.reject(cause);
-      }
+    transport,
+    opens,
+    push(scope: string, runId: string | undefined, frame: SyncStreamFrame) {
+      const chan = channel(`${scope}:${runId ?? ""}`);
+      chan.queue.push(frame);
+      for (const waiter of chan.waiters.splice(0)) waiter();
     },
   };
 }
 
-describe("useSyncQuery lifecycle", () => {
+function provider(registry: GatewayCollections, child: ReactElement): ReactElement {
+  return createElement(SyncProvider, { client: registry }, child);
+}
+
+describe("useSyncQuery over the registry", () => {
   test("re-renders from loading to success when the fetcher resolves", async () => {
     let resolveFetch: (v: number) => void = () => {};
-    const transport: SyncTransport = {
-      rpc() {
-        return new Promise<number>((resolve) => {
-          resolveFetch = resolve;
-        });
-      },
-    };
-    const client = new SyncClient({ transport });
+    const registry = createGatewayCollections({
+      client: makeTransport(() => new Promise<number>((resolve) => (resolveFetch = resolve))).transport,
+    });
 
     const seen: Array<{ status: string; data: number | undefined }> = [];
     function Probe() {
-      const q = useSyncQuery<number>(["counter"], () => client.rpc<number>("get", {}));
+      const q = useSyncQuery<number>(["counter"], () => registry.rpc<number>("get", {}));
       seen.push({ status: q.status, data: q.data });
       return null;
     }
 
     const harness = await mountHarness();
-    await harness.render(createElement(SyncProvider, { client }, createElement(Probe)));
-    // First commit should be loading with no data.
+    await harness.render(provider(registry, createElement(Probe)));
+    await settle();
     expect(seen[seen.length - 1]).toEqual({ status: "loading", data: undefined });
 
     await act(async () => {
       resolveFetch(42);
-      await flush();
     });
+    await settle();
     expect(seen[seen.length - 1]).toEqual({ status: "success", data: 42 });
 
     await harness.unmount();
   });
 
-  test("refetch advances the entry's version and re-renders with the fresh value", async () => {
+  test("refetch re-runs the fetcher and re-renders with the fresh value", async () => {
     let count = 0;
-    const transport: SyncTransport = {
-      rpc() {
-        return Promise.resolve(++count);
-      },
-    };
-    const client = new SyncClient({ transport });
+    const registry = createGatewayCollections({ client: makeTransport(() => Promise.resolve(++count)).transport });
 
     let lastRefetch: (() => Promise<unknown>) | undefined;
     const renders: number[] = [];
     function Probe() {
-      const q = useSyncQuery<number>(["counter"], () => client.rpc<number>("get", {}));
+      const q = useSyncQuery<number>(["counter"], () => registry.rpc<number>("get", {}));
       lastRefetch = q.refetch;
       if (typeof q.data === "number") renders.push(q.data);
       return null;
     }
 
     const harness = await mountHarness();
-    await harness.render(createElement(SyncProvider, { client }, createElement(Probe)));
-    await flush();
-    expect(renders[renders.length - 1]).toBe(1);
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => renders[renders.length - 1] === 1);
 
     await act(async () => {
       await lastRefetch?.();
-      await flush();
     });
-    expect(renders[renders.length - 1]).toBe(2);
+    await waitFor(() => renders[renders.length - 1] === 2);
 
     await harness.unmount();
   });
 
-  test("client.invalidate re-renders subscribers with the freshly fetched value", async () => {
-    let value = 10;
-    const transport: SyncTransport = {
-      rpc() {
-        return Promise.resolve(value);
-      },
-    };
-    const client = new SyncClient({ transport });
+  test("setQueryData (optimistic push) re-renders subscribers", async () => {
+    const registry = createGatewayCollections({ client: makeTransport(() => Promise.resolve(1)).transport });
 
     const observed: number[] = [];
     function Probe() {
-      const q = useSyncQuery<number>(["x"], () => client.rpc<number>("get", {}));
+      const q = useSyncQuery<number>(["x"], () => registry.rpc<number>("get", {}));
       if (typeof q.data === "number") observed.push(q.data);
       return null;
     }
 
     const harness = await mountHarness();
-    await harness.render(createElement(SyncProvider, { client }, createElement(Probe)));
-    await flush();
-    expect(observed[observed.length - 1]).toBe(10);
-
-    value = 20;
-    await act(async () => {
-      await client.invalidate(["x"]);
-      await flush();
-    });
-    expect(observed[observed.length - 1]).toBe(20);
-
-    await harness.unmount();
-  });
-
-  test("a direct cache.setData (live data push) re-renders subscribers", async () => {
-    const client = new SyncClient({ transport: rpcTransport({ get: () => 1 }) });
-
-    const observed: number[] = [];
-    function Probe() {
-      const q = useSyncQuery<number>(["x"], () => client.rpc<number>("get", {}));
-      if (typeof q.data === "number") observed.push(q.data);
-      return null;
-    }
-
-    const harness = await mountHarness();
-    await harness.render(createElement(SyncProvider, { client }, createElement(Probe)));
-    await flush();
-    expect(observed[observed.length - 1]).toBe(1);
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => observed[observed.length - 1] === 1);
 
     await act(async () => {
-      client.cache.setData(["x"], 99);
-      await flush();
+      registry.setQueryData(["x"], 99);
     });
-    expect(observed[observed.length - 1]).toBe(99);
+    await waitFor(() => observed[observed.length - 1] === 99);
 
     await harness.unmount();
   });
@@ -205,38 +215,29 @@ describe("useSyncQuery lifecycle", () => {
 describe("useGatewayQuery params", () => {
   test("params changes do not reuse stale data when the caller key is stable", async () => {
     const calls: unknown[] = [];
-    const transport = rpcTransport({
-      getThing: (params) => {
-        calls.push(params);
-        return { id: (params as { id: string }).id, call: calls.length };
-      },
+    const registry = createGatewayCollections({
+      client: makeTransport((method, params) => {
+        calls.push({ method, params });
+        return Promise.resolve({ id: (params as { id: string }).id, call: calls.length });
+      }).transport,
     });
-    const client = new SyncClient({ transport });
 
-    let latest:
-      | { status: string; data: { id: string; call: number } | undefined }
-      | undefined;
-
+    let latest: { id: string; call: number } | undefined;
     function Probe({ id }: { id: string }) {
-      const q = useGatewayQuery<{ id: string; call: number }>(
-        ["gateway:getThing"],
-        "getThing",
-        { id },
-      );
-      latest = { status: q.status, data: q.data };
+      const q = useGatewayQuery<{ id: string; call: number }>(["gateway:getThing"], "getThing", { id });
+      latest = q.data;
       return null;
     }
 
     const harness = await mountHarness();
-    await harness.render(createElement(SyncProvider, { client }, createElement(Probe, { id: "a" })));
-    await flush();
-    expect(latest?.data).toEqual({ id: "a", call: 1 });
+    await harness.render(provider(registry, createElement(Probe, { id: "a" })));
+    await waitFor(() => latest?.id === "a");
+    expect(latest).toEqual({ id: "a", call: 1 });
 
-    await harness.render(createElement(SyncProvider, { client }, createElement(Probe, { id: "b" })));
-    expect(latest?.data?.id).not.toBe("a");
-    await flush();
-    expect(latest?.data).toEqual({ id: "b", call: 2 });
-    expect(calls).toEqual([{ id: "a" }, { id: "b" }]);
+    await harness.render(provider(registry, createElement(Probe, { id: "b" })));
+    expect(latest?.id).not.toBe("a");
+    await waitFor(() => latest?.id === "b");
+    expect(calls).toEqual([{ method: "getThing", params: { id: "a" } }, { method: "getThing", params: { id: "b" } }]);
 
     await harness.unmount();
   });
@@ -244,198 +245,384 @@ describe("useGatewayQuery params", () => {
 
 describe("useSyncMutation optimistic + rollback", () => {
   test("rolls back optimistic data when the runner rejects", async () => {
-    const transport = rpcTransport({
-      readCounter: () => 5,
-      bump: () => {
-        throw new Error("bump failed");
-      },
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "readCounter") return Promise.resolve(5);
+        return Promise.reject(new Error("bump failed"));
+      }).transport,
     });
-    const client = new SyncClient({ transport });
 
-    const seen: Array<{ data: number | undefined; status: string }> = [];
+    const seen: number[] = [];
     let mutate: (vars: number) => Promise<number> = async () => 0;
-
     function Probe() {
-      const q = useSyncQuery<number>(["counter"], () => client.rpc<number>("readCounter", {}));
+      const q = useSyncQuery<number>(["counter"], () => registry.rpc<number>("readCounter", {}));
       const m = useSyncMutation<number, number, number | undefined>(
-        (next: number) => client.rpc<number>("bump", { next }),
+        (next) => registry.rpc<number>("bump", { next }),
         {
-          onMutate: (next, c) => {
-            const { previous } = c.cache.setData<number>(["counter"], next);
-            return previous;
-          },
-          onError: (_err, _vars, previous, c) => {
-            if (typeof previous === "number") {
-              c.cache.setData(["counter"], previous);
-            }
+          onMutate: (next) => registry.setQueryData<number>(["counter"], next).previous,
+          onError: (_err, _vars, previous) => {
+            if (typeof previous === "number") registry.setQueryData(["counter"], previous);
           },
         },
       );
       mutate = m.mutate;
-      seen.push({ data: q.data, status: q.status });
+      if (typeof q.data === "number") seen.push(q.data);
       return null;
     }
 
     const harness = await mountHarness();
-    await harness.render(createElement(SyncProvider, { client }, createElement(Probe)));
-    await flush();
-    expect(seen[seen.length - 1].data).toBe(5);
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => seen[seen.length - 1] === 5);
 
     await act(async () => {
       await mutate(99).catch(() => undefined);
-      await flush();
     });
-    // After rollback the cached value is the original 5 again.
-    expect(seen[seen.length - 1].data).toBe(5);
+    await settle();
+    // Optimistic 99 was written then rolled back to 5 on rejection.
+    expect(seen).toContain(99);
+    expect(seen[seen.length - 1]).toBe(5);
 
     await harness.unmount();
   });
 });
 
 describe("useSyncSubscription frames + backpressure", () => {
-  function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
-    let resolve: (v: T) => void = () => {};
-    const promise = new Promise<T>((res) => {
-      resolve = res;
-    });
-    return { promise, resolve };
-  }
-
-  function streamingTransport() {
-    const queue: SyncStreamFrame[] = [];
-    const opens: Array<{ scope: string; params: unknown; signal: AbortSignal | undefined }> = [];
-    let waiter: { resolve: (v: void) => void } | null = null;
-    let ended = false;
-    function notify() {
-      const pending = waiter;
-      waiter = null;
-      pending?.resolve();
-    }
-    const transport: SyncTransport = {
-      rpc() {
-        return Promise.reject(new Error("not used"));
-      },
-      async *stream(scope, params, options: SyncStreamOptions): AsyncIterable<SyncStreamFrame> {
-        opens.push({ scope, params, signal: options.signal });
-        while (true) {
-          if (options.signal?.aborted) return;
-          if (queue.length > 0) {
-            yield queue.shift()!;
-            continue;
-          }
-          if (ended) return;
-          const d = deferred<void>();
-          waiter = { resolve: d.resolve };
-          await d.promise;
-        }
-      },
-    };
-    return {
-      transport,
-      opens,
-      push(frame: SyncStreamFrame) {
-        queue.push(frame);
-        notify();
-      },
-      end() {
-        ended = true;
-        notify();
-      },
-    };
-  }
-
-  test("frames pushed by the transport appear in the consumer's bounded buffer", async () => {
-    const stream = streamingTransport();
-    const client = new SyncClient({ transport: stream.transport });
+  test("frames pushed by the transport appear in the bounded buffer", async () => {
+    const stream = makeTransport(() => Promise.reject(new Error("not used")));
+    const registry = createGatewayCollections({ client: stream.transport });
 
     let last: SyncStreamFrame | undefined;
     function Probe() {
-      const r = useSyncSubscription(["run", "r1"], "streamRunEvents", { runId: "r1" }, { maxFrames: 3 });
+      const r = useSyncSubscription(gatewayKeys.runEvents("r1"), "streamRunEvents", { runId: "r1" }, { maxFrames: 3 });
       last = r.last;
       return null;
     }
 
     const harness = await mountHarness();
-    await harness.render(createElement(SyncProvider, { client }, createElement(Probe)));
-    await flush();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => stream.opens.length === 1);
 
     await act(async () => {
-      stream.push({ key: ["run", "r1"], seq: 1, event: "run.event", payload: { v: 1 } });
-      await flush();
+      stream.push("streamRunEvents", "r1", { key: ["run", "r1"], seq: 1, event: "run.event", payload: { v: 1 } });
     });
-    expect(last?.seq).toBe(1);
+    await waitFor(() => last?.seq === 1);
 
     await act(async () => {
-      stream.push({ key: ["run", "r1"], seq: 2, event: "run.event", payload: { v: 2 } });
-      stream.push({ key: ["run", "r1"], seq: 3, event: "run.event", payload: { v: 3 } });
-      await flush();
+      stream.push("streamRunEvents", "r1", { key: ["run", "r1"], seq: 2, event: "run.event", payload: { v: 2 } });
+      stream.push("streamRunEvents", "r1", { key: ["run", "r1"], seq: 3, event: "run.event", payload: { v: 3 } });
     });
-    expect(last?.seq).toBe(3);
+    await waitFor(() => last?.seq === 3);
 
     await harness.unmount();
   });
 
-  test("frames past maxFrames push older ones out (consumer-side backpressure)", async () => {
-    const stream = streamingTransport();
-    const client = new SyncClient({ transport: stream.transport });
+  test("frames past maxFrames push older ones out", async () => {
+    const stream = makeTransport(() => Promise.reject(new Error("not used")));
+    const registry = createGatewayCollections({ client: stream.transport });
 
-    let result:
-      | { frames: ReadonlyArray<SyncStreamFrame>; dropped: number }
-      | undefined;
+    let result: UseSyncSubscriptionResult | undefined;
     function Probe() {
-      result = useSyncSubscription(["run", "r1"], "streamRunEvents", { runId: "r1" }, { maxFrames: 3 });
+      result = useSyncSubscription(gatewayKeys.runEvents("flood"), "streamRunEvents", { runId: "flood" }, { maxFrames: 3 });
       return null;
     }
 
     const harness = await mountHarness();
-    await harness.render(createElement(SyncProvider, { client }, createElement(Probe)));
-    await flush();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => stream.opens.length === 1);
 
     await act(async () => {
       for (let seq = 1; seq <= 6; seq += 1) {
-        stream.push({ key: ["run", "r1"], seq, event: "run.event", payload: { seq } });
+        stream.push("streamRunEvents", "flood", { key: ["run", "flood"], seq, event: "run.event", payload: { seq } });
       }
-      await flush();
     });
-
-    expect(result?.frames.length).toBe(3);
+    await waitFor(() => result?.frames.length === 3 && result.frames[2]?.seq === 6);
     expect(result?.frames.map((f) => f.seq)).toEqual([4, 5, 6]);
     expect(result?.dropped).toBeGreaterThanOrEqual(3);
 
     await harness.unmount();
   });
 
-  test("params changes tear down the old stream and open a new one", async () => {
-    const stream = streamingTransport();
-    const client = new SyncClient({ transport: stream.transport });
+  test("params changes open a fresh stream and reset frames", async () => {
+    const stream = makeTransport(() => Promise.reject(new Error("not used")));
+    const registry = createGatewayCollections({ client: stream.transport });
 
     let result: UseSyncSubscriptionResult | undefined;
     function Probe({ runId }: { runId: string }) {
-      result = useSyncSubscription(["run", "events"], "streamRunEvents", { runId }, { maxFrames: 3 });
+      result = useSyncSubscription(gatewayKeys.runEvents(runId), "streamRunEvents", { runId }, { maxFrames: 3 });
       return null;
     }
 
     const harness = await mountHarness();
-    await harness.render(createElement(SyncProvider, { client }, createElement(Probe, { runId: "r1" })));
-    await flush();
-    expect(stream.opens).toHaveLength(1);
-    expect(stream.opens[0]!.params).toEqual({ runId: "r1" });
-    expect(stream.opens[0]!.signal?.aborted).toBe(false);
+    await harness.render(provider(registry, createElement(Probe, { runId: "r1" })));
+    await waitFor(() => stream.opens.some((o) => String((o.params as { runId?: string }).runId) === "r1"));
 
     await act(async () => {
-      stream.push({ key: ["run", "events"], seq: 1, event: "run.event", payload: { runId: "r1" } });
-      await flush();
+      stream.push("streamRunEvents", "r1", { key: ["run", "r1"], seq: 1, event: "run.event", payload: { runId: "r1" } });
     });
-    expect(result?.last?.payload).toEqual({ runId: "r1" });
+    await waitFor(() => result?.last?.payload !== undefined);
 
-    await harness.render(createElement(SyncProvider, { client }, createElement(Probe, { runId: "r2" })));
-    expect(result?.frames).toEqual([]);
-    expect(result?.last).toBeUndefined();
-    await flush();
-    expect(stream.opens).toHaveLength(2);
-    expect(stream.opens[0]!.signal?.aborted).toBe(true);
-    expect(stream.opens[1]!.params).toEqual({ runId: "r2" });
+    await harness.render(provider(registry, createElement(Probe, { runId: "r2" })));
+    await waitFor(() => result?.frames.length === 0);
+    await waitFor(() => stream.opens.some((o) => String((o.params as { runId?: string }).runId) === "r2"));
 
     await harness.unmount();
+  });
+});
+
+describe("legacy synced hooks over collections", () => {
+  test("useGatewayRuns lists rows from listRuns", async () => {
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") return Promise.resolve([{ runId: "run-1", status: "running" }]);
+        return Promise.resolve([]);
+      }).transport,
+    });
+
+    let snapshot: ReturnType<typeof useGatewayRuns> | undefined;
+    function Probe() {
+      snapshot = useGatewayRuns();
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => (snapshot?.data?.length ?? 0) === 1);
+    expect((snapshot?.data?.[0] as { runId?: string }).runId).toBe("run-1");
+    expect(snapshot?.loading).toBe(false);
+
+    await harness.unmount();
+  });
+
+  test("useGatewayRun upserts run status from a streamRunEvents lifecycle frame", async () => {
+    const stream = makeTransport((method) => {
+      if (method === "getRun") return Promise.resolve({ runId: "run-1", status: "running" });
+      return Promise.resolve({});
+    });
+    const registry = createGatewayCollections({ client: stream.transport });
+
+    let snapshot: ReturnType<typeof useGatewayRun> | undefined;
+    function Probe() {
+      snapshot = useGatewayRun("run-1");
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => (snapshot?.data as { status?: string })?.status === "running");
+
+    await act(async () => {
+      stream.push("streamRunEvents", "run-1", {
+        key: gatewayKeys.runEvents("run-1"),
+        seq: 7,
+        event: "run.lifecycle",
+        payload: { event: "run.completed", payload: { state: "ok" } },
+      });
+    });
+    await waitFor(() => (snapshot?.data as { status?: string })?.status === "ok");
+
+    await harness.unmount();
+  });
+
+  test("useGatewayApprovals and useGatewayWorkflows surface their lists", async () => {
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listApprovals") {
+          return Promise.resolve([{ runId: "run-1", nodeId: "approve", iteration: 0, requestedAtMs: 1 }]);
+        }
+        if (method === "listWorkflows") return Promise.resolve([{ key: "deploy", hasUi: true, uiPath: "/x" }]);
+        return Promise.resolve([]);
+      }).transport,
+    });
+
+    let approvals: ReturnType<typeof useGatewayApprovals> | undefined;
+    let workflows: ReturnType<typeof useGatewayWorkflows> | undefined;
+    function Probe() {
+      approvals = useGatewayApprovals({ filter: { runId: "run-1" } });
+      workflows = useGatewayWorkflows({ filter: { hasUi: true } });
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => (approvals?.data?.length ?? 0) === 1 && (workflows?.data?.length ?? 0) === 1);
+    expect(approvals?.data?.[0]?.nodeId).toBe("approve");
+    expect(workflows?.data?.[0]?.key).toBe("deploy");
+
+    await harness.unmount();
+  });
+});
+
+describe("useGatewayRunEvents over the runEvents collection", () => {
+  test("filters heartbeats into lastHeartbeat and caps the events array", async () => {
+    const stream = makeTransport(() => Promise.reject(new Error("not used")));
+    const registry = createGatewayCollections({ client: stream.transport });
+
+    let snapshot: ReturnType<typeof useGatewayRunEvents> | undefined;
+    function Probe() {
+      snapshot = useGatewayRunEvents("run-1", { maxEvents: 5 });
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => stream.opens.length === 1);
+
+    await act(async () => {
+      for (let seq = 1; seq <= 8; seq += 1) {
+        stream.push("streamRunEvents", "run-1", {
+          key: gatewayKeys.runEvents("run-1"),
+          seq,
+          event: "run.event",
+          payload: { seq },
+        });
+        if (seq === 3) {
+          stream.push("streamRunEvents", "run-1", {
+            key: gatewayKeys.runEvents("run-1"),
+            seq: 103,
+            event: "run.heartbeat",
+            payload: {},
+          });
+        }
+        if (seq === 6) {
+          stream.push("streamRunEvents", "run-1", {
+            key: gatewayKeys.runEvents("run-1"),
+            seq: 106,
+            event: "run.heartbeat",
+            payload: {},
+          });
+        }
+      }
+    });
+
+    await waitFor(() => snapshot?.events.length === 5 && snapshot?.lastHeartbeat?.seq === 106);
+    expect(snapshot?.events.every((f) => f.event !== "run.heartbeat")).toBe(true);
+    expect(snapshot?.events.map((f) => f.seq)).toEqual([4, 5, 6, 7, 8]);
+    expect(snapshot?.streaming).toBe(true);
+
+    await harness.unmount();
+  });
+});
+
+describe("useGatewayRunTree reconcile", () => {
+  test("a devtools frame upserts changed nodes and deletes removed ones", async () => {
+    const snapshots = [
+      {
+        root: {
+          id: 0,
+          name: "Workflow",
+          type: "Workflow",
+          children: [
+            { id: 1, name: "a", type: "Task", task: { nodeId: "a" } },
+            { id: 2, name: "b", type: "Task", task: { nodeId: "b" } },
+          ],
+        },
+        runState: { state: "running" },
+      },
+      {
+        root: {
+          id: 0,
+          name: "Workflow",
+          type: "Workflow",
+          children: [
+            { id: 1, name: "a", type: "Task", task: { nodeId: "a" } },
+            { id: 3, name: "c", type: "Task", task: { nodeId: "c" } },
+          ],
+        },
+        runState: { state: "running" },
+      },
+    ];
+    const stream = makeTransport((method) => {
+      if (method === "getDevToolsSnapshot") {
+        return Promise.resolve(snapshots.shift() ?? snapshots[snapshots.length - 1]);
+      }
+      return Promise.resolve({});
+    });
+    const registry = createGatewayCollections({ client: stream.transport });
+
+    let tree: ReturnType<typeof useGatewayRunTree> | undefined;
+    function Probe() {
+      tree = useGatewayRunTree("run-1");
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => tree?.nodes.some((n) => n.id === "b") === true);
+    expect(
+      tree?.nodes
+        .map((n) => n.id)
+        .slice()
+        .sort(),
+    ).toEqual(["0", "a", "b"]);
+    expect(tree?.root?.children?.map((c) => c.id)).toEqual(["a", "b"]);
+
+    await act(async () => {
+      stream.push("streamDevTools", "run-1", {
+        key: gatewayKeys.devtools("run-1"),
+        seq: 4,
+        event: "devtools.event",
+        payload: { kind: "changed" },
+      });
+    });
+
+    await waitFor(() => tree?.nodes.some((n) => n.id === "c") === true);
+    expect(tree?.nodes.some((n) => n.id === "b")).toBe(false);
+    expect(tree?.root?.children?.map((c) => c.id)).toEqual(["a", "c"]);
+
+    await harness.unmount();
+  });
+});
+
+describe("useGatewayConnectionStatus", () => {
+  test("goes online on a successful load and unauthorized on an auth error", async () => {
+    let authMessage = "";
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") return Promise.resolve([]);
+        return Promise.reject(new Error("UNAUTHORIZED: missing token"));
+      }).transport,
+      onAuthError: (error) => {
+        authMessage = error.message;
+      },
+    });
+
+    let status: ReturnType<typeof useGatewayConnectionStatus> | undefined;
+    function Probe() {
+      useGatewayRuns();
+      status = useGatewayConnectionStatus();
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => status?.status === "online");
+    expect(status?.isOnline).toBe(true);
+
+    // A failing auth RPC flips the observer to unauthorized and fires onAuthError.
+    await act(async () => {
+      await registry.rpc("getRun", { runId: "x" }).catch(() => undefined);
+    });
+    await waitFor(() => status?.status === "unauthorized");
+    expect(authMessage).toMatch(/UNAUTHORIZED/);
+
+    await harness.unmount();
+  });
+
+  test("connect() probes the gateway and reset() clears the observer", async () => {
+    const calls: string[] = [];
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        calls.push(method);
+        return Promise.resolve([]);
+      }).transport,
+    });
+
+    expect(registry.connection().status).toBe("idle");
+    await registry.connect();
+    expect(calls).toContain("listRuns");
+    expect(registry.connection().status).toBe("online");
+
+    registry.reset();
+    expect(registry.connection().status).toBe("idle");
   });
 });

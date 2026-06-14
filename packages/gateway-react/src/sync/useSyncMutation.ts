@@ -1,17 +1,36 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import type { SyncMutationOptions } from "@smithers-orchestrator/gateway-client";
+import type { SyncKey } from "@smithers-orchestrator/gateway-client";
 import { useSyncClient } from "./useSyncClient.ts";
+import type { GatewayCollections } from "./GatewayCollections.ts";
 
 /**
- * A mutation hook with optimistic updates + invalidate-on-success. Mirrors the
- * SDK's `client.mutate` but exposes status (`idle | loading | success | error`)
- * so consumers can disable buttons mid-flight without juggling local state.
+ * A mutation hook with optimistic updates + invalidate-on-success over the
+ * `GatewayCollections` registry. `runner` performs the write (typically
+ * `registry.rpc(method, vars)`); `onMutate` may stage an optimistic value via
+ * `registry.setQueryData` and return a rollback context for `onError`.
  *
  * Status is tracked in a tiny vanilla observer (not React state) so the hook
  * stays useEffect-free and re-renders are driven by `useSyncExternalStore`.
  */
 
 export type UseSyncMutationStatus = "idle" | "loading" | "success" | "error";
+
+export type SyncMutationOptions<TVars, TData, TContext = unknown> = {
+  /**
+   * Called before the mutation fires. Return a context (rollback snapshot) the
+   * hook hands back to `onError` for symmetric undo of optimistic cache writes.
+   */
+  onMutate?: (vars: TVars, registry: GatewayCollections) => TContext | Promise<TContext>;
+  onSuccess?: (data: TData, vars: TVars, context: TContext, registry: GatewayCollections) => void | Promise<void>;
+  onError?: (
+    error: Error,
+    vars: TVars,
+    context: TContext | undefined,
+    registry: GatewayCollections,
+  ) => void | Promise<void>;
+  /** Keys (or key prefixes) to invalidate after a successful mutation. */
+  invalidate?: ReadonlyArray<SyncKey>;
+};
 
 export type UseSyncMutationResult<TVars, TData> = {
   mutate: (vars: TVars) => Promise<TData>;
@@ -52,7 +71,7 @@ export function useSyncMutation<TVars, TData, TContext = unknown>(
   runner: (vars: TVars) => Promise<TData>,
   options: SyncMutationOptions<TVars, TData, TContext> = {},
 ): UseSyncMutationResult<TVars, TData> {
-  const client = useSyncClient();
+  const registry = useSyncClient();
   const runnerRef = useRef(runner);
   runnerRef.current = runner;
   const optionsRef = useRef(options);
@@ -65,22 +84,26 @@ export function useSyncMutation<TVars, TData, TContext = unknown>(
 
   const mutate = useCallback(
     async (vars: TVars) => {
+      const opts = optionsRef.current;
       store.set({ status: "loading", data: undefined, error: undefined });
+      let context: TContext | undefined;
       try {
-        const data = await client.mutate<TVars, TData, TContext>(
-          runnerRef.current,
-          vars,
-          optionsRef.current,
-        );
+        context = await opts.onMutate?.(vars, registry);
+        const data = await runnerRef.current(vars);
+        await opts.onSuccess?.(data, vars, context as TContext, registry);
+        for (const key of opts.invalidate ?? []) {
+          await registry.invalidate(key);
+        }
         store.set({ status: "success", data, error: undefined });
         return data;
       } catch (cause) {
         const error = cause instanceof Error ? cause : new Error(String(cause));
+        await opts.onError?.(error, vars, context, registry);
         store.set({ status: "error", data: undefined, error });
         throw error;
       }
     },
-    [client, store],
+    [registry, store],
   );
 
   const mutateSafe = useCallback(

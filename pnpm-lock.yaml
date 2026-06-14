@@ -968,6 +968,9 @@ importers:
       '@smithers-orchestrator/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
+      '@tanstack/react-db':
+        specifier: 0.1.86
+        version: 0.1.86(react@19.2.5)(typescript@5.9.3)
     devDependencies:
       '@happy-dom/global-registrator':
         specifier: ^20.9.0
@@ -3998,6 +4001,11 @@ packages:
 
   '@tanstack/query-core@5.99.1':
     resolution: {integrity: sha512-5E8xwxyWvr22yt7zvzP3KOZ5TUElOdVA45NP3/Ao1m9mvc9i18NLTDe9m3M00BH2DR5J20cv7xckMPlhKNs+vQ==}
+
+  '@tanstack/react-db@0.1.86':
+    resolution: {integrity: sha512-s/8Iv5IrJd0jGeVwX/x3fn7GrPwCGkakzdfxvp2ju2o267uvV5YC2+MviVo9UIGZ+cCLdFAHjxY6P9+WZWTRAg==}
+    peerDependencies:
+      react: '>=16.8.0'
 
   '@tanstack/react-query@5.99.1':
     resolution: {integrity: sha512-akg5GdwW70lvJvCqVHZ7tizGyc+TATjUzKX9RuF1xknhEe/1leofXk7YLYbrbRsuhNbHJBAayaQUMvvOFZ5L5g==}
@@ -9798,6 +9806,14 @@ snapshots:
   '@tanstack/pacer-lite@0.2.2': {}
 
   '@tanstack/query-core@5.99.1': {}
+
+  '@tanstack/react-db@0.1.86(react@19.2.5)(typescript@5.9.3)':
+    dependencies:
+      '@tanstack/db': 0.6.8(typescript@5.9.3)
+      react: 19.2.5
+      use-sync-external-store: 1.6.0(react@19.2.5)
+    transitivePeerDependencies:
+      - typescript
 
   '@tanstack/react-query@5.99.1(react@19.2.5)':
     dependencies:

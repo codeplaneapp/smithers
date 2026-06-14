@@ -1,16 +1,19 @@
-import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { useMemo } from "react";
+import { useLiveQuery } from "@tanstack/react-db";
 import { syncKeyFingerprint, type SyncKey, type SyncStreamFrame } from "@smithers-orchestrator/gateway-client";
 import { useSyncClient } from "./useSyncClient.ts";
+import type { GatewayStreamRow } from "./GatewayCollections.ts";
 
 /**
- * Subscribe to a streaming source (run events, devtools, …) through the
- * `SyncSubscriptionHub`. Returns the rolling buffer of frames + connection
+ * Subscribe to a streaming source (run events, devtools, …) through a bounded
+ * stream collection in the registry. Returns the rolling buffer of frames +
  * stats. Heavy bursts are bounded by `maxFrames`; older frames drop off the
  * front so render time stays predictable on a hot run.
  *
- * The hub deduplicates: N components subscribing to the same key share ONE
- * upstream connection. Disabling (`enabled: false`) unsubscribes and frees the
- * upstream when this was the last observer.
+ * N components subscribing to the same key share ONE collection (and one
+ * upstream socket) — multiplexing falls out of the per-key collection id.
+ * Disabling (`enabled: false`) drops the subscription; the collection's
+ * `gcTime: 0` aborts the upstream when this was the last observer.
  */
 
 export type UseSyncSubscriptionOptions = {
@@ -22,48 +25,9 @@ export type UseSyncSubscriptionOptions = {
 export type UseSyncSubscriptionResult = {
   frames: ReadonlyArray<SyncStreamFrame>;
   last: SyncStreamFrame | undefined;
-  /** Frames dropped due to the consumer's bounded buffer (not the hub's). */
+  /** Frames dropped off the front of the bounded buffer. */
   dropped: number;
 };
-
-type SnapshotState = {
-  frames: SyncStreamFrame[];
-  last: SyncStreamFrame | undefined;
-  dropped: number;
-  version: number;
-};
-
-function createSubscriptionStore(maxFrames: number) {
-  let state: SnapshotState = { frames: [], last: undefined, dropped: 0, version: 0 };
-  const listeners = new Set<() => void>();
-  return {
-    get(): SnapshotState {
-      return state;
-    },
-    push(frame: SyncStreamFrame): void {
-      const overflow = state.frames.length >= maxFrames;
-      const frames = overflow
-        ? state.frames.slice(state.frames.length - maxFrames + 1)
-        : state.frames.slice();
-      frames.push(frame);
-      state = {
-        frames,
-        last: frame,
-        dropped: state.dropped + (overflow ? 1 : 0),
-        version: state.version + 1,
-      };
-      for (const listener of listeners) listener();
-    },
-    reset(): void {
-      state = { frames: [], last: undefined, dropped: 0, version: state.version + 1 };
-      for (const listener of listeners) listener();
-    },
-    subscribe(listener: () => void): () => void {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-  };
-}
 
 export function useSyncSubscription(
   key: SyncKey,
@@ -71,59 +35,26 @@ export function useSyncSubscription(
   params: unknown,
   options: UseSyncSubscriptionOptions = {},
 ): UseSyncSubscriptionResult {
-  const client = useSyncClient();
+  const registry = useSyncClient();
   const enabled = options.enabled ?? true;
   const maxFrames = options.maxFrames ?? 200;
   const paramsFingerprint = syncKeyFingerprint(["params", params]);
   const fingerprint = useMemo(
-    () => syncKeyFingerprint(key) + "|" + scope + "|" + paramsFingerprint,
-    [key, scope, paramsFingerprint],
+    () => `${syncKeyFingerprint(key)}|${scope}|${paramsFingerprint}|${maxFrames}`,
+    [key, scope, paramsFingerprint, maxFrames],
   );
-  const storeRef = useRef<{
-    fingerprint: string;
-    maxFrames: number;
-    store: ReturnType<typeof createSubscriptionStore>;
-  } | null>(null);
-  if (
-    !storeRef.current ||
-    storeRef.current.fingerprint !== fingerprint ||
-    storeRef.current.maxFrames !== maxFrames
-  ) {
-    storeRef.current = { fingerprint, maxFrames, store: createSubscriptionStore(maxFrames) };
-  }
-  const store = storeRef.current.store;
-  const keyRef = useRef<SyncKey>(key);
-  keyRef.current = key;
-  const paramsRef = useRef<unknown>(params);
-  paramsRef.current = params;
-  const scopeRef = useRef(scope);
-  scopeRef.current = scope;
+  const handle = enabled ? registry.stream(key, scope, params, maxFrames) : undefined;
 
-  const subscribe = useCallback(
-    (notify: () => void) => {
-      const listenersUnsubscribe = store.subscribe(notify);
-      if (!enabled) {
-        return () => {
-          listenersUnsubscribe();
-        };
-      }
-      store.reset();
-      const hubUnsubscribe = client.subscribe(
-        keyRef.current,
-        scopeRef.current,
-        paramsRef.current,
-        (frame) => store.push(frame),
-      );
-      return () => {
-        hubUnsubscribe();
-        listenersUnsubscribe();
-      };
-    },
-    [client, enabled, fingerprint, store],
+  const live = useLiveQuery(
+    (q) => (handle ? q.from({ row: handle.collection }) : undefined),
+    [fingerprint, enabled],
   );
 
-  const getSnapshot = useCallback(() => store.get(), [store]);
-
-  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  return { frames: state.frames, last: state.last, dropped: state.dropped };
+  const rows = (live.data ?? []) as GatewayStreamRow[];
+  const frames = useMemo(
+    () => [...rows].sort((left, right) => left.id - right.id).map((row) => row.frame),
+    [rows],
+  );
+  const dropped = handle ? Math.max(0, handle.stats.totalSeen - frames.length) : 0;
+  return { frames, last: frames[frames.length - 1], dropped };
 }
