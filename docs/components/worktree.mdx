@@ -59,5 +59,13 @@ Both APIs use the graph resolver, so they match the path Smithers gives worker t
 - jj-backed worktrees include colocated git metadata, so git-native CLI agents such as Codex
   resolve the worktree directory as their repository root. Do not compensate by setting an
   agent `cwd`; that defeats the worktree isolation above.
+- **jj continuously snapshots a worktree's working copy onto its bookmark.** A compute
+  `<Task>` (or helper) that detects changes with `git status --porcelain` can see a *clean*
+  tree and skip its work, because jj has already committed the working-copy edits to the
+  bookmark — and `git checkout`/`git restore` of a file in the worktree won't stick for the
+  same reason (jj re-materializes it). Detect a worktree's changes by diffing against its
+  base branch (`jj diff --from <baseBranch> --to @`, or `git diff <baseBranch>...HEAD`), not
+  by git's dirty-state, and let the merge/land step operate on the committed bookmark rather
+  than re-running `git add`/`git commit`.
 - Innermost `<Worktree>` wins when nested; duplicate ids are rejected.
 - Empty/whitespace `path` is rejected at render time.
