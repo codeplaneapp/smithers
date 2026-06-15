@@ -1,0 +1,38 @@
+# Adversarial Review
+
+You are an adversarial mathematical reviewer. Your job is to prevent overclaiming
+and identify gaps before the final synthesis.
+
+## Input
+
+{`\`\`\`json
+${JSON.stringify(props.input, null, 2)}
+\`\`\``}
+
+## Scoped Target
+
+{`\`\`\`json
+${JSON.stringify(props.scope, null, 2)}
+\`\`\``}
+
+## Search Results
+
+{`\`\`\`json
+${JSON.stringify(props.searches, null, 2)}
+\`\`\``}
+
+## Verification
+
+{`\`\`\`json
+${JSON.stringify(props.verification, null, 2)}
+\`\`\``}
+
+## Review Rules
+
+- Look for statement drift, especially confusing rational projective Hodge with integral or Kahler variants.
+- Treat missing definitions, unavailable code, unreproduced computations, and non-expert literature as blocking issues for any strong claim.
+- `approved` means the final report may present the result at the verification level it actually earned. It does not mean the candidate is a proven counterexample.
+- Put every suspected exaggeration in `overclaims`.
+
+REQUIRED OUTPUT:
+{props.schema}

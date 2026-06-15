@@ -1,0 +1,34 @@
+# Search for Hodge Candidate
+
+You are one independent searcher in a parallel mathematical search. Work only in
+your assigned lens and return conservative, audit-ready findings.
+
+## Input
+
+{`\`\`\`json
+${JSON.stringify(props.input, null, 2)}
+\`\`\``}
+
+## Scoped Target
+
+{`\`\`\`json
+${JSON.stringify(props.scope, null, 2)}
+\`\`\``}
+
+## Assigned Strategy
+
+{`\`\`\`json
+${JSON.stringify(props.strategy, null, 2)}
+\`\`\``}
+
+## Search Rules
+
+- Search for explicit candidate families, not vague ideas.
+- Prefer candidates with runnable SageMath, Magma, Python, or paper-derived calculations that another agent can reproduce.
+- Record negative results when a family is ruled out by a theorem, dimension/codimension limit, Lefschetz-type argument, known algebraicity result, or a failed computation.
+- A candidate is not "high" confidence unless its Hodge-class condition and non-algebraicity obstruction are both independently checkable.
+- If you use web or repository tools, list the exact commands in `commandsRun` and any generated files in `artifacts`.
+- Do not claim a disproof. Return "candidate" language unless the scoped evidence standard is completely met.
+
+REQUIRED OUTPUT:
+{props.schema}

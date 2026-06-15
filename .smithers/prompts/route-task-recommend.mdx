@@ -44,6 +44,7 @@ Rough guide to what each is for:
 - `create-skill` — author a new reusable agent skill.
 - `extract-skill` — harvest a reusable skill or workflow sketch from a finished run.
 - `improve-test-coverage` — raise test coverage until a target holds.
+- `hodge-counterexample-search` — run a scoped, parallel, independently verified search for Hodge-conjecture counterexample candidates.
 
 ## Tie-breaking
 
@@ -54,6 +55,8 @@ Prefer the most SPECIFIC workflow that covers the ask over a general one:
 - A read-only findings sweep is `audit`; reviewing a specific diff is `review`.
 - Ongoing watching of many runs is `monitor-smithers`; one run's post-mortem is
   `triage-run`.
+- Hodge-conjecture counterexample searches go to `hodge-counterexample-search`,
+  not generic `research`, when the user wants candidate generation plus verification.
 - If two workflows fit equally, pick the narrower one and list the broader one
   in `alternativeWorkflows`.
 

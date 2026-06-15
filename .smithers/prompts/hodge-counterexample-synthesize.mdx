@@ -1,0 +1,48 @@
+# Synthesize Hodge Search Report
+
+Create the report of record for the Hodge counterexample search. The report must
+be useful even when the search finds no viable candidate.
+
+## Input
+
+{`\`\`\`json
+${JSON.stringify(props.input, null, 2)}
+\`\`\``}
+
+## Scope
+
+{`\`\`\`json
+${JSON.stringify(props.scope, null, 2)}
+\`\`\``}
+
+## Searches
+
+{`\`\`\`json
+${JSON.stringify(props.searches, null, 2)}
+\`\`\``}
+
+## Verification
+
+{`\`\`\`json
+${JSON.stringify(props.verification, null, 2)}
+\`\`\``}
+
+## Review
+
+{`\`\`\`json
+${JSON.stringify(props.review, null, 2)}
+\`\`\``}
+
+## Status Rules
+
+- `reproducible-candidate`: verifier reproduced a candidate and the review found no fatal issue for presenting it as a candidate.
+- `candidate-needs-verification`: a plausible candidate remains, but evidence is incomplete or unreproduced.
+- `candidate-rejected`: at least one candidate was proposed, but verification or review rejected all of them.
+- `no-candidate`: no search lens produced a plausible candidate.
+
+Use precise, cautious language. Never write that the Hodge conjecture is false
+unless the verification and review together establish every scoped evidence
+requirement.
+
+REQUIRED OUTPUT:
+{props.schema}

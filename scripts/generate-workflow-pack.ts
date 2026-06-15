@@ -47,6 +47,7 @@ const SEEDED_WORKFLOW_IDS = [
   "triage-run",
   "context-doctor",
   "backpressure-plan",
+  "hodge-counterexample-search",
   "eval-author",
   "report-slideshow",
   // Fable-as-operator meta-workflow (authored in fable-smithers, moved here).

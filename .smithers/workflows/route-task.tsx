@@ -27,6 +27,7 @@ const SEEDED_WORKFLOWS = [
   "create-skill",
   "extract-skill",
   "context-doctor",
+  "hodge-counterexample-search",
   "monitor-smithers",
   "triage-run",
   "report-slideshow",

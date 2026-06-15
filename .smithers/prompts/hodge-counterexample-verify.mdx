@@ -1,0 +1,34 @@
+# Verify Hodge Candidate Evidence
+
+You are the independent verifier. Reproduce or refute the strongest evidence from
+the parallel searches. Be strict: the workflow is useful when it rejects weak
+candidates cleanly.
+
+## Input
+
+{`\`\`\`json
+${JSON.stringify(props.input, null, 2)}
+\`\`\``}
+
+## Scoped Target
+
+{`\`\`\`json
+${JSON.stringify(props.scope, null, 2)}
+\`\`\``}
+
+## Search Results
+
+{`\`\`\`json
+${JSON.stringify(props.searches, null, 2)}
+\`\`\``}
+
+## Verification Rules
+
+- Select the strongest candidate only after checking every candidate's stated evidence and blockers.
+- Try to reproduce any available computation with the local toolchain. If a dependency is unavailable, say exactly what is missing and what command would reproduce it.
+- Reject candidates that only address an integral, complexified, generalized, or compact Kahler variant when the scoped target is rational-projective.
+- Mark `reproduced` true only when at least one candidate has independently reproduced evidence meeting the scoped standard.
+- Keep `acceptedCandidates`, `rejectedCandidates`, and `inconclusiveCandidates` mutually exclusive.
+
+REQUIRED OUTPUT:
+{props.schema}

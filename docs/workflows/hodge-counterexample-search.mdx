@@ -1,0 +1,43 @@
+---
+title: hodge-counterexample-search
+description: Search for Hodge-conjecture counterexample candidates with scoped claims, parallel lenses, verification, and adversarial review.
+---
+
+`hodge-counterexample-search` coordinates a cautious mathematical search for
+counterexample candidates related to the Hodge conjecture. It scopes the exact
+variant first, fans out across independent search lenses, verifies the strongest
+evidence, reviews for overclaims, and returns a final status.
+
+```bash
+bunx smithers-orchestrator workflow run hodge-counterexample-search \
+  --input '{"conjectureVariant":"rational-projective","searchBudget":3}'
+```
+
+## Stages
+
+1. **scope**: define the target conjecture variant, known safe regions, known false variants, and the evidence standard.
+2. **search-lenses**: run three parallel searches: hypersurface periods, abelian Hodge classes, and Kahler or variant counterexamples.
+3. **verify**: independently reproduce or reject the strongest candidate evidence.
+4. **review**: adversarially check statement drift, missing evidence, and overclaims.
+5. **synthesize**: produce the report of record with `no-candidate`, `candidate-rejected`, `candidate-needs-verification`, or `reproducible-candidate`.
+
+## Inputs
+
+| Input | Type | Default |
+| --- | --- | --- |
+| `question` | string | `"Search for explicit, reproducible counterexample candidates related to the Hodge conjecture..."` |
+| `conjectureVariant` | enum | `"rational-projective"` |
+| `searchBudget` | integer | `3` |
+| `requireReproducibleComputation` | boolean | `true` |
+| `additionalContext` | string \| null | `null` |
+
+## Use it when
+
+- You need a structured, evidence-first mathematical search rather than a one-shot research answer.
+- You want known false variants separated from the rational projective Hodge conjecture.
+- You need independent verification before any candidate is presented as serious.
+
+## Use something else when
+
+- You only need background context: use [`research`](/workflows/research).
+- You need a plan for implementing code: use [`plan`](/workflows/plan) or [`research-plan-implement`](/workflows/research-plan-implement).

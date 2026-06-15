@@ -135,6 +135,7 @@
               "workflows/audit",
               "workflows/context-doctor",
               "workflows/backpressure-plan",
+              "workflows/hodge-counterexample-search",
               "workflows/triage-run",
               "workflows/report-slideshow",
               "workflows/monitor-smithers",

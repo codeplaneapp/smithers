@@ -34,6 +34,7 @@ const SEEDED_WORKFLOWS = [
   "create-skill",
   "context-doctor",
   "backpressure-plan",
+  "hodge-counterexample-search",
   "route-task",
   "report-slideshow",
   "monitor-smithers",
