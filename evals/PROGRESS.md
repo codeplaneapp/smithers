@@ -30,9 +30,16 @@ dry-runs) before moving on.
 - [x] P3 — db-query wave: `lib/fixture.ts` (deterministic run-history DB) + `query` verify (runs the
       candidate's SQL) + `db-query` suite (11 cases). Live-proven: haiku wrote correct SQL → pass.
 - [x] P3 — Docs fix at source: corrected `llmJudge` + scorer `sampling` API in `skills/eval-writer/SKILL.md`.
-- [~] P4 — Cross-model baseline scorecard (haiku baseline running; `scorecard.ts` aggregates → SCORECARD.md)
-- [ ] P3 — Remaining fixture wave: 84 deferred ops tasks (live run state) — next session
-- [ ] P5 — Codex review of the whole PR; address findings
+- [x] P4 — Baseline scorecard snapshot (`evals/BASELINE-SCORECARD.md`): pass 89% / one-shot 78% on a
+      bounded weak-model run. **Surfaced a real gap: memory authoring ~33% pass / 0% one-shot**
+      ("memory store access within a workflow undocumented; guessed store.setFact()").
+- [x] P5 — Codex review (`codex exec review --base main`) — both findings fixed (graph-verify fresh-checkout
+      ENOENT; `new-eval` `friction` alias). Also fixed via self-review + sampling: equals JSX-bracket
+      stripping (knowledge-components 0/4→4/4 false-fail), sentence→judge mapping, word-boundary equals.
+- [ ] NEXT — Fix surfaced docs gaps (memory-store-from-workflow; ambiguous Workflow-import; ClaudeCodeAgent
+      vs AnthropicAgent for structured output) in `docs/`, regen bundles; re-run to confirm green.
+- [ ] NEXT — Fixture wave: 84 deferred ops tasks (live run state); broaden cross-model sweeps (gemini/kimi
+      need provider auth in-env).
 
 ### Verify paths — all live-proven on a weak model
 - `equals` (knowledge-cli, sonnet) · `graph` (authoring-workflows, sonnet) · `query` (db-query, haiku).
