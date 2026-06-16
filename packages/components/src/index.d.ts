@@ -800,40 +800,44 @@ type BranchProps$2 = {
 /**
  * Token budget configuration for Aspects.
  *
- * Runtime enforcement is not implemented yet; this is declarative metadata.
+ * The engine accumulates per-run token usage and enforces `max` at
+ * task-dispatch time.
  */
 type TokenBudgetConfig = {
     /** Maximum total tokens across all tasks within the Aspects scope. */
     max: number;
-    /** Optional per-task token limit. */
+    /** Optional per-task token limit. Not enforced yet. */
     perTask?: number;
-    /** Requested future behavior when the budget is exceeded. Default: "fail". */
+    /** Behavior when the budget is exceeded. Default: "fail". */
     onExceeded?: "fail" | "warn" | "skip-remaining";
 };
 
 /**
  * Latency SLO configuration for Aspects.
  *
- * Runtime enforcement is not implemented yet; this is declarative metadata.
+ * The engine enforces the scope-wide `maxMs` wall-clock SLO at task-dispatch
+ * time, measured from the run's start.
  */
 type LatencySloConfig = {
-    /** Maximum total latency in milliseconds across all tasks. */
+    /** Maximum total wall-clock latency in milliseconds across all tasks. */
     maxMs: number;
-    /** Optional per-task latency limit in milliseconds. */
+    /** Optional per-task latency limit in milliseconds. Not enforced yet. */
     perTask?: number;
-    /** Requested future behavior when the SLO is exceeded. Default: "fail". */
+    /** Behavior when the SLO is exceeded. Default: "fail". */
     onExceeded?: "fail" | "warn";
 };
 
 /**
  * Cost budget configuration for Aspects.
  *
- * Runtime enforcement is not implemented yet; this is declarative metadata.
+ * The engine estimates per-run cost from reported token usage and enforces
+ * `maxUsd` at task-dispatch time. Cost is only estimated for models the
+ * built-in price table recognizes; unknown models contribute no cost.
  */
 type CostBudgetConfig = {
-    /** Maximum total cost in USD across all tasks within the Aspects scope. */
+    /** Maximum total estimated cost in USD across all tasks within the Aspects scope. */
     maxUsd: number;
-    /** Requested future behavior when the budget is exceeded. Default: "fail". */
+    /** Behavior when the budget is exceeded. Default: "fail". */
     onExceeded?: "fail" | "warn" | "skip-remaining";
 };
 
@@ -850,11 +854,11 @@ type TrackingConfig = {
 };
 
 type AspectsProps$2 = {
-    /** Token budget metadata. Runtime enforcement is not implemented yet. */
+    /** Token budget — max total tokens, optional per-task limit, and exceeded behavior. */
     tokenBudget?: TokenBudgetConfig;
-    /** Latency SLO metadata. Runtime enforcement is not implemented yet. */
+    /** Latency SLO — max total wall-clock latency and exceeded behavior. */
     latencySlo?: LatencySloConfig;
-    /** Cost budget metadata. Runtime enforcement is not implemented yet. */
+    /** Cost budget — max total estimated USD and exceeded behavior. */
     costBudget?: CostBudgetConfig;
     /** Which metrics to track. Defaults to all enabled. */
     tracking?: TrackingConfig;
