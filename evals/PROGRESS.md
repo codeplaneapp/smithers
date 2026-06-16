@@ -110,3 +110,18 @@ Tier = which model tier the candidate runs on.
 - Confirm which model API keys are available in this environment for smoke runs.
 - Decide whether to register `evals/` suites in the seeded pack / starters.
 - Wire `typecheck:evals` into CI once the suite stabilizes.
+
+## Goal 2: improve one-shot odds + UI evals + library issues (in progress)
+
+- [x] eval-gap-triage **workflow** (multi-agent) classified surfaced gaps → docs vs library.
+- [x] **5 docs fixes applied** (raise one-shot odds): workflow-import equivalence (components/workflow),
+      native-vs-prompt structured output (integrations/sdk-agents), ctx optional (jsx/overview),
+      memory store mid-run via createMemoryStore (concepts/memory), succeeded-masks-failures caveat
+      (runtime/run-state). Bundles regenerated; check:docs/llms green.
+- [x] **Library issue #295** opened — run reports finished while fan-out agents failed; cites
+      real-usage `ru-run-completed-but-failed` + a source-grounded fix (degraded status / failedChildren).
+- [x] **UI-authoring suite** (`build` verify + `ui-quality` llmJudge): one-shot a gateway-react UI bundle,
+      AI scores quality. Live-proven (sonnet). Corpus now **1028 cases / 22 suites**.
+- [~] Retry triage for 4 rate-limited gaps (number→int coercion, input-table migration, Worktree cwd
+      footgun, waiting-event overload) → more docs fixes + library issues.
+- [ ] NEXT — apply retry-triage outputs; re-run affected suites to confirm one-shot odds improved.
