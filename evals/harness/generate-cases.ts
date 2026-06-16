@@ -71,7 +71,12 @@ function routeSuite(t: Task): string | null {
     if (area === "memory") return "knowledge-memory";
     if (area === "examples") return "knowledge-examples";
     if (area === "observability" || area === "devtools") return "knowledge-observability";
-    if (area === "mcp" || area === "integrations" || area === "human-inbox" || area === "scheduling") return "knowledge-integrations";
+    if (area === "mcp" || area === "integrations" || area === "human-inbox" || area === "scheduling" || area === "scheduling-cron-poller") return "knowledge-integrations";
+    if (area === "gateway-http-api") return "knowledge-gateway";
+    if (area === "aspects-budgets") return "knowledge-concepts";
+    if (area === "sandbox-runtimes" || area === "components-advanced") return "knowledge-components";
+    if (area === "time-travel-deep") return "knowledge-time-travel";
+    if (area === "openapi-tools-deep") return "knowledge-tools";
     return "knowledge-cli";
   }
 
@@ -81,9 +86,11 @@ function routeSuite(t: Task): string | null {
     if (area === "scorers" || area === "evals") return "authoring-scorers-evals";
     if (area === "memory") return "authoring-memory";
     if (area.startsWith("agent")) return "authoring-agents";
-    if (area === "openapi-tools" || area === "built-in-tools" || area === "tool-context") return "authoring-tools";
-    if (area === "sandboxing" || area === "vcs") return "authoring-sandbox-vcs";
-    if (area === "workflow-integration" || area === "examples" || area === "optimize") return "authoring-misc";
+    if (area === "openapi-tools" || area === "built-in-tools" || area === "tool-context" || area === "openapi-tools-deep") return "authoring-tools";
+    if (area === "sandboxing" || area === "vcs" || area === "sandbox-runtimes") return "authoring-sandbox-vcs";
+    if (area === "scheduling-cron-poller" || area === "components-advanced") return "authoring-patterns";
+    if (area === "aspects-budgets" || area === "time-travel-deep") return "authoring-workflows";
+    if (area === "workflow-integration" || area === "examples" || area === "optimize" || area === "gateway-http-api") return "authoring-misc";
     // components-control-flow + authoring + control-flow + output-handling + configuration + capabilities
     const tags = extractTags(t.canonicalAnswer);
     if (tags.some((tag) => APPROVAL_TAGS.has(tag))) return "authoring-approvals";
@@ -114,6 +121,21 @@ function verifyOf(t: Task): VerifySpec | null {
   if (t.kind === "knowledge") {
     const ans = (t.canonicalAnswer ?? "").trim();
     if (!ans) return null;
+    // A multi-value answer (a comma/"and"-separated list of short items, e.g.
+    // "run:read, run:write, ...") → require each value to appear. Checked before
+    // the sentence heuristic so long lists don't get punted to a judge.
+    if (/,/.test(ans)) {
+      const parts = ans
+        .split(/,|\band\b/)
+        .map((s) => s.replace(/^[[\]"'\s]+|[[\]"'\s]+$/g, ""))
+        .filter(Boolean);
+      const allShort = parts.length >= 2 && parts.every((p) => p.split(/\s+/).length <= 4);
+      if (allShort) {
+        const spec: VerifySpec = { kind: "contains", must: parts };
+        if (t.mustNot?.length) spec.mustNot = t.mustNot;
+        return spec;
+      }
+    }
     const words = ans.split(/\s+/).length;
     // A sentence-like answer (an explanation) can't be matched verbatim — grade
     // it with a judge against the canonical answer as the rubric. Only short
