@@ -124,8 +124,17 @@ function verifyOf(t: Task): VerifySpec | null {
     if (t.mustNot?.length) spec.mustNot = t.mustNot;
     return spec;
   }
-  // authoring deterministic → render + required component tags (+ optional forbidden tokens)
-  const spec: VerifySpec = { kind: "graph", must: extractTags(t.canonicalAnswer) };
+  // authoring deterministic
+  const tags = extractTags(t.canonicalAnswer);
+  if (tags.length === 0) {
+    // No component tree to render (memory store API, openapi tool() calls, config
+    // code, prose answers). A render-only graph check would false-fail or be
+    // meaninglessly weak — judge the code against its intended behavior instead.
+    const rubric = t.notes || (t.canonicalAnswer ? `Correct code should accomplish the task; reference: ${t.canonicalAnswer}` : t.task);
+    return { kind: "judge", rubric };
+  }
+  // A real component-tree workflow: render it and require the key component tags.
+  const spec: VerifySpec = { kind: "graph", must: tags };
   if (t.mustNot?.length) spec.mustNot = t.mustNot;
   return spec;
 }
