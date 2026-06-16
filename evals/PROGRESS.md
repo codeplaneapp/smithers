@@ -27,10 +27,16 @@ dry-runs) before moving on.
 - [x] P2 — `new-eval.tsx` issue→eval generator (renders; drafts task → appends curated → regenerates)
 - [x] P2 — Live-proved both deterministic verify paths: knowledge `equals` (sonnet PASS) + authoring `graph` (sonnet PASS, surfaced 4 real doc-friction notes)
 - [x] P2 — Real-usage mining folded in → 37-case `real-usage` suite (edit-then-resume, Worktree cwd, waiting-event, JSON output, …)
-- [ ] P3 — Waves: broaden live baseline runs across models; build fixture wave (84 deferred ops/db-query tasks)
-- [ ] P3 — Backfill docs gaps the evals surface (fix docs in `docs/`, regen bundles)
-- [ ] P4 — Cross-model baseline scorecard
+- [x] P3 — db-query wave: `lib/fixture.ts` (deterministic run-history DB) + `query` verify (runs the
+      candidate's SQL) + `db-query` suite (11 cases). Live-proven: haiku wrote correct SQL → pass.
+- [x] P3 — Docs fix at source: corrected `llmJudge` + scorer `sampling` API in `skills/eval-writer/SKILL.md`.
+- [~] P4 — Cross-model baseline scorecard (haiku baseline running; `scorecard.ts` aggregates → SCORECARD.md)
+- [ ] P3 — Remaining fixture wave: 84 deferred ops tasks (live run state) — next session
 - [ ] P5 — Codex review of the whole PR; address findings
+
+### Verify paths — all live-proven on a weak model
+- `equals` (knowledge-cli, sonnet) · `graph` (authoring-workflows, sonnet) · `query` (db-query, haiku).
+- `contains` / `judge` share the same compute/agent path; `sql` shares the bun:sqlite path with `query`.
 
 ### Proven facts (for future sessions)
 - Eval run output = `{ <schemaName>: [rows] }`; assertions key on `outputContains: { verdict: [{ passed: true }] }`.
@@ -72,10 +78,10 @@ Tier = which model tier the candidate runs on.
 
 | Metric | Value |
 | ------ | ----- |
-| Suites scaffolded | 19 |
-| Cases written | 898 (+84 deferred to fixture wave) |
+| Suites scaffolded | 20 (incl. db-query) |
+| Cases written | 909 (+84 deferred) |
 | Cases dry-run verified | 898 (all suites plan clean) |
-| Suites smoke-run on a real model | 2 (knowledge-cli, authoring-workflows; sonnet PASS) |
+| Suites smoke-run on a real model | 3 (knowledge-cli, authoring-workflows, db-query — all PASS) |
 | Coverage-map features / tasks | 380 / 416 |
 
 ## Decisions / invariants
