@@ -66,6 +66,7 @@ export default smithers((ctx) => (
 ## Reactivity
 
 The tree re-renders on every frame, so branching is a normal JSX conditional. Inside a workflow function, `ctx` exposes `ctx.input` and `ctx.outputMaybe(ref, { nodeId })`. The latter returns the output of a completed task, or `undefined` if it hasn't run yet:
+The `ctx` parameter is optional: it is just a normal function argument, so a workflow that never reads `ctx.input` or `ctx.outputMaybe` can drop it entirely and write `smithers(() => ( ... ))`. Add `(ctx)` only when you actually reference dynamic input or prior task output.
 
 ```tsx
 const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });

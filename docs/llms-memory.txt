@@ -66,6 +66,31 @@ Pick the kind to match the lifetime: `workflow` is scoped to a workflow definiti
 ```
 
 `memory` is preserved on the task descriptor as metadata for runtimes and integrations that layer memory behavior onto task execution. The direct store APIs above are the current public memory read/write surface.
+## Imperative get/set/delete inside a workflow
+
+The `memory={{ recall, remember }}` block above is **declarative metadata**; it is preserved on the task descriptor for runtimes that layer memory onto task execution, not an imperative call. To actually get, set, or delete a fact **while a run is executing**, build a store with `createMemoryStore(db)` and call it from inside a compute `<Task>` (a function task with no `agent`). The compute callback receives `deps` only; there is no injected `store`, so you create one:
+
+```tsx
+import { createMemoryStore } from "smithers-orchestrator/memory";
+import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+
+const store = createMemoryStore(drizzle(new Database("smithers.db")));
+const ns = { kind: "workflow" as const, id: "code-review" };
+
+<Task id="remember-model" output={outputs.done}>
+  {async () => {
+    await store.setFact(ns, "model", "gpt-4");           // set
+    const fact = await store.getFact(ns, "model");        // get (MemoryFact | undefined)
+    const all  = await store.listFacts(ns);               // list
+    await store.deleteFact(ns, "stale-key");              // delete
+    return { done: true };
+  }}
+</Task>
+```
+
+Create the store once at module scope (outside the workflow) and reuse it across tasks rather than re-opening the SQLite handle in every task body. Under Effect, the same operations are available as `store.setFactEffect(ns, key, value, ttlMs?)`, `store.getFactEffect(ns, key)`, etc., or via `MemoryService` (`MemoryServiceApi`), which also exposes the underlying `.store`.
+
 
 ## Processors
 

@@ -1625,6 +1625,7 @@ export default smithers((ctx) => (
 ## Reactivity
 
 The tree re-renders on every frame, so branching is a normal JSX conditional. Inside a workflow function, `ctx` exposes `ctx.input` and `ctx.outputMaybe(ref, { nodeId })`. The latter returns the output of a completed task, or `undefined` if it hasn't run yet:
+The `ctx` parameter is optional: it is just a normal function argument, so a workflow that never reads `ctx.input` or `ctx.outputMaybe` can drop it entirely and write `smithers(() => ( ... ))`. Add `(ctx)` only when you actually reference dynamic input or prior task output.
 
 ```tsx
 const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
@@ -2418,6 +2419,7 @@ export default smithers((ctx) => (
 ## Notes
 
 - Direct children run sequentially; `<Sequence>` is only needed inside other control-flow components.
+- **Two ways to get `<Workflow>`, both equivalent.** You can either `import { Workflow } from "smithers-orchestrator"` (top-level export) or destructure it from `createSmithers(...)`; they render the identical node. The factory's `Workflow` is a thin pass-through to the same component (it injects no schema or context), unlike `Task`/`Approval`/`Sandbox`/`Signal`, which the factory wires to the run's context and your output schemas. **Convention: destructure `Workflow` from `createSmithers` alongside `Task`, `smithers`, and `outputs`** so the workflow's components all come from one place; this is what the example above and ~95% of `examples/` do. Importing `Workflow` (or `Sequence`, `Branch`, `Loop`, `Parallel`, also pure structural components) directly from `"smithers-orchestrator"` is equally valid and handy in tiny single-file workflows.
 - Custom Drizzle tables require `runId`, `nodeId`, and `iteration` columns with a composite primary key `(run_id, node_id, iteration)`. Tasks outside a `<Loop>` write `iteration = 0`.
 
 ---
@@ -7662,6 +7664,20 @@ The legacy run-row `status` column maps to `RunState` like this:
 | missing / unknown text  | `unknown`                      |
 
 `recovering` is reserved for the supervisor takeover window. As of this writing, it is defined but not yet emitted by the runtime.
+<Warning>
+**`succeeded`/`finished` can mask failed child agents.** Run-level status is binary; `finished` or `failed`; and a run is only `failed` when it has an *unhandled* task failure. Two large classes of failed children are deliberately not treated as run-level failures: tasks marked `continueOnFail`, and agent tasks that fail with a *transient* error (rate limits, timeouts, aborts; `SESSION_ERROR`, `TASK_TIMEOUT`, `TASK_HEARTBEAT_TIMEOUT`, `TASK_ABORTED`, or `failureRetryable`). A fan-out where most agents hit provider rate limits can therefore still report `finished` → `succeeded`.
+
+Never trust the top-level status alone to conclude a run truly succeeded. Inspect per-node/agent outcomes:
+
+```bash
+bunx smithers-orchestrator inspect RUN_ID   # top-level runState plus every node's state (look for failed nodes)
+bunx smithers-orchestrator node NODE_ID      # one node's failure/error, retries, and tool calls
+bunx smithers-orchestrator events --run RUN_ID  # the full event history, including per-task failures
+bunx smithers-orchestrator scores RUN_ID     # scorer results when you gate on judged output
+```
+
+To avoid the rate-limit failures in the first place, bound fan-out concurrency with `<Parallel maxConcurrency={N}>` so you don't burst past the provider's limit.
+</Warning>
 
 ## ReasonBlocked / ReasonUnhealthy
 
@@ -7953,6 +7969,31 @@ Pick the kind to match the lifetime: `workflow` is scoped to a workflow definiti
 ```
 
 `memory` is preserved on the task descriptor as metadata for runtimes and integrations that layer memory behavior onto task execution. The direct store APIs above are the current public memory read/write surface.
+## Imperative get/set/delete inside a workflow
+
+The `memory={{ recall, remember }}` block above is **declarative metadata**; it is preserved on the task descriptor for runtimes that layer memory onto task execution, not an imperative call. To actually get, set, or delete a fact **while a run is executing**, build a store with `createMemoryStore(db)` and call it from inside a compute `<Task>` (a function task with no `agent`). The compute callback receives `deps` only; there is no injected `store`, so you create one:
+
+```tsx
+import { createMemoryStore } from "smithers-orchestrator/memory";
+import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+
+const store = createMemoryStore(drizzle(new Database("smithers.db")));
+const ns = { kind: "workflow" as const, id: "code-review" };
+
+<Task id="remember-model" output={outputs.done}>
+  {async () => {
+    await store.setFact(ns, "model", "gpt-4");           // set
+    const fact = await store.getFact(ns, "model");        // get (MemoryFact | undefined)
+    const all  = await store.listFacts(ns);               // list
+    await store.deleteFact(ns, "stale-key");              // delete
+    return { done: true };
+  }}
+</Task>
+```
+
+Create the store once at module scope (outside the workflow) and reuse it across tasks rather than re-opening the SQLite handle in every task body. Under Effect, the same operations are available as `store.setFactEffect(ns, key, value, ttlMs?)`, `store.getFactEffect(ns, key)`, etc., or via `MemoryService` (`MemoryServiceApi`), which also exposes the underlying `.store`.
+
 
 ## Processors
 
@@ -10447,6 +10488,9 @@ Limits:
 | Billing | Provider subscription / local CLI | API billing |
 | Tools | Provider CLI tool ecosystem | Smithers tools sandbox |
 | Flexibility | Native CLI flags | AI SDK `providerOptions` |
+| Structured output | Prompt-injection + text JSON extraction | Native (`supportsNativeStructuredOutput`) |
+
+**Choosing an agent for typed/JSON-output tasks.** Only `AnthropicAgent` and `OpenAIAgent` declare `supportsNativeStructuredOutput = true`, so when a `<Task>` has an `output` schema they pass it through the AI SDK's native structured-output API (`Output.object({ schema })`) and the result is schema-constrained. CLI agents (`ClaudeCodeAgent`, `CodexAgent`, etc.) do **not** set this flag: the engine falls back to injecting JSON instructions into the prompt and extracting the object from the model's text, and emits a `console.warn` ("engine ... does not support native structured output. Falling back to prompt-injection + text JSON extraction"). Schema-validation retries still run, but valid JSON shape does not guarantee meaningful values. For tasks whose primary job is producing typed/JSON output, prefer `AnthropicAgent`/`OpenAIAgent` (or, for an OpenAI-compatible endpoint that honors JSON schema, an `OpenAIAgent` with `nativeStructuredOutput` left enabled). `CodexAgent` additionally forwards the task schema to the CLI via `--output-schema` for constrained decoding, but the engine still wraps it with the prompt-injection fallback because the flag is unset.
 
 Pass a raw `ToolLoopAgent` directly if you prefer; the wrappers are convenience, not a separate runtime.
 
