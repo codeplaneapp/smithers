@@ -194,6 +194,7 @@ Defined in the root `package.json` for development:
 | `dev:studio` | `bun apps/smithers-studio-2/scripts/dev.ts` | Start the Smithers Studio 2 development script |
 | `typecheck` | `tsc --noEmit` | Type-check the `src/` and `tests/` trees against `tsconfig.json` |
 | `typecheck:examples` | `tsc -p examples/tsconfig.json --noEmit` | Type-check example files against a separate config that maps `smithers-orchestrator` to `examples-entry.js` |
+| `typecheck:evals` | `tsc -p evals/tsconfig.json --noEmit` | Type-check the agent-fluency eval suite under `evals/` against its own config |
 | `lint` | `oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore -A react/no-children-prop -A unicorn/no-thenable --ignore-pattern 'packages/*/src/**/*.d.ts' packages/*/src packages/*/tests` | Lint package source and tests with oxlint |
 | `lint:fix` | `oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore -A react/no-children-prop -A unicorn/no-thenable --ignore-pattern 'packages/*/src/**/*.d.ts' --fix --fix-suggestions packages/*/src packages/*/tests` | Apply supported oxlint fixes |
 | `cli` | `bun run apps/cli/src/index.js` | Run the local development CLI entrypoint |
