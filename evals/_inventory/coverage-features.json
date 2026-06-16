@@ -1,0 +1,3643 @@
+[
+  {
+    "id": "workflow-run",
+    "name": "workflow run",
+    "area": "workflow-execution",
+    "kind": "cli",
+    "summary": "Execute a discovered workflow by ID with optional input, detached mode, and concurrency controls.",
+    "keyApi": "smithers workflow run <name>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "workflow-list",
+    "name": "workflow list",
+    "area": "workflow-discovery",
+    "kind": "cli",
+    "summary": "List all discovered local workflows in the current project.",
+    "keyApi": "smithers workflow list",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "workflow-path",
+    "name": "workflow path",
+    "area": "workflow-discovery",
+    "kind": "cli",
+    "summary": "Resolve a workflow ID to its entry file path.",
+    "keyApi": "smithers workflow path <name>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "workflow-create",
+    "name": "workflow create",
+    "area": "workflow-authoring",
+    "kind": "cli",
+    "summary": "Create a new workflow scaffold in .smithers/workflows or globally with --global.",
+    "keyApi": "smithers workflow create <name>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "workflow-inspect",
+    "name": "workflow inspect",
+    "area": "workflow-authoring",
+    "kind": "cli",
+    "summary": "Show workflow metadata, input schema, and agent-facing skill preview.",
+    "keyApi": "smithers workflow inspect <name>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "workflow-skills",
+    "name": "workflow skills",
+    "area": "workflow-authoring",
+    "kind": "cli",
+    "summary": "Generate agent-facing skill docs for local workflows and write .md files.",
+    "keyApi": "smithers workflow skills [name]",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "workflow-doctor",
+    "name": "workflow doctor",
+    "area": "workflow-discovery",
+    "kind": "cli",
+    "summary": "Inspect workflow discovery, preload files, VCS status, and detected agents.",
+    "keyApi": "smithers workflow doctor [name]",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "up",
+    "name": "up",
+    "area": "workflow-execution",
+    "kind": "cli",
+    "summary": "Start a workflow execution with optional detached mode (-d), resumable run ID, and input.",
+    "keyApi": "smithers up [workflow]",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "init",
+    "name": "init",
+    "area": "project-setup",
+    "kind": "cli",
+    "summary": "Install the local Smithers workflow pack into .smithers/ directory.",
+    "keyApi": "smithers init",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "starters",
+    "name": "starters",
+    "area": "workflow-discovery",
+    "kind": "cli",
+    "summary": "Show plain-English starter workflows with copy-paste commands.",
+    "keyApi": "smithers starters [id]",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "monitor",
+    "name": "monitor",
+    "area": "workflow-monitoring",
+    "kind": "cli",
+    "summary": "Watch, diagnose, optionally self-fix, and generate HTML report on a running workflow.",
+    "keyApi": "smithers monitor [runId]",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "gateway",
+    "name": "gateway",
+    "area": "infrastructure",
+    "kind": "cli",
+    "summary": "Serve the multi-run Gateway RPC/WS control plane for workspace workflows (not tied to one run).",
+    "keyApi": "smithers gateway",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "eval",
+    "name": "eval",
+    "area": "testing-evaluation",
+    "kind": "cli",
+    "summary": "Run a workflow over a JSON/JSONL eval suite and write regression report.",
+    "keyApi": "smithers eval <workflow>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "optimize",
+    "name": "optimize",
+    "area": "testing-evaluation",
+    "kind": "cli",
+    "summary": "Run GEPA prompt optimization over an eval suite and write optimized prompt artifact.",
+    "keyApi": "smithers optimize <workflow>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "supervise",
+    "name": "supervise",
+    "area": "workflow-monitoring",
+    "kind": "cli",
+    "summary": "Watch for stale running runs and auto-resume them at configurable intervals.",
+    "keyApi": "smithers supervise",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "ps",
+    "name": "ps",
+    "area": "workflow-monitoring",
+    "kind": "cli",
+    "summary": "List active, paused, and recently completed runs with optional --watch polling.",
+    "keyApi": "smithers ps",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "logs",
+    "name": "logs",
+    "area": "observability",
+    "kind": "cli",
+    "summary": "Tail the event log of a specific run with --follow and --tail options.",
+    "keyApi": "smithers logs <runId>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "events",
+    "name": "events",
+    "area": "observability",
+    "kind": "cli",
+    "summary": "Query run event history with --node filter, --type, --since, --limit, --group-by, and --watch.",
+    "keyApi": "smithers events <runId>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "chat",
+    "name": "chat",
+    "area": "observability",
+    "kind": "cli",
+    "summary": "Show agent chat output for the latest run or a specific run with --follow option.",
+    "keyApi": "smithers chat [runId]",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "chat-create",
+    "name": "chat-create",
+    "area": "agent-interaction",
+    "kind": "cli",
+    "summary": "Create and start a one-task auto-hijacked chat run with specified agent.",
+    "keyApi": "smithers chat-create",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "hijack",
+    "name": "hijack",
+    "area": "agent-interaction",
+    "kind": "cli",
+    "summary": "Hand off latest resumable agent session or conversation for a run to interactive terminal.",
+    "keyApi": "smithers hijack <runId>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "inspect",
+    "name": "inspect",
+    "area": "observability",
+    "kind": "cli",
+    "summary": "Output detailed run state including steps, agents, approvals, and outputs with optional --watch.",
+    "keyApi": "smithers inspect <runId>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "node",
+    "name": "node",
+    "area": "observability",
+    "kind": "cli",
+    "summary": "Show enriched node details for debugging retries, tool calls, and output with watch support.",
+    "keyApi": "smithers node <nodeId>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "why",
+    "name": "why",
+    "area": "observability",
+    "kind": "cli",
+    "summary": "Explain why a run is currently blocked, paused, or waiting with actionable next steps.",
+    "keyApi": "smithers why <runId>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "human",
+    "name": "human",
+    "area": "approvals",
+    "kind": "cli",
+    "summary": "List pending human requests, answer with --value, or cancel requests.",
+    "keyApi": "smithers human (inbox|answer|cancel)",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "ask-human",
+    "name": "ask-human",
+    "area": "approvals",
+    "kind": "cli",
+    "summary": "Raise a blocking human-approval request from inside a run and wait for decision.",
+    "keyApi": "smithers ask-human <prompt>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "alerts",
+    "name": "alerts",
+    "area": "monitoring",
+    "kind": "cli",
+    "summary": "List and manage durable alert instances with actions: list, ack, resolve, silence.",
+    "keyApi": "smithers alerts (list|ack|resolve|silence)",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "approve",
+    "name": "approve",
+    "area": "approvals",
+    "kind": "cli",
+    "summary": "Approve a paused approval gate, auto-detecting pending node if only one exists.",
+    "keyApi": "smithers approve <runId>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "signal",
+    "name": "signal",
+    "area": "run-control",
+    "kind": "cli",
+    "summary": "Deliver a durable signal to a run waiting on <Signal> or <WaitForEvent>.",
+    "keyApi": "smithers signal <runId> <signalName>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "deny",
+    "name": "deny",
+    "area": "approvals",
+    "kind": "cli",
+    "summary": "Deny a paused approval gate, rejecting workflow progress.",
+    "keyApi": "smithers deny <runId>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "cancel",
+    "name": "cancel",
+    "area": "run-control",
+    "kind": "cli",
+    "summary": "Safely halt agents and terminate a run.",
+    "keyApi": "smithers cancel <runId>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "down",
+    "name": "down",
+    "area": "run-control",
+    "kind": "cli",
+    "summary": "Cancel all active runs. Like 'docker compose down' for workflows.",
+    "keyApi": "smithers down",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "graph",
+    "name": "graph",
+    "area": "devtools",
+    "kind": "cli",
+    "summary": "Render the workflow graph without executing it, with optional --input and --compact.",
+    "keyApi": "smithers graph <workflow>",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "snapshots",
+    "name": "snapshots",
+    "area": "devtools",
+    "kind": "cli",
+    "summary": "List durability snapshots (workspace checkpoints) for a run.",
+    "keyApi": "smithers snapshots <runId>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "restore",
+    "name": "restore",
+    "area": "devtools",
+    "kind": "cli",
+    "summary": "Restore a worktree to a durability checkpoint (latest for the node, or --seq).",
+    "keyApi": "smithers restore <runId> <nodeId>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "snapshot-hook",
+    "name": "snapshot-hook",
+    "area": "devtools",
+    "kind": "cli",
+    "summary": "Internal: PostToolUse hook that requests a Tier 1 durability snapshot.",
+    "keyApi": "smithers snapshot-hook",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "revert",
+    "name": "revert",
+    "area": "time-travel",
+    "kind": "cli",
+    "summary": "Revert the workspace to a previous task attempt's filesystem state.",
+    "keyApi": "smithers revert <workflow>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "retry-task",
+    "name": "retry-task",
+    "area": "time-travel",
+    "kind": "cli",
+    "summary": "Retry a specific task within a run, optionally skipping dependents with --no-deps.",
+    "keyApi": "smithers retry-task <workflow>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "timetravel",
+    "name": "timetravel",
+    "area": "time-travel",
+    "kind": "cli",
+    "summary": "Time-travel to a previous task state by reverting filesystem and DB, optionally resuming.",
+    "keyApi": "smithers timetravel <workflow>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "observability",
+    "name": "observability",
+    "area": "infrastructure",
+    "kind": "cli",
+    "summary": "Start local observability stack (Grafana, Prometheus, Tempo, OTLP) via Docker Compose.",
+    "keyApi": "smithers observability",
+    "docPointer": "llms-observability.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "ask",
+    "name": "ask",
+    "area": "agent-interaction",
+    "kind": "cli",
+    "summary": "Ask a question about Smithers using installed agent and Smithers MCP server.",
+    "keyApi": "smithers ask [question]",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "scores",
+    "name": "scores",
+    "area": "testing-evaluation",
+    "kind": "cli",
+    "summary": "View scorer results for a specific run, optionally filtered by --node.",
+    "keyApi": "smithers scores <runId>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "replay",
+    "name": "replay",
+    "area": "time-travel",
+    "kind": "cli",
+    "summary": "Fork from a checkpoint and resume execution with input overrides.",
+    "keyApi": "smithers replay <workflow>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "tree",
+    "name": "tree",
+    "area": "devtools",
+    "kind": "cli",
+    "summary": "Print DevTools snapshot as XML tree with optional filtering, watch, and JSON modes.",
+    "keyApi": "smithers tree <runId>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "diff",
+    "name": "diff",
+    "area": "devtools",
+    "kind": "cli",
+    "summary": "Print DiffBundle as unified diff with --stat summary and colorization options.",
+    "keyApi": "smithers diff <runId> <nodeId>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "output",
+    "name": "output",
+    "area": "devtools",
+    "kind": "cli",
+    "summary": "Print node output row as JSON with optional --pretty schema-ordered rendering.",
+    "keyApi": "smithers output <runId> <nodeId>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "rewind",
+    "name": "rewind",
+    "area": "time-travel",
+    "kind": "cli",
+    "summary": "Rewind a run to a previous frame without executing.",
+    "keyApi": "smithers rewind <runId> <frameNo>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "fork",
+    "name": "fork",
+    "area": "time-travel",
+    "kind": "cli",
+    "summary": "Create a branched run from a snapshot checkpoint with optional --run to auto-start.",
+    "keyApi": "smithers fork <workflow>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "timeline",
+    "name": "timeline",
+    "area": "time-travel",
+    "kind": "cli",
+    "summary": "View execution timeline for a run and its forks with optional --tree recursion.",
+    "keyApi": "smithers timeline <runId>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "gui",
+    "name": "gui",
+    "area": "ui",
+    "kind": "cli",
+    "summary": "Open a directory as a workspace in Smithers GUI macOS app.",
+    "keyApi": "smithers gui [path]",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "ui",
+    "name": "ui",
+    "area": "ui",
+    "kind": "cli",
+    "summary": "Open custom UI for a workflow run in browser, auto-starting Gateway if needed.",
+    "keyApi": "smithers ui [runId]",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "docs",
+    "name": "docs",
+    "area": "docs",
+    "kind": "cli",
+    "summary": "Print llms.txt (concise docs index for LLMs) for this CLI version.",
+    "keyApi": "smithers docs",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "docs-full",
+    "name": "docs-full",
+    "area": "docs",
+    "kind": "cli",
+    "summary": "Print llms-full.txt (full docs bundle for LLMs) for this CLI version.",
+    "keyApi": "smithers docs-full",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "usage",
+    "name": "usage",
+    "area": "agents",
+    "kind": "cli",
+    "summary": "Show rate limit and subscription quota usage for each registered account.",
+    "keyApi": "smithers usage",
+    "docPointer": "llms.txt",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "cron-start",
+    "name": "cron start",
+    "area": "scheduling",
+    "kind": "cli",
+    "summary": "Start background scheduler loop in current terminal.",
+    "keyApi": "smithers cron start",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "cron-add",
+    "name": "cron add",
+    "area": "scheduling",
+    "kind": "cli",
+    "summary": "Register a new workflow cron schedule with pattern and workflow path.",
+    "keyApi": "smithers cron add <pattern> <workflowPath>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "cron-list",
+    "name": "cron list",
+    "area": "scheduling",
+    "kind": "cli",
+    "summary": "List all registered background cron schedules.",
+    "keyApi": "smithers cron list",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "cron-rm",
+    "name": "cron rm",
+    "area": "scheduling",
+    "kind": "cli",
+    "summary": "Delete an existing cron schedule by ID.",
+    "keyApi": "smithers cron rm <cronId>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "agents-capabilities",
+    "name": "agents capabilities",
+    "area": "agents",
+    "kind": "cli",
+    "summary": "Print JSON report of built-in CLI agent capability registries.",
+    "keyApi": "smithers agents capabilities",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "agents-doctor",
+    "name": "agents doctor",
+    "area": "agents",
+    "kind": "cli",
+    "summary": "Validate built-in CLI agent capability registries and command-surface contracts.",
+    "keyApi": "smithers agents doctor",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "agents-add",
+    "name": "agents add",
+    "area": "agents",
+    "kind": "cli",
+    "summary": "Register Smithers agent account via interactive wizard or non-interactive flags.",
+    "keyApi": "smithers agents add",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "agents-list",
+    "name": "agents list",
+    "area": "agents",
+    "kind": "cli",
+    "summary": "List all registered Smithers agent accounts with labels and credentials status.",
+    "keyApi": "smithers agents list",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "agents-remove",
+    "name": "agents remove",
+    "area": "agents",
+    "kind": "cli",
+    "summary": "Remove a registered agent account by label.",
+    "keyApi": "smithers agents remove <label>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "memory-list",
+    "name": "memory list",
+    "area": "memory",
+    "kind": "cli",
+    "summary": "List all memory facts in a namespace.",
+    "keyApi": "smithers memory list <namespace>",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "cli-verbs"
+  },
+  {
+    "id": "workflow-component",
+    "name": "Workflow",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Root container that sequences direct children and optionally caches for resume.",
+    "docPointer": "/docs/llms-core.txt (line 2360)",
+    "keyApi": "<Workflow name=\"...\" cache?>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "task-component",
+    "name": "Task",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Executes work via agent call, computed function, or static value with schema validation.",
+    "docPointer": "/docs/llms-core.txt (line 2405)",
+    "keyApi": "<Task id=\"...\" output={...} agent?>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "sequence-component",
+    "name": "Sequence",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Executes child tasks top-to-bottom in order.",
+    "docPointer": "/docs/llms-core.txt (line 2578)",
+    "keyApi": "<Sequence>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "parallel-component",
+    "name": "Parallel",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Executes child tasks concurrently with optional maxConcurrency limit.",
+    "docPointer": "/docs/llms-core.txt (line 2622)",
+    "keyApi": "<Parallel maxConcurrency={n}>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "branch-component",
+    "name": "Branch",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Conditionally executes one of two branches (then/else) based on a boolean condition.",
+    "docPointer": "/docs/llms-core.txt (line 2660)",
+    "keyApi": "<Branch if={cond} then={...} else={...}>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "loop-component",
+    "name": "Loop",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Repeatedly renders and executes children until condition holds or maxIterations reached.",
+    "docPointer": "/docs/llms-core.txt (line 2705)",
+    "keyApi": "<Loop until={cond} maxIterations={n}>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "approval-component",
+    "name": "Approval",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Decision node that waits for human approval, produces typed ApprovalDecision output.",
+    "docPointer": "/docs/llms-core.txt (line 2757)",
+    "keyApi": "<Approval id=\"...\" output={...} request={...}>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "approval-gate-component",
+    "name": "ApprovalGate",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Conditional approval gate that only requires approval when 'when' condition is true.",
+    "docPointer": "/docs/llms-core.txt (line 2837)",
+    "keyApi": "<ApprovalGate id=\"...\" when={bool} output={...}>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "human-task-component",
+    "name": "HumanTask",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Suspends until human submits JSON matching output schema with max validation retries.",
+    "docPointer": "/docs/llms-core.txt (line 2992)",
+    "keyApi": "<HumanTask id=\"...\" output={...} prompt=\"...\">",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "signal-component",
+    "name": "Signal",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Typed wrapper around WaitForEvent; signal name equals node id, with typed schema.",
+    "docPointer": "/docs/llms-core.txt (line 3061)",
+    "keyApi": "<Signal id=\"...\" schema={...}>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "wait-for-event-component",
+    "name": "WaitForEvent",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Durably suspends until correlated external event arrives or timeout, with timeout behavior.",
+    "docPointer": "/docs/llms-core.txt (line 3117)",
+    "keyApi": "<WaitForEvent id=\"...\" event=\"...\" output={...}>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "timer-component",
+    "name": "Timer",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Durably suspends for relative duration (e.g. '30s') or until absolute time.",
+    "docPointer": "/docs/llms-core.txt (line 3170)",
+    "keyApi": "<Timer id=\"...\" duration=\"...\" | until=\"...\">",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "worktree-component",
+    "name": "Worktree",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Runs child tasks in isolated git worktree at specified path, created and torn down automatically.",
+    "docPointer": "/docs/llms-core.txt (line 3744)",
+    "keyApi": "<Worktree path=\"...\" branch? baseBranch?>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "merge-queue-component",
+    "name": "MergeQueue",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Queues child tasks so at most maxConcurrency run; defaults to 1 for single-lane merge queue.",
+    "docPointer": "/docs/llms-core.txt (line 4196)",
+    "keyApi": "<MergeQueue maxConcurrency={n}>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "subflow-component",
+    "name": "Subflow",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Invokes child workflow with own retry, cache, and resume boundary.",
+    "docPointer": "/docs/llms-core.txt (line 3542)",
+    "keyApi": "<Subflow id=\"...\" workflow={...} output={...} mode=\"childRun\"|\"inline\">",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "super-smithers-component",
+    "name": "SuperSmithers",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Reads and modifies source code at runtime via markdown strategy doc with agent.",
+    "docPointer": "/docs/llms-core.txt (line 3647)",
+    "keyApi": "<SuperSmithers strategy=\"...\" agent={...} targetFiles?>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "sandbox-component",
+    "name": "Sandbox",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Runs child workflow through injectable provider with isolation, parallelism, or horizontal scale.",
+    "docPointer": "/docs/llms-core.txt (line 3313)",
+    "keyApi": "<Sandbox id=\"...\" workflow={...} provider={...} output={...}>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "aspects-component",
+    "name": "Aspects",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Propagates token budget and latency SLO constraints to descendant tasks.",
+    "docPointer": "/docs/llms-core.txt (line 3690)",
+    "keyApi": "<Aspects tokenBudget={{...}} latencySlo={{...}}>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "try-catch-finally-component",
+    "name": "TryCatchFinally",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Workflow-scoped error boundary with catch handlers and guaranteed cleanup via finally.",
+    "docPointer": "/docs/llms-core.txt (line 3267)",
+    "keyApi": "<TryCatchFinally try={...} catch={...} finally={...}>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "continue-as-new-component",
+    "name": "ContinueAsNew",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Closes current run and starts fresh one with optional carried state.",
+    "docPointer": "/docs/llms-core.txt (line 3598)",
+    "keyApi": "<ContinueAsNew state={{...}}>",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "ralph-component",
+    "name": "Ralph",
+    "area": "components-control-flow",
+    "kind": "component",
+    "summary": "Deprecated alias for Loop component; use Loop instead.",
+    "docPointer": "/packages/components/src/components/RalphProps.ts",
+    "keyApi": "<Ralph> (deprecated)",
+    "slice": "components-control-flow"
+  },
+  {
+    "id": "review-loop-pattern",
+    "name": "ReviewLoop",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Produce, review, and fix in a loop until the reviewer approves.",
+    "keyApi": "<ReviewLoop>",
+    "docPointer": "docs/components/review-loop.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "optimizer-pattern",
+    "name": "Optimizer",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Generate, evaluate, and improve in a loop until a target score is reached.",
+    "keyApi": "<Optimizer>",
+    "docPointer": "docs/components/optimizer.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "scan-fix-verify-pattern",
+    "name": "ScanFixVerify",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Scan for problems, fix in parallel, verify, then report in a retry loop.",
+    "keyApi": "<ScanFixVerify>",
+    "docPointer": "docs/components/scan-fix-verify.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "panel-pattern",
+    "name": "Panel",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Parallel specialist agents review the same input; a moderator synthesizes results.",
+    "keyApi": "<Panel>",
+    "docPointer": "docs/components/panel.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "debate-pattern",
+    "name": "Debate",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Adversarial multi-round debate between proposer and opponent, then judge verdict.",
+    "keyApi": "<Debate>",
+    "docPointer": "docs/components/debate.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "supervisor-pattern",
+    "name": "Supervisor",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Boss plans, workers run in parallel, boss reviews and re-delegates failures.",
+    "keyApi": "<Supervisor>",
+    "docPointer": "docs/components/supervisor.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "saga-pattern",
+    "name": "Saga",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Forward steps with compensations run in reverse on failure.",
+    "keyApi": "<Saga>",
+    "docPointer": "docs/components/saga.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "kanban-pattern",
+    "name": "Kanban",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Process items through ordered columns with a pluggable ticket source.",
+    "keyApi": "<Kanban>",
+    "docPointer": "docs/components/kanban.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "escalation-chain-pattern",
+    "name": "EscalationChain",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Sequential agent escalation with optional human fallback.",
+    "keyApi": "<EscalationChain>",
+    "docPointer": "docs/components/escalation-chain.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "classify-and-route-pattern",
+    "name": "ClassifyAndRoute",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Classify items into categories, then route each to a category-specific agent in parallel.",
+    "keyApi": "<ClassifyAndRoute>",
+    "docPointer": "docs/components/classify-and-route.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "gather-and-synthesize-pattern",
+    "name": "GatherAndSynthesize",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Parallel gather from multiple sources, then synthesize into a unified result.",
+    "keyApi": "<GatherAndSynthesize>",
+    "docPointer": "docs/components/gather-and-synthesize.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "check-suite-pattern",
+    "name": "CheckSuite",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Parallel checks with auto-aggregated pass/fail verdict.",
+    "keyApi": "<CheckSuite>",
+    "docPointer": "docs/components/check-suite.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "decision-table-pattern",
+    "name": "DecisionTable",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Flat rule table that replaces nested Branch trees with declarative routing.",
+    "keyApi": "<DecisionTable>",
+    "docPointer": "docs/components/decision-table.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "poller-pattern",
+    "name": "Poller",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Poll an external condition with configurable backoff until satisfied or timed out.",
+    "keyApi": "<Poller>",
+    "docPointer": "docs/components/poller.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "runbook-pattern",
+    "name": "Runbook",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Sequential steps with risk classification; safe auto-runs, risky/critical gate on approval.",
+    "keyApi": "<Runbook>",
+    "docPointer": "docs/components/runbook.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "drift-detector-pattern",
+    "name": "DriftDetector",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Capture state, compare against a baseline, and alert on meaningful drift.",
+    "keyApi": "<DriftDetector>",
+    "docPointer": "docs/components/drift-detector.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "content-pipeline-pattern",
+    "name": "ContentPipeline",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Typed waterfall of refinement stages, each depending on the previous.",
+    "keyApi": "<ContentPipeline>",
+    "docPointer": "docs/components/content-pipeline.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "loop-until-scored-pattern",
+    "name": "LoopUntilScored",
+    "area": "patterns",
+    "kind": "component",
+    "summary": "Re-run children until the latest output's score crosses a threshold, or maxIterations is hit.",
+    "keyApi": "<LoopUntilScored>",
+    "docPointer": "docs/components/loop-until-scored.mdx",
+    "slice": "components-patterns"
+  },
+  {
+    "id": "createScorer",
+    "name": "createScorer factory",
+    "area": "scorers",
+    "kind": "component",
+    "summary": "Creates a custom scorer from a configuration object with id, name, description, and score function.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "llmJudge",
+    "name": "llmJudge factory",
+    "area": "scorers",
+    "kind": "component",
+    "summary": "Creates an LLM-as-judge scorer that delegates evaluation to an AI agent and parses JSON responses.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "aggregateScores",
+    "name": "Aggregate scorer statistics",
+    "area": "scorers",
+    "kind": "api",
+    "summary": "Computes aggregate statistics (count, mean, min, max, p50, stddev) for scorer results across runs.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "schemaAdherenceScorer",
+    "name": "Schema adherence scorer (builtin)",
+    "area": "scorers",
+    "kind": "component",
+    "summary": "Validates task output against Zod schema, returning 1.0 if valid or 0.0 with validation errors.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "latencyScorer",
+    "name": "Latency scorer (builtin)",
+    "area": "scorers",
+    "kind": "component",
+    "summary": "Scores execution time with linear interpolation between a target and maximum latency threshold.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "relevancyScorer",
+    "name": "Relevancy scorer (builtin)",
+    "area": "scorers",
+    "kind": "component",
+    "summary": "LLM-based scorer that evaluates whether output addresses and is relevant to the input prompt.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "toxicityScorer",
+    "name": "Toxicity scorer (builtin)",
+    "area": "scorers",
+    "kind": "component",
+    "summary": "LLM-based scorer that detects toxic, harmful, offensive, or inappropriate content in output.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "faithfulnessScorer",
+    "name": "Faithfulness scorer (builtin)",
+    "area": "scorers",
+    "kind": "component",
+    "summary": "LLM-based scorer that checks output is faithful to provided context without hallucinations.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "sampling-config",
+    "name": "Scorer sampling configuration",
+    "area": "scorers",
+    "kind": "concept",
+    "summary": "Controls how often a scorer runs: 'all', 'ratio', or 'none' types to optimize expensive evaluations.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "scorers-map-jsx",
+    "name": "Attach scorers to Task in JSX",
+    "area": "scorers",
+    "kind": "component",
+    "summary": "Use the scorers={} prop on Task to bind multiple named scorers with individual sampling configs.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "loadEvalCases",
+    "name": "Load eval cases from JSONL/JSON",
+    "area": "evals",
+    "kind": "api",
+    "summary": "Loads and normalizes eval cases from JSONL or JSON files, with per-case input, expected assertions, and metadata.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "eval-cases-jsonl",
+    "name": "Eval cases JSONL format",
+    "area": "evals",
+    "kind": "concept",
+    "summary": "Line-delimited JSON format for eval cases, each with id, input, expected (status/output/outputContains), annotations, metadata.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "buildEvalPlan",
+    "name": "Build eval execution plan",
+    "area": "evals",
+    "kind": "api",
+    "summary": "Transforms loaded cases into a planned execution with stable run IDs and suite/case metadata.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "evaluateEvalCaseResult",
+    "name": "Evaluate case result assertions",
+    "area": "evals",
+    "kind": "api",
+    "summary": "Checks run result against expected assertions (status, output, outputContains, errorContains) and returns pass/fail per assertion.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "smithers-eval-command",
+    "name": "smithers eval CLI command",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Runs an eval suite: `smithers eval <workflow> --cases <file.jsonl> --suite <name> [--concurrency N] [--dry-run]`.",
+    "keyApi": "smithers eval",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "buildEvalReport",
+    "name": "Build and write eval report",
+    "area": "evals",
+    "kind": "api",
+    "summary": "Constructs and writes a JSON report summarizing eval results with per-case status, assertions, and timing.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "smithers-optimize-command",
+    "name": "smithers optimize CLI command",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Runs prompt optimization: baseline eval, GEPA patch generation, optimized eval, score comparison, and artifact output.",
+    "keyApi": "smithers optimize",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "optimize-provider",
+    "name": "GEPA optimizer provider selection",
+    "area": "optimize",
+    "kind": "concept",
+    "summary": "Choose optimizer: heuristic, cerebras, openai, anthropic, gemini, or openai-compatible with provider-specific config.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "optimize-command",
+    "name": "Optimize command with thresholds",
+    "area": "optimize",
+    "kind": "api",
+    "summary": "Optimize with --minImprovement, --provider, --model, --artifact, --reportDir, and concurrency options.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "heuristic-gepa",
+    "name": "Heuristic GEPA optimizer",
+    "area": "optimize",
+    "kind": "concept",
+    "summary": "Uses metadata.promptPatches or metadata.optimizationHints from cases to generate prompt patches without calling an LLM.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "eval-writer-skill",
+    "name": "eval-writer skill for bootstrapping suites",
+    "area": "evals",
+    "kind": "example",
+    "summary": "Workflow skill that turns plain-English acceptance criteria into executable JSONL eval fixtures with cases and rubrics.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "evalRunId",
+    "name": "Generate stable eval run IDs",
+    "area": "evals",
+    "kind": "api",
+    "summary": "Creates deterministic run IDs from suite and case IDs, capping at 64 characters with hash suffix for long names.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "eval-cases-metadata",
+    "name": "Eval case metadata for optimization hints",
+    "area": "evals",
+    "kind": "concept",
+    "summary": "Per-case metadata object supporting promptPatches (explicit patches) and optimizationHints (guidance for GEPA).",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "ScorerContext",
+    "name": "Scorer execution context type",
+    "area": "scorers",
+    "kind": "api",
+    "summary": "Runtime context passed to scorer functions: runId, nodeId, iteration, attempt, input, output, latencyMs, outputSchema.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "ScorerBinding",
+    "name": "Named scorer binding with sampling",
+    "area": "scorers",
+    "kind": "api",
+    "summary": "Maps a named key to a Scorer and optional SamplingConfig, used in Task scorers prop.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "aggregateOptions",
+    "name": "Filter options for aggregateScores",
+    "area": "scorers",
+    "kind": "api",
+    "summary": "Options to filter aggregate statistics by runId, nodeId, or scorerId.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "scorer-metrics",
+    "name": "Scorer event metrics",
+    "area": "scorers",
+    "kind": "api",
+    "summary": "Observable metrics: scorersStarted, scorersFinished, scorersFailed, scorerDuration for monitoring scorer execution.",
+    "slice": "scorers-evals-optimize"
+  },
+  {
+    "id": "agent-pools",
+    "name": "Agent fallback pools",
+    "area": "orchestration",
+    "kind": "concept",
+    "summary": "Named agent pools in .smithers/agents.ts that define fallback chains (e.g. cheapFast, smart, smartTool) for automatic agent selection and failover.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "claudecode-agent",
+    "name": "ClaudeCodeAgent",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new ClaudeCodeAgent({...})",
+    "summary": "CLI agent wrapping the Anthropic Claude Code CLI with session persistence, MCP config, tool allow/deny lists, and permission modes.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "codex-agent",
+    "name": "CodexAgent",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new CodexAgent({...})",
+    "summary": "CLI agent wrapping the OpenAI Codex CLI with sandbox modes, config overrides, structured JSON output schema, and thread-based resumption.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "opencode-agent",
+    "name": "OpenCodeAgent",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new OpenCodeAgent({...})",
+    "summary": "CLI agent wrapping the OpenCode CLI via opencode run --format json with session IDs, file attachments, and reasoning variants.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "pi-agent",
+    "name": "PiAgent",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new PiAgent({...})",
+    "summary": "CLI agent wrapping the Pi CLI with three modes (text/json/rpc), extension UI request callbacks, and skills/template support.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "kimi-agent",
+    "name": "KimiAgent",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new KimiAgent({...})",
+    "summary": "CLI agent wrapping the Moonshot Kimi CLI with automatic OAuth refresh, configurable thinking, agent selection (default/okabe), and auto-isolated KIMI_SHARE_DIR.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "amp-agent",
+    "name": "AmpAgent",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new AmpAgent({...})",
+    "summary": "CLI agent wrapping the Amp CLI in --execute headless mode with thread visibility, MCP config, and dangerouslyAllowAll option.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "gemini-agent",
+    "name": "GeminiAgent (deprecated)",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new GeminiAgent({...})",
+    "summary": "Legacy CLI agent wrapping the older Google Gemini CLI; use AntigravityAgent instead for new Google CLI integrations.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "antigravity-agent",
+    "name": "AntigravityAgent",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new AntigravityAgent({...})",
+    "summary": "CLI agent wrapping the Google Antigravity CLI (agy binary) with conversation resumption, MCP config, and sandbox mode; replaces GeminiAgent.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "forge-agent",
+    "name": "ForgeAgent",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new ForgeAgent({...})",
+    "summary": "CLI agent wrapping the Forge CLI supporting 300+ LLM models via provider/model strings and conversation persistence.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "vibe-agent",
+    "name": "VibeAgent",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new VibeAgent({...})",
+    "summary": "CLI agent wrapping the Mistral Vibe CLI with streaming JSON output, session management, and tool enablement.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "anthropic-sdk-agent",
+    "name": "AnthropicAgent (SDK)",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new AnthropicAgent({...})",
+    "summary": "AI SDK wrapper for Anthropic Claude models with native structured output support and tool-loop agent semantics.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "openai-sdk-agent",
+    "name": "OpenAIAgent (SDK)",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new OpenAIAgent({...})",
+    "summary": "AI SDK wrapper for OpenAI/Azure OpenAI models with configurable baseURL/apiKey and native structured output.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "hermes-agent",
+    "name": "HermesAgent (SDK)",
+    "area": "agents-runtimes",
+    "kind": "api",
+    "keyApi": "new HermesAgent({...})",
+    "summary": "OpenAI-compatible local agent wrapper (Nous Research Hermes) using OpenAI SDK with disabled native structured output by default.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "agent-options-base",
+    "name": "BaseCliAgentOptions",
+    "area": "configuration",
+    "kind": "api",
+    "keyApi": "id, model, systemPrompt, cwd, env, yolo, timeoutMs, idleTimeoutMs, maxOutputBytes, extraArgs",
+    "summary": "Common configuration options shared by all CLI agents including timeouts, environment variables, and system prompts.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "agent-mcp-configuration",
+    "name": "MCP configuration",
+    "area": "capabilities",
+    "kind": "concept",
+    "summary": "Model Context Protocol bootstrap modes (project-config, inline-config, allow-list, unsupported) vary by agent with different project/user scope support.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "agent-config-isolation",
+    "name": "Config directory isolation",
+    "area": "configuration",
+    "kind": "concept",
+    "summary": "Agents support configDir option to isolate credentials per invocation (CLAUDE_CONFIG_DIR, CODEX_HOME, KIMI_SHARE_DIR, GEMINI_DIR).",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "permission-modes",
+    "name": "Permission and approval modes",
+    "area": "security",
+    "kind": "concept",
+    "summary": "Agent-specific permission handling: yolo (skip all), permissionMode flags (bypassPermissions, plan, etc.), dangerouslySkipPermissions, approvalMode, dangerouslyAllowAll.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "session-resumption",
+    "name": "Session resumption",
+    "area": "agent-lifecycle",
+    "kind": "concept",
+    "summary": "Agents persist and resume sessions via native IDs (sessionId, threadId, conversationId) passed through resumeSession or generate() options.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "structured-output",
+    "name": "Structured output (JSON schema)",
+    "area": "output-handling",
+    "kind": "concept",
+    "summary": "CLI agents support outputSchema parameter; SDK agents support via native structured-output APIs (AnthropicAgent, OpenAIAgent) or Zod schema output.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "skill-installation",
+    "name": "Skill installation modes",
+    "area": "capabilities",
+    "kind": "concept",
+    "summary": "Agents support different skill installation: plugin (launch-time), dir (directory), files (file-based), or none; varies by agent.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "output-format",
+    "name": "Output format selection",
+    "area": "output-handling",
+    "kind": "concept",
+    "summary": "CLI agents support multiple output formats (text, json, stream-json) to control how progress and results are streamed and parsed.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "task-agent-routing",
+    "name": "Task agent routing",
+    "area": "workflow-integration",
+    "kind": "concept",
+    "summary": "Workflows route tasks to named agent pools from agents.ts for automatic model selection, fallback, and per-task optimization.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "fallback-chains",
+    "name": "Fallback chains",
+    "area": "orchestration",
+    "kind": "concept",
+    "summary": "When a task specifies a pool of agents, Smithers automatically retries with the next agent if the current agent fails, enabling graceful degradation.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "hijack-support",
+    "name": "Hijack (interactive resume)",
+    "area": "agent-lifecycle",
+    "kind": "concept",
+    "summary": "Most CLI agents support native interactive takeover via bunx smithers-orchestrator hijack RUN_ID using vendor-specific resume flags.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "yolo-mode",
+    "name": "Yolo mode",
+    "area": "security",
+    "kind": "concept",
+    "summary": "yolo: true (default) auto-approves all tool calls, mapping to vendor-specific skip-permissions flags; disable for tighter control.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "pi-extension-ui",
+    "name": "Pi extension UI requests",
+    "area": "agents-runtimes",
+    "kind": "concept",
+    "summary": "PiAgent in RPC mode supports custom UI callbacks via onExtensionUiRequest hook for extension-based interactions.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "kimi-oauth-refresh",
+    "name": "Kimi OAuth auto-refresh",
+    "area": "agents-runtimes",
+    "kind": "concept",
+    "summary": "KimiAgent automatically refreshes expired OAuth tokens using stored refresh_token; fails fast non-retryable if no token or refresh fails.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "opencode-json-events",
+    "name": "OpenCode nd-JSON events",
+    "area": "agents-runtimes",
+    "kind": "concept",
+    "summary": "OpenCodeAgent parses streaming nd-JSON from opencode run with step_start/text/tool_use/step_finish/reasoning/error envelopes.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "codex-config-overrides",
+    "name": "Codex config overrides",
+    "area": "agents-runtimes",
+    "kind": "concept",
+    "summary": "CodexAgent config option enables inline Codex configuration via -c flags or structured key-value pairs.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "claude-permission-modes",
+    "name": "Claude permission modes",
+    "area": "agents-runtimes",
+    "kind": "concept",
+    "summary": "ClaudeCodeAgent supports permissionMode enum: acceptEdits, bypassPermissions, default, delegate, dontAsk, plan for fine-grained permission control.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "agent-like-interface",
+    "name": "AgentLike interface",
+    "area": "concepts",
+    "kind": "api",
+    "keyApi": "AgentLike type",
+    "summary": "Common interface for all agents exposing generate() method, optional tools, and AgentCapabilityRegistry for introspection.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "agent-capability-registry",
+    "name": "AgentCapabilityRegistry",
+    "area": "concepts",
+    "kind": "api",
+    "keyApi": "AgentCapabilityRegistry type",
+    "summary": "Structured capability metadata for agents including engine name, MCP bootstrap mode, skill installation mode, and built-in tool list.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "model-selection",
+    "name": "Model selection and fallback",
+    "area": "configuration",
+    "kind": "concept",
+    "summary": "Agents accept model option (e.g., claude-opus-4-8, gpt-5.5, gemini-3.1-pro); pools support fallback chains for automatic model selection.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "opencode-variant",
+    "name": "OpenCode variant/reasoning",
+    "area": "agents-runtimes",
+    "kind": "concept",
+    "summary": "OpenCodeAgent variant option controls reasoning effort level (high/medium/low) for different task complexity needs.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "anthropic-sdk-import",
+    "name": "anthropic provider import",
+    "area": "sdk-agents",
+    "kind": "api",
+    "keyApi": "import { anthropic } from '@ai-sdk/anthropic'",
+    "summary": "SDK provider for AnthropicAgent allowing direct model references like anthropic('claude-opus-4').",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "openai-sdk-import",
+    "name": "openai provider import",
+    "area": "sdk-agents",
+    "kind": "api",
+    "keyApi": "import { openai } from '@ai-sdk/openai'",
+    "summary": "SDK provider for OpenAIAgent supporting model strings and createOpenAI() factory for custom baseURL/apiKey.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "cli-agent-capabilities-doctor",
+    "name": "Agent capability diagnostics",
+    "area": "diagnostics",
+    "kind": "api",
+    "keyApi": "getCliAgentCapabilityDoctorReport, formatCliAgentCapabilityDoctorReport",
+    "summary": "Diagnostic functions to check agent CLI availability, MCP support, skill registration, and tool surface compliance.",
+    "slice": "agents-runtimes"
+  },
+  {
+    "id": "snapshots-list",
+    "name": "List durability snapshots",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "List workspace checkpoints (durability snapshots) captured during a run's execution.",
+    "keyApi": "smithers snapshots <runId>",
+    "docPointer": "llms-core.txt",
+    "slice": "time-travel"
+  },
+  {
+    "id": "restore-worktree",
+    "name": "Restore worktree to checkpoint",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Restore a worktree to a durability checkpoint by running jj restore with the checkpoint's commit ID.",
+    "keyApi": "smithers restore <runId> --node <nodeId>",
+    "docPointer": "llms-core.txt",
+    "slice": "time-travel"
+  },
+  {
+    "id": "rewind-to-frame",
+    "name": "Rewind run to prior frame",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Destructively time-travel backwards by reverting VCS state and deleting frames recorded after the target frame.",
+    "keyApi": "smithers rewind <runId> --frame <frameNo> --yes",
+    "docPointer": "llms-core.txt",
+    "slice": "time-travel"
+  },
+  {
+    "id": "fork-from-checkpoint",
+    "name": "Fork run from checkpoint",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Create an independent branched run from a snapshot checkpoint with optional node reset and input overrides.",
+    "keyApi": "smithers fork <workflow> --run-id <runId> --frame <frameNo>",
+    "docPointer": "llms-core.txt",
+    "slice": "time-travel"
+  },
+  {
+    "id": "replay-and-resume",
+    "name": "Replay from checkpoint and resume",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Fork from a checkpoint and immediately resume execution, optionally restoring the VCS working copy to match the original attempt.",
+    "keyApi": "smithers replay <workflow> --run-id <runId> --frame <frameNo> --restore-vcs",
+    "docPointer": "llms-core.txt",
+    "slice": "time-travel"
+  },
+  {
+    "id": "timetravel-revert",
+    "name": "Time-travel to prior attempt",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Revert a specific node to a prior attempt by restoring filesystem state and resetting dependent nodes.",
+    "keyApi": "smithers timetravel <workflow> --run-id <runId> --node <nodeId> --attempt <attemptNo>",
+    "docPointer": "llms-core.txt",
+    "slice": "time-travel"
+  },
+  {
+    "id": "retry-task",
+    "name": "Retry a task within a run",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Reset a node to pending state and optionally reset all dependent downstream nodes, then resume the run.",
+    "keyApi": "smithers retry-task <workflow> --run-id <runId> --node <nodeId>",
+    "docPointer": "llms-core.txt",
+    "slice": "time-travel"
+  },
+  {
+    "id": "timeline-view",
+    "name": "View execution timeline",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Display all frames and fork branches for a run, with optional recursive tree view of descendants.",
+    "keyApi": "smithers timeline <runId> --tree",
+    "docPointer": "llms-core.txt",
+    "slice": "time-travel"
+  },
+  {
+    "id": "diff-snapshots",
+    "name": "Diff snapshots between frames",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Compute structured diff of nodes, outputs, loops, and input changes between two snapshots.",
+    "keyApi": "smithers diff <runId> <nodeId>",
+    "docPointer": "llms-core.txt",
+    "slice": "time-travel"
+  },
+  {
+    "id": "snapshot-capture",
+    "name": "Capture workflow snapshot",
+    "area": "time-travel",
+    "kind": "component",
+    "summary": "Capture durable snapshot of nodes, outputs, inputs, and loops at each execution frame for time-travel.",
+    "keyApi": "captureSnapshot(adapter, runId, frameNo, snapshotData)",
+    "docPointer": "/packages/time-travel/src/snapshot/index.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "snapshot-load",
+    "name": "Load snapshot by frame",
+    "area": "time-travel",
+    "kind": "component",
+    "summary": "Retrieve a serialized snapshot for a specific frame or the latest frame of a run.",
+    "keyApi": "loadSnapshot(adapter, runId, frameNo), loadLatestSnapshot(adapter, runId)",
+    "docPointer": "/packages/time-travel/src/snapshot/index.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "fork-operation",
+    "name": "Fork operation with branch metadata",
+    "area": "time-travel",
+    "kind": "api",
+    "summary": "Programmatic fork: creates child run from snapshot with branch label, input overrides, and node resets.",
+    "keyApi": "forkRun(adapter, ForkParams)",
+    "docPointer": "/packages/time-travel/src/fork/index.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "replay-operation",
+    "name": "Replay operation with VCS restore",
+    "area": "time-travel",
+    "kind": "api",
+    "summary": "Programmatic replay: fork a snapshot and optionally restore VCS working copy to original revision.",
+    "keyApi": "replayFromCheckpoint(adapter, ReplayParams)",
+    "docPointer": "/packages/time-travel/src/replay.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "jump-to-frame",
+    "name": "Jump to frame (rewind)",
+    "area": "time-travel",
+    "kind": "api",
+    "summary": "Core rewind mechanism: validates runId/frameNo, acquires lock, reverts VCS sandboxes, deletes future frames and attempts.",
+    "keyApi": "jumpToFrame(input: JumpToFrameInput)",
+    "docPointer": "/packages/time-travel/src/jumpToFrame.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "revert-operation",
+    "name": "Revert to node attempt",
+    "area": "time-travel",
+    "kind": "api",
+    "summary": "Restore workspace to a specific node attempt's filesystem state via jj and discard frames after it.",
+    "keyApi": "revertToAttempt(adapter, RevertOptions)",
+    "docPointer": "/packages/time-travel/src/revert.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "timetravel-full",
+    "name": "Full time-travel with reset",
+    "area": "time-travel",
+    "kind": "api",
+    "summary": "High-level time-travel: revert attempt, reset nodes, and optionally restore VCS to specific revision.",
+    "keyApi": "timeTravel(adapter, TimeTravelOptions)",
+    "docPointer": "/packages/time-travel/src/timetravel.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "retry-task-operation",
+    "name": "Retry task operation",
+    "area": "time-travel",
+    "kind": "api",
+    "summary": "Reset node and dependents to pending, cancel in-flight attempts, clear outputs, and resume run.",
+    "keyApi": "retryTask(adapter, RetryTaskOptions)",
+    "docPointer": "/packages/time-travel/src/retry-task.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "branch-info",
+    "name": "Branch metadata record",
+    "area": "time-travel",
+    "kind": "component",
+    "summary": "Records parentRunId, parentFrameNo, branch label, and fork description for a forked run.",
+    "keyApi": "BranchInfo type",
+    "docPointer": "/packages/time-travel/src/BranchInfo.ts",
+    "slice": "time-travel"
+  },
+  {
+    "id": "timeline-structure",
+    "name": "Timeline frames and tree",
+    "area": "time-travel",
+    "kind": "component",
+    "summary": "BuildTimeline returns flat list of frames with fork points; buildTimelineTree returns recursive tree of run and descendants.",
+    "keyApi": "buildTimeline(adapter, runId), buildTimelineTree(adapter, runId)",
+    "docPointer": "/packages/time-travel/src/timeline/index.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "snapshot-diff-type",
+    "name": "Structured snapshot diff",
+    "area": "time-travel",
+    "kind": "component",
+    "summary": "SnapshotDiff captures added/removed/changed nodes, outputs, loops, input changes, and VCS pointer changes.",
+    "keyApi": "diffSnapshots(a, b), SnapshotDiff type",
+    "docPointer": "/packages/time-travel/src/diff.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "rewind-lock",
+    "name": "Rewind concurrency lock",
+    "area": "time-travel",
+    "kind": "component",
+    "summary": "Mutual exclusion lock preventing concurrent rewinds on the same run.",
+    "keyApi": "acquireRewindLock(runId), hasRewindLock(runId)",
+    "docPointer": "/packages/time-travel/src/rewindLock.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "rewind-rate-limit",
+    "name": "Rewind rate limiter",
+    "area": "time-travel",
+    "kind": "component",
+    "summary": "Rate limit enforcement: default 10 rewinds per hour per caller, configurable window.",
+    "keyApi": "evaluateRewindRateLimit(runId, windowMs, maxPerWindow)",
+    "docPointer": "/packages/time-travel/src/rewindRateLimit.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "rewind-audit",
+    "name": "Rewind audit trail",
+    "area": "time-travel",
+    "kind": "component",
+    "summary": "Persistent audit log of all rewind operations with status (success/failed/partial/in_progress).",
+    "keyApi": "writeRewindAuditRow, listRewindAuditRows, updateRewindAuditRow",
+    "docPointer": "/packages/time-travel/src/rewindAudit.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "vcs-tag-snapshot",
+    "name": "VCS-tagged snapshot",
+    "area": "time-travel",
+    "kind": "component",
+    "summary": "Tag a snapshot with its VCS revision and enable reverting to that exact version.",
+    "keyApi": "tagSnapshotVcs(adapter, runId, frameNo, vcsPointer)",
+    "docPointer": "/packages/time-travel/src/vcs-version/index.js",
+    "slice": "time-travel"
+  },
+  {
+    "id": "fact-storage",
+    "name": "Fact storage (working memory)",
+    "area": "memory",
+    "kind": "component",
+    "summary": "Namespace-scoped JSON fact storage with optional TTL, supporting get/set/delete/list operations across workflow, agent, user, and global scopes.",
+    "keyApi": "store.setFact(ns, key, value, ttlMs?)",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "message-history",
+    "name": "Message history (threads)",
+    "area": "memory",
+    "kind": "component",
+    "summary": "Ordered message threads per namespace supporting saveMessage, listMessages, countMessages, and thread lifecycle operations.",
+    "keyApi": "store.createThread(ns, title?)",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "namespace-isolation",
+    "name": "Memory namespaces",
+    "area": "memory",
+    "kind": "concept",
+    "summary": "Four namespace kinds (workflow, agent, user, global) provide isolated scopes for facts and threads, matching lifetime semantics.",
+    "keyApi": "MemoryNamespace { kind, id }",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "task-memory-recall",
+    "name": "Task memory recall metadata",
+    "area": "memory",
+    "kind": "component",
+    "summary": "Optional task metadata for semantic recall: namespace, topK, and query fields to inject relevant past facts into prompts.",
+    "keyApi": "memory={{ recall: { namespace, topK, query } }}",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "task-memory-remember",
+    "name": "Task memory persist metadata",
+    "area": "memory",
+    "kind": "component",
+    "summary": "Optional task metadata to persist task output as a fact: namespace and key fields store result in working memory across runs.",
+    "keyApi": "memory={{ remember: { namespace, key } }}",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "task-memory-threadid",
+    "name": "Task message history metadata",
+    "area": "memory",
+    "kind": "component",
+    "summary": "Optional task metadata to append agent conversation messages to a named thread for cross-run history.",
+    "keyApi": "memory={{ threadId }}",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "ttl-garbage-collector",
+    "name": "TTL garbage collector processor",
+    "area": "memory",
+    "kind": "component",
+    "summary": "Memory maintenance processor that deletes facts past their TTL expiration, run periodically to clean up ephemeral working memory.",
+    "keyApi": "TtlGarbageCollector()",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "token-limiter",
+    "name": "Token limiter processor",
+    "area": "memory",
+    "kind": "component",
+    "summary": "Memory maintenance processor that trims message history to stay under token budget, operates at thread level.",
+    "keyApi": "TokenLimiter(maxTokens)",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "summarizer-processor",
+    "name": "Summarizer processor",
+    "area": "memory",
+    "kind": "component",
+    "summary": "Memory maintenance processor that compresses old messages into summaries using an LLM agent, operates at thread level.",
+    "keyApi": "Summarizer(agent)",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "memory-store-api",
+    "name": "Memory store direct API",
+    "area": "memory",
+    "kind": "api",
+    "summary": "Synchronous memory store with methods for fact, thread, and message operations: getFact, setFact, deleteFact, listFacts, createThread, saveMessage, listMessages, deleteExpiredFacts.",
+    "keyApi": "createMemoryStore(db)",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "memory-service-effect",
+    "name": "Memory service (Effect)",
+    "area": "memory",
+    "kind": "api",
+    "summary": "Effect-ts service layer providing memory operations as effects: getFact, setFact, listFacts, createThread, saveMessage, countMessages.",
+    "keyApi": "MemoryService, createMemoryLayer(config)",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "namespace-parsing",
+    "name": "Namespace string parsing",
+    "area": "memory",
+    "kind": "api",
+    "summary": "Utility functions to convert between MemoryNamespace objects and string representations with encoding (kind:id format).",
+    "keyApi": "parseNamespace(str), namespaceToString(ns)",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "memory-cli-list",
+    "name": "Memory CLI listing",
+    "area": "memory",
+    "kind": "cli",
+    "summary": "CLI command to inspect facts in a namespace for debugging and observability.",
+    "keyApi": "bunx smithers-orchestrator memory list",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "memory-metrics",
+    "name": "Memory metrics",
+    "area": "memory",
+    "kind": "component",
+    "summary": "Observability metrics: memoryFactReads, memoryFactWrites, memoryRecallQueries, memoryMessageSaves, memoryRecallDuration.",
+    "keyApi": "memoryFactReads, memoryFactWrites, memoryRecallQueries, memoryMessageSaves, memoryRecallDuration",
+    "docPointer": "llms-memory.txt",
+    "slice": "memory"
+  },
+  {
+    "id": "memory-schema-drizzle",
+    "name": "Memory schema (Drizzle tables)",
+    "area": "memory",
+    "kind": "component",
+    "summary": "SQLite schema tables for persistent storage: smithersMemoryFacts, smithersMemoryThreads, smithersMemoryMessages.",
+    "keyApi": "smithersMemoryFacts, smithersMemoryThreads, smithersMemoryMessages",
+    "docPointer": "UNDOCUMENTED",
+    "slice": "memory"
+  },
+  {
+    "id": "gateway-rpc-methods",
+    "name": "Gateway RPC methods",
+    "area": "gateway",
+    "kind": "api",
+    "keyApi": "launchRun, resumeRun, cancelRun, hijackRun, rewindRun, submitApproval, submitSignal, getRun, listRuns, listWorkflows, listApprovals, streamRunEvents, streamDevTools, getNodeOutput, getNodeDiff, cronList, cronCreate, cronDelete, cronRun",
+    "summary": "19 typed RPC methods over HTTP+WebSocket for run lifecycle, approvals, signals, cron, and devtools, with stable error codes and auth scopes.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "gateway-client-sdk",
+    "name": "Gateway client SDK (TypeScript/JavaScript)",
+    "area": "gateway",
+    "kind": "api",
+    "keyApi": "SmithersGatewayClient, SmithersGatewayConnection",
+    "summary": "Browser-first SDK for programmatic gateway RPC calls, event streaming with resilient reconnection/backoff, and WebSocket multiplexing.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "gateway-react-hooks",
+    "name": "Gateway React hooks",
+    "area": "gateway",
+    "kind": "component",
+    "keyApi": "useGatewayRun, useGatewayRuns, useGatewayRpc, useGatewayRunEvents, useGatewayApprovals, useGatewayActions, useGatewayExtensionStream, useGatewayExtensionResource, useGatewayExtensionAction, createGatewayReactRoot, SmithersGatewayProvider",
+    "summary": "React 19 hooks for live-data subscriptions over gateway collections with stale-data guards, optimistic mutations, and WebSocket reconnect handling.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "gateway-sync-collections",
+    "name": "Declarative sync collections (TanStack DB)",
+    "area": "gateway",
+    "kind": "component",
+    "keyApi": "useSyncQuery, useSyncMutation, useSyncSubscription, createGatewayCollections, SyncProvider, createSmithersGatewayTransport",
+    "summary": "TanStack DB-backed declarative query/mutation/subscription API for runs, workflows, approvals, and events with multiplexing and GC.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "gateway-extension-rpc",
+    "name": "Gateway extension RPC/stream system",
+    "area": "gateway",
+    "kind": "api",
+    "keyApi": "extensionMethodName, extensionStreamMethodName, GATEWAY_EXTENSION_METHOD_PREFIX, GatewayExtensionEnvelope",
+    "summary": "Third-party RPC methods and streams over the gateway namespace/key pattern with backpressure, bounded frame windows, and reconnect resume.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "gateway-auth-scopes",
+    "name": "Gateway auth scopes and tokens",
+    "area": "gateway",
+    "kind": "concept",
+    "keyApi": "run:read, run:write, run:admin, approval:submit, signal:submit, cron:read, cron:write, observability:read, *, methodName",
+    "summary": "Granular auth scopes for gateway RPC methods; tokens grant scopes and caller identity (userId, role) for ownership and audit.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "gateway-ui-boot-config",
+    "name": "Gateway UI boot configuration",
+    "area": "gateway",
+    "kind": "concept",
+    "keyApi": "GatewayUiBootConfig, __SMITHERS_GATEWAY_UI__",
+    "summary": "Global config passed to custom UIs at boot time: base URL, auth token, run ID, and protocol version via window.__SMITHERS_GATEWAY_UI__.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "gateway-error-codes",
+    "name": "Gateway RPC error codes",
+    "area": "gateway",
+    "kind": "api",
+    "keyApi": "InvalidRequest, InvalidInput, Unauthorized, Forbidden, RunNotFound, RUN_NOT_ACTIVE, CronNotFound, NodeNotFound, FrameOutOfRange, SeqOutOfRange, Busy, AlreadyDecided, RateLimited, PayloadTooLarge, BackpressureDisconnect, UnsupportedSandbox, VcsError, RewindFailed, Internal",
+    "summary": "21 stable error codes with HTTP status mappings and optional requiredScope/refresh hints for auth token expiry handling.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "smithers-observability-service",
+    "name": "Smithers observability service layer",
+    "area": "observability",
+    "kind": "api",
+    "keyApi": "SmithersObservability, createSmithersObservabilityLayer, createSmithersOtelLayer, resolveSmithersObservabilityOptions",
+    "summary": "Effect-based service for OpenTelemetry integration: span context, tracing, logging format (json/pretty/logfmt), and log-level configuration.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "smithers-metrics-system",
+    "name": "Smithers metrics system (Prometheus/OTLP)",
+    "area": "observability",
+    "kind": "api",
+    "keyApi": "renderPrometheusMetrics, prometheusContentType, smithersMetrics, MetricsService, MetricsServiceLive",
+    "summary": "In-process metrics registry with 100+ Prometheus counters/gauges/histograms for runs, nodes, timers, tokens, sandbox, DB, and networking.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "smithers-metric-definitions",
+    "name": "Metric definitions catalog",
+    "area": "observability",
+    "kind": "concept",
+    "keyApi": "SmithersMetricDefinition, smithersMetricCatalog, toPrometheusMetricName",
+    "summary": "Typed metric registry: counter/gauge/histogram with unit, labels, boundaries; label cardinality safeguards and overflow protection.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "correlation-context",
+    "name": "Correlation context (distributed tracing)",
+    "area": "observability",
+    "kind": "component",
+    "keyApi": "CorrelationContext, correlationContextFiberRef, withCorrelationContext, withCurrentCorrelationContext, getCurrentCorrelationContext",
+    "summary": "Fiber-local correlation context for tracing: userId, runId, traceId propagation across Effect tasks.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "smithers-structured-logging",
+    "name": "Structured logging API",
+    "area": "observability",
+    "kind": "api",
+    "keyApi": "logDebug, logInfo, logWarning, logError, SmithersEvent, SmithersLogFormat",
+    "summary": "Structured event logging with configurable format (JSON, pretty, logfmt, string) and log level filtering.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "devtools-stream",
+    "name": "DevTools snapshot/delta stream",
+    "area": "gateway",
+    "kind": "api",
+    "keyApi": "streamDevTools, DevToolsSnapshot, DevToolsDelta, DevToolsEvent, DevToolsNode",
+    "summary": "Versioned (v1) WebSocket stream of workflow tree snapshots and incremental deltas for inspector/debugger consumption.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "run-events-stream",
+    "name": "Run events resilient stream",
+    "area": "gateway",
+    "kind": "api",
+    "keyApi": "streamRunEvents, streamRunEventsResilient, GatewayEventFrame, run.heartbeat, run.gap_resync",
+    "summary": "WebSocket stream with gap-resync semantics, bounded replay, per-run sequence numbers, and heartbeat keep-alives.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "serve-mode",
+    "name": "Serve mode (single-workflow HTTP server)",
+    "area": "observability",
+    "kind": "concept",
+    "keyApi": "createServeApp, bunx smithers-orchestrator up --serve, --port, --host, --auth-token, --metrics",
+    "summary": "Hono-based HTTP server for a single workflow: REST routes, SSE events, approvals, metrics, and health endpoint.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "gateway-server",
+    "name": "Gateway server (multi-workflow)",
+    "area": "observability",
+    "kind": "api",
+    "keyApi": "Gateway, gateway.register(), gateway.listen(), GatewayOptions, GatewayAuthConfig",
+    "summary": "Multi-workflow headless control plane with WebSocket RPC, event subscriptions, UI mounting, cron scheduling, and auth.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "http-server",
+    "name": "HTTP server (REST multi-workflow)",
+    "area": "observability",
+    "kind": "api",
+    "keyApi": "startServer, ServerOptions, /v1/runs, /v1/approvals, /metrics, /events",
+    "summary": "Node.js http-based multi-workflow REST server with bearer auth, SSE events, approval submission, and Prometheus metrics.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "gateway-websocket-protocol",
+    "name": "Gateway WebSocket protocol",
+    "area": "gateway",
+    "kind": "concept",
+    "keyApi": "req, res, event, connect.challenge, hello, tick, run.completed, approval.requested, devtools.event",
+    "summary": "Frame-based protocol: request/response with correlation IDs, server-pushed events, handshake with auth challenge, and heartbeat.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "gateway-ui-custom",
+    "name": "Custom UI pattern (vanilla/React)",
+    "area": "gateway",
+    "kind": "example",
+    "keyApi": "gateway.register(key, workflow, { ui: { entry, title } }), createGatewayReactRoot",
+    "summary": "Mount custom UIs per workflow via .ui/<key>.tsx or vanilla JS entry points; UIs bootstrap with gateway boot config.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "rewind-run-operation",
+    "name": "Rewind run (time travel)",
+    "area": "gateway",
+    "kind": "api",
+    "keyApi": "rewindRun, frameNo, confirm:true, JumpResult, TimeTravelJumped, _smithers_time_travel_audit",
+    "summary": "Destructive frame rewind with VCS sandbox rollback, audit trail, owner/admin authorization, and 10-rewind-per-hour quota.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "gateway-backoff-strategy",
+    "name": "Gateway exponential backoff",
+    "area": "gateway",
+    "kind": "component",
+    "keyApi": "gatewayBackoffDelay, GatewayBackoffOptions, attempt, maxDelayMs, jitterFraction",
+    "summary": "Configurable exponential backoff with jitter for stream reconnection and RPC retry.",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "node-output-fetching",
+    "name": "Node output and diff fetching",
+    "area": "gateway",
+    "kind": "api",
+    "keyApi": "getNodeOutput, getNodeDiff, NodeOutputResponse, OutputSchemaDescriptor, iteration",
+    "summary": "Fetch task output payload with schema descriptor or node-level diff bundle (VCS, file-level changes).",
+    "slice": "observability-gateway-server"
+  },
+  {
+    "id": "worktree-component",
+    "name": "<Worktree>",
+    "area": "vcs",
+    "kind": "component",
+    "summary": "React component that runs a subtree in an isolated git or jj worktree rooted at a filesystem path.",
+    "keyApi": "<Worktree path={string} branch? baseBranch? id? skipIf?>",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "merge-queue-component",
+    "name": "<MergeQueue>",
+    "area": "control-flow",
+    "kind": "component",
+    "summary": "React component that queues child tasks to run with bounded concurrency (default 1), providing merge-queue serialization.",
+    "keyApi": "<MergeQueue maxConcurrency? id? skipIf?>",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "sandbox-component",
+    "name": "<Sandbox>",
+    "area": "sandboxing",
+    "kind": "component",
+    "summary": "React component that executes a child workflow through an injectable sandbox provider with optional networking, volume mounts, custom images, and egress config.",
+    "keyApi": "<Sandbox id={string} provider? runtime? workflow? input? output>",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "sandbox-provider",
+    "name": "SandboxProvider",
+    "area": "sandboxing",
+    "kind": "api",
+    "summary": "Pluggable interface for sandbox execution: {id, run(request), cleanup?(request)} for local/remote VM/Docker/Freestyle implementations.",
+    "keyApi": "SandboxProvider, registerSandboxProvider, resolveSandboxProvider",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "sandbox-runtime",
+    "name": "SandboxRuntime",
+    "area": "sandboxing",
+    "kind": "concept",
+    "summary": "Process isolation runtime for sandboxes: bubblewrap (Linux), docker (OCI containers), or codeplane (cloud VMs).",
+    "keyApi": "runtime: 'bubblewrap' | 'docker' | 'codeplane'",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "sandbox-network",
+    "name": "Sandbox Network",
+    "area": "sandboxing",
+    "kind": "concept",
+    "summary": "Network access control for sandboxes via allowNetwork prop; denied by default, enabled per-sandbox.",
+    "keyApi": "allowNetwork: boolean",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "sandbox-volumes",
+    "name": "Sandbox Volume Mounts",
+    "area": "sandboxing",
+    "kind": "concept",
+    "summary": "Host directory binding into sandbox containers via volumes prop with {host, container, readonly?} specifications.",
+    "keyApi": "volumes: SandboxVolumeMount[]",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "sandbox-egress",
+    "name": "Sandbox Egress Config",
+    "area": "sandboxing",
+    "kind": "concept",
+    "summary": "HTTP/HTTPS proxy, CA certificates, and secret bindings for sandbox outbound connections.",
+    "keyApi": "egress: SandboxEgressConfig",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "sandbox-workspace",
+    "name": "Sandbox Workspace Spec",
+    "area": "sandboxing",
+    "kind": "concept",
+    "summary": "jj workspace configuration inside a sandbox with name, snapshot restoration, idle timeout, and persistence mode.",
+    "keyApi": "workspace: SandboxWorkspaceSpec",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "sandbox-review-diffs",
+    "name": "Sandbox Diff Review",
+    "area": "sandboxing",
+    "kind": "concept",
+    "summary": "Human-in-the-loop review and auto-acceptance of file changes produced by sandbox execution.",
+    "keyApi": "reviewDiffs, autoAcceptDiffs",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "vcs-find-root",
+    "name": "findVcsRoot()",
+    "area": "vcs",
+    "kind": "api",
+    "summary": "Detect the nearest .jj or .git directory, preferring jj for colocated repos, returning {type, root} or null.",
+    "keyApi": "findVcsRoot(startDir)",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "vcs-run-jj",
+    "name": "runJj()",
+    "area": "vcs",
+    "kind": "api",
+    "summary": "Execute an arbitrary jj command and capture {code, stdout, stderr}; safe to call when jj is missing.",
+    "keyApi": "runJj(args, opts?)",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "vcs-pointer",
+    "name": "Jj Pointer",
+    "area": "vcs",
+    "kind": "concept",
+    "summary": "A jj change_id that identifies a stable point in worktree history for durable restore and cache invalidation.",
+    "keyApi": "getJjPointer, revertToJjPointer",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "vcs-revert",
+    "name": "revertToJjPointer()",
+    "area": "vcs",
+    "kind": "api",
+    "summary": "Restore a worktree's working copy to a previously recorded jj change_id using 'jj restore --from <pointer>'.",
+    "keyApi": "revertToJjPointer(pointer, cwd?)",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "vcs-workspace-add",
+    "name": "workspaceAdd()",
+    "area": "vcs",
+    "kind": "api",
+    "summary": "Create a new jj workspace at a filesystem path with a friendly name, optionally at a specific revision.",
+    "keyApi": "workspaceAdd(name, path, opts?)",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "vcs-workspace-list",
+    "name": "workspaceList()",
+    "area": "vcs",
+    "kind": "api",
+    "summary": "List existing jj workspaces in a repo with structured output, falling back to parsing if -T template is unavailable.",
+    "keyApi": "workspaceList(cwd?)",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "vcs-workspace-close",
+    "name": "workspaceClose()",
+    "area": "vcs",
+    "kind": "api",
+    "summary": "Close a jj workspace by name, cleaning up associated metadata and directories.",
+    "keyApi": "workspaceClose(name, opts?)",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "vcs-repo-detection",
+    "name": "isJjRepo()",
+    "area": "vcs",
+    "kind": "api",
+    "summary": "Detect whether a directory is a readable jj repository via 'jj --version' execution.",
+    "keyApi": "isJjRepo(cwd?)",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "vcs-snapshot",
+    "name": "captureWorkspaceSnapshot()",
+    "area": "vcs",
+    "kind": "api",
+    "summary": "Capture a worktree's current state as {commitId, changeId, operationId} for time-travel and durability.",
+    "keyApi": "captureWorkspaceSnapshot(cwd?)",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "vcs-binary-resolution",
+    "name": "Binary Resolution",
+    "area": "vcs",
+    "kind": "concept",
+    "summary": "Executable discovery for jj and git: env override (SMITHERS_JJ_PATH/SMITHERS_GIT_PATH), bundled packages, then PATH.",
+    "keyApi": "resolveJjBinary, resolveGitBinary, ResolvedBinary",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "vcs-tooling-status",
+    "name": "vcsToolingStatus()",
+    "area": "vcs",
+    "kind": "api",
+    "summary": "Synchronous best-effort probe for usable jj and/or git executables, returning {jj, git, ok}.",
+    "keyApi": "vcsToolingStatus(): VcsToolingStatus",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "jj-snapshot-gotcha",
+    "name": "jj Snapshot Behavior",
+    "area": "vcs",
+    "kind": "concept",
+    "summary": "jj continuously snapshots working-copy edits onto its bookmark; dirty-state detection via git status appears clean; instead use jj diff or git diff against baseBranch.",
+    "keyApi": "jj diff --from <baseBranch> --to @",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "worktree-path-context",
+    "name": "Worktree Path Access",
+    "area": "vcs",
+    "kind": "api",
+    "summary": "Read the resolved absolute worktree path in a task using ctx.worktreePath(taskId) or ctx.resolveWorktreePath(pathProp).",
+    "keyApi": "ctx.worktreePath, ctx.resolveWorktreePath",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "worktree-mergequeue-pattern",
+    "name": "Worktree + MergeQueue Pattern",
+    "area": "vcs",
+    "kind": "example",
+    "summary": "Fan-out work across multiple isolated worktrees, each with sequential build/test/apply steps in MergeQueue, enabling per-worktree parallelism with bounded merges.",
+    "keyApi": "<Worktree><Task/><MergeQueue><Task/></MergeQueue></Worktree>",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "sandbox-provider-interface",
+    "name": "SandboxProvider Interface",
+    "area": "sandboxing",
+    "kind": "concept",
+    "summary": "Contract for sandbox implementations: {id, run(request), cleanup?(request)} where run receives request with rootDir/workflow/input and returns {bundlePath} or {status, output, diffBundle, patches}.",
+    "keyApi": "SandboxProvider",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "sandbox-freestyle-provider",
+    "name": "Freestyle Sandbox Adapter",
+    "area": "sandboxing",
+    "kind": "example",
+    "summary": "Pluggable provider adapter that creates Freestyle VMs, writes request/setup files, execs commands, reads result JSON, enabling real VMs as sandboxes.",
+    "keyApi": "createFreestyleSandboxProvider",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "supervisor-useWorktrees",
+    "name": "Supervisor Per-Agent Worktrees",
+    "area": "vcs",
+    "kind": "concept",
+    "summary": "When useWorktrees={true}, Supervisor places each worker in .worktrees/{prefix}-worker-{type} on branch worker/{prefix}-worker-{type} for isolated parallel work.",
+    "keyApi": "useWorktrees: boolean",
+    "slice": "sandbox-worktree-vcs"
+  },
+  {
+    "id": "createOpenApiTools-async",
+    "name": "createOpenApiTools (async)",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Async function that parses an OpenAPI spec and returns a record of AI SDK tools keyed by operationId.",
+    "keyApi": "createOpenApiTools(input, options?)",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "createOpenApiToolsSync-sync",
+    "name": "createOpenApiToolsSync (sync)",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Synchronous variant of createOpenApiTools that works with local files and spec objects (not URLs).",
+    "keyApi": "createOpenApiToolsSync(input, options?)",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "createOpenApiTool-async",
+    "name": "createOpenApiTool (async)",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Async function to create a single AI SDK tool for a specific operationId from an OpenAPI spec.",
+    "keyApi": "createOpenApiTool(input, operationId, options?)",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "createOpenApiToolSync-sync",
+    "name": "createOpenApiToolSync (sync)",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Synchronous variant to create a single tool for a specific operationId (local files and objects only).",
+    "keyApi": "createOpenApiToolSync(input, operationId, options?)",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "listOperations",
+    "name": "listOperations",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "List all operationIds and their metadata (method, path, summary) from an OpenAPI spec without creating tools.",
+    "keyApi": "listOperations(input)",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "smithers-openapi-list-cli",
+    "name": "smithers openapi list CLI command",
+    "area": "openapi-tools",
+    "kind": "cli",
+    "summary": "CLI command to preview tools that would be generated from an OpenAPI spec, listing each operationId with method, path, and summary.",
+    "keyApi": "smithers openapi list <spec-path>",
+    "docPointer": "apps/cli/src/index.js",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "auth-bearer",
+    "name": "Bearer token authentication",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Pass auth option { type: 'bearer', token: string } to add Authorization: Bearer header to all tool requests.",
+    "keyApi": "auth: { type: 'bearer', token }",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "auth-basic",
+    "name": "Basic authentication",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Pass auth option { type: 'basic', username, password } to add Authorization: Basic header (base64 encoded) to all tool requests.",
+    "keyApi": "auth: { type: 'basic', username, password }",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "auth-apikey",
+    "name": "API key authentication",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Pass auth option { type: 'apiKey', name, value, in: 'header'|'query' } to add API key as header or query parameter to all tool requests.",
+    "keyApi": "auth: { type: 'apiKey', name, value, in }",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "baseUrl-override",
+    "name": "Base URL override",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Pass baseUrl option to override the spec's default server URL for all tool requests.",
+    "keyApi": "baseUrl: string",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "custom-headers",
+    "name": "Custom request headers",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Pass headers option as Record<string, string> to add custom headers merged into every tool request.",
+    "keyApi": "headers: Record<string, string>",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "operation-filtering",
+    "name": "Operation filtering (include/exclude)",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Pass include/exclude arrays of operationIds to allowlist or blocklist specific operations; exclude wins if both are set.",
+    "keyApi": "include: string[] | exclude: string[]",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "tool-name-prefix",
+    "name": "Tool name prefix",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Pass namePrefix option to prepend a prefix to generated tool names without changing the operationIds used for filtering.",
+    "keyApi": "namePrefix: string",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "spec-loading-file",
+    "name": "Load spec from local file",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Pass a local file path (string) to createOpenApiTools/loadSpec functions to read and parse a YAML or JSON OpenAPI spec.",
+    "keyApi": "createOpenApiTools('./path/to/spec.yaml')",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "spec-loading-url",
+    "name": "Load spec from URL",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Pass a URL (http:// or https://) to createOpenApiTools/loadSpecEffect to fetch and parse a remote OpenAPI spec.",
+    "keyApi": "createOpenApiTools('https://api.example.com/openapi.json')",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "spec-loading-text",
+    "name": "Load spec from raw text",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Pass a raw JSON or YAML text string to createOpenApiTools/loadSpec functions; auto-detects format and parses without filesystem access.",
+    "keyApi": "createOpenApiTools(jsonString)",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "spec-loading-object",
+    "name": "Load spec from object",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Pass a parsed OpenAPI spec object directly to createOpenApiTools; skips parsing and uses it immediately.",
+    "keyApi": "createOpenApiTools(specObject)",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "schema-conversion",
+    "name": "JSON Schema to Zod conversion",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Exported jsonSchemaToZod(schema, spec) converts OpenAPI JSON Schema objects to Zod schemas, supporting allOf/anyOf/oneOf, nullable fields, defaults, and constraints.",
+    "keyApi": "jsonSchemaToZod(schema, spec, visited?)",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "buildOperationSchema",
+    "name": "Build combined operation schema",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Exported buildOperationSchema(parameters, requestBody, spec) combines path/query/header parameters and request body into a single Zod schema for an operation.",
+    "keyApi": "buildOperationSchema(parameters, requestBody, spec)",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "extractOperations",
+    "name": "Extract operations from spec",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Exported extractOperations(spec) parses an OpenAPI spec and returns ParsedOperation[] with operationId, method, path, parameters, and requestBody.",
+    "keyApi": "extractOperations(spec)",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "loadSpecEffect",
+    "name": "Load spec with Effect",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Exported loadSpecEffect(input) returns Effect.Effect<OpenApiSpec> that loads a spec from file, URL, or text with async/error handling.",
+    "keyApi": "loadSpecEffect(input)",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "loadSpecSync",
+    "name": "Load spec synchronously",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Exported loadSpecSync(input) synchronously loads a spec from a local file path or object; does not fetch URLs.",
+    "keyApi": "loadSpecSync(input)",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "observability-metrics",
+    "name": "OpenAPI tool metrics",
+    "area": "openapi-tools",
+    "kind": "api",
+    "summary": "Exported Effect metrics: openApiToolCallsTotal (counter), openApiToolCallErrorsTotal (counter), openApiToolDuration (histogram) for observability.",
+    "keyApi": "openApiToolCallsTotal | openApiToolCallErrorsTotal | openApiToolDuration",
+    "docPointer": "docs/llms-openapi.txt",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "bash-tool",
+    "name": "bash tool",
+    "area": "built-in-tools",
+    "kind": "api",
+    "summary": "Built-in Smithers tool to run shell commands with cmd, optional args array, and optional cwd; enforces network/path containment.",
+    "keyApi": "bash(cmd, args?, opts?)",
+    "docPointer": "packages/smithers/src/tools/bash.js",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "read-tool",
+    "name": "read tool",
+    "area": "built-in-tools",
+    "kind": "api",
+    "summary": "Built-in Smithers tool to read file contents; enforces path containment within --root.",
+    "keyApi": "read(path)",
+    "docPointer": "packages/smithers/src/tools/read.js",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "write-tool",
+    "name": "write tool",
+    "area": "built-in-tools",
+    "kind": "api",
+    "summary": "Built-in Smithers tool to write or overwrite file contents; enforces path containment within --root.",
+    "keyApi": "write(path, content)",
+    "docPointer": "packages/smithers/src/tools/write.js",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "edit-tool",
+    "name": "edit tool",
+    "area": "built-in-tools",
+    "kind": "api",
+    "summary": "Built-in Smithers tool to apply unified diff patches to files; enforces path containment within --root.",
+    "keyApi": "edit(path, patch)",
+    "docPointer": "packages/smithers/src/tools/edit.js",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "grep-tool",
+    "name": "grep tool",
+    "area": "built-in-tools",
+    "kind": "api",
+    "summary": "Built-in Smithers tool to search files with regex patterns using ripgrep (rg); enforces path containment within --root.",
+    "keyApi": "grep(pattern, path?)",
+    "docPointer": "packages/smithers/src/tools/grep.js",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "path-containment-check",
+    "name": "Path containment enforcement",
+    "area": "openapi-tools",
+    "kind": "concept",
+    "summary": "All file-accessing tools enforce --root containment: paths are validated against rootDir, symlink targets are checked, and escape attempts throw TOOL_PATH_ESCAPE error.",
+    "keyApi": "resolveToolPath(rootDir, inputPath)",
+    "docPointer": "packages/sandbox/src/sandboxPath.js",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "tool-context-access",
+    "name": "getToolContext()",
+    "area": "tool-context",
+    "kind": "api",
+    "summary": "Get the ambient AsyncLocalStorage-based tool execution context (run/node/cwd/auth/limits) set by runWithToolContext().",
+    "keyApi": "getToolContext()",
+    "docPointer": "packages/tool-context/src/toolContext.js",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "tool-context-management",
+    "name": "runWithToolContext()",
+    "area": "tool-context",
+    "kind": "api",
+    "summary": "Set the ambient tool execution context via AsyncLocalStorage so tool execute() functions can access run/node/idempotency context across awaits.",
+    "keyApi": "runWithToolContext(ctx, fn)",
+    "docPointer": "packages/tool-context/src/toolContext.js",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "idempotency-key",
+    "name": "getToolIdempotencyKey()",
+    "area": "tool-context",
+    "kind": "api",
+    "summary": "Generate or return an idempotency key for tool requests from context: 'smithers:<runId>:<nodeId>:<iteration>' or custom idempotencyKey field.",
+    "keyApi": "getToolIdempotencyKey(ctx?)",
+    "docPointer": "packages/tool-context/src/toolContext.js",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "next-tool-seq",
+    "name": "nextToolSeq()",
+    "area": "tool-context",
+    "kind": "api",
+    "summary": "Increment and return a sequence counter in the tool context for ordering or versioning tool calls within a run/node.",
+    "keyApi": "nextToolSeq(ctx)",
+    "docPointer": "packages/tool-context/src/toolContext.js",
+    "slice": "openapi-tools"
+  },
+  {
+    "id": "mcp-server-cli",
+    "name": "MCP Server via CLI",
+    "area": "mcp",
+    "kind": "cli",
+    "summary": "Start Smithers as a Model Context Protocol stdio server with --mcp flag for AI agent control.",
+    "keyApi": "--mcp",
+    "docPointer": "docs/llms-observability.txt: MCP Server section",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "mcp-semantic-tools",
+    "name": "MCP Semantic Tools",
+    "area": "mcp",
+    "kind": "component",
+    "summary": "Stable structured tool set for MCP clients including list_workflows, run_workflow, watch_run, resolve_approval, ask_human, and more.",
+    "keyApi": "semantic-surface",
+    "docPointer": "docs/llms-observability.txt: Tool Reference section",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "workflow-skills-gen",
+    "name": "Workflow Skills Generation",
+    "area": "skills",
+    "kind": "cli",
+    "summary": "Generate agent-facing skill documentation files for local workflows via smithers workflow skills.",
+    "keyApi": "smithers workflow skills",
+    "docPointer": "apps/cli/src/index.js: lines 2126-2168",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "cron-scheduling",
+    "name": "Cron Schedule Management",
+    "area": "ops",
+    "kind": "cli",
+    "summary": "Register, list, and manage background cron schedules for workflow automation via smithers cron commands.",
+    "keyApi": "smithers cron add|list|rm|start",
+    "docPointer": "apps/cli/src/index.js: lines 2265-2328",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "ask-human-blocking",
+    "name": "Ask Human Blocking Request",
+    "area": "human-inbox",
+    "kind": "cli",
+    "summary": "Raise a blocking human-approval request from inside a running workflow and wait for the decision.",
+    "keyApi": "smithers ask-human <prompt>",
+    "docPointer": "apps/cli/src/index.js: lines 4326-4459; docs/llms-observability.txt: ask_human tool",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "human-inbox-manage",
+    "name": "Human Request Inbox Management",
+    "area": "human-inbox",
+    "kind": "cli",
+    "summary": "List, answer, and cancel durable human requests via smithers human inbox|answer|cancel.",
+    "keyApi": "smithers human inbox|answer|cancel",
+    "docPointer": "apps/cli/src/index.js: lines 4189-4321",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "hijack-session",
+    "name": "Hijack Agent Session",
+    "area": "ops",
+    "kind": "cli",
+    "summary": "Hand off the latest resumable agent session or conversation for a run to native CLI.",
+    "keyApi": "smithers hijack <run-id>",
+    "docPointer": "apps/cli/src/index.js: lines 3824-3972; docs/llms-integrations.txt: Hijack handoff section",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "supervise-stale-runs",
+    "name": "Supervisor Watch Loop",
+    "area": "ops",
+    "kind": "cli",
+    "summary": "Watch for stale running runs and auto-resume them in background with configurable thresholds.",
+    "keyApi": "smithers supervise",
+    "docPointer": "apps/cli/src/index.js: lines 3170-3219",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "signal-delivery",
+    "name": "Signal Delivery to Runs",
+    "area": "ops",
+    "kind": "cli",
+    "summary": "Deliver a durable named signal to a run waiting on Signal or WaitForEvent components.",
+    "keyApi": "smithers signal <run-id> <signal-name>",
+    "docPointer": "apps/cli/src/index.js: lines 4651-4712; docs/llms-observability.txt: submitSignal RPC",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "gateway-rpc-cron",
+    "name": "Gateway Cron RPC Methods",
+    "area": "ops",
+    "kind": "api",
+    "summary": "RPC methods cronList, cronCreate, cronDelete, cronRun for programmatic cron management via Gateway.",
+    "keyApi": "cronList|cronCreate|cronDelete|cronRun",
+    "docPointer": "docs/llms-observability.txt: Gateway RPC methods section",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "mcp-list-workflows",
+    "name": "MCP List Workflows Tool",
+    "area": "mcp",
+    "kind": "component",
+    "summary": "Discover and list all Smithers workflows available in working directory via MCP list_workflows tool.",
+    "keyApi": "list_workflows",
+    "docPointer": "docs/llms-observability.txt: list_workflows tool reference",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "mcp-run-workflow",
+    "name": "MCP Run Workflow Tool",
+    "area": "mcp",
+    "kind": "component",
+    "summary": "Start or resume a discovered workflow via MCP run_workflow tool with input, runId, and run options.",
+    "keyApi": "run_workflow",
+    "docPointer": "docs/llms-observability.txt: run_workflow tool reference",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "mcp-watch-run",
+    "name": "MCP Watch Run Tool",
+    "area": "mcp",
+    "kind": "component",
+    "summary": "Poll a run at fixed interval until terminal state with timeout support via MCP watch_run tool.",
+    "keyApi": "watch_run",
+    "docPointer": "docs/llms-observability.txt: watch_run tool reference",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "mcp-explain-run",
+    "name": "MCP Explain Run Tool",
+    "area": "mcp",
+    "kind": "component",
+    "summary": "Return structured diagnosis explaining why a run is blocked, waiting, or stale via MCP explain_run.",
+    "keyApi": "explain_run",
+    "docPointer": "docs/llms-observability.txt: explain_run tool reference",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "mcp-resolve-approval",
+    "name": "MCP Resolve Approval Tool",
+    "area": "mcp",
+    "kind": "component",
+    "summary": "Approve or deny a pending human approval gate via MCP resolve_approval tool.",
+    "keyApi": "resolve_approval",
+    "docPointer": "docs/llms-observability.txt: resolve_approval tool reference",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "mcp-revert-attempt",
+    "name": "MCP Revert Attempt Tool",
+    "area": "mcp",
+    "kind": "component",
+    "summary": "Revert workspace and frame history back to a specific attempt state (destructive) via MCP revert_attempt.",
+    "keyApi": "revert_attempt",
+    "docPointer": "docs/llms-observability.txt: revert_attempt tool reference",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "mcp-get-node-detail",
+    "name": "MCP Get Node Detail Tool",
+    "area": "mcp",
+    "kind": "component",
+    "summary": "Get enriched detail for a single node including attempts, tool calls, token usage, and scorer results.",
+    "keyApi": "get_node_detail",
+    "docPointer": "docs/llms-observability.txt: get_node_detail tool reference",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "mcp-list-approvals",
+    "name": "MCP List Pending Approvals Tool",
+    "area": "mcp",
+    "kind": "component",
+    "summary": "List human approvals waiting for decision, optionally filtered by run, workflow, or node.",
+    "keyApi": "list_pending_approvals",
+    "docPointer": "docs/llms-observability.txt: list_pending_approvals tool reference",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "mcp-ask-human-tool",
+    "name": "MCP Ask Human Tool",
+    "area": "mcp",
+    "kind": "component",
+    "summary": "Block current run and ask human to make decision, wait for answer via MCP ask_human tool.",
+    "keyApi": "ask_human",
+    "docPointer": "docs/llms-observability.txt: ask_human tool reference",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "smithers-as-mcp-client",
+    "name": "Smithers as MCP Client",
+    "area": "integrations",
+    "kind": "api",
+    "summary": "Use Smithers as a client to external MCP servers via createMcpToolset for SDK agents.",
+    "keyApi": "createMcpToolset",
+    "docPointer": "docs/llms-integrations.txt: MCP Toolset section",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "native-agent-hijack-engines",
+    "name": "Native Agent Hijack Engines",
+    "area": "ops",
+    "kind": "concept",
+    "summary": "Support for hijacking sessions across multiple agent CLIs: Claude Code, Codex, Antigravity, Gemini, Pi, Kimi, Forge, Amp.",
+    "keyApi": "claude-code|codex|agy|gemini|pi|kimi|forge|amp",
+    "docPointer": "apps/cli/src/hijack.js; docs/llms-integrations.txt: Hijack handoff table",
+    "slice": "integrations-mcp-ops"
+  },
+  {
+    "id": "render-execute-persist-loop",
+    "name": "Render-Execute-Persist Loop",
+    "area": "runtime-core",
+    "kind": "concept",
+    "summary": "The fundamental cycle that powers Smithers: render the workflow tree, extract ready tasks, execute them, persist outputs to SQLite, and re-render against the new state.",
+    "keyApi": "WorkflowDriver.run(), EngineDecision",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "frame-unit",
+    "name": "Frame as Unit of Progress",
+    "area": "runtime-core",
+    "kind": "concept",
+    "summary": "Every frame is a snapshot of (state → plan); frames are the unit for time travel, observability, hot reload, and resume.",
+    "keyApi": "GraphSnapshot, frameNo",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "ctx-output-api",
+    "name": "ctx.output() and ctx.outputMaybe()",
+    "area": "context-api",
+    "kind": "api",
+    "summary": "Two methods to read upstream task outputs: ctx.output() throws if missing (for guaranteed deps), ctx.outputMaybe() returns undefined (for conditional rendering).",
+    "keyApi": "ctx.output(table, {nodeId, iteration}), ctx.outputMaybe(table, {nodeId, iteration})",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "ctx-outputs-api",
+    "name": "ctx.outputs() for All Rows",
+    "area": "context-api",
+    "kind": "api",
+    "summary": "Returns all rows from an output table or accesses rows by schema key as ctx.outputs.keyName.",
+    "keyApi": "ctx.outputs(table), ctx.outputs.<key>",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "ctx-latest-api",
+    "name": "ctx.latest() for Loop Iteration",
+    "area": "context-api",
+    "kind": "api",
+    "summary": "Reads the highest-iteration output of a task, used inside Loop to read the previous iteration's output.",
+    "keyApi": "ctx.latest(table, nodeId)",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "ctx-latestarray-api",
+    "name": "ctx.latestArray() for Parsed Arrays",
+    "area": "context-api",
+    "kind": "api",
+    "summary": "Parses a JSON string, scalar, or array and keeps entries accepted by a Zod schema, handling null coalescing.",
+    "keyApi": "ctx.latestArray(value, schema)",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "crash-resume-durability",
+    "name": "Crash-Resume Durability Contract",
+    "area": "durability-model",
+    "kind": "concept",
+    "summary": "A completed task is never re-executed. Resume loads persisted state, validates workflow source hash and VCS revision, abandons stale in-progress attempts (>15 min without heartbeat), and continues.",
+    "keyApi": "resume: true, --resume flag",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "heartbeat-timeout",
+    "name": "Heartbeat Timeout Recovery",
+    "area": "durability-model",
+    "kind": "concept",
+    "summary": "In-progress tasks without a heartbeat for >15 minutes are abandoned on resume as stale and re-executed as a fresh attempt.",
+    "keyApi": "heartbeatTimedOut(), heartbeatTimeoutMs prop",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "hot-reload-mode",
+    "name": "Hot Reload Mode",
+    "area": "durability-model",
+    "kind": "concept",
+    "summary": "Edit workflow code during a running execution; changes apply only to newly scheduled tasks while in-flight tasks finish on their original code.",
+    "keyApi": "hot: true, up --hot",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "stable-task-ids",
+    "name": "Stable Task ID Requirement",
+    "area": "durability-model",
+    "kind": "concept",
+    "summary": "Task IDs must be stable and data-derived across renders. Changing an ID makes it look like a new task; a disappeared ID drops the old task from the plan.",
+    "keyApi": "id prop on Task, Loop, Branch",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "aspects-token-budget",
+    "name": "Aspects Token Budget",
+    "area": "budget-enforcement",
+    "kind": "concept",
+    "summary": "Limit total token usage across a workflow subtree with per-task and global limits; enforce with fail/warn/skip-remaining on breach.",
+    "keyApi": "Aspects, tokenBudget prop",
+    "docPointer": "docs/components/aspects.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "aspects-latency-slo",
+    "name": "Aspects Latency SLO",
+    "area": "budget-enforcement",
+    "kind": "concept",
+    "summary": "Limit wall-clock latency for workflow execution; enforce with fail/warn on breach.",
+    "keyApi": "Aspects, latencySlo prop",
+    "docPointer": "docs/components/aspects.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "aspects-budget",
+    "name": "Aspects Budget Inheritance",
+    "area": "budget-enforcement",
+    "kind": "concept",
+    "summary": "Nested Aspects inherit outer budget configs wholesale; a child's config field replaces the parent's entire field (no per-field merge).",
+    "keyApi": "Aspects nesting",
+    "docPointer": "docs/components/aspects.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "smithers-event-union",
+    "name": "SmithersEvent Union Type",
+    "area": "observability",
+    "kind": "concept",
+    "summary": "Tagged union of all runtime events: SupervisorStarted, RunStarted, NodePending, NodeStarted, TaskHeartbeat, TaskHeartbeatTimeout, NodeFinished, NodeFailed, ApprovalRequested, etc.",
+    "keyApi": "SmithersEvent, event.type",
+    "docPointer": "apps/observability/src/SmithersEvent.ts",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "engine-decision-union",
+    "name": "EngineDecision Union Type",
+    "area": "runtime-core",
+    "kind": "concept",
+    "summary": "Tagged union of scheduler decisions: Execute (run tasks), ReRender (render with new context), Wait (pause for event), ContinueAsNew (close and restart), Finished, Failed.",
+    "keyApi": "EngineDecision, _tag property",
+    "docPointer": "packages/scheduler/src/index.d.ts",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "loop-control-flow",
+    "name": "Loop Control Flow",
+    "area": "control-flow",
+    "kind": "component",
+    "summary": "Re-run children repeatedly: on each iteration, render, execute, persist outputs; check until condition on next frame; stop when until is true or maxIterations is reached.",
+    "keyApi": "Loop id, until, maxIterations, onMaxReached",
+    "docPointer": "docs/components/loop.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "branch-conditional",
+    "name": "Branch Conditional Rendering",
+    "area": "control-flow",
+    "kind": "component",
+    "summary": "Conditional fork: mounts then when if is true, otherwise else. Unselected branch tasks are absent from the task graph.",
+    "keyApi": "Branch if, then, else",
+    "docPointer": "docs/components/branch.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "parallel-concurrency",
+    "name": "Parallel Concurrency Control",
+    "area": "control-flow",
+    "kind": "component",
+    "summary": "Run children concurrently with optional maxConcurrency cap. Completes when all children finish unless continueOnFail is set on individual tasks.",
+    "keyApi": "Parallel maxConcurrency",
+    "docPointer": "docs/components/parallel.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "fork-session",
+    "name": "Fork Immutable Session Copy",
+    "area": "control-flow",
+    "kind": "api",
+    "summary": "Copy another agent task's final session context into a fresh, independent session and submit a new prompt. Source is never mutated; multiple tasks can safely fork the same source.",
+    "keyApi": "Task fork prop",
+    "docPointer": "docs/components/task.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "continue-as-new",
+    "name": "Continue As New State Transition",
+    "area": "control-flow",
+    "kind": "component",
+    "summary": "Close the current run and start a fresh one with optional JSON-serializable carried state. Workflow id is preserved; run id increments.",
+    "keyApi": "ContinueAsNew state prop, continueAsNew()",
+    "docPointer": "docs/components/continue-as-new.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "render-context",
+    "name": "Render Context (ctx)",
+    "area": "context-api",
+    "kind": "api",
+    "summary": "The only interface between workflow code and runtime; provides runId, iteration, iterations, input, outputs, auth, task states.",
+    "keyApi": "SmithersCtx, ctx parameter",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "task-state-machine",
+    "name": "Task State Machine",
+    "area": "runtime-core",
+    "kind": "concept",
+    "summary": "Task states: pending, waiting-approval, waiting-event, waiting-timer, in-progress, finished, failed, cancelled, skipped. Transitions driven by task completion, approval, timeout, or scheduler decisions.",
+    "keyApi": "TaskState type, getTaskStates()",
+    "docPointer": "packages/scheduler/src/TaskState.ts",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "input-immutable",
+    "name": "Input Immutability",
+    "area": "runtime-concepts",
+    "kind": "concept",
+    "summary": "ctx.input is immutable and persisted at first run. Resuming with different --input is an error.",
+    "keyApi": "ctx.input",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "saga-pattern",
+    "name": "Saga Compensation Pattern",
+    "area": "control-flow",
+    "kind": "component",
+    "summary": "Forward steps run sequentially, each with a compensation. On failure of any step, compensations run in reverse from the failed step.",
+    "keyApi": "Saga steps prop, compensation",
+    "docPointer": "docs/components/saga.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "retry-on-agent-validation",
+    "name": "Agent Output Validation Retries",
+    "area": "runtime-concepts",
+    "kind": "concept",
+    "summary": "Agent output validation failures trigger retry attempts; agents self-correct on schema drift without consuming manual retry budget.",
+    "keyApi": "retries prop, validation failure",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "cache-policy",
+    "name": "Task Caching with Auto-Invalidation",
+    "area": "runtime-concepts",
+    "kind": "concept",
+    "summary": "Per-task caching with cache key = cache.by(ctx) + cache.version + schema signature (SHA-256). Schema changes auto-invalidate; use for pure work only.",
+    "keyApi": "Task cache prop, cache.by, cache.version",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "task-deps-needs",
+    "name": "Task Dependencies: deps and needs",
+    "area": "context-api",
+    "kind": "api",
+    "summary": "deps declares typed render-time upstream outputs; needs maps local names to upstream task ids. Use needs when dep name differs from upstream id.",
+    "keyApi": "Task deps, needs, dependsOn props",
+    "docPointer": "docs/components/task.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "pure-function-render",
+    "name": "Pure Function Render Model",
+    "area": "runtime-core",
+    "kind": "concept",
+    "summary": "Render function is a pure function of ctx (which reads SQLite). Plan is derived from persisted state; no mutation, no refs, no useState for durable values.",
+    "keyApi": "WorkflowDefinition.build(ctx)",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "approval-patterns",
+    "name": "Approval Gate vs Decision Node",
+    "area": "control-flow",
+    "kind": "concept",
+    "summary": "needsApproval on Task is a gate (pause, no decision data). Approval is a decision node (produces typed ApprovalDecision row for branching).",
+    "keyApi": "Task needsApproval, Approval component",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "approval-ondeny",
+    "name": "Approval Denial Policies",
+    "area": "control-flow",
+    "kind": "concept",
+    "summary": "Three policies for denied approval: fail (abort run), continue (proceed without gated branch), skip (skip gated tasks, continue siblings).",
+    "keyApi": "Approval onDeny prop",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "idempotency-key",
+    "name": "Idempotency Key for Side-Effect Tools",
+    "area": "runtime-concepts",
+    "kind": "concept",
+    "summary": "Mark tools with sideEffect: true and use ctx.idempotencyKey so retries don't double-fire the same operation.",
+    "keyApi": "ctx.idempotencyKey, defineTool sideEffect",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "graph-snapshot",
+    "name": "Graph Snapshot Extraction",
+    "area": "runtime-core",
+    "kind": "concept",
+    "summary": "Runtime walks the rendered JSX tree to produce a GraphSnapshot: flat list of TaskDescriptors capturing node id, dependencies, output schema, agent, retries, timeouts.",
+    "keyApi": "GraphSnapshot, TaskDescriptor",
+    "docPointer": "docs/how-it-works.mdx",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "scheduler-service",
+    "name": "Scheduler Service",
+    "area": "runtime-core",
+    "kind": "integration",
+    "summary": "Computes the ready set from the plan: tasks whose dependencies completed, whose enclosing sequence reached them, whose enclosing branch resolved them, and which fit within maxConcurrency.",
+    "keyApi": "Scheduler, schedule(), ScheduleResult",
+    "docPointer": "packages/scheduler/src/index.d.ts",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "workflow-session-service",
+    "name": "Workflow Session Service",
+    "area": "runtime-core",
+    "kind": "integration",
+    "summary": "Effect-based service that orchestrates task lifecycle: submitGraph, taskCompleted, taskFailed, approvalResolved, eventReceived, signalReceived, hotReloaded, etc.",
+    "keyApi": "WorkflowSession, makeWorkflowSession()",
+    "docPointer": "packages/scheduler/src/index.d.ts",
+    "slice": "engine-runtime-concepts"
+  },
+  {
+    "id": "smithers-init",
+    "name": "Smithers Init Command",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Scaffold .smithers/ with seeded workflows, prompts, components, agent configs, and optional dependencies.",
+    "keyApi": "bunx smithers-orchestrator init",
+    "docPointer": "docs/llms-full.txt (lines 380-410)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "init-templates",
+    "name": "Init Templates (Starters)",
+    "area": "cli",
+    "kind": "concept",
+    "summary": "Pre-built starter templates for common workflows (idea-to-prd, idea-to-tickets, research, debug, etc.).",
+    "keyApi": "bunx smithers-orchestrator init --template <id>",
+    "docPointer": "docs/llms-full.txt (lines 550-590)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "starters-command",
+    "name": "Starters Browsing Command",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Browse and filter available starter templates by audience, goal, workflow, or tag.",
+    "keyApi": "bunx smithers-orchestrator starters [--audience|--goal|--workflow|--tag]",
+    "docPointer": "docs/llms-full.txt (lines 595-610)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "workflow-run",
+    "name": "Workflow Run Command",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Execute a discovered workflow by ID with input, concurrency control, resumption, and HTTP serving.",
+    "keyApi": "bunx smithers-orchestrator workflow run <name>",
+    "docPointer": "docs/llms-full.txt (lines ~1720-1770)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "workflow-create",
+    "name": "Workflow Create Scaffold Command",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Create a new minimal flat workflow scaffold in .smithers/workflows/ with TypeScript and JSX setup.",
+    "keyApi": "bunx smithers-orchestrator workflow.create <name>",
+    "docPointer": "docs/llms-full.txt (~1835)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "create-workflow-seeded",
+    "name": "Create Workflow (Seeded Workflow)",
+    "area": "workflows",
+    "kind": "example",
+    "summary": "Guided agent-driven workflow authoring: clarify intent → provision docs/skills → design → approve → scaffold → verify → document.",
+    "keyApi": ".smithers/workflows/create-workflow.tsx",
+    "docPointer": ".smithers/workflows/create-workflow.tsx (entire file)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "create-skill-seeded",
+    "name": "Create Skill (Seeded Workflow)",
+    "area": "workflows",
+    "kind": "example",
+    "summary": "Guided agent-driven skill authoring: clarify capability → design doc structure → scaffold SKILL.md → verify → document.",
+    "keyApi": ".smithers/workflows/create-skill.tsx",
+    "docPointer": ".smithers/workflows/create-skill.tsx",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "jsx-api",
+    "name": "JSX Workflow Authoring API",
+    "area": "authoring",
+    "kind": "api",
+    "summary": "Author workflows as JSX trees with Workflow, Task, Sequence, Parallel, Branch, Loop, and control-flow components.",
+    "keyApi": "createSmithers(), <Workflow>, <Task>, <Sequence>, <Parallel>, <Branch>, <Loop>",
+    "docPointer": "docs/llms-full.txt (lines 1555-1600)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "seeded-workflows",
+    "name": "Seeded Workflow Pack",
+    "area": "workflows",
+    "kind": "example",
+    "summary": "61 pre-built workflow templates covering research, planning, review, approval, monitoring, and multi-agent patterns.",
+    "keyApi": ".smithers/workflows/*.tsx",
+    "docPointer": ".smithers/workflows/ directory",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "example-workflows",
+    "name": "Example Workflow Patterns",
+    "area": "examples",
+    "kind": "example",
+    "summary": "100 documented example workflows demonstrating patterns: fan-out-fan-in, loops, debates, panels, triage, migrations, PR lifecycles, and more.",
+    "keyApi": "examples/*.jsx",
+    "docPointer": "examples/ directory + docs/llms-full.txt (lines 203-225)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "workflow-graph",
+    "name": "Workflow Graph Rendering",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Render the workflow graph without executing it to verify structure and detect syntax errors.",
+    "keyApi": "bunx smithers-orchestrator graph <workflow>",
+    "docPointer": "docs/llms-full.txt (~1800)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "workflow-inspect",
+    "name": "Workflow Inspection Command",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Show workflow metadata, input/output schemas, and agent-facing skill documentation.",
+    "keyApi": "bunx smithers-orchestrator workflow.inspect <name>",
+    "docPointer": "docs/llms-full.txt (~1828)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "workflow-skills",
+    "name": "Workflow Skills Generation",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Generate SKILL.md documentation for discovered workflows for agent use.",
+    "keyApi": "bunx smithers-orchestrator workflow.skills [name] [--output]",
+    "docPointer": "docs/llms-full.txt (~1839)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "mdx-prompts",
+    "name": "MDX Prompt Templates",
+    "area": "authoring",
+    "kind": "component",
+    "summary": "Author prompts as .mdx files with JSX interpolation for variables, enabling dynamic prompt composition.",
+    "keyApi": ".smithers/prompts/*.mdx",
+    "docPointer": "docs/llms-full.txt (lines 1595-1600, JSX API section)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "task-component",
+    "name": "Task Component",
+    "area": "authoring",
+    "kind": "component",
+    "summary": "JSX component for declaring a unit of work with agent, output schema, prompt, and dependencies.",
+    "keyApi": "<Task id output agent>",
+    "docPointer": "docs/llms-full.txt (lines 2425+)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "sequence-component",
+    "name": "Sequence Component",
+    "area": "authoring",
+    "kind": "component",
+    "summary": "JSX component for sequential task execution where later tasks depend on earlier outputs.",
+    "keyApi": "<Sequence>",
+    "docPointer": "docs/llms-full.txt (~1750)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "parallel-component",
+    "name": "Parallel Component",
+    "area": "authoring",
+    "kind": "component",
+    "summary": "JSX component for concurrent independent task execution with optional concurrency limit.",
+    "keyApi": "<Parallel maxConcurrency>",
+    "docPointer": "docs/llms-full.txt (~1750)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "loop-component",
+    "name": "Loop Component",
+    "area": "authoring",
+    "kind": "component",
+    "summary": "JSX component for iterating tasks until a condition is satisfied or max iterations reached.",
+    "keyApi": "<Loop until maxIterations>",
+    "docPointer": "docs/llms-full.txt (~1750)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "branch-component",
+    "name": "Branch Component",
+    "area": "authoring",
+    "kind": "component",
+    "summary": "JSX component for conditional execution: if condition then branch1 else branch2.",
+    "keyApi": "<Branch if then else>",
+    "docPointer": "docs/llms-full.txt (~1750)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "approval-component",
+    "name": "Approval Component",
+    "area": "authoring",
+    "kind": "component",
+    "summary": "JSX component for pausing execution to request human approval with optional feedback.",
+    "keyApi": "<Approval id output request>",
+    "docPointer": "docs/llms-full.txt (lines 1016-1070)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "workflow-list",
+    "name": "Workflow List Discovery",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "List all discovered workflows from local .smithers/workflows/ and global ~/.smithers/workflows/.",
+    "keyApi": "bunx smithers-orchestrator workflow.list",
+    "docPointer": "docs/llms-full.txt (~1715)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "seeded-starters-table",
+    "name": "Starter Templates Reference",
+    "area": "cli",
+    "kind": "doc",
+    "summary": "10 canonical starter template IDs with audiences and corresponding seeded workflows (idea-to-prd, idea-to-tickets, launch-checklist, etc.).",
+    "keyApi": "bunx smithers-orchestrator starters",
+    "docPointer": "docs/llms-full.txt (lines 575-590)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "workflow-agents",
+    "name": "Workflow Agent Configuration",
+    "area": "authoring",
+    "kind": "concept",
+    "summary": "Assign agents to tasks; agents are configured in .smithers/agents/ (smart, smartTool, cheapFast, etc.) and can be any provider.",
+    "keyApi": "agents.smart, agents.smartTool, agents.cheapFast",
+    "docPointer": "docs/llms-full.txt (lines 399, 2700+)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "workflow-up",
+    "name": "Workflow Up Command",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Start or resume a workflow execution with input, run ID, resource limits, and optional HTTP serving.",
+    "keyApi": "bunx smithers-orchestrator up <workflow>",
+    "docPointer": "docs/llms-full.txt (~1720)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "init-force",
+    "name": "Force Init Flag",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Overwrite existing .smithers/ scaffold files during init.",
+    "keyApi": "bunx smithers-orchestrator init --force",
+    "docPointer": "docs/llms-full.txt (line 1704)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "init-global",
+    "name": "Global Init Flag",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Scaffold the workflow pack in ~/.smithers (global) instead of ./.smithers (local).",
+    "keyApi": "bunx smithers-orchestrator init --global",
+    "docPointer": "docs/llms-full.txt (line 1708)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "init-agents-only",
+    "name": "Agents-Only Init Flag",
+    "area": "cli",
+    "kind": "cli",
+    "summary": "Only create .smithers/agents/ configuration without touching the workflow pack.",
+    "keyApi": "bunx smithers-orchestrator init --agents-only",
+    "docPointer": "docs/llms-full.txt (line 1705)",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "pattern-fan-out-fan-in",
+    "name": "Fan-Out-Fan-In Pattern",
+    "area": "examples",
+    "kind": "example",
+    "summary": "Split work into N parallel items, process each independently, merge results.",
+    "keyApi": "examples/fan-out-fan-in.jsx",
+    "docPointer": "examples/fan-out-fan-in.jsx",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "pattern-loop",
+    "name": "Loop/Coverage Pattern",
+    "area": "examples",
+    "kind": "example",
+    "summary": "Iterate until convergence: measure → improve → repeat with measurable progress.",
+    "keyApi": "examples/coverage-loop.jsx",
+    "docPointer": "examples/coverage-loop.jsx",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "pattern-debate",
+    "name": "Debate/Panel Pattern",
+    "area": "examples",
+    "kind": "example",
+    "summary": "Multiple agents argue positions in parallel, a judge synthesizes the verdict.",
+    "keyApi": "examples/debate.jsx, examples/panel.jsx",
+    "docPointer": "examples/debate.jsx",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "pattern-triage",
+    "name": "Triage/Classifier Pattern",
+    "area": "examples",
+    "kind": "example",
+    "summary": "Classify/categorize items, route each to handler by classification.",
+    "keyApi": "examples/triage.jsx, examples/classifier-switchboard.jsx",
+    "docPointer": "examples/triage.jsx",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "pattern-waterfall",
+    "name": "Waterfall/Sequence Pattern",
+    "area": "examples",
+    "kind": "example",
+    "summary": "Sequential phases where each phase receives and builds on previous phase output.",
+    "keyApi": "examples/waterfall.jsx",
+    "docPointer": "examples/waterfall.jsx",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "pattern-review-loop",
+    "name": "Review Loop Pattern",
+    "area": "examples",
+    "kind": "example",
+    "summary": "Agent implements, reviewer critiques, implementer fixes, repeat until approved.",
+    "keyApi": "examples/review-cycle.jsx, examples/code-review-loop.jsx",
+    "docPointer": "examples/review-cycle.jsx",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "example-kit",
+    "name": "Example Kit Utilities",
+    "area": "examples",
+    "kind": "api",
+    "summary": "Helper functions and utilities for writing example workflows: createExampleSmithers, latest, unique, countBy, etc.",
+    "keyApi": "examples/_example-kit.js",
+    "docPointer": "examples/_example-kit.js",
+    "slice": "examples-starters-init"
+  },
+  {
+    "id": "components-tsx",
+    "name": "Seeded Reusable Components",
+    "area": "authoring",
+    "kind": "component",
+    "summary": "Pre-built TSX components for common subflows: ValidationLoop, Review, GrillMe, FeatureEnum, ShipTickets.",
+    "keyApi": ".smithers/components/*.tsx",
+    "docPointer": ".smithers/components/ directory",
+    "slice": "examples-starters-init"
+  }
+]

@@ -16,17 +16,26 @@ dry-runs) before moving on.
 ## Phase status
 
 - [x] P0 — Recon: understand runtime, CLI, `smithers eval`, scorers, agents, examples
-- [x] P0 — Branch `evals/agent-fluency-suite` + scaffold (`README.md`, `PROGRESS.md`)
-- [ ] P1 — Coverage map: fan out over the codebase → `COVERAGE.md` (every feature → eval tasks)
-- [ ] P1 — Real-usage mining: scan Claude Code + Codex sessions for actual Smithers
-      questions/workflows/**struggles** → `_inventory/real-usage.json` → high-signal cases
-- [ ] P2 — Framework: `agents.ts`, `lib/{report-schema,model-matrix,scorers,verify,eval-kit}.ts`, `tsconfig.json`
-- [ ] P2 — One suite end-to-end, dry-run verified (proves the pattern)
-- [ ] P2 — Harness: `harness/{run-suite,run-all,scorecard}.ts`
+- [x] P0 — Branch `evals/agent-fluency-suite` + scaffold (`README.md`, `PROGRESS.md`) + draft PR #294
+- [x] P1 — Coverage map: 14-way agent sweep → `COVERAGE.md` (380 features, 416 tasks, 28 UNDOCUMENTED).
+      Raw in `_inventory/coverage-*.json` + `task-bank.jsonl`. ⚠️ `docs-skills-surface` slice failed — backfill.
+- [~] P1 — Real-usage mining: agent scanning Claude Code + Codex sessions (running in background)
+- [x] P2 — Framework: `agents.ts`, `lib/{report-schema,model-matrix,scorers,verify,paths,eval-kit}.ts`, `tsconfig.json` (typecheck clean)
+- [x] P2 — One suite end-to-end: `knowledge-cli` renders (`graph`), plans (`--dry-run`), and **passed a LIVE sonnet case** (candidate→verify→verdict→assert, 1/1, 32s)
+- [ ] P2 — Harness: `harness/{run-suite,run-all,scorecard}.ts` (read verdict/candidate from evals.db)
+- [ ] P2 — Case generator: `task-bank.jsonl` → per-suite `cases.jsonl` with model fan-out + verify mapping
 - [ ] P2 — `new-eval.tsx` issue→eval generator
 - [ ] P3 — Waves (see below), each verified before the next
 - [ ] P4 — Cross-model smoke run where keys exist; record baseline scorecard
 - [ ] P5 — Codex review of the whole PR; address findings
+
+### Proven facts (for future sessions)
+- Eval run output = `{ <schemaName>: [rows] }`; assertions key on `outputContains: { verdict: [{ passed: true }] }`.
+- Static/agentless verify = a `<Task output={...}>{ async () => verdict }</Task>` (compute child). Zero model spend.
+- Claude Code engine has NO native structured output → prompt-injection JSON. `schemaAdherenceScorer` guards this.
+- `llmJudge` real API = `{ id, name, description, judge, instructions, promptTemplate }` (NOT `{model,prompt}` — docs bug).
+- Scorer `sampling` real shape = `{ type: "ratio", rate }` (NOT `{ kind, ratio }` — docs bug). Both in skills/.
+- Eval runs isolated to `.smithers/state/evals.db` (gitignored).
 
 ## Wave plan (feature areas → suites)
 
@@ -60,10 +69,11 @@ Tier = which model tier the candidate runs on.
 
 | Metric | Value |
 | ------ | ----- |
-| Suites scaffolded | 0 |
-| Cases written | 0 |
-| Cases dry-run verified | 0 |
-| Suites smoke-run on a real model | 0 |
+| Suites scaffolded | 1 (knowledge-cli) |
+| Cases written | 16 |
+| Cases dry-run verified | 16 |
+| Suites smoke-run on a real model | 1 (knowledge-cli, sonnet, PASS) |
+| Coverage-map features / tasks | 380 / 416 |
 
 ## Decisions / invariants
 
