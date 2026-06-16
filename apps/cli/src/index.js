@@ -64,6 +64,7 @@ import { optimizeOptions, runOptimizeCommand, withOptimizationArtifactEnv } from
 import { ask } from "./ask.js";
 import { runScheduler } from "./scheduler.js";
 import { resumeRunDetached } from "./resume-detached.js";
+import { resolveLaunchRootDir, parsePersistedRootDir } from "./resolve-root.js";
 import { formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, } from "@smithers-orchestrator/agents/cli-capabilities";
 import { parseDurationMs, supervisorLoopEffect, } from "./supervisor.js";
 import { WATCH_MIN_INTERVAL_MS, runWatchLoop, watchIntervalSecondsToMs, } from "./watch.js";
@@ -1452,6 +1453,7 @@ const hijackOptions = z.object({
 const graphOptions = z.object({
     runId: z.string().default("graph").describe("Run ID for context"),
     input: z.string().optional().describe("Input data as JSON"),
+    root: z.string().optional().describe("Tool sandbox root directory (same semantics as `up`)"),
     compact: z.boolean().default(false).describe("Omit task prompt/text bodies (structure only) — validate that a workflow compiles without flooding output with every prompt"),
 });
 const revertOptions = z.object({
@@ -1485,13 +1487,15 @@ const workflowRunOptions = upOptions.extend({
  * @returns {UpCommandOptions}
  */
 function normalizeWorkflowRunOptions(options) {
+    // `root` intentionally flows through untouched (no "." default): `workflow
+    // run` and `up <path>` now share resolveLaunchRootDir, which anchors to the
+    // project root rather than the operator CWD. (#283)
     return {
         ...options,
         input: options.input ??
             (options.prompt !== undefined
                 ? JSON.stringify({ prompt: options.prompt })
                 : undefined),
-        root: options.root ?? ".",
     };
 }
 function formatRequestedJsonOutput() {
@@ -1756,19 +1760,28 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 process.stderr.write("  Use 'smithers cancel' to mark them as cancelled, or 'smithers up --resume' to continue.\n");
             }
         }
+        let existingRun = null;
         if (runId) {
-            const existing = await adapter.getRun(runId);
-            if (resume && !existing) {
+            existingRun = await adapter.getRun(runId);
+            if (resume && !existingRun) {
                 return fail({ code: "RUN_NOT_FOUND", message: `Run not found: ${runId}`, exitCode: 4 });
             }
-            if (resume && existing?.status === "running" && isRunHeartbeatFresh(existing) && !options.force) {
+            if (resume && existingRun?.status === "running" && isRunHeartbeatFresh(existingRun) && !options.force) {
                 return fail({ code: "RUN_STILL_RUNNING", message: `Run is still actively running: ${runId}. Use --force to resume anyway.`, exitCode: 4 });
             }
-            if (!resume && existing) {
+            if (!resume && existingRun) {
                 return fail({ code: "RUN_EXISTS", message: `Run already exists: ${runId}`, exitCode: 4 });
             }
         }
-        const rootDir = options.root ? resolve(process.cwd(), options.root) : dirname(resolvedWorkflowPath);
+        // Resolve the task root consistently across every launch form (#283).
+        // An explicit --root always wins. Resuming without --root re-uses the
+        // absolute root persisted on the original run, so detached/supervised
+        // resumes can't drift to the workflow directory. Otherwise anchor to the
+        // project root — the same anchor `createSmithers()` uses for the DB.
+        const persistedRootDir = resume ? parsePersistedRootDir(existingRun?.configJson) : undefined;
+        const rootDir = !options.root && persistedRootDir
+            ? persistedRootDir
+            : resolveLaunchRootDir(options.root);
         const logDir = options.log ? options.logDir : null;
         const onProgress = buildProgressReporter();
         const abort = setupAbortSignal();
@@ -3037,7 +3050,7 @@ const cli = Cli.create({
             setupSqliteCleanup(workflow);
             const schema = resolveSchema(workflow.db);
             const resolvedWorkflowPath = resolve(process.cwd(), workflowPath);
-            const rootDir = c.options.root ? resolve(process.cwd(), c.options.root) : dirname(resolvedWorkflowPath);
+            const rootDir = resolveLaunchRootDir(c.options.root);
             const logDir = c.options.log ? c.options.logDir : null;
             const abort = setupAbortSignal();
             const startedAtMs = Date.now();
@@ -4925,7 +4938,7 @@ const cli = Cli.create({
                 input: inputRow ?? {},
                 outputs,
             });
-            const baseRootDir = dirname(resolvedWorkflowPath);
+            const baseRootDir = resolveLaunchRootDir(c.options.root);
             const snap = await Effect.runPromise(renderFrame(workflow, ctx, {
                 baseRootDir,
                 workflowPath: resolvedWorkflowPath,
