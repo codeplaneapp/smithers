@@ -120,10 +120,6 @@ type TaskAspects$1 = {
         perTask?: number;
         onExceeded?: "fail" | "warn";
     };
-    costBudget?: {
-        maxUsd: number;
-        onExceeded?: "fail" | "warn" | "skip-remaining";
-    };
 };
 type TaskDescriptor$1 = {
     nodeId: string;

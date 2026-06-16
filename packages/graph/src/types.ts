@@ -126,7 +126,7 @@ export type ApprovalOption = {
 /**
  * Resolved `<Aspects>` budget configuration that applies to a task, extracted
  * from the `__aspects` element prop. The engine reads this at task-dispatch
- * time to enforce per-run token, cost, and latency budgets. The render-time
+ * time to enforce per-run token and latency budgets. The render-time
  * accumulator carried alongside the budgets in the component tree is dropped
  * here; the engine keeps its own durable accumulator.
  */
@@ -140,10 +140,6 @@ export type TaskAspects = {
     maxMs: number;
     perTask?: number;
     onExceeded?: "fail" | "warn";
-  };
-  costBudget?: {
-    maxUsd: number;
-    onExceeded?: "fail" | "warn" | "skip-remaining";
   };
 };
 

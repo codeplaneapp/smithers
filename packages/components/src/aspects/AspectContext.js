@@ -1,7 +1,6 @@
 // @smithers-type-exports-begin
 /** @typedef {import("./AspectAccumulator.ts").AspectAccumulator} AspectAccumulator */
 /** @typedef {import("./AspectContextValue.ts").AspectContextValue} AspectContextValue */
-/** @typedef {import("./CostBudgetConfig.ts").CostBudgetConfig} CostBudgetConfig */
 /** @typedef {import("./LatencySloConfig.ts").LatencySloConfig} LatencySloConfig */
 /** @typedef {import("./TokenBudgetConfig.ts").TokenBudgetConfig} TokenBudgetConfig */
 /** @typedef {import("./TrackingConfig.ts").TrackingConfig} TrackingConfig */
@@ -24,7 +23,6 @@ export function createAccumulator() {
     return {
         totalTokens: 0,
         totalLatencyMs: 0,
-        totalCostUsd: 0,
         taskCount: 0,
     };
 }

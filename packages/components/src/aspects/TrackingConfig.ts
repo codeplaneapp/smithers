@@ -6,6 +6,4 @@ export type TrackingConfig = {
 	tokens?: boolean;
 	/** Track latency. Default: true. */
 	latency?: boolean;
-	/** Track cost. Default: true. */
-	cost?: boolean;
 };

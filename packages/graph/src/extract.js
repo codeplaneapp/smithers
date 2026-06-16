@@ -289,18 +289,7 @@ function aspects(value) {
                 : {}),
         };
     }
-    const cost = raw.costBudget;
-    if (cost && typeof cost === "object" && !Array.isArray(cost) &&
-        typeof (/** @type {Record<string, unknown>} */ (cost).maxUsd) === "number") {
-        const c = /** @type {Record<string, unknown>} */ (cost);
-        out.costBudget = {
-            maxUsd: /** @type {number} */ (c.maxUsd),
-            ...(c.onExceeded === "warn" || c.onExceeded === "skip-remaining" || c.onExceeded === "fail"
-                ? { onExceeded: /** @type {"fail" | "warn" | "skip-remaining"} */ (c.onExceeded) }
-                : {}),
-        };
-    }
-    return out.tokenBudget || out.latencySlo || out.costBudget ? out : undefined;
+    return out.tokenBudget || out.latencySlo ? out : undefined;
 }
 /**
  * @param {"parallel" | "merge-queue"} tag

@@ -717,12 +717,10 @@ type CheckSuiteProps = {
 
 type TokenBudgetConfig = { max: number; perTask?: number; onExceeded?: "fail" | "warn" | "skip-remaining" };
 type LatencySloConfig = { maxMs: number; perTask?: number; onExceeded?: "fail" | "warn" };
-type CostBudgetConfig = { maxUsd: number; onExceeded?: "fail" | "warn" | "skip-remaining" };
-type TrackingConfig = { tokens?: boolean; latency?: boolean; cost?: boolean };
+type TrackingConfig = { tokens?: boolean; latency?: boolean };
 type AspectsProps = {
   tokenBudget?: TokenBudgetConfig;
   latencySlo?: LatencySloConfig;
-  costBudget?: CostBudgetConfig;
   tracking?: TrackingConfig;
   children?: React.ReactNode;
 };

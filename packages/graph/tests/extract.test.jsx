@@ -66,7 +66,6 @@ describe("extractGraph", () => {
 				__aspects: {
 					tokenBudget: { max: 100, perTask: 20, onExceeded: "warn" },
 					latencySlo: { maxMs: 30000, onExceeded: "fail" },
-					costBudget: { maxUsd: 5, onExceeded: "skip-remaining" },
 					// Render-time fields that must NOT survive extraction.
 					tracking: { tokens: true },
 					accumulator: { totalTokens: 0 },
@@ -77,7 +76,6 @@ describe("extractGraph", () => {
 		expect(result.tasks[0].aspects).toEqual({
 			tokenBudget: { max: 100, perTask: 20, onExceeded: "warn" },
 			latencySlo: { maxMs: 30000, onExceeded: "fail" },
-			costBudget: { maxUsd: 5, onExceeded: "skip-remaining" },
 		});
 	});
 

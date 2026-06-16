@@ -2118,7 +2118,6 @@ function checkTypesReferenceIncludesCompositeComponentProps() {
     ["CheckSuiteProps", join(root, "packages/components/src/components/CheckSuiteProps.ts")],
     ["TokenBudgetConfig", join(root, "packages/components/src/aspects/TokenBudgetConfig.ts")],
     ["LatencySloConfig", join(root, "packages/components/src/aspects/LatencySloConfig.ts")],
-    ["CostBudgetConfig", join(root, "packages/components/src/aspects/CostBudgetConfig.ts")],
     ["TrackingConfig", join(root, "packages/components/src/aspects/TrackingConfig.ts")],
     ["AspectsProps", join(root, "packages/components/src/components/AspectsProps.ts")],
     ["CategoryConfig", join(root, "packages/components/src/components/CategoryConfig.ts")],

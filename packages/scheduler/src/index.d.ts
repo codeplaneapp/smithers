@@ -200,7 +200,7 @@ type WorkflowSessionService$2 = {
 };
 
 type AspectBudgetBreach$1 = {
-    readonly kind: "tokens" | "cost" | "latency";
+    readonly kind: "tokens" | "latency";
     readonly limit: number;
     readonly current: number;
     readonly onExceeded: "fail" | "warn" | "skip-remaining";

@@ -828,20 +828,6 @@ type LatencySloConfig = {
 };
 
 /**
- * Cost budget configuration for Aspects.
- *
- * The engine estimates per-run cost from reported token usage and enforces
- * `maxUsd` at task-dispatch time. Cost is only estimated for models the
- * built-in price table recognizes; unknown models contribute no cost.
- */
-type CostBudgetConfig = {
-    /** Maximum total estimated cost in USD across all tasks within the Aspects scope. */
-    maxUsd: number;
-    /** Behavior when the budget is exceeded. Default: "fail". */
-    onExceeded?: "fail" | "warn" | "skip-remaining";
-};
-
-/**
  * Tracking configuration — which metrics to track.
  */
 type TrackingConfig = {
@@ -849,8 +835,6 @@ type TrackingConfig = {
     tokens?: boolean;
     /** Track latency. Default: true. */
     latency?: boolean;
-    /** Track cost. Default: true. */
-    cost?: boolean;
 };
 
 type AspectsProps$2 = {
@@ -858,8 +842,6 @@ type AspectsProps$2 = {
     tokenBudget?: TokenBudgetConfig;
     /** Latency SLO — max total wall-clock latency and exceeded behavior. */
     latencySlo?: LatencySloConfig;
-    /** Cost budget — max total estimated USD and exceeded behavior. */
-    costBudget?: CostBudgetConfig;
     /** Which metrics to track. Defaults to all enabled. */
     tracking?: TrackingConfig;
     /** Workflow content these aspects apply to. */
@@ -1404,7 +1386,6 @@ type TryCatchFinallyProps$1 = TryCatchFinallyProps$2;
 type AspectAccumulator = {
     totalTokens: number;
     totalLatencyMs: number;
-    totalCostUsd: number;
     taskCount: number;
 };
 
@@ -1414,7 +1395,6 @@ type AspectAccumulator = {
 type AspectContextValue = {
     tokenBudget?: TokenBudgetConfig;
     latencySlo?: LatencySloConfig;
-    costBudget?: CostBudgetConfig;
     tracking: TrackingConfig;
     accumulator: AspectAccumulator;
 };

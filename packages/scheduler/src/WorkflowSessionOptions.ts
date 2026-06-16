@@ -2,7 +2,7 @@ import type { TaskDescriptor } from "@smithers-orchestrator/graph/TaskDescriptor
 
 /** A breached Aspects budget for a task that is about to be dispatched. */
 export type AspectBudgetBreach = {
-  readonly kind: "tokens" | "cost" | "latency";
+  readonly kind: "tokens" | "latency";
   readonly limit: number;
   readonly current: number;
   readonly onExceeded: "fail" | "warn" | "skip-remaining";

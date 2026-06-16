@@ -106,25 +106,6 @@ describe("Aspects budget enforcement (engine)", () => {
         }
     });
 
-    test("costBudget enforces an estimated USD ceiling for known models", async () => {
-        const { smithers, outputs, tables, db, cleanup } = createTestSmithers(schemas);
-        try {
-            // Opus at 60 in + 60 out tokens ≈ $0.0054, which exceeds maxUsd 0.001.
-            const workflow = twoTaskWorkflow(smithers, outputs, {
-                costBudget: { maxUsd: 0.001, onExceeded: "fail" },
-            });
-            const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
-            expect(result.status).toBe("failed");
-            expect(result.error?.code).toBe("ASPECT_BUDGET_EXCEEDED");
-            expect(result.error?.details?.kind).toBe("cost");
-            const rowsB = await db.select().from(tables.outputB);
-            expect(rowsB).toHaveLength(0);
-        }
-        finally {
-            cleanup();
-        }
-    });
-
     test("accumulated usage survives resume and still enforces the budget", async () => {
         const { smithers, outputs, tables, db, cleanup } = createTestSmithers(schemas);
         try {

@@ -292,7 +292,6 @@ export function Task(props) {
  * @param {{
  *     tokenBudget?: unknown;
  *     latencySlo?: unknown;
- *     costBudget?: unknown;
  *     tracking?: unknown;
  *     accumulator?: unknown;
  * }} aspectCtx
@@ -303,7 +302,6 @@ function buildAspectMeta(aspectCtx) {
         __aspects: {
             tokenBudget: aspectCtx.tokenBudget,
             latencySlo: aspectCtx.latencySlo,
-            costBudget: aspectCtx.costBudget,
             tracking: aspectCtx.tracking,
             accumulator: aspectCtx.accumulator,
         },

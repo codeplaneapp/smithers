@@ -1,7 +1,6 @@
 import type React from "react";
 import type { TokenBudgetConfig } from "../aspects/TokenBudgetConfig.ts";
 import type { LatencySloConfig } from "../aspects/LatencySloConfig.ts";
-import type { CostBudgetConfig } from "../aspects/CostBudgetConfig.ts";
 import type { TrackingConfig } from "../aspects/TrackingConfig.ts";
 
 export type AspectsProps = {
@@ -9,8 +8,6 @@ export type AspectsProps = {
 	tokenBudget?: TokenBudgetConfig;
 	/** Latency SLO — max total wall-clock latency and exceeded behavior. */
 	latencySlo?: LatencySloConfig;
-	/** Cost budget — max total estimated USD and exceeded behavior. */
-	costBudget?: CostBudgetConfig;
 	/** Which metrics to track. Defaults to all enabled. */
 	tracking?: TrackingConfig;
 	/** Workflow content these aspects apply to. */

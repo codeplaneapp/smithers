@@ -611,7 +611,6 @@ describe("composite component expansion coverage", () => {
         expect(accumulator).toEqual({
             totalTokens: 0,
             totalLatencyMs: 0,
-            totalCostUsd: 0,
             taskCount: 0,
         });
 
@@ -631,7 +630,7 @@ describe("composite component expansion coverage", () => {
 
         expect(seen.tokenBudget).toEqual({ max: 100 });
         expect(seen.latencySlo).toEqual({ maxMs: 250 });
-        expect(seen.tracking).toEqual({ tokens: false, latency: true, cost: true });
+        expect(seen.tracking).toEqual({ tokens: false, latency: true });
         expect(seen.accumulator).toEqual(accumulator);
     });
 });

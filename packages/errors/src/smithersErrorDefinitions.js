@@ -231,7 +231,7 @@ export const smithersErrorDefinitions = {
     },
     ASPECT_BUDGET_EXCEEDED: {
         category: "components",
-        when: "An Aspects budget (tokens, latency, or cost) has been exceeded.",
+        when: "An Aspects budget (tokens or latency) has been exceeded.",
         details: "{ kind, limit, current }",
     },
     APPROVAL_OUTSIDE_TASK: {

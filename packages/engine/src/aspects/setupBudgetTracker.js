@@ -48,7 +48,7 @@ export async function setupBudgetTracker(opts) {
 
 /**
  * @param {Record<string, unknown>} row
- * @returns {import("./estimateCostUsd.js").UsageLike | null}
+ * @returns {import("./createBudgetTracker.js").UsageLike | null}
  */
 function parseUsageRow(row) {
     const json = row?.payloadJson;
