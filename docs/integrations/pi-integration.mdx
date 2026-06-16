@@ -24,7 +24,7 @@ const pi = new PiAgent({
 </Task>
 ```
 
-`PiAgent` supports all PI CLI flags: provider/model, tools, extensions, skills, prompt templates, themes, sessions. Text mode uses `--print` by default; JSON/RPC modes set `--mode` and omit `--print`.
+`PiAgent` supports all PI CLI flags: provider/model, tools, extensions, skills, prompt templates, themes, sessions. Text and JSON modes both run non-interactively with `--print` (pi's `--mode` only selects the output format, so JSON also needs `--print` to process one prompt and exit instead of idling until the task timeout); JSON mode adds `--mode json`. RPC mode drives its own persistent stdin/stdout transport, so it sets `--mode rpc` and omits `--print`. Pass `print: false` to opt back into interactive behavior.
 
 PI sessions are first-class hijack targets. `bunx smithers-orchestrator hijack RUN_ID --target pi` reopens the PI session for local steering.
 
