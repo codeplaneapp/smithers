@@ -1,0 +1,217 @@
+// Turn the coverage-map task bank (+ any hand-curated tasks) into per-suite
+// cases.jsonl, fanning each task across the model matrix. This is the multiplier
+// that scales coverage × models toward ~1000 evals.
+//
+//   bun evals/harness/generate-cases.ts            # (re)generate every suite
+//   bun evals/harness/generate-cases.ts --dry      # report counts, write nothing
+//
+// Sources (same task schema, merged + deduped by id):
+//   evals/_inventory/task-bank.jsonl       — auto (the 14-way sweep)
+//   evals/_inventory/curated-tasks.jsonl   — hand-written high-confidence tasks
+//
+// Per-suite hand-written CASE lines in evals/suites/<suite>/curated.jsonl are
+// prepended verbatim (and win id collisions).
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { SOTA_MODELS, WEAK_MODELS } from "../agents.js";
+import { repoRoot } from "../lib/paths.js";
+
+const ROOT = repoRoot();
+const SUITES = join(ROOT, "evals", "suites");
+
+type Task = {
+  id: string;
+  feature?: string;
+  area?: string;
+  kind?: string; // knowledge | authoring | ops | db-query | build-complex
+  tier?: string; // weak | sota
+  verify?: string; // deterministic | judge | fixture
+  task: string;
+  canonicalAnswer?: string;
+  notes?: string;
+};
+
+function readJsonl(path: string): Task[] {
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as Task);
+}
+
+const KNOWLEDGE_CLI_AREAS = new Set([
+  "cli", "workflow-execution", "workflow-monitoring", "workflow-discovery", "run-control",
+  "agent-interaction", "diagnostics", "project-setup", "testing-evaluation", "approvals",
+  "configuration",
+]);
+const APPROVAL_TAGS = new Set([
+  "<Approval", "<ApprovalGate", "<HumanTask", "<Signal", "<WaitForEvent", "<Timer",
+]);
+
+/** Route a task to a suite, or null to defer it (no deterministic verify yet). */
+function routeSuite(t: Task): string | null {
+  const area = t.area ?? "";
+  const kind = t.kind ?? "";
+  if (t.verify === "fixture") return null; // needs a seeded run DB — fixture wave
+  if (kind === "ops" || kind === "db-query") return null; // needs live state — fixture wave
+
+  if (kind === "knowledge") {
+    if (!((t.canonicalAnswer ?? "").trim())) return null; // nothing to assert on
+    if (KNOWLEDGE_CLI_AREAS.has(area)) return "knowledge-cli";
+    if (area.startsWith("components") || area === "patterns" || area === "control-flow" || area === "output-handling" || area === "capabilities") return "knowledge-components";
+    if (area === "runtime-concepts" || area === "concepts" || area === "durability-model" || area === "knowledge") return "knowledge-concepts";
+    if (area === "time-travel") return "knowledge-time-travel";
+    if (area === "scorers" || area === "evals") return "knowledge-scorers-evals";
+    if (area === "memory") return "knowledge-memory";
+    if (area === "examples") return "knowledge-examples";
+    if (area === "observability" || area === "devtools") return "knowledge-observability";
+    return "knowledge-cli";
+  }
+
+  if (kind === "authoring" || kind === "build-complex") {
+    if (t.tier === "sota" || kind === "build-complex") return "build-complex";
+    if (area === "patterns") return "authoring-patterns";
+    if (area === "scorers" || area === "evals") return "authoring-scorers-evals";
+    if (area === "memory") return "authoring-memory";
+    if (area.startsWith("agent")) return "authoring-agents";
+    if (area === "openapi-tools" || area === "built-in-tools" || area === "tool-context") return "authoring-tools";
+    if (area === "sandboxing" || area === "vcs") return "authoring-sandbox-vcs";
+    if (area === "workflow-integration" || area === "examples" || area === "optimize") return "authoring-misc";
+    // components-control-flow + authoring + control-flow + output-handling + configuration + capabilities
+    const tags = extractTags(t.canonicalAnswer);
+    if (tags.some((tag) => APPROVAL_TAGS.has(tag))) return "authoring-approvals";
+    return "authoring-workflows";
+  }
+  return null;
+}
+
+/** `<Approval ...` / `<Loop ...` → ["<Approval","<Loop"] (unique, max 2). */
+function extractTags(answer?: string): string[] {
+  const out: string[] = [];
+  const re = /<([A-Z][A-Za-z0-9]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(answer ?? "")) !== null) {
+    const tag = `<${m[1]}`;
+    if (!out.includes(tag)) out.push(tag);
+  }
+  return out.slice(0, 2);
+}
+
+type VerifySpec = { kind: string; must?: string[]; mustNot?: string[]; answer?: string; rubric?: string };
+
+function verifyOf(t: Task): VerifySpec | null {
+  if (t.kind === "knowledge") {
+    const ans = (t.canonicalAnswer ?? "").trim();
+    if (!ans) return null;
+    const short = !ans.includes("\n") && ans.split(/\s+/).length <= 4;
+    return short ? { kind: "equals", answer: ans } : { kind: "contains", must: [ans] };
+  }
+  if (t.verify === "judge") {
+    return { kind: "judge", rubric: t.notes || t.task };
+  }
+  // authoring deterministic → render + required component tags
+  return { kind: "graph", must: extractTags(t.canonicalAnswer) };
+}
+
+/** Spread models so we don't always lead with haiku: rotate the window by index. */
+function fanModels(pool: readonly string[], count: number, index: number): string[] {
+  const n = Math.min(count, pool.length);
+  return Array.from({ length: n }, (_, i) => pool[(index + i) % pool.length]);
+}
+
+function fanCount(t: Task): number {
+  if (t.tier === "sota" || t.kind === "build-complex") return SOTA_MODELS.length; // both sota
+  if (t.kind === "knowledge") return 3; // cheap → broader model spread
+  return 2; // authoring
+}
+
+function main() {
+  const dry = process.argv.includes("--dry");
+  const tasks = [...readJsonl(join(ROOT, "evals/_inventory/task-bank.jsonl")), ...readJsonl(join(ROOT, "evals/_inventory/curated-tasks.jsonl"))];
+  // dedup tasks by id (curated wins)
+  const byId = new Map<string, Task>();
+  for (const t of tasks) byId.set(t.id, t);
+  const deduped = [...byId.values()];
+
+  const bySuite = new Map<string, string[]>();
+  const deferred: Task[] = [];
+  let idx = 0;
+  for (const t of deduped) {
+    const suite = routeSuite(t);
+    const verify = suite ? verifyOf(t) : null;
+    if (!suite || !verify) {
+      deferred.push(t);
+      continue;
+    }
+    const sota = t.tier === "sota" || t.kind === "build-complex";
+    const pool = sota ? SOTA_MODELS : WEAK_MODELS;
+    const models = fanModels(pool, fanCount(t), idx++);
+    for (const model of models) {
+      const id = `${t.id}--${model}`;
+      const line = JSON.stringify({
+        id,
+        input: {
+          taskId: t.id,
+          area: t.area ?? "unknown",
+          feature: t.feature ?? "unknown",
+          model,
+          task: t.task,
+          verify,
+          judgeModel: "opus",
+        },
+        expected: { status: "finished", outputContains: { verdict: [{ passed: true }] } },
+        metadata: { area: t.area ?? "unknown", feature: t.feature ?? "unknown", tier: sota ? "sota" : "weak", source: "coverage-map", kind: t.kind, verify: t.verify },
+      });
+      (bySuite.get(suite) ?? bySuite.set(suite, []).get(suite)!).push(line);
+    }
+  }
+
+  // write per-suite cases.jsonl = curated case lines + generated, dedup by case id
+  let total = 0;
+  const summary: Array<[string, number]> = [];
+  for (const [suite, genLines] of [...bySuite.entries()].sort()) {
+    const dir = join(SUITES, suite);
+    const curatedPath = join(dir, "curated.jsonl");
+    const curated = existsSync(curatedPath)
+      ? readFileSync(curatedPath, "utf8").split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+      : [];
+    const seen = new Set<string>();
+    const merged: string[] = [];
+    for (const line of [...curated, ...genLines]) {
+      let id: string | undefined;
+      try {
+        id = JSON.parse(line).id;
+      } catch {
+        continue;
+      }
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        merged.push(line);
+      }
+    }
+    total += merged.length;
+    summary.push([suite, merged.length]);
+    if (!dry) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "cases.jsonl"), `${merged.join("\n")}\n`);
+      // ensure each suite has an eval.tsx
+      const evalFile = join(dir, "eval.tsx");
+      if (!existsSync(evalFile)) {
+        writeFileSync(
+          evalFile,
+          `/** @jsxImportSource smithers-orchestrator */\n// ${suite} — generated suite. See evals/README.md.\nimport { createFluencyEval } from "../../lib/eval-kit";\n\nexport default createFluencyEval({ suite: "${suite}" });\n`,
+        );
+      }
+    }
+  }
+
+  if (!dry) {
+    writeFileSync(join(ROOT, "evals/_inventory/deferred-tasks.jsonl"), deferred.map((t) => JSON.stringify(t)).join("\n") + "\n");
+  }
+
+  console.log(`Generated ${total} cases across ${summary.length} suites${dry ? " (dry)" : ""}; deferred ${deferred.length} (fixture/ops/no-answer).`);
+  for (const [s, n] of summary.sort((a, b) => b[1] - a[1])) console.log(`  ${String(n).padStart(4)}  ${s}`);
+}
+
+main();

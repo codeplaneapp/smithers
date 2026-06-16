@@ -1,0 +1,444 @@
+{
+  "generatedAt": "2026-06-16",
+  "purpose": "Mined from real Claude Code + Codex coding-agent session history to ground a Smithers eval suite in genuine usage, prioritizing places where the agent STRUGGLED.",
+  "scannedSources": [
+    "~/.claude/projects/-Users-williamcory-vibecode-room*/**.jsonl (heaviest real consumer; custom 'smithering' orchestration layer on smithers-orchestrator; 122k+ smithers mentions, 334 files)",
+    "~/.claude/projects/-Users-williamcory-tevm-monorepo/**.jsonl (incl. nested subagents/workflows/wf_*; 46k+ mentions, 365 files; multi-agent bug-hunt workflows)",
+    "~/.claude/projects/-Users-williamcory-multi/**.jsonl (mostly ../smithers path refs for UI-parity study, little authoring)",
+    "~/.claude/projects/-Users-williamcory-fable-smithers/**.jsonl (rich: authoring 'smithering'/fable-build.tsx + seeding it into init pack)",
+    "~/.claude/projects/-Users-williamcory-meet-fast/**.jsonl (real product built ON smithers-orchestrator)",
+    "~/.claude/projects/-Users-williamcory-agentic-hacks, -matui, -contexto, -demo-smithers, -takopi-smithers, -paperclip-smithers, -blanks, -crush, -marketing, -clawthereum (none-to-thin coverage; several dirs have ZERO jsonl files)",
+    "~/.codex/history.jsonl (4655 smithers mentions; literal commands the user ran)",
+    "~/.codex/sessions/**/*.jsonl and ~/.codex/archived_sessions/rollout-*.jsonl (3025 of ~3120 files mention smithers; densest April/May/June rollouts mined)"
+  ],
+  "sessionCount": 105,
+  "coverageNotes": "Richest real usage: vibecode-room (custom orchestration layer), tevm-monorepo (multi-agent bug hunts), fable-smithers (authoring + seeding the 'smithering' meta-workflow), and Codex sessions (ticket-kanban / studio-parity-swarm / zevm-rebuild durable runs). The smithers/* repo dirs themselves are framework DEVELOPMENT, not usage, so excluded from mining. Dirs demo-smithers/takopi-smithers/paperclip-smithers/blanks/crush/marketing/clawthereum exist but contain no usable transcripts. matui/contexto reference smithers only via the CC skill listing (no real use).",
+  "questions": [
+    {
+      "q": "Why did launching the Smithers UI take 10 minutes instead of instantly? Is there a bug?",
+      "context": "Maintainer asked agent to open the monitoring UI for a running workflow; `smithers ui` could not connect because the installed 0.23.0 shipped the UI client without the `gateway` server command it needs.",
+      "struggled": true,
+      "struggleDetail": "`smithers ui` connects to a Gateway RPC (listWorkflows) on 127.0.0.1:7331, but 0.23.0 had no `gateway` command (Unknown command). Agent wrongly tried `up --serve` (a single-run status JSON, not the RPC) to squat the port; had to find the 0.23.1 source build that registers `gateway`.",
+      "feature": "ui",
+      "suggestedEvalTask": "On a repo with smithers-orchestrator installed, run `smithers ui`. If it fails with gateway-unreachable, start the correct `smithers gateway` server and get the UI live; do NOT squat port 7331 with `up --serve` (which lacks the listWorkflows RPC).",
+      "tier": "sota",
+      "verify": "fixture"
+    },
+    {
+      "q": "Why aren't worktrees working? Smithers has a built-in <Worktree> component — are we not using it, or does it have a bug?",
+      "context": "After ~14 build attempts landed 0% of code, the user pressed on why each ticket's code ended up in repo-root src/ instead of its isolated worktree branch.",
+      "struggled": true,
+      "struggleDetail": "Workers wrapped in <Worktree> wrote to repo root because (1) agents pinned cwd:process.cwd(), silently overriding the Worktree-injected cwd (precedence inverted), and (2) <Worktree path> resolves relative to the workflow file's dir (.smithers/workflows/) while helpers computed it relative to process.cwd() (repo root).",
+      "feature": "worktree",
+      "suggestedEvalTask": "Author a workflow whose worker Task is wrapped in <Worktree path=... branch=... baseBranch=...> with a CodexAgent. Ensure the agent writes ONLY into the worktree: do not pin agent.cwd, and resolve any worktree path from the engine (ctx.worktreePath/resolveWorktreePath), not process.cwd(). Verify files land on the build branch, not repo-root src/.",
+      "tier": "sota",
+      "verify": "fixture"
+    },
+    {
+      "q": "When you run a smithers workflow your job is to run it to completion in the background, not stop and wait for me on a bug you could fix. Update llms-full.txt to say so.",
+      "context": "Maintainer left an AFK overnight goal to drive a build to completion; the agent stopped on an easily self-fixable issue.",
+      "struggled": true,
+      "struggleDetail": "Agent paused on a trivially self-fixable bug instead of fixing it and resuming the durable run, defeating background run-to-completion. User demanded a memory + llms-full.txt rule: drive to completion, fix what you can, stop only at explicit human gates.",
+      "feature": "durability",
+      "suggestedEvalTask": "Given 'run this workflow to completion in background, approve your own gates, fix self-fixable bugs', launch detached and keep it progressing to a finished state: auto-resume on transient pauses, fix self-fixable failures, stop only at explicit human gates. Do not ask the user about a bug you can fix.",
+      "tier": "sota",
+      "verify": "judge"
+    },
+    {
+      "q": "How do I intercept and HOLD a destructive tool call before it executes inside a Smithers agent run? Is there a PreToolUse hook?",
+      "context": "An eng doc claimed Smithers exposes pre/post-tool hooks; agent searched the .d.ts surface for preToolUse/beforeTool/onTool/toolInterceptor and found none.",
+      "struggled": true,
+      "struggleDetail": "Agent burned ~15 tool calls hunting a per-tool interceptor that does not exist; found only Approval/ApprovalGate/Signal/WaitForEvent/HumanTask plus the Claude-Code snapshot hook. Correct answer: gate at the workflow level (Approval/Signal) and route per-tool interception through Claude Code settings.json hooks.",
+      "feature": "approvals",
+      "suggestedEvalTask": "Answer: 'I need to block specific destructive tool calls (rm -rf) before they run inside a Smithers agent. What does Smithers actually provide?' Correct answer names workflow-level Approval/ApprovalGate + Signal/WaitForEvent + the snapshot-hook mechanism, and routes per-tool interception through Claude Code settings.json hooks, WITHOUT inventing a Smithers preToolUse API.",
+      "tier": "sota",
+      "verify": "judge"
+    },
+    {
+      "q": "How do I read back a delivered signal payload after WaitForEvent/Signal, and how do event/correlationId map onto submitSignal's signalName/correlationKey?",
+      "context": "Task prompts explicitly told implementers to read index.d.ts for WaitForEvent/Signal/Loop prop types and confirm how a delivered payload is read back via ctx, rather than guessing.",
+      "struggled": true,
+      "struggleDetail": "Neither author nor implementer trusted the signal API from memory; both read .d.ts + scheduler source to confirm WaitForEvent props (id/event/correlationId/output/outputSchema), ctx.latest for the payload, and submitSignal alignment. A per-loop correlationId bug double-fired steer events until changed to a per-iteration key.",
+      "feature": "signals",
+      "suggestedEvalTask": "Author a Loop workflow with <WaitForEvent event='steer'> using a per-iteration correlationId, deliver a signal via `smithers signal`/gateway submitSignal, and read the payload inside the workflow with ctx.latest. Verify two consecutive steers each advance exactly one iteration (no double-fire) and the payload is readable.",
+      "tier": "sota",
+      "verify": "fixture"
+    },
+    {
+      "q": "A run shows state 'waiting-event' — what event is it waiting for? Should I send a signal?",
+      "context": "Monitoring a detached kanban swarm; inspect/ps reported waiting-event and both user and agent assumed a real Signal/WaitForEvent pause. `smithers why` revealed it was actually the retries-exhausted failure block of two review nodes.",
+      "struggled": true,
+      "struggleDetail": "'waiting-event' is overloaded for genuine signal waits AND retries-exhausted failure blocks; the operator can't tell whether to `smithers signal` or `smithers retry-task`/fork without digging.",
+      "feature": "signals",
+      "suggestedEvalTask": "Given a run reported as 'waiting-event', use inspect/why to classify a genuine <WaitForEvent> pause (resolve with `smithers signal`) vs a retries-exhausted block (resolve with `smithers retry-task`/fork), and apply the right recovery.",
+      "tier": "sota",
+      "verify": "fixture"
+    },
+    {
+      "q": "How do I resume a run after editing the workflow source? When is --force / fork needed vs plain --resume?",
+      "context": "After editing a reviewer model/prompt, `smithers up --resume` was refused (stored workflow-module hash changed). Agent considered hand-editing smithers.db before finding `smithers fork --frame --reset-node`. Two resume syntaxes also seen.",
+      "struggled": true,
+      "struggleDetail": "No obvious supported path to continue a run whose source changed; resume-vs-force-vs-fork semantics and the two resume syntaxes (`--run-id X --resume true` vs `--resume <run-id>`) are ambiguous. Error: 'Cannot resume run because durable metadata changed: workflow entry file changed' (seen 24x in one build).",
+      "feature": "durability",
+      "suggestedEvalTask": "Edit one task's prompt in a workflow with a paused run, then continue preserving completed work via the supported fork/replay path (not a DB hack). Verify finished nodes are not re-run.",
+      "tier": "sota",
+      "verify": "fixture"
+    },
+    {
+      "q": "How do operators diagnose and recover a stuck run marked 'running' without opening SQLite and hand-editing JSON?",
+      "context": "A new launch warned 'Found 2 run(s) still marked as running' (weeks old). Field report: operators routinely open SQLite and hand-edit JSON to recover stuck runs.",
+      "struggled": true,
+      "struggleDetail": "Runs whose owner process died stay 'running' indefinitely with no auto-reaping; recovery required knowing to cancel/resume.",
+      "feature": "durability",
+      "suggestedEvalTask": "Present a run stuck 'running' with a dead owner. The agent must diagnose via CLI only (why/ps heartbeat age) and recover with `smithers cancel` or `smithers up --resume --force`, never touching .smithers/*.db.",
+      "tier": "sota",
+      "verify": "fixture"
+    },
+    {
+      "q": "Does a smithers <Task> have to be agent/prompt-driven, or can it be a deterministic hardcoded code task?",
+      "context": "On the zevm rebuild workflow the agent modeled every step (even a deterministic preflight) as an .mdx-prompt agent Task; the user pushed back: couldn't a preflight just be a hardcoded <Task>{() => {}} code task?",
+      "struggled": true,
+      "struggleDetail": "Agent's default instinct is LLM-prompt Tasks everywhere; the code-Task vs prompt-Task distinction is not obvious, so deterministic steps became unnecessary (paid) agent calls.",
+      "feature": "workflow-authoring",
+      "suggestedEvalTask": "Author a workflow with one deterministic code <Task> (derives a verify command via a plain function, no LLM) and one agent <Task> driven by an .mdx prompt. Verify the code task runs without invoking any agent.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "q": "Will `smithers init` overwrite my existing tickets / workflow edits, or does it skip them and only add new files?",
+      "context": "User had hand-authored tickets/workflows and feared init would clobber them; agent read workflow-pack.js source and used `smithers init --format json` (writtenFiles vs skippedFiles) to confirm.",
+      "struggled": false,
+      "struggleDetail": "Answered by JSON output (existing files -> skippedFiles, new -> writtenFiles), but required reading source rather than docs.",
+      "feature": "init",
+      "suggestedEvalTask": "Run `smithers init` in a directory that already has a populated .smithers/ (incl. user tickets); confirm via `--format json` that no existing file is overwritten without --force while a new workflow is added.",
+      "tier": "sota",
+      "verify": "fixture"
+    },
+    {
+      "q": "Run this workflow using model Fable for every agent.",
+      "context": "User demanded the bug-hunt workflow run on Fable throughout; agent said 'agents inherit it by default' but the persisted run recorded defaultModel=claude-opus-4-8 in both attempts.",
+      "struggled": true,
+      "struggleDetail": "Stated intent (Fable) silently did not match the persisted model; agent assumed agents inherit the session model, but no explicit per-workflow/per-agent override was set, so the demand was not honored.",
+      "feature": "workflow-authoring",
+      "suggestedEvalTask": "User says 'run this workflow using model X for every agent'. Modify the workflow so EVERY spawned agent uses model X explicitly (per-agent model option, not session inheritance). Verify the persisted run records model X for all agents.",
+      "tier": "sota",
+      "verify": "deterministic"
+    },
+    {
+      "q": "Does <Aspects> tokenBudget/costBudget/latencySlo actually get enforced at runtime?",
+      "context": "Agent set Aspects budget props per docs, then discovered the 0.23.0 engine never consumed them; filed upstream issue #265.",
+      "struggled": true,
+      "struggleDetail": "Docs implied enforcement but the runtime was a no-op (type-only props) until 0.24.1.",
+      "feature": "workflow-authoring",
+      "suggestedEvalTask": "Determine whether <Aspects> tokenBudget/costBudget/latencySlo fail/warn/skip at runtime or are type-only, and state which version enforces them.",
+      "tier": "weak",
+      "verify": "fixture"
+    },
+    {
+      "q": "Build a custom per-workflow UI page served by the gateway (use apps/smithers as the style guide).",
+      "context": "User asked for a gateway-served per-workflow UI; agent reverse-engineered the wiring (.smithers/ui/<key>.tsx auto-discovery, useSmithersGateway, GatewayRpcMethod, __smithers_ui asset path) from node_modules because docs were thin.",
+      "struggled": true,
+      "struggleDetail": "Custom-UI mounting convention is implicit/undocumented; learned only by code-reading gateway/server source.",
+      "feature": "cli",
+      "suggestedEvalTask": "Author a workflow plus a custom UI at the conventional path so visiting /workflows/<key> in the gateway renders it (page + client.js bundle return HTTP 200); verify via real-gateway e2e.",
+      "tier": "sota",
+      "verify": "fixture"
+    },
+    {
+      "q": "Review my workflow against https://smithers.sh/llms-full.txt — where could I have used Smithers better?",
+      "context": "After authoring a workflow set, user asked the agent to audit it against full feature docs; agent enumerated unused levers (task caching, scorers, child workflows, memory).",
+      "struggled": false,
+      "struggleDetail": "Advanced features (caching, scorers, child workflows, memory) are under-discovered without an explicit docs prompt.",
+      "feature": "workflow-authoring",
+      "suggestedEvalTask": "Given an existing workflow.tsx, identify which Smithers features (caching, scorers, approvals, memory, child workflows) would improve it and correctly apply at least one.",
+      "tier": "sota",
+      "verify": "judge"
+    },
+    {
+      "q": "I think we have a `smithers run tickets-kanban` — why don't we support `smithers workflow run`?",
+      "context": "User reached for a `smithers run <name>` verb and a plural/typo'd workflow name; agent had to `smithers workflow list` to discover there is no `run` verb and the workflow is `ticket-kanban` (singular).",
+      "struggled": true,
+      "struggleDetail": "Hallucinated `smithers run` verb + workflow-name typo; no 'did you mean' suggestion, so recovery required manually listing workflows. Correct launch is `smithers up <file>` or `smithers workflow run <name>`.",
+      "feature": "cli",
+      "suggestedEvalTask": "Repo has a workflow named ticket-kanban. Ask the agent to 'run tickets-kanban'. It should list workflows, notice no `run` verb / no plural, and launch `smithers up .smithers/workflows/ticket-kanban.tsx` (or `smithers workflow run ticket-kanban`). Verify it never invents `smithers run`.",
+      "tier": "weak",
+      "verify": "deterministic"
+    }
+  ],
+  "workflowsBuilt": [
+    {
+      "description": "smithering-impl.tsx (~86KB, vibecode-room): durable meta-workflow building an entire voice-agent app ticket-by-ticket. Parses tickets.json, walks the DAG in topological <Parallel> waves (6-8 workers), each ticket in its own <Worktree> off an integration branch (never main): implement (CodexAgent) -> cross-family review (ClaudeCodeAgent) -> independent verify -> depth-1 serialized merge lane, red-before-green evidence gates, final delivery <Approval>. Uses createSmithers, defineTool landTool, /** @jsxImportSource smithers-orchestrator */, zod/v4 typed outputs.",
+      "features": ["createSmithers", "Worktree", "Parallel", "Loop", "Approval", "Task", "defineTool", "CodexAgent", "ClaudeCodeAgent", "jsxImportSource", "durable runs", "smithers up -d"],
+      "struggled": true,
+      "struggleDetail": "Workers wrote to repo root not their <Worktree> (agent.cwd pin + path-base mismatch) so ~14 attempts landed 0%. landTool idempotent:false while running git checkout/merge in a dirty root. tsc failure (ctx.idempotencyKey string|null vs string required). A review Task returned prose ('returned plain text, but task outputs must be JSON objects'). Resume refused 24x with 'durable metadata changed' after the .tsx was edited mid-run.",
+      "suggestedEvalTask": "Author a durable multi-ticket build workflow with per-ticket Worktree isolation, a Loop over dependency waves, and a final Approval gate. It must typecheck under tsc; side-effecting land tools must be idempotent with a stable idempotencyKey derived from the ticket id (never index/timestamp); workers write only into their worktree; every Task returns a JSON object matching a zod schema."
+    },
+    {
+      "description": "bug-hunt-tevm-zevm + evm-bug-hunt-fable (tevm-monorepo): two-phase Hunt->Verify multi-agent bug hunts over multiple repos. One finder per subsystem slice with a strict JSON findings schema; one adversarial verifier per finding (defaults to refuted). Aggregates confirmed findings by severity.",
+      "features": ["workflow-authoring", "parallel/pipeline fan-out", "structured-output-schema", "phases", "adversarial-verification"],
+      "struggled": true,
+      "struggleDetail": "The 5-repo Fable variant fanned out 55 finders in a single burst; ~54 hit 'Server is temporarily limiting requests · Rate limited' then 'You've hit your session limit'. Run reported status:completed with confirmed:0 despite 63/65 agents failing. Manual chunking (args=[sliceIds] + sequential launches) still hit session limits. Demanded Fable model was not honored (persisted opus).",
+      "suggestedEvalTask": "Author a Hunt->Verify workflow, then refactor an N-way parallel finder fan-out into bounded-concurrency batches with exponential backoff on rate-limit errors and args-driven subset selection. Verify no burst exceeds the cap and a 'completed' run with mostly-failed agents is reported as degraded, not success."
+    },
+    {
+      "description": "fable-build.tsx -> seeded as 'smithering' (fable-smithers): ~1700-line meta-workflow translating a markdown playbook into a durable run: preflight, interactive input elicitation, plan, <Approval> gate, child-run launch, monitor <Loop> with a 15m <Timer> emitting HTML progress reports, a verify Loop calling `smithers graph`, final review gate. Then renamed (tsx + metadata header + ~42 .mdx prompts) and seeded into the init pack via generate-workflow-pack.",
+      "features": ["workflow-authoring", "approvals", "ralph/Loop", "signals", "Timer", "durability", "output", "inspect", "eval", "init seeding", "graph"],
+      "struggled": true,
+      "struggleDetail": "Used runId where child-launch wants childRunId; engine reserves input.runId (had to rename to targetRunId); monitor-Loop exhaustion (return-last, terminal=false) deadlocked instead of escalating; graph initially failed to render; renaming required coordinated sed across .tsx + metadata header + 42 prompt filenames; seeding pipeline (source dir -> SEEDED_WORKFLOW_IDS -> generate-workflow-pack -> generated.js) was undocumented.",
+      "suggestedEvalTask": "Build a workflow that launches a child run (via childRunId) and monitors it in a Loop with a periodic Timer, ensuring loop exhaustion ESCALATES to a gate instead of deadlocking, then add it to the seeded init pack end-to-end so a fresh `smithers init` installs it."
+    },
+    {
+      "description": "process.tsx + gateway.ts + control-plane.ts (vibecode-room): steerable durable 'process' run — a Loop+WaitForEvent(event='steer') workflow registered on a Gateway, with a SmithersGatewayClient wrapper exposing launch/steer/pause/resume/kill by app id, plus a Cue<->Smithers seam using the Gateway RPC surface (launchRun/submitSignal/resumeRun/cancelRun/streamRunEvents) with checkpoint-recovery e2e tests.",
+      "features": ["createSmithers", "Loop", "WaitForEvent", "Signal", "Gateway", "gateway-client", "submitSignal", "resumeRun", "cancelRun", "streamRunEvents", "durable runs", "checkpoints"],
+      "struggled": true,
+      "struggleDetail": "Reused one correlationId across loop iterations -> steer signals double-fired (fixed to per-iteration key). streamEvents rethrew in a detached unawaited async IIFE -> unhandled rejection, no onError channel. Pausing via submitSignal({signalName:'pause'}) never produced the pause-ack node; getNodeOutput('pause-ack') returned NodeNotFound after 5s consistently until the workflow emitted acks via the signal path.",
+      "suggestedEvalTask": "Build a steerable durable run: a Loop+WaitForEvent workflow on a Gateway plus a control-plane client that launches it and delivers a steer/pause/resume signal the workflow reads back and acks (pause-ack/resume-ack nodes). Require a smoke test proving boot->launch->wait->steer->ack round-trips with per-run isolation and streaming errors surfaced via onError (no unhandled rejection)."
+    },
+    {
+      "description": "ticket-kanban / studio-parity-swarm / zevm-rebuild (Codex): glob-based ticket-runner durable workflows. Each ticket = agent implement <Task> in a validation <Loop>, worktree-per-ticket branch, implement+review nodes, launched detached with --max-concurrency, monitored via inspect/logs/chat/events/why/node.",
+      "features": ["Workflow", "Task", "Sequence", "Parallel maxConcurrency", "Loop", "Approval", "Worktree", "--detach", "--run-id", "--input", "--hot", "--resume", "retry-task", "fork"],
+      "struggled": true,
+      "struggleDetail": "Adding a typed input schema broke startup ('table input has no column named ticket_ids'). `key={ticket.id}` on a custom component in .map() failed typecheck (TS2322). Review nodes exhausted retries -> wedged in waiting-event; recovery needed `smithers retry-task` + `smithers fork --frame --reset-node` (plain resume no-ops). `.smithers` package.json without node_modules broke graph (Zod load error). Resume refused after edits (module-hash mismatch).",
+      "suggestedEvalTask": "Take a glob-based ticket-runner .tsx, add an optional ticketIdPrefixes input filter, and launch it filtered without breaking persistence (no SQLite column error). Recover a run wedged in waiting-event with retry-exhausted review nodes by resetting exactly those nodes via retry-task/fork and resuming to completion without re-running finished work."
+    },
+    {
+      "description": "ralph.tsx (seeded pack, tevm-monorepo + Codex): infinite single-Task <Loop until={false} maxIterations={Infinity}> driving the 'smart' agent on ctx.input.prompt, createSmithers({input, ralph}), zod input/output schemas. Repurposed via --prompt to write one tmux TUI e2e test per iteration.",
+      "features": ["ralph", "Loop", "Task", "createSmithers", "zod schemas", "--prompt runtime input"],
+      "struggled": true,
+      "struggleDetail": "Canonical positive reference for JSX authoring. Struggle: agent edited ralph.tsx unnecessarily when the existing --prompt input already covered the use case ('you shouldn't have needed to modify the script'), then hit workflow-discovery failure invoking the CLI from inside .smithers.",
+      "suggestedEvalTask": "Drive the bundled ralph workflow via --prompt only (no .tsx edit), launched from the repo root, and verify it runs. Separately, reproduce the ralph.tsx Loop-of-one-Task pattern from scratch given a one-line description (must use /** @jsxImportSource smithers-orchestrator */ and import agents from ../agents)."
+    },
+    {
+      "description": "open-code-review workflow (Codex): ported from alibaba/open-code-review. Previews diffs, shells the upstream `ocr review` CLI, parses JSON, emits structured target/preview/review/summary outputs, serves a custom Gateway UI.",
+      "features": ["workflow-authoring", "custom-ui", "output", "eval"],
+      "struggled": true,
+      "struggleDetail": "Custom-UI mounting convention (.smithers/ui/<key>.tsx) undocumented; `.smithers` tsc --noEmit OOM'd repeatedly during the build.",
+      "suggestedEvalTask": "Author a diff-review workflow that shells a CLI, parses its JSON, emits 4 named outputs, and serves a custom UI; verify outputs + UI render via real-gateway e2e and that the workflow pack typechecks without OOM."
+    },
+    {
+      "description": "validate-fable-build.ts (fable-smithers): render-simulation regression harness that seeds persisted node outputs phase-by-phase and asserts the plan mounts the correct ready nodes (22->29 scenarios) without executing agents.",
+      "features": ["workflow-authoring", "durability", "eval", "render-time testing"],
+      "struggled": false,
+      "struggleDetail": "Clean reference pattern for testing a workflow's scheduling without paid agent calls.",
+      "suggestedEvalTask": "Write a render-time test that feeds simulated persisted node outputs into a workflow and asserts the next set of ready nodes, executing no agents."
+    }
+  ],
+  "struggles": [
+    {
+      "what": "Pinning agent.cwd:process.cwd() silently overrides the <Worktree>-injected cwd, so workers edit repo-root src/ instead of their isolated worktree branch — nodes go green while 0 code lands.",
+      "snippet": "agents pin `cwd: process.cwd()` — which overrides the `<Worktree>` isolation ... ticket-1 code is in repo-root `src/` (12 files), not the worktree (0 files)",
+      "rootCause": "durability/footgun (explicit agent cwd inverts precedence over Worktree isolation; silent success)",
+      "feature": "worktree",
+      "suggestedEvalTask": "Given a worker Task wrapped in <Worktree>, ensure the agent writes only into the worktree. It must NOT pin agent.cwd to process.cwd(). Verify the edited files are on the build branch, not repo-root src/.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "<Worktree path> is resolved by the engine relative to the workflow file's dir (.smithers/workflows/), but workflow helpers computed it relative to process.cwd() (repo root) — a silent path mismatch (.smithers/workflows/.smithers/wt/<id> vs .smithers/wt/<id>).",
+      "snippet": "the engine resolves the `<Worktree path>` relative to the workflow file's dir ... while workerBundleDir computes it relative to process.cwd()",
+      "rootCause": "doc gap / wrong api (Worktree path-resolution base undocumented; no engine-provided absolute path until ctx.worktreePath added)",
+      "feature": "worktree",
+      "suggestedEvalTask": "Author a workflow that needs the absolute path of its own <Worktree> to read an evidence bundle. Obtain it from the engine (ctx.worktreePath(id)/resolveWorktreePath), not by guessing with process.cwd()/import.meta.dir/../.. so reads hit the real worktree.",
+      "tier": "weak",
+      "verify": "fixture"
+    },
+    {
+      "what": "Adding/changing a typed input schema breaks the run on startup — typed input is persisted into a fixed-column `input` table with no migration.",
+      "snippet": "SQLiteError: table input has no column named ticket_ids  (also: 'no column named prompt')",
+      "rootCause": "durability confusion / missing migration (input columns frozen from the first run; raw SQLite error, no migration path; agent abandoned typed schema for untyped ctx.input)",
+      "feature": "durability",
+      "suggestedEvalTask": "Add a new field to a workflow's typed input schema and re-run; verify Smithers either migrates the input table or surfaces a clear actionable error (not a raw bun-sqlite stack), and that a fresh run-id works.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "Editing a durable workflow's .tsx entry file between resume attempts makes the run permanently un-resumable; recovery via fork/replay is non-obvious.",
+      "snippet": "Cannot resume run because durable metadata changed: workflow module graph changed, workflow entry file changed",
+      "rootCause": "durability confusion (resume invalidation on workflow edits; agent considered hand-editing smithers.db before finding fork --frame --reset-node)",
+      "feature": "durability",
+      "suggestedEvalTask": "Given a durable run that failed mid-way and a subsequently-edited workflow file, recover progress by forking/replaying from the last good snapshot instead of looping on a doomed `smithers resume`.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "A Task returned plain prose instead of a JSON object matching its declared schema, aborting the step.",
+      "snippet": "Task \"...:review:0\" returned plain text, but Smithers task outputs must be JSON objects matching the declared output schema",
+      "rootCause": "doc gap / task output contract (agents not steered to return JSON; engine fallback wrappers even tell providers to 'end with a json fence' which conflicts with typed outputs)",
+      "feature": "workflow-authoring",
+      "suggestedEvalTask": "Author a review Task whose agent tends to write prose. Declare z.object({...}) and force a JSON-object return so it does not trip 'returned plain text'. Feed a prose+fenced reply and verify the step succeeds.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "'waiting-event' state is overloaded — used for genuine signal waits AND for runs blocked after retries are exhausted, needing different recovery commands.",
+      "snippet": "It is not waiting for a user/business event. Smithers is using `waiting-event` as the blocked state after task failures.",
+      "rootCause": "doc gap / misleading status naming",
+      "feature": "signals",
+      "suggestedEvalTask": "From inspect/why output, correctly classify whether a 'waiting-event' run needs `smithers signal` (real wait) or `smithers retry-task`/fork (failure block).",
+      "tier": "weak",
+      "verify": "fixture"
+    },
+    {
+      "what": "Run wedged because review nodes exhausted retries; plain `smithers up --resume` silently can't restart exhausted nodes.",
+      "snippet": "the plain resume cannot proceed because those review nodes already exhausted retries. I'm going to reset the failed review tasks with smithers retry-task",
+      "rootCause": "doc gap (non-obvious that exhausted-retry nodes need explicit retry-task reset before a run continues; resume no-ops)",
+      "feature": "durability",
+      "suggestedEvalTask": "Continue a run blocked on retry-exhausted nodes by resetting exactly those nodes and resuming, without re-running finished work.",
+      "tier": "weak",
+      "verify": "fixture"
+    },
+    {
+      "what": "Two inconsistent resume syntaxes in `smithers up`: `--run-id X --resume true` (boolean) vs `--resume <run-id>` (value); agent oscillated between them.",
+      "snippet": "smithers up workflow.tsx --run-id abc123 --resume true   …vs…   smithers up swarm.tsx --resume run-1779930590732",
+      "rootCause": "wrong api / ambiguous flag design",
+      "feature": "durability",
+      "suggestedEvalTask": "Resume a specific detached run by id with `smithers up` using the canonical documented syntax on the first try.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "Detached `smithers up --resume` returns a PID but inspect still shows the run cancelled/not resumed (detached resume exits immediately on the hash check without surfacing failure).",
+      "snippet": "`smithers up --resume` returned a detached PID, but inspect still shows the run as cancelled",
+      "rootCause": "durability confusion (status lies; no failure surfaced to launcher)",
+      "feature": "durability",
+      "suggestedEvalTask": "Detect when a detached `smithers up --resume` did NOT actually resume (process exited immediately) and report the real reason rather than the returned PID.",
+      "tier": "weak",
+      "verify": "fixture"
+    },
+    {
+      "what": "Right after launching a detached run, the SQLite DB is locked so inspect/logs can't read state.",
+      "snippet": "the Smithers SQLite database is currently locked during early startup, so inspect/logs ... could not read it yet ... database is locked",
+      "rootCause": "durability confusion (early-startup write contention; no retry/backoff on SQLITE_BUSY)",
+      "feature": "inspect",
+      "suggestedEvalTask": "Launch with --detach and immediately call inspect/logs; verify the CLI retries on SQLITE_BUSY/locked and returns state instead of erroring.",
+      "tier": "weak",
+      "verify": "fixture"
+    },
+    {
+      "what": "Single-burst fan-out of 55 finder agents triggered server rate-limiting + session-token cap; ~54/55 finders failed and even manual chunking still hit the cap.",
+      "snippet": "[find:g-frame] failed: API Error: Server is temporarily limiting requests · Rate limited ... [verify-spec:g-memory] failed: You've hit your session limit · resets 9:30pm",
+      "rootCause": "missing feature (no built-in concurrency cap / retry-backoff / token-budget awareness in parallel()/pipeline() fan-out)",
+      "feature": "workflow-authoring",
+      "suggestedEvalTask": "Refactor an N-way parallel agent fan-out to bounded concurrency with exponential backoff on rate-limit API errors; verify no single burst exceeds the cap.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "A run where 63/65 agents failed still reports status:completed with confirmed:0, masking near-total failure as success.",
+      "snippet": "status: completed ... \"totalFindings\": 29, \"confirmed\": 0  (63 of 65 logs are 'failed')",
+      "rootCause": "missing feature (no run-level failed/degraded status when most agents error)",
+      "feature": "durability",
+      "suggestedEvalTask": "Detect that a 'completed' run with a high agent-failure ratio and empty results is actually a failed/degraded run and report it as such.",
+      "tier": "weak",
+      "verify": "judge"
+    },
+    {
+      "what": "`key={item.id}` on a custom component inside .map() fails typecheck under the smithers JSX runtime.",
+      "snippet": "rebuild.tsx(139,15): error TS2322: ... Property 'key' does not exist on type 'RebuildTicketLoopProps'",
+      "rootCause": "wrong api / doc gap (smithers jsxImportSource doesn't special-case React's key; authors port React list habits)",
+      "feature": "workflow-authoring",
+      "suggestedEvalTask": "Author `tickets.map(t => <Ticket key={t.id} ticket={t}/>)`; it must typecheck under the smithers jsxImportSource using whatever keyed-children idiom smithers supports.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "A run failed at load with a SQLite duplicate-column error because the output schema used a reserved field name `iteration`.",
+      "snippet": "cli load workflow: duplicate column name: iteration",
+      "rootCause": "doc gap (reserved output-schema field names not documented)",
+      "feature": "workflow-authoring",
+      "suggestedEvalTask": "Author a workflow whose task output schema includes a field named `iteration`; recognize the 'duplicate column name: iteration' failure and rename the field so the run loads.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "Non-existent `smithers run` verb with a misspelled workflow name; no 'did you mean' suggestion.",
+      "snippet": "I think we have a smithers run tickets-kanban  ->  'There is a local workflow named ticket-kanban; I don't see tickets-kanban plural'",
+      "rootCause": "doc gap / cli discoverability (correct is `smithers up <file>` or `smithers workflow run <name>`)",
+      "feature": "cli",
+      "suggestedEvalTask": "Run `smithers run <name>` (invalid verb) and `smithers workflow run tickets-kanban` (wrong name); verify a clear error with a 'did you mean ticket-kanban / use smithers up' suggestion.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "`smithers init`'s seeded monitor.tsx fails its own typecheck with a Zod .default({}) overload error; the installed smithers-snapshot-hook SKILL.md has invalid YAML frontmatter; smithers.db* and .smithers/executions/ logs are not gitignored by default.",
+      "snippet": "monitor.tsx(70,14): error TS2769: No overload matches this call ... failed to load skill smithers-snapshot-hook/SKILL.md: invalid YAML ... smithers.db* ... leaked into a commit",
+      "rootCause": "real smithers defect(s) in the init pack (non-typechecking seed, malformed skill YAML, missing default .gitignore for durable state)",
+      "feature": "init",
+      "suggestedEvalTask": "Run `smithers init`, then: (1) typecheck the scaffolded .smithers/ pack (must pass, no TS2769); (2) load every installed SKILL.md as YAML (must parse); (3) assert a .gitignore covers smithers.db*, *.db-shm/-wal, .smithers/executions/.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "`smithers graph`/run fails when .smithers/package.json exists but .smithers/node_modules is missing — falls through to a stale global cache and errors on Zod load; and the global launcher mishandles the local shell-shim bin.",
+      "snippet": "graph check hit a Bun cache/load error while reading Zod ... .smithers/package.json but no .smithers/node_modules ... the local .smithers/.bin/smithers shim is a shell script, but the global launcher is handing it to Bun",
+      "rootCause": "doc gap / missing setup step + wrong api (local-pack deps never installed; global-vs-local dispatch not robust)",
+      "feature": "init",
+      "suggestedEvalTask": "In a repo with .smithers/package.json but no node_modules, run `smithers graph`; verify the CLI auto-installs/uses the local pack (and dispatches to the local shim) instead of a raw Zod/Bun error.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "`smithers inspect <bad-id>` / `smithers cancel <id>` from a subdirectory returns RUN_NOT_FOUND, and the error CTA blames stale skills (`smithers skills add`) instead of the wrong id / wrong cwd. A noisy non-actionable Effect version-mismatch WARN also pollutes stdout.",
+      "snippet": "{ code: RUN_NOT_FOUND, message: \"Run not found: ...\", cta: \"Skills are out of date: smithers skills add\" } ... Executing an Effect versioned 3.21.3 with a Runtime of version 3.21.2",
+      "rootCause": "real smithers defect (generic CTA mis-attached to unrelated errors nudges wrong remediation; per-cwd DB resolution; noisy WARN)",
+      "feature": "inspect",
+      "suggestedEvalTask": "Inspect a nonexistent/typo'd run-id and cancel a run from a nested subdir; verify the agent doesn't conclude `smithers skills add` fixes a missing-run error, isn't derailed by the Effect WARN, and resolves the run from the correct project root (use --format json).",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "Coding agents launched by `smithers up` default to cwd=.smithers/workflows instead of the app repo root, so they would edit the dev pack instead of the app; a shell 'inside a worktree' still ran tests against the wrong tree.",
+      "snippet": "cwd gotcha confirmed: the agent ran in cwd=.../.smithers/workflows, not the repo root ... my working directory is the main repo, not the worktree at .smithers/wt/X",
+      "rootCause": "doc gap / footgun (default agent cwd resolves to .smithers/ under `smithers up`; worktree path not surfaced as the agent's shell cwd)",
+      "feature": "agents.ts",
+      "suggestedEvalTask": "Configure a dev-pack agent in .smithers/agents.ts that must edit the PARENT app repo (or run inside its assigned worktree). Confirm via a read-only probe that the agent's cwd is the app root / worktree path (not .smithers/workflows) when launched via `smithers up`.",
+      "tier": "weak",
+      "verify": "fixture"
+    },
+    {
+      "what": "An agents.ts fallback chain led with an unsupported model (gpt-5.3-codex on a ChatGPT account) / expired-OAuth provider (kimi invalid_grant), causing infinite non-fatal retries or an aborted first run; failure surfaced late, not fail-fast.",
+      "snippet": "The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT account ... kimi oauth refresh failed (http-400): invalid_grant",
+      "rootCause": "agents.ts misconfiguration / doc gap (model-vs-account compatibility + stale credentials not detected pre-flight; dead provider leads the chain)",
+      "feature": "agents.ts",
+      "suggestedEvalTask": "Given an agents.ts whose fallback chain leads with an unsupported-model or expired-credential provider, run a smoke workflow, detect the failure, and reorder/fix the chain to lead with a reachable account (verified via `smithers agents test <label>`) instead of retrying forever. Note: `smithers agents test` takes the label as a POSITIONAL arg, not --label.",
+      "tier": "weak",
+      "verify": "fixture"
+    },
+    {
+      "what": "Native structured output unsupported on some models forces opting into prompt-based JSON extraction, surfaced only via an error message; large single-line JSON agent outputs were truncated during trace capture.",
+      "snippet": "opt out with OpenAIAgent({ nativeStructuredOutput: false }) so Smithers can use prompt-based JSON extraction ... reason: truncated-json-stream ... trace.completeness=capture-failed",
+      "rootCause": "wrong api / discoverability + real defect (fix buried in error; agent-trace capture limit on large cli-json-stream payloads loses the verdict)",
+      "feature": "agents.ts",
+      "suggestedEvalTask": "Author a workflow using a model lacking native structured output (verify nativeStructuredOutput:false fixes it) and a Task whose agent emits a >32KB single-line JSON object; assert the orchestrator captures the full payload (or fails closed clearly) rather than silently truncating.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "Both detached and non-detached `smithers up` exited when the run parked at waiting-event; manual one-shot resumes did not survive an AFK multi-hour run, and stale 'running' runs (dead owner) were never auto-reaped.",
+      "snippet": "both detached *and* non-detached `up` exit on pauses/transients; manual one-shot resumes won't survive an AFK multi-hour run ... Found 2 run(s) still marked as 'running'",
+      "rootCause": "durability confusion / missing supervision (driver exits on pause; no auto-reaping of dead-owner runs)",
+      "feature": "durability",
+      "suggestedEvalTask": "Launch a run that pauses at waiting-event, observe the driver exit, and keep it progressing to a finished state via `smithers supervise` or a poll+resume keeper rather than leaving it parked; separately, start a new run while a dead-owner run is stuck 'running' and verify the stale owner is reaped or an unambiguous cancel/resume instruction is given.",
+      "tier": "weak",
+      "verify": "fixture"
+    },
+    {
+      "what": "`smithers graph` output is polluted with repeated runtime WARN lines (ClaudeCodeAgent unsetting ANTHROPIC_API_KEY) even though graph executes no agents, forcing grep to extract the graph; large workflow-pack tsc --noEmit OOM'd.",
+      "snippet": "level=WARN ... ClaudeCodeAgent: unsetting ANTHROPIC_API_KEY ... runId: graph ... FATAL ERROR: JavaScript heap out of memory ... tsc --noEmit",
+      "rootCause": "missing flag / config (no clean-graph output; no NODE_OPTIONS/project-references default for typechecking a large pack)",
+      "feature": "graph",
+      "suggestedEvalTask": "Run `smithers graph <file.tsx>` and confirm the graph output is cleanly separable from (or free of) agent-init WARN noise; typecheck a many-file .smithers workflows package and confirm it completes without OOM.",
+      "tier": "weak",
+      "verify": "deterministic"
+    },
+    {
+      "what": "Workflow agents did not run on the user-mandated model (Fable); persisted defaultModel was claude-opus-4-8 because no explicit per-agent override was set and the 'agents inherit the session model' assumption failed silently.",
+      "snippet": "I'll keep model = Fable throughout (workflow agents inherit it by default) ... defaultModel: claude-opus-4-8",
+      "rootCause": "wrong api / doc gap (no explicit per-workflow/per-agent model override; inheritance assumption wrong)",
+      "feature": "workflow-authoring",
+      "suggestedEvalTask": "Ensure a workflow runs all agents on a caller-specified model and assert the persisted run records that model for every agent.",
+      "tier": "weak",
+      "verify": "deterministic"
+    }
+  ]
+}
