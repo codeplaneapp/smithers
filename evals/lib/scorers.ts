@@ -63,9 +63,13 @@ export const frictionScorer = createScorer({
 
 /** llmJudge: how high-quality is a candidate's custom workflow UI bundle? Grades
  * design/UX/code on a 0-1 scale (the build verifier only checks it compiles +
- * uses the right API). Attached only to UI-authoring cases. */
-export const uiQualityScorer = (judge: AgentLike) =>
-  llmJudge({
+ * uses the right API). Attached only to UI-authoring cases.
+ *
+ * Wrapped so a transient judge failure (rate/session limit) still records a row
+ * — otherwise a thrown judge call drops the score silently and the AI-quality
+ * signal vanishes from the scorecard. */
+export const uiQualityScorer = (judge: AgentLike) => {
+  const base = llmJudge({
     id: "ui-quality",
     name: "UI Quality",
     description: "Quality of a Smithers custom workflow UI bundle (gateway-react).",
@@ -82,6 +86,19 @@ export const uiQualityScorer = (judge: AgentLike) =>
       return `Rate this Smithers workflow UI bundle 0-1:\n\n${(r.artifact ?? "(none)").slice(0, 6000)}\n\nReturn JSON {"score","reason"}.`;
     },
   });
+  return createScorer({
+    id: "ui-quality",
+    name: "UI Quality",
+    description: base.description,
+    score: async (input) => {
+      try {
+        return await base.score(input);
+      } catch (e) {
+        return { score: 0, reason: `ui-quality judge unavailable: ${(e instanceof Error ? e.message : String(e)).slice(0, 100)}`, meta: { judgeError: true } };
+      }
+    },
+  });
+};
 
 /** llmJudge: does the reported friction reflect a REAL, fixable docs/API gap (so
  * the scorecard can prioritize)? Sample this — it spends a model. */
