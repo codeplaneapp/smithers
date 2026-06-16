@@ -86,7 +86,81 @@ export function buildFixture(): string {
   return abs;
 }
 
+// ── Ops fixture: Smithers' REAL run-history schema, so "investigate my runs"
+//    evals query the actual _smithers_* tables a user would. ────────────────
+export const OPS_DB_REL = ".smithers/state/fixture-ops.db";
+export function opsDbAbs(): string {
+  return join(repoRoot(), OPS_DB_REL);
+}
+
+export const OPS_SCHEMA_DOC = `The run-history DB uses Smithers' real schema. Key tables:
+  _smithers_runs(run_id, workflow_name, status, created_at_ms, finished_at_ms, error_json, ...)
+  _smithers_nodes(run_id, node_id, iteration, state, label, ...)   -- state: finished|failed|running|pending
+  _smithers_events(run_id, seq, type, payload_json, timestamp_ms)  -- type: run_started|node_finished|node_failed|approval_requested
+  _smithers_approvals(run_id, node_id, status, ...)                -- status: pending|approved|denied
+  _smithers_scorers(run_id, node_id, scorer_name, score, ...)`;
+
+export const KNOWN_OPS = {
+  waitingApprovalRun: "or4",
+  failedRun: "or3",
+  failedNodeInOr3: "implement",
+  failedRunsCount: 1,
+  mostRunsWorkflow: "implement",
+  nodeFailedEvents: 1,
+  approvalRequestedEvents: 1,
+};
+
+export function buildOpsFixture(): string {
+  const abs = opsDbAbs();
+  mkdirSync(dirname(abs), { recursive: true });
+  const db = new Database(abs);
+  for (const t of ["_smithers_runs", "_smithers_nodes", "_smithers_events", "_smithers_approvals", "_smithers_scorers"]) {
+    db.exec(`DROP TABLE IF EXISTS ${t};`);
+  }
+  db.exec(`
+    CREATE TABLE _smithers_runs(run_id TEXT PRIMARY KEY, workflow_name TEXT, status TEXT, created_at_ms INTEGER, finished_at_ms INTEGER, error_json TEXT);
+    CREATE TABLE _smithers_nodes(run_id TEXT, node_id TEXT, iteration INTEGER, state TEXT, label TEXT);
+    CREATE TABLE _smithers_events(run_id TEXT, seq INTEGER, type TEXT, payload_json TEXT, timestamp_ms INTEGER);
+    CREATE TABLE _smithers_approvals(run_id TEXT, node_id TEXT, status TEXT, requested_at_ms INTEGER);
+    CREATE TABLE _smithers_scorers(run_id TEXT, node_id TEXT, scorer_name TEXT, score REAL);`);
+  const runs: Array<[string, string, string, number, number | null, string | null]> = [
+    ["or1", "implement", "finished", 1000, 1100, null],
+    ["or2", "review", "finished", 1010, 1200, null],
+    ["or3", "implement", "failed", 1020, 1050, JSON.stringify({ message: "TypeError: cannot read property 'id' of undefined" })],
+    ["or4", "deploy", "waiting-approval", 1030, null, null],
+    ["or5", "implement", "cancelled", 1040, 1045, null],
+    ["or6", "research", "running", 1050, null, null],
+  ];
+  const ri = db.prepare("INSERT INTO _smithers_runs VALUES (?,?,?,?,?,?)");
+  for (const r of runs) ri.run(...r);
+  const nodes: Array<[string, string, number, string, string]> = [
+    ["or1", "analyze", 0, "finished", "Analyze"],
+    ["or1", "implement", 0, "finished", "Implement"],
+    ["or2", "review", 0, "finished", "Review"],
+    ["or3", "analyze", 0, "finished", "Analyze"],
+    ["or3", "implement", 0, "failed", "Implement"],
+    ["or4", "build", 0, "finished", "Build"],
+    ["or4", "deploy", 0, "pending", "Deploy"],
+    ["or6", "search", 0, "running", "Search"],
+  ];
+  const ni = db.prepare("INSERT INTO _smithers_nodes VALUES (?,?,?,?,?)");
+  for (const n of nodes) ni.run(...n);
+  const events: Array<[string, number, string]> = [
+    ["or1", 1, "run_started"], ["or1", 2, "node_finished"],
+    ["or3", 1, "run_started"], ["or3", 2, "node_failed"],
+    ["or4", 1, "run_started"], ["or4", 2, "approval_requested"],
+  ];
+  const ei = db.prepare("INSERT INTO _smithers_events(run_id,seq,type) VALUES (?,?,?)");
+  for (const e of events) ei.run(...e);
+  db.prepare("INSERT INTO _smithers_approvals(run_id,node_id,status) VALUES (?,?,?)").run("or4", "deploy", "pending");
+  const si = db.prepare("INSERT INTO _smithers_scorers(run_id,node_id,scorer_name,score) VALUES (?,?,?,?)");
+  si.run("or1", "implement", "faithfulness", 0.9);
+  si.run("or2", "review", "faithfulness", 0.7);
+  db.close();
+  return abs;
+}
+
 if (import.meta.main) {
-  const p = buildFixture();
-  console.log(`fixture seeded → ${p}`);
+  console.log(`fixture seeded → ${buildFixture()}`);
+  console.log(`ops fixture seeded → ${buildOpsFixture()}`);
 }

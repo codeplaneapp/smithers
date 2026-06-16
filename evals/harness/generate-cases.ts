@@ -99,7 +99,9 @@ function routeSuite(t: Task): string | null {
   return null;
 }
 
-/** `<Approval ...` / `<Loop ...` → ["<Approval","<Loop"] (unique, max 2). */
+/** `<Approval ...` / `<Loop ...` → ["<Approval","<Loop"] (unique, max 5). Up to 5
+ * so a complex multi-feature workflow is verified on ALL its required components
+ * (a real complexity test), not just the first two. */
 function extractTags(answer?: string): string[] {
   const out: string[] = [];
   const re = /<([A-Z][A-Za-z0-9]*)/g;
@@ -108,7 +110,7 @@ function extractTags(answer?: string): string[] {
     const tag = `<${m[1]}`;
     if (!out.includes(tag)) out.push(tag);
   }
-  return out.slice(0, 2);
+  return out.slice(0, 5);
 }
 
 type VerifySpec = { kind: string; must?: string[]; mustNot?: string[]; answer?: string; rubric?: string };
