@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/tool-context",
-  "version": "0.24.0",
+  "version": "0.24.1",
   "description": "AsyncLocalStorage tool-execution context for Smithers (run/node/idempotency), extracted so both engine and smithers can depend on it without a cycle",
   "type": "module",
   "sideEffects": false,

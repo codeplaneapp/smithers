@@ -58,6 +58,37 @@ describe("extractGraph", () => {
 		expect(result.tasks.map((t) => t.ordinal)).toEqual([0, 1, 2]);
 	});
 
+	test("threads __aspects budget config onto the descriptor", () => {
+		const root = hostEl("smithers:workflow", {}, [
+			hostEl("smithers:task", {
+				id: "t1",
+				output: "t",
+				__aspects: {
+					tokenBudget: { max: 100, perTask: 20, onExceeded: "warn" },
+					latencySlo: { maxMs: 30000, onExceeded: "fail" },
+					// Render-time fields that must NOT survive extraction.
+					tracking: { tokens: true },
+					accumulator: { totalTokens: 0 },
+				},
+			}),
+		]);
+		const result = extractGraph(root);
+		expect(result.tasks[0].aspects).toEqual({
+			tokenBudget: { max: 100, perTask: 20, onExceeded: "warn" },
+			latencySlo: { maxMs: 30000, onExceeded: "fail" },
+		});
+	});
+
+	test("omits aspects when no budget configs are present", () => {
+		const root = hostEl("smithers:workflow", {}, [
+			hostEl("smithers:task", { id: "t1", output: "t", __aspects: { tracking: { tokens: true } } }),
+			hostEl("smithers:task", { id: "t2", output: "t" }),
+		]);
+		const result = extractGraph(root);
+		expect(result.tasks[0].aspects).toBeUndefined();
+		expect(result.tasks[1].aspects).toBeUndefined();
+	});
+
 	test("throws on missing task id", () => {
 		expect(() => extractGraph(hostEl("smithers:task", { output: "t" }))).toThrow(
 			"Task id is required",

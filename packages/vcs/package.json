@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/vcs",
-  "version": "0.24.0",
+  "version": "0.24.1",
   "description": "VCS discovery and jj workspace operations for Smithers",
   "type": "module",
   "sideEffects": false,

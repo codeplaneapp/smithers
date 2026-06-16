@@ -862,7 +862,7 @@ export class BaseCliAgent {
                 }
                 flushBufferedLines(stream, false);
             };
-            diagnosticsPromise = launchDiagnostics(commandSpec.command, commandEnv, cwd);
+            diagnosticsPromise = launchDiagnostics(commandSpec.command, commandEnv, cwd, this.diagnosticHints?.());
             return Effect.gen(this, function* () {
                 const result = yield* runCommandEffect(commandSpec.command, commandSpec.args, {
                     cwd,
@@ -1086,6 +1086,12 @@ export class BaseCliAgent {
    * @returns {CliOutputInterpreter | undefined}
    */
     createOutputInterpreter() {
+        return undefined;
+    }
+    /**
+   * @returns {{ provider?: string; model?: string } | undefined}
+   */
+    diagnosticHints() {
         return undefined;
     }
 }

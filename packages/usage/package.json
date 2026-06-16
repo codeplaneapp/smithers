@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/usage",
-  "version": "0.24.0",
+  "version": "0.24.1",
   "description": "Report how much rate limit or subscription quota each registered Smithers account has consumed, across Claude, Codex, OpenAI, Anthropic, and Google providers.",
   "type": "module",
   "sideEffects": false,

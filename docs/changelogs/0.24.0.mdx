@@ -114,9 +114,9 @@ The built-in provider defaults now point at the current model generation. `bunx 
 
 The docs now state explicitly that a coding agent operates the Smithers CLI on the human's behalf. The guide, quickstart, CLI cheatsheet, component pages, MCP server docs, and the agent skill make the division of responsibility concrete: the agent runs every command itself, relays approval and human-task prompts to the human in conversation, and submits the resolving command (`approve`, `deny`, `human answer`, `signal`) without asking the human to type Smithers commands. Installation remains the one step a human may run by hand.
 
-### Aspects budgets marked declarative, not yet enforced
+### Aspects token and latency budgets enforced
 
-The `costBudget`, `tokenBudget`, and `latencySlo` fields on `<Aspect>` are accepted and stored but not enforced by the engine. The docs now label them as declarative scaffolding; runtime enforcement is tracked in [#273](https://github.com/smithersai/smithers/issues/273). Fixes [#265](https://github.com/smithersai/smithers/issues/265). PR [#274](https://github.com/smithersai/smithers/pull/274).
+`<Aspects>` `tokenBudget` and `latencySlo` are now enforced by the engine at task-dispatch time: before each descendant task runs, the run's accumulated token total (`tokenBudget.max`) and wall-clock since the run started (`latencySlo.maxMs`) are checked against the budget and `onExceeded` is applied: `fail` raises `ASPECT_BUDGET_EXCEEDED` and fails the run, `warn` logs and continues, `skip-remaining` skips the task. Accumulated token usage survives resume. The USD `costBudget` prop was removed; budget on tokens instead. Per-task limits (`perTask`) are not enforced yet. Implements [#273](https://github.com/smithersai/smithers/issues/273); fixes [#265](https://github.com/smithersai/smithers/issues/265). PRs [#274](https://github.com/smithersai/smithers/pull/274), [#290](https://github.com/smithersai/smithers/pull/290).
 
 The reference docs also document the `@smithers-orchestrator/review` package and the `sandbox:up` and `sandbox:down` GCP VM scripts in the package-configuration tables.
 

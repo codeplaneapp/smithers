@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/gateway-react",
-  "version": "0.24.0",
+  "version": "0.24.1",
   "description": "React hooks and root helpers for Smithers Gateway UIs",
   "type": "module",
   "sideEffects": false,

@@ -1,6 +1,6 @@
 {
   "name": "smithers-orchestrator",
-  "version": "0.24.0",
+  "version": "0.24.1",
   "description": "Public Smithers facade for durable coding-agent workflows and Gateway operation",
   "type": "module",
   "sideEffects": false,

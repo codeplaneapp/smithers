@@ -530,6 +530,28 @@ export function makeWorkflowSession(options = {}) {
                 changed = true;
                 continue;
             }
+            const budgetBreach = options.evaluateAspectBudget?.(task);
+            if (budgetBreach) {
+                if (budgetBreach.onExceeded === "skip-remaining") {
+                    options.onAspectBudgetSkip?.(task, budgetBreach);
+                    state.states.set(key, "skipped");
+                    changed = true;
+                    continue;
+                }
+                if (budgetBreach.onExceeded === "warn") {
+                    options.onAspectBudgetWarn?.(task, budgetBreach);
+                }
+                else {
+                    return {
+                        _tag: "Failed",
+                        error: new SmithersError("ASPECT_BUDGET_EXCEEDED", `Aspects ${budgetBreach.kind} budget exceeded for task "${task.nodeId}": ${budgetBreach.current} >= ${budgetBreach.limit}`, {
+                            kind: budgetBreach.kind,
+                            limit: budgetBreach.limit,
+                            current: budgetBreach.current,
+                        }),
+                    };
+                }
+            }
             state.states.set(key, "in-progress");
             executable.push(task);
             changed = true;

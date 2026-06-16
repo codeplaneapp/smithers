@@ -199,6 +199,12 @@ type WorkflowSessionService$2 = {
     readonly getCurrentGraph: () => Effect.Effect<WorkflowGraph | null>;
 };
 
+type AspectBudgetBreach$1 = {
+    readonly kind: "tokens" | "latency";
+    readonly limit: number;
+    readonly current: number;
+    readonly onExceeded: "fail" | "warn" | "skip-remaining";
+};
 type WorkflowSessionOptions$2 = {
     readonly runId?: string;
     readonly nowMs?: () => number;
@@ -208,6 +214,9 @@ type WorkflowSessionOptions$2 = {
         readonly iteration: number;
         readonly done: boolean;
     }>;
+    readonly evaluateAspectBudget?: (descriptor: TaskDescriptor$3) => AspectBudgetBreach$1 | null | undefined;
+    readonly onAspectBudgetSkip?: (descriptor: TaskDescriptor$3, breach: AspectBudgetBreach$1) => void;
+    readonly onAspectBudgetWarn?: (descriptor: TaskDescriptor$3, breach: AspectBudgetBreach$1) => void;
 };
 
 type TaskRecord$1 = {

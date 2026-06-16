@@ -123,6 +123,26 @@ export type ApprovalOption = {
   metadata?: Record<string, unknown>;
 };
 
+/**
+ * Resolved `<Aspects>` budget configuration that applies to a task, extracted
+ * from the `__aspects` element prop. The engine reads this at task-dispatch
+ * time to enforce per-run token and latency budgets. The render-time
+ * accumulator carried alongside the budgets in the component tree is dropped
+ * here; the engine keeps its own durable accumulator.
+ */
+export type TaskAspects = {
+  tokenBudget?: {
+    max: number;
+    perTask?: number;
+    onExceeded?: "fail" | "warn" | "skip-remaining";
+  };
+  latencySlo?: {
+    maxMs: number;
+    perTask?: number;
+    onExceeded?: "fail" | "warn";
+  };
+};
+
 export type TaskDescriptor = {
   nodeId: string;
   ordinal: number;
@@ -173,6 +193,8 @@ export type TaskDescriptor = {
   scorers?: ScorersMap;
 
   memoryConfig?: TaskMemoryConfig;
+  /** Resolved `<Aspects>` budget configuration enforced by the engine at dispatch. */
+  aspects?: TaskAspects;
 };
 
 export type WorkflowGraph = {

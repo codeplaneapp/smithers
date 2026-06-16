@@ -491,6 +491,17 @@ export type ScoreReport = z.infer<typeof scoreReportSchema>;
 export type MediaAssetKind = z.infer<typeof mediaAssetKindSchema>;
 export type MediaAssets = z.infer<typeof mediaAssetsSchema>;
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export function normalizeReleaseContentInput(input: unknown): ReleaseContentInput {
-  return releaseContentInputSchema.parse(input ?? {});
+  // The engine fills unsupplied top-level input keys with null rather than
+  // leaving them undefined, so zod's optional()/default() never apply. Strip
+  // the nulls before parsing so a partial `smithers up --input '{...}'` works.
+  const record = isPlainRecord(input) ? { ...input } : {};
+  for (const key of Object.keys(record)) {
+    if (record[key] === null) delete record[key];
+  }
+  return releaseContentInputSchema.parse(record);
 }

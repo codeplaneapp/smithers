@@ -1,13 +1,14 @@
 /**
  * Latency SLO configuration for Aspects.
  *
- * Runtime enforcement is not implemented yet; this is declarative metadata.
+ * The engine enforces the scope-wide `maxMs` wall-clock SLO at task-dispatch
+ * time, measured from the run's start.
  */
 export type LatencySloConfig = {
-	/** Maximum total latency in milliseconds across all tasks. */
+	/** Maximum total wall-clock latency in milliseconds across all tasks. */
 	maxMs: number;
-	/** Optional per-task latency limit in milliseconds. */
+	/** Optional per-task latency limit in milliseconds. Not enforced yet. */
 	perTask?: number;
-	/** Requested future behavior when the SLO is exceeded. Default: "fail". */
+	/** Behavior when the SLO is exceeded. Default: "fail". */
 	onExceeded?: "fail" | "warn";
 };

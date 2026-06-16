@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { createTempRepo, runSmithers, writeTestWorkflow, } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { createExecutableDir, createTempRepo, runSmithers, writeFakeCodexBinary, writeTestWorkflow, } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 /**
  * Minimal discoverable workflow file. Discovery only reads the file for metadata
@@ -80,10 +80,26 @@ test("smithers init --global scaffolds the canonical ~/.smithers pack (no nested
     const smithersHome = join(globalHome.dir, ".smithers");
     const repo = createTempRepo();
 
+    // `init` refuses to scaffold a pack it can't run: it throws NO_USABLE_AGENTS
+    // unless a usable agent is detected (binary on PATH + credentials) — see
+    // init-agents.e2e.test.js. Provide a fake Codex CLI + OPENAI_API_KEY (and a
+    // pinned PATH with cleared keys) so this test is independent of whatever
+    // agents happen to be installed on the host, and passes on a clean CI box.
+    const binDir = createExecutableDir();
+    writeFakeCodexBinary(binDir);
+
     const result = runSmithers(["init", "--global", "--no-install"], {
         cwd: repo.dir,
         format: "json",
-        env: { SMITHERS_HOME: smithersHome, HOME: globalHome.dir },
+        env: {
+            SMITHERS_HOME: smithersHome,
+            HOME: globalHome.dir,
+            PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+            ANTHROPIC_API_KEY: "",
+            OPENAI_API_KEY: "test-openai-key",
+            GEMINI_API_KEY: "",
+            GOOGLE_API_KEY: "",
+        },
     });
 
     expect(result.exitCode).toBe(0);

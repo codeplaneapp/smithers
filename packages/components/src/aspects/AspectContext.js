@@ -1,7 +1,6 @@
 // @smithers-type-exports-begin
 /** @typedef {import("./AspectAccumulator.ts").AspectAccumulator} AspectAccumulator */
 /** @typedef {import("./AspectContextValue.ts").AspectContextValue} AspectContextValue */
-/** @typedef {import("./CostBudgetConfig.ts").CostBudgetConfig} CostBudgetConfig */
 /** @typedef {import("./LatencySloConfig.ts").LatencySloConfig} LatencySloConfig */
 /** @typedef {import("./TokenBudgetConfig.ts").TokenBudgetConfig} TokenBudgetConfig */
 /** @typedef {import("./TrackingConfig.ts").TrackingConfig} TrackingConfig */
@@ -10,7 +9,8 @@
 import React from "react";
 /**
  * React context that propagates Aspects configuration down the component tree.
- * Budget configuration is declarative metadata and is not enforced yet.
+ * Tasks read from this context to attach budgets the engine enforces and to
+ * track metrics.
  * @type {React.Context<AspectContextValue | null>}
  */
 export const AspectContext = React.createContext(/** @type {AspectContextValue | null} */ (null));
@@ -23,7 +23,6 @@ export function createAccumulator() {
     return {
         totalTokens: 0,
         totalLatencyMs: 0,
-        totalCostUsd: 0,
         taskCount: 0,
     };
 }

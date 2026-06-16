@@ -4,6 +4,5 @@
 export type AspectAccumulator = {
 	totalTokens: number;
 	totalLatencyMs: number;
-	totalCostUsd: number;
 	taskCount: number;
 };

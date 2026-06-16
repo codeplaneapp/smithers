@@ -223,8 +223,8 @@ export function Task(props) {
         ctx?.recordDeferredDep?.(props.id, depNodeIds ?? []);
         return null;
     }
-    // Build aspect metadata to attach to the task element. Budget metadata is
-    // declarative only until runtime enforcement is implemented.
+    // Build aspect metadata to attach to the task element so the engine can
+    // enforce budgets and track metrics at execution time.
     const aspectMeta = aspectCtx ? buildAspectMeta(aspectCtx) : undefined;
     const agentChain = Array.isArray(agent)
         ? fallbackAgent
@@ -287,12 +287,11 @@ export function Task(props) {
 }
 /**
  * Build the __aspects metadata object from the current AspectContext.
- * This is attached to the smithers:task element props. Budget metadata is not
- * enforced by the runtime yet.
+ * This is attached to the smithers:task element props so the engine can read
+ * budgets and tracking config at execution time.
  * @param {{
  *     tokenBudget?: unknown;
  *     latencySlo?: unknown;
- *     costBudget?: unknown;
  *     tracking?: unknown;
  *     accumulator?: unknown;
  * }} aspectCtx
@@ -303,7 +302,6 @@ function buildAspectMeta(aspectCtx) {
         __aspects: {
             tokenBudget: aspectCtx.tokenBudget,
             latencySlo: aspectCtx.latencySlo,
-            costBudget: aspectCtx.costBudget,
             tracking: aspectCtx.tracking,
             accumulator: aspectCtx.accumulator,
         },

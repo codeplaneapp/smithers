@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -44,16 +45,29 @@ async function waitForHealth(timeoutMs = 60_000): Promise<boolean> {
   }
   return false;
 }
-async function loadChromium() {
-  const pkg = "playwright";
-  try {
-    return (await import(pkg)).chromium;
-  } catch {
-    return (await import(resolve(repoRoot, "apps/smithers-studio-2/node_modules/playwright/index.js"))).chromium;
+// Resolve a Chromium with an installed browser binary. CI runs `pnpm test`
+// without `playwright install`, so the browser is often absent — skip rather
+// than fail there (matches apps/cli's workflow-ui e2e). Runs wherever a browser
+// is installed (local dev, or a job that ran `playwright install`).
+const require = createRequire(import.meta.url);
+const STUDIO_PLAYWRIGHT_ENTRY = resolve(repoRoot, "apps/smithers-studio-2/node_modules/playwright/index.js");
+function resolveChromium() {
+  const entries = ["playwright"];
+  if (existsSync(STUDIO_PLAYWRIGHT_ENTRY)) entries.push(STUDIO_PLAYWRIGHT_ENTRY);
+  for (const entry of entries) {
+    try {
+      const chromium = require(entry).chromium;
+      const executablePath = chromium?.executablePath?.();
+      if (typeof executablePath === "string" && existsSync(executablePath)) return chromium;
+    } catch {}
   }
+  return null;
 }
+const CHROMIUM = resolveChromium();
+const browserTest = CHROMIUM ? test : test.skip;
 
 beforeAll(async () => {
+  if (!CHROMIUM) return; // browser test will skip; don't spawn the fixture server
   tempRepo = mkdtempSync(join(tmpdir(), "open-code-review-e2e-"));
   symlinkSync(realNodeModules, join(tempRepo, "node_modules"), "dir");
   write(join(tempRepo, "package.json"), JSON.stringify({ name: "open-code-review-e2e", type: "module" }) + "\n");
@@ -85,12 +99,13 @@ beforeAll(async () => {
 }, 80_000);
 
 afterAll(() => {
+  if (!CHROMIUM) return;
   try { proc?.kill("SIGTERM"); } catch {}
   try { rmSync(tempRepo, { recursive: true, force: true }); } catch {}
 });
 
-test("Open Code Review UI renders a real workflow run", async () => {
-  const browser = await (await loadChromium()).launch({ headless: true });
+browserTest("Open Code Review UI renders a real workflow run", async () => {
+  const browser = await CHROMIUM.launch({ headless: true });
   try {
     const page = await browser.newPage();
     const errors: string[] = [];

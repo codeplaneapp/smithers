@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/control-plane",
-  "version": "0.24.0",
+  "version": "0.24.1",
   "description": "Durable organization, project, billing, usage, secret-reference, and audit primitives for hosted Smithers control planes.",
   "type": "module",
   "sideEffects": false,

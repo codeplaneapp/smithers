@@ -231,7 +231,7 @@ export const smithersErrorDefinitions = {
     },
     ASPECT_BUDGET_EXCEEDED: {
         category: "components",
-        when: "Reserved for future Aspects budget enforcement; the runtime does not emit this code yet.",
+        when: "An Aspects budget (tokens or latency) has been exceeded.",
         details: "{ kind, limit, current }",
     },
     APPROVAL_OUTSIDE_TASK: {

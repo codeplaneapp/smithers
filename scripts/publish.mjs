@@ -50,6 +50,11 @@ function runArgs(cmd, args) {
   const out = spawnSync(cmd, args, { stdio: "inherit", cwd: root });
   if (out.status !== 0) throw new Error(`command failed: ${cmd} ${args.join(" ")}`);
 }
+function gitStatusPorcelain() {
+  const out = spawnSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" });
+  if (out.status !== 0) throw new Error(`git status failed:\n${out.stderr ?? ""}`);
+  return out.stdout.trim();
+}
 function workspacePackages() {
   const packages = [];
   for (const entry of ["packages", "apps", "e2e", ".smithers"]) {
@@ -118,10 +123,10 @@ try {
 
 if (!SKIP_GIT) {
   log("git", "checking clean working tree");
-  const out = spawnSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" });
-  if (out.stdout.trim()) {
+  const dirty = gitStatusPorcelain();
+  if (dirty) {
     throw new Error(
-      `working tree is dirty — run \`pnpm version <patch|minor|major>\` first, or pass --skip-git:\n${out.stdout}`,
+      `working tree is dirty — run \`pnpm version <patch|minor|major>\` first, or pass --skip-git:\n${dirty}`,
     );
   }
 }
@@ -132,6 +137,23 @@ run("pnpm check:llms");
 if (!SKIP_BUILD) {
   log("build", "pnpm -r build");
   run("pnpm -r build");
+
+  // The build regenerates committed declaration files (each package's
+  // src/*.d.ts via `tsup --dts-only`). If the build changes a tracked file,
+  // a generated artifact was committed stale and would ship out of date —
+  // exactly how 0.24.0 published a stale packages/smithers/src/index.d.ts.
+  // Fail loudly so it gets regenerated and committed before release.
+  if (!SKIP_GIT) {
+    log("git", "checking build left no stale committed artifacts");
+    const drift = gitStatusPorcelain();
+    if (drift) {
+      throw new Error(
+        "`pnpm -r build` changed committed files — a generated artifact (e.g. a " +
+          "package's src/*.d.ts) is stale and would ship out of date. Commit the " +
+          `regenerated files before releasing:\n${drift}`,
+      );
+    }
+  }
 } else {
   log("build", "skipped (--skip-build)");
 }

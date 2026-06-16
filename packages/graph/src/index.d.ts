@@ -109,6 +109,18 @@ type ApprovalOption$1 = {
     summary?: string;
     metadata?: Record<string, unknown>;
 };
+type TaskAspects$1 = {
+    tokenBudget?: {
+        max: number;
+        perTask?: number;
+        onExceeded?: "fail" | "warn" | "skip-remaining";
+    };
+    latencySlo?: {
+        maxMs: number;
+        perTask?: number;
+        onExceeded?: "fail" | "warn";
+    };
+};
 type TaskDescriptor$1 = {
     nodeId: string;
     ordinal: number;
@@ -156,6 +168,7 @@ type TaskDescriptor$1 = {
     meta?: Record<string, unknown>;
     scorers?: ScorersMap$1;
     memoryConfig?: TaskMemoryConfig$1;
+    aspects?: TaskAspects$1;
 };
 type WorkflowGraph$2 = {
     readonly xml: XmlNode$1 | null;
@@ -222,6 +235,7 @@ type ScorerBinding = ScorerBinding$1;
 type ScorerFn = ScorerFn$1;
 type ScorerInput = ScorerInput$1;
 type ScorersMap = ScorersMap$1;
+type TaskAspects = TaskAspects$1;
 type TaskDescriptor = TaskDescriptor$1;
 type TaskMemoryConfig = TaskMemoryConfig$1;
 type WorkflowGraph = WorkflowGraph$2;
@@ -229,4 +243,4 @@ type XmlElement = XmlElement$1;
 type XmlNode = XmlNode$1;
 type XmlText = XmlText$1;
 
-export { type AgentLike, type ApprovalOption, type CachePolicy, type ExtractGraph, type ExtractOptions, type GraphSnapshot, type HostElement, type HostNode, type HostText, type MemoryNamespace, type MemoryNamespaceKind, type RetryPolicy, type SamplingConfig, type ScoreResult, type Scorer, type ScorerBinding, type ScorerFn, type ScorerInput, type ScorersMap, type TaskDescriptor, type TaskMemoryConfig, type WorkflowGraph, type XmlElement, type XmlNode, type XmlText, extractFromHost, extractGraph, resolveWorktreePath };
+export { type AgentLike, type ApprovalOption, type CachePolicy, type ExtractGraph, type ExtractOptions, type GraphSnapshot, type HostElement, type HostNode, type HostText, type MemoryNamespace, type MemoryNamespaceKind, type RetryPolicy, type SamplingConfig, type ScoreResult, type Scorer, type ScorerBinding, type ScorerFn, type ScorerInput, type ScorersMap, type TaskAspects, type TaskDescriptor, type TaskMemoryConfig, type WorkflowGraph, type XmlElement, type XmlNode, type XmlText, extractFromHost, extractGraph, resolveWorktreePath };

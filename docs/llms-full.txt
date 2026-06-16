@@ -3709,7 +3709,7 @@ type SuperSmithersProps = {
 
 ## <Aspects>
 
-> Declare token, latency, and cost budgets for descendant tasks.
+> Propagate token and latency budgets to descendant tasks.
 
 ```ts
 import { Aspects } from "smithers-orchestrator";
@@ -3726,17 +3726,11 @@ type LatencySloConfig = {
   onExceeded?: "fail" | "warn"; // default "fail"
 };
 
-type CostBudgetConfig = {
-  maxUsd: number;
-  onExceeded?: "fail" | "warn" | "skip-remaining"; // default "fail"
-};
-
-type TrackingConfig = { tokens?: boolean; latency?: boolean; cost?: boolean };
+type TrackingConfig = { tokens?: boolean; latency?: boolean };
 
 type AspectsProps = {
   tokenBudget?: TokenBudgetConfig;
   latencySlo?: LatencySloConfig;
-  costBudget?: CostBudgetConfig;
   tracking?: TrackingConfig; // default all true
   children?: ReactNode;
 };
@@ -3747,7 +3741,6 @@ type AspectsProps = {
   <Aspects
     tokenBudget={{ max: 100_000, perTask: 25_000, onExceeded: "warn" }}
     latencySlo={{ maxMs: 30_000, onExceeded: "fail" }}
-    costBudget={{ maxUsd: 5.0, onExceeded: "skip-remaining" }}
   >
     <Task id="analyze" output={outputs.analysis} agent={codeAgent}>
       Analyze the repository.
@@ -3761,10 +3754,10 @@ type AspectsProps = {
 
 ## Notes
 
-- Nested `<Aspects>` inherit outer budget configs wholesale. If an inner `<Aspects>` sets `tokenBudget`, `latencySlo`, or `costBudget`, that field's entire parent config object is replaced (no per-field merge). The `tracking` config is the exception: `tokens`, `latency`, and `cost` each fall back to the parent value independently.
-- Budget props are not enforced by the runtime yet. They are currently declarative metadata reserved for future token, latency, and cost enforcement.
-- `tracking` controls metric emission only.
-- Accumulator is per-run and resets on resume.
+- Nested `<Aspects>` inherit outer budget configs wholesale. If an inner `<Aspects>` sets `tokenBudget` or `latencySlo`, that field's entire parent config object is replaced (no per-field merge). The `tracking` config is the exception: `tokens` and `latency` each fall back to the parent value independently.
+- Budgets enforce at task-dispatch time. Before each descendant task runs, the engine compares the run's accumulated token total (`tokenBudget.max`) and wall-clock since the run started (`latencySlo.maxMs`) against the budget and applies `onExceeded`: `fail` raises `ASPECT_BUDGET_EXCEEDED` and fails the run, `warn` logs and continues, `skip-remaining` skips the task. The per-task limits (`perTask`) are not enforced yet.
+- Budgets enforce regardless of `tracking`; `tracking` controls metric emission only.
+- Accumulated token usage is per run and survives resume (re-seeded from persisted token-usage events).
 
 ---
 
@@ -5725,12 +5718,10 @@ type CheckSuiteProps = {
 
 type TokenBudgetConfig = { max: number; perTask?: number; onExceeded?: "fail" | "warn" | "skip-remaining" };
 type LatencySloConfig = { maxMs: number; perTask?: number; onExceeded?: "fail" | "warn" };
-type CostBudgetConfig = { maxUsd: number; onExceeded?: "fail" | "warn" | "skip-remaining" };
-type TrackingConfig = { tokens?: boolean; latency?: boolean; cost?: boolean };
+type TrackingConfig = { tokens?: boolean; latency?: boolean };
 type AspectsProps = {
   tokenBudget?: TokenBudgetConfig;
   latencySlo?: LatencySloConfig;
-  costBudget?: CostBudgetConfig;
   tracking?: TrackingConfig;
   children?: React.ReactNode;
 };
@@ -6776,7 +6767,7 @@ try {
 | `CONTEXT_OUTSIDE_WORKFLOW` | Workflow context access happens outside an active Smithers workflow render. | -- |
 | `MISSING_OUTPUT` | Code calls `ctx.output()` for a node result that does not exist. | `{ nodeId, iteration }` |
 | `DEP_NOT_SATISFIED` | A typed dep on `<Task>` references an upstream output that has not been produced yet. | `{ taskId, depKey, resolvedNodeId }` |
-| `ASPECT_BUDGET_EXCEEDED` | Reserved for future Aspects budget enforcement; the runtime does not emit this code yet. | `{ kind, limit, current }` |
+| `ASPECT_BUDGET_EXCEEDED` | An Aspects budget (tokens or latency) has been exceeded. | `{ kind, limit, current }` |
 | `APPROVAL_OUTSIDE_TASK` | `<Approval>` is resolved outside the active task runtime. | -- |
 | `APPROVAL_OPTIONS_REQUIRED` | An approval mode that requires explicit options is missing them. | -- |
 | `WORKFLOW_MISSING_DEFAULT` | A workflow module does not export a default Smithers workflow. | -- |
