@@ -130,6 +130,7 @@ describe("Gateway RPC contract", () => {
       "getSchemaSignature",
       "listWorkflows",
       "listApprovals",
+      "listDocs",
       "streamRunEvents",
       "streamDevTools",
       "getNodeOutput",

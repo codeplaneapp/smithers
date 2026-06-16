@@ -864,3 +864,85 @@ describe("workspace snapshot tables", () => {
         expect(await adapter.listWorkspaceCheckpoints("r1")).toHaveLength(1);
     });
 });
+
+describe("docs table", () => {
+    test("doc rows upsert, tombstone, and list through the adapter", async () => {
+        const { adapter } = createTestDb();
+        await adapter.upsertDocRow({
+            path: "tickets/demo.md",
+            kind: "ticket",
+            content: "# Demo\n",
+            contentHash: "hash-a",
+            updatedAtMs: now,
+            deletedAtMs: null,
+        });
+        await adapter.upsertDocRow({
+            path: "tickets/demo.md",
+            kind: "ticket",
+            content: "",
+            contentHash: "empty",
+            updatedAtMs: now + 1,
+            deletedAtMs: now + 1,
+        });
+
+        expect(await adapter.listDocs()).toHaveLength(0);
+        const all = await adapter.listDocs({ includeDeleted: true });
+        expect(all).toHaveLength(1);
+        expect(all[0]).toMatchObject({ path: "tickets/demo.md", deletedAtMs: now + 1 });
+    });
+
+    test("a normal forward edit does not record a conflict marker", async () => {
+        const { adapter } = createTestDb();
+        await adapter.upsertDocRow({
+            path: "plans/sync.md",
+            kind: "plan",
+            content: "first\n",
+            contentHash: "hash-1",
+            updatedAtMs: now,
+            deletedAtMs: null,
+        });
+        // A strictly-forward edit (updatedAtMs advances) is the single-writer
+        // happy path: last-write-wins applies but no marker is minted.
+        await adapter.upsertDocRow({
+            path: "plans/sync.md",
+            kind: "plan",
+            content: "second\n",
+            contentHash: "hash-2",
+            updatedAtMs: now + 1,
+            deletedAtMs: null,
+        });
+
+        const latest = await adapter.getDoc("plans/sync.md");
+        expect(latest?.content).toBe("second\n");
+        expect(await adapter.listDocs({ kind: "conflict" })).toHaveLength(0);
+    });
+
+    test("a stale/out-of-order write records a conflict marker while last write wins", async () => {
+        const { adapter } = createTestDb();
+        await adapter.upsertDocRow({
+            path: "plans/sync.md",
+            kind: "plan",
+            content: "base\n",
+            contentHash: "hash-base",
+            updatedAtMs: now + 5,
+            deletedAtMs: null,
+        });
+        // An older write arriving after a newer one is a genuine divergence:
+        // its content differs and its timestamp does not advance the row.
+        await adapter.upsertDocRow({
+            path: "plans/sync.md",
+            kind: "plan",
+            content: "stale\n",
+            contentHash: "hash-stale",
+            updatedAtMs: now + 1,
+            deletedAtMs: null,
+        });
+
+        const latest = await adapter.getDoc("plans/sync.md");
+        expect(latest?.content).toBe("stale\n");
+        const conflicts = await adapter.listDocs({ kind: "conflict" });
+        expect(conflicts).toHaveLength(1);
+        expect(conflicts[0]?.path.startsWith("conflicts/")).toBe(true);
+        expect(conflicts[0]?.content).toContain('"resolution": "last-write-wins"');
+    });
+});

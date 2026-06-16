@@ -9,6 +9,7 @@ import {
   syncKeyMatches,
   type CollectionDef,
   type GatewayApprovalRow,
+  type GatewayDocRow,
   type GatewayRunEventRow,
   type GatewayRunNode,
   type GatewayRunRow,
@@ -21,6 +22,7 @@ import {
 } from "@smithers-orchestrator/gateway-client";
 import type {
   ListApprovalsRequest,
+  ListDocsRequest,
   ListRunsRequest,
   ListWorkflowsRequest,
 } from "@smithers-orchestrator/gateway/rpc";
@@ -64,7 +66,7 @@ export type CreateGatewayCollectionsOptions = {
 
 const LIST_GC_TIME = 5 * 60_000;
 const RUN_GC_TIME = 0;
-const DEFAULT_SCHEMA_VERSION = "0016";
+const DEFAULT_SCHEMA_VERSION = "0017";
 const MUTATION_CONFIRM_TIMEOUT_MS = 30_000;
 const MUTATION_CONFIRM_POLL_MS = 25;
 
@@ -741,6 +743,8 @@ export function createGatewayCollections(
       knownCollection<GatewayWorkflowRow, string>(gatewayCollectionDefs.workflows(params), listGcTime),
     approvals: (params: ListApprovalsRequest = {}) =>
       knownCollection<GatewayApprovalRow, string>(gatewayCollectionDefs.approvals(params), listGcTime),
+    tickets: (params: ListDocsRequest = {}) =>
+      knownCollection<GatewayDocRow, string>(gatewayCollectionDefs.tickets(params), listGcTime),
     nodes: (runId: string) =>
       knownCollection<GatewayRunNode, string>(gatewayCollectionDefs.nodes(runId), RUN_GC_TIME),
     runEvents: (runId: string) =>

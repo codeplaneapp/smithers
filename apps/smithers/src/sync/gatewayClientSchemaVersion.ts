@@ -1,6 +1,6 @@
 import { getGatewayClient } from "../gateway/gatewayClient";
 
-const BUNDLED_SCHEMA_VERSION = "0016";
+const BUNDLED_SCHEMA_VERSION = "0017";
 let cachedSchemaVersion: Promise<string> | undefined;
 
 type SchemaSignatureRow = { schemaVersion: string; signature: string };

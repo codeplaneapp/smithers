@@ -148,6 +148,7 @@ describe("DB migration edges", () => {
           "0001_current_tables",
           "0013_run_owned_foreign_keys",
           "0014_current_indexes",
+          "0017_add_smithers_docs",
         ]),
       );
     } finally {
@@ -191,6 +192,80 @@ describe("DB migration edges", () => {
     // defaulted to 'full'.
     expect(row.run_id).toBe("legacy");
     expect(row.encoding).toBe("full");
+    sqlite.close();
+  });
+
+  test("0014 current-indexes upgrades a store whose ledger predates _smithers_docs", () => {
+    // Regression: the `_smithers_docs` index lives in the current-index list that
+    // migration 0014 runs, but the table is only created by 0017. A store whose
+    // ledger recorded 0001 (so 0001 won't recreate tables) but not 0014 used to
+    // fail opening with "no such table: _smithers_docs" because 0014 ran the
+    // index before 0017 created the table. 0014 must now skip indexes whose
+    // table is absent and let 0017 create the table + its index.
+    const sqlite = new Database(":memory:");
+    sqlite.exec(`
+      CREATE TABLE _smithers_schema_migrations (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at_ms INTEGER NOT NULL,
+        checksum TEXT,
+        destructive INTEGER NOT NULL DEFAULT 0,
+        details_json TEXT
+      );
+      CREATE TABLE _smithers_runs (
+        run_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        heartbeat_at_ms INTEGER,
+        parent_run_id TEXT,
+        created_at_ms INTEGER NOT NULL
+      );
+      CREATE TABLE _smithers_signals (
+        run_id TEXT NOT NULL,
+        signal_name TEXT NOT NULL,
+        correlation_id TEXT,
+        received_at_ms INTEGER NOT NULL
+      );
+      CREATE TABLE _smithers_time_travel_audit (
+        run_id TEXT NOT NULL,
+        caller TEXT NOT NULL,
+        timestamp_ms INTEGER NOT NULL
+      );
+      CREATE TABLE _smithers_alerts (
+        id TEXT PRIMARY KEY,
+        run_id TEXT,
+        fingerprint TEXT,
+        status TEXT
+      );
+    `);
+    // Record every migration except 0014 and 0017 as already applied, so 0001
+    // does not recreate tables and 0014 runs against a DB lacking _smithers_docs.
+    for (const id of [
+      "0001_current_tables",
+      "0002_attempt_legacy_columns",
+      "0003_run_legacy_columns",
+      "0004_approval_payload_columns",
+      "0005_alert_model_extensions",
+      "0006_frame_encoding_column",
+      "0011_add_node_diffs",
+      "0012_add_time_travel_audit",
+      "0013_run_owned_foreign_keys",
+      "0015_add_workspace_states",
+      "0016_add_workspace_checkpoints",
+    ]) {
+      sqlite.run("INSERT INTO _smithers_schema_migrations (id, name, applied_at_ms) VALUES (?, ?, ?)", [id, id, 1]);
+    }
+    const db = drizzle(sqlite);
+
+    expect(() => ensureSmithersTables(db)).not.toThrow();
+
+    const docsTable = sqlite
+      .query("SELECT name FROM sqlite_master WHERE type='table' AND name = '_smithers_docs'")
+      .get();
+    expect(docsTable).toBeTruthy();
+    const docsIndex = sqlite
+      .query("SELECT name FROM sqlite_master WHERE type='index' AND name = '_smithers_docs_kind_updated_idx'")
+      .get();
+    expect(docsIndex).toBeTruthy();
     sqlite.close();
   });
 

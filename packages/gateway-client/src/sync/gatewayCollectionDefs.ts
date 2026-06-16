@@ -1,6 +1,7 @@
 import type { Collection } from "@tanstack/db";
-import type { ListApprovalsRequest, ListRunsRequest, ListWorkflowsRequest } from "@smithers-orchestrator/gateway/rpc";
+import type { ListApprovalsRequest, ListDocsRequest, ListRunsRequest, ListWorkflowsRequest } from "@smithers-orchestrator/gateway/rpc";
 import type { GatewayApprovalRow } from "./GatewayApprovalRow.ts";
+import type { GatewayDocRow } from "./GatewayDocRow.ts";
 import type { GatewayRunEventRow } from "./GatewayRunEventRow.ts";
 import type { GatewayRunNode } from "./GatewayRunNode.ts";
 import type { GatewayRunRow } from "./GatewayRunRow.ts";
@@ -89,6 +90,30 @@ function runRowsFromFrame(runId: string) {
 }
 
 export const gatewayCollectionDefs = {
+  tickets: (params: ListDocsRequest = {}): CollectionDef<GatewayDocRow, string> => {
+    const effectiveParams = {
+      ...params,
+      filter: {
+        ...params.filter,
+        includeDeleted: params.filter?.includeDeleted ?? true,
+      },
+    };
+    return {
+      key: gatewayKeys.tickets(effectiveParams),
+      persisted: true,
+      maxRows: 4_096,
+      getKey: (row: GatewayDocRow) => row.path,
+      gateway: {
+        method: "listDocs",
+        params: effectiveParams,
+        rows: arrayRows<GatewayDocRow>,
+        pollMs: 1_000,
+      },
+      electric: {
+        shape: { table: "_smithers_docs" },
+      },
+    };
+  },
   workflows: (params: ListWorkflowsRequest = {}): CollectionDef<GatewayWorkflowRow, string> => ({
     key: gatewayKeys.workflows(params.filter),
     persisted: true,

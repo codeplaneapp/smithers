@@ -10,6 +10,7 @@ import type { SyncKey } from "./SyncKey.ts";
 export const gatewayKeys = {
   workflows: (filter?: { hasUi?: boolean }): SyncKey => ["gateway:listWorkflows", filter ?? {}],
   runs: (params?: Record<string, unknown>): SyncKey => ["gateway:listRuns", params ?? {}],
+  tickets: (params?: Record<string, unknown>): SyncKey => ["gateway:listDocs", params ?? {}],
   run: (runId: string): SyncKey => ["gateway:getRun", { runId }],
   devtoolsSnapshot: (runId: string): SyncKey => ["gateway:getDevToolsSnapshot", { runId }],
   approvals: (params?: Record<string, unknown>): SyncKey => ["gateway:listApprovals", params ?? {}],

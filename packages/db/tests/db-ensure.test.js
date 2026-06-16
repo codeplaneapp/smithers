@@ -25,6 +25,7 @@ describe("ensureSmithersTables", () => {
         expect(tableNames).toContain("_smithers_ralph");
         expect(tableNames).toContain("_smithers_workspace_states");
         expect(tableNames).toContain("_smithers_workspace_checkpoints");
+        expect(tableNames).toContain("_smithers_docs");
         sqlite.close();
     });
     test("is idempotent (can be called twice)", () => {
@@ -123,6 +124,17 @@ describe("ensureSmithersTables", () => {
             "label",
             "tool_use_id",
             "created_at_ms",
+        ]));
+        const docCols = sqlite
+            .query('PRAGMA table_info("_smithers_docs")')
+            .all();
+        expect(docCols.map((c) => c.name)).toEqual(expect.arrayContaining([
+            "path",
+            "kind",
+            "content",
+            "content_hash",
+            "updated_at_ms",
+            "deleted_at_ms",
         ]));
         sqlite.close();
     });

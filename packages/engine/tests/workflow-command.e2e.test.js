@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { createExecutableDir, createTempRepo, runSmithers, writeFakeCodexBinary, writeTestWorkflow, } from "../../smithers/tests/e2e-helpers.js";
+import { createExecutableDir, createTempRepo, pinSqliteBackend, runSmithers, writeFakeCodexBinary, writeTestWorkflow, } from "../../smithers/tests/e2e-helpers.js";
 /**
  * @param {string} homeDir
  */
@@ -188,6 +188,7 @@ test("workflow create scaffolds a workflow that runs immediately", () => {
 }, 60_000);
 test("workflow path can pause on WaitForEvent, accept a signal, and resume", () => {
     const repo = createTempRepo();
+    pinSqliteBackend(repo.dir);
     repo.write("workflow.tsx", [
         "/** @jsxImportSource smithers-orchestrator */",
         'import { createSmithers, WaitForEvent, Workflow } from "smithers-orchestrator";',

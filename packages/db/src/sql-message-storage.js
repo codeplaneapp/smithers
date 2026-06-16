@@ -239,6 +239,14 @@ const CREATE_TABLE_STATEMENTS = [
     created_at_ms INTEGER NOT NULL,
     PRIMARY KEY (run_id, node_id, iteration, attempt, seq)
   )`,
+    `CREATE TABLE IF NOT EXISTS _smithers_docs (
+    path TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL,
+    deleted_at_ms INTEGER
+  )`,
     `CREATE TABLE IF NOT EXISTS _smithers_events (
     run_id TEXT NOT NULL,
     seq INTEGER NOT NULL,
@@ -360,6 +368,8 @@ const CREATE_INDEX_STATEMENTS = [
     ON _smithers_signals (run_id, signal_name, correlation_id, received_at_ms)`,
     `CREATE INDEX IF NOT EXISTS _smithers_time_travel_audit_lookup_idx
     ON _smithers_time_travel_audit (run_id, caller, timestamp_ms)`,
+    `CREATE INDEX IF NOT EXISTS _smithers_docs_kind_updated_idx
+    ON _smithers_docs (kind, updated_at_ms)`,
 ];
 /**
  * @param {string} identifier

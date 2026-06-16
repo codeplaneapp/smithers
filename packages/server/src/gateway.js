@@ -3560,6 +3560,39 @@ export class Gateway {
         approvals.sort((a, b) => (a.requestedAtMs ?? 0) - (b.requestedAtMs ?? 0));
         return approvals;
     }
+    /**
+   * @param {{ kind?: string; includeDeleted?: boolean; updatedAfterMs?: number; limit?: number }} [options]
+   */
+    async listDocsAcrossWorkflows(options = {}) {
+        const seenAdapters = new Set();
+        const byPath = new Map();
+        const limit = Math.max(1, Math.min(10_000, Math.floor(options.limit ?? 4_096)));
+        for (const entry of this.workflows.values()) {
+            const adapter = this.adapterForWorkflow(entry.workflow);
+            if (seenAdapters.has(adapter)) {
+                continue;
+            }
+            seenAdapters.add(adapter);
+            if (typeof adapter.listDocs !== "function") {
+                continue;
+            }
+            const rows = await adapter.listDocs({
+                kind: options.kind,
+                includeDeleted: options.includeDeleted,
+                updatedAfterMs: options.updatedAfterMs,
+                limit,
+            });
+            for (const row of rows) {
+                const existing = byPath.get(row.path);
+                if (!existing || (row.updatedAtMs ?? 0) >= (existing.updatedAtMs ?? 0)) {
+                    byPath.set(row.path, row);
+                }
+            }
+        }
+        const docs = [...byPath.values()];
+        docs.sort((a, b) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0) || String(a.path).localeCompare(String(b.path)));
+        return docs.slice(0, limit);
+    }
     async listCrons() {
         const rows = [];
         for (const entry of this.workflows.values()) {
@@ -4545,6 +4578,19 @@ export class Gateway {
                     approvals = approvals.slice(0, limit);
                 }
                 return responseOk(frame.id, approvals);
+            }
+            case "listDocs": {
+                const filter = asObject(params.filter) ?? {};
+                const kind = asString(params.kind) ?? asString(filter.kind);
+                const includeDeleted = asBoolean(params.includeDeleted) ?? asBoolean(filter.includeDeleted) ?? false;
+                const updatedAfterMs = asNumber(params.updatedAfterMs) ?? asNumber(filter.updatedAfterMs);
+                const limit = asOptionalPositiveInt(params.limit ?? filter.limit, "limit") ?? 4_096;
+                return responseOk(frame.id, await this.listDocsAcrossWorkflows({
+                    kind,
+                    includeDeleted,
+                    updatedAfterMs,
+                    limit,
+                }));
             }
             case "approvals.decide":
             case "submitApproval": {

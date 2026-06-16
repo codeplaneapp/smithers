@@ -153,6 +153,21 @@ function tableExists(sqlite, table) {
 }
 
 /**
+ * Extract the target table name from a `CREATE INDEX ... ON <table> (...)`
+ * statement so the "current indexes" migration can skip an index whose table a
+ * later migration has not created yet (e.g. a store upgrading from a ledger that
+ * predates `_smithers_docs`). Returns null when no table can be parsed, in which
+ * case the statement runs unguarded.
+ *
+ * @param {string} statement
+ * @returns {string | null}
+ */
+function indexTargetTable(statement) {
+    const match = /\bON\s+"?([A-Za-z0-9_]+)"?/i.exec(statement);
+    return match ? match[1] : null;
+}
+
+/**
  * @param {import("bun:sqlite").Database} sqlite
  * @param {string} table
  */
@@ -612,16 +627,35 @@ function buildMigrations(context) {
             isApplied: () => false,
             isAppliedPostgres: () => false,
             up: (sqlite) => {
+                let applied = 0;
+                let skipped = 0;
                 for (const statement of [...context.createIndexStatements, ...EXTRA_INDEX_STATEMENTS]) {
+                    const target = indexTargetTable(statement);
+                    // Skip indexes whose table a later migration creates; running
+                    // them here would throw "no such table" on a store whose
+                    // ledger predates that table (e.g. `_smithers_docs`).
+                    if (target && !tableExists(sqlite, target)) {
+                        skipped += 1;
+                        continue;
+                    }
                     sqlite.run(statement);
+                    applied += 1;
                 }
-                return { statementCount: context.createIndexStatements.length + EXTRA_INDEX_STATEMENTS.length };
+                return { statementCount: applied, skipped };
             },
             upPostgres: async (pgConn) => {
+                let applied = 0;
+                let skipped = 0;
                 for (const statement of [...context.createIndexStatements, ...EXTRA_INDEX_STATEMENTS]) {
+                    const target = indexTargetTable(statement);
+                    if (target && !(await tableExistsPostgres(pgConn, target))) {
+                        skipped += 1;
+                        continue;
+                    }
                     await pgConn.query({ text: translateDdl(POSTGRES, statement) });
+                    applied += 1;
                 }
-                return { statementCount: context.createIndexStatements.length + EXTRA_INDEX_STATEMENTS.length };
+                return { statementCount: applied, skipped };
             },
         },
         {
@@ -652,6 +686,25 @@ function buildMigrations(context) {
             upPostgres: async (pgConn) => {
                 await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_workspace_checkpoints", context.createTableStatements)) });
                 return { table: "_smithers_workspace_checkpoints" };
+            },
+        },
+        {
+            id: "0017_add_smithers_docs",
+            name: "Add DB-backed Smithers markdown docs table",
+            checksum: "packages/db/migrations/0017_add_smithers_docs.sql",
+            isApplied: (sqlite) => tableExists(sqlite, "_smithers_docs"),
+            isAppliedPostgres: (pgConn) => tableExistsPostgres(pgConn, "_smithers_docs"),
+            up: (sqlite) => {
+                sqlite.run(createTableStatementFor("_smithers_docs", context.createTableStatements));
+                sqlite.run(`CREATE INDEX IF NOT EXISTS _smithers_docs_kind_updated_idx
+                    ON _smithers_docs (kind, updated_at_ms)`);
+                return { table: "_smithers_docs" };
+            },
+            upPostgres: async (pgConn) => {
+                await pgConn.query({ text: translateDdl(POSTGRES, createTableStatementFor("_smithers_docs", context.createTableStatements)) });
+                await pgConn.query({ text: translateDdl(POSTGRES, `CREATE INDEX IF NOT EXISTS _smithers_docs_kind_updated_idx
+                    ON _smithers_docs (kind, updated_at_ms)`) });
+                return { table: "_smithers_docs" };
             },
         },
     ];

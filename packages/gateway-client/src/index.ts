@@ -54,6 +54,7 @@ export {
 } from "./sync/sanitizeRunEventRowForPersistence.ts";
 export { reconcileSnapshotNodes } from "./sync/reconcileSnapshotNodes.ts";
 export type { GatewayApprovalRow } from "./sync/GatewayApprovalRow.ts";
+export type { GatewayDocRow } from "./sync/GatewayDocRow.ts";
 export type { GatewayRunEventRow } from "./sync/GatewayRunEventRow.ts";
 export type { GatewayRunNode } from "./sync/GatewayRunNode.ts";
 export type { GatewayRunRow } from "./sync/GatewayRunRow.ts";

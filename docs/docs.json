@@ -230,6 +230,7 @@
               "rpc/get-schema-signature",
               "rpc/list-workflows",
               "rpc/list-approvals",
+              "rpc/list-docs",
               "rpc/stream-run-events",
               "rpc/stream-dev-tools",
               "rpc/get-node-output",

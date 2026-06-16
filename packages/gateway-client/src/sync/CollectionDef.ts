@@ -16,6 +16,8 @@ export type CollectionDef<TRow extends object, TKey extends string | number = st
     method?: string;
     params?: unknown;
     rows?: (payload: unknown) => Iterable<TRow> | Promise<Iterable<TRow>>;
+    /** Refetch-only collections can opt into a bounded poll invalidator. */
+    pollMs?: number;
     stream?: GatewayCollectionStreamConfig<TRow, TKey>;
   };
   electric?: {

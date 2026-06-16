@@ -12,11 +12,14 @@ export * from "./alert-runtime.js";
 export * from "./approvals.js";
 export * from "./child-workflow.js";
 export * from "./events.js";
+export * from "./createDocWatcher.js";
 export * from "./getDefinedToolMetadata.js";
 export * from "./human-requests.js";
 export * from "./runtime-owner.js";
 export * from "./scheduler.js";
 export * from "./signals.js";
+export * from "./startDocFileSync.js";
+export * from "./syncDocsFromDisk.js";
 
 // Hot reload public surface (aggregated in hot/index.js)
 export * from "./hot/index.js";

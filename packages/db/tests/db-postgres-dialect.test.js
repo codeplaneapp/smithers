@@ -83,6 +83,7 @@ describe("SqlMessageStorage postgres dialect", () => {
         expect(ids).toContain("0001_current_tables");
         expect(ids).toContain("0014_current_indexes");
         expect(ids).toContain("0016_add_workspace_checkpoints");
+        expect(ids).toContain("0017_add_smithers_docs");
 
         await storage.ensureSchema();
         const after = await storage.queryAll("SELECT id FROM _smithers_schema_migrations ORDER BY id");

@@ -25,6 +25,7 @@ import { AgentTraceCollector } from "./AgentTraceCollector.js";
 import { getJjPointer, runJj, workspaceAdd } from "@smithers-orchestrator/vcs/jj";
 import { findVcsRoot } from "@smithers-orchestrator/vcs/find-root";
 import { startDurability } from "./startDurability.js";
+import { startDocFileSync } from "./startDocFileSync.js";
 import { restoreWorkspaceToLatestCheckpoint } from "./restoreWorkspace.js";
 import { runWithToolContext } from "@smithers-orchestrator/tool-context";
 import { vcsToolingStatus } from "@smithers-orchestrator/vcs/vcsToolingStatus";
@@ -3438,6 +3439,11 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                     cwd: taskRoot,
                     withSocket: true,
                 });
+                const docFileSync = await startDocFileSync({
+                    enabled: process.env.SMITHERS_DOCS_FILE_SYNC === "1",
+                    adapter,
+                    cwd: taskRoot,
+                });
                 // Tier 1 for in-process SDK agents: give their tools an ambient
                 // context (run/node/cwd + a Tier 1 snapshot hook) so defineTool
                 // snapshots after each side-effect tool. Only when durability is
@@ -3518,7 +3524,12 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         }
                         // Close the watcher and flush a final snapshot of the
                         // attempt's last settled write. No-op when disabled.
-                        await durability.stop();
+                        try {
+                            await durability.stop();
+                        }
+                        finally {
+                            await docFileSync.stop();
+                        }
                     }
                 }
                 catch (error) {

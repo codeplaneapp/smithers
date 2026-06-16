@@ -13,7 +13,7 @@ describe("gatewayClientSchemaVersion", () => {
     const offline = await gatewayClientSchemaVersion(() =>
       Promise.reject(new Error("gateway unreachable")),
     );
-    expect(offline).toBe("0016:offline");
+    expect(offline).toBe("0017:offline");
 
     // Recovery: the next caller re-attempts (memo was dropped on failure) and
     // adopts the live server signature instead of staying stuck offline.

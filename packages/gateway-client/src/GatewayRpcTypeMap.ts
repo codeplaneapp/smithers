@@ -14,6 +14,8 @@ import type {
   LaunchRunResponse,
   ListApprovalsRequest,
   ListApprovalsResponse,
+  ListDocsRequest,
+  ListDocsResponse,
   ListRunsRequest,
   ListWorkflowsRequest,
   ListWorkflowsResponse,
@@ -43,6 +45,7 @@ export type GatewayRpcRequestMap = {
   getSchemaSignature: GetSchemaSignatureRequest;
   listWorkflows: ListWorkflowsRequest;
   listApprovals: ListApprovalsRequest;
+  listDocs: ListDocsRequest;
   streamRunEvents: StreamRunEventsRequest;
   streamDevTools: StreamDevToolsRequest;
   getNodeOutput: NodeRequest;
@@ -66,6 +69,7 @@ export type GatewayRpcResponseMap = {
   getSchemaSignature: GetSchemaSignatureResponse;
   listWorkflows: ListWorkflowsResponse;
   listApprovals: ListApprovalsResponse;
+  listDocs: ListDocsResponse;
   streamRunEvents: StreamRunEventsResponse;
   streamDevTools: Record<string, unknown>;
   getNodeOutput: Record<string, unknown>;

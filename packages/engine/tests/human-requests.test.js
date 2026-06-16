@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { buildHumanRequestId } from "../src/human-requests.js";
-import { createTempRepo, runSmithers } from "../../smithers/tests/e2e-helpers.js";
+import { createTempRepo, pinSqliteBackend, runSmithers } from "../../smithers/tests/e2e-helpers.js";
 function createAdapter() {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);
@@ -18,6 +18,7 @@ function createAdapter() {
  * @param {ReturnType<typeof createTempRepo>} repo
  */
 function openRepoDb(repo) {
+    pinSqliteBackend(repo.dir);
     const sqlite = new Database(repo.path("smithers.db"));
     const db = drizzle(sqlite);
     ensureSmithersTables(db);

@@ -58,7 +58,7 @@ function createPulser() {
       set.clear();
       for (const resolve of resolvers) resolve();
     },
-    stream(fingerprint: string, signal: AbortSignal): AsyncIterable<SyncStreamFrame> {
+    stream(fingerprint: string, signal: AbortSignal, pollMs?: number): AsyncIterable<SyncStreamFrame> {
       return {
         async *[Symbol.asyncIterator]() {
           while (!signal.aborted) {
@@ -70,14 +70,22 @@ function createPulser() {
                   resolve();
                   return;
                 }
+                let timer: ReturnType<typeof setTimeout> | undefined;
                 const set = waiters.get(fingerprint) ?? new Set();
-                set.add(resolve);
+                const done = () => {
+                  if (timer) clearTimeout(timer);
+                  set.delete(done);
+                  resolve();
+                };
+                set.add(done);
                 waiters.set(fingerprint, set);
+                if (pollMs !== undefined && Number.isFinite(pollMs) && pollMs > 0) {
+                  timer = setTimeout(done, pollMs);
+                }
                 signal.addEventListener(
                   "abort",
                   () => {
-                    set.delete(resolve);
-                    resolve();
+                    done();
                   },
                   { once: true },
                 );
@@ -153,8 +161,11 @@ export function createGatewaySyncSource(options: GatewaySyncSourceOptions): Gate
         const fingerprint = typeof params === "string"
           ? params
           : String((params as { fingerprint?: unknown })?.fingerprint ?? "");
+        const pollMs = typeof (params as { pollMs?: unknown })?.pollMs === "number"
+          ? (params as { pollMs: number }).pollMs
+          : undefined;
         const signal = streamOptions.signal ?? new AbortController().signal;
-        return pulser.stream(fingerprint, signal);
+        return pulser.stream(fingerprint, signal, pollMs);
       }
       if (!base.stream) {
         throw new Error("Gateway transport has no stream implementation.");
@@ -200,7 +211,7 @@ export function createGatewaySyncSource(options: GatewaySyncSourceOptions): Gate
           }
         : {
             scope: INVALIDATE_SCOPE,
-            params: { fingerprint: id },
+            params: { fingerprint: id, ...(def.gateway.pollMs === undefined ? {} : { pollMs: def.gateway.pollMs }) },
             refetchOnFrame: true,
             refetchMode: "replace" as const,
             reconnectOnGracefulEnd: false,

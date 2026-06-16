@@ -1,6 +1,7 @@
 import type { Collection } from "@tanstack/react-db";
 import type {
   GatewayApprovalRow,
+  GatewayDocRow,
   GatewayRunEventRow,
   GatewayRunNode,
   GatewayRunRow,
@@ -13,6 +14,7 @@ import type {
 } from "@smithers-orchestrator/gateway-client";
 import type {
   ListApprovalsRequest,
+  ListDocsRequest,
   ListRunsRequest,
   ListWorkflowsRequest,
 } from "@smithers-orchestrator/gateway/rpc";
@@ -95,6 +97,7 @@ export type GatewayCollections = {
   run(runId: string): Collection<GatewayRunRow, string>;
   workflows(params?: ListWorkflowsRequest): Collection<GatewayWorkflowRow, string>;
   approvals(params?: ListApprovalsRequest): Collection<GatewayApprovalRow, string>;
+  tickets(params?: ListDocsRequest): Collection<GatewayDocRow, string>;
   /** Flattened devtools run-node tree, reconciled per devtools frame. */
   nodes(runId: string): Collection<GatewayRunNode, string>;
   /** Bounded append-only run-event ring. */

@@ -22,3 +22,4 @@ export { smithersCron } from "./smithersCron.js";
 export { smithersSchemaMigrations } from "./smithersSchemaMigrations.js";
 export { smithersWorkspaceStates } from "./smithersWorkspaceStates.js";
 export { smithersWorkspaceCheckpoints } from "./smithersWorkspaceCheckpoints.js";
+export { smithersDocs } from "./smithersDocs.js";

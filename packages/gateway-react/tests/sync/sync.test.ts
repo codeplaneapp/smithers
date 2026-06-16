@@ -37,6 +37,7 @@ import {
   useGatewayRunEvents,
   useGatewayRunTree,
   useGatewayRuns,
+  useGatewayTickets,
   useGatewayWorkflows,
   useSyncMutation,
   useSyncQuery,
@@ -777,11 +778,14 @@ describe("legacy synced hooks over collections", () => {
     await harness.unmount();
   });
 
-  test("useGatewayApprovals and useGatewayWorkflows surface their lists", async () => {
+  test("useGatewayApprovals, useGatewayWorkflows, and useGatewayTickets surface their lists", async () => {
     const registry = createGatewayCollections({
       client: makeTransport((method) => {
         if (method === "listApprovals") {
           return Promise.resolve([{ runId: "run-1", nodeId: "approve", iteration: 0, requestedAtMs: 1 }]);
+        }
+        if (method === "listDocs") {
+          return Promise.resolve([{ path: "conflicts/demo.json", kind: "conflict", content: "{}", contentHash: "hash", updatedAtMs: 2, deletedAtMs: null }]);
         }
         if (method === "listWorkflows") return Promise.resolve([{ key: "deploy", hasUi: true, uiPath: "/x" }]);
         return Promise.resolve([]);
@@ -789,17 +793,20 @@ describe("legacy synced hooks over collections", () => {
     });
 
     let approvals: ReturnType<typeof useGatewayApprovals> | undefined;
+    let tickets: ReturnType<typeof useGatewayTickets> | undefined;
     let workflows: ReturnType<typeof useGatewayWorkflows> | undefined;
     function Probe() {
       approvals = useGatewayApprovals({ filter: { runId: "run-1" } });
+      tickets = useGatewayTickets();
       workflows = useGatewayWorkflows({ filter: { hasUi: true } });
       return null;
     }
 
     const harness = await mountHarness();
     await harness.render(provider(registry, createElement(Probe)));
-    await waitFor(() => (approvals?.data?.length ?? 0) === 1 && (workflows?.data?.length ?? 0) === 1);
+    await waitFor(() => (approvals?.data?.length ?? 0) === 1 && (tickets?.data?.length ?? 0) === 1 && (workflows?.data?.length ?? 0) === 1);
     expect(approvals?.data?.[0]?.nodeId).toBe("approve");
+    expect(tickets?.data?.[0]?.kind).toBe("conflict");
     expect(workflows?.data?.[0]?.key).toBe("deploy");
 
     await harness.unmount();

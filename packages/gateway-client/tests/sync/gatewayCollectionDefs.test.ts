@@ -97,3 +97,23 @@ describe("gatewayCollectionDefs.nodes", () => {
     expect(collection.status).toBe("ready");
   });
 });
+
+describe("gatewayCollectionDefs.tickets", () => {
+  test("maps listDocs rows into the persisted tickets collection", async () => {
+    const def = gatewayCollectionDefs.tickets();
+    expect(def.key[0]).toBe("gateway:listDocs");
+    expect(def.persisted).toBe(true);
+    expect(def.maxRows).toBe(4_096);
+    expect(def.gateway.method).toBe("listDocs");
+    expect(def.gateway.params).toEqual({ filter: { includeDeleted: true } });
+    expect(def.gateway.pollMs).toBe(1_000);
+    expect(def.getKey({
+      path: "tickets/demo.md",
+      kind: "ticket",
+      content: "# Demo\n",
+      contentHash: "hash",
+      updatedAtMs: 1,
+      deletedAtMs: null,
+    })).toBe("tickets/demo.md");
+  });
+});

@@ -505,6 +505,10 @@ export class SmithersGatewayClient {
     return this.rpc("listApprovals", params);
   }
 
+  listDocs(params: GatewayRpcParams<"listDocs"> = {}) {
+    return this.rpc("listDocs", params);
+  }
+
   getNodeOutput(params: GatewayRpcParams<"getNodeOutput">) {
     return this.rpc("getNodeOutput", params);
   }

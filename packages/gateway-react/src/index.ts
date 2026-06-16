@@ -3,6 +3,7 @@ export { SmithersGatewayContext } from "./SmithersGatewayContext.ts";
 export { SmithersGatewayProvider } from "./SmithersGatewayProvider.ts";
 export { useGatewayActions } from "./useGatewayActions.ts";
 export { useGatewayApprovals } from "./useGatewayApprovals.ts";
+export { useGatewayTickets } from "./useGatewayTickets.ts";
 export { useGatewayNodeOutput } from "./useGatewayNodeOutput.ts";
 export { useGatewayRpc } from "./useGatewayRpc.ts";
 export { useGatewayRun } from "./useGatewayRun.ts";
@@ -41,6 +42,8 @@ export type { GatewayConnectionState, GatewayConnectionStatus } from "@smithers-
 export type { PersistenceAdapter, PersistedRow, SavePersistedRowsRequest } from "./sync/PersistenceAdapter.ts";
 export { createMemoryPersistenceAdapter } from "./sync/createMemoryPersistenceAdapter.ts";
 export { persistedCollectionOptions } from "./sync/persistedCollectionOptions.ts";
+export { materializeGatewayDocs } from "./sync/materializeGatewayDocs.ts";
+export type { GatewayDocMaterializerFs, MaterializeGatewayDocsResult } from "./sync/materializeGatewayDocs.ts";
 // Platform persistence adapters are SUBPATH-ONLY, never re-exported from this
 // barrel. They must load lazily on the path that needs them: the web build
 // imports `@smithers-orchestrator/gateway-react/opfsJsonPersistenceAdapter`, the

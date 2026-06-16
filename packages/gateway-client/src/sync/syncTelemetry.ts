@@ -9,7 +9,9 @@ export type SyncTelemetryEvent = {
     | "sync.mutation.optimistic_apply"
     | "sync.mutation.handler_rpc"
     | "sync.mutation.confirm"
-    | "sync.mutation.rollback";
+    | "sync.mutation.rollback"
+    | "docs.materialize.write"
+    | "docs.materialize.delete";
   collectionId: string;
   key: readonly unknown[];
   method?: string;
@@ -20,6 +22,9 @@ export type SyncTelemetryEvent = {
   durationMs?: number;
   count?: number;
   rollbackCount?: number;
+  path?: string;
+  kind?: string;
+  hash?: string;
   /** Cumulative frames shed from the bounded apply queue (type "sync.backpressure"). */
   dropped?: number;
   error?: string;
@@ -65,6 +70,9 @@ export function emitSyncTelemetry(event: SyncTelemetryEvent): void {
         "smithers.sync.duration_ms": event.durationMs,
         "smithers.sync.count": event.count,
         "smithers.sync.rollback_count": event.rollbackCount,
+        "smithers.sync.path": event.path,
+        "smithers.sync.kind": event.kind,
+        "smithers.sync.hash": event.hash,
         "smithers.sync.dropped": event.dropped,
         "smithers.sync.error": event.error,
       },

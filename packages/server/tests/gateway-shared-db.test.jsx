@@ -123,7 +123,7 @@ describe("gateway — many workflows sharing one DB", () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(response.payload.schemaVersion).toBe("0016");
+    expect(response.payload.schemaVersion).toBe("0017");
     expect(typeof response.payload.signature).toBe("string");
     expect(typeof response.payload.components._smithers_runs).toBe("string");
   });
