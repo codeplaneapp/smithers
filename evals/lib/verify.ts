@@ -42,13 +42,15 @@ export function normalizeVerify(raw: unknown): VerifySpec {
   };
 }
 
-/** Normalize a CLI-ish answer so `smithers ps`, `bunx smithers-orchestrator ps`,
- * and "`ps`" all compare equal. */
+/** Normalize a short CLI/component answer so `smithers ps`,
+ * `bunx smithers-orchestrator ps`, "`ps`" all compare equal, and a JSX component
+ * answer `<Parallel>` / `</Task>` compares equal to its bare name `Parallel`. */
 export function normalizeCliAnswer(s: string): string {
   return s
     .toLowerCase()
-    .replace(/`/g, "")
+    .replace(/[`<>/]/g, "") // code ticks + JSX angle brackets + closing-tag slash
     .replace(/^\s*(bunx\s+)?smithers(-orchestrator)?\s+/g, "")
+    .replace(/[.,;:]+$/g, "") // trailing punctuation
     .replace(/\s+/g, " ")
     .trim();
 }
