@@ -11,8 +11,8 @@ import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { EVAL_DB_PATH } from "./paths.js";
 import { resolveCandidate, resolveJudge } from "./model-matrix.js";
-import { candidateReport, type CandidateReport, evalVerdict } from "./report-schema.js";
-import { docsGapScorer, frictionScorer, oneShotScorer, schemaAdherenceScorer, uiQualityScorer } from "./scorers.js";
+import { candidateReport, type CandidateReport, evalVerdict, qualityScore } from "./report-schema.js";
+import { docsGapScorer, frictionScorer, oneShotScorer, schemaAdherenceScorer } from "./scorers.js";
 import { computeVerdict, normalizeVerify, type VerifyKind } from "./verify.js";
 
 const verifyShape = z.object({
@@ -116,6 +116,17 @@ function judgePrompt(task: string, report: { artifact?: string; summary?: string
     .join("\n");
 }
 
+function qualityPrompt(report: { artifact?: string }): string {
+  return [
+    "You rate a Smithers custom workflow UI bundle (React + smithers-orchestrator/gateway-react).",
+    "Score 0-1 on: correct use of createGatewayReactRoot + the gateway hooks (useGatewayRun/RunEvents/NodeOutput/Approvals/Actions/Runs); handling of loading/empty/error states; scoping to the ?runId in location.search; clean component structure; sensible layout/UX and basic accessibility; and absence of obvious bugs or invented APIs.",
+    "",
+    `UI BUNDLE:\n${(report.artifact ?? "(none)").slice(0, 6000)}`,
+    "",
+    "Set `score` (0-1) and a short `reason`.",
+  ].join("\n");
+}
+
 export type FluencyEvalOptions = {
   /** Stable suite id — also the eval-report filename stem. */
   suite: string;
@@ -129,6 +140,7 @@ export function createFluencyEval(opts: FluencyEvalOptions) {
       input: inputSchema,
       candidate: candidateReport,
       verdict: evalVerdict,
+      quality: qualityScore,
     },
     { dbPath: EVAL_DB_PATH },
   );
@@ -144,18 +156,16 @@ export function createFluencyEval(opts: FluencyEvalOptions) {
     const judge = resolveJudge(judgeModel);
     const report = ctx.outputMaybe("candidate", { nodeId: "candidate" }) as CandidateReport | undefined;
 
-    // Scorers grade non-binary quality (never block the run). UI-authoring cases
-    // additionally get the ui-quality judge.
-    const baseScorers = {
+    // Scorers grade non-binary quality (never block the run). UI-authoring (build)
+    // cases get their AI quality score from a first-class `quality` Task instead
+    // (a fire-and-forget judge scorer gets dropped when the judge is slow).
+    const scorers = {
       schema: { scorer: schemaAdherenceScorer() },
       oneShot: { scorer: oneShotScorer },
       friction: { scorer: frictionScorer },
       docsGap: { scorer: docsGapScorer(judge), sampling: { type: "ratio" as const, rate: 0.34 } },
     };
-    const scorers =
-      verify.kind === "build"
-        ? { ...baseScorers, uiQuality: { scorer: uiQualityScorer(judge) } }
-        : baseScorers;
+    const isUi = verify.kind === "build";
 
     return (
       <Workflow name={`fluency-${opts.suite}`}>
@@ -186,6 +196,22 @@ export function createFluencyEval(opts: FluencyEvalOptions) {
                 </Task>
               )
             : null}
+
+          {/* 3 — UI (build) cases: a first-class AI quality score. A judge Task
+              (not a fire-and-forget scorer) so the score reliably persists;
+              continueOnFail keeps a flaky judge from failing the eval. */}
+          {report && isUi ? (
+            <Task
+              id="quality"
+              output={outputs.quality}
+              agent={judge}
+              continueOnFail
+              retries={1}
+              heartbeatTimeoutMs={300_000}
+            >
+              {qualityPrompt(report)}
+            </Task>
+          ) : null}
         </Sequence>
       </Workflow>
     );

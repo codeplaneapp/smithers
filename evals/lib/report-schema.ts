@@ -87,5 +87,14 @@ export const evalVerdict = z.object({
   checks: z.array(verdictCheck).default([]).describe("Per-check breakdown."),
 });
 
+/** First-class AI quality score for UI-authoring (build) cases. Persisted as a
+ * workflow output (a judge Task), not a best-effort async scorer, so the score
+ * reliably lands even when the judge is slow. */
+export const qualityScore = z.object({
+  score: z.number().min(0).max(1).describe("UI quality 0-1."),
+  reason: z.string().describe("Why this score."),
+});
+
 export type CandidateReport = z.infer<typeof candidateReport>;
 export type EvalVerdict = z.infer<typeof evalVerdict>;
+export type QualityScore = z.infer<typeof qualityScore>;
