@@ -55,6 +55,12 @@ export type GatewayStreamHandle = {
   stats: { totalSeen: number };
 };
 
+export type GatewayOptimisticMutationRequest<TVars, TData> = {
+  method: string;
+  vars: TVars;
+  commit: (vars: TVars) => Promise<TData>;
+};
+
 /**
  * The registry handed to `<SyncProvider>`. It owns one TanStack DB collection
  * per gateway resource (built with `createGatewayCollection` over the app's
@@ -77,6 +83,13 @@ export type GatewayCollections = {
 
   /** Re-pull every memoized collection/query whose key matches `prefix`. */
   invalidate(prefix: SyncKey): Promise<void>;
+  /**
+   * Apply a known gateway write through TanStack DB optimistic transactions.
+   * Returns undefined for unknown writes so callers can fall back to plain RPC.
+   */
+  optimisticMutation<TVars, TData>(
+    request: GatewayOptimisticMutationRequest<TVars, TData>,
+  ): Promise<TData> | undefined;
 
   runs(params?: ListRunsRequest): Collection<GatewayRunSummaryRow, string>;
   run(runId: string): Collection<GatewayRunRow, string>;

@@ -1,10 +1,10 @@
 import * as react from 'react';
 import { ReactElement, ReactNode } from 'react';
 import * as _smithers_orchestrator_gateway_client from '@smithers-orchestrator/gateway-client';
-import { SmithersGatewayClientOptions, SmithersGatewayClient, GatewayRpcParams, GatewayRpcPayload, GatewayEventFrame, GatewayBackoffOptions, SyncTransport, SyncKey, GatewayRunSummaryRow, GatewayRunRow, GatewayWorkflowRow, GatewayApprovalRow, GatewayRunNode, GatewayRunEventRow, SyncStreamFrame, GatewayConnectionState, SyncSource, GatewayConnectionStatus } from '@smithers-orchestrator/gateway-client';
+import { SmithersGatewayClientOptions, SmithersGatewayClient, GatewayApprovalRow, GatewayRpcParams, GatewayRpcPayload, GatewayRunRow, GatewayEventFrame, GatewayRunSummaryRow, GatewayWorkflowRow, GatewayBackoffOptions, SyncTransport, SyncKey, GatewayRunNode, GatewayRunEventRow, SyncStreamFrame, GatewayConnectionState, SyncSource, GatewayConnectionStatus } from '@smithers-orchestrator/gateway-client';
 export { GatewayConnectionState, GatewayConnectionStatus } from '@smithers-orchestrator/gateway-client';
 import * as _smithers_orchestrator_gateway_rpc from '@smithers-orchestrator/gateway/rpc';
-import { ListApprovalsRequest, ListApprovalsResponse, GatewayRpcMethod, ListRunsRequest, ListWorkflowsRequest, ListWorkflowsResponse } from '@smithers-orchestrator/gateway/rpc';
+import { ListApprovalsRequest, GatewayRpcMethod, ListRunsRequest, ListWorkflowsRequest } from '@smithers-orchestrator/gateway/rpc';
 import { Collection, CollectionConfig } from '@tanstack/react-db';
 
 declare function createGatewayReactRoot(element: ReactElement, options?: SmithersGatewayClientOptions & {
@@ -45,7 +45,7 @@ type GatewayAsyncState<T> = {
  * waiting-approval or a `submitApproval` mutation). Same `GatewayAsyncState`
  * shape the RPC hook returned.
  */
-declare function useGatewayApprovals(params?: ListApprovalsRequest): GatewayAsyncState<ListApprovalsResponse>;
+declare function useGatewayApprovals(params?: ListApprovalsRequest): GatewayAsyncState<GatewayApprovalRow[]>;
 
 declare function useGatewayNodeOutput(params: {
     runId: string | undefined;
@@ -63,7 +63,7 @@ declare function useGatewayRpc<Method extends GatewayRpcMethod>(method: Method, 
  * `streamRunEvents`, so each lifecycle frame upserts the row without a
  * whole-tree refetch). Same `GatewayAsyncState` shape the RPC hook returned.
  */
-declare function useGatewayRun(runId: string | undefined): GatewayAsyncState<GatewayRpcPayload<"getRun">>;
+declare function useGatewayRun(runId: string | undefined): GatewayAsyncState<GatewayRunRow>;
 
 /**
  * Live run-event buffer over the bounded `runEvents` collection
@@ -86,14 +86,14 @@ declare function useGatewayRunEvents(runId: string | undefined, options?: {
  * Live run list over the `runs` collection (initial `listRuns`, re-pulled on
  * `invalidate`). Same `GatewayAsyncState` shape the RPC hook returned.
  */
-declare function useGatewayRuns(params?: ListRunsRequest): GatewayAsyncState<GatewayRpcPayload<"listRuns">>;
+declare function useGatewayRuns(params?: ListRunsRequest): GatewayAsyncState<GatewayRunSummaryRow[]>;
 
 /**
  * Live workflow list over the `workflows` collection (initial `listWorkflows`,
  * re-pulled on `invalidate`). Same `GatewayAsyncState` shape the RPC hook
  * returned.
  */
-declare function useGatewayWorkflows(params?: ListWorkflowsRequest): GatewayAsyncState<ListWorkflowsResponse>;
+declare function useGatewayWorkflows(params?: ListWorkflowsRequest): GatewayAsyncState<GatewayWorkflowRow[]>;
 
 declare function useSmithersGateway(): _smithers_orchestrator_gateway_client.SmithersGatewayClient;
 
@@ -193,6 +193,11 @@ type GatewayStreamHandle = {
         totalSeen: number;
     };
 };
+type GatewayOptimisticMutationRequest<TVars, TData> = {
+    method: string;
+    vars: TVars;
+    commit: (vars: TVars) => Promise<TData>;
+};
 /**
  * The registry handed to `<SyncProvider>`. It owns one TanStack DB collection
  * per gateway resource (built with `createGatewayCollection` over the app's
@@ -215,6 +220,11 @@ type GatewayCollections = {
     }): Promise<T>;
     /** Re-pull every memoized collection/query whose key matches `prefix`. */
     invalidate(prefix: SyncKey): Promise<void>;
+    /**
+     * Apply a known gateway write through TanStack DB optimistic transactions.
+     * Returns undefined for unknown writes so callers can fall back to plain RPC.
+     */
+    optimisticMutation<TVars, TData>(request: GatewayOptimisticMutationRequest<TVars, TData>): Promise<TData> | undefined;
     runs(params?: ListRunsRequest): Collection<GatewayRunSummaryRow, string>;
     run(runId: string): Collection<GatewayRunRow, string>;
     workflows(params?: ListWorkflowsRequest): Collection<GatewayWorkflowRow, string>;
@@ -491,4 +501,4 @@ type UseGatewayConnectionStatusResult = {
  */
 declare function useGatewayConnectionStatus(): UseGatewayConnectionStatusResult;
 
-export { type CreateGatewayCollectionsOptions, type GatewayAsyncState, type GatewayCollectionStatusRow, type GatewayCollections, type GatewayExtensionStreamState, type GatewayQueryHandle, type GatewayQueryRow, type GatewayStreamHandle, type GatewayStreamRow, type NodeStatus, type PersistedRow, type PersistenceAdapter, type SavePersistedRowsRequest, SmithersGatewayContext, SmithersGatewayProvider, SyncContext, type SyncMutationOptions, SyncProvider, type SyncSourceHooks, type UseGatewayConnectionStatusResult, type UseGatewayRunTreeResult, type UseSyncMutationResult, type UseSyncMutationStatus, type UseSyncQueryOptions, type UseSyncQueryResult, type UseSyncSubscriptionOptions, type UseSyncSubscriptionResult, createGatewayCollections, createGatewayReactRoot, createMemoryPersistenceAdapter, persistedCollectionOptions, useGatewayActions, useGatewayApprovals, useGatewayConnectionStatus, useGatewayExtensionAction, useGatewayExtensionResource, useGatewayExtensionStream, useGatewayMutation, useGatewayNodeOutput, useGatewayQuery, useGatewayRpc, useGatewayRun, useGatewayRunEvents, useGatewayRunStream, useGatewayRunTree, useGatewayRuns, useGatewayWorkflows, useSmithersGateway, useSyncClient, useSyncMutation, useSyncQuery, useSyncSubscription };
+export { type CreateGatewayCollectionsOptions, type GatewayAsyncState, type GatewayCollectionStatusRow, type GatewayCollections, type GatewayExtensionStreamState, type GatewayOptimisticMutationRequest, type GatewayQueryHandle, type GatewayQueryRow, type GatewayStreamHandle, type GatewayStreamRow, type NodeStatus, type PersistedRow, type PersistenceAdapter, type SavePersistedRowsRequest, SmithersGatewayContext, SmithersGatewayProvider, SyncContext, type SyncMutationOptions, SyncProvider, type SyncSourceHooks, type UseGatewayConnectionStatusResult, type UseGatewayRunTreeResult, type UseSyncMutationResult, type UseSyncMutationStatus, type UseSyncQueryOptions, type UseSyncQueryResult, type UseSyncSubscriptionOptions, type UseSyncSubscriptionResult, createGatewayCollections, createGatewayReactRoot, createMemoryPersistenceAdapter, persistedCollectionOptions, useGatewayActions, useGatewayApprovals, useGatewayConnectionStatus, useGatewayExtensionAction, useGatewayExtensionResource, useGatewayExtensionStream, useGatewayMutation, useGatewayNodeOutput, useGatewayQuery, useGatewayRpc, useGatewayRun, useGatewayRunEvents, useGatewayRunStream, useGatewayRunTree, useGatewayRuns, useGatewayWorkflows, useSmithersGateway, useSyncClient, useSyncMutation, useSyncQuery, useSyncSubscription };

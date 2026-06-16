@@ -5,13 +5,21 @@ export type SyncTelemetryEvent = {
     | "sync.gap_resync"
     | "sync.error"
     | "sync.backpressure"
-    | "sync.reconnect";
+    | "sync.reconnect"
+    | "sync.mutation.optimistic_apply"
+    | "sync.mutation.handler_rpc"
+    | "sync.mutation.confirm"
+    | "sync.mutation.rollback";
   collectionId: string;
   key: readonly unknown[];
+  method?: string;
+  mutationId?: string;
   scope?: string;
   seq?: number;
   lagMs?: number;
+  durationMs?: number;
   count?: number;
+  rollbackCount?: number;
   /** Cumulative frames shed from the bounded apply queue (type "sync.backpressure"). */
   dropped?: number;
   error?: string;
@@ -50,9 +58,13 @@ export function emitSyncTelemetry(event: SyncTelemetryEvent): void {
       attributes: {
         "smithers.sync.collection_id": event.collectionId,
         "smithers.sync.scope": event.scope,
+        "smithers.sync.method": event.method,
+        "smithers.sync.mutation_id": event.mutationId,
         "smithers.sync.seq": event.seq,
         "smithers.sync.lag_ms": event.lagMs,
+        "smithers.sync.duration_ms": event.durationMs,
         "smithers.sync.count": event.count,
+        "smithers.sync.rollback_count": event.rollbackCount,
         "smithers.sync.dropped": event.dropped,
         "smithers.sync.error": event.error,
       },

@@ -63,6 +63,13 @@ export type GatewayCollectionConfig<TRow extends object, TKey extends string | n
   onAuthError?: (error: Error) => void;
   onError?: (error: Error) => void;
   onReady?: () => void;
+  /**
+   * Fired after each `refetchOnFrame` cycle settles (success or RPC failure), so
+   * a caller can await "the refetch triggered by my invalidate has applied".
+   * The unified write path uses this to keep an optimistic row visible until the
+   * confirmed rows are buffered as a synced transaction.
+   */
+  onRefetched?: () => void;
   onInsert?: CollectionConfig<TRow, TKey>["onInsert"];
   onUpdate?: CollectionConfig<TRow, TKey>["onUpdate"];
   onDelete?: CollectionConfig<TRow, TKey>["onDelete"];
@@ -302,11 +309,17 @@ export function createGatewayCollection<TRow extends object, TKey extends string
             return;
           }
           if (stream.refetchOnFrame) {
-            const rows = await refetchRows();
-            if (stream.refetchMode === "upsert") {
-              applyWrites(rows.map((value) => ({ type: "upsert" as const, value })), stream.maxRows);
-            } else {
-              replaceRows(rows, stream.maxRows);
+            try {
+              const rows = await refetchRows();
+              if (stream.refetchMode === "upsert") {
+                applyWrites(rows.map((value) => ({ type: "upsert" as const, value })), stream.maxRows);
+              } else {
+                replaceRows(rows, stream.maxRows);
+              }
+            } finally {
+              // Signal even on a failed refetch so a confirmation waiter is never
+              // left hanging; the next live frame still reconciles the rows.
+              config.onRefetched?.();
             }
           }
         };

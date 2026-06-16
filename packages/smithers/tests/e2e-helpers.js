@@ -154,6 +154,17 @@ export function runSmithers(args, options) {
     };
 }
 /**
+ * Pin a workspace to the legacy bun:sqlite backend by writing
+ * `.smithers/smithers.config.ts`. Read-command fixtures seed a SQLite store
+ * directly, so they must declare `backend: "sqlite"` or the fail-loud migration
+ * gate (default pglite) refuses to silently read the legacy store.
+ *
+ * @param {string} dir workspace root (the CLI cwd)
+ */
+export function pinSqliteBackend(dir) {
+    writeFile(join(dir, ".smithers", "smithers.config.ts"), 'export default { backend: "sqlite" };\n');
+}
+/**
  * @param {string} dir
  * @param {Record<string, string | undefined>} [env]
  */

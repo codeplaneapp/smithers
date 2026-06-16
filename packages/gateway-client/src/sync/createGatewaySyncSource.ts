@@ -1,6 +1,6 @@
 import type { CollectionConfig } from "@tanstack/db";
 import type { CollectionDef } from "./CollectionDef.ts";
-import type { SyncSource } from "./SyncSource.ts";
+import type { SyncSource, SyncSourceWriteRequest } from "./SyncSource.ts";
 import type { SyncKey } from "./SyncKey.ts";
 import { syncKeyFingerprint, syncKeyMatches } from "./SyncKey.ts";
 import type { SyncStreamFrame, SyncStreamOptions, SyncTransport } from "./SyncTransport.ts";
@@ -17,9 +17,13 @@ type GatewaySyncSourceOptions = {
 type GatewaySyncSource = SyncSource & {
   client: SyncTransport;
   invalidate(prefix: SyncKey): void;
+  commit<TData>(request: SyncSourceWriteRequest<unknown>): Promise<TData>;
+  confirm(prefix: SyncKey): Promise<void>;
 };
 
 const INVALIDATE_SCOPE = "smithers:invalidate";
+/** Safety bound for an awaited confirm refetch (a live sync resolves in ms). */
+const CONFIRM_REFETCH_TIMEOUT_MS = 10_000;
 
 function isAuthError(error: unknown): boolean {
   const record = error as { code?: unknown; status?: unknown } | undefined;
@@ -38,36 +42,48 @@ function asError(cause: unknown): Error {
 
 function createPulser() {
   const waiters = new Map<string, Set<() => void>>();
+  // A pulse with no current waiter is remembered and delivered to the next
+  // subscriber. Without this a pulse fired while the stream loop is mid-refetch
+  // (between awaits) would be lost, so an awaited confirm could hang on a
+  // refetch that never runs.
+  const pending = new Set<string>();
   return {
     pulse(fingerprint: string) {
       const set = waiters.get(fingerprint);
-      if (!set || set.size === 0) return;
-      const pending = Array.from(set);
+      if (!set || set.size === 0) {
+        pending.add(fingerprint);
+        return;
+      }
+      const resolvers = Array.from(set);
       set.clear();
-      for (const resolve of pending) resolve();
+      for (const resolve of resolvers) resolve();
     },
     stream(fingerprint: string, signal: AbortSignal): AsyncIterable<SyncStreamFrame> {
       return {
         async *[Symbol.asyncIterator]() {
           while (!signal.aborted) {
-            await new Promise<void>((resolve) => {
-              if (signal.aborted) {
-                resolve();
-                return;
-              }
-              const set = waiters.get(fingerprint) ?? new Set();
-              set.add(resolve);
-              waiters.set(fingerprint, set);
-              signal.addEventListener(
-                "abort",
-                () => {
-                  set.delete(resolve);
+            if (pending.has(fingerprint)) {
+              pending.delete(fingerprint);
+            } else {
+              await new Promise<void>((resolve) => {
+                if (signal.aborted) {
                   resolve();
-                },
-                { once: true },
-              );
-            });
-            if (signal.aborted) return;
+                  return;
+                }
+                const set = waiters.get(fingerprint) ?? new Set();
+                set.add(resolve);
+                waiters.set(fingerprint, set);
+                signal.addEventListener(
+                  "abort",
+                  () => {
+                    set.delete(resolve);
+                    resolve();
+                  },
+                  { once: true },
+                );
+              });
+              if (signal.aborted) return;
+            }
             yield { key: ["smithers:invalidate", fingerprint], event: "invalidate", payload: undefined };
           }
         },
@@ -76,9 +92,41 @@ function createPulser() {
   };
 }
 
+/**
+ * Resolves the next time `signal()` is called for an id, or after a timeout.
+ * The write path registers a waiter, pulses the collection, and awaits this so
+ * the confirmed refetch is buffered before the optimistic transaction completes.
+ */
+function createRefetchWaiters() {
+  const waiters = new Map<string, Set<() => void>>();
+  return {
+    signal(id: string) {
+      const set = waiters.get(id);
+      if (!set || set.size === 0) return;
+      const resolvers = Array.from(set);
+      set.clear();
+      for (const resolve of resolvers) resolve();
+    },
+    wait(id: string, timeoutMs: number): Promise<void> {
+      return new Promise<void>((resolve) => {
+        const set = waiters.get(id) ?? new Set<() => void>();
+        const done = () => {
+          clearTimeout(timer);
+          set.delete(done);
+          resolve();
+        };
+        const timer = setTimeout(done, timeoutMs);
+        set.add(done);
+        waiters.set(id, set);
+      });
+    },
+  };
+}
+
 export function createGatewaySyncSource(options: GatewaySyncSourceOptions): GatewaySyncSource {
   const connection = createConnectionObserver();
   const pulser = createPulser();
+  const refetchWaiters = createRefetchWaiters();
   const invalidators = new Map<string, { key: SyncKey; run: () => void }>();
   const base = options.transport;
 
@@ -170,6 +218,7 @@ export function createGatewaySyncSource(options: GatewaySyncSourceOptions): Gate
         onAuthError: options.onAuthError,
         onError: (error) => options.onCollectionError?.(id, error),
         onReady: () => options.onCollectionReady?.(id),
+        onRefetched: () => refetchWaiters.signal(id),
       });
     },
     status: () => connection,
@@ -177,6 +226,25 @@ export function createGatewaySyncSource(options: GatewaySyncSourceOptions): Gate
       for (const { key, run } of invalidators.values()) {
         if (syncKeyMatches(key, prefix)) run();
       }
+    },
+    commit<TData>(request: SyncSourceWriteRequest<unknown>): Promise<TData> {
+      return transport.rpc(request.method, request.vars) as Promise<TData>;
+    },
+    async confirm(prefix: SyncKey): Promise<void> {
+      const ids: string[] = [];
+      for (const [id, { key }] of invalidators) {
+        if (syncKeyMatches(key, prefix)) ids.push(id);
+      }
+      if (ids.length === 0) return;
+      await Promise.all(
+        ids.map((id) => {
+          // Register the waiter BEFORE pulsing so the refetch the pulse triggers
+          // is the one that resolves it.
+          const landed = refetchWaiters.wait(id, CONFIRM_REFETCH_TIMEOUT_MS);
+          pulser.pulse(id);
+          return landed;
+        }),
+      );
     },
     reset() {
       invalidators.clear();

@@ -7,6 +7,7 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { pinSqliteBackend } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 const CLI_ENTRY = resolve(import.meta.dir, "..", "src", "index.js");
 
@@ -40,6 +41,7 @@ function runCli(args, extraEnv = {}) {
 }
 
 async function seedFixtureDb() {
+    pinSqliteBackend(fixtureDir);
     const dbPath = join(fixtureDir, "smithers.db");
     if (existsSync(dbPath)) return;
     const sqlite = new Database(dbPath);

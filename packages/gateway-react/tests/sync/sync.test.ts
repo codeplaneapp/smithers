@@ -21,6 +21,7 @@ import {
   gatewayKeys,
   gatewayCollectionDefs,
   syncKeyFingerprint,
+  type SyncTelemetryEvent,
   type SyncStreamFrame,
   type SyncTransport,
 } from "@smithers-orchestrator/gateway-client";
@@ -30,6 +31,7 @@ import {
   createMemoryPersistenceAdapter,
   useGatewayApprovals,
   useGatewayConnectionStatus,
+  useGatewayMutation,
   useGatewayQuery,
   useGatewayRun,
   useGatewayRunEvents,
@@ -162,6 +164,23 @@ function makeTransport(rpc: SyncTransport["rpc"]) {
 
 function provider(registry: GatewayCollections, child: ReactElement): ReactElement {
   return createElement(SyncProvider, { client: registry }, child);
+}
+
+function installSyncTelemetry(events: SyncTelemetryEvent[], spans: Array<{ name: string; attributes: Record<string, unknown> }>) {
+  const host = globalThis as {
+    __smithersSyncTelemetry?: {
+      event?: (event: SyncTelemetryEvent) => void;
+      span?: (span: { name: string; attributes: Record<string, unknown> }) => void;
+    };
+  };
+  const previous = host.__smithersSyncTelemetry;
+  host.__smithersSyncTelemetry = {
+    event: (event) => events.push(event),
+    span: (span) => spans.push(span),
+  };
+  return () => {
+    host.__smithersSyncTelemetry = previous;
+  };
 }
 
 /** Mount a hook over one registry and wait until its value satisfies `done`. */
@@ -327,6 +346,296 @@ describe("useSyncMutation optimistic + rollback", () => {
     expect(seen).toContain(99);
     expect(seen[seen.length - 1]).toBe(5);
 
+    await harness.unmount();
+  });
+});
+
+describe("useGatewayMutation optimistic transactions", () => {
+  test("launchRun writes an optimistic run and marks it synced after gateway confirmation", async () => {
+    const events: SyncTelemetryEvent[] = [];
+    const spans: Array<{ name: string; attributes: Record<string, unknown> }> = [];
+    const restoreTelemetry = installSyncTelemetry(events, spans);
+    let launchedRunId: string | undefined;
+    let resolveLaunch: (() => void) | undefined;
+    const transport = makeTransport((method, params) => {
+      if (method === "listRuns") {
+        return Promise.resolve(
+          launchedRunId
+            ? [{ runId: launchedRunId, workflowKey: "deploy", status: "running", createdAtMs: 1 }]
+            : [],
+        );
+      }
+      if (method === "launchRun") {
+        const options = (params as { options?: { runId?: string } }).options ?? {};
+        launchedRunId = options.runId;
+        return new Promise((resolve) => {
+          resolveLaunch = () => resolve({ runId: launchedRunId, workflow: "deploy" });
+        });
+      }
+      return Promise.resolve({});
+    });
+    const registry = createGatewayCollections({ client: transport.transport });
+
+    const snapshots: Array<Array<{ runId: string; synced: boolean | undefined; status: string | undefined }>> = [];
+    let runsReady = false;
+    let launch: (vars: { workflow: string; input: Record<string, unknown> }) => Promise<{ runId?: string }> = async () => ({});
+    function Probe() {
+      const runs = useGatewayRuns();
+      const mutation = useGatewayMutation<{ workflow: string; input: Record<string, unknown> }, { runId?: string }>(
+        "launchRun",
+      );
+      launch = mutation.mutate;
+      runsReady = !runs.loading;
+      snapshots.push(
+        (runs.data ?? []).map((row) => ({
+          runId: row.runId,
+          synced: row.$synced,
+          status: row.status,
+        })),
+      );
+      return null;
+    }
+
+    const harness = await mountHarness();
+    try {
+      await harness.render(provider(registry, createElement(Probe)));
+      await waitFor(() => runsReady && snapshots[snapshots.length - 1]?.length === 0);
+
+      let pending!: Promise<{ runId?: string }>;
+      await act(async () => {
+        pending = launch({ workflow: "deploy", input: {} });
+        await settle();
+      });
+      await waitFor(() => snapshots.some((rows) => rows.some((row) => row.synced === false)));
+      expect(typeof launchedRunId).toBe("string");
+
+      await act(async () => {
+        resolveLaunch?.();
+        await pending;
+      });
+      await waitFor(() =>
+        snapshots.some((rows) => rows.some((row) => row.runId === launchedRunId && row.synced === true)),
+      );
+      await waitFor(() => events.some((event) => event.type === "sync.mutation.confirm"));
+      expect(events.some((event) => event.type === "sync.mutation.optimistic_apply")).toBe(true);
+      expect(events.some((event) => event.type === "sync.mutation.handler_rpc" && event.method === "launchRun")).toBe(true);
+      expect(spans.some((span) => span.name === "smithers.sync.mutation.confirm")).toBe(true);
+    } finally {
+      restoreTelemetry();
+      await harness.unmount();
+    }
+  });
+
+  test("submitApproval keeps the row visibly pending until the gateway refetch confirms it", async () => {
+    let approved = false;
+    let resolveApproval: (() => void) | undefined;
+    const approval = {
+      runId: "run-1",
+      nodeId: "approve",
+      iteration: 0,
+      requestedAtMs: 1,
+      requestTitle: "Ship it",
+    };
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listApprovals") return Promise.resolve(approved ? [] : [approval]);
+        if (method === "submitApproval") {
+          return new Promise((resolve) => {
+            resolveApproval = () => {
+              approved = true;
+              resolve({ runId: "run-1", nodeId: "approve", iteration: 0, approved: true });
+            };
+          });
+        }
+        if (method === "listRuns") return Promise.resolve([]);
+        return Promise.resolve({});
+      }).transport,
+    });
+
+    const snapshots: Array<Array<{ synced: boolean | undefined; status: string | undefined }>> = [];
+    let approvalsReady = false;
+    let submit: (vars: {
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      decision: { approved: boolean };
+    }) => Promise<unknown> = async () => undefined;
+    function Probe() {
+      const approvals = useGatewayApprovals({ filter: { runId: "run-1" } });
+      const mutation = useGatewayMutation<{
+        runId: string;
+        nodeId: string;
+        iteration: number;
+        decision: { approved: boolean };
+      }>("submitApproval");
+      submit = mutation.mutate;
+      approvalsReady = !approvals.loading;
+      snapshots.push((approvals.data ?? []).map((row) => ({ synced: row.$synced, status: row.status })));
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => approvalsReady && snapshots.some((rows) => rows.length === 1 && rows[0]?.synced === true));
+
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = submit({
+        runId: "run-1",
+        nodeId: "approve",
+        iteration: 0,
+        decision: { approved: true },
+      });
+      await settle();
+    });
+    await waitFor(() => snapshots.some((rows) => rows.some((row) => row.synced === false && row.status === "approved")));
+
+    await act(async () => {
+      resolveApproval?.();
+      await pending;
+    });
+    await waitFor(() => snapshots[snapshots.length - 1]?.length === 0);
+    await harness.unmount();
+  });
+
+  test("rolls back the optimistic run when the gateway RPC rejects", async () => {
+    const events: SyncTelemetryEvent[] = [];
+    const spans: Array<{ name: string; attributes: Record<string, unknown> }> = [];
+    const restoreTelemetry = installSyncTelemetry(events, spans);
+    let rejectLaunch: ((error: Error) => void) | undefined;
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") return Promise.resolve([]);
+        if (method === "launchRun") {
+          return new Promise((_resolve, reject) => {
+            rejectLaunch = reject;
+          });
+        }
+        return Promise.resolve({});
+      }).transport,
+    });
+
+    const snapshots: Array<Array<{ synced: boolean | undefined }>> = [];
+    let runsReady = false;
+    let launch: (vars: { workflow: string; input: Record<string, unknown> }) => Promise<unknown> = async () => undefined;
+    function Probe() {
+      const runs = useGatewayRuns();
+      const mutation = useGatewayMutation<{ workflow: string; input: Record<string, unknown> }>("launchRun");
+      launch = mutation.mutate;
+      runsReady = !runs.loading;
+      snapshots.push((runs.data ?? []).map((row) => ({ synced: row.$synced })));
+      return null;
+    }
+
+    const harness = await mountHarness();
+    try {
+      await harness.render(provider(registry, createElement(Probe)));
+      await waitFor(() => runsReady && snapshots[snapshots.length - 1]?.length === 0);
+
+      let pending!: Promise<unknown>;
+      await act(async () => {
+        pending = launch({ workflow: "deploy", input: {} });
+        await settle();
+      });
+      await waitFor(() => snapshots.some((rows) => rows.some((row) => row.synced === false)));
+
+      await act(async () => {
+        rejectLaunch?.(new Error("launch failed"));
+        await pending.catch(() => undefined);
+      });
+      await waitFor(() => snapshots[snapshots.length - 1]?.length === 0);
+      expect(events.some((event) => event.type === "sync.mutation.rollback" && event.rollbackCount === 1)).toBe(true);
+      expect(spans.some((span) => span.name === "smithers.sync.mutation.rollback")).toBe(true);
+    } finally {
+      restoreTelemetry();
+      await harness.unmount();
+    }
+  });
+
+  test("keeps the optimistic run visible across a delayed confirmation refetch (no flicker)", async () => {
+    // The reviewer's repro: the launchRun RPC resolves, but the confirming
+    // listRuns refetch is delayed. The optimistic transaction must NOT complete
+    // (and the row must NOT blink out) until that confirmation lands, and
+    // `mutate()` must stay pending the whole time so a button can't double-fire.
+    let launchedRunId: string | undefined;
+    let releaseConfirm: (() => void) | undefined;
+    const confirmGate = new Promise<void>((resolve) => {
+      releaseConfirm = resolve;
+    });
+    let listCalls = 0;
+    const registry = createGatewayCollections({
+      client: makeTransport((method, params) => {
+        if (method === "launchRun") {
+          const options = (params as { options?: { runId?: string } }).options ?? {};
+          launchedRunId = options.runId;
+          return Promise.resolve({ runId: launchedRunId, workflow: "deploy" });
+        }
+        if (method === "listRuns") {
+          listCalls += 1;
+          // First call is the cold initial load; every confirmation read after
+          // the launch is held until the gate is released.
+          if (listCalls === 1) return Promise.resolve([]);
+          return confirmGate.then(() =>
+            launchedRunId
+              ? [{ runId: launchedRunId, workflowKey: "deploy", status: "running", createdAtMs: 1 }]
+              : [],
+          );
+        }
+        return Promise.resolve({});
+      }).transport,
+    });
+
+    const snapshots: Array<Array<{ runId: string; synced: boolean | undefined }>> = [];
+    let runsReady = false;
+    let launch: (vars: { workflow: string; input: Record<string, unknown> }) => Promise<{ runId?: string }> = async () => ({});
+    function Probe() {
+      const runs = useGatewayRuns();
+      const mutation = useGatewayMutation<{ workflow: string; input: Record<string, unknown> }, { runId?: string }>(
+        "launchRun",
+      );
+      launch = mutation.mutate;
+      runsReady = !runs.loading;
+      snapshots.push((runs.data ?? []).map((row) => ({ runId: row.runId, synced: row.$synced })));
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => runsReady && snapshots[snapshots.length - 1]?.length === 0);
+
+    let resolved = false;
+    let pending!: Promise<{ runId?: string }>;
+    await act(async () => {
+      pending = launch({ workflow: "deploy", input: {} }).then((value) => {
+        resolved = true;
+        return value;
+      });
+      await settle();
+    });
+
+    // RPC resolved and the optimistic row is visible, but confirmation is gated.
+    await waitFor(() => snapshots.some((rows) => rows.some((row) => row.synced === false)));
+    expect(typeof launchedRunId).toBe("string");
+    await settle(6);
+    // The mutation has NOT resolved (still confirming) and the row is still there.
+    expect(resolved).toBe(false);
+    const firstSeen = snapshots.findIndex((rows) => rows.some((row) => row.runId === launchedRunId));
+    expect(firstSeen).toBeGreaterThanOrEqual(0);
+    expect(snapshots.slice(firstSeen).every((rows) => rows.some((row) => row.runId === launchedRunId))).toBe(true);
+
+    // Release the gated confirmation: the row stays put and flips to synced.
+    await act(async () => {
+      releaseConfirm?.();
+      await pending;
+    });
+    expect(resolved).toBe(true);
+    await waitFor(() =>
+      snapshots.some((rows) => rows.some((row) => row.runId === launchedRunId && row.synced === true)),
+    );
+    // Continuous visibility across the entire lifecycle — once present, never absent.
+    const seenAt = snapshots.findIndex((rows) => rows.some((row) => row.runId === launchedRunId));
+    expect(snapshots.slice(seenAt).every((rows) => rows.some((row) => row.runId === launchedRunId))).toBe(true);
+    expect(snapshots[snapshots.length - 1].find((row) => row.runId === launchedRunId)?.synced).toBe(true);
     await harness.unmount();
   });
 });

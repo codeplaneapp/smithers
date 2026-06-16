@@ -1,4 +1,6 @@
-export type GatewayRunNode = {
+import type { GatewayVirtualRow } from "./GatewayVirtualRow.ts";
+
+export type GatewayRunNode = GatewayVirtualRow & {
   id: string;
   name: string;
   cardLabel?: string;

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { forkRun, getBranchInfo, listBranches } from "@smithers-orchestrator/time-travel/fork";
 import { createSmithers } from "../src/create.js";
 import { migrateSmithersStore } from "../src/migrateSmithersStore.js";
 import { openSmithersBackend } from "../src/openSmithersBackend.js";
@@ -71,6 +74,71 @@ async function tableCount(pgConn, table) {
   return Number(rows.rows[0].count);
 }
 
+function quoteId(identifier) {
+  return `"${String(identifier).replaceAll('"', '""')}"`;
+}
+
+function listSourceTables(sqlite) {
+  return sqlite
+    .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .all()
+    .map((row) => row.name);
+}
+
+function sourceColumns(sqlite, table) {
+  return sqlite
+    .query(`PRAGMA table_info(${quoteId(table)})`)
+    .all()
+    .map((row) => row.name);
+}
+
+// Storage is mirrored (booleans in BIGINT, blobs in BYTEA, JSON in TEXT) and
+// node-postgres returns BIGINT as a string unless coerced, so normalize each
+// value to a dialect-independent shape before comparing source vs target rows.
+function normalizeCell(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (value instanceof Uint8Array || (typeof Buffer !== "undefined" && Buffer.isBuffer(value))) {
+    return `blob:${Buffer.from(value).toString("hex")}`;
+  }
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+  return value;
+}
+
+function canonicalRows(rows, columns) {
+  return rows
+    .map((row) => JSON.stringify(columns.map((column) => normalizeCell(row[column]))))
+    .sort();
+}
+
+// Compare EVERY row of EVERY source table against the migrated target,
+// column-for-column, proving a faithful row-for-row copy (not just counts).
+async function assertRowForRowEquality(sourceDbPath, pgConn) {
+  const sqlite = new Database(sourceDbPath, { readonly: true });
+  try {
+    const tables = listSourceTables(sqlite);
+    expect(tables.length).toBeGreaterThan(0);
+    for (const table of tables) {
+      const columns = sourceColumns(sqlite, table);
+      if (columns.length === 0) {
+        continue;
+      }
+      const columnSql = columns.map(quoteId).join(", ");
+      const sourceRows = sqlite.query(`SELECT ${columnSql} FROM ${quoteId(table)}`).all();
+      const target = await pgConn.query({ text: `SELECT ${columnSql} FROM ${quoteId(table)}` });
+      expect({ table, rows: canonicalRows(target.rows, columns) }).toEqual({
+        table,
+        rows: canonicalRows(sourceRows, columns),
+      });
+    }
+  } finally {
+    sqlite.close();
+  }
+}
+
 describe("migrateSmithersStore", () => {
   test("copies a SQLite Smithers store to PGlite row-for-row and writes migrated.json", async () => {
     const cwd = makeWorkspace("smithers-migrate-pglite");
@@ -120,6 +188,55 @@ describe("migrateSmithersStore", () => {
       const vector = await pgConn.query({ text: "SELECT dimensions, embedding FROM _smithers_vectors" });
       expect(vector.rows[0].dimensions).toBe(4);
       expect(Buffer.from(vector.rows[0].embedding).toString("hex")).toBe("01020304");
+    } finally {
+      await closeApi(api);
+    }
+  });
+
+  test("migrates every row of every table row-for-row and yields a replayable (fork/time-travel) run on the target", async () => {
+    const cwd = makeWorkspace("smithers-migrate-roundtrip");
+    const dbPath = seedSqliteStore(cwd);
+
+    const result = await migrateSmithersStore({ cwd });
+    // Copy-only by default: the source store is left intact for rollback.
+    expect(result.sqliteRemoved).toBe(false);
+    expect(existsSync(dbPath)).toBe(true);
+
+    const api = await openSmithersBackend({}, { cwd, backend: "pglite", env: {} });
+    try {
+      const pgConn = api.db.connection;
+
+      // 1. Row-for-row equality across every migrated table.
+      await assertRowForRowEquality(dbPath, pgConn);
+
+      // 2. The migrated snapshot is replayable: fork the run from its frame on
+      //    the PGlite target and confirm the branched run + lineage persisted.
+      const adapter = new SmithersDb(api.db);
+      const fork = await forkRun(adapter, {
+        parentRunId: "run-migrate-1",
+        frameNo: 1,
+        branchLabel: "replay-after-migrate",
+      });
+      expect(fork.runId).toBeTruthy();
+      expect(fork.runId).not.toBe("run-migrate-1");
+
+      const childRun = await adapter.getRun(fork.runId);
+      expect(childRun?.parentRunId).toBe("run-migrate-1");
+
+      const branches = await listBranches(adapter, "run-migrate-1");
+      expect(branches.map((branch) => branch.runId)).toContain(fork.runId);
+
+      const branchInfo = await getBranchInfo(adapter, fork.runId);
+      expect(branchInfo?.parentRunId).toBe("run-migrate-1");
+      expect(branchInfo?.parentFrameNo).toBe(1);
+
+      // The forked snapshot carries the migrated input forward (frame 0 of the
+      // child), proving the time-travel checkpoint survived the migration.
+      const childSnapshot = await pgConn.query({
+        text: 'SELECT input_json FROM _smithers_snapshots WHERE run_id = $1 AND frame_no = 0',
+        values: [fork.runId],
+      });
+      expect(JSON.parse(childSnapshot.rows[0].input_json)).toEqual({ prompt: "hello" });
     } finally {
       await closeApi(api);
     }

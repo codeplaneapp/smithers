@@ -70,3 +70,70 @@ test("smithers gateway fails loud for a legacy sqlite store before migration", a
   expect(combined).toContain("smithers migrate");
   expect(combined).toContain("smithers <cmd> --backend sqlite");
 });
+
+test("smithers ps (a CLI read command) fails loud for a legacy sqlite store before migration", () => {
+  const repo = createTempRepo();
+  seedLegacyStore(repo);
+
+  const result = runSmithers(["ps"], {
+    cwd: repo.dir,
+    format: "json",
+    timeoutMs: 30_000,
+  });
+
+  // No silent success: the legacy run is NOT listed; the resolver fails loud.
+  expect(result.exitCode).not.toBe(0);
+  const combined = `${result.stdout}\n${result.stderr}`;
+  expect(combined).toContain("SMITHERS_MIGRATION_REQUIRED");
+  expect(combined).toContain("smithers.db");
+  expect(combined).toContain("1 runs");
+  expect(combined).toContain("schema v0016");
+  expect(combined).toContain("smithers migrate");
+  expect(combined).not.toContain("cli-migrate-run");
+});
+
+test("SMITHERS_BACKEND=sqlite suppresses the ps migration guard and reads the legacy store", () => {
+  const repo = createTempRepo();
+  seedLegacyStore(repo);
+
+  const result = runSmithers(["ps", "--all"], {
+    cwd: repo.dir,
+    format: "json",
+    env: { SMITHERS_BACKEND: "sqlite" },
+    timeoutMs: 30_000,
+  });
+
+  expect(result.exitCode).toBe(0);
+  const combined = `${result.stdout}\n${result.stderr}`;
+  expect(combined).not.toContain("SMITHERS_MIGRATION_REQUIRED");
+  expect(JSON.stringify(result.json)).toContain("cli-migrate-run");
+});
+
+test("a present migrated.json marker suppresses the ps migration guard", () => {
+  const repo = createTempRepo();
+  seedLegacyStore(repo);
+  repo.write(".smithers/migrated.json", JSON.stringify({ migratedAt: 1 }));
+
+  const result = runSmithers(["ps", "--all"], {
+    cwd: repo.dir,
+    format: "json",
+    timeoutMs: 30_000,
+  });
+
+  expect(result.exitCode).toBe(0);
+  expect(`${result.stdout}\n${result.stderr}`).not.toContain("SMITHERS_MIGRATION_REQUIRED");
+});
+
+test("a fresh workspace never triggers the ps migration guard", () => {
+  const repo = createTempRepo();
+  repo.write(".smithers/smithers.config.ts", "export default {};\n");
+
+  const result = runSmithers(["ps"], {
+    cwd: repo.dir,
+    format: "json",
+    timeoutMs: 30_000,
+  });
+
+  // A fresh `.smithers/` has no run history, so the guard never fires.
+  expect(`${result.stdout}\n${result.stderr}`).not.toContain("SMITHERS_MIGRATION_REQUIRED");
+});

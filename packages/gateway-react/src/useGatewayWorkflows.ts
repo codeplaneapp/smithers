@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { gatewayKeys, type GatewayWorkflowRow } from "@smithers-orchestrator/gateway-client";
-import type { ListWorkflowsRequest, ListWorkflowsResponse } from "@smithers-orchestrator/gateway/rpc";
+import type { ListWorkflowsRequest } from "@smithers-orchestrator/gateway/rpc";
 import { useGatewayCollectionStatus } from "./sync/useGatewayCollectionStatus.ts";
 import { useSyncClient } from "./sync/useSyncClient.ts";
 import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
@@ -11,7 +11,7 @@ import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
  * re-pulled on `invalidate`). Same `GatewayAsyncState` shape the RPC hook
  * returned.
  */
-export function useGatewayWorkflows(params: ListWorkflowsRequest = {}): GatewayAsyncState<ListWorkflowsResponse> {
+export function useGatewayWorkflows(params: ListWorkflowsRequest = {}): GatewayAsyncState<GatewayWorkflowRow[]> {
   const registry = useSyncClient();
   const key = gatewayKeys.workflows(params.filter);
   const status = useGatewayCollectionStatus(key);
@@ -21,7 +21,7 @@ export function useGatewayWorkflows(params: ListWorkflowsRequest = {}): GatewayA
     await registry.invalidate(key);
   }, [registry, key]);
 
-  const data = (live.data ?? []) as GatewayWorkflowRow[] as ListWorkflowsResponse;
+  const data = (live.data ?? []) as GatewayWorkflowRow[];
   return {
     data,
     error: status.status === "error" ? status.error : undefined,

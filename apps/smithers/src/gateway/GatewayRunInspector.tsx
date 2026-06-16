@@ -74,6 +74,7 @@ export function GatewayRunInspector({
   const title = asString(workflow?.readableName) || workflowKey;
   const approval = (approvals.data ?? [])
     .find((item) => item.runId === runId && item.nodeId);
+  const approvalPending = approval?.$synced === false;
 
   useEffect(() => {
     if (runTree.status === "waiting") {
@@ -143,10 +144,10 @@ export function GatewayRunInspector({
             type="button"
             className="gw-btn gw-btn-primary"
             data-testid="gateway-approve-button"
-            disabled={submitApproval.isLoading}
+            disabled={submitApproval.isLoading || approvalPending}
             onClick={approve}
           >
-            {submitApproval.isLoading ? "Approving" : "Approve"}
+            {approvalPending ? "Confirming" : submitApproval.isLoading ? "Approving" : "Approve"}
           </button>
         </div>
       ) : null}

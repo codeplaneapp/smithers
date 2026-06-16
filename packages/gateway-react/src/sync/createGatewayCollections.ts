@@ -1,8 +1,10 @@
-import { createCollection, type Collection, type CollectionConfig } from "@tanstack/react-db";
+import { createCollection, createTransaction, type Collection, type CollectionConfig } from "@tanstack/react-db";
 import {
   createGatewayCollection,
   createGatewaySyncSource,
+  emitSyncTelemetry,
   gatewayCollectionDefs,
+  gatewayKeys,
   syncKeyFingerprint,
   syncKeyMatches,
   type CollectionDef,
@@ -25,6 +27,7 @@ import type {
 import type {
   GatewayCollectionStatusRow,
   GatewayCollections,
+  GatewayOptimisticMutationRequest,
   GatewayQueryHandle,
   GatewayQueryRow,
   GatewayStreamHandle,
@@ -62,9 +65,37 @@ export type CreateGatewayCollectionsOptions = {
 const LIST_GC_TIME = 5 * 60_000;
 const RUN_GC_TIME = 0;
 const DEFAULT_SCHEMA_VERSION = "0016";
+const MUTATION_CONFIRM_TIMEOUT_MS = 30_000;
+const MUTATION_CONFIRM_POLL_MS = 25;
 
 function asError(cause: unknown): Error {
   return cause instanceof Error ? cause : new Error(String(cause));
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function randomMutationId(prefix: string): string {
+  const cryptoApi = globalThis.crypto;
+  const suffix = typeof cryptoApi?.randomUUID === "function"
+    ? cryptoApi.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${suffix}`;
+}
+
+function syncScope(scope: string): SyncKey {
+  return [scope];
 }
 
 export function createGatewayCollections(
@@ -91,6 +122,7 @@ export function createGatewayCollections(
   };
 
   const collections = new Map<string, Collection<object, string | number>>();
+  const collectionKeys = new Map<string, SyncKey>();
   const queries = new Map<string, QueryHandleInternal<unknown>>();
   const queryKeyById = new Map<string, SyncKey>();
   const streams = new Map<string, GatewayStreamHandle>();
@@ -143,7 +175,12 @@ export function createGatewayCollections(
       },
       ...sourceHooks,
     });
-  const sourceWithClient = source as SyncSource & { client?: SyncTransport; invalidate?: (prefix: SyncKey) => void };
+  const sourceWithClient = source as SyncSource & {
+    client?: SyncTransport;
+    invalidate?: (prefix: SyncKey) => void;
+    commit?: <TData>(request: { method: string; vars: unknown }) => Promise<TData>;
+    confirm?: (prefix: SyncKey) => Promise<void>;
+  };
   const transport = sourceWithClient.client ?? options.client ?? {
     rpc: () => Promise.reject(new Error("GatewayCollections was created without an RPC transport.")),
   };
@@ -208,6 +245,7 @@ export function createGatewayCollections(
       : statusConfig;
     const collection = createCollection<TRow, TKey>(collectionOptions);
     collections.set(id, collection as unknown as Collection<object, string | number>);
+    collectionKeys.set(id, def.key);
     return collection;
   }
 
@@ -311,18 +349,389 @@ export function createGatewayCollections(
     return handle;
   }
 
+  function loadedKnownCollections(prefix: SyncKey): Array<{
+    id: string;
+    key: SyncKey;
+    collection: Collection<object, string | number>;
+  }> {
+    const matches: Array<{ id: string; key: SyncKey; collection: Collection<object, string | number> }> = [];
+    for (const [id, collection] of collections.entries()) {
+      const key = collectionKeys.get(id);
+      if (key && syncKeyMatches(key, prefix)) {
+        matches.push({ id, key, collection });
+      }
+    }
+    return matches;
+  }
+
+  function runListAccepts(key: SyncKey, row: GatewayRunSummaryRow): boolean {
+    const params = asRecord(key[1]);
+    const filter = asRecord(params.filter);
+    const status = asString(params.status) ?? asString(filter.status);
+    return !status || status === row.status;
+  }
+
+  function applyPatch(
+    collection: Collection<object, string | number>,
+    key: string | number,
+    patch: Record<string, unknown>,
+    metadata: Record<string, unknown>,
+  ): void {
+    collection.update(key, { metadata }, (draft) => {
+      Object.assign(draft, patch);
+    });
+  }
+
+  function upsertRow(
+    collection: Collection<object, string | number>,
+    key: string | number,
+    row: Record<string, unknown>,
+    metadata: Record<string, unknown>,
+  ): void {
+    if (collection.has(key)) {
+      applyPatch(collection, key, row, metadata);
+      return;
+    }
+    collection.insert(row, { metadata });
+  }
+
+  async function invalidatePrefix(prefix: SyncKey): Promise<void> {
+    sourceWithClient.invalidate?.(prefix);
+    for (const [id, query] of queries.entries()) {
+      const key = queryKeyById.get(id);
+      if (key && syncKeyMatches(key, prefix)) void query.refetch();
+    }
+  }
+
+  type ConfirmTarget = {
+    collectionId: string;
+    collection: Collection<object, string | number>;
+    key: string | number;
+  };
+
+  function asRows(payload: unknown): Record<string, unknown>[] {
+    return Array.isArray(payload)
+      ? payload.filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
+      : [];
+  }
+
+  /**
+   * Poll the server of record until the write is reflected (the run appears, the
+   * approval is gone, …) or the deadline passes. Runs while the optimistic
+   * transaction is still `persisting`, so the confirming sync write that lands
+   * afterwards is buffered and merged atomically on completion — the optimistic
+   * row never blinks out. The synced state cannot be observed through the
+   * collection here (the optimistic upsert masks it), so confirmation reads the
+   * backend directly through the source transport.
+   */
+  async function waitForBackendConfirm(predicate: (transport: SyncTransport) => Promise<boolean>): Promise<void> {
+    const deadline = Date.now() + MUTATION_CONFIRM_TIMEOUT_MS;
+    for (;;) {
+      let confirmed = false;
+      try {
+        confirmed = await predicate(transport);
+      } catch {
+        confirmed = false;
+      }
+      if (confirmed || Date.now() >= deadline) return;
+      await new Promise((resolve) => setTimeout(resolve, MUTATION_CONFIRM_POLL_MS));
+    }
+  }
+
+  /**
+   * Awaitable invalidation used inside the optimistic write handler: each
+   * matching collection re-pulls and applies its confirmed rows (`source.confirm`
+   * resolves only once that refetch lands), and generic query handles refetch.
+   * Falls back to fire-and-forget invalidation for a source without `confirm`.
+   */
+  async function confirmInvalidation(prefixes: readonly SyncKey[]): Promise<void> {
+    for (const prefix of prefixes) {
+      if (sourceWithClient.confirm) {
+        await sourceWithClient.confirm(prefix);
+      } else {
+        sourceWithClient.invalidate?.(prefix);
+      }
+      for (const [id, query] of queries.entries()) {
+        const key = queryKeyById.get(id);
+        if (key && syncKeyMatches(key, prefix)) void query.refetch();
+      }
+    }
+  }
+
+  type PreparedMutation<TVars> = {
+    vars: TVars;
+    telemetryKey: SyncKey;
+    invalidate: readonly SyncKey[];
+    apply: (metadata: Record<string, unknown>) => ConfirmTarget[];
+    /**
+     * Resolves true once the server of record reflects the write. Absent for
+     * writes with no observable confirmation (signals), which fall through to a
+     * plain refetch.
+     */
+    confirm?: (transport: SyncTransport) => Promise<boolean>;
+  };
+
+  function prepareGatewayMutation<TVars>(method: string, vars: TVars): PreparedMutation<TVars> | undefined {
+    const normalized = method === "runs.create"
+      ? "launchRun"
+      : method === "runs.cancel"
+        ? "cancelRun"
+        : method === "approvals.decide"
+          ? "submitApproval"
+          : method === "signals.send"
+            ? "submitSignal"
+            : method;
+    const input = asRecord(vars);
+
+    if (normalized === "launchRun") {
+      const workflow = asString(input.workflow);
+      if (!workflow) return undefined;
+      const originalOptions = asRecord(input.options);
+      const runId = asString(originalOptions.runId) ?? asString(input.runId) ?? randomMutationId("run");
+      const row: GatewayRunSummaryRow = {
+        runId,
+        workflowKey: workflow,
+        status: "queued",
+        createdAtMs: Date.now(),
+      };
+      return {
+        vars: {
+          ...input,
+          options: { ...originalOptions, runId },
+        } as TVars,
+        telemetryKey: gatewayKeys.runs({}),
+        invalidate: [syncScope("gateway:listRuns"), gatewayKeys.run(runId)],
+        apply(metadata) {
+          const targets: ConfirmTarget[] = [];
+          for (const entry of loadedKnownCollections(syncScope("gateway:listRuns"))) {
+            if (!runListAccepts(entry.key, row)) continue;
+            upsertRow(entry.collection, runId, row, metadata);
+            targets.push({
+              collectionId: entry.id,
+              collection: entry.collection,
+              key: runId,
+            });
+          }
+          return targets;
+        },
+        confirm: async (client) => {
+          // Confirmed once the launched run is listed by the server of record.
+          const rows = asRows(await client.rpc("listRuns", {}));
+          return rows.some((entry) => asString(entry.runId) === runId);
+        },
+      };
+    }
+
+    if (normalized === "submitApproval") {
+      const runId = asString(input.runId);
+      const nodeId = asString(input.nodeId);
+      const iteration = typeof input.iteration === "number" ? input.iteration : 0;
+      const decision = asRecord(input.decision);
+      const approved = asBoolean(decision.approved) ?? asBoolean(input.approved);
+      if (!runId || !nodeId || approved === undefined) return undefined;
+      const approvalKey = `${runId}:${nodeId}:${iteration}`;
+      return {
+        vars,
+        telemetryKey: gatewayKeys.approvals({}),
+        invalidate: [syncScope("gateway:listApprovals"), syncScope("gateway:listRuns"), gatewayKeys.run(runId)],
+        apply(metadata) {
+          const targets: ConfirmTarget[] = [];
+          for (const entry of loadedKnownCollections(syncScope("gateway:listApprovals"))) {
+            if (!entry.collection.has(approvalKey)) continue;
+            applyPatch(
+              entry.collection,
+              approvalKey,
+              {
+                status: approved ? "approved" : "denied",
+                decision: input.decision,
+                decidedAtMs: Date.now(),
+              },
+              metadata,
+            );
+            targets.push({
+              collectionId: entry.id,
+              collection: entry.collection,
+              key: approvalKey,
+            });
+          }
+          return targets;
+        },
+        confirm: async (client) => {
+          // Confirmed once the decided gate no longer appears as pending.
+          const rows = asRows(await client.rpc("listApprovals", {}));
+          return !rows.some(
+            (entry) =>
+              asString(entry.runId) === runId &&
+              asString(entry.nodeId) === nodeId &&
+              (typeof entry.iteration === "number" ? entry.iteration : 0) === iteration,
+          );
+        },
+      };
+    }
+
+    if (normalized === "cancelRun" || normalized === "submitSignal") {
+      const runId = asString(input.runId);
+      if (!runId) return undefined;
+      const status = normalized === "cancelRun" ? "cancelling" : "running";
+      return {
+        vars,
+        telemetryKey: gatewayKeys.run(runId),
+        invalidate: [syncScope("gateway:listRuns"), gatewayKeys.run(runId)],
+        apply(metadata) {
+          const targets: ConfirmTarget[] = [];
+          for (const entry of loadedKnownCollections(syncScope("gateway:listRuns"))) {
+            if (!entry.collection.has(runId)) continue;
+            applyPatch(entry.collection, runId, { status }, metadata);
+            targets.push({
+              collectionId: entry.id,
+              collection: entry.collection,
+              key: runId,
+            });
+          }
+          for (const entry of loadedKnownCollections(gatewayKeys.run(runId))) {
+            if (!entry.collection.has(runId)) continue;
+            applyPatch(entry.collection, runId, { status }, metadata);
+            targets.push({
+              collectionId: entry.id,
+              collection: entry.collection,
+              key: runId,
+            });
+          }
+          return targets;
+        },
+        // A cancel is confirmed once the run leaves an active state; a signal has
+        // no observable list change, so it falls through to a plain refetch.
+        confirm: normalized === "cancelRun"
+          ? async (client) => {
+              const run = asRecord(await client.rpc("getRun", { runId }));
+              const runStatus = asString(run.status);
+              return runStatus !== undefined && runStatus !== "running" && runStatus !== "queued" && runStatus !== "waiting";
+            }
+          : undefined,
+      };
+    }
+
+    return undefined;
+  }
+
+  function optimisticMutation<TVars, TData>(
+    request: GatewayOptimisticMutationRequest<TVars, TData>,
+  ): Promise<TData> | undefined {
+    const plan = prepareGatewayMutation(request.method, request.vars);
+    if (!plan) return undefined;
+    const mutationId = randomMutationId("gateway-mutation");
+    const startedAtMs = Date.now();
+    let data: TData | undefined;
+    let targets: ConfirmTarget[] = [];
+    const telemetryCollectionId = () => targets[0]?.collectionId ?? syncKeyFingerprint(plan.telemetryKey);
+
+    // Route the write through the source's own commit path so a second source
+    // (Electric) can swap in its write transport. The request's own commit
+    // closure (gateway RPC) remains the fallback for a source without `commit`.
+    const commitWrite = (vars: TVars): Promise<TData> =>
+      sourceWithClient.commit
+        ? sourceWithClient.commit<TData>({ method: request.method, vars })
+        : request.commit(vars);
+
+    const tx = createTransaction<object>({
+      autoCommit: false,
+      metadata: { method: request.method, mutationId },
+      mutationFn: async () => {
+        // 1. Persist to the server of record.
+        const rpcStartedAtMs = Date.now();
+        try {
+          data = await commitWrite(plan.vars);
+          emitSyncTelemetry({
+            type: "sync.mutation.handler_rpc",
+            collectionId: telemetryCollectionId(),
+            key: plan.telemetryKey,
+            method: request.method,
+            mutationId,
+            durationMs: Date.now() - rpcStartedAtMs,
+            count: targets.length,
+          });
+        } catch (cause) {
+          const error = asError(cause);
+          emitSyncTelemetry({
+            type: "sync.mutation.handler_rpc",
+            collectionId: telemetryCollectionId(),
+            key: plan.telemetryKey,
+            method: request.method,
+            mutationId,
+            durationMs: Date.now() - rpcStartedAtMs,
+            count: targets.length,
+            error: error.message,
+          });
+          throw error;
+        }
+        // 2. Hold the optimistic transaction open until the write is confirmed.
+        //    Both the backend poll and the awaited refetch run while the tx is
+        //    still `persisting`, so the confirming sync write is buffered and
+        //    merged atomically when the tx completes. The optimistic row stays
+        //    continuously visible and `$synced` flips false → true with no gap.
+        if (plan.confirm) await waitForBackendConfirm(plan.confirm);
+        await confirmInvalidation(plan.invalidate);
+        emitSyncTelemetry({
+          type: "sync.mutation.confirm",
+          collectionId: telemetryCollectionId(),
+          key: plan.telemetryKey,
+          method: request.method,
+          mutationId,
+          durationMs: Date.now() - startedAtMs,
+          count: targets.length,
+        });
+      },
+    });
+    try {
+      tx.mutate(() => {
+        targets = plan.apply({ method: request.method, mutationId });
+      });
+      if (tx.mutations.length === 0 || targets.length === 0) {
+        void tx.isPersisted.promise.catch(() => undefined);
+        tx.rollback();
+        return undefined;
+      }
+      emitSyncTelemetry({
+        type: "sync.mutation.optimistic_apply",
+        collectionId: telemetryCollectionId(),
+        key: plan.telemetryKey,
+        method: request.method,
+        mutationId,
+        count: tx.mutations.length,
+      });
+    } catch (cause) {
+      void tx.isPersisted.promise.catch(() => undefined);
+      if (tx.state === "pending" || tx.state === "persisting") tx.rollback();
+      throw cause;
+    }
+
+    return tx.commit().then(
+      () => data as TData,
+      (cause) => {
+        const error = asError(cause);
+        emitSyncTelemetry({
+          type: "sync.mutation.rollback",
+          collectionId: telemetryCollectionId(),
+          key: plan.telemetryKey,
+          method: request.method,
+          mutationId,
+          durationMs: Date.now() - startedAtMs,
+          count: tx.mutations.length,
+          rollbackCount: tx.mutations.length,
+          error: error.message,
+        });
+        throw error;
+      },
+    );
+  }
+
   return {
     client: transport,
     rpc: <T,>(method: string, params: unknown, opts?: { signal?: AbortSignal }) =>
       transport.rpc(method, params, opts) as Promise<T>,
 
-    invalidate: async (prefix: SyncKey) => {
-      sourceWithClient.invalidate?.(prefix);
-      for (const [id, query] of queries.entries()) {
-        const key = queryKeyById.get(id);
-        if (key && syncKeyMatches(key, prefix)) void query.refetch();
-      }
-    },
+    invalidate: invalidatePrefix,
+    optimisticMutation,
 
     runs: (params: ListRunsRequest = {}) =>
       knownCollection<GatewayRunSummaryRow, string>(gatewayCollectionDefs.runs(params), listGcTime),
@@ -373,6 +782,7 @@ export function createGatewayCollections(
       queryKeyById.clear();
       streams.clear();
       collectionStatusRows.clear();
+      collectionKeys.clear();
       source.reset?.();
       // Reset the shared adapter (whether it was a direct value or lazily
       // constructed) and drop the memo so the next mount builds a fresh one.

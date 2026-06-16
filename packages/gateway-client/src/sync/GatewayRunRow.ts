@@ -1,4 +1,6 @@
-export type GatewayRunRow = Record<string, unknown> & {
+import type { GatewayVirtualRow } from "./GatewayVirtualRow.ts";
+
+export type GatewayRunRow = Record<string, unknown> & GatewayVirtualRow & {
   runId: string;
   workflowKey?: string;
   status?: string;

@@ -18,7 +18,12 @@ export function useGatewayMutation<TVars extends Record<string, unknown>, TData 
 ): UseSyncMutationResult<TVars, TData> {
   const registry = useSyncClient();
   const runner = useMemo(
-    () => (vars: TVars) => registry.rpc<TData>(method, vars),
+    () => (vars: TVars) =>
+      registry.optimisticMutation<TVars, TData>({
+        method,
+        vars,
+        commit: (nextVars) => registry.rpc<TData>(method, nextVars),
+      }) ?? registry.rpc<TData>(method, vars),
     [registry, method],
   );
   return useSyncMutation<TVars, TData>(runner, options);

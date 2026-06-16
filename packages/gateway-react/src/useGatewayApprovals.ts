@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { gatewayKeys, type GatewayApprovalRow } from "@smithers-orchestrator/gateway-client";
-import type { ListApprovalsRequest, ListApprovalsResponse } from "@smithers-orchestrator/gateway/rpc";
+import type { ListApprovalsRequest } from "@smithers-orchestrator/gateway/rpc";
 import { useGatewayCollectionStatus } from "./sync/useGatewayCollectionStatus.ts";
 import { useSyncClient } from "./sync/useSyncClient.ts";
 import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
@@ -12,7 +12,7 @@ import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
  * waiting-approval or a `submitApproval` mutation). Same `GatewayAsyncState`
  * shape the RPC hook returned.
  */
-export function useGatewayApprovals(params: ListApprovalsRequest = {}): GatewayAsyncState<ListApprovalsResponse> {
+export function useGatewayApprovals(params: ListApprovalsRequest = {}): GatewayAsyncState<GatewayApprovalRow[]> {
   const registry = useSyncClient();
   const key = gatewayKeys.approvals(params);
   const status = useGatewayCollectionStatus(key);
@@ -22,7 +22,7 @@ export function useGatewayApprovals(params: ListApprovalsRequest = {}): GatewayA
     await registry.invalidate(key);
   }, [registry, key]);
 
-  const data = (live.data ?? []) as GatewayApprovalRow[] as ListApprovalsResponse;
+  const data = (live.data ?? []) as GatewayApprovalRow[];
   return {
     data,
     error: status.status === "error" ? status.error : undefined,

@@ -31,6 +31,7 @@ export {
 export type {
   GatewayCollectionStatusRow,
   GatewayCollections,
+  GatewayOptimisticMutationRequest,
   GatewayQueryHandle,
   GatewayQueryRow,
   GatewayStreamHandle,
