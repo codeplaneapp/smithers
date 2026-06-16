@@ -17,7 +17,11 @@ type CaseResult = {
   status?: string;
   input?: { area?: string; feature?: string; model?: string; taskId?: string };
   metadata?: { area?: string; feature?: string; tier?: string; source?: string };
-  output?: { candidate?: Array<{ oneShot?: boolean; confidence?: number; friction?: Friction[]; summary?: string }>; verdict?: Array<{ score?: number; reason?: string }> };
+  output?: {
+    candidate?: Array<{ oneShot?: boolean; confidence?: number; friction?: Friction[]; summary?: string }>;
+    verdict?: Array<{ score?: number; reason?: string }>;
+    quality?: Array<{ score?: number; reason?: string }>;
+  };
 };
 type Report = { suiteId: string; results: CaseResult[] };
 
@@ -77,6 +81,7 @@ function main() {
   const byFeature: Record<string, Bucket> = {};
   const overall = empty();
   const friction: Record<string, { count: number; sample: string; kind: string }> = {};
+  const uiQuality: number[] = [];
 
   for (const r of all) {
     const area = r.metadata?.area ?? r.input?.area ?? "unknown";
@@ -88,6 +93,8 @@ function main() {
     add(byModel, model, r);
     add(byTier, tier, r);
     add(byFeature, feature, r);
+    const ui = r.output?.quality?.[0]?.score;
+    if (typeof ui === "number") uiQuality.push(ui);
     for (const fr of r.output?.candidate?.[0]?.friction ?? []) {
       const key = `${fr.kind ?? "other"} :: ${(fr.docPointer ?? "?").slice(0, 60)}`;
       const slot = (friction[key] ??= { count: 0, sample: fr.detail ?? "", kind: fr.kind ?? "other" });
@@ -103,6 +110,10 @@ function main() {
   md.push(`- **Pass rate:** ${pct(overall.passed, overall.n)} (${overall.passed}/${overall.n})`);
   md.push(`- **One-shot rate:** ${pct(overall.oneShot, overall.n)}`);
   md.push(`- **Mean correctness score:** ${overall.scoreN ? (overall.scoreSum / overall.scoreN).toFixed(2) : "—"}`, "");
+  if (uiQuality.length > 0) {
+    const mean = uiQuality.reduce((a, b) => a + b, 0) / uiQuality.length;
+    md.push(`- **UI quality (AI-judged):** ${mean.toFixed(2)} mean over ${uiQuality.length} UI bundle(s)`, "");
+  }
   md.push(...table("By model", byModel));
   md.push(...table("By tier", byTier));
   md.push(...table("By area", byArea));

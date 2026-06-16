@@ -134,8 +134,9 @@ Tier = which model tier the candidate runs on.
 - [~] eval-expansion **workflow**: authoring source-grounded tasks for under-covered areas (gateway HTTP,
       effect-api, Aspects/budgets, scheduling/Poller, sandbox runtimes, advanced components, time-travel,
       openapi tools) → append to curated-tasks → regenerate (toward broader coverage).
-- [ ] NEXT — apply expansion tasks; demonstrate one-shot odds improved on a fixed-gap eval; confirm
-      `ui-quality` records a real score once session limits clear.
+- [x] Expansion tasks applied (1340 cases / 24 suites). UI quality is now a first-class awaited
+      judge **Task** (was a droppable async scorer): live-demoed sonnet one-shot a UI bundle → build
+      PASS + **quality 1.00** persisted + surfaced in the scorecard ("UI quality (AI-judged)").
 
 ### Note on this session's live runs
 Heavy concurrent Claude Code usage this session hit subscription **session limits** (the exact
