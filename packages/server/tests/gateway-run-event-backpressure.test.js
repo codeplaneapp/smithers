@@ -89,6 +89,30 @@ describe("streamRunEvents backpressure", () => {
     expect(stream.outboundQueue).toHaveLength(0);
   });
 
+  test("does not misclassify a healthy replay burst larger than the queue limit as backpressure", async () => {
+    gateway = new Gateway({});
+    connection = makeFakeConnection({ bufferedAmount: 0 });
+    gateway.registerRunEventSubscriber(connection, "stream-replay", "run-replay");
+
+    const burst = QUEUE_LIMIT + 500;
+    for (let seq = 1; seq <= burst; seq += 1) {
+      gateway.sendRunEventStreamFrame(connection, "stream-replay", {
+        runId: "run-replay",
+        seq,
+        event: "node.started",
+      });
+    }
+
+    const events = runEvents(connection);
+    expect(events).toHaveLength(burst);
+    expect(events[0].payload.seq).toBe(1);
+    expect(events[events.length - 1].payload.seq).toBe(burst);
+    expect(runErrors(connection)).toHaveLength(0);
+    const stream = connection.runEventStreams.get("stream-replay");
+    expect(stream.backpressureDisconnected).toBe(false);
+    expect(stream.outboundQueue).toHaveLength(0);
+  });
+
   test("buffers frames while the socket is congested then drains them losslessly", async () => {
     gateway = new Gateway({});
     // 16 MiB buffered: above the 8 MiB high-water mark, so drains stall.

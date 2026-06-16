@@ -1822,31 +1822,29 @@ export class Gateway {
             return;
         }
         stream.flushPending = true;
-        queueMicrotask(() => {
-            try {
-                while (stream.outboundQueue.length > 0 &&
-                    !stream.backpressureDisconnected &&
-                    connection.ws.readyState === connection.ws.OPEN) {
-                    const ws = connection.ws;
-                    if (typeof ws.bufferedAmount === "number" &&
-                        ws.bufferedAmount > RUN_EVENT_STREAM_WS_BUFFERED_HIGH_WATER_BYTES) {
-                        setTimeout(() => {
-                            stream.flushPending = false;
-                            this.drainRunEventStream(connection, stream);
-                        }, RUN_EVENT_STREAM_DRAIN_RETRY_MS);
-                        return;
-                    }
-                    const frame = stream.outboundQueue.shift();
-                    if (!frame) {
-                        continue;
-                    }
-                    this.sendEvent(connection, "run.event", { streamId: stream.streamId, ...frame });
+        try {
+            while (stream.outboundQueue.length > 0 &&
+                !stream.backpressureDisconnected &&
+                connection.ws.readyState === connection.ws.OPEN) {
+                const ws = connection.ws;
+                if (typeof ws.bufferedAmount === "number" &&
+                    ws.bufferedAmount > RUN_EVENT_STREAM_WS_BUFFERED_HIGH_WATER_BYTES) {
+                    setTimeout(() => {
+                        stream.flushPending = false;
+                        this.drainRunEventStream(connection, stream);
+                    }, RUN_EVENT_STREAM_DRAIN_RETRY_MS);
+                    return;
                 }
+                const frame = stream.outboundQueue.shift();
+                if (!frame) {
+                    continue;
+                }
+                this.sendEvent(connection, "run.event", { streamId: stream.streamId, ...frame });
             }
-            finally {
-                stream.flushPending = false;
-            }
-        });
+        }
+        finally {
+            stream.flushPending = false;
+        }
     }
     /**
    * Tear down a single slow run event subscriber whose outbound queue overflowed.

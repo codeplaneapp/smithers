@@ -15,8 +15,12 @@ function seedLegacyStore(repo) {
     INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
       VALUES ('cli-migrate-run', 1, 1, 'RunStarted', '{"runId":"cli-migrate-run"}');
   `);
+  const row = api.db.$client
+    .query("SELECT id FROM _smithers_schema_migrations ORDER BY id DESC LIMIT 1")
+    .get();
+  const schemaVersion = String(row?.id ?? "0000").match(/^\d+/)?.[0] ?? "0000";
   api.db.$client.close();
-  return dbPath;
+  return { dbPath, schemaVersion };
 }
 
 async function findOpenPort() {
@@ -35,7 +39,7 @@ async function findOpenPort() {
 
 test("smithers migrate copies the legacy sqlite store to PGlite and writes migrated.json", () => {
   const repo = createTempRepo();
-  const dbPath = seedLegacyStore(repo);
+  const { dbPath } = seedLegacyStore(repo);
 
   const result = runSmithers(["migrate", "--to", "pglite"], {
     cwd: repo.dir,
@@ -52,7 +56,7 @@ test("smithers migrate copies the legacy sqlite store to PGlite and writes migra
 
 test("smithers gateway fails loud for a legacy sqlite store before migration", async () => {
   const repo = createTempRepo();
-  seedLegacyStore(repo);
+  const { schemaVersion } = seedLegacyStore(repo);
   const port = await findOpenPort();
 
   const result = runSmithers(["gateway", "--host", "127.0.0.1", "--port", String(port)], {
@@ -66,14 +70,14 @@ test("smithers gateway fails loud for a legacy sqlite store before migration", a
   expect(combined).toContain("SMITHERS_MIGRATION_REQUIRED");
   expect(combined).toContain("smithers.db");
   expect(combined).toContain("1 runs");
-  expect(combined).toContain("schema v0016");
+  expect(combined).toContain(`schema v${schemaVersion}`);
   expect(combined).toContain("smithers migrate");
   expect(combined).toContain("smithers <cmd> --backend sqlite");
 });
 
 test("smithers ps (a CLI read command) fails loud for a legacy sqlite store before migration", () => {
   const repo = createTempRepo();
-  seedLegacyStore(repo);
+  const { schemaVersion } = seedLegacyStore(repo);
 
   const result = runSmithers(["ps"], {
     cwd: repo.dir,
@@ -87,7 +91,7 @@ test("smithers ps (a CLI read command) fails loud for a legacy sqlite store befo
   expect(combined).toContain("SMITHERS_MIGRATION_REQUIRED");
   expect(combined).toContain("smithers.db");
   expect(combined).toContain("1 runs");
-  expect(combined).toContain("schema v0016");
+  expect(combined).toContain(`schema v${schemaVersion}`);
   expect(combined).toContain("smithers migrate");
   expect(combined).not.toContain("cli-migrate-run");
 });

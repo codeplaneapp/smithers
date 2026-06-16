@@ -96,6 +96,14 @@ function defaultElectricRow<TRow extends object>(
     const runId = asString(camel.runId) ?? asString(row.run_id) ?? "";
     const nodeId = asString(camel.nodeId) ?? asString(row.node_id) ?? "";
     const iteration = asNumber(camel.iteration) ?? Number(row.iteration ?? 0);
+    // `_smithers_nodes` is a FLAT durable table (run_id, node_id, iteration,
+    // state, label) — it has no parent/child columns and no workflow-root
+    // container. The full run-tree hierarchy that `useGatewayRunTree` renders is
+    // a devtools projection of the live React tree (getDevToolsSnapshot), NOT a
+    // durable table, so an Electric shape over `_smithers_nodes` yields flat
+    // task rows, not the nested tree. The flat collections (runs/run/approvals/
+    // events/docs) map 1:1 and have real source parity; reconstructing the run
+    // tree over Electric needs a durable tree projection (a follow-up, §5.6).
     return {
       ...camel,
       id: `${runId}:${nodeId}:${iteration}`,
