@@ -80,16 +80,26 @@ import { llmJudge } from "smithers-orchestrator/scorers";
     schema:    { scorer: schemaAdherenceScorer() },
     grounded:  { scorer: faithfulnessScorer() },
     onTopic:   { scorer: relevancyScorer() },
-    quality:   { scorer: llmJudge({ model: claude, prompt: "Rate completeness 0-1" }),
-                 sampling: { kind: "ratio", ratio: 0.1 } },
+    quality:   { scorer: llmJudge({
+                   id: "completeness",
+                   name: "Completeness",
+                   description: "Rates release-note completeness 0-1",
+                   judge: claude,
+                   instructions: "Reply with JSON { score: 0-1, reason }.",
+                   promptTemplate: ({ output }) => `Rate completeness 0-1:\n${JSON.stringify(output)}`,
+                 }),
+                 sampling: { type: "ratio", rate: 0.1 } },
   }}>
   Draft the release notes.
 </Task>
 ```
 
 `faithfulness` (grounded in source), `relevancy` (on-topic), `schemaAdherence`
-(shape held), and `llmJudge(...)` (rubric-as-judge) are the workhorses. Sample
-expensive judges with `{ kind: "ratio", ratio: 0.1 }`. Inspect:
+(shape held), and `llmJudge(...)` (rubric-as-judge) are the workhorses. `llmJudge`
+takes `{ id, name, description, judge, instructions, promptTemplate }` — a `judge`
+agent and a `promptTemplate(input)` that asks for `{ score, reason }` JSON, **not**
+a `{ model, prompt }` pair. Sample expensive judges with
+`sampling: { type: "ratio", rate: 0.1 }`. Inspect:
 
 ```bash
 bunx smithers-orchestrator scores <run-id>
