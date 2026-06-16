@@ -122,6 +122,23 @@ Tier = which model tier the candidate runs on.
       real-usage `ru-run-completed-but-failed` + a source-grounded fix (degraded status / failedChildren).
 - [x] **UI-authoring suite** (`build` verify + `ui-quality` llmJudge): one-shot a gateway-react UI bundle,
       AI scores quality. Live-proven (sonnet). Corpus now **1028 cases / 22 suites**.
-- [~] Retry triage for 4 rate-limited gaps (number→int coercion, input-table migration, Worktree cwd
-      footgun, waiting-event overload) → more docs fixes + library issues.
-- [ ] NEXT — apply retry-triage outputs; re-run affected suites to confirm one-shot odds improved.
+- [x] Retry triage **workflow** for the 4 rate-limited gaps → **3 more docs fixes** (how-it-works
+      auto-migration, components/worktree relative-path footgun, runtime/run-state waiting-event overload)
+      + **3 library issues**. Total this goal: **8 docs fixes, 4 library issues**.
+- [x] Library issues filed (each cites the eval + a source-grounded fix):
+      **#295** run finished-masks-failures · **#296** zod `z.number()`→INTEGER corrupts decimals on Postgres
+      · **#297** `<Worktree>` relative path anchors to launch root · **#298** `waiting-event` overloaded.
+- [x] Hardened `ui-quality` scorer (records a fallback row even when the judge call rate-limits) and made
+      UI candidates sonnet-primary (haiku reliably fails to emit a large bundle via prompt-injection JSON —
+      itself the JSON-output limitation #295/#296 surface).
+- [~] eval-expansion **workflow**: authoring source-grounded tasks for under-covered areas (gateway HTTP,
+      effect-api, Aspects/budgets, scheduling/Poller, sandbox runtimes, advanced components, time-travel,
+      openapi tools) → append to curated-tasks → regenerate (toward broader coverage).
+- [ ] NEXT — apply expansion tasks; demonstrate one-shot odds improved on a fixed-gap eval; confirm
+      `ui-quality` records a real score once session limits clear.
+
+### Note on this session's live runs
+Heavy concurrent Claude Code usage this session hit subscription **session limits** (the exact
+real-usage struggle #6), causing some candidate/judge runs to fail as infra (not eval) failures.
+The suite + harness are correct; re-run when limits clear. Deterministic verify paths (no model
+in the gate) are unaffected.
