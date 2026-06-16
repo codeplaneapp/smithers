@@ -6,13 +6,8 @@ import {
   SmithersGatewayProvider,
   createGatewayReactRoot,
   useGatewayActions,
-  useGatewayApprovals,
   useGatewayNodeOutput,
   useGatewayRpc,
-  useGatewayRun,
-  useGatewayRunEvents,
-  useGatewayRuns,
-  useGatewayWorkflows,
   useSmithersGateway,
 } from "../src/index.ts";
 import type { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
@@ -221,16 +216,15 @@ describe("gateway query hooks", () => {
     expect(rejecting.calls).toEqual([{ method: "listRuns", params: { limit: 1 } }]);
   });
 
-  test("wrapper hooks pass expected params and enabled state", () => {
+  // The collection-backed hooks (useGatewayRuns / useGatewayRun /
+  // useGatewayApprovals / useGatewayWorkflows / useGatewayRunEvents) now run over
+  // the `SyncProvider` registry — see `tests/sync/sync.test.ts`. The on-demand
+  // node-output hook stays on the legacy `SmithersGatewayContext` client.
+  test("useGatewayNodeOutput reflects enabled / disabled state on the legacy client", () => {
     const { client } = createRpcClient();
     const observed: Record<string, unknown> = {};
 
     function Probe() {
-      observed.runs = useGatewayRuns({ status: "running" });
-      observed.workflows = useGatewayWorkflows({ rootDir: "/repo" });
-      observed.approvals = useGatewayApprovals({ runId: "run-1" });
-      observed.run = useGatewayRun("run-1");
-      observed.disabledRun = useGatewayRun(undefined);
       observed.output = useGatewayNodeOutput({
         runId: "run-1",
         nodeId: "node-1",
@@ -245,11 +239,6 @@ describe("gateway query hooks", () => {
 
     renderToString(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
 
-    expect(observed.runs).toMatchObject({ loading: true });
-    expect(observed.workflows).toMatchObject({ loading: true });
-    expect(observed.approvals).toMatchObject({ loading: true });
-    expect(observed.run).toMatchObject({ loading: true });
-    expect(observed.disabledRun).toMatchObject({ loading: false });
     expect(observed.output).toMatchObject({ loading: true });
     expect(observed.disabledOutput).toMatchObject({ loading: false });
   });
@@ -269,30 +258,5 @@ describe("gateway query hooks", () => {
     expect(calls).toEqual([
       { method: "getNodeOutput", params: { runId: "run-1", nodeId: "ship", iteration: 0 } },
     ]);
-  });
-
-  test("run event hook exposes initial streaming state", () => {
-    const { client } = createRpcClient();
-    let active: ReturnType<typeof useGatewayRunEvents> | undefined;
-    let inactive: ReturnType<typeof useGatewayRunEvents> | undefined;
-
-    function Probe() {
-      active = useGatewayRunEvents("run-1", { afterSeq: 2 });
-      inactive = useGatewayRunEvents(undefined);
-      return null;
-    }
-
-    renderToString(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
-
-    expect(active).toMatchObject({
-      events: [],
-      error: undefined,
-      streaming: true,
-    });
-    expect(inactive).toMatchObject({
-      events: [],
-      error: undefined,
-      streaming: false,
-    });
   });
 });

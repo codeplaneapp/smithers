@@ -17,6 +17,10 @@ export const gatewayKeys = {
     "gateway:getNodeOutput",
     { runId, nodeId, iteration },
   ],
+  nodeDiff: (runId: string, nodeId: string, iteration = 0): SyncKey => [
+    "gateway:getNodeDiff",
+    { runId, nodeId, iteration },
+  ],
   cronList: (params?: Record<string, unknown>): SyncKey => ["gateway:cronList", params ?? {}],
   runEvents: (runId: string): SyncKey => ["gateway:streamRunEvents", { runId }],
   devtools: (runId: string): SyncKey => ["gateway:streamDevTools", { runId }],

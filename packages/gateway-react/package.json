@@ -26,7 +26,8 @@
   },
   "dependencies": {
     "@smithers-orchestrator/gateway": "workspace:*",
-    "@smithers-orchestrator/gateway-client": "workspace:*"
+    "@smithers-orchestrator/gateway-client": "workspace:*",
+    "@tanstack/react-db": "0.1.86"
   },
   "peerDependencies": {
     "react": "^19.0.0",

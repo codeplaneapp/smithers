@@ -25,7 +25,8 @@
     "test": "bun test tests"
   },
   "dependencies": {
-    "@smithers-orchestrator/gateway": "workspace:*"
+    "@smithers-orchestrator/gateway": "workspace:*",
+    "@tanstack/db": "^0.6.8"
   },
   "devDependencies": {
     "@types/bun": "latest",

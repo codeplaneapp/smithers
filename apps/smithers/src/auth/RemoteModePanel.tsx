@@ -1,20 +1,20 @@
 import { useState } from "react";
-import { useGatewayStore } from "../gateway/gatewayStore";
+import { resetGatewayClient } from "../gateway/gatewayClient";
+import { appGatewayCollections } from "../sync/appGatewayCollections";
+import { useGatewayConnectionStatus } from "../sync/useGatewayConnectionStatus";
 import { useAuthStore } from "./authStore";
 
 export function RemoteModePanel() {
   const gatewayBaseUrl = useAuthStore((state) => state.gatewayBaseUrl);
   const setGatewayBaseUrl = useAuthStore((state) => state.setGatewayBaseUrl);
   const authStatus = useAuthStore((state) => state.status);
-  const gatewayStatus = useGatewayStore((state) => state.status);
-  const resetGateway = useGatewayStore((state) => state.reset);
-  const ensureConnected = useGatewayStore((state) => state.ensureConnected);
+  const gateway = useGatewayConnectionStatus();
   const [draft, setDraft] = useState(gatewayBaseUrl);
 
   const apply = () => {
     setGatewayBaseUrl(draft);
-    resetGateway();
-    ensureConnected();
+    resetGatewayClient();
+    appGatewayCollections.reset();
   };
 
   return (
@@ -40,7 +40,7 @@ export function RemoteModePanel() {
       </div>
       <div className="remote-meta">
         <span>auth: {authStatus}</span>
-        <span>gateway: {gatewayStatus}</span>
+        <span>gateway: {gateway.status}</span>
       </div>
     </section>
   );

@@ -1,9 +1,10 @@
 import { createContext } from "react";
-import type { SyncClient } from "@smithers-orchestrator/gateway-client";
+import type { GatewayCollections } from "./GatewayCollections.ts";
 
 /**
- * The React context that hands a `SyncClient` to every hook. The default is
- * `null` so consumers must wrap their tree in a `SyncProvider` — surfacing the
- * missing-provider error eagerly beats a silent no-op.
+ * The React context that hands the `GatewayCollections` registry to every sync
+ * hook. The default is `null` so consumers must wrap their tree in a
+ * `SyncProvider` — surfacing the missing-provider error eagerly beats a silent
+ * no-op.
  */
-export const SyncContext = createContext<SyncClient | null>(null);
+export const SyncContext = createContext<GatewayCollections | null>(null);

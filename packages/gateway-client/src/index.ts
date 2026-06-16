@@ -27,23 +27,21 @@ export type {
   GatewayExtensionSubscribeResponse,
 } from "./GatewayExtensionEnvelope.ts";
 
-// Declarative sync SDK: typed cache keys, vanilla cache + subscription hub, and
-// the gateway-backed transport wiring. The React surface lives in
+// Declarative sync SDK: TanStack DB collection options backed by the gateway
+// RPC + WebSocket transport. React bindings live in
 // `@smithers-orchestrator/gateway-react` so the core stays framework-free.
-export { SyncCache } from "./sync/SyncCache.ts";
-export type { SyncCacheEntry, SyncCacheOptions, SyncCacheStatus } from "./sync/SyncCache.ts";
-export { SyncClient } from "./sync/SyncClient.ts";
-export type {
-  SyncClientOptions,
-  SyncFetcher,
-  SyncMutationOptions,
-  SyncQueryOptions,
-} from "./sync/SyncClient.ts";
-export { SyncSubscriptionHub } from "./sync/SyncSubscriptionHub.ts";
-export type {
-  SyncSubscriptionListener,
-  SyncSubscriptionOptions,
-} from "./sync/SyncSubscriptionHub.ts";
+export { createGatewayCollection, type GatewayCollectionConfig } from "./sync/createGatewayCollection.ts";
+export { flattenGatewayRunNode } from "./sync/flattenGatewayRunNode.ts";
+export { snapshotToGatewayRunNode } from "./sync/snapshotToGatewayRunNode.ts";
+export type { DevToolsSnapshot, DevToolsSnapshotNode } from "./sync/snapshotToGatewayRunNode.ts";
+export { gatewayCollectionDefs } from "./sync/gatewayCollectionDefs.ts";
+export { reconcileSnapshotNodes } from "./sync/reconcileSnapshotNodes.ts";
+export type { GatewayApprovalRow } from "./sync/GatewayApprovalRow.ts";
+export type { GatewayRunEventRow } from "./sync/GatewayRunEventRow.ts";
+export type { GatewayRunNode } from "./sync/GatewayRunNode.ts";
+export type { GatewayRunRow } from "./sync/GatewayRunRow.ts";
+export type { GatewayRunSummaryRow } from "./sync/GatewayRunSummaryRow.ts";
+export type { GatewayWorkflowRow } from "./sync/GatewayWorkflowRow.ts";
 export { syncBackoffDelay } from "./sync/SyncBackoff.ts";
 export type { SyncBackoffOptions } from "./sync/SyncBackoff.ts";
 export { syncKeyFingerprint, syncKeyMatches } from "./sync/SyncKey.ts";
