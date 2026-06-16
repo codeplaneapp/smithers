@@ -9,6 +9,9 @@ import { spawnSync } from "node:child_process";
 /**
  * @typedef {{ id: DiagnosticCheckId; run: (ctx: DiagnosticContext) => Promise<DiagnosticCheck>; }} DiagnosticCheckDef
  */
+/**
+ * @typedef {{ provider?: string; model?: string; apiKey?: string }} DiagnosticHints
+ */
 
 // ---------------------------------------------------------------------------
 // Shared check helpers
@@ -472,15 +475,75 @@ const antigravityStrategy = {
 // ---------------------------------------------------------------------------
 // Pi strategy
 // ---------------------------------------------------------------------------
-const piStrategy = {
-    agentId: "pi",
-    command: "pi",
-    checks: [
-        checkCliInstalled("pi", "Pi"),
-        googleAuthCheck,
-        googleRateLimitCheck,
-    ],
-};
+/**
+ * Resolve the effective pi provider family from an explicit `--provider`, a
+ * `provider/model` prefix, or a bare model id's well-known prefix. Returns ""
+ * when undeterminable so callers fall back to pi's default (google) (#284).
+ * @param {DiagnosticHints | undefined} hints
+ * @returns {string}
+ */
+function resolvePiProvider(hints) {
+    const explicit = (hints?.provider || "").trim().toLowerCase();
+    if (explicit) {
+        return explicit;
+    }
+    const model = typeof hints?.model === "string" ? hints.model.trim().toLowerCase() : "";
+    if (!model) {
+        return "";
+    }
+    if (model.includes("/")) {
+        return model.split("/")[0];
+    }
+    // Bare model id (no provider prefix) — infer the provider family from
+    // common id prefixes so diagnostics probe the right backend.
+    if (model.startsWith("gpt-") || model.startsWith("o1-") || model.startsWith("o3-") || model.startsWith("o4-") || model.startsWith("chatgpt")) {
+        return "openai";
+    }
+    if (model.startsWith("claude")) {
+        return "anthropic";
+    }
+    if (model.startsWith("gemini")) {
+        return "google";
+    }
+    return "";
+}
+/**
+ * @param {DiagnosticHints | undefined} hints
+ * @returns {DiagnosticCheckDef[]}
+ */
+function piProviderChecks(hints) {
+    const raw = resolvePiProvider(hints);
+    if (raw === "openai" || raw === "openai-codex" || raw === "azure" || raw === "azure-openai") {
+        return [...codexApiKeyAndRateLimitCheck];
+    }
+    if (raw === "anthropic" || raw === "claude") {
+        return [claudeApiKeyCheck, claudeRateLimitCheck];
+    }
+    return [googleAuthCheck, googleRateLimitCheck];
+}
+/**
+ * pi accepts credentials via the `--api-key` option instead of an environment
+ * variable. Diagnostics only see the process env, so map an explicit apiKey to
+ * the env var the selected provider's checks read — otherwise an apiKey-only pi
+ * run is misreported as "key missing" (#284). Returns undefined when there is
+ * nothing to inject.
+ * @param {string} command
+ * @param {DiagnosticHints | undefined} hints
+ * @returns {Record<string, string> | undefined}
+ */
+export function diagnosticApiKeyEnv(command, hints) {
+    if (command !== "pi" || !hints?.apiKey) {
+        return undefined;
+    }
+    const raw = resolvePiProvider(hints);
+    if (raw === "openai" || raw === "openai-codex" || raw === "azure" || raw === "azure-openai") {
+        return { OPENAI_API_KEY: hints.apiKey };
+    }
+    if (raw === "anthropic" || raw === "claude") {
+        return { ANTHROPIC_API_KEY: hints.apiKey };
+    }
+    return { GOOGLE_API_KEY: hints.apiKey };
+}
 // ---------------------------------------------------------------------------
 // Amp strategy
 // ---------------------------------------------------------------------------
@@ -524,13 +587,20 @@ const strategies = {
     antigravity: antigravityStrategy,
     agy: antigravityStrategy,
     gemini: geminiStrategy,
-    pi: piStrategy,
     amp: ampStrategy,
 };
 /**
  * @param {string} command
+ * @param {DiagnosticHints} [hints]
  * @returns {AgentDiagnosticStrategy | null}
  */
-export function getDiagnosticStrategy(command) {
+export function getDiagnosticStrategy(command, hints) {
+    if (command === "pi") {
+        return {
+            agentId: "pi",
+            command: "pi",
+            checks: [checkCliInstalled("pi", "Pi"), ...piProviderChecks(hints)],
+        };
+    }
     return strategies[command] ?? null;
 }

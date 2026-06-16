@@ -198,11 +198,114 @@ process.stdout.write(lines.join("\\n") + "\\n");
             await rm(argsFileDir, { recursive: true, force: true });
         }
     }, 15_000);
+    test("PiAgent json mode includes --print", async () => {
+        const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-pi-json-print-"));
+        const argsFile = join(argsFileDir, "args.json");
+        const fake = await makeFakePi(`
+ const fs = require("node:fs");
+ const args = process.argv.slice(2);
+ if (process.env.PI_ARGS_FILE) fs.writeFileSync(process.env.PI_ARGS_FILE, JSON.stringify(args), "utf8");
+ const lines = [
+   JSON.stringify({ type: "session", id: "json-print-session" }),
+   JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } })
+ ];
+ process.stdout.write(lines.join("\\n") + "\\n");
+ `);
+        try {
+            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PI_ARGS_FILE = argsFile;
+            const agent = new PiAgent({
+                mode: "json",
+                env: { PATH: process.env.PATH },
+            });
+            await agent.generate({
+                messages: [{ role: "user", content: "Ping?" }],
+            });
+            const capturedArgs = JSON.parse(await readFile(argsFile, "utf8"));
+            expect(capturedArgs).toContain("--print");
+            expect(capturedArgs).toContain("--mode");
+            expect(capturedArgs).toContain("json");
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+            await rm(argsFileDir, { recursive: true, force: true });
+        }
+    });
+    test("PiAgent onEvent path includes --print and --mode json", async () => {
+        const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-pi-on-event-print-"));
+        const argsFile = join(argsFileDir, "args.json");
+        const fake = await makeFakePi(`
+ const fs = require("node:fs");
+ const args = process.argv.slice(2);
+ if (process.env.PI_ARGS_FILE) fs.writeFileSync(process.env.PI_ARGS_FILE, JSON.stringify(args), "utf8");
+ const lines = [
+   JSON.stringify({ type: "session", id: "on-event-print-session" }),
+   JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } })
+ ];
+ process.stdout.write(lines.join("\\n") + "\\n");
+ `);
+        try {
+            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PI_ARGS_FILE = argsFile;
+            const agent = new PiAgent({
+                env: { PATH: process.env.PATH },
+            });
+            await agent.generate({
+                messages: [{ role: "user", content: "Ping?" }],
+                onEvent: () => undefined,
+            });
+            const capturedArgs = JSON.parse(await readFile(argsFile, "utf8"));
+            expect(capturedArgs).toContain("--print");
+            expect(capturedArgs).toContain("--mode");
+            expect(capturedArgs).toContain("json");
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+            await rm(argsFileDir, { recursive: true, force: true });
+        }
+    });
+    test("PiAgent print false omits --print in json mode", async () => {
+        const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-pi-no-print-"));
+        const argsFile = join(argsFileDir, "args.json");
+        const fake = await makeFakePi(`
+ const fs = require("node:fs");
+ const args = process.argv.slice(2);
+ if (process.env.PI_ARGS_FILE) fs.writeFileSync(process.env.PI_ARGS_FILE, JSON.stringify(args), "utf8");
+ const lines = [
+   JSON.stringify({ type: "session", id: "no-print-session" }),
+   JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } })
+ ];
+ process.stdout.write(lines.join("\\n") + "\\n");
+ `);
+        try {
+            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PI_ARGS_FILE = argsFile;
+            const agent = new PiAgent({
+                mode: "json",
+                print: false,
+                env: { PATH: process.env.PATH },
+            });
+            await agent.generate({
+                messages: [{ role: "user", content: "Ping?" }],
+            });
+            const capturedArgs = JSON.parse(await readFile(argsFile, "utf8"));
+            expect(capturedArgs).not.toContain("--print");
+            expect(capturedArgs).toContain("--mode");
+            expect(capturedArgs).toContain("json");
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+            await rm(argsFileDir, { recursive: true, force: true });
+        }
+    });
     test("PiAgent RPC mode sends prompt and returns output", async () => {
         const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-pi-rpc-"));
         const argsFile = join(argsFileDir, "prompt.json");
+        const responseFile = join(argsFileDir, "args.json");
         const fake = await makeFakePi(`
  const fs = require("node:fs");
+ const args = process.argv.slice(2);
+ if (process.env.PI_RESPONSE_FILE) fs.writeFileSync(process.env.PI_RESPONSE_FILE, JSON.stringify(args), "utf8");
  let buffer = "";
  process.stdin.on("data", (chunk) => {
    buffer += chunk.toString("utf8");
@@ -223,6 +326,7 @@ process.stdout.write(lines.join("\\n") + "\\n");
         try {
             process.env.PATH = `${fake.dir}:${originalPath}`;
             process.env.PI_ARGS_FILE = argsFile;
+            process.env.PI_RESPONSE_FILE = responseFile;
             const agent = new PiAgent({
                 mode: "rpc",
                 model: "gpt-4o-mini",
@@ -235,6 +339,10 @@ process.stdout.write(lines.join("\\n") + "\\n");
             const promptPayload = JSON.parse(await readFile(argsFile, "utf8"));
             expect(promptPayload.type).toBe("prompt");
             expect(promptPayload.message).toContain("USER: Ping?");
+            const capturedArgs = JSON.parse(await readFile(responseFile, "utf8"));
+            expect(capturedArgs).toContain("--mode");
+            expect(capturedArgs).toContain("rpc");
+            expect(capturedArgs).not.toContain("--print");
         }
         finally {
             await rm(fake.dir, { recursive: true, force: true });
@@ -415,6 +523,85 @@ process.stdout.write(lines.join("\\n") + "\\n");
                 messages: [{ role: "user", content: "Hello" }],
             });
             expect(result.text).toBe("Response from agent_end");
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+        }
+    });
+    test("PiAgent completes once on agent_end with usage", async () => {
+        const fake = await makeFakePi(`
+ const lines = [
+   JSON.stringify({ type: "session", version: 3, id: "agent-end-usage-session" }),
+   JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "partial" } }),
+   JSON.stringify({ type: "agent_end", messages: [
+     { role: "user", content: [{ type: "text", text: "Hello" }] },
+     { role: "assistant", content: [{ type: "text", text: "Final from agent_end" }] }
+   ], usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 } })
+ ];
+ process.stdout.write(lines.join("\\n") + "\\n");
+ `);
+        try {
+            process.env.PATH = `${fake.dir}:${originalPath}`;
+            const events = [];
+            const agent = new PiAgent({
+                mode: "json",
+                model: "test-model",
+                env: { PATH: process.env.PATH },
+            });
+            const result = await agent.generate({
+                messages: [{ role: "user", content: "Hello" }],
+                onEvent: (event) => {
+                    events.push(event);
+                },
+            });
+            const completedEvents = events.filter((event) => event.type === "completed");
+            expect(completedEvents).toHaveLength(1);
+            expect(completedEvents[0].answer).toBe("Final from agent_end");
+            expect(completedEvents[0].usage).toEqual({
+                input_tokens: 10,
+                output_tokens: 5,
+                total_tokens: 15,
+            });
+            expect(result.text).toBe("Final from agent_end");
+            expect(result.usage.inputTokens).toBe(10);
+            expect(result.usage.outputTokens).toBe(5);
+        }
+        finally {
+            await rm(fake.dir, { recursive: true, force: true });
+        }
+    });
+    test("PiAgent surfaces usage via the completed-event fallback when stdout extraction misses it", async () => {
+        // usage is nested under message.usage (NOT a top-level `usage` field),
+        // which BaseCliAgent.extractUsageFromOutput ignores. result.usage must
+        // therefore come from the interpreter's completed event via
+        // usageFromCompletedEvent — exercising the fallback path (#284).
+        const fake = await makeFakePi(`
+ const lines = [
+   JSON.stringify({ type: "session", version: 3, id: "usage-fallback-session" }),
+   JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }], stopReason: "stop", usage: { input_tokens: 7, output_tokens: 3 } } })
+ ];
+ process.stdout.write(lines.join("\\n") + "\\n");
+ `);
+        try {
+            process.env.PATH = `${fake.dir}:${originalPath}`;
+            const events = [];
+            const agent = new PiAgent({
+                mode: "json",
+                model: "test-model",
+                env: { PATH: process.env.PATH },
+            });
+            const result = await agent.generate({
+                messages: [{ role: "user", content: "Hello" }],
+                onEvent: (event) => {
+                    events.push(event);
+                },
+            });
+            const completed = events.find((event) => event.type === "completed");
+            expect(completed?.usage).toEqual({ input_tokens: 7, output_tokens: 3 });
+            // The fallback (usageFromCompletedEvent) populated result.usage even
+            // though the stdout extractor found no top-level usage.
+            expect(result.usage.inputTokens).toBe(7);
+            expect(result.usage.outputTokens).toBe(3);
         }
         finally {
             await rm(fake.dir, { recursive: true, force: true });

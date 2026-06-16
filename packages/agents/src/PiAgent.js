@@ -104,11 +104,14 @@ export class PiAgent extends BaseCliAgent {
             : undefined;
         const effectiveSession = resumeSession ?? this.opts.session;
         this.issuedSessionRef = effectiveSession;
-        if (params.mode === "text") {
-            if (this.opts.print !== false)
-                args.push("--print");
+        // pi's --print (non-interactive: process prompt and exit) and --mode
+        // are independent. Apply --print to every non-RPC mode so json task
+        // executions also process one prompt and exit instead of lingering as
+        // an interactive session (#284).
+        if (params.mode !== "rpc" && this.opts.print !== false) {
+            args.push("--print");
         }
-        else {
+        if (params.mode !== "text") {
             args.push("--mode", params.mode);
         }
         pushFlag(args, "--provider", this.opts.provider);
@@ -197,7 +200,9 @@ export class PiAgent extends BaseCliAgent {
     createOutputInterpreter() {
         let sessionId = this.issuedSessionRef;
         let emittedStarted = false;
+        let emittedCompleted = false;
         let finalAnswer = "";
+        let finalUsage;
         /**
      * @param {unknown} value
      */
@@ -229,6 +234,17 @@ export class PiAgent extends BaseCliAgent {
                     resume: sessionId,
                     detail,
                 }];
+        };
+        /**
+     * @param {Record<string, unknown>} payload
+     */
+        const captureUsage = (payload) => {
+            const candidate = (payload && typeof payload.usage === "object" && payload.usage) ||
+                (payload && typeof payload.message === "object" && payload.message && typeof payload.message.usage === "object" && payload.message.usage) ||
+                undefined;
+            if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+                finalUsage = candidate;
+            }
         };
         /**
      * @param {string} line
@@ -267,6 +283,7 @@ export class PiAgent extends BaseCliAgent {
                 return startedEvents();
             }
             if (type === "message_end" || type === "turn_end") {
+                captureUsage(payload);
                 const message = payload.message;
                 if (message?.role === "assistant") {
                     const extracted = extractTextFromJsonValue(message);
@@ -275,6 +292,33 @@ export class PiAgent extends BaseCliAgent {
                     }
                 }
                 return startedEvents();
+            }
+            if (type === "agent_end") {
+                captureUsage(payload);
+                if (Array.isArray(payload.messages)) {
+                    for (let i = payload.messages.length - 1; i >= 0; i--) {
+                        const message = payload.messages[i];
+                        if (message?.role === "assistant") {
+                            const extracted = extractTextFromJsonValue(message);
+                            if (extracted) {
+                                finalAnswer = extracted;
+                            }
+                            break;
+                        }
+                    }
+                }
+                emittedCompleted = true;
+                return [
+                    ...startedEvents(),
+                    {
+                        type: "completed",
+                        engine: this.cliEngine,
+                        ok: true,
+                        answer: finalAnswer || undefined,
+                        usage: finalUsage,
+                        resume: sessionId,
+                    },
+                ];
             }
             if (type === "tool_execution_start") {
                 const toolName = asString(payload.toolName) ?? "tool";
@@ -355,6 +399,9 @@ export class PiAgent extends BaseCliAgent {
                 const started = !emittedStarted && sessionId
                     ? startedEvents()
                     : [];
+                if (emittedCompleted) {
+                    return started;
+                }
                 return [
                     ...started,
                     {
@@ -362,6 +409,7 @@ export class PiAgent extends BaseCliAgent {
                         engine: this.cliEngine,
                         ok: !result.exitCode || result.exitCode === 0,
                         answer: finalAnswer || undefined,
+                        usage: finalUsage,
                         error: result.exitCode && result.exitCode !== 0
                             ? result.stderr.trim() || `PI exited with code ${result.exitCode}`
                             : undefined,
@@ -394,7 +442,7 @@ export class PiAgent extends BaseCliAgent {
         const cwd = this.cwd ?? options?.rootDir ?? process.cwd();
         const env = { ...process.env, ...this.env };
         const args = this.buildArgs({ prompt, cwd, options, mode });
-        const diagnosticsPromise = launchDiagnostics("pi", env, cwd);
+        const diagnosticsPromise = launchDiagnostics("pi", env, cwd, this.diagnosticHints());
         const interpreter = this.createOutputInterpreter();
         /**
      * @param {AgentCliEvent[] | AgentCliEvent | null | undefined} payload
@@ -463,6 +511,16 @@ export class PiAgent extends BaseCliAgent {
                 mode,
             }),
             outputFormat: mode,
+        };
+    }
+    /**
+   * @returns {{ provider?: string; model?: string; apiKey?: string }}
+   */
+    diagnosticHints() {
+        return {
+            provider: this.opts.provider,
+            model: this.opts.model ?? this.model,
+            apiKey: this.opts.apiKey,
         };
     }
 }
