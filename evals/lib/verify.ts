@@ -78,11 +78,17 @@ function containsVerify(artifact: string, v: VerifySpec): EvalVerdict {
   };
 }
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function equalsVerify(artifact: string, v: VerifySpec): EvalVerdict {
   const want = normalizeCliAnswer(v.answer ?? "");
   const got = normalizeCliAnswer(artifact);
-  // accept the canonical answer appearing anywhere in a normalized answer line
-  const passed = got === want || got.split("\n").some((line) => line.trim() === want) || got.includes(want);
+  // Exact, exact-per-line, or a whole-word match — NOT a loose substring, so the
+  // canonical answer "up" does not falsely match a candidate that said "update".
+  const wordMatch = want.length > 0 && new RegExp(`(^|\\s)${escapeRegex(want)}($|\\s)`).test(got);
+  const passed = got === want || got.split("\n").some((line) => line.trim() === want) || wordMatch;
   return {
     passed,
     score: passed ? 1 : 0,
