@@ -113,7 +113,13 @@ function verifyOf(t: Task): VerifySpec | null {
   if (t.kind === "knowledge") {
     const ans = (t.canonicalAnswer ?? "").trim();
     if (!ans) return null;
-    const short = !ans.includes("\n") && ans.split(/\s+/).length <= 4;
+    const words = ans.split(/\s+/).length;
+    // A sentence-like answer (an explanation) can't be matched verbatim — grade
+    // it with a judge against the canonical answer as the rubric. Only short
+    // keyword/identifier answers use deterministic equals/contains.
+    const looksLikeSentence = /[.!?]\s/.test(ans) || ans.length > 60 || words > 8;
+    if (looksLikeSentence) return { kind: "judge", rubric: `A correct answer should convey: ${ans}` };
+    const short = !ans.includes("\n") && words <= 4;
     const spec: VerifySpec = short ? { kind: "equals", answer: ans } : { kind: "contains", must: [ans] };
     if (t.mustNot?.length) spec.mustNot = t.mustNot;
     return spec;

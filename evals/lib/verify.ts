@@ -2,7 +2,7 @@
 // possible. A fluency eval's verify <Task> calls computeVerdict() from an
 // agentless compute child; only `judge` verification spends a model.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoRoot } from "./paths.js";
 import type { CandidateReport, EvalVerdict } from "./report-schema.js";
@@ -108,6 +108,9 @@ function graphVerify(artifact: string, v: VerifySpec): EvalVerdict {
   let graphStatus: number | null = null;
   let graphOut = "";
   try {
+    // .smithers/state is gitignored and may not exist on a fresh checkout —
+    // create it so the very first graph-verify doesn't ENOENT.
+    mkdirSync(tmpBase, { recursive: true });
     dir = mkdtempSync(join(tmpBase, "eval-graph-"));
     const file = join(dir, "candidate.tsx");
     writeFileSync(file, artifact, "utf8");

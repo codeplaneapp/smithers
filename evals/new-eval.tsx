@@ -21,7 +21,9 @@ const ROOT = repoRoot();
 const CURATED = join(ROOT, "evals/_inventory/curated-tasks.jsonl");
 
 const inputSchema = z.object({
-  issue: z.string().default("Describe the Smithers friction or struggle to turn into an eval."),
+  issue: z.string().nullable().default(null).describe("The Smithers friction/struggle to turn into an eval."),
+  // Accept `friction` as an alias for `issue` (the README + intuition use either).
+  friction: z.string().nullable().default(null).describe("Alias for `issue`."),
   area: z.string().nullable().default(null).describe("Optional feature-area hint."),
   tier: z.enum(["weak", "sota"]).nullable().default(null).describe("Optional tier override."),
 });
@@ -72,7 +74,7 @@ const DRAFT_PROMPT = (issue: string, area: string | null, tier: string | null) =
     .join("\n");
 
 export default smithers((ctx) => {
-  const issue = ctx.input.issue ?? "Describe the Smithers friction to turn into an eval.";
+  const issue = ctx.input.issue ?? ctx.input.friction ?? "Describe the Smithers friction to turn into an eval.";
   const area = ctx.input.area ?? null;
   const tier = ctx.input.tier ?? null;
   const draft = ctx.outputMaybe("draft", { nodeId: "draft" }) as z.infer<typeof draftSchema> | undefined;
