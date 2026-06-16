@@ -16,7 +16,7 @@ import { docsGapScorer, frictionScorer, oneShotScorer, schemaAdherenceScorer } f
 import { computeVerdict, normalizeVerify, type VerifyKind } from "./verify.js";
 
 const verifyShape = z.object({
-  kind: z.enum(["contains", "equals", "graph", "sql", "judge"]).default("contains"),
+  kind: z.enum(["contains", "equals", "graph", "sql", "query", "judge"]).default("contains"),
   must: z.array(z.string()).default([]),
   mustNot: z.array(z.string()).default([]),
   answer: z.string().nullable().default(null),
@@ -63,8 +63,8 @@ function artifactContract(kind: VerifyKind): string {
       "  • It must render with `smithers graph` (a valid <Workflow> tree with typed <Task> outputs).",
     ].join("\n");
   }
-  if (kind === "sql") {
-    return "Deliverable: put a single SQL query that answers the question in `artifact` (artifactKind: sql).";
+  if (kind === "sql" || kind === "query") {
+    return "Deliverable: put a single SQL query (SQLite dialect) that answers the question in `artifact` (artifactKind: sql). No prose, just the query.";
   }
   if (kind === "contains" || kind === "equals") {
     return "Deliverable: put ONLY the answer/command in `artifact` (artifactKind: cli-command or answer). Be concise — no surrounding prose in `artifact`.";

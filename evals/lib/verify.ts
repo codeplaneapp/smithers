@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { repoRoot } from "./paths.js";
 import type { CandidateReport, EvalVerdict } from "./report-schema.js";
 
-export type VerifyKind = "contains" | "equals" | "graph" | "sql" | "judge";
+export type VerifyKind = "contains" | "equals" | "graph" | "sql" | "query" | "judge";
 
 export type VerifySpec = {
   kind: VerifyKind;
@@ -178,6 +178,53 @@ async function sqlVerify(v: VerifySpec): Promise<EvalVerdict> {
   };
 }
 
+/** Run the CANDIDATE's SQL (its artifact) against a seeded fixture db and compare
+ * the result to the known answer. This is the db-query eval: did the weak model
+ * write SQL that answers the question? */
+async function queryVerify(artifact: string, v: VerifySpec): Promise<EvalVerdict> {
+  if (!v.db) {
+    return { passed: false, score: 0, reason: "query verify needs a fixture db", method: "query", checks: [{ name: "fixture", passed: false, detail: "missing db" }] };
+  }
+  // Strip code fences / leading prose so a candidate's ```sql block still runs.
+  const sql = artifact.replace(/```sql/gi, "").replace(/```/g, "").trim();
+  const { Database } = await import("bun:sqlite");
+  let rows: unknown[] = [];
+  try {
+    const db = new Database(v.db, { readonly: true });
+    rows = db.query(sql).all();
+    db.close();
+  } catch (err) {
+    return { passed: false, score: 0, reason: `candidate SQL failed: ${err instanceof Error ? err.message : String(err)}`, method: "query", checks: [{ name: "runs", passed: false, detail: sql.slice(0, 120) }] };
+  }
+  const got = JSON.stringify(rows);
+  const want = (v.expect ?? "").trim();
+  // Order-insensitive single-scalar match (e.g. [{"n":3}]) or substring of the
+  // canonical answer; tolerant of column aliasing by also matching the value.
+  const passed = got === want || (want.length > 0 && (got.includes(want) || normalizeScalar(got) === normalizeScalar(want)));
+  return {
+    passed,
+    score: passed ? 1 : 0,
+    reason: passed ? "candidate query returns the expected answer" : `expected ${want}, got ${got.slice(0, 200)}`,
+    method: "query",
+    checks: [{ name: "result", passed, detail: got.slice(0, 200) }],
+  };
+}
+
+/** Reduce a single-row/single-value result to its scalar so column aliases don't
+ * matter: [{"n":3}] and [{"count":3}] both → "3". */
+function normalizeScalar(json: string): string {
+  try {
+    const v = JSON.parse(json);
+    if (Array.isArray(v) && v.length === 1 && v[0] && typeof v[0] === "object") {
+      const vals = Object.values(v[0] as Record<string, unknown>);
+      if (vals.length === 1) return String(vals[0]);
+    }
+  } catch {
+    /* not json */
+  }
+  return json.trim();
+}
+
 /** Deterministic verdict for every non-judge verify kind. */
 export async function computeVerdict(
   verify: VerifySpec,
@@ -191,6 +238,8 @@ export async function computeVerdict(
       return graphVerify(artifact, verify);
     case "sql":
       return await sqlVerify(verify);
+    case "query":
+      return await queryVerify(artifact, verify);
     case "contains":
     default:
       return containsVerify(artifact, verify);
