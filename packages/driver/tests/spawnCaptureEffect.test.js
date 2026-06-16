@@ -178,15 +178,25 @@ describe("spawnCaptureEffect — timeouts and cancellation", () => {
   });
 
   test("idle timer resets on stdout activity", async () => {
-    // Process emits a tick every 50ms for ~250ms; idleTimeout 200ms.
+    // Process emits ticks for longer than the idle timeout. Without resetting
+    // on stdout activity, this would fail around 500ms.
     // It should never time out because each tick resets the idle timer.
     const result = await run(
-      "sh",
+      "node",
       [
-        "-c",
-        "for i in 1 2 3 4 5; do echo tick; sleep 0.05; done",
+        "-e",
+        [
+          "let ticks = 0;",
+          "const interval = setInterval(() => {",
+          "  ticks += 1;",
+          "  process.stdout.write(`tick ${ticks}\\n`);",
+          "  if (ticks === 10) {",
+          "    clearInterval(interval);",
+          "  }",
+          "}, 100);",
+        ].join("\n"),
       ],
-      { idleTimeoutMs: 200 },
+      { idleTimeoutMs: 500 },
     );
     expect(result.stdout).toContain("tick");
     expect(result.exitCode).toBe(0);
