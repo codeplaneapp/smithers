@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { repoRoot } from "./paths.js";
 import type { CandidateReport, EvalVerdict } from "./report-schema.js";
 
-export type VerifyKind = "contains" | "equals" | "graph" | "sql" | "query" | "judge";
+export type VerifyKind = "contains" | "equals" | "graph" | "sql" | "query" | "build" | "judge";
 
 export type VerifySpec = {
   kind: VerifyKind;
@@ -236,6 +236,33 @@ function normalizeScalar(json: string): string {
   return json.trim();
 }
 
+/** Transpile a candidate UI/code bundle (proves it's syntactically valid TSX) and
+ * require the key API tokens. Pairs with the ui-quality llmJudge scorer, which
+ * grades design/UX. Zero model spend, no module resolution. */
+function buildVerify(artifact: string, v: VerifySpec): EvalVerdict {
+  let transpiled = false;
+  let err = "";
+  try {
+    new Bun.Transpiler({ loader: "tsx" }).transformSync(artifact);
+    transpiled = true;
+  } catch (e) {
+    err = e instanceof Error ? e.message : String(e);
+  }
+  const checks: EvalVerdict["checks"] = [
+    { name: "transpiles", passed: transpiled, detail: transpiled ? "valid tsx" : err.slice(0, 200) },
+    ...v.must.map((m) => ({ name: `must:${m}`, passed: artifact.includes(m), detail: m })),
+    ...v.mustNot.map((m) => ({ name: `mustNot:${m}`, passed: !artifact.includes(m), detail: m })),
+  ];
+  const passed = checks.every((c) => c.passed);
+  return {
+    passed,
+    score: scoreFromChecks(checks),
+    reason: passed ? "bundle transpiles and uses the required API" : `failed: ${checks.filter((c) => !c.passed).map((c) => c.name).join(", ")}`,
+    method: "build",
+    checks,
+  };
+}
+
 /** Deterministic verdict for every non-judge verify kind. */
 export async function computeVerdict(
   verify: VerifySpec,
@@ -251,6 +278,8 @@ export async function computeVerdict(
       return await sqlVerify(verify);
     case "query":
       return await queryVerify(artifact, verify);
+    case "build":
+      return buildVerify(artifact, verify);
     case "contains":
     default:
       return containsVerify(artifact, verify);

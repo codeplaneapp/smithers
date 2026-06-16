@@ -61,6 +61,28 @@ export const frictionScorer = createScorer({
   },
 });
 
+/** llmJudge: how high-quality is a candidate's custom workflow UI bundle? Grades
+ * design/UX/code on a 0-1 scale (the build verifier only checks it compiles +
+ * uses the right API). Attached only to UI-authoring cases. */
+export const uiQualityScorer = (judge: AgentLike) =>
+  llmJudge({
+    id: "ui-quality",
+    name: "UI Quality",
+    description: "Quality of a Smithers custom workflow UI bundle (gateway-react).",
+    judge,
+    instructions:
+      "You rate a Smithers custom workflow UI bundle (React + smithers-orchestrator/gateway-react). " +
+      "Score 0-1 on: correct use of createGatewayReactRoot + the gateway hooks " +
+      "(useGatewayRun/RunEvents/NodeOutput/Approvals/Actions/Runs); handling of loading, empty, and error states; " +
+      "scoping to the ?runId in location.search; clean component structure and naming; sensible layout/UX and basic accessibility; " +
+      "and absence of obvious bugs or invented APIs. " +
+      'Respond ONLY with JSON: {"score": <0-1>, "reason": "<short>"}.',
+    promptTemplate: (input) => {
+      const r = asReport(input.output);
+      return `Rate this Smithers workflow UI bundle 0-1:\n\n${(r.artifact ?? "(none)").slice(0, 6000)}\n\nReturn JSON {"score","reason"}.`;
+    },
+  });
+
 /** llmJudge: does the reported friction reflect a REAL, fixable docs/API gap (so
  * the scorecard can prioritize)? Sample this — it spends a model. */
 export const docsGapScorer = (judge: AgentLike) =>

@@ -12,11 +12,11 @@ import { z } from "zod/v4";
 import { EVAL_DB_PATH } from "./paths.js";
 import { resolveCandidate, resolveJudge } from "./model-matrix.js";
 import { candidateReport, type CandidateReport, evalVerdict } from "./report-schema.js";
-import { docsGapScorer, frictionScorer, oneShotScorer, schemaAdherenceScorer } from "./scorers.js";
+import { docsGapScorer, frictionScorer, oneShotScorer, schemaAdherenceScorer, uiQualityScorer } from "./scorers.js";
 import { computeVerdict, normalizeVerify, type VerifyKind } from "./verify.js";
 
 const verifyShape = z.object({
-  kind: z.enum(["contains", "equals", "graph", "sql", "query", "judge"]).default("contains"),
+  kind: z.enum(["contains", "equals", "graph", "sql", "query", "build", "judge"]).default("contains"),
   must: z.array(z.string()).default([]),
   mustNot: z.array(z.string()).default([]),
   answer: z.string().nullable().default(null),
@@ -67,6 +67,17 @@ function artifactContract(kind: VerifyKind): string {
   }
   if (kind === "sql" || kind === "query") {
     return "Deliverable: put a single SQL query (SQLite dialect) that answers the question in `artifact` (artifactKind: sql). No prose, just the query.";
+  }
+  if (kind === "build") {
+    return [
+      "Deliverable: put a COMPLETE, self-contained custom workflow UI bundle in `artifact` (artifactKind: ui-tsx). One file.",
+      "Requirements:",
+      "  • Start with the pragma: /** @jsxImportSource react */",
+      "  • Import the gateway hooks from 'smithers-orchestrator/gateway-react' (createGatewayReactRoot + the hooks you need: useGatewayRun, useGatewayRunEvents, useGatewayNodeOutput, useGatewayApprovals, useGatewayActions, useGatewayRuns).",
+      "  • Read the run to scope to from `?runId` in location.search.",
+      "  • Mount with createGatewayReactRoot(<App />). Handle loading / empty / error states.",
+      "  • It must be valid TSX that transpiles. Do not invent hooks or props that don't exist.",
+    ].join("\n");
   }
   if (kind === "contains" || kind === "equals") {
     return "Deliverable: put ONLY the answer/command in `artifact` (artifactKind: cli-command or answer). Be concise — no surrounding prose in `artifact`.";
@@ -133,6 +144,19 @@ export function createFluencyEval(opts: FluencyEvalOptions) {
     const judge = resolveJudge(judgeModel);
     const report = ctx.outputMaybe("candidate", { nodeId: "candidate" }) as CandidateReport | undefined;
 
+    // Scorers grade non-binary quality (never block the run). UI-authoring cases
+    // additionally get the ui-quality judge.
+    const baseScorers = {
+      schema: { scorer: schemaAdherenceScorer() },
+      oneShot: { scorer: oneShotScorer },
+      friction: { scorer: frictionScorer },
+      docsGap: { scorer: docsGapScorer(judge), sampling: { type: "ratio" as const, rate: 0.34 } },
+    };
+    const scorers =
+      verify.kind === "build"
+        ? { ...baseScorers, uiQuality: { scorer: uiQualityScorer(judge) } }
+        : baseScorers;
+
     return (
       <Workflow name={`fluency-${opts.suite}`}>
         <Sequence>
@@ -143,12 +167,7 @@ export function createFluencyEval(opts: FluencyEvalOptions) {
             agent={candidateAgent}
             retries={1}
             heartbeatTimeoutMs={600_000}
-            scorers={{
-              schema: { scorer: schemaAdherenceScorer() },
-              oneShot: { scorer: oneShotScorer },
-              friction: { scorer: frictionScorer },
-              docsGap: { scorer: docsGapScorer(judge), sampling: { type: "ratio", rate: 0.34 } },
-            }}
+            scorers={scorers}
           >
             {candidatePrompt(task, context, verify.kind)}
           </Task>
