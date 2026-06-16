@@ -28,7 +28,9 @@ type Task = {
   verify?: string; // deterministic | judge | fixture
   task: string;
   canonicalAnswer?: string;
+  mustNot?: string[]; // optional forbidden tokens (curated tasks)
   notes?: string;
+  source?: string; // coverage-map | real-usage | curated
 };
 
 function readJsonl(path: string): Task[] {
@@ -54,10 +56,13 @@ function routeSuite(t: Task): string | null {
   const area = t.area ?? "";
   const kind = t.kind ?? "";
   if (t.verify === "fixture") return null; // needs a seeded run DB — fixture wave
+  // Real-usage tasks (mined from actual sessions) get their own high-signal suite,
+  // regardless of kind, as long as they are verifiable (judge or have an answer).
+  if (t.source === "real-usage" && t.verify !== "fixture") return "real-usage";
   if (kind === "ops" || kind === "db-query") return null; // needs live state — fixture wave
 
   if (kind === "knowledge") {
-    if (!((t.canonicalAnswer ?? "").trim())) return null; // nothing to assert on
+    if (t.verify !== "judge" && !((t.canonicalAnswer ?? "").trim())) return null; // nothing to assert on
     if (KNOWLEDGE_CLI_AREAS.has(area)) return "knowledge-cli";
     if (area.startsWith("components") || area === "patterns" || area === "control-flow" || area === "output-handling" || area === "capabilities") return "knowledge-components";
     if (area === "runtime-concepts" || area === "concepts" || area === "durability-model" || area === "knowledge") return "knowledge-concepts";
@@ -101,17 +106,22 @@ function extractTags(answer?: string): string[] {
 type VerifySpec = { kind: string; must?: string[]; mustNot?: string[]; answer?: string; rubric?: string };
 
 function verifyOf(t: Task): VerifySpec | null {
+  // judge wins regardless of kind (a knowledge task can be judge-graded).
+  if (t.verify === "judge") {
+    return { kind: "judge", rubric: t.notes || t.task };
+  }
   if (t.kind === "knowledge") {
     const ans = (t.canonicalAnswer ?? "").trim();
     if (!ans) return null;
     const short = !ans.includes("\n") && ans.split(/\s+/).length <= 4;
-    return short ? { kind: "equals", answer: ans } : { kind: "contains", must: [ans] };
+    const spec: VerifySpec = short ? { kind: "equals", answer: ans } : { kind: "contains", must: [ans] };
+    if (t.mustNot?.length) spec.mustNot = t.mustNot;
+    return spec;
   }
-  if (t.verify === "judge") {
-    return { kind: "judge", rubric: t.notes || t.task };
-  }
-  // authoring deterministic → render + required component tags
-  return { kind: "graph", must: extractTags(t.canonicalAnswer) };
+  // authoring deterministic → render + required component tags (+ optional forbidden tokens)
+  const spec: VerifySpec = { kind: "graph", must: extractTags(t.canonicalAnswer) };
+  if (t.mustNot?.length) spec.mustNot = t.mustNot;
+  return spec;
 }
 
 /** Spread models so we don't always lead with haiku: rotate the window by index. */
@@ -126,7 +136,7 @@ function fanCount(t: Task): number {
   return 2; // authoring
 }
 
-function main() {
+export function main() {
   const dry = process.argv.includes("--dry");
   const tasks = [...readJsonl(join(ROOT, "evals/_inventory/task-bank.jsonl")), ...readJsonl(join(ROOT, "evals/_inventory/curated-tasks.jsonl"))];
   // dedup tasks by id (curated wins)
@@ -161,7 +171,7 @@ function main() {
           judgeModel: "opus",
         },
         expected: { status: "finished", outputContains: { verdict: [{ passed: true }] } },
-        metadata: { area: t.area ?? "unknown", feature: t.feature ?? "unknown", tier: sota ? "sota" : "weak", source: "coverage-map", kind: t.kind, verify: t.verify },
+        metadata: { area: t.area ?? "unknown", feature: t.feature ?? "unknown", tier: sota ? "sota" : "weak", source: t.source ?? "coverage-map", kind: t.kind, verify: t.verify },
       });
       (bySuite.get(suite) ?? bySuite.set(suite, []).get(suite)!).push(line);
     }
@@ -214,4 +224,7 @@ function main() {
   for (const [s, n] of summary.sort((a, b) => b[1] - a[1])) console.log(`  ${String(n).padStart(4)}  ${s}`);
 }
 
-main();
+// Exported for the issue→eval generator (new-eval.tsx).
+export { routeSuite, verifyOf, type Task };
+
+if (import.meta.main) main();

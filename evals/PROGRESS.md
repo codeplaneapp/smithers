@@ -22,11 +22,14 @@ dry-runs) before moving on.
 - [~] P1 — Real-usage mining: agent scanning Claude Code + Codex sessions (running in background)
 - [x] P2 — Framework: `agents.ts`, `lib/{report-schema,model-matrix,scorers,verify,paths,eval-kit}.ts`, `tsconfig.json` (typecheck clean)
 - [x] P2 — One suite end-to-end: `knowledge-cli` renders (`graph`), plans (`--dry-run`), and **passed a LIVE sonnet case** (candidate→verify→verdict→assert, 1/1, 32s)
-- [ ] P2 — Harness: `harness/{run-suite,run-all,scorecard}.ts` (read verdict/candidate from evals.db)
-- [ ] P2 — Case generator: `task-bank.jsonl` → per-suite `cases.jsonl` with model fan-out + verify mapping
-- [ ] P2 — `new-eval.tsx` issue→eval generator
-- [ ] P3 — Waves (see below), each verified before the next
-- [ ] P4 — Cross-model smoke run where keys exist; record baseline scorecard
+- [x] P2 — Harness: `harness/{run-suite,run-all,scorecard,generate-cases}.ts` (reports under .report/, gitignored)
+- [x] P2 — Case generator: task-bank + curated → 19 suites, **898 cases**, model fan-out + verify mapping
+- [x] P2 — `new-eval.tsx` issue→eval generator (renders; drafts task → appends curated → regenerates)
+- [x] P2 — Live-proved both deterministic verify paths: knowledge `equals` (sonnet PASS) + authoring `graph` (sonnet PASS, surfaced 4 real doc-friction notes)
+- [x] P2 — Real-usage mining folded in → 37-case `real-usage` suite (edit-then-resume, Worktree cwd, waiting-event, JSON output, …)
+- [ ] P3 — Waves: broaden live baseline runs across models; build fixture wave (84 deferred ops/db-query tasks)
+- [ ] P3 — Backfill docs gaps the evals surface (fix docs in `docs/`, regen bundles)
+- [ ] P4 — Cross-model baseline scorecard
 - [ ] P5 — Codex review of the whole PR; address findings
 
 ### Proven facts (for future sessions)
@@ -69,10 +72,10 @@ Tier = which model tier the candidate runs on.
 
 | Metric | Value |
 | ------ | ----- |
-| Suites scaffolded | 1 (knowledge-cli) |
-| Cases written | 16 |
-| Cases dry-run verified | 16 |
-| Suites smoke-run on a real model | 1 (knowledge-cli, sonnet, PASS) |
+| Suites scaffolded | 19 |
+| Cases written | 898 (+84 deferred to fixture wave) |
+| Cases dry-run verified | 898 (all suites plan clean) |
+| Suites smoke-run on a real model | 2 (knowledge-cli, authoring-workflows; sonnet PASS) |
 | Coverage-map features / tasks | 380 / 416 |
 
 ## Decisions / invariants
