@@ -74,6 +74,7 @@ export { signalRun } from '@smithers-orchestrator/engine/signals';
 export { usePatched } from '@smithers-orchestrator/engine/effect/versioning';
 import { SmithersDb } from '@smithers-orchestrator/db/adapter';
 export { SmithersDb } from '@smithers-orchestrator/db/adapter';
+export { loadOutputs, loadOutputsEffect } from '@smithers-orchestrator/db';
 export { ensureSmithersTables } from '@smithers-orchestrator/db/ensure';
 export { markdownComponents } from '@smithers-orchestrator/components/markdownComponents';
 export { renderMdx } from '@smithers-orchestrator/components/renderMdx';
@@ -82,7 +83,7 @@ export { syncZodTableSchema, zodSchemaColumns, zodToCreateTableSQL } from '@smit
 export { camelToSnake } from '@smithers-orchestrator/db/utils/camelToSnake';
 export { unwrapZodType } from '@smithers-orchestrator/db/unwrapZodType';
 export { zodSchemaToJsonExample } from '@smithers-orchestrator/components/zod-to-example';
-export { BuilderApi, BuiltSmithersWorkflow, Smithers, StepOptions, fragment, renderFrame, runWorkflow, workflow } from '@smithers-orchestrator/engine';
+export { approveNode, BuilderApi, BuiltSmithersWorkflow, denyNode, fragment, getRun, listRuns, renderFrame, runWorkflow, Smithers, StepOptions, workflow } from '@smithers-orchestrator/engine';
 export { resolveWorktreePath } from '@smithers-orchestrator/graph';
 
 type SerializedCtx$1 = {

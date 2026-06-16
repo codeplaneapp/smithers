@@ -185,7 +185,11 @@ export { runJj, getJjPointer, revertToJjPointer, isJjRepo, workspaceAdd, workspa
 // Core API
 export { createSmithers, createSmithersPostgres } from "./create.js";
 export {
+  approveNode,
+  denyNode,
   fragment,
+  getRun,
+  listRuns,
   renderFrame,
   runWorkflow,
   Smithers,
@@ -214,6 +218,7 @@ export { createServeApp } from "@smithers-orchestrator/server/serve";
 export { SmithersObservability, createSmithersObservabilityLayer, createSmithersOtelLayer, createSmithersRuntimeLayer, smithersMetrics, trackSmithersEvent, activeNodes, activeRuns, externalWaitAsyncPending, approvalsDenied, approvalsGranted, approvalsRequested, timerDelayDuration, timersCancelled, timersCreated, timersFired, timersPending, attemptDuration, cacheHits, cacheMisses, dbQueryDuration, dbRetries, dbTransactionDuration, dbTransactionRetries, dbTransactionRollbacks, hotReloadDuration, hotReloadFailures, hotReloads, httpRequestDuration, httpRequests, nodeDuration, nodesFailed, nodesFinished, nodesStarted, prometheusContentType, renderPrometheusMetrics, resolveSmithersObservabilityOptions, runsTotal, sandboxActive, sandboxBundleSizeBytes, sandboxCompletedTotal, sandboxCreatedTotal, sandboxDurationMs, sandboxPatchCount, sandboxTransportDurationMs, schedulerQueueDepth, toolCallsTotal, toolDuration, vcsDuration, } from "@smithers-orchestrator/observability";
 // DB
 export { SmithersDb } from "@smithers-orchestrator/db";
+export { loadOutputs, loadOutputsEffect } from "@smithers-orchestrator/db";
 export { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 // Renderer
 export { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
