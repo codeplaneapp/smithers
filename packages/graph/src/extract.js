@@ -249,6 +249,60 @@ function approvalAutoApprove(value) {
     };
 }
 /**
+ * Normalize the `__aspects` element prop attached by `<Task>` into the
+ * `TaskAspects` budget metadata the engine enforces. Only the budget configs
+ * are kept; the render-time accumulator and tracking flags are dropped (the
+ * engine keeps its own durable per-run accumulator and budgets enforce
+ * regardless of tracking).
+ *
+ * @param {unknown} value
+ * @returns {import("./types").TaskAspects | undefined}
+ */
+function aspects(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const raw = /** @type {Record<string, unknown>} */ (value);
+    /** @type {import("./types").TaskAspects} */
+    const out = {};
+    const token = raw.tokenBudget;
+    if (token && typeof token === "object" && !Array.isArray(token) &&
+        typeof (/** @type {Record<string, unknown>} */ (token).max) === "number") {
+        const t = /** @type {Record<string, unknown>} */ (token);
+        out.tokenBudget = {
+            max: /** @type {number} */ (t.max),
+            ...(typeof t.perTask === "number" ? { perTask: t.perTask } : {}),
+            ...(t.onExceeded === "warn" || t.onExceeded === "skip-remaining" || t.onExceeded === "fail"
+                ? { onExceeded: /** @type {"fail" | "warn" | "skip-remaining"} */ (t.onExceeded) }
+                : {}),
+        };
+    }
+    const latency = raw.latencySlo;
+    if (latency && typeof latency === "object" && !Array.isArray(latency) &&
+        typeof (/** @type {Record<string, unknown>} */ (latency).maxMs) === "number") {
+        const l = /** @type {Record<string, unknown>} */ (latency);
+        out.latencySlo = {
+            maxMs: /** @type {number} */ (l.maxMs),
+            ...(typeof l.perTask === "number" ? { perTask: l.perTask } : {}),
+            ...(l.onExceeded === "warn" || l.onExceeded === "fail"
+                ? { onExceeded: /** @type {"fail" | "warn"} */ (l.onExceeded) }
+                : {}),
+        };
+    }
+    const cost = raw.costBudget;
+    if (cost && typeof cost === "object" && !Array.isArray(cost) &&
+        typeof (/** @type {Record<string, unknown>} */ (cost).maxUsd) === "number") {
+        const c = /** @type {Record<string, unknown>} */ (cost);
+        out.costBudget = {
+            maxUsd: /** @type {number} */ (c.maxUsd),
+            ...(c.onExceeded === "warn" || c.onExceeded === "skip-remaining" || c.onExceeded === "fail"
+                ? { onExceeded: /** @type {"fail" | "warn" | "skip-remaining"} */ (c.onExceeded) }
+                : {}),
+        };
+    }
+    return out.tokenBudget || out.latencySlo || out.costBudget ? out : undefined;
+}
+/**
  * @param {"parallel" | "merge-queue"} tag
  * @param {Record<string, unknown>} raw
  * @param {readonly number[]} path
@@ -628,6 +682,7 @@ export function extractGraph(root, opts) {
                 memoryConfig: raw.memory && typeof raw.memory === "object" && !Array.isArray(raw.memory)
                     ? raw.memory
                     : undefined,
+                aspects: aspects(raw.__aspects),
             });
         }
         let elementIndex = 0;

@@ -56,6 +56,9 @@ import { runWithCorrelationContext, updateCurrentCorrelationContext, withCorrela
 import { extractWorkflowImportSpecifiers, getWorkflowImportScanLoader, readWorkflowEntryHash, readWorkflowGraphHash, resolveWorkflowImport, sha256Hex, } from "./workflow-hash.js";
 import { applyOptimizationArtifactToTasks } from "./optimization-artifact.js";
 import { extractBalancedJson, extractLastBalancedJson } from "./json-extraction.js";
+import { setupBudgetTracker } from "./aspects/setupBudgetTracker.js";
+import { evaluateAspectBudget } from "./aspects/evaluateAspectBudget.js";
+import { enforceDispatchBudget } from "./aspects/enforceDispatchBudget.js";
 /** @typedef {import("@smithers-orchestrator/graph/GraphSnapshot").GraphSnapshot} GraphSnapshot */
 /** @typedef {import("./HijackState.ts").HijackState} HijackState */
 /** @typedef {import("@smithers-orchestrator/driver/RunOptions").RunOptions} RunOptions */
@@ -2296,9 +2299,10 @@ function isRetryableTaskFailure(attempt) {
  * @param {TaskDescriptor[]} tasks
  * @param {EventBus} eventBus
  * @param {Map<string, boolean>} ralphDone
+ * @param {Set<string>} [budgetSkippedKeys] keys skipped by Aspects `skip-remaining`
  * @returns {Promise<{ stateMap: TaskStateMap; retryWait: Map<string, number> }>}
  */
-async function computeTaskStates(adapter, db, runId, tasks, eventBus, ralphDone) {
+async function computeTaskStates(adapter, db, runId, tasks, eventBus, ralphDone, budgetSkippedKeys) {
     const stateMap = new Map();
     const retryWait = new Map();
     const existing = await Effect.runPromise(adapter.listNodes(runId));
@@ -2336,7 +2340,7 @@ async function computeTaskStates(adapter, db, runId, tasks, eventBus, ralphDone)
     };
     for (const desc of tasks) {
         const key = buildStateKey(desc.nodeId, desc.iteration);
-        if (desc.skipIf) {
+        if (desc.skipIf || budgetSkippedKeys?.has(key)) {
             stateMap.set(key, "skipped");
             await Effect.runPromise(adapter.insertNode({
                 runId,
@@ -4744,6 +4748,12 @@ async function runWorkflowBodyDriver(workflow, opts) {
     let workflowName = "workflow";
     let cacheEnabled = Boolean(workflow.opts.cache);
     let ralphState = new Map();
+    // Aspects budget enforcement: per-run token/cost/latency accumulator and the
+    // set of tasks skipped because a budget was exceeded (`skip-remaining`).
+    /** @type {import("./aspects/createBudgetTracker.js").BudgetTracker | null} */
+    let budgetTracker = null;
+    /** @type {Set<string>} */
+    const budgetSkippedKeys = new Set();
     let activeTaskCount = 0;
     const taskWaiters = [];
     const acquireTaskSlot = async () => {
@@ -5175,7 +5185,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             }
             const key = buildStateKey(task.nodeId, task.iteration);
             const previous = existingState.get(key);
-            if (task.skipIf) {
+            if (task.skipIf || budgetSkippedKeys.has(key)) {
                 if (previous === "skipped")
                     continue;
                 await Effect.runPromise(adapter.insertNode({
@@ -5538,12 +5548,34 @@ async function runWorkflowBodyDriver(workflow, opts) {
             const maxRalphIteration = [...ralphState.values()].reduce((max, state) => Math.max(max, state.iteration), 0);
             defaultIteration = Math.max(defaultIteration, maxRalphIteration);
         }
+        budgetTracker = await setupBudgetTracker({
+            adapter,
+            runId,
+            eventBus,
+            runStartMs: (await Effect.runPromise(adapter.getRun(runId)))?.createdAtMs ?? nowMs(),
+        });
         workflowSession = makeWorkflowSession({
             runId,
             nowMs,
             requireStableFinish: true,
             requireRerenderOnOutputChange: true,
             initialRalphState: ralphState,
+            evaluateAspectBudget: (descriptor) => budgetTracker
+                ? evaluateAspectBudget(descriptor.aspects, budgetTracker.snapshot(nowMs()))
+                : null,
+            onAspectBudgetSkip: (descriptor) => {
+                budgetSkippedKeys.add(buildStateKey(descriptor.nodeId, descriptor.iteration));
+            },
+            onAspectBudgetWarn: (descriptor, breach) => {
+                logWarning("aspect budget exceeded; continuing (onExceeded: warn)", {
+                    runId,
+                    nodeId: descriptor.nodeId,
+                    iteration: descriptor.iteration,
+                    kind: breach.kind,
+                    limit: breach.limit,
+                    current: breach.current,
+                }, "engine:aspects");
+            },
         });
         const driverRenderer = {
             render: async (element, renderOpts) => {
@@ -6090,6 +6122,15 @@ async function runWorkflowBodyLegacy(workflow, opts) {
         const triggerQueue = await Effect.runPromise(Queue.unbounded());
         const schedulerTaskKeys = new Set();
         let schedulerTaskError = null;
+        // Aspects budget enforcement: per-run accumulator + skip-remaining set.
+        /** @type {Set<string>} */
+        const budgetSkippedKeys = new Set();
+        const budgetTracker = await setupBudgetTracker({
+            adapter,
+            runId,
+            eventBus,
+            runStartMs: (await Effect.runPromise(adapter.getRun(runId)))?.createdAtMs ?? nowMs(),
+        });
         let hotWaitInFlight = false;
         let scheduledRetryAtMs = null;
         let retryWakeFiber = null;
@@ -6743,7 +6784,7 @@ async function runWorkflowBodyLegacy(workflow, opts) {
             }
             const singleRalphId = ralphs.length === 1 ? ralphs[0].id : null;
             const ralphDoneMap = buildRalphDoneMap(ralphs, ralphState);
-            const { stateMap, retryWait } = await computeTaskStates(adapter, db, runId, tasks, eventBus, ralphDoneMap);
+            const { stateMap, retryWait } = await computeTaskStates(adapter, db, runId, tasks, eventBus, ralphDoneMap, budgetSkippedKeys);
             const descriptorMap = buildDescriptorMap(tasks);
             const schedule = scheduleTasks(plan, stateMap, descriptorMap, ralphState, retryWait, nowMs());
             compareWorkflowSessionShadow("submitGraph", sessionGraphDecision, summarizeLegacySchedulerDecision(schedule, stateMap, tasks, schedulerTaskKeys), {
@@ -6759,9 +6800,28 @@ async function runWorkflowBodyLegacy(workflow, opts) {
                 }
             }
             const localCapacity = Math.max(0, maxConcurrency - Math.max(dbInProgressCount, schedulerTaskKeys.size));
-            const runnable = applyConcurrencyLimits(schedule.runnable, stateMap, maxConcurrency, tasks)
+            const concurrencyRunnable = applyConcurrencyLimits(schedule.runnable, stateMap, maxConcurrency, tasks)
                 .filter((task) => !schedulerTaskKeys.has(makeSchedulerTaskKey(task)))
                 .slice(0, localCapacity);
+            // Apply Aspects budget `onExceeded` at dispatch time: drop tasks that
+            // are skipped (skip-remaining) and throw ASPECT_BUDGET_EXCEEDED (fail).
+            const runnable = [];
+            for (const task of concurrencyRunnable) {
+                const outcome = await enforceDispatchBudget({
+                    desc: task,
+                    snapshot: budgetTracker.snapshot(nowMs()),
+                    adapter,
+                    runId,
+                    eventBus,
+                    budgetSkippedKeys,
+                    stateKey: buildStateKey(task.nodeId, task.iteration),
+                    nowMs,
+                    logWarning,
+                });
+                if (outcome === "run") {
+                    runnable.push(task);
+                }
+            }
             void Effect.runPromise(Metric.set(schedulerQueueDepth, schedule.runnable.length - runnable.length));
             const advanceReadyRalphs = async ({ allowContinueAsNew }) => {
                     // Re-evaluate each ralph's `until` with the correct per-ralph
@@ -7443,7 +7503,9 @@ async function runWorkflowBodyLegacy(workflow, opts) {
                 armHotReloadWakeup();
             }
         }).pipe(Effect.interruptible));
-        return await Effect.runPromise(schedulerLoopEffect);
+        // Preserve the original failure (e.g. ASPECT_BUDGET_EXCEEDED) instead of
+        // the FiberFailure wrapper so the run error surfaces its SmithersError code.
+        return await runPromisePreservingFailure(schedulerLoopEffect);
     }
     catch (err) {
         if (runAbortController.signal.aborted || isAbortError(err)) {
