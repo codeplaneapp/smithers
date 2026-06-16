@@ -85,10 +85,10 @@ Tier = which model tier the candidate runs on.
 
 | Metric | Value |
 | ------ | ----- |
-| Suites scaffolded | 20 (incl. db-query) |
-| Cases written | 909 (+84 deferred) |
+| Suites scaffolded | 21 |
+| Cases written | 1017 (+84 deferred) — past the 1000 target |
 | Cases dry-run verified | 898 (all suites plan clean) |
-| Suites smoke-run on a real model | 3 (knowledge-cli, authoring-workflows, db-query — all PASS) |
+| Suites smoke-run on a real model | 4 (knowledge-cli, knowledge-components, authoring-workflows, db-query — all PASS) |
 | Coverage-map features / tasks | 380 / 416 |
 
 ## Decisions / invariants

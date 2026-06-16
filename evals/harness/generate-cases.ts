@@ -71,6 +71,7 @@ function routeSuite(t: Task): string | null {
     if (area === "memory") return "knowledge-memory";
     if (area === "examples") return "knowledge-examples";
     if (area === "observability" || area === "devtools") return "knowledge-observability";
+    if (area === "mcp" || area === "integrations" || area === "human-inbox" || area === "scheduling") return "knowledge-integrations";
     return "knowledge-cli";
   }
 
