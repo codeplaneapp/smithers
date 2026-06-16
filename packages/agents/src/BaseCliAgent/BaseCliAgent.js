@@ -506,6 +506,42 @@ export function extractUsageFromOutput(raw) {
             countedIncremental = true;
             continue;
         }
+        // pi (@mariozechner/pi) reports final per-message token usage under
+        // message.usage on the assistant's message_end, with its own field
+        // names (input/output/cacheRead/cacheWrite/totalTokens) rather than
+        // Anthropic's input_tokens/output_tokens. Without this branch the only
+        // pi usage captured is the all-zero message_start, so completed runs
+        // report zero tokens. Sum across assistant message_end events so
+        // multi-step tool loops total correctly; turn_end mirrors the last
+        // message, so it is intentionally not counted here to avoid double
+        // counting. (#284)
+        if (parsed.type === "message_end" &&
+            parsed.message?.role === "assistant" &&
+            parsed.message.usage &&
+            typeof parsed.message.usage === "object" &&
+            typeof parsed.message.usage.input_tokens !== "number" &&
+            (typeof parsed.message.usage.input === "number" ||
+                typeof parsed.message.usage.output === "number" ||
+                typeof parsed.message.usage.totalTokens === "number")) {
+            const u = parsed.message.usage;
+            if (typeof u.input === "number") {
+                usage.inputTokens = (usage.inputTokens ?? 0) + u.input;
+            }
+            if (typeof u.output === "number") {
+                usage.outputTokens = (usage.outputTokens ?? 0) + u.output;
+            }
+            if (typeof u.cacheRead === "number" && u.cacheRead) {
+                usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) + u.cacheRead;
+            }
+            if (typeof u.cacheWrite === "number" && u.cacheWrite) {
+                usage.cacheWriteTokens = (usage.cacheWriteTokens ?? 0) + u.cacheWrite;
+            }
+            if (typeof u.totalTokens === "number") {
+                usage.totalTokens = (usage.totalTokens ?? 0) + u.totalTokens;
+            }
+            found = true;
+            continue;
+        }
         if (parsed.type === "message_delta" && parsed.usage) {
             if (parsed.usage.output_tokens) {
                 usage.outputTokens =

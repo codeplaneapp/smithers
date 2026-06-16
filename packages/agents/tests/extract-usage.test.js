@@ -108,6 +108,41 @@ describe("extractUsageFromOutput", () => {
     expect(usage.outputTokens).toBe(50);
   });
 
+  test("extracts tokens from pi json NDJSON (assistant message_end), ignoring zero message_start and mirrored turn_end (#284)", () => {
+    const piUsage = { input: 1228, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 1230 };
+    const lines = [
+      JSON.stringify({ type: "session", id: "s1", version: 3 }),
+      JSON.stringify({ type: "agent_start" }),
+      JSON.stringify({ type: "turn_start" }),
+      JSON.stringify({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "hi" }] } }),
+      JSON.stringify({ type: "message_end", message: { role: "user", content: [{ type: "text", text: "hi" }] } }),
+      // assistant message_start carries an all-zero usage up front; must not win.
+      JSON.stringify({ type: "message_start", message: { role: "assistant", content: [], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 } } }),
+      JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "hi" }], usage: piUsage } }),
+      // turn_end mirrors the last assistant message; counting it would double.
+      JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: piUsage } }),
+      JSON.stringify({ type: "agent_end", messages: [] }),
+    ];
+    const usage = extractUsageFromOutput(lines.join("\n"));
+    expect(usage).toBeDefined();
+    expect(usage.inputTokens).toBe(1228);
+    expect(usage.outputTokens).toBe(2);
+    expect(usage.totalTokens).toBe(1230);
+  });
+
+  test("sums pi usage across multiple assistant message_end events (tool loop) (#284)", () => {
+    const lines = [
+      JSON.stringify({ type: "message_end", message: { role: "assistant", usage: { input: 100, output: 10, totalTokens: 110 } } }),
+      JSON.stringify({ type: "message_end", message: { role: "assistant", usage: { input: 200, output: 20, cacheRead: 5, totalTokens: 220 } } }),
+    ];
+    const usage = extractUsageFromOutput(lines.join("\n"));
+    expect(usage).toBeDefined();
+    expect(usage.inputTokens).toBe(300);
+    expect(usage.outputTokens).toBe(30);
+    expect(usage.totalTokens).toBe(330);
+    expect(usage.cacheReadTokens).toBe(5);
+  });
+
   test("returns undefined for plain text output with no usage data", () => {
     const raw = "Hello, I am a helpful assistant.\nHow can I help you today?";
     const usage = extractUsageFromOutput(raw);
