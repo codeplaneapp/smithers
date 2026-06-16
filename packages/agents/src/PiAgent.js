@@ -104,12 +104,22 @@ export class PiAgent extends BaseCliAgent {
             : undefined;
         const effectiveSession = resumeSession ?? this.opts.session;
         this.issuedSessionRef = effectiveSession;
-        if (params.mode === "text") {
-            if (this.opts.print !== false)
-                args.push("--print");
+        // pi's `--mode` only selects the output format (text|json|rpc); it does
+        // NOT make pi process a single prompt and exit. `--print` is the
+        // non-interactive switch. Without it, a json/stream-json task can emit
+        // its complete result (agent_end) and then sit as an open interactive
+        // session until Smithers kills it at the task timeout, discarding the
+        // finished output as PROCESS_TIMEOUT. So `--print` applies to every
+        // non-interactive mode, not just text. RPC mode drives its own
+        // persistent stdin/stdout transport, so `--print` does not apply. (#284)
+        if (params.mode === "rpc") {
+            args.push("--mode", "rpc");
         }
         else {
-            args.push("--mode", params.mode);
+            if (this.opts.print !== false)
+                args.push("--print");
+            if (params.mode !== "text")
+                args.push("--mode", params.mode);
         }
         pushFlag(args, "--provider", this.opts.provider);
         pushFlag(args, "--model", this.opts.model ?? this.model);

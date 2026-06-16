@@ -21,6 +21,34 @@ afterEach(() => {
     delete process.env.PI_RESPONSE_FILE;
 });
 describe("PI CLI agent", () => {
+    test("buildArgs adds --print for every non-interactive mode, not just text (#284)", async () => {
+        // text mode: --print, no --mode (text is pi's default output mode)
+        const textArgs = await (new PiAgent({ mode: "text" })).buildArgs({ prompt: "hi", cwd: "/tmp", options: {}, mode: "text" });
+        expect(textArgs).toContain("--print");
+        expect(textArgs).not.toContain("--mode");
+
+        // json mode: --print AND --mode json (so pi exits after emitting NDJSON)
+        const jsonArgs = await (new PiAgent({ mode: "json" })).buildArgs({ prompt: "hi", cwd: "/tmp", options: {}, mode: "json" });
+        expect(jsonArgs).toContain("--print");
+        expect(jsonArgs.indexOf("--mode")).toBeGreaterThanOrEqual(0);
+        expect(jsonArgs[jsonArgs.indexOf("--mode") + 1]).toBe("json");
+
+        // onEvent forces json mode (resolveMode) and must still be non-interactive
+        const evAgent = new PiAgent({});
+        const evArgs = await evAgent.buildArgs({ prompt: "hi", cwd: "/tmp", options: { onEvent: () => {} }, mode: evAgent.resolveMode({ onEvent: () => {} }) });
+        expect(evArgs).toContain("--print");
+        expect(evArgs).toContain("json");
+
+        // rpc mode drives its own persistent transport: --mode rpc, never --print
+        const rpcArgs = await (new PiAgent({ mode: "rpc" })).buildArgs({ prompt: "hi", cwd: "/tmp", options: {}, mode: "rpc" });
+        expect(rpcArgs[rpcArgs.indexOf("--mode") + 1]).toBe("rpc");
+        expect(rpcArgs).not.toContain("--print");
+
+        // print:false opts out even in json mode (explicit interactive override)
+        const noPrintArgs = await (new PiAgent({ mode: "json", print: false })).buildArgs({ prompt: "hi", cwd: "/tmp", options: {}, mode: "json" });
+        expect(noPrintArgs).not.toContain("--print");
+        expect(noPrintArgs).toContain("--mode");
+    });
     test("PiAgent emits resumable session and tool lifecycle events when hijack hooks are enabled", async () => {
         const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-pi-events-"));
         const argsFile = join(argsFileDir, "args.json");
@@ -141,6 +169,9 @@ process.stdout.write(lines.join("\\n") + "\\n");
             expect(Array.isArray(payload.args)).toBe(true);
             expect(payload.args).toContain("--mode");
             expect(payload.args).toContain("json");
+            // json mode must be non-interactive: --print makes pi process the
+            // prompt and exit instead of idling until the task timeout (#284).
+            expect(payload.args).toContain("--print");
             expect(payload.args).toContain("--continue");
             expect(payload.args).toContain("--resume");
             expect(payload.args).toContain("--provider");
