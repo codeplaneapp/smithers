@@ -2,11 +2,11 @@ import { expect, test } from "@playwright/test";
 
 /**
  * The corner notification stack: an aria-live polite region. Launching a run
- * raises an ambient companion toast (titled with the run kind, e.g. "Implement
- * · …"); switching the active view to Ask Me and submitting a topic raises an
- * "Ask Me" workflow toast. Together they exercise the stack's accumulate +
- * per-toast dismiss path. The dev-only "Demo workflow" toast is scoped out by
- * matching specific titles, not the whole stack.
+ * via "ship …" raises an ambient companion toast carrying launchRun's static
+ * title ("Open Code Review", not the run's own title); submitting an "/askme"
+ * topic raises an "Ask Me" workflow toast. Together they exercise the stack's
+ * accumulate + per-toast dismiss path. The dev-only "Demo workflow" toast is
+ * scoped out by matching specific titles, not the whole stack.
  */
 test.describe("notifications stack", () => {
   test("multiple workflow toasts accumulate and dismiss independently", async ({ page }) => {

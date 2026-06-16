@@ -70,7 +70,7 @@ reflects real behavior. Unit tests use `bun test`.
 ## Running
 
 ```
-pnpm --filter ./apps/smithers typecheck        # types green
-bun test --path-ignore-patterns="**/tests/**"  # unit + domain
+pnpm --filter ./apps/smithers typecheck             # types green
+pnpm --filter ./apps/smithers test:unit             # unit + domain
 pnpm --filter ./apps/smithers exec playwright test  # e2e (real fixtures)
 ```

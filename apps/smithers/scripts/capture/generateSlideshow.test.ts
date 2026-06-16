@@ -1,12 +1,23 @@
-import { describe, expect, it, afterEach } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveManifestPath } from "./generateSlideshow.ts";
 
 describe("resolveManifestPath", () => {
   const originalEnv = process.env.SMITHERS_CAPTURE_DRY_RUN;
-  // A directory that does not exist on disk, so the newer-dry-run probe
-  // (existsSync) never fires and the default branch stays deterministic.
-  const baseDir = "/tmp/smithers-slideshow-test-fixture";
+  // A real but EMPTY temp dir: the newer-dry-run probe (existsSync) can never
+  // fire because no manifest files exist, so the default branch stays
+  // deterministic no matter what's already sitting in the machine's /tmp.
+  let baseDir = "";
+
+  beforeAll(() => {
+    baseDir = mkdtempSync(join(tmpdir(), "smithers-slideshow-"));
+  });
+
+  afterAll(() => {
+    rmSync(baseDir, { recursive: true, force: true });
+  });
 
   afterEach(() => {
     if (originalEnv === undefined) {

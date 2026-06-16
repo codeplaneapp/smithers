@@ -1,22 +1,15 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { registerHappyDomForTests } from "../test/registerHappyDom";
 import { useRunsListStore } from "./runsListStore";
 import { SEEDED_RUNS } from "./runsList";
 
-// approve/deny/resume echo through notificationsStore.notify, which schedules
-// a window.setTimeout for transient toasts. Register happy-dom locally so the
-// store's timer host exists, and tear it down so it doesn't leak.
-let registered = false;
+// approve/deny/resume echo through notificationsStore.notify, which schedules a
+// window.setTimeout for transient toasts. Use the shared helper so happy-dom is
+// installed for that timer host WITHOUT clobbering Bun's native fetch/Request —
+// other unit tests in the same process rely on real loopback fetch, and a raw
+// GlobalRegistrator.register() here would make the suite order-dependent.
 beforeAll(() => {
-  if (typeof globalThis.window === "undefined") {
-    GlobalRegistrator.register();
-    registered = true;
-  }
-});
-afterAll(() => {
-  if (registered) {
-    GlobalRegistrator.unregister();
-  }
+  registerHappyDomForTests();
 });
 
 /**
@@ -40,6 +33,17 @@ function reset() {
 
 beforeEach(reset);
 
+// approve/deny/resume each guard on a specific run status; pull a seeded run of
+// that status and fail loudly (not with an opaque `undefined`) if the fixture
+// ever stops shipping one.
+function seededWithStatus(status: (typeof SEEDED_RUNS)[number]["status"]) {
+  const run = SEEDED_RUNS.find((r) => r.status === status);
+  if (!run) {
+    throw new Error(`runsListStore.test expected a seeded run with status "${status}"`);
+  }
+  return run;
+}
+
 describe("runsListStore — stale-update prevention", () => {
   test("approve(unknown) is a no-op (no thrown error, no state change)", () => {
     const before = useRunsListStore.getState().runs;
@@ -48,14 +52,14 @@ describe("runsListStore — stale-update prevention", () => {
   });
 
   test("approve only fires on a waiting run; other statuses are ignored", () => {
-    const running = SEEDED_RUNS.find((run) => run.status === "running")!;
+    const running = seededWithStatus("running");
     useRunsListStore.getState().approve(running.runId);
     const after = useRunsListStore.getState().runs.find((r) => r.runId === running.runId)!;
     expect(after.status).toBe("running");
   });
 
   test("approve flips a waiting run to running in place", () => {
-    const waiting = SEEDED_RUNS.find((run) => run.status === "waiting")!;
+    const waiting = seededWithStatus("waiting");
     useRunsListStore.getState().approve(waiting.runId);
     const after = useRunsListStore.getState().runs.find((r) => r.runId === waiting.runId)!;
     expect(after.status).toBe("running");
@@ -63,21 +67,21 @@ describe("runsListStore — stale-update prevention", () => {
   });
 
   test("deny only fires on a waiting run; running stays running", () => {
-    const running = SEEDED_RUNS.find((run) => run.status === "running")!;
+    const running = seededWithStatus("running");
     useRunsListStore.getState().deny(running.runId);
     const after = useRunsListStore.getState().runs.find((r) => r.runId === running.runId)!;
     expect(after.status).toBe("running");
   });
 
   test("resume only fires on a failed/cancelled run", () => {
-    const ok = SEEDED_RUNS.find((run) => run.status === "finished")!;
+    const ok = seededWithStatus("finished");
     useRunsListStore.getState().resume(ok.runId);
     const after = useRunsListStore.getState().runs.find((r) => r.runId === ok.runId)!;
     expect(after.status).toBe("finished");
   });
 
   test("resume restarts a cancelled run", () => {
-    const cancelled = SEEDED_RUNS.find((run) => run.status === "cancelled")!;
+    const cancelled = seededWithStatus("cancelled");
     useRunsListStore.getState().resume(cancelled.runId);
     const after = useRunsListStore.getState().runs.find((r) => r.runId === cancelled.runId)!;
     expect(after.status).toBe("running");

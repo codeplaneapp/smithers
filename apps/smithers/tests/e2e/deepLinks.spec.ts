@@ -1,11 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
 /**
- * Deep links. Every URL-routed surface (`/runs`, `/agents`, `/crons`,
- * `/memory`, `/prompts`, `/scores`, `/issues`, `/tickets`, `/landings`,
- * `/store`, `/palette`, `/askme`) must mount cleanly from a fresh navigation,
- * without an uncaught error. The surface's data-testid is the canonical
- * landing signal because it survives the router/zustand churn.
+ * Deep links. Every URL-routed surface in SURFACES below (`/runs`, `/agents`,
+ * `/crons`, `/memory`, `/prompts`, `/scores`, `/issues`, `/tickets`,
+ * `/landings`, `/store`) must mount cleanly from a fresh navigation, without an
+ * uncaught error. The surface's data-testid is the canonical landing signal
+ * because it survives the router/zustand churn.
  */
 const SURFACES: { path: string; testId: string }[] = [
   { path: "/runs", testId: "runs-canvas" },
