@@ -22,7 +22,10 @@ reload + offline reads, with no backend change yet.
 - **`schemaVersion` plumbing.** `gatewayClientSchemaVersion` is a local constant
   (the client's bundled schema head); bumping it clears the local copy and forces
   a cold re-sync. No `schema_signature` network RPC (that arrives in phase 3), so
-  rehydration never blocks on a slow/offline gateway.
+  rehydration never blocks on a slow/offline gateway. `scopedClientSchemaVersion`
+  folds the live backend identity (mode + gateway base URL) into that version, so
+  a client pointed at a different backend can never warm-start from another
+  backend's rows — the version no longer matches and the stale copy is wiped.
 - **Pluggable `SyncSource` seam.** `selectAppSyncSource` chooses the source at
   boot from `backendStore` (gateway today; Electric in phase 7). Wired through a
   `createSource` factory so the chosen source gets the registry's per-collection
@@ -50,6 +53,13 @@ reload + offline reads, with no backend change yet.
 - **Event streams resume from the cached seq.** After a persisted `runEvents`
   collection rehydrates, the stream reopens with `afterSeq = max(cached seq)` so
   frames produced during the offline gap are replayed, not dropped.
+- **Bounded backpressure.** The collection's in-flight frame handling is now one
+  bounded queue (replacing an unbounded pre-load buffer and an unbounded apply
+  promise chain): under a burst against a slow consumer the oldest unapplied
+  frame is shed and counted (`sync.backpressure` telemetry → drops counter), so
+  memory can't grow without bound. A transient (non-auth) stream error no longer
+  leaves a sticky `error` status — the first frame after the automatic reconnect
+  flips the collection back to success (`sync.reconnect`).
 - **Browser bundle.** The platform adapters are no longer re-exported from the
   `@smithers-orchestrator/gateway-react` barrel: re-exporting the bun:sqlite
   adapter pulled `import("bun:sqlite")` into every browser build and broke the

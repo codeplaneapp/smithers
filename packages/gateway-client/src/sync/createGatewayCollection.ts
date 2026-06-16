@@ -35,8 +35,19 @@ export type GatewayCollectionStreamConfig<TRow extends object, TKey extends stri
   refetchMode?: "replace" | "upsert";
   reconnectOnGracefulEnd?: boolean;
   maxRows?: number;
+  /**
+   * Hard cap on the in-flight frame queue (frames received but not yet applied,
+   * including those buffered before the initial load commits). When the queue
+   * exceeds this, the OLDEST unprocessed frame is shed and counted, so a slow
+   * consumer or a burst can never grow memory without bound. Defaults to
+   * `max(maxRows, 1024)`. `maxRows` bounds the stored rows; this bounds the
+   * apply backlog.
+   */
+  maxBufferedFrames?: number;
   backoff?: SyncBackoffOptions;
 };
+
+const DEFAULT_MAX_BUFFERED_FRAMES = 1024;
 
 export type GatewayCollectionConfig<TRow extends object, TKey extends string | number = string> = {
   key: SyncKey;
@@ -163,9 +174,21 @@ export function createGatewayCollection<TRow extends object, TKey extends string
         const controller = new AbortController();
         const signal = controller.signal;
         const stream = config.stream;
-        const buffered: SyncStreamFrame[] = [];
+        // ONE bounded queue for every frame not yet applied — the ones buffered
+        // before the initial load commits AND the live backlog when the consumer
+        // (apply) is slower than the producer (stream). A single drain loop
+        // applies them in order; on overflow the oldest is shed and counted.
+        // This replaces an unbounded pre-load array plus an unbounded promise
+        // chain, either of which grew without limit under a burst.
+        const queue: SyncStreamFrame[] = [];
+        // An explicit `maxBufferedFrames` wins as-is (lets a caller tune the cap
+        // down); otherwise default to a generous bound that still scales with a
+        // ring collection's own `maxRows`.
+        const maxQueued = stream?.maxBufferedFrames
+          ?? Math.max(stream?.maxRows ?? 0, DEFAULT_MAX_BUFFERED_FRAMES);
         let initialComplete = false;
-        let applyChain = Promise.resolve();
+        let draining = false;
+        let droppedFrames = 0;
 
         const handleError = (cause: unknown) => {
           if (signal.aborted) return;
@@ -288,14 +311,40 @@ export function createGatewayCollection<TRow extends object, TKey extends string
           }
         };
 
-        const enqueueFrame = (frame: SyncStreamFrame) => {
-          if (!initialComplete) {
-            buffered.push(frame);
-            return;
+        const drainQueue = async () => {
+          if (draining) return;
+          draining = true;
+          try {
+            while (initialComplete && !signal.aborted && queue.length > 0) {
+              const frame = queue.shift() as SyncStreamFrame;
+              try {
+                await applyFrame(frame);
+              } catch (cause) {
+                handleError(cause);
+              }
+            }
+          } finally {
+            draining = false;
           }
-          applyChain = applyChain
-            .then(() => applyFrame(frame))
-            .catch(handleError);
+        };
+
+        const enqueueFrame = (frame: SyncStreamFrame) => {
+          queue.push(frame);
+          if (queue.length > maxQueued) {
+            // Shed the oldest unapplied frame. The collection's `maxRows` still
+            // bounds stored rows; this bounds the apply backlog so a slow
+            // consumer under a burst cannot grow memory without bound.
+            queue.shift();
+            droppedFrames += 1;
+            emitSyncTelemetry({
+              type: "sync.backpressure",
+              collectionId: id,
+              key: config.key,
+              scope: stream?.scope,
+              dropped: droppedFrames,
+            });
+          }
+          void drainQueue();
         };
 
         const openStreamLoop = async () => {
@@ -307,6 +356,10 @@ export function createGatewayCollection<TRow extends object, TKey extends string
           // persisted reload and this subscription are replayed, not lost.
           let afterSeq = stream.afterSeq ?? maxNumericKey(collection);
           let attempt = 0;
+          // Tracks whether the last stream attempt reported an error so a
+          // successful reconnect can clear the sticky 'error' status instead of
+          // leaving a recovered, live stream showing an error forever.
+          let streamErrored = false;
           while (!signal.aborted) {
             let threw = false;
             try {
@@ -314,6 +367,18 @@ export function createGatewayCollection<TRow extends object, TKey extends string
               for await (const frame of iterable) {
                 if (signal.aborted) return;
                 attempt = 0;
+                if (streamErrored) {
+                  streamErrored = false;
+                  emitSyncTelemetry({
+                    type: "sync.reconnect",
+                    collectionId: id,
+                    key: config.key,
+                    scope: stream.scope,
+                  });
+                  // Flip the per-collection status back to success on the first
+                  // frame after a recovered transient error.
+                  config.onReady?.();
+                }
                 if (typeof frame.seq === "number") {
                   afterSeq = frame.seq;
                 }
@@ -346,6 +411,7 @@ export function createGatewayCollection<TRow extends object, TKey extends string
                 config.onAuthError?.(error);
                 return;
               }
+              streamErrored = true;
               config.onError?.(error);
             }
             if (signal.aborted) return;
@@ -372,16 +438,13 @@ export function createGatewayCollection<TRow extends object, TKey extends string
               });
             }
             initialComplete = true;
-            for (const frame of buffered.splice(0)) {
-              applyChain = applyChain
-                .then(() => applyFrame(frame))
-                .catch(handleError);
-            }
-            await applyChain;
+            // Apply the frames buffered during the initial load before signaling
+            // ready, so a reload's first paint already reflects them.
+            await drainQueue();
             config.onReady?.();
           } catch (cause) {
             initialComplete = true;
-            buffered.length = 0;
+            queue.length = 0;
             handleError(cause);
           } finally {
             if (!signal.aborted) {

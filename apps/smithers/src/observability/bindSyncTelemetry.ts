@@ -1,6 +1,7 @@
 import type { SyncTelemetryEvent } from "@smithers-orchestrator/gateway-client";
 import { info, warn } from "./logger";
 import {
+  syncBackpressureDropsTotal,
   syncErrorsTotal,
   syncFrameLagMs,
   syncFramesTotal,
@@ -55,6 +56,17 @@ export function bindSyncTelemetry(): void {
         case "sync.error":
           syncErrorsTotal.inc({ scope });
           warn("sync.error", { scope, collectionId: event.collectionId, error: event.error }, "ui.sync");
+          break;
+        case "sync.backpressure":
+          syncBackpressureDropsTotal.inc({ scope });
+          warn(
+            "sync.backpressure",
+            { scope, collectionId: event.collectionId, dropped: event.dropped },
+            "ui.sync",
+          );
+          break;
+        case "sync.reconnect":
+          info("sync.reconnect", { scope, collectionId: event.collectionId }, "ui.sync");
           break;
       }
     },

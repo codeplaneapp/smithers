@@ -167,6 +167,12 @@ export const syncFrameLagMs = browserRegistry.histogram({
   buckets: DEFAULT_MS_BUCKETS,
 });
 
+export const syncBackpressureDropsTotal = browserRegistry.counter({
+  name: "smithers_ui_sync_backpressure_drops_total",
+  help: "Stream frames shed from the bounded apply queue under backpressure (browser-local).",
+  allowedLabels: ["scope"],
+});
+
 /* ───────────────────────── per-surface refresh metrics (browser-local) ─ */
 
 export const surfaceRefreshTotal = browserRegistry.counter({

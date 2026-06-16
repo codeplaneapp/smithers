@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
+  createGatewaySyncSource,
   gatewayKeys,
   gatewayCollectionDefs,
   syncKeyFingerprint,
@@ -512,6 +513,37 @@ describe("legacy synced hooks over collections", () => {
     const harness = await mountHarness();
     await harness.render(provider(registry, createElement(Probe)));
     await waitFor(() => snapshot?.error?.message === "listRuns failed");
+    expect(snapshot?.loading).toBe(false);
+    await harness.unmount();
+  });
+
+  test("surface load errors through a createSource-selected source (the real app's path)", async () => {
+    // apps/smithers does NOT pass a pre-built `source`; it passes `createSource`
+    // so the registry injects its per-collection status hooks into the source it
+    // builds at boot. This proves the error surfaces on THAT path — the previous
+    // gap was an external pre-built source whose load failures were silently
+    // reported as success.
+    const registry = createGatewayCollections({
+      createSource: (hooks) =>
+        createGatewaySyncSource({
+          transport: makeTransport((method) =>
+            method === "listRuns"
+              ? Promise.reject(new Error("listRuns failed via createSource"))
+              : Promise.resolve([]),
+          ).transport,
+          ...hooks,
+        }),
+    });
+
+    let snapshot: ReturnType<typeof useGatewayRuns> | undefined;
+    function Probe() {
+      snapshot = useGatewayRuns();
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => snapshot?.error?.message === "listRuns failed via createSource");
     expect(snapshot?.loading).toBe(false);
     await harness.unmount();
   });
@@ -1061,6 +1093,44 @@ describe("useGatewayRunEvents over the runEvents collection", () => {
       await settle(2);
     }
     expect(maxRowsSeen).toBeLessThanOrEqual(1_024);
+    await harness.unmount();
+  });
+
+  test("resumes the stream from the persisted high-water seq after reload (no missed offline frames)", async () => {
+    const persistence = createMemoryPersistenceAdapter();
+    const runEventsId = syncKeyFingerprint(gatewayKeys.runEvents("resume-run"));
+    // A prior session cached run events up to seq 42.
+    await persistence.saveRows({
+      collectionId: runEventsId,
+      schemaVersion: "0016",
+      rows: [
+        { key: "n:40", row: { key: gatewayKeys.runEvents("resume-run"), seq: 40, event: "run.event", payload: { seq: 40 } } },
+        { key: "n:42", row: { key: gatewayKeys.runEvents("resume-run"), seq: 42, event: "run.event", payload: { seq: 42 } } },
+      ],
+    });
+
+    const stream = makeTransport(() => Promise.reject(new Error("not used")));
+    const registry = createGatewayCollections({
+      client: stream.transport,
+      persistence,
+      schemaVersion: "0016",
+    });
+
+    let snapshot: ReturnType<typeof useGatewayRunEvents> | undefined;
+    function Probe() {
+      snapshot = useGatewayRunEvents("resume-run", { maxEvents: 1024 });
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    // Warm hydrate from the persisted ring…
+    await waitFor(() => snapshot?.events.some((event) => event.seq === 42) === true);
+    // …then the live stream opens RESUMING after the cached max seq, so frames
+    // produced while the client was offline are replayed instead of dropped.
+    await waitFor(() =>
+      stream.opens.some((open) => open.scope === "streamRunEvents" && open.afterSeq === 42),
+    );
     await harness.unmount();
   });
 });

@@ -1,11 +1,19 @@
 export type SyncTelemetryEvent = {
-  type: "sync.initial_load" | "sync.frame" | "sync.gap_resync" | "sync.error";
+  type:
+    | "sync.initial_load"
+    | "sync.frame"
+    | "sync.gap_resync"
+    | "sync.error"
+    | "sync.backpressure"
+    | "sync.reconnect";
   collectionId: string;
   key: readonly unknown[];
   scope?: string;
   seq?: number;
   lagMs?: number;
   count?: number;
+  /** Cumulative frames shed from the bounded apply queue (type "sync.backpressure"). */
+  dropped?: number;
   error?: string;
 };
 
@@ -45,6 +53,7 @@ export function emitSyncTelemetry(event: SyncTelemetryEvent): void {
         "smithers.sync.seq": event.seq,
         "smithers.sync.lag_ms": event.lagMs,
         "smithers.sync.count": event.count,
+        "smithers.sync.dropped": event.dropped,
         "smithers.sync.error": event.error,
       },
     });
