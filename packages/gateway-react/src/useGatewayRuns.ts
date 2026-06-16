@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { gatewayKeys, type GatewayRpcPayload, type GatewayRunSummaryRow } from "@smithers-orchestrator/gateway-client";
 import type { ListRunsRequest } from "@smithers-orchestrator/gateway/rpc";
+import { useGatewayCollectionStatus } from "./sync/useGatewayCollectionStatus.ts";
 import { useSyncClient } from "./sync/useSyncClient.ts";
 import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
 
@@ -11,17 +12,19 @@ import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
  */
 export function useGatewayRuns(params: ListRunsRequest = {}): GatewayAsyncState<GatewayRpcPayload<"listRuns">> {
   const registry = useSyncClient();
+  const key = gatewayKeys.runs(params);
+  const status = useGatewayCollectionStatus(key);
   const collection = registry.runs(params);
   const live = useLiveQuery((q) => q.from({ row: collection }), [collection]);
   const refetch = useCallback(async () => {
-    await registry.invalidate(gatewayKeys.runs(params));
-  }, [registry, collection]);
+    await registry.invalidate(key);
+  }, [registry, key]);
 
   const data = (live.data ?? []) as GatewayRunSummaryRow[] as GatewayRpcPayload<"listRuns">;
   return {
     data,
-    error: undefined,
-    loading: !live.isReady && data.length === 0,
+    error: status.status === "error" ? status.error : undefined,
+    loading: status.status === "loading" && data.length === 0,
     refetch,
   };
 }

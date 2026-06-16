@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import type { GatewayEventFrame, GatewayRunEventRow } from "@smithers-orchestrator/gateway-client";
+import { gatewayKeys, type GatewayEventFrame, type GatewayRunEventRow } from "@smithers-orchestrator/gateway-client";
+import { useGatewayCollectionStatus } from "./sync/useGatewayCollectionStatus.ts";
 import { useSyncClient } from "./sync/useSyncClient.ts";
 
 const DEFAULT_MAX_EVENTS = 1000;
@@ -33,6 +34,7 @@ export function useGatewayRunEvents(
   const registry = useSyncClient();
   const afterSeq = options.afterSeq;
   const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
+  const status = useGatewayCollectionStatus(runId ? gatewayKeys.runEvents(runId) : ["gateway:runEvents", "disabled"]);
   const collection = runId ? registry.runEvents(runId) : undefined;
   const live = useLiveQuery(
     (q) => (collection ? q.from({ row: collection }) : undefined),
@@ -55,7 +57,7 @@ export function useGatewayRunEvents(
   return {
     events,
     lastHeartbeat,
-    error: live.isError ? new Error("Run event stream failed.") : undefined,
-    streaming: Boolean(runId) && !live.isError,
+    error: status.status === "error" ? status.error : undefined,
+    streaming: Boolean(runId) && status.status !== "error",
   };
 }

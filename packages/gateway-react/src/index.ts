@@ -23,15 +23,31 @@ export type { GatewayAsyncState } from "./GatewayAsyncState.ts";
 export { SyncContext } from "./sync/SyncContext.ts";
 export { SyncProvider } from "./sync/SyncProvider.ts";
 export { useSyncClient } from "./sync/useSyncClient.ts";
-export { createGatewayCollections, type CreateGatewayCollectionsOptions } from "./sync/createGatewayCollections.ts";
+export {
+  createGatewayCollections,
+  type CreateGatewayCollectionsOptions,
+  type SyncSourceHooks,
+} from "./sync/createGatewayCollections.ts";
 export type {
+  GatewayCollectionStatusRow,
   GatewayCollections,
   GatewayQueryHandle,
   GatewayQueryRow,
   GatewayStreamHandle,
   GatewayStreamRow,
 } from "./sync/GatewayCollections.ts";
-export type { GatewayConnectionState, GatewayConnectionStatus } from "./sync/GatewayConnectionState.ts";
+export type { GatewayConnectionState, GatewayConnectionStatus } from "@smithers-orchestrator/gateway-client";
+export type { PersistenceAdapter, PersistedRow, SavePersistedRowsRequest } from "./sync/PersistenceAdapter.ts";
+export { createMemoryPersistenceAdapter } from "./sync/createMemoryPersistenceAdapter.ts";
+export { persistedCollectionOptions } from "./sync/persistedCollectionOptions.ts";
+// Platform persistence adapters are SUBPATH-ONLY, never re-exported from this
+// barrel. They must load lazily on the path that needs them: the web build
+// imports `@smithers-orchestrator/gateway-react/opfsJsonPersistenceAdapter`, the
+// native build `.../bunSqlitePersistenceAdapter`. Re-exporting the bun:sqlite
+// adapter here pulled `import("bun:sqlite")` into every browser bundle, which
+// makes `Bun.build({ target: "browser" })` fail to build a custom workflow UI
+// (the gateway served a 500 for the UI bundle). Keeping them off the barrel also
+// honors the design rule that native/SQLite-WASM code never loads on the web path.
 export { useSyncQuery } from "./sync/useSyncQuery.ts";
 export type { UseSyncQueryOptions, UseSyncQueryResult } from "./sync/useSyncQuery.ts";
 export { useSyncMutation } from "./sync/useSyncMutation.ts";

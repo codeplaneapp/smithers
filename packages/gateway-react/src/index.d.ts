@@ -1,10 +1,11 @@
 import * as react from 'react';
 import { ReactElement, ReactNode } from 'react';
 import * as _smithers_orchestrator_gateway_client from '@smithers-orchestrator/gateway-client';
-import { SmithersGatewayClientOptions, SmithersGatewayClient, GatewayRpcParams, GatewayRpcPayload, GatewayEventFrame, GatewayBackoffOptions, SyncTransport, SyncKey, GatewayRunSummaryRow, GatewayRunRow, GatewayWorkflowRow, GatewayApprovalRow, GatewayRunNode, GatewayRunEventRow, SyncStreamFrame } from '@smithers-orchestrator/gateway-client';
+import { SmithersGatewayClientOptions, SmithersGatewayClient, GatewayRpcParams, GatewayRpcPayload, GatewayEventFrame, GatewayBackoffOptions, SyncTransport, SyncKey, GatewayRunSummaryRow, GatewayRunRow, GatewayWorkflowRow, GatewayApprovalRow, GatewayRunNode, GatewayRunEventRow, SyncStreamFrame, GatewayConnectionState, SyncSource, GatewayConnectionStatus } from '@smithers-orchestrator/gateway-client';
+export { GatewayConnectionState, GatewayConnectionStatus } from '@smithers-orchestrator/gateway-client';
 import * as _smithers_orchestrator_gateway_rpc from '@smithers-orchestrator/gateway/rpc';
 import { ListApprovalsRequest, ListApprovalsResponse, GatewayRpcMethod, ListRunsRequest, ListWorkflowsRequest, ListWorkflowsResponse } from '@smithers-orchestrator/gateway/rpc';
-import { Collection } from '@tanstack/react-db';
+import { Collection, CollectionConfig } from '@tanstack/react-db';
 
 declare function createGatewayReactRoot(element: ReactElement, options?: SmithersGatewayClientOptions & {
     rootId?: string;
@@ -158,19 +159,6 @@ declare function useGatewayExtensionStream<T = unknown>(namespace: string | unde
 }): GatewayExtensionStreamState<T>;
 
 /**
- * The connection lifecycle of the gateway link, derived from real transport
- * traffic (RPC resolves, stream frames, auth/transport errors). Mirrors the
- * union apps/smithers used to keep in its hand-rolled `GatewayStatus` store
- * field, now surfaced by `useGatewayConnectionStatus`.
- */
-type GatewayConnectionStatus = "idle" | "connecting" | "online" | "offline" | "unauthorized";
-type GatewayConnectionState = {
-    status: GatewayConnectionStatus;
-    /** Epoch ms of the first failure in the current offline streak; cleared on reconnect. */
-    reconnectingSince?: number;
-};
-
-/**
  * The cache entry the generic `useSyncQuery` path stores per `SyncKey`. Status,
  * data, and error all live IN the row so a single `useLiveQuery` subscription
  * carries every transition reactively. `revision` guarantees a re-fetch that
@@ -180,6 +168,12 @@ type GatewayQueryRow<T> = {
     key: string;
     status: "idle" | "loading" | "success" | "error";
     value: T | undefined;
+    error: Error | undefined;
+    revision: number;
+};
+type GatewayCollectionStatusRow = {
+    key: string;
+    status: "idle" | "loading" | "success" | "error";
     error: Error | undefined;
     revision: number;
 };
@@ -233,6 +227,8 @@ type GatewayCollections = {
     query<T>(key: SyncKey, fetcher: () => Promise<T>): GatewayQueryHandle<T>;
     /** Resolve (or create) the bounded streaming collection for `key`. */
     stream(key: SyncKey, scope: string, params: unknown, maxFrames: number): GatewayStreamHandle;
+    /** Shared sidecar row carrying collection load/error state. */
+    collectionStatus(key: SyncKey): Collection<GatewayCollectionStatusRow, string>;
     /** Read the current value cached for a generic query `key` (optimistic helpers). */
     getQueryData<T>(key: SyncKey): T | undefined;
     /** Optimistically overwrite a generic query value; returns the prior value for rollback. */
@@ -281,20 +277,65 @@ declare function SyncProvider(props: {
  */
 declare function useSyncClient(): GatewayCollections;
 
-type CreateGatewayCollectionsOptions = {
-    /**
-     * The instrumented transport — apps/smithers passes one built over its
-     * wrapped `getGatewayClient()` (so auth/CSRF/proxy/observability are
-     * preserved); `createGatewayReactRoot` passes `createSmithersGatewayTransport`
-     * over a fresh client.
-     */
-    client: SyncTransport;
-    /** Top-level auth bailout (apps/smithers wires this to `handleAuthRequired`). */
+type PersistedRow<TRow extends object> = {
+    key: string;
+    row: TRow;
+};
+type SavePersistedRowsRequest<TRow extends object> = {
+    collectionId: string;
+    schemaVersion: string;
+    rows: readonly PersistedRow<TRow>[];
+};
+type PersistenceAdapter = {
+    loadRows<TRow extends object>(collectionId: string, schemaVersion: string): Promise<readonly PersistedRow<TRow>[]>;
+    saveRows<TRow extends object>(request: SavePersistedRowsRequest<TRow>): Promise<void>;
+    reset?(): Promise<void> | void;
+    close?(): Promise<void> | void;
+};
+
+type LazyValue<T> = T | (() => T | Promise<T>);
+
+/**
+ * Status hooks a `SyncSource` calls so the registry can surface per-collection
+ * load state (the PR #286 error-surfacing edge). Passed to a `createSource`
+ * factory so a source chosen at app boot is wired into the same status sidecar
+ * as the built-in gateway source — a pre-built `source` object that does not
+ * call these would otherwise report every load as a silent success.
+ */
+type SyncSourceHooks = {
     onAuthError?: (error: Error) => void;
-    /** gcTime for the pollable list/query collections. Default 5 min. */
+    onCollectionError?: (id: string, error: Error) => void;
+    onCollectionReady?: (id: string) => void;
+};
+type CreateGatewayCollectionsOptions = {
+    source?: SyncSource;
+    /** Source factory selected at app boot (e.g. from `backendStore`); wired with
+     *  the registry's status hooks. Preferred over `source` for real apps. */
+    createSource?: (hooks: SyncSourceHooks) => SyncSource;
+    client?: SyncTransport;
+    onAuthError?: (error: Error) => void;
     listGcTime?: number;
+    persistence?: LazyValue<PersistenceAdapter | undefined>;
+    schemaVersion?: LazyValue<string>;
 };
 declare function createGatewayCollections(options: CreateGatewayCollectionsOptions): GatewayCollections;
+
+declare function createMemoryPersistenceAdapter(): PersistenceAdapter & {
+    rows(collectionId: string): readonly PersistedRow<object>[];
+};
+
+type PersistedCollectionOptions<TRow extends object, TKey extends string | number> = CollectionConfig<TRow, TKey> & {
+    persistence: LazyValue<PersistenceAdapter | undefined>;
+    schemaVersion: LazyValue<string>;
+    maxRows?: number;
+    /**
+     * Per-row transform applied only on the way into the persistence adapter, so
+     * a collection can keep large blobs out of its durable copy while the live
+     * in-memory row stays intact (see `sanitizeRunEventRowForPersistence`).
+     */
+    sanitizeRow?: (row: TRow) => TRow;
+};
+declare function persistedCollectionOptions<TRow extends object, TKey extends string | number>(options: PersistedCollectionOptions<TRow, TKey>): CollectionConfig<TRow, TKey>;
 
 /**
  * Declarative data fetching for the sync registry. Backed by TanStack DB's
@@ -450,4 +491,4 @@ type UseGatewayConnectionStatusResult = {
  */
 declare function useGatewayConnectionStatus(): UseGatewayConnectionStatusResult;
 
-export { type CreateGatewayCollectionsOptions, type GatewayAsyncState, type GatewayCollections, type GatewayConnectionState, type GatewayConnectionStatus, type GatewayExtensionStreamState, type GatewayQueryHandle, type GatewayQueryRow, type GatewayStreamHandle, type GatewayStreamRow, type NodeStatus, SmithersGatewayContext, SmithersGatewayProvider, SyncContext, type SyncMutationOptions, SyncProvider, type UseGatewayConnectionStatusResult, type UseGatewayRunTreeResult, type UseSyncMutationResult, type UseSyncMutationStatus, type UseSyncQueryOptions, type UseSyncQueryResult, type UseSyncSubscriptionOptions, type UseSyncSubscriptionResult, createGatewayCollections, createGatewayReactRoot, useGatewayActions, useGatewayApprovals, useGatewayConnectionStatus, useGatewayExtensionAction, useGatewayExtensionResource, useGatewayExtensionStream, useGatewayMutation, useGatewayNodeOutput, useGatewayQuery, useGatewayRpc, useGatewayRun, useGatewayRunEvents, useGatewayRunStream, useGatewayRunTree, useGatewayRuns, useGatewayWorkflows, useSmithersGateway, useSyncClient, useSyncMutation, useSyncQuery, useSyncSubscription };
+export { type CreateGatewayCollectionsOptions, type GatewayAsyncState, type GatewayCollectionStatusRow, type GatewayCollections, type GatewayExtensionStreamState, type GatewayQueryHandle, type GatewayQueryRow, type GatewayStreamHandle, type GatewayStreamRow, type NodeStatus, type PersistedRow, type PersistenceAdapter, type SavePersistedRowsRequest, SmithersGatewayContext, SmithersGatewayProvider, SyncContext, type SyncMutationOptions, SyncProvider, type SyncSourceHooks, type UseGatewayConnectionStatusResult, type UseGatewayRunTreeResult, type UseSyncMutationResult, type UseSyncMutationStatus, type UseSyncQueryOptions, type UseSyncQueryResult, type UseSyncSubscriptionOptions, type UseSyncSubscriptionResult, createGatewayCollections, createGatewayReactRoot, createMemoryPersistenceAdapter, persistedCollectionOptions, useGatewayActions, useGatewayApprovals, useGatewayConnectionStatus, useGatewayExtensionAction, useGatewayExtensionResource, useGatewayExtensionStream, useGatewayMutation, useGatewayNodeOutput, useGatewayQuery, useGatewayRpc, useGatewayRun, useGatewayRunEvents, useGatewayRunStream, useGatewayRunTree, useGatewayRuns, useGatewayWorkflows, useSmithersGateway, useSyncClient, useSyncMutation, useSyncQuery, useSyncSubscription };

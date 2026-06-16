@@ -9,6 +9,7 @@ import { bindDock } from "./apps/bindDock";
 import { getGatewayClient } from "./gateway/gatewayClient";
 import { startApprovalWatcher } from "./runs/watchApprovals";
 import { registerServiceWorker } from "./registerServiceWorker";
+import { bindSyncTelemetry } from "./observability/bindSyncTelemetry";
 import { appGatewayCollections } from "./sync/appGatewayCollections";
 import { platformFetch } from "./jjhub/platformFetch";
 import { platformJson, PlatformError } from "./jjhub/platformJson";
@@ -18,6 +19,7 @@ import "./styles.css";
 // the first paint, so every store is live when the shell mounts.
 bindRouteStore(router);
 bindDock();
+bindSyncTelemetry();
 startApprovalWatcher();
 // Kick the auth check once at boot (not from an AuthStatus mount effect).
 void useAuthStore.getState().bootstrap();

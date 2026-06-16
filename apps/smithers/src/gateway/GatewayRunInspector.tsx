@@ -2,13 +2,13 @@ import { useEffect, useMemo } from "react";
 import {
   useGatewayApprovals,
   useGatewayMutation,
+  useGatewayRunTree,
   useGatewayWorkflows,
 } from "@smithers-orchestrator/gateway-react";
 import { gatewayKeys } from "@smithers-orchestrator/gateway-client";
 import { StatusPill } from "../cards/StatusPill";
-import { findNode } from "../runs/Run";
+import { findNode, type RunNode } from "../runs/Run";
 import { RunTree } from "../runs/RunTree";
-import { useGatewayRunTree } from "../sync/useGatewayRunTree";
 import { GatewayNodeDetail } from "./GatewayNodeDetail";
 import { WorkflowRunUi } from "./WorkflowRunUi";
 import {
@@ -82,7 +82,7 @@ export function GatewayRunInspector({
   }, [approvals.refetch, runTree.status]);
 
   const effectiveView: GatewayRunView = storedView ?? (uiPath ? "flow" : "inspector");
-  const tree = runTree.root;
+  const tree = runTree.root as RunNode | null;
   const activeNodeId = selectedNodeId ?? tree?.id;
   const selected =
     tree && activeNodeId ? findNode(tree, activeNodeId) ?? tree : null;

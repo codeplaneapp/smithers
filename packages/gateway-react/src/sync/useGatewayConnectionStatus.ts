@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
+import type { GatewayConnectionStatus } from "@smithers-orchestrator/gateway-client";
 import { useSyncClient } from "./useSyncClient.ts";
-import type { GatewayConnectionStatus } from "./GatewayConnectionState.ts";
 
 export type UseGatewayConnectionStatusResult = {
   status: GatewayConnectionStatus;

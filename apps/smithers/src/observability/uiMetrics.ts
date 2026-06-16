@@ -134,6 +134,39 @@ export const gatewayConnectionState = browserRegistry.gauge({
   allowedLabels: [],
 });
 
+/* ─────────────────────── TanStack DB sync metrics (browser-local) ──────── */
+
+export const syncFramesTotal = browserRegistry.counter({
+  name: "smithers_ui_sync_frames_total",
+  help: "Stream frames applied into a synced TanStack DB collection (browser-local).",
+  allowedLabels: ["scope"],
+});
+
+export const syncErrorsTotal = browserRegistry.counter({
+  name: "smithers_ui_sync_errors_total",
+  help: "Errors raised while loading or streaming a synced collection (browser-local).",
+  allowedLabels: ["scope"],
+});
+
+export const syncGapResyncTotal = browserRegistry.counter({
+  name: "smithers_ui_sync_gap_resync_total",
+  help: "Replay-gap (SeqOutOfRange) resyncs on a synced collection stream (browser-local).",
+  allowedLabels: ["scope"],
+});
+
+export const syncInitialLoadTotal = browserRegistry.counter({
+  name: "smithers_ui_sync_initial_load_total",
+  help: "Initial RPC loads completed for a synced collection (browser-local).",
+  allowedLabels: ["scope"],
+});
+
+export const syncFrameLagMs = browserRegistry.histogram({
+  name: "smithers_ui_sync_frame_lag_ms",
+  help: "Observed lag between a frame's source timestamp and its client apply, in ms (browser-local).",
+  allowedLabels: ["scope"],
+  buckets: DEFAULT_MS_BUCKETS,
+});
+
 /* ───────────────────────── per-surface refresh metrics (browser-local) ─ */
 
 export const surfaceRefreshTotal = browserRegistry.counter({

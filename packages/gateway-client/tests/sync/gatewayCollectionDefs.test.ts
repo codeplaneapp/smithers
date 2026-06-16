@@ -51,7 +51,7 @@ function quietTransport(payload: unknown): SyncTransport {
 
 describe("gatewayCollectionDefs.nodes", () => {
   test("rows mapper flattens a real { root } snapshot into node rows", () => {
-    const rows = Array.from(gatewayCollectionDefs.nodes("run-1").rows(snapshot));
+    const rows = Array.from(gatewayCollectionDefs.nodes("run-1").gateway.rows!(snapshot));
     expect(rows.map((row) => row.id)).toEqual(["1", "2", "plan", "approve"]);
     expect(rows.find((row) => row.id === "1")?.childIds).toEqual(["2"]);
     expect(rows.find((row) => row.id === "2")?.childIds).toEqual(["plan", "approve"]);
@@ -61,12 +61,17 @@ describe("gatewayCollectionDefs.nodes", () => {
 
   test("honors a caller-supplied rows mapper", () => {
     const custom = (): GatewayRunNode[] => [{ id: "x", name: "X", kind: "compute", status: "ok" }];
-    expect(gatewayCollectionDefs.nodes("run-1", custom).rows).toBe(custom);
+    expect(gatewayCollectionDefs.nodes("run-1", custom).gateway.rows).toBe(custom);
   });
 
   test("populates a TanStack DB collection from the snapshot RPC", async () => {
     const collection = createCollection<GatewayRunNode, string>(
-      createGatewayCollection({ ...gatewayCollectionDefs.nodes("run-1"), client: quietTransport(snapshot) }),
+      createGatewayCollection({
+        key: gatewayCollectionDefs.nodes("run-1").key,
+        getKey: gatewayCollectionDefs.nodes("run-1").getKey,
+        client: quietTransport(snapshot),
+        ...gatewayCollectionDefs.nodes("run-1").gateway,
+      }),
     );
 
     await collection.preload();
@@ -79,8 +84,10 @@ describe("gatewayCollectionDefs.nodes", () => {
   test("stays empty for the gateway empty-root placeholder", async () => {
     const collection = createCollection<GatewayRunNode, string>(
       createGatewayCollection({
-        ...gatewayCollectionDefs.nodes("run-1"),
+        key: gatewayCollectionDefs.nodes("run-1").key,
+        getKey: gatewayCollectionDefs.nodes("run-1").getKey,
         client: quietTransport({ root: { id: 0, name: "(empty)", children: [] } }),
+        ...gatewayCollectionDefs.nodes("run-1").gateway,
       }),
     );
 

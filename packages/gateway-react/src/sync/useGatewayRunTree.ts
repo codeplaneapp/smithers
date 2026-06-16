@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { gatewayKeys, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { useGatewayCollectionStatus } from "./useGatewayCollectionStatus.ts";
 import { useSyncClient } from "./useSyncClient.ts";
 
 /** The five tones the run UI knows; mirrors `snapshotToGatewayRunNode`'s output. */
@@ -45,6 +46,7 @@ function buildRunTree(rows: readonly GatewayRunNode[]): GatewayRunNode | null {
  */
 export function useGatewayRunTree(runId: string | undefined): UseGatewayRunTreeResult {
   const registry = useSyncClient();
+  const statusRow = useGatewayCollectionStatus(runId ? gatewayKeys.devtoolsSnapshot(runId) : ["gateway:nodes", "disabled"]);
   const collection = runId ? registry.nodes(runId) : undefined;
 
   const live = useLiveQuery(
@@ -55,12 +57,12 @@ export function useGatewayRunTree(runId: string | undefined): UseGatewayRunTreeR
   const nodes = (live.data ?? []) as GatewayRunNode[];
   const root = useMemo(() => buildRunTree(nodes), [nodes]);
   const status = (root?.status ?? "queued") as NodeStatus;
-  const isLoading = Boolean(runId) && !live.isReady && nodes.length === 0;
+  const isLoading = Boolean(runId) && statusRow.status === "loading" && nodes.length === 0;
   return {
     root,
     nodes,
     status,
     isLoading,
-    error: live.isError ? new Error("Failed to load run tree.") : undefined,
+    error: statusRow.status === "error" ? statusRow.error : undefined,
   };
 }

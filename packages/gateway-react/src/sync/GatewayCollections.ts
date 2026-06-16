@@ -6,6 +6,7 @@ import type {
   GatewayRunRow,
   GatewayRunSummaryRow,
   GatewayWorkflowRow,
+  GatewayConnectionState,
   SyncKey,
   SyncStreamFrame,
   SyncTransport,
@@ -15,7 +16,6 @@ import type {
   ListRunsRequest,
   ListWorkflowsRequest,
 } from "@smithers-orchestrator/gateway/rpc";
-import type { GatewayConnectionState } from "./GatewayConnectionState.ts";
 
 /**
  * The cache entry the generic `useSyncQuery` path stores per `SyncKey`. Status,
@@ -27,6 +27,13 @@ export type GatewayQueryRow<T> = {
   key: string;
   status: "idle" | "loading" | "success" | "error";
   value: T | undefined;
+  error: Error | undefined;
+  revision: number;
+};
+
+export type GatewayCollectionStatusRow = {
+  key: string;
+  status: "idle" | "loading" | "success" | "error";
   error: Error | undefined;
   revision: number;
 };
@@ -84,6 +91,8 @@ export type GatewayCollections = {
   query<T>(key: SyncKey, fetcher: () => Promise<T>): GatewayQueryHandle<T>;
   /** Resolve (or create) the bounded streaming collection for `key`. */
   stream(key: SyncKey, scope: string, params: unknown, maxFrames: number): GatewayStreamHandle;
+  /** Shared sidecar row carrying collection load/error state. */
+  collectionStatus(key: SyncKey): Collection<GatewayCollectionStatusRow, string>;
 
   /** Read the current value cached for a generic query `key` (optimistic helpers). */
   getQueryData<T>(key: SyncKey): T | undefined;

@@ -101,6 +101,7 @@ let activeEmitter: Emitter = (line) => {
     console.info(line);
   }
 };
+let activeCorrelationContext: Record<string, unknown> = {};
 
 /** Swap the emitter — used by tests to capture lines, and by deployments to
  *  forward to a custom sink (loki, jjhub). */
@@ -112,6 +113,7 @@ export function emit(event: LogEvent): void {
   const payload: Record<string, unknown> = {
     level: event.level,
     message: event.message,
+    ...activeCorrelationContext,
   };
   if (event.component) payload.component = event.component;
   if (event.fields) {
@@ -130,6 +132,16 @@ export function emit(event: LogEvent): void {
     activeEmitter(line);
   } catch {
     loggerDropsTotal.inc({ reason: "sink" });
+  }
+}
+
+export function withCorrelationContext<T>(context: Record<string, unknown>, fn: () => T): T {
+  const previous = activeCorrelationContext;
+  activeCorrelationContext = { ...previous, ...context };
+  try {
+    return fn();
+  } finally {
+    activeCorrelationContext = previous;
   }
 }
 

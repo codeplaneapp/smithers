@@ -1,19 +1,20 @@
-import { createCollection, type Collection } from "@tanstack/react-db";
+import { createCollection, type Collection, type CollectionConfig } from "@tanstack/react-db";
 import {
   createGatewayCollection,
+  createGatewaySyncSource,
   gatewayCollectionDefs,
   syncKeyFingerprint,
   syncKeyMatches,
+  type CollectionDef,
   type GatewayApprovalRow,
-  type GatewayCollectionConfig,
   type GatewayRunEventRow,
   type GatewayRunNode,
   type GatewayRunRow,
   type GatewayRunSummaryRow,
   type GatewayWorkflowRow,
   type SyncKey,
+  type SyncSource,
   type SyncStreamFrame,
-  type SyncStreamOptions,
   type SyncTransport,
 } from "@smithers-orchestrator/gateway-client";
 import type {
@@ -21,194 +22,67 @@ import type {
   ListRunsRequest,
   ListWorkflowsRequest,
 } from "@smithers-orchestrator/gateway/rpc";
-import type { GatewayConnectionState } from "./GatewayConnectionState.ts";
 import type {
+  GatewayCollectionStatusRow,
   GatewayCollections,
   GatewayQueryHandle,
   GatewayQueryRow,
   GatewayStreamHandle,
   GatewayStreamRow,
 } from "./GatewayCollections.ts";
+import type { PersistenceAdapter } from "./PersistenceAdapter.ts";
+import { persistedCollectionOptions } from "./persistedCollectionOptions.ts";
+import { resolveLazy, type LazyValue } from "./resolveLazy.ts";
 
-export type CreateGatewayCollectionsOptions = {
-  /**
-   * The instrumented transport — apps/smithers passes one built over its
-   * wrapped `getGatewayClient()` (so auth/CSRF/proxy/observability are
-   * preserved); `createGatewayReactRoot` passes `createSmithersGatewayTransport`
-   * over a fresh client.
-   */
-  client: SyncTransport;
-  /** Top-level auth bailout (apps/smithers wires this to `handleAuthRequired`). */
+/**
+ * Status hooks a `SyncSource` calls so the registry can surface per-collection
+ * load state (the PR #286 error-surfacing edge). Passed to a `createSource`
+ * factory so a source chosen at app boot is wired into the same status sidecar
+ * as the built-in gateway source — a pre-built `source` object that does not
+ * call these would otherwise report every load as a silent success.
+ */
+export type SyncSourceHooks = {
   onAuthError?: (error: Error) => void;
-  /** gcTime for the pollable list/query collections. Default 5 min. */
-  listGcTime?: number;
+  onCollectionError?: (id: string, error: Error) => void;
+  onCollectionReady?: (id: string) => void;
 };
 
-/** Pseudo stream scope the registry uses to drive `invalidate()` re-pulls. */
-const INVALIDATE_SCOPE = "smithers:invalidate";
-const LIST_GC_TIME = 5 * 60_000;
-/** Per-run streamed collections tear down promptly so navigating away aborts the WS. */
-const RUN_GC_TIME = 0;
+export type CreateGatewayCollectionsOptions = {
+  source?: SyncSource;
+  /** Source factory selected at app boot (e.g. from `backendStore`); wired with
+   *  the registry's status hooks. Preferred over `source` for real apps. */
+  createSource?: (hooks: SyncSourceHooks) => SyncSource;
+  client?: SyncTransport;
+  onAuthError?: (error: Error) => void;
+  listGcTime?: number;
+  persistence?: LazyValue<PersistenceAdapter | undefined>;
+  schemaVersion?: LazyValue<string>;
+};
 
-function isAuthError(error: unknown): boolean {
-  const record = error as { code?: unknown; status?: unknown } | undefined;
-  const code = typeof record?.code === "string" ? record.code : "";
-  const status = typeof record?.status === "number" ? record.status : undefined;
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  return status === 401 ||
-    status === 403 ||
-    /^(UNAUTHORIZED|Unauthorized|FORBIDDEN|Forbidden)\b/.test(message) ||
-    /^(Unauthorized|Forbidden)$/i.test(code);
-}
+const LIST_GC_TIME = 5 * 60_000;
+const RUN_GC_TIME = 0;
+const DEFAULT_SCHEMA_VERSION = "0016";
 
 function asError(cause: unknown): Error {
   return cause instanceof Error ? cause : new Error(String(cause));
-}
-
-type ConnectionObserver = {
-  get(): GatewayConnectionState;
-  subscribe(listener: () => void): () => void;
-  markConnecting(): void;
-  markOnline(): void;
-  markOffline(): void;
-  markUnauthorized(): void;
-  reset(): void;
-};
-
-function createConnectionObserver(): ConnectionObserver {
-  let state: GatewayConnectionState = { status: "idle" };
-  const listeners = new Set<() => void>();
-  const set = (next: GatewayConnectionState) => {
-    if (next.status === state.status && next.reconnectingSince === state.reconnectingSince) return;
-    state = next;
-    for (const listener of listeners) listener();
-  };
-  return {
-    get: () => state,
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    markConnecting: () => {
-      if (state.status === "idle") set({ status: "connecting" });
-    },
-    markOnline: () => set({ status: "online" }),
-    markOffline: () =>
-      set({ status: "offline", reconnectingSince: state.reconnectingSince ?? Date.now() }),
-    markUnauthorized: () => set({ status: "unauthorized" }),
-    reset: () => set({ status: "idle" }),
-  };
-}
-
-/**
- * Per-fingerprint pulse bus backing `invalidate()`. A collection subscribes to
- * its own fingerprint through the `INVALIDATE_SCOPE` pseudo-stream;
- * `invalidate()` pulses the fingerprint, which `createGatewayCollection`'s
- * `refetchOnFrame` turns into a fresh RPC + reconcile.
- */
-function createPulser() {
-  const waiters = new Map<string, Set<() => void>>();
-  return {
-    pulse(fingerprint: string) {
-      const set = waiters.get(fingerprint);
-      if (!set || set.size === 0) return;
-      const pending = Array.from(set);
-      set.clear();
-      for (const resolve of pending) resolve();
-    },
-    stream(fingerprint: string, signal: AbortSignal): AsyncIterable<SyncStreamFrame> {
-      return {
-        async *[Symbol.asyncIterator]() {
-          while (!signal.aborted) {
-            await new Promise<void>((resolve) => {
-              if (signal.aborted) {
-                resolve();
-                return;
-              }
-              const set = waiters.get(fingerprint) ?? new Set();
-              set.add(resolve);
-              waiters.set(fingerprint, set);
-              signal.addEventListener(
-                "abort",
-                () => {
-                  set.delete(resolve);
-                  resolve();
-                },
-                { once: true },
-              );
-            });
-            if (signal.aborted) return;
-            yield { key: ["smithers:invalidate", fingerprint], event: "invalidate", payload: undefined };
-          }
-        },
-      };
-    },
-  };
 }
 
 export function createGatewayCollections(
   options: CreateGatewayCollectionsOptions,
 ): GatewayCollections {
   const listGcTime = options.listGcTime ?? LIST_GC_TIME;
-  const connection = createConnectionObserver();
-  const pulser = createPulser();
-  const base = options.client;
 
-  // Instrument the transport so connection status and the top-level auth bailout
-  // are derived from real traffic, and so the `INVALIDATE_SCOPE` pseudo-stream is
-  // served locally rather than forwarded to the gateway.
-  const transport: SyncTransport = {
-    async rpc(method, params, opts) {
-      connection.markConnecting();
-      try {
-        const result = await base.rpc(method, params, opts);
-        connection.markOnline();
-        return result;
-      } catch (cause) {
-        const error = asError(cause);
-        if (isAuthError(error)) {
-          connection.markUnauthorized();
-          options.onAuthError?.(error);
-        } else {
-          connection.markOffline();
-        }
-        throw error;
-      }
-    },
-    stream(scope, params, streamOptions: SyncStreamOptions) {
-      if (scope === INVALIDATE_SCOPE) {
-        const fingerprint = typeof params === "string"
-          ? params
-          : String((params as { fingerprint?: unknown })?.fingerprint ?? "");
-        const signal = streamOptions.signal ?? new AbortController().signal;
-        return pulser.stream(fingerprint, signal);
-      }
-      if (!base.stream) {
-        throw new Error("Gateway transport has no stream implementation.");
-      }
-      const upstream = base.stream;
-      return {
-        async *[Symbol.asyncIterator]() {
-          connection.markConnecting();
-          try {
-            for await (const frame of upstream(scope, params, streamOptions)) {
-              connection.markOnline();
-              yield frame;
-            }
-          } catch (cause) {
-            const error = asError(cause);
-            if (isAuthError(error)) {
-              connection.markUnauthorized();
-              options.onAuthError?.(error);
-            } else {
-              connection.markOffline();
-            }
-            throw error;
-          }
-        },
-      };
-    },
-  };
+  // Resolve the persistence adapter at most once and share that single instance
+  // across every collection. Resolving the lazy value per collection (the old
+  // behavior) constructed an independent adapter each time; adapters that hold
+  // an in-memory snapshot (the OPFS-JSON web cache) would then clobber each
+  // other's durable state. One shared adapter, keyed internally by collectionId,
+  // keeps the durable copy consistent across collections.
+  let sharedPersistence: Promise<PersistenceAdapter | undefined> | undefined;
+  const persistenceThunk: LazyValue<PersistenceAdapter | undefined> | undefined =
+    options.persistence === undefined
+      ? undefined
+      : () => (sharedPersistence ??= resolveLazy(options.persistence!));
 
   type QueryHandleInternal<T> = GatewayQueryHandle<T> & {
     fetcher: () => Promise<T>;
@@ -218,63 +92,122 @@ export function createGatewayCollections(
 
   const collections = new Map<string, Collection<object, string | number>>();
   const queries = new Map<string, QueryHandleInternal<unknown>>();
+  const queryKeyById = new Map<string, SyncKey>();
   const streams = new Map<string, GatewayStreamHandle>();
-  // Per-fingerprint invalidators, so `invalidate(prefix)` can re-pull by key.
-  const invalidators = new Map<string, { key: SyncKey; run: () => void }>();
+  const collectionStatusRows = new Map<string, GatewayCollectionStatusRow>();
+  let writeCollectionStatusRow: ((row: GatewayCollectionStatusRow) => void) | null = null;
+  const statusCollection = createCollection<GatewayCollectionStatusRow, string>({
+    id: "gateway:collection-status",
+    getKey: (row) => row.key,
+    gcTime: Number.POSITIVE_INFINITY,
+    startSync: true,
+    sync: {
+      sync: ({ begin, write, commit, markReady, collection }) => {
+        writeCollectionStatusRow = (row) => {
+          collectionStatusRows.set(row.key, row);
+          begin();
+          write({ type: collection.has(row.key) ? "update" : "insert", value: row });
+          commit();
+        };
+        for (const row of collectionStatusRows.values()) writeCollectionStatusRow(row);
+        markReady();
+        return () => {
+          writeCollectionStatusRow = null;
+        };
+      },
+    },
+  });
 
-  function registerInvalidator(id: string, key: SyncKey, run: () => void) {
-    invalidators.set(id, { key, run });
-  }
-
-  type KnownConfig<TRow extends object, TKey extends string | number> = {
-    key: SyncKey;
-    getKey: (row: TRow) => TKey;
-    method?: string;
-    params?: unknown;
-    rows?: (payload: unknown) => Iterable<TRow>;
-    stream?: GatewayCollectionConfig<TRow, TKey>["stream"];
+  const writeCollectionStatus = (id: string, status: GatewayCollectionStatusRow["status"], error?: Error) => {
+    const current = collectionStatusRows.get(id);
+    const row: GatewayCollectionStatusRow = {
+      key: id,
+      status,
+      error,
+      revision: (current?.revision ?? 0) + 1,
+    };
+    collectionStatusRows.set(id, row);
+    writeCollectionStatusRow?.(row);
   };
 
-  /**
-   * Build (once) a known gateway collection. Pollable lists with no upstream
-   * stream get the `INVALIDATE_SCOPE` pseudo-stream wired in so `invalidate()`
-   * can force a fresh RPC + reconcile.
-   */
+  const sourceHooks: SyncSourceHooks = {
+    onAuthError: options.onAuthError,
+    onCollectionError: (id, error) => writeCollectionStatus(id, "error", error),
+    onCollectionReady: (id) => writeCollectionStatus(id, "success", undefined),
+  };
+  const source = options.source
+    ?? options.createSource?.(sourceHooks)
+    ?? createGatewaySyncSource({
+      transport: options.client ?? {
+        rpc: () => Promise.reject(new Error("Gateway SyncSource requires a SyncTransport for RPC.")),
+      },
+      ...sourceHooks,
+    });
+  const sourceWithClient = source as SyncSource & { client?: SyncTransport; invalidate?: (prefix: SyncKey) => void };
+  const transport = sourceWithClient.client ?? options.client ?? {
+    rpc: () => Promise.reject(new Error("GatewayCollections was created without an RPC transport.")),
+  };
+
+  function withCollectionStatus<TRow extends object, TKey extends string | number>(
+    id: string,
+    config: CollectionConfig<TRow, TKey>,
+  ): CollectionConfig<TRow, TKey> {
+    const sync = config.sync;
+    return {
+      ...config,
+      sync: {
+        ...sync,
+        sync(api) {
+          writeCollectionStatus(id, "loading", undefined);
+          try {
+            return sync.sync({
+              ...api,
+              markReady: () => {
+                if (collectionStatusRows.get(id)?.status !== "error") {
+                  writeCollectionStatus(id, "success", undefined);
+                }
+                api.markReady();
+              },
+            });
+          } catch (cause) {
+            writeCollectionStatus(id, "error", asError(cause));
+            throw cause;
+          }
+        },
+      },
+    };
+  }
+
   function knownCollection<TRow extends object, TKey extends string | number>(
-    def: KnownConfig<TRow, TKey>,
+    def: CollectionDef<TRow, TKey>,
     gcTime: number,
   ): Collection<TRow, TKey> {
     const id = syncKeyFingerprint(def.key);
     const existing = collections.get(id);
     if (existing) return existing as unknown as Collection<TRow, TKey>;
-    const pollable = def.stream === undefined;
-    const collection = createCollection<TRow, TKey>(
-      createGatewayCollection<TRow, TKey>({
-        key: def.key,
-        client: transport,
-        getKey: def.getKey,
-        gcTime,
-        startSync: false,
-        ...(def.method ? { method: def.method } : {}),
-        ...(def.params === undefined ? {} : { params: def.params }),
-        ...(def.rows ? { rows: def.rows } : {}),
-        ...(def.stream
-          ? { stream: def.stream }
-          : {
-              stream: {
-                scope: INVALIDATE_SCOPE,
-                params: { fingerprint: id },
-                refetchOnFrame: true,
-                refetchMode: "replace" as const,
-                reconnectOnGracefulEnd: false,
-              },
-            }),
-      }),
-    );
+    // Do NOT write "loading" here. `knownCollection` is called from hooks during
+    // React render; writing to the shared status collection synchronously would
+    // update any other component already subscribed to it (the React
+    // "setState while rendering a different component" warning). The "loading"
+    // transition is written by `withCollectionStatus` when the collection's sync
+    // actually starts, which happens in an effect (startSync:false), off-render.
+    const sourceConfig = source.collection(def);
+    const statusConfig = withCollectionStatus(id, {
+      ...sourceConfig,
+      gcTime,
+      startSync: false,
+    });
+    const collectionOptions = def.persisted && persistenceThunk
+      ? persistedCollectionOptions<TRow, TKey>({
+          ...statusConfig,
+          persistence: persistenceThunk,
+          schemaVersion: options.schemaVersion ?? DEFAULT_SCHEMA_VERSION,
+          ...(def.maxRows !== undefined ? { maxRows: def.maxRows } : {}),
+          ...(def.sanitizeForPersistence ? { sanitizeRow: def.sanitizeForPersistence } : {}),
+        })
+      : statusConfig;
+    const collection = createCollection<TRow, TKey>(collectionOptions);
     collections.set(id, collection as unknown as Collection<object, string | number>);
-    if (pollable) {
-      registerInvalidator(id, def.key, () => pulser.pulse(id));
-    }
     return collection;
   }
 
@@ -282,7 +215,6 @@ export function createGatewayCollections(
     const id = syncKeyFingerprint(key);
     const existing = queries.get(id) as QueryHandleInternal<T> | undefined;
     if (existing) {
-      // Pin the latest fetcher closure so refetch/invalidate use current params.
       existing.fetcher = fetcher;
       return existing;
     }
@@ -344,7 +276,7 @@ export function createGatewayCollections(
       },
     };
     queries.set(id, api as QueryHandleInternal<unknown>);
-    registerInvalidator(id, key, () => void runFetch());
+    queryKeyById.set(id, key);
     return api;
   }
 
@@ -385,8 +317,10 @@ export function createGatewayCollections(
       transport.rpc(method, params, opts) as Promise<T>,
 
     invalidate: async (prefix: SyncKey) => {
-      for (const { key, run } of invalidators.values()) {
-        if (syncKeyMatches(key, prefix)) run();
+      sourceWithClient.invalidate?.(prefix);
+      for (const [id, query] of queries.entries()) {
+        const key = queryKeyById.get(id);
+        if (key && syncKeyMatches(key, prefix)) void query.refetch();
       }
     },
 
@@ -405,6 +339,13 @@ export function createGatewayCollections(
 
     query: queryHandle,
     stream: streamHandle,
+    collectionStatus: (key: SyncKey) => {
+      const id = syncKeyFingerprint(key);
+      if (!collectionStatusRows.has(id)) {
+        collectionStatusRows.set(id, { key: id, status: "idle", error: undefined, revision: 0 });
+      }
+      return statusCollection;
+    },
 
     getQueryData: <T,>(key: SyncKey): T | undefined => {
       const handle = queries.get(syncKeyFingerprint(key)) as QueryHandleInternal<T> | undefined;
@@ -415,13 +356,10 @@ export function createGatewayCollections(
       return handle ? handle.set(value) : { previous: undefined };
     },
 
-    connection: connection.get,
-    subscribeConnection: connection.subscribe,
+    connection: source.status().get,
+    subscribeConnection: source.status().subscribe,
 
     connect: async () => {
-      // A lightweight probe; the instrumented transport flips the observer to
-      // online / offline / unauthorized off the result. Errors are swallowed —
-      // the status is the signal, not a throw.
       await transport.rpc("listRuns", {}).catch(() => undefined);
     },
 
@@ -429,11 +367,20 @@ export function createGatewayCollections(
       for (const collection of collections.values()) void collection.cleanup();
       for (const handle of queries.values()) void handle.collection.cleanup();
       for (const handle of streams.values()) void handle.collection.cleanup();
+      void statusCollection.cleanup();
       collections.clear();
       queries.clear();
+      queryKeyById.clear();
       streams.clear();
-      invalidators.clear();
-      connection.reset();
+      collectionStatusRows.clear();
+      source.reset?.();
+      // Reset the shared adapter (whether it was a direct value or lazily
+      // constructed) and drop the memo so the next mount builds a fresh one.
+      if (sharedPersistence) {
+        const pending = sharedPersistence;
+        sharedPersistence = undefined;
+        void pending.then((adapter) => adapter?.reset?.());
+      }
     },
   };
 }

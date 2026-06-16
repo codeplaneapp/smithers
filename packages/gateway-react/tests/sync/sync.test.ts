@@ -10,17 +10,23 @@ if (typeof globalThis.document === "undefined") {
   GlobalRegistrator.register();
 }
 
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
   gatewayKeys,
+  gatewayCollectionDefs,
+  syncKeyFingerprint,
   type SyncStreamFrame,
   type SyncTransport,
 } from "@smithers-orchestrator/gateway-client";
 import {
   SyncProvider,
   createGatewayCollections,
+  createMemoryPersistenceAdapter,
   useGatewayApprovals,
   useGatewayConnectionStatus,
   useGatewayQuery,
@@ -35,6 +41,9 @@ import {
   type GatewayCollections,
   type UseSyncSubscriptionResult,
 } from "../../src/index.ts";
+// Native-only adapter: imported via its module, never the browser-safe barrel.
+import { createBunSqlitePersistenceAdapter } from "../../src/bunSqlitePersistenceAdapter.ts";
+import { createFakeElectricSyncSource } from "./fakeElectricSyncSource.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -78,6 +87,24 @@ async function waitFor(predicate: () => boolean): Promise<void> {
   }
   expect(predicate()).toBe(true);
 }
+
+async function waitForAsync(predicate: () => Promise<boolean>): Promise<void> {
+  for (let i = 0; i < 50; i += 1) {
+    if (await predicate()) return;
+    await settle(2);
+  }
+  expect(await predicate()).toBe(true);
+}
+
+const tmpPersistenceDirs: string[] = [];
+function tmpSqlitePath(): string {
+  const dir = mkdtempSync(join(tmpdir(), "smithers-sync-persist-"));
+  tmpPersistenceDirs.push(dir);
+  return join(dir, "client.sqlite");
+}
+afterAll(() => {
+  for (const dir of tmpPersistenceDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 /** A controllable fake transport: rpc dispatch + per-(scope,runId) stream channels. */
 function makeTransport(rpc: SyncTransport["rpc"]) {
@@ -134,6 +161,23 @@ function makeTransport(rpc: SyncTransport["rpc"]) {
 
 function provider(registry: GatewayCollections, child: ReactElement): ReactElement {
   return createElement(SyncProvider, { client: registry }, child);
+}
+
+/** Mount a hook over one registry and wait until its value satisfies `done`. */
+async function assertOverSource<T>(
+  registry: GatewayCollections,
+  useHook: () => T,
+  done: (value: T) => boolean,
+): Promise<void> {
+  let value: T | undefined;
+  function Probe() {
+    value = useHook();
+    return null;
+  }
+  const harness = await mountHarness();
+  await harness.render(provider(registry, createElement(Probe)));
+  await waitFor(() => value !== undefined && done(value));
+  await harness.unmount();
 }
 
 describe("useSyncQuery over the registry", () => {
@@ -450,6 +494,418 @@ describe("legacy synced hooks over collections", () => {
 
     await harness.unmount();
   });
+
+  test("collection-backed hooks surface load errors", async () => {
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") return Promise.reject(new Error("listRuns failed"));
+        return Promise.resolve([]);
+      }).transport,
+    });
+
+    let snapshot: ReturnType<typeof useGatewayRuns> | undefined;
+    function Probe() {
+      snapshot = useGatewayRuns();
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => snapshot?.error?.message === "listRuns failed");
+    expect(snapshot?.loading).toBe(false);
+    await harness.unmount();
+  });
+});
+
+describe("collection persistence", () => {
+  test("rehydrates a collection from SQLite persistence before the first live load", async () => {
+    const persistence = createMemoryPersistenceAdapter();
+    const first = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") return Promise.resolve([{ runId: "warm-run", status: "running" }]);
+        return Promise.resolve([]);
+      }).transport,
+      persistence,
+      schemaVersion: "0016",
+    });
+
+    let firstSnapshot: ReturnType<typeof useGatewayRuns> | undefined;
+    function FirstProbe() {
+      firstSnapshot = useGatewayRuns();
+      return null;
+    }
+
+    const firstHarness = await mountHarness();
+    await firstHarness.render(provider(first, createElement(FirstProbe)));
+    await waitFor(() => firstSnapshot?.data?.[0]?.runId === "warm-run");
+    await waitFor(() => persistence.rows(syncKeyFingerprint(gatewayKeys.runs({}))).length === 1);
+    await firstHarness.unmount();
+
+    let resolveColdLoad: (rows: unknown[]) => void = () => {};
+    const second = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") return new Promise((resolve) => {
+          resolveColdLoad = resolve;
+        });
+        return Promise.resolve([]);
+      }).transport,
+      persistence,
+      schemaVersion: "0016",
+    });
+
+    let secondSnapshot: ReturnType<typeof useGatewayRuns> | undefined;
+    function SecondProbe() {
+      secondSnapshot = useGatewayRuns();
+      return null;
+    }
+
+    const secondHarness = await mountHarness();
+    await secondHarness.render(provider(second, createElement(SecondProbe)));
+    await waitFor(() => secondSnapshot?.data?.[0]?.runId === "warm-run");
+    expect(secondSnapshot?.loading).toBe(false);
+
+    await act(async () => {
+      resolveColdLoad([{ runId: "live-run", status: "ok" }]);
+    });
+    await waitFor(() => secondSnapshot?.data?.[0]?.runId === "live-run");
+    await secondHarness.unmount();
+  });
+
+  test("schemaVersion bump clears persisted rows and forces a cold resync", async () => {
+    const persistence = createMemoryPersistenceAdapter();
+    const seed = createGatewayCollections({
+      client: makeTransport(() => Promise.resolve([{ runId: "old-run", status: "running" }])).transport,
+      persistence,
+      schemaVersion: "0016",
+    });
+
+    let seedSnapshot: ReturnType<typeof useGatewayRuns> | undefined;
+    function SeedProbe() {
+      seedSnapshot = useGatewayRuns();
+      return null;
+    }
+
+    const seedHarness = await mountHarness();
+    await seedHarness.render(provider(seed, createElement(SeedProbe)));
+    await waitFor(() => seedSnapshot?.data?.[0]?.runId === "old-run");
+    await seedHarness.unmount();
+
+    let calls = 0;
+    const bumped = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") {
+          calls += 1;
+          return Promise.resolve([{ runId: "new-run", status: "queued" }]);
+        }
+        return Promise.resolve([]);
+      }).transport,
+      persistence,
+      schemaVersion: "0017",
+    });
+
+    let bumpedSnapshot: ReturnType<typeof useGatewayRuns> | undefined;
+    function BumpedProbe() {
+      bumpedSnapshot = useGatewayRuns();
+      return null;
+    }
+
+    const bumpedHarness = await mountHarness();
+    await bumpedHarness.render(provider(bumped, createElement(BumpedProbe)));
+    expect(bumpedSnapshot?.data?.some((row) => row.runId === "old-run")).not.toBe(true);
+    await waitFor(() => bumpedSnapshot?.data?.[0]?.runId === "new-run");
+    expect(calls).toBeGreaterThanOrEqual(1);
+    await bumpedHarness.unmount();
+  });
+
+  test("large node output and diff reads are not persisted collections", async () => {
+    const savedIds: string[] = [];
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "getNodeOutput") return Promise.resolve({ status: "produced", output: "x".repeat(1024) });
+        if (method === "getNodeDiff") return Promise.resolve({ summary: { filesChanged: 1 }, files: [] });
+        if (method === "listRuns") return Promise.resolve([{ runId: "run-1", status: "ok" }]);
+        return Promise.resolve([]);
+      }).transport,
+      persistence: {
+        async loadRows() {
+          return [];
+        },
+        async saveRows(request: { collectionId: string }) {
+          savedIds.push(request.collectionId);
+        },
+      },
+      schemaVersion: "0016",
+    });
+
+    let snapshot: ReturnType<typeof useGatewayRuns> | undefined;
+    function Probe() {
+      snapshot = useGatewayRuns();
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => snapshot?.data?.[0]?.runId === "run-1");
+    await act(async () => {
+      await registry.rpc("getNodeOutput", { runId: "run-1", nodeId: "n1" });
+      await registry.rpc("getNodeDiff", { runId: "run-1", nodeId: "n1", iteration: 0 });
+    });
+    expect(savedIds.some((id) => id.includes("getNodeOutput") || id.includes("getNodeDiff"))).toBe(false);
+    await harness.unmount();
+  });
+
+  test("rehydrates from a real bun:sqlite file before the first live frame (warm start)", async () => {
+    const path = tmpSqlitePath();
+    const runsId = syncKeyFingerprint(gatewayKeys.runs({}));
+
+    // Session 1: cold-load from the gateway, persist to a real SQLite file.
+    const writerAdapter = await createBunSqlitePersistenceAdapter({ path });
+    const first = createGatewayCollections({
+      client: makeTransport((method) =>
+        method === "listRuns"
+          ? Promise.resolve([{ runId: "warm-run", status: "running" }])
+          : Promise.resolve([]),
+      ).transport,
+      persistence: writerAdapter,
+      schemaVersion: "0016",
+    });
+
+    let firstSnapshot: ReturnType<typeof useGatewayRuns> | undefined;
+    function FirstProbe() {
+      firstSnapshot = useGatewayRuns();
+      return null;
+    }
+    const firstHarness = await mountHarness();
+    await firstHarness.render(provider(first, createElement(FirstProbe)));
+    await waitFor(() => firstSnapshot?.data?.[0]?.runId === "warm-run");
+    await waitForAsync(async () => (await writerAdapter.loadRows(runsId, "0016")).length === 1);
+    await firstHarness.unmount();
+    writerAdapter.close?.();
+
+    // Session 2 (the reload): a fresh adapter on the same file, and a gateway
+    // whose live load never resolves — so the only way "warm-run" can appear is
+    // a real SQLite rehydration that completes before any live frame.
+    const readerAdapter = await createBunSqlitePersistenceAdapter({ path });
+    const second = createGatewayCollections({
+      client: makeTransport(() => new Promise<unknown[]>(() => {})).transport,
+      persistence: readerAdapter,
+      schemaVersion: "0016",
+    });
+
+    let secondSnapshot: ReturnType<typeof useGatewayRuns> | undefined;
+    function SecondProbe() {
+      secondSnapshot = useGatewayRuns();
+      return null;
+    }
+    const secondHarness = await mountHarness();
+    await secondHarness.render(provider(second, createElement(SecondProbe)));
+    await waitFor(() => secondSnapshot?.data?.[0]?.runId === "warm-run");
+    expect(secondSnapshot?.loading).toBe(false);
+    await secondHarness.unmount();
+    readerAdapter.close?.();
+  });
+
+  test("schemaVersion bump clears a real bun:sqlite copy and forces a cold resync", async () => {
+    const path = tmpSqlitePath();
+
+    const seedAdapter = await createBunSqlitePersistenceAdapter({ path });
+    const seed = createGatewayCollections({
+      client: makeTransport(() => Promise.resolve([{ runId: "old-run", status: "running" }])).transport,
+      persistence: seedAdapter,
+      schemaVersion: "0016",
+    });
+    let seedSnapshot: ReturnType<typeof useGatewayRuns> | undefined;
+    function SeedProbe() {
+      seedSnapshot = useGatewayRuns();
+      return null;
+    }
+    const seedHarness = await mountHarness();
+    await seedHarness.render(provider(seed, createElement(SeedProbe)));
+    await waitFor(() => seedSnapshot?.data?.[0]?.runId === "old-run");
+    await waitForAsync(async () =>
+      (await seedAdapter.loadRows(syncKeyFingerprint(gatewayKeys.runs({})), "0016")).length === 1,
+    );
+    await seedHarness.unmount();
+    seedAdapter.close?.();
+
+    // Reopen at a bumped schemaVersion: the stale "old-run" copy is wiped and a
+    // cold load runs.
+    const bumpedAdapter = await createBunSqlitePersistenceAdapter({ path });
+    const bumped = createGatewayCollections({
+      client: makeTransport((method) =>
+        method === "listRuns"
+          ? Promise.resolve([{ runId: "new-run", status: "queued" }])
+          : Promise.resolve([]),
+      ).transport,
+      persistence: bumpedAdapter,
+      schemaVersion: "0017",
+    });
+    let bumpedSnapshot: ReturnType<typeof useGatewayRuns> | undefined;
+    function BumpedProbe() {
+      bumpedSnapshot = useGatewayRuns();
+      return null;
+    }
+    const bumpedHarness = await mountHarness();
+    await bumpedHarness.render(provider(bumped, createElement(BumpedProbe)));
+    expect(bumpedSnapshot?.data?.some((row) => row.runId === "old-run")).not.toBe(true);
+    await waitFor(() => bumpedSnapshot?.data?.[0]?.runId === "new-run");
+    await bumpedHarness.unmount();
+    bumpedAdapter.close?.();
+  });
+
+  test("large node-output payloads are stripped from persisted run events", async () => {
+    const savedRows: Array<{ key: string; row: unknown }> = [];
+    const stream = makeTransport(() => Promise.reject(new Error("not used")));
+    const registry = createGatewayCollections({
+      client: stream.transport,
+      persistence: {
+        async loadRows() {
+          return [];
+        },
+        async saveRows(request: { rows: readonly { key: string; row: unknown }[] }) {
+          savedRows.push(...request.rows);
+        },
+      },
+      schemaVersion: "0016",
+    });
+
+    let snapshot: ReturnType<typeof useGatewayRunEvents> | undefined;
+    function Probe() {
+      snapshot = useGatewayRunEvents("blob-run", { maxEvents: 16 });
+      return null;
+    }
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => stream.opens.length === 1);
+
+    const huge = "x".repeat(200_000);
+    await act(async () => {
+      stream.push("streamRunEvents", "blob-run", {
+        key: gatewayKeys.runEvents("blob-run"),
+        seq: 1,
+        event: "node.output",
+        payload: { output: huge },
+      });
+    });
+
+    // The live ring keeps the full payload for the UI...
+    await waitFor(() => (snapshot?.events.at(-1)?.payload as { output?: string } | undefined)?.output === huge);
+    // ...but the durable copy carries only the truncation marker — the blob is
+    // never written to client persistence (design §5.4).
+    await waitFor(() => savedRows.length > 0);
+    const persistedSeq1 = savedRows.find((r) => (r.row as { seq?: number }).seq === 1);
+    expect(persistedSeq1).toBeDefined();
+    expect((persistedSeq1!.row as { payload?: unknown }).payload).toMatchObject({ $truncated: true });
+    expect(JSON.stringify(savedRows).includes(huge)).toBe(false);
+    await harness.unmount();
+  });
+});
+
+describe("source parity", () => {
+  test("the same run-list hook works over gateway and fake Electric SyncSources", async () => {
+    const gatewayRegistry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") return Promise.resolve([{ runId: "gateway-run", status: "running" }]);
+        return Promise.resolve([]);
+      }).transport,
+    });
+    const electricSource = createFakeElectricSyncSource();
+    electricSource.setRows(gatewayCollectionDefs.runs({}), [{ runId: "electric-run", status: "queued" }]);
+    const electricRegistry = createGatewayCollections({ source: electricSource });
+
+    const seen: string[] = [];
+    function Probe() {
+      const runs = useGatewayRuns();
+      const id = runs.data?.[0]?.runId;
+      if (id) seen.push(id);
+      return null;
+    }
+
+    const gatewayHarness = await mountHarness();
+    await gatewayHarness.render(provider(gatewayRegistry, createElement(Probe)));
+    await waitFor(() => seen.includes("gateway-run"));
+    await gatewayHarness.unmount();
+
+    const electricHarness = await mountHarness();
+    await electricHarness.render(provider(electricRegistry, createElement(Probe)));
+    await waitFor(() => seen.includes("electric-run"));
+    await electricHarness.unmount();
+  });
+
+  test("useGatewayRun renders the same over gateway and fake Electric", async () => {
+    const gateway = createGatewayCollections({
+      client: makeTransport((method) =>
+        method === "getRun" ? Promise.resolve({ runId: "run-1", status: "running" }) : Promise.resolve({}),
+      ).transport,
+    });
+    const electric = createFakeElectricSyncSource();
+    electric.setRows(gatewayCollectionDefs.run("run-1"), [{ runId: "run-1", status: "running" }]);
+    const electricRegistry = createGatewayCollections({ source: electric });
+
+    const ok = (r: ReturnType<typeof useGatewayRun>) => (r.data as { status?: string } | undefined)?.status === "running";
+    await assertOverSource(gateway, () => useGatewayRun("run-1"), ok);
+    await assertOverSource(electricRegistry, () => useGatewayRun("run-1"), ok);
+  });
+
+  test("useGatewayApprovals renders the same over gateway and fake Electric", async () => {
+    const approval = { runId: "run-1", nodeId: "approve", iteration: 0, requestedAtMs: 1 };
+    const gateway = createGatewayCollections({
+      client: makeTransport((method) =>
+        method === "listApprovals" ? Promise.resolve([approval]) : Promise.resolve([]),
+      ).transport,
+    });
+    const electric = createFakeElectricSyncSource();
+    electric.setRows(gatewayCollectionDefs.approvals({}), [approval]);
+    const electricRegistry = createGatewayCollections({ source: electric });
+
+    const ok = (a: ReturnType<typeof useGatewayApprovals>) => a.data?.[0]?.nodeId === "approve";
+    await assertOverSource(gateway, () => useGatewayApprovals(), ok);
+    await assertOverSource(electricRegistry, () => useGatewayApprovals(), ok);
+  });
+
+  test("useGatewayWorkflows renders the same over gateway and fake Electric", async () => {
+    const workflow = { key: "deploy", hasUi: true, uiPath: "/x" };
+    const gateway = createGatewayCollections({
+      client: makeTransport((method) =>
+        method === "listWorkflows" ? Promise.resolve([workflow]) : Promise.resolve([]),
+      ).transport,
+    });
+    const electric = createFakeElectricSyncSource();
+    electric.setRows(gatewayCollectionDefs.workflows({}), [workflow]);
+    const electricRegistry = createGatewayCollections({ source: electric });
+
+    const ok = (w: ReturnType<typeof useGatewayWorkflows>) => w.data?.[0]?.key === "deploy";
+    await assertOverSource(gateway, () => useGatewayWorkflows(), ok);
+    await assertOverSource(electricRegistry, () => useGatewayWorkflows(), ok);
+  });
+
+  test("useGatewayRunTree projects a tree the same over gateway and fake Electric", async () => {
+    const gateway = createGatewayCollections({
+      client: makeTransport((method) =>
+        method === "getDevToolsSnapshot"
+          ? Promise.resolve({
+              root: {
+                id: 0,
+                name: "Workflow",
+                type: "Workflow",
+                children: [{ id: 1, name: "a", type: "Task", task: { nodeId: "a" } }],
+              },
+              runState: { state: "running" },
+            })
+          : Promise.resolve({}),
+      ).transport,
+    });
+    const electric = createFakeElectricSyncSource();
+    electric.setRows(gatewayCollectionDefs.nodes("run-1"), [
+      { id: "0", name: "Workflow", kind: "Workflow", status: "running", childIds: ["a"] },
+      { id: "a", name: "a", kind: "Task", status: "ok", parentId: "0" },
+    ]);
+    const electricRegistry = createGatewayCollections({ source: electric });
+
+    const ok = (t: ReturnType<typeof useGatewayRunTree>) => t.root !== null && t.nodes.length > 0;
+    await assertOverSource(gateway, () => useGatewayRunTree("run-1"), ok);
+    await assertOverSource(electricRegistry, () => useGatewayRunTree("run-1"), ok);
+  });
 });
 
 describe("useGatewayRunEvents over the runEvents collection", () => {
@@ -499,6 +955,112 @@ describe("useGatewayRunEvents over the runEvents collection", () => {
     expect(snapshot?.events.map((f) => f.seq)).toEqual([4, 5, 6, 7, 8]);
     expect(snapshot?.streaming).toBe(true);
 
+    await harness.unmount();
+  });
+
+  test("large bursts keep the persisted run event ring bounded", async () => {
+    let maxPersistedRows = 0;
+    const stream = makeTransport(() => Promise.reject(new Error("not used")));
+    const registry = createGatewayCollections({
+      client: stream.transport,
+      persistence: {
+        async loadRows() {
+          return [];
+        },
+        async saveRows(request: { rows: readonly unknown[] }) {
+          maxPersistedRows = Math.max(maxPersistedRows, request.rows.length);
+        },
+      },
+      schemaVersion: "0016",
+    });
+
+    let snapshot: ReturnType<typeof useGatewayRunEvents> | undefined;
+    function Probe() {
+      snapshot = useGatewayRunEvents("burst-run", { maxEvents: 1024 });
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => stream.opens.length === 1);
+
+    await act(async () => {
+      for (let seq = 1; seq <= 1_500; seq += 1) {
+        stream.push("streamRunEvents", "burst-run", {
+          key: gatewayKeys.runEvents("burst-run"),
+          seq,
+          event: "run.event",
+          payload: { seq },
+        });
+      }
+    });
+    await waitFor(() => snapshot?.events.at(-1)?.seq === 1_500);
+    await waitFor(() => maxPersistedRows > 0);
+    expect(maxPersistedRows).toBeLessThanOrEqual(1_024);
+    expect(snapshot?.events.length).toBeLessThanOrEqual(1_024);
+    await harness.unmount();
+  });
+
+  test("a slow persistence consumer never blocks the producer and stays bounded", async () => {
+    let saveCalls = 0;
+    let maxRowsSeen = 0;
+    const gates: Array<() => void> = [];
+    const stream = makeTransport(() => Promise.reject(new Error("not used")));
+    const registry = createGatewayCollections({
+      client: stream.transport,
+      persistence: {
+        async loadRows() {
+          return [];
+        },
+        async saveRows(request: { rows: readonly unknown[] }) {
+          saveCalls += 1;
+          maxRowsSeen = Math.max(maxRowsSeen, request.rows.length);
+          // Hold the save open: the producer must drain regardless of how slow
+          // the persistence consumer is.
+          await new Promise<void>((resolve) => {
+            gates.push(resolve);
+          });
+        },
+      },
+      schemaVersion: "0016",
+    });
+
+    let snapshot: ReturnType<typeof useGatewayRunEvents> | undefined;
+    function Probe() {
+      snapshot = useGatewayRunEvents("slow-run", { maxEvents: 1024 });
+      return null;
+    }
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => stream.opens.length === 1);
+
+    await act(async () => {
+      for (let seq = 1; seq <= 1_500; seq += 1) {
+        stream.push("streamRunEvents", "slow-run", {
+          key: gatewayKeys.runEvents("slow-run"),
+          seq,
+          event: "run.event",
+          payload: { seq },
+        });
+      }
+    });
+
+    // All 1500 frames landed in the live ring while the very first persist save
+    // is still held open — the slow consumer did not stall the stream. Writes
+    // are coalesced, so the consumer was invoked far fewer times than frames.
+    await waitFor(() => snapshot?.events.at(-1)?.seq === 1_500);
+    await waitFor(() => saveCalls >= 1);
+    expect(saveCalls).toBeLessThan(50);
+    expect(snapshot?.events.length).toBeLessThanOrEqual(1_024);
+
+    // Drain the held saves; every persisted snapshot stayed within the ring.
+    for (let i = 0; i < 10; i += 1) {
+      await act(async () => {
+        for (const release of gates.splice(0)) release();
+      });
+      await settle(2);
+    }
+    expect(maxRowsSeen).toBeLessThanOrEqual(1_024);
     await harness.unmount();
   });
 });

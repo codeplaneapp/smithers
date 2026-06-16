@@ -4,6 +4,7 @@ import { syncBackoffDelay } from "./SyncBackoff.ts";
 import type { SyncKey } from "./SyncKey.ts";
 import { syncKeyFingerprint } from "./SyncKey.ts";
 import type { SyncStreamFrame, SyncTransport } from "./SyncTransport.ts";
+import { emitSyncTelemetry, syncLagMs } from "./syncTelemetry.ts";
 
 type GatewayCollectionWrite<TRow extends object, TKey extends string | number> =
   | { type: "insert" | "update" | "upsert"; value: TRow }
@@ -18,7 +19,7 @@ type GatewayCollectionSyncApi<TRow extends object, TKey extends string | number>
   signal: AbortSignal;
 };
 
-type GatewayCollectionStreamConfig<TRow extends object, TKey extends string | number> = {
+export type GatewayCollectionStreamConfig<TRow extends object, TKey extends string | number> = {
   scope: string;
   params: unknown;
   afterSeq?: number;
@@ -50,6 +51,7 @@ export type GatewayCollectionConfig<TRow extends object, TKey extends string | n
   compare?: (left: TRow, right: TRow) => number;
   onAuthError?: (error: Error) => void;
   onError?: (error: Error) => void;
+  onReady?: () => void;
   onInsert?: CollectionConfig<TRow, TKey>["onInsert"];
   onUpdate?: CollectionConfig<TRow, TKey>["onUpdate"];
   onDelete?: CollectionConfig<TRow, TKey>["onDelete"];
@@ -123,6 +125,24 @@ function keySort(left: string | number, right: string | number): number {
   return String(left).localeCompare(String(right));
 }
 
+/**
+ * Largest numeric key already in the collection, or undefined when there are
+ * none. After a persisted seq-keyed collection (runEvents) rehydrates, this is
+ * the resume cursor: the stream must reopen with `afterSeq = max(cached seq)`
+ * so the gateway replays frames produced between the cached max and the new
+ * subscription instead of dropping them. String-keyed collections return
+ * undefined and fall back to the gateway's default replay window.
+ */
+function maxNumericKey<TRow extends object, TKey extends string | number>(
+  collection: Collection<TRow, TKey>,
+): number | undefined {
+  let max: number | undefined;
+  for (const key of collection.keys()) {
+    if (typeof key === "number" && (max === undefined || key > max)) max = key;
+  }
+  return max;
+}
+
 export function createGatewayCollection<TRow extends object, TKey extends string | number = string>(
   config: GatewayCollectionConfig<TRow, TKey>,
 ): CollectionConfig<TRow, TKey> {
@@ -150,6 +170,13 @@ export function createGatewayCollection<TRow extends object, TKey extends string
         const handleError = (cause: unknown) => {
           if (signal.aborted) return;
           const error = asError(cause);
+          emitSyncTelemetry({
+            type: "sync.error",
+            collectionId: id,
+            key: config.key,
+            scope: stream?.scope,
+            error: error.message,
+          });
           if (isAuthError(error)) {
             config.onAuthError?.(error);
           }
@@ -276,7 +303,9 @@ export function createGatewayCollection<TRow extends object, TKey extends string
           if (!config.client.stream) {
             throw new Error("Gateway collection stream requested, but client has no stream implementation.");
           }
-          let afterSeq = stream.afterSeq;
+          // Resume from the cached high-water mark so frames produced between a
+          // persisted reload and this subscription are replayed, not lost.
+          let afterSeq = stream.afterSeq ?? maxNumericKey(collection);
           let attempt = 0;
           while (!signal.aborted) {
             let threw = false;
@@ -288,11 +317,31 @@ export function createGatewayCollection<TRow extends object, TKey extends string
                 if (typeof frame.seq === "number") {
                   afterSeq = frame.seq;
                 }
+                emitSyncTelemetry({
+                  type: "sync.frame",
+                  collectionId: id,
+                  key: config.key,
+                  scope: stream.scope,
+                  seq: frame.seq,
+                  lagMs: syncLagMs(frame.payload),
+                });
                 enqueueFrame(frame);
               }
             } catch (cause) {
               threw = true;
               const error = asError(cause);
+              if (
+                (error as { code?: unknown }).code === "SeqOutOfRange" ||
+                /SeqOutOfRange|GapResync|replay gap/i.test(error.message)
+              ) {
+                emitSyncTelemetry({
+                  type: "sync.gap_resync",
+                  collectionId: id,
+                  key: config.key,
+                  scope: stream.scope,
+                  error: error.message,
+                });
+              }
               if (isAuthError(error)) {
                 config.onAuthError?.(error);
                 return;
@@ -312,7 +361,15 @@ export function createGatewayCollection<TRow extends object, TKey extends string
         const loadInitial = async () => {
           try {
             if (config.method) {
-              replaceRows(await refetchRows(), stream?.maxRows);
+              const rows = await refetchRows();
+              replaceRows(rows, stream?.maxRows);
+              emitSyncTelemetry({
+                type: "sync.initial_load",
+                collectionId: id,
+                key: config.key,
+                scope: stream?.scope,
+                count: rows.length,
+              });
             }
             initialComplete = true;
             for (const frame of buffered.splice(0)) {
@@ -321,6 +378,7 @@ export function createGatewayCollection<TRow extends object, TKey extends string
                 .catch(handleError);
             }
             await applyChain;
+            config.onReady?.();
           } catch (cause) {
             initialComplete = true;
             buffered.length = 0;

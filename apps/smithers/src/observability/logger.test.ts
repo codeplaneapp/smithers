@@ -8,6 +8,7 @@ import {
   redactHeaders,
   redactUrl,
   setEmitter,
+  withCorrelationContext,
 } from "./logger";
 
 let captured: string[] = [];
@@ -119,5 +120,15 @@ describe("emit / level helpers", () => {
       emit({ level: "info", message: "x", fields: { circular } }),
     ).not.toThrow();
     expect(loggerDropsTotal.get({ reason: "serialize" })).toBe(1);
+  });
+
+  test("withCorrelationContext is visible to imperative log calls", () => {
+    withCorrelationContext({ runId: "run-1", nodeId: "node-1" }, () => {
+      logInfo("correlated", { action: "sync" }, "test");
+    });
+    const parsed = JSON.parse(captured[0]);
+    expect(parsed.runId).toBe("run-1");
+    expect(parsed.nodeId).toBe("node-1");
+    expect(parsed.action).toBe("sync");
   });
 });

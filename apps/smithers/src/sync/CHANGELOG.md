@@ -1,5 +1,68 @@
 # apps/smithers sync glue changelog
 
+## 0.4.0 — client SQLite persistence + pluggable SyncSource (2026-06-16)
+
+Milestone 2 of `.smithers/specs/postgres-tanstack-sync.md` (phase 12.2). Warm
+reload + offline reads, with no backend change yet.
+
+### Added
+
+- **Persistence wrapper.** `persistedCollectionOptions({ persistence,
+  schemaVersion, maxRows, sanitizeRow })` (in `packages/gateway-react`) hydrates
+  a collection from a durable cache before the first live frame and persists
+  coalesced snapshots on commit. Wired into `createGatewayCollections` for every
+  `persisted` collection def.
+- **Platform persistence adapters** (subpath-only, never on the browser barrel):
+  - `createBunSqlitePersistenceAdapter` — the real SQLite adapter (native
+    Electrobun build); proven end-to-end in `tests/sync/*`.
+  - `createOpfsJsonPersistenceAdapter` — the web durable cache (OPFS JSON).
+    Honestly named: real SQLite-WASM/OPFS on the web is **deferred** (TanStack
+    DB 0.6.8 ships no SQLite persistence contract; the OPFS SQLite VFS needs a
+    cross-origin-isolated worker harness, out of scope here).
+- **`schemaVersion` plumbing.** `gatewayClientSchemaVersion` is a local constant
+  (the client's bundled schema head); bumping it clears the local copy and forces
+  a cold re-sync. No `schema_signature` network RPC (that arrives in phase 3), so
+  rehydration never blocks on a slow/offline gateway.
+- **Pluggable `SyncSource` seam.** `selectAppSyncSource` chooses the source at
+  boot from `backendStore` (gateway today; Electric in phase 7). Wired through a
+  `createSource` factory so the chosen source gets the registry's per-collection
+  status hooks.
+- **Sync telemetry pipeline.** `bindSyncTelemetry()` binds the gateway-client
+  telemetry seam to the structured logger (OTLP-shaped span lines, `otelSpan:
+  true`) and `browserRegistry` (frame/error/gap/initial-load counters + a
+  frame-lag histogram). Frames are metric-only; load/resync/error emit spans.
+
+### Fixed
+
+- **Error surfacing in the real app.** A pre-built `source` bypassed the
+  registry's `onCollectionError`/`onCollectionReady` hooks, so collection load
+  errors surfaced as silent success in the app (only the `client`-path test
+  exercised it). The `createSource` factory now threads the status hooks through,
+  closing the PR #286 edge on the boot path too.
+- **One persistence adapter, shared.** The registry memoizes the resolved adapter
+  so all collections share one instance; constructing a fresh adapter per
+  collection let concurrent collections clobber each other's durable rows.
+- **Large blobs stay out of persistence.** The `runEvents` collection sanitizes
+  blob-bearing payloads (node outputs, transcripts, traces) on the way into the
+  durable cache (`sanitizeRunEventRowForPersistence`); the live ring keeps full
+  frames, the durable copy keeps a truncation marker. Outputs/diffs remain
+  RPC-on-demand by id.
+- **Event streams resume from the cached seq.** After a persisted `runEvents`
+  collection rehydrates, the stream reopens with `afterSeq = max(cached seq)` so
+  frames produced during the offline gap are replayed, not dropped.
+- **Browser bundle.** The platform adapters are no longer re-exported from the
+  `@smithers-orchestrator/gateway-react` barrel: re-exporting the bun:sqlite
+  adapter pulled `import("bun:sqlite")` into every browser build and broke the
+  custom workflow UI bundle (`Bun.build({ target: "browser" })` 500).
+
+### Tests
+
+- Real `bun:sqlite` round-trip (`tests/sync/bunSqlitePersistenceAdapter.test.ts`)
+  and a through-the-stack warm-start + schemaVersion-clear over a real SQLite
+  file. Run-event blob exclusion. Source parity over gateway **and** a fake
+  Electric source for `useGatewayRuns/Run/Approvals/Workflows/RunTree`.
+  Slow-consumer backpressure (producer never blocks; persists stay bounded).
+
 ## 0.3.0 — TanStack DB migration (2026-06-14)
 
 ### Changed

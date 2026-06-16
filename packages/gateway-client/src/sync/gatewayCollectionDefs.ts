@@ -6,8 +6,10 @@ import type { GatewayRunNode } from "./GatewayRunNode.ts";
 import type { GatewayRunRow } from "./GatewayRunRow.ts";
 import type { GatewayRunSummaryRow } from "./GatewayRunSummaryRow.ts";
 import type { GatewayWorkflowRow } from "./GatewayWorkflowRow.ts";
+import type { CollectionDef } from "./CollectionDef.ts";
 import { flattenGatewayRunNode } from "./flattenGatewayRunNode.ts";
 import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "./snapshotToGatewayRunNode.ts";
+import { sanitizeRunEventRowForPersistence } from "./sanitizeRunEventRowForPersistence.ts";
 import { gatewayKeys } from "./gatewayKeys.ts";
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -87,68 +89,109 @@ function runRowsFromFrame(runId: string) {
 }
 
 export const gatewayCollectionDefs = {
-  workflows: (params: ListWorkflowsRequest = {}) => ({
+  workflows: (params: ListWorkflowsRequest = {}): CollectionDef<GatewayWorkflowRow, string> => ({
     key: gatewayKeys.workflows(params.filter),
-    method: "listWorkflows",
-    params,
+    persisted: true,
     getKey: (row: GatewayWorkflowRow) => row.key,
-    rows: arrayRows<GatewayWorkflowRow>,
+    gateway: {
+      method: "listWorkflows",
+      params,
+      rows: arrayRows<GatewayWorkflowRow>,
+    },
   }),
-  runs: (params: ListRunsRequest = {}) => ({
+  runs: (params: ListRunsRequest = {}): CollectionDef<GatewayRunSummaryRow, string> => ({
     key: gatewayKeys.runs(params),
-    method: "listRuns",
-    params,
+    persisted: true,
     getKey: (row: GatewayRunSummaryRow) => row.runId,
-    rows: arrayRows<GatewayRunSummaryRow>,
+    gateway: {
+      method: "listRuns",
+      params,
+      rows: arrayRows<GatewayRunSummaryRow>,
+    },
+    electric: {
+      shape: { table: "_smithers_runs" },
+    },
   }),
-  run: (runId: string) => ({
+  run: (runId: string): CollectionDef<GatewayRunRow, string> => ({
     key: gatewayKeys.run(runId),
-    method: "getRun",
-    params: { runId },
+    persisted: true,
     getKey: (row: GatewayRunRow) => row.runId,
-    rows: singleRow<GatewayRunRow>,
-    stream: {
-      scope: "streamRunEvents",
+    gateway: {
+      method: "getRun",
       params: { runId },
-      frameToRows: runRowsFromFrame(runId),
+      rows: singleRow<GatewayRunRow>,
+      stream: {
+        scope: "streamRunEvents",
+        params: { runId },
+        frameToRows: runRowsFromFrame(runId),
+      },
+    },
+    electric: {
+      shape: { table: "_smithers_runs", where: `run_id = '${runId.replaceAll("'", "''")}'` },
     },
   }),
-  nodes: (runId: string, rows: (payload: unknown) => Iterable<GatewayRunNode> = snapshotRows) => ({
+  nodes: (
+    runId: string,
+    rows: (payload: unknown) => Iterable<GatewayRunNode> = snapshotRows,
+  ): CollectionDef<GatewayRunNode, string> => ({
     key: gatewayKeys.devtoolsSnapshot(runId),
-    method: "getDevToolsSnapshot",
-    params: { runId },
+    persisted: true,
     getKey: (row: GatewayRunNode) => row.id,
-    rows,
-    // DevTools frames carry deltas, not full trees, so the honest mapping into a
-    // node-keyed collection is to re-pull `getDevToolsSnapshot` and reconcile.
-    // `refetchMode: "replace"` diffs against the live collection (via
-    // `createGatewayCollection`'s `replaceRows`) and writes only the rows that
-    // actually changed, so reactive consumers see fine-grained updates rather
-    // than a full-tree churn. Consumers that maintain their own tree can apply
-    // frames incrementally with the exported `reconcileSnapshotNodes` instead.
-    stream: {
-      scope: "streamDevTools",
+    gateway: {
+      method: "getDevToolsSnapshot",
       params: { runId },
-      refetchOnFrame: true,
-      refetchMode: "replace" as const,
-      reconnectOnGracefulEnd: true,
+      rows,
+      // DevTools frames carry deltas, not full trees, so the honest mapping into a
+      // node-keyed collection is to re-pull `getDevToolsSnapshot` and reconcile.
+      // `refetchMode: "replace"` diffs against the live collection (via
+      // `createGatewayCollection`'s `replaceRows`) and writes only the rows that
+      // actually changed, so reactive consumers see fine-grained updates rather
+      // than a full-tree churn. Consumers that maintain their own tree can apply
+      // frames incrementally with the exported `reconcileSnapshotNodes` instead.
+      stream: {
+        scope: "streamDevTools",
+        params: { runId },
+        refetchOnFrame: true,
+        refetchMode: "replace" as const,
+        reconnectOnGracefulEnd: true,
+      },
+    },
+    electric: {
+      shape: { table: "_smithers_nodes", where: `run_id = '${runId.replaceAll("'", "''")}'` },
     },
   }),
-  approvals: (params: ListApprovalsRequest = {}) => ({
+  approvals: (params: ListApprovalsRequest = {}): CollectionDef<GatewayApprovalRow, string> => ({
     key: gatewayKeys.approvals(params),
-    method: "listApprovals",
-    params,
+    persisted: true,
     getKey: (row: GatewayApprovalRow) => `${row.runId}:${row.nodeId}:${row.iteration}`,
-    rows: arrayRows<GatewayApprovalRow>,
+    gateway: {
+      method: "listApprovals",
+      params,
+      rows: arrayRows<GatewayApprovalRow>,
+    },
+    electric: {
+      shape: { table: "_smithers_approvals" },
+    },
   }),
-  runEvents: (runId: string, maxRows = 1_024) => ({
+  runEvents: (runId: string, maxRows = 1_024): CollectionDef<GatewayRunEventRow, number> => ({
     key: gatewayKeys.runEvents(runId),
+    persisted: true,
+    maxRows,
+    // The live ring keeps full frames; the durable copy drops blob-bearing
+    // payloads (node outputs, transcripts, traces) so large rows never land in
+    // client persistence — they stay RPC-on-demand by id (design §5.4).
+    sanitizeForPersistence: sanitizeRunEventRowForPersistence,
     getKey: (row: GatewayRunEventRow) => row.seq,
-    stream: {
-      scope: "streamRunEvents",
-      params: { runId },
-      frameToRows: eventRows,
-      maxRows,
+    gateway: {
+      stream: {
+        scope: "streamRunEvents",
+        params: { runId },
+        frameToRows: eventRows,
+        maxRows,
+      },
+    },
+    electric: {
+      shape: { table: "_smithers_events", where: `run_id = '${runId.replaceAll("'", "''")}'` },
     },
   }),
 } as const;

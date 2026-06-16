@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   SmithersGatewayClient,
   createSmithersGatewayTransport,
+  createGatewaySyncSource,
   type SmithersGatewayClientOptions,
 } from "@smithers-orchestrator/gateway-client";
 import { SmithersGatewayProvider } from "./SmithersGatewayProvider.ts";
@@ -22,7 +23,11 @@ export function createGatewayReactRoot(
   // hooks (actions / node output / extensions) and the `SyncProvider` registry
   // for the live collection hooks (runs / run / approvals / run tree / events).
   // A custom workflow UI gets the full hook surface from one call.
-  const collections = createGatewayCollections({ client: createSmithersGatewayTransport(client) });
+  const transport = createSmithersGatewayTransport(client);
+  const collections = createGatewayCollections({
+    source: createGatewaySyncSource({ transport }),
+    client: transport,
+  });
   createRoot(root).render(
     createElement(
       SmithersGatewayProvider,

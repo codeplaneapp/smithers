@@ -226,6 +226,101 @@ describe("createGatewayCollection", () => {
     expect(Array.from(collection.keys())).toEqual([3, 4, 5]);
   });
 
+  test("keeps a slow consumer bounded during a large burst", async () => {
+    const stream = controllableStreamTransport(() => Promise.resolve([]));
+    const gates: Array<() => void> = [];
+    const collection = createCollection<GatewayRunEventRow, number>(
+      createGatewayCollection({
+        key: gatewayKeys.runEvents("slow-consumer"),
+        client: stream.transport,
+        getKey: (row) => row.seq,
+        stream: {
+          scope: "streamRunEvents",
+          params: { runId: "slow-consumer" },
+          maxRows: 5,
+          frameToRows: async (frame) => {
+            await new Promise<void>((resolve) => gates.push(resolve));
+            return typeof frame.seq === "number"
+              ? [{
+                key: frame.key as GatewayRunEventRow["key"],
+                seq: frame.seq,
+                event: frame.event,
+                payload: frame.payload,
+              }]
+              : [];
+          },
+        },
+      }),
+    );
+
+    await collection.preload();
+    for (let seq = 1; seq <= 25; seq += 1) {
+      stream.push({
+        key: gatewayKeys.runEvents("slow-consumer"),
+        seq,
+        event: "run.event",
+        payload: { seq },
+      });
+    }
+
+    await waitFor(() => gates.length > 0);
+    for (let i = 0; i < 200 && (gates.length > 0 || !collection.has(25)); i += 1) {
+      gates.splice(0).forEach((release) => release());
+      await Promise.resolve();
+    }
+    expect(collection.has(25)).toBe(true);
+
+    expect(collection.size).toBeLessThanOrEqual(5);
+    expect(Array.from(collection.keys())).toEqual([21, 22, 23, 24, 25]);
+  });
+
+  test("emits sync telemetry events, spans, lag, and replay-gap counts", async () => {
+    const events: unknown[] = [];
+    const spans: unknown[] = [];
+    (globalThis as { __smithersSyncTelemetry?: unknown }).__smithersSyncTelemetry = {
+      event: (event: unknown) => events.push(event),
+      span: (span: unknown) => spans.push(span),
+    };
+    const stream = controllableStreamTransport(() => Promise.resolve([]));
+    const collection = createCollection<GatewayRunEventRow, number>(
+      createGatewayCollection({
+        key: gatewayKeys.runEvents("telemetry"),
+        client: stream.transport,
+        getKey: (row) => row.seq,
+        stream: {
+          scope: "streamRunEvents",
+          params: { runId: "telemetry" },
+          maxRows: 10,
+          frameToRows: (frame) => typeof frame.seq === "number"
+            ? [{
+              key: frame.key as GatewayRunEventRow["key"],
+              seq: frame.seq,
+              event: frame.event,
+              payload: frame.payload,
+            }]
+            : [],
+        },
+      }),
+    );
+
+    await collection.preload();
+    stream.push({
+      key: gatewayKeys.runEvents("telemetry"),
+      seq: 1,
+      event: "run.event",
+      payload: { timestampMs: Date.now() - 25 },
+    });
+    await waitFor(() => collection.has(1));
+    stream.fail(Object.assign(new Error("SeqOutOfRange: replay gap"), { code: "SeqOutOfRange" }));
+    await waitFor(() => events.some((event) => (event as { type?: string }).type === "sync.gap_resync"));
+
+    expect(events.some((event) => (event as { type?: string }).type === "sync.frame")).toBe(true);
+    expect(events.some((event) => typeof (event as { lagMs?: unknown }).lagMs === "number")).toBe(true);
+    expect(spans.some((span) => (span as { name?: string }).name === "smithers.sync.frame")).toBe(true);
+    delete (globalThis as { __smithersSyncTelemetry?: unknown }).__smithersSyncTelemetry;
+    await collection.cleanup();
+  });
+
   test("routes auth failures to onAuthError without creating blob collections", async () => {
     let authMessage = "";
     const client: SyncTransport = {

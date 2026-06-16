@@ -97,6 +97,13 @@ if (gatewayTarget) {
 
 export default defineConfig({
   plugins: [react()],
+  // No cross-origin-isolation headers (COOP/COEP). The Phase 2 web persistence
+  // adapter is async OPFS-JSON (`opfsJsonPersistenceAdapter`), which needs no
+  // SharedArrayBuffer and so no cross-origin isolation. Real SQLite-WASM/OPFS
+  // (which does need COI) is deferred (design §5.4, risk §11.2); adding
+  // `require-corp` here prematurely blocks the same-origin custom-workflow-UI
+  // iframe (`/workflows/<key>`) with ERR_BLOCKED_BY_RESPONSE. Reintroduce these
+  // headers alongside CORP on the gateway-served bundle when SQLite-WASM lands.
   server: {
     host: "127.0.0.1",
     port: 5175,

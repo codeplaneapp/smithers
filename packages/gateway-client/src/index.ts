@@ -30,11 +30,28 @@ export type {
 // Declarative sync SDK: TanStack DB collection options backed by the gateway
 // RPC + WebSocket transport. React bindings live in
 // `@smithers-orchestrator/gateway-react` so the core stays framework-free.
-export { createGatewayCollection, type GatewayCollectionConfig } from "./sync/createGatewayCollection.ts";
+export {
+  createGatewayCollection,
+  type GatewayCollectionConfig,
+  type GatewayCollectionStreamConfig,
+} from "./sync/createGatewayCollection.ts";
+export { createConnectionObserver } from "./sync/createConnectionObserver.ts";
+export { createGatewaySyncSource } from "./sync/createGatewaySyncSource.ts";
+export type { CollectionDef } from "./sync/CollectionDef.ts";
+export type { ConnectionObserver } from "./sync/ConnectionObserver.ts";
+export type { GatewayConnectionState, GatewayConnectionStatus } from "./sync/GatewayConnectionState.ts";
+export type { SyncSource } from "./sync/SyncSource.ts";
+export { emitSyncTelemetry, syncLagMs } from "./sync/syncTelemetry.ts";
+export type { SyncTelemetryEvent } from "./sync/syncTelemetry.ts";
 export { flattenGatewayRunNode } from "./sync/flattenGatewayRunNode.ts";
 export { snapshotToGatewayRunNode } from "./sync/snapshotToGatewayRunNode.ts";
 export type { DevToolsSnapshot, DevToolsSnapshotNode } from "./sync/snapshotToGatewayRunNode.ts";
 export { gatewayCollectionDefs } from "./sync/gatewayCollectionDefs.ts";
+export {
+  sanitizeRunEventRowForPersistence,
+  MAX_PERSISTED_EVENT_PAYLOAD_CHARS,
+  type TruncatedEventPayload,
+} from "./sync/sanitizeRunEventRowForPersistence.ts";
 export { reconcileSnapshotNodes } from "./sync/reconcileSnapshotNodes.ts";
 export type { GatewayApprovalRow } from "./sync/GatewayApprovalRow.ts";
 export type { GatewayRunEventRow } from "./sync/GatewayRunEventRow.ts";
