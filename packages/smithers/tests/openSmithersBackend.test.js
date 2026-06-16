@@ -109,7 +109,31 @@ describe("openSmithersBackend", () => {
     });
   });
 
-  test("a stale .smithers/migrated.json marker does not bypass the fail-loud guard", async () => {
+  test("explicit sqlite suppresses the migration-required guard", async () => {
+    const cwd = makeWorkspace("smithers-open-sqlite-legacy");
+    const dbPath = join(cwd, "smithers.db");
+    const sqlite = new Database(dbPath);
+    sqlite.exec(`
+      CREATE TABLE _smithers_runs (
+        run_id TEXT PRIMARY KEY,
+        workflow_name TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL
+      );
+      INSERT INTO _smithers_runs (run_id, workflow_name, status, created_at_ms)
+        VALUES ('legacy-run', 'wf', 'finished', 1);
+    `);
+    sqlite.close();
+
+    const api = await openSmithersBackend({}, { cwd, backend: "sqlite", env: {} });
+    try {
+      expect(api.db.$client).toBeDefined();
+    } finally {
+      await closeApi(api);
+    }
+  });
+
+  test("a present .smithers/migrated.json marker suppresses the migration-required guard", async () => {
     const cwd = makeWorkspace("smithers-open-stale-marker");
     const dbPath = join(cwd, "smithers.db");
     const sqlite = new Database(dbPath);
@@ -124,14 +148,13 @@ describe("openSmithersBackend", () => {
         VALUES ('legacy-run', 'wf', 'finished', 1);
     `);
     sqlite.close();
-    // An accidental/stale marker must NOT be trusted while `smithers migrate`
-    // (the data copy) does not exist: opening an empty target would silently
-    // hide this store's runs.
     writeFileSync(join(cwd, ".smithers", "migrated.json"), JSON.stringify({ migratedAt: 1 }));
 
-    await expect(openSmithersBackend({}, { cwd, env: {} })).rejects.toMatchObject({
-      code: "SMITHERS_MIGRATION_REQUIRED",
-      details: { runCount: 1, resolvedBackend: "pglite" },
-    });
+    const api = await openSmithersBackend({}, { cwd, env: {} });
+    try {
+      expect(api.db.dialect).toBe("postgres");
+    } finally {
+      await closeApi(api);
+    }
   });
 });

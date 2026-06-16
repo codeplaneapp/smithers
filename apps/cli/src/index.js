@@ -1329,6 +1329,11 @@ const gatewayOptions = z.object({
     port: z.number().int().min(1).default(7331).describe("Gateway port"),
     backend: z.enum(["sqlite", "pglite", "postgres"]).optional().describe("Workspace storage backend"),
 });
+const migrateOptions = z.object({
+    to: z.enum(["pglite", "postgres"]).default("pglite").describe("Target backend"),
+    url: z.string().optional().describe("Postgres connection URL when --to postgres"),
+    keepSqlite: z.boolean().default(true).describe("Keep the legacy SQLite database after a successful copy"),
+});
 const monitorArgs = z.object({
     runId: z.string().optional().describe("Run ID to monitor (default: the most recent active run)"),
 });
@@ -2983,6 +2988,51 @@ const cli = Cli.create({
             return c.error(opts);
         };
         return executeUpCommand(c, c.args.workflow, c.options, fail);
+    },
+})
+    // =========================================================================
+    // smithers migrate
+    // =========================================================================
+    .command("migrate", {
+    description: "Copy the legacy bun:sqlite smithers.db into PGlite or Postgres and write the migrated.json marker.",
+    options: migrateOptions,
+    async run(c) {
+        const fail = (opts) => {
+            commandExitOverride = opts.exitCode ?? 1;
+            return c.error(opts);
+        };
+        try {
+            const { migrateSmithersStore } = await import("smithers-orchestrator/migrateSmithersStore");
+            const result = await migrateSmithersStore({
+                cwd: process.cwd(),
+                to: c.options.to,
+                url: c.options.url,
+                keepSqlite: c.options.keepSqlite,
+                onProgress(event) {
+                    if (event.type === "table-copied") {
+                        process.stderr.write(`[smithers] migrated ${event.table}: ${event.targetRows}/${event.sourceRows} rows\n`);
+                    }
+                    else if (event.type === "done") {
+                        process.stderr.write(`[smithers] migration completed in ${event.durationMs}ms\n`);
+                    }
+                },
+            });
+            return c.ok(result, {
+                cta: {
+                    description: "Next steps:",
+                    commands: [
+                        { command: "smithers gateway", description: "Start the Gateway on the migrated backend" },
+                        { command: "smithers <cmd> --backend sqlite", description: "Temporarily use the old SQLite store" },
+                    ],
+                },
+            });
+        }
+        catch (err) {
+            if (err instanceof SmithersError) {
+                return fail({ code: err.code, message: err.message, exitCode: 4 });
+            }
+            return fail({ code: "MIGRATION_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+        }
     },
 })
     // =========================================================================

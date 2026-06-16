@@ -1618,7 +1618,7 @@ If no Gateway is reachable on the default local port, `bunx smithers-orchestrato
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[72]:
+commands[73]:
   - name: init
     purpose: Install the workflow pack into .smithers/ (local) or ~/.smithers/ (--global)
     flags[6]{name,short,type,default,desc}:
@@ -1671,6 +1671,12 @@ commands[72]:
       auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
+  - name: migrate
+    purpose: Copy the legacy bun:sqlite smithers.db into PGlite or Postgres and write the migrated.json marker
+    flags[3]{name,short,type,default,desc}:
+      to,,enum,pglite,Target backend (pglite|postgres)
+      url,,string,,Postgres connection URL when --to postgres
+      keep-sqlite,,boolean,true,Keep the legacy SQLite database after a successful copy
   - name: eval
     purpose: Run a workflow over JSON/JSONL cases and write a regression report
     args[1]{name,type,required,desc}:

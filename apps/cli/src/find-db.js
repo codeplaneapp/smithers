@@ -4,6 +4,7 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { findSmithersAnchorDir } from "smithers-orchestrator/findSmithersAnchorDir";
+import { resolveSmithersBackendChoice } from "smithers-orchestrator/resolveSmithersBackendChoice";
 /** @typedef {import("./FindDbWaitOptions.ts").FindDbWaitOptions} FindDbWaitOptions */
 
 /**
@@ -124,6 +125,21 @@ export async function openSmithersDb(dbPath) {
     };
 }
 /**
+ * Enforce the fail-loud migration gate before any CLI read command opens the
+ * legacy bun:sqlite store. Resolution and the SMITHERS_MIGRATION_REQUIRED check
+ * are shared with the async backend factory (`openSmithersBackend`) so the CLI
+ * read path and the gateway/server boot path honor the identical contract: a
+ * legacy SQLite store holding run data is never silently read when the resolved
+ * backend is pglite/postgres and no `migrated.json` marker exists. `--backend
+ * sqlite` (SMITHERS_BACKEND / smithers.config.ts) pins the resolver back at the
+ * SQLite store and suppresses the error.
+ *
+ * @param {string} [from]
+ */
+async function assertSmithersReadBackend(from) {
+    await resolveSmithersBackendChoice({ cwd: from ?? process.cwd() });
+}
+/**
  * Find and open the nearest smithers.db.
  *
  * @param {string} [from]
@@ -131,6 +147,7 @@ export async function openSmithersDb(dbPath) {
  * @returns {Promise<{ adapter: SmithersDb; dbPath: string; cleanup: () => void }>}
  */
 export async function findAndOpenDb(from, opts) {
+    await assertSmithersReadBackend(from);
     const dbPath = await waitForSmithersDb(from, opts);
     const { adapter, cleanup } = await openSmithersDb(dbPath);
     return { adapter, dbPath, cleanup };
