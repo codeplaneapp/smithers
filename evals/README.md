@@ -95,3 +95,33 @@ bunx smithers-orchestrator up evals/new-eval.tsx \
 
 It distills the friction into a task + verify + a `cases.jsonl` line, then prints the
 `smithers eval` command. See `PROGRESS.md` for the wave plan and current coverage.
+
+## Verify kinds (the hard gate)
+
+Each case's `input.verify.kind` selects how `passed` is decided. Deterministic kinds
+spend **no model**:
+
+| kind | how it gates | used by |
+| --- | --- | --- |
+| `equals` | normalized answer == canonical (JSX brackets stripped, word-boundary) | "which CLI verb / component" knowledge |
+| `contains` | artifact contains all `must` tokens, none of `mustNot` | short keyword knowledge |
+| `graph` | candidate's workflow renders via `smithers graph` + uses required `<Component>` tags | authoring workflows |
+| `query` | runs the candidate's **SQL** against a seeded run-history fixture, checks the scalar | `db-query` |
+| `build` | transpiles the candidate's UI bundle (Bun) + checks it uses the gateway-react API | `ui-authoring` |
+| `judge` | a SOTA judge grades correctness against a rubric (the only model-spending gate) | concepts, non-workflow code |
+
+**UI evals** additionally attach the `ui-quality` llmJudge scorer, which scores a
+candidate's `gateway-react` bundle 0-1 on hook usage, loading/empty/error states, UX, and
+accessibility — "did it one-shot a UI, and how good is it?"
+
+## Closing the loop: docs fixes + library issues
+
+The point of a red eval is to fix the thing it found. The `eval-gap-triage` workflow takes
+the surfaced friction and, per gap, decides:
+
+- **docs fix** → a precise patch to a `docs/*.mdx` source file (then `pnpm docs:llms`), which
+  raises one-shot odds directly. 8 such fixes shipped on this branch.
+- **library fix** → a GitHub issue **citing the eval + a source-grounded suggested solution**
+  (issues #295–#298 on this branch: run-status masking, `z.number()`→INTEGER, `<Worktree>`
+  path anchoring, `waiting-event` overload). Filed when the robust fix is code, not docs.
+
