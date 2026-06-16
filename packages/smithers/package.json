@@ -35,15 +35,20 @@
       "import": "./src/control-plane.js",
       "default": "./src/control-plane.js"
     },
+    "./jsx-runtime": {
+      "types": "./src/jsx-runtime.d.ts",
+      "import": "./src/jsx-runtime.js",
+      "default": "./src/jsx-runtime.js"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./src/jsx-runtime.d.ts",
+      "import": "./src/jsx-runtime.js",
+      "default": "./src/jsx-runtime.js"
+    },
     "./*": {
       "types": "./src/index.d.ts",
       "import": "./src/*.js",
       "default": "./src/*.js"
-    },
-    "./jsx-dev-runtime": {
-      "types": "./src/index.d.ts",
-      "import": "./src/jsx-runtime.js",
-      "default": "./src/jsx-runtime.js"
     }
   },
   "files": [
