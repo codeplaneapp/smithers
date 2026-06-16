@@ -49,7 +49,9 @@ const DOCS_PREAMBLE =
   "  • skills/smithers/SKILL.md and skills/smithers/llms-full.txt\n" +
   "  • docs/llms-core.txt and the docs/llms-*.txt topic fragments\n" +
   "Ground your answer in those docs. If something you need is missing, unclear, or wrong in the docs, " +
-  "do your best AND record it honestly in `friction` — that is the most valuable output here.";
+  "do your best AND record it honestly in `friction` — that is the most valuable output here.\n" +
+  "IMPORTANT: Do NOT create, edit, or delete any files on disk, and do NOT run the workflow. " +
+  "Produce your ENTIRE answer only in the structured `artifact` field. Reading docs/source is fine.";
 
 function artifactContract(kind: VerifyKind): string {
   if (kind === "graph") {
