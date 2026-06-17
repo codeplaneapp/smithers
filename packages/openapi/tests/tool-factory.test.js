@@ -39,6 +39,40 @@ describe("createOpenApiToolsSync", () => {
         expect(Object.keys(tools)).toContain("pet_createPet");
         expect(Object.keys(tools)).not.toContain("listPets");
     });
+    test("curates generated tools with aliases, descriptions, skipped endpoints, and response examples", () => {
+        const tools = createOpenApiToolsSync(petStoreSpec, {
+            operations: {
+                listPets: {
+                    name: "findPets",
+                    description: "Find pets by optional tag before choosing one.",
+                    responseExamples: [
+                        {
+                            status: 200,
+                            description: "Two pets returned",
+                            value: [{ id: 1, name: "Fluffy" }],
+                        },
+                    ],
+                },
+                createPet: false,
+                deletePet: { include: false },
+            },
+        });
+        expect(Object.keys(tools).sort()).toEqual(["findPets", "getPet"]);
+        expect(tools.findPets.description).toContain("Find pets by optional tag");
+        expect(tools.findPets.description).toContain("Response examples:");
+        expect(tools.findPets.description).toContain("200 Two pets returned");
+        expect(tools.findPets.description).toContain('"name": "Fluffy"');
+        expect(tools.createPet).toBeUndefined();
+        expect(tools.deletePet).toBeUndefined();
+    });
+    test("throws when curated operation names collide", () => {
+        expect(() => createOpenApiToolsSync(petStoreSpec, {
+            operations: {
+                listPets: { name: "managePets" },
+                createPet: { name: "managePets" },
+            },
+        })).toThrow(/Duplicate OpenAPI tool name "managePets".*listPets.*createPet/);
+    });
     test("uses server URL from spec as default base URL", () => {
         // Tools are created — we just verify they exist and the spec server is used
         const tools = createOpenApiToolsSync(petStoreSpec);

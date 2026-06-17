@@ -1518,6 +1518,20 @@ type OpenApiToolsOptions = {
   include?: string[];
   exclude?: string[];
   namePrefix?: string;
+  operations?: Record<
+    string,
+    | false
+    | {
+        include?: boolean;
+        name?: string;
+        description?: string;
+        responseExamples?: Array<{
+          status?: string | number;
+          description?: string;
+          value: unknown;
+        }>;
+      }
+  >;
 };
 
 // =============================================================================
