@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { ControlPlaneStore, ensureControlPlaneTables } from "../src/index.js";
 
 function makeStore() {
@@ -17,6 +18,45 @@ describe("ControlPlaneStore", () => {
       const project = store.createProject({ orgId: org.orgId, projectId: "project_b", slug: "b", name: "B", createdAtMs: 3 });
       expect(team.slug).toBe("a");
       expect(project.slug).toBe("b");
+    }
+    finally {
+      sqlite.close();
+    }
+  });
+
+  test("maps duplicate slugs to typed Smithers errors", () => {
+    const { sqlite, store } = makeStore();
+    try {
+      store.createOrg({ orgId: "org_acme", slug: "acme", name: "Acme", createdAtMs: 1 });
+
+      expect(() =>
+        store.createOrg({ orgId: "org_other", slug: "acme", name: "Other", createdAtMs: 2 }),
+      ).toThrow(SmithersError);
+      expect(() =>
+        store.createOrg({ orgId: "org_other", slug: "acme", name: "Other", createdAtMs: 2 }),
+      ).toThrow(expect.objectContaining({
+        code: "DUPLICATE_ID",
+        summary: "Duplicate control-plane org slug: acme",
+        details: { kind: "control-plane.org", id: "acme", slug: "acme" },
+      }));
+
+      store.createTeam({ orgId: "org_acme", teamId: "team_ops", slug: "ops", name: "Ops", createdAtMs: 3 });
+      expect(() =>
+        store.createTeam({ orgId: "org_acme", teamId: "team_support", slug: "ops", name: "Support", createdAtMs: 4 }),
+      ).toThrow(expect.objectContaining({
+        code: "DUPLICATE_ID",
+        summary: "Duplicate control-plane team slug: ops",
+        details: { kind: "control-plane.team", id: "ops", slug: "ops", orgId: "org_acme" },
+      }));
+
+      store.createProject({ orgId: "org_acme", projectId: "project_api", slug: "api", name: "API", createdAtMs: 5 });
+      expect(() =>
+        store.createProject({ orgId: "org_acme", projectId: "project_web", slug: "api", name: "Web", createdAtMs: 6 }),
+      ).toThrow(expect.objectContaining({
+        code: "DUPLICATE_ID",
+        summary: "Duplicate control-plane project slug: api",
+        details: { kind: "control-plane.project", id: "api", slug: "api", orgId: "org_acme" },
+      }));
     }
     finally {
       sqlite.close();
