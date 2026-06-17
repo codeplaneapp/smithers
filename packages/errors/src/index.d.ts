@@ -588,161 +588,185 @@ declare namespace smithersErrorDefinitions {
         let when_61: string;
         export { when_61 as when };
     }
-    namespace DB_MISSING_COLUMNS {
+    namespace ACCOUNT_INVALID {
         let category_62: string;
         export { category_62 as category };
         let when_62: string;
         export { when_62 as when };
     }
-    namespace DB_REQUIRES_BUN_SQLITE {
+    namespace ACCOUNT_NOT_FOUND {
         let category_63: string;
         export { category_63 as category };
         let when_63: string;
         export { when_63 as when };
     }
-    namespace DB_QUERY_FAILED {
+    namespace ACCOUNT_DUPLICATE_LABEL {
         let category_64: string;
         export { category_64 as category };
         let when_64: string;
         export { when_64 as when };
     }
-    namespace DB_WRITE_FAILED {
+    namespace ACCOUNTS_FILE_INVALID {
         let category_65: string;
         export { category_65 as category };
         let when_65: string;
         export { when_65 as when };
     }
-    namespace STORAGE_ERROR {
+    namespace DB_MISSING_COLUMNS {
         let category_66: string;
         export { category_66 as category };
         let when_66: string;
         export { when_66 as when };
     }
-    namespace INTERNAL_ERROR {
+    namespace DB_REQUIRES_BUN_SQLITE {
         let category_67: string;
         export { category_67 as category };
         let when_67: string;
         export { when_67 as when };
     }
-    namespace PROCESS_ABORTED {
+    namespace DB_QUERY_FAILED {
         let category_68: string;
         export { category_68 as category };
         let when_68: string;
         export { when_68 as when };
-        let details_30: string;
-        export { details_30 as details };
     }
-    namespace PROCESS_TIMEOUT {
+    namespace DB_WRITE_FAILED {
         let category_69: string;
         export { category_69 as category };
         let when_69: string;
         export { when_69 as when };
-        let details_31: string;
-        export { details_31 as details };
     }
-    namespace PROCESS_IDLE_TIMEOUT {
+    namespace STORAGE_ERROR {
         let category_70: string;
         export { category_70 as category };
         let when_70: string;
         export { when_70 as when };
-        let details_32: string;
-        export { details_32 as details };
     }
-    namespace PROCESS_SPAWN_FAILED {
+    namespace INTERNAL_ERROR {
         let category_71: string;
         export { category_71 as category };
         let when_71: string;
         export { when_71 as when };
-        let details_33: string;
-        export { details_33 as details };
     }
-    namespace TASK_RUNTIME_UNAVAILABLE {
+    namespace PROCESS_ABORTED {
         let category_72: string;
         export { category_72 as category };
         let when_72: string;
         export { when_72 as when };
+        let details_30: string;
+        export { details_30 as details };
     }
-    namespace SCHEMA_CHANGE_HOT {
+    namespace PROCESS_TIMEOUT {
         let category_73: string;
         export { category_73 as category };
         let when_73: string;
         export { when_73 as when };
+        let details_31: string;
+        export { details_31 as details };
     }
-    namespace HOT_OVERLAY_FAILED {
+    namespace PROCESS_IDLE_TIMEOUT {
         let category_74: string;
         export { category_74 as category };
         let when_74: string;
         export { when_74 as when };
+        let details_32: string;
+        export { details_32 as details };
     }
-    namespace HOT_RELOAD_INVALID_MODULE {
+    namespace PROCESS_SPAWN_FAILED {
         let category_75: string;
         export { category_75 as category };
         let when_75: string;
         export { when_75 as when };
+        let details_33: string;
+        export { details_33 as details };
     }
-    namespace SCORER_FAILED {
+    namespace TASK_RUNTIME_UNAVAILABLE {
         let category_76: string;
         export { category_76 as category };
         let when_76: string;
         export { when_76 as when };
     }
-    namespace WORKFLOW_EXISTS {
+    namespace SCHEMA_CHANGE_HOT {
         let category_77: string;
         export { category_77 as category };
         let when_77: string;
         export { when_77 as when };
     }
-    namespace CLI_DB_NOT_FOUND {
+    namespace HOT_OVERLAY_FAILED {
         let category_78: string;
         export { category_78 as category };
         let when_78: string;
         export { when_78 as when };
     }
-    namespace CLI_AGENT_UNSUPPORTED {
+    namespace HOT_RELOAD_INVALID_MODULE {
         let category_79: string;
         export { category_79 as category };
         let when_79: string;
         export { when_79 as when };
     }
-    namespace PI_HTTP_ERROR {
+    namespace SCORER_FAILED {
         let category_80: string;
         export { category_80 as category };
         let when_80: string;
         export { when_80 as when };
     }
-    namespace EXTERNAL_BUILD_FAILED {
+    namespace WORKFLOW_EXISTS {
         let category_81: string;
         export { category_81 as category };
         let when_81: string;
         export { when_81 as when };
-        let details_34: string;
-        export { details_34 as details };
     }
-    namespace SCHEMA_DISCOVERY_FAILED {
+    namespace CLI_DB_NOT_FOUND {
         let category_82: string;
         export { category_82 as category };
         let when_82: string;
         export { when_82 as when };
-        let details_35: string;
-        export { details_35 as details };
     }
-    namespace OPENAPI_SPEC_LOAD_FAILED {
+    namespace CLI_AGENT_UNSUPPORTED {
         let category_83: string;
         export { category_83 as category };
         let when_83: string;
         export { when_83 as when };
     }
-    namespace OPENAPI_OPERATION_NOT_FOUND {
+    namespace PI_HTTP_ERROR {
         let category_84: string;
         export { category_84 as category };
         let when_84: string;
         export { when_84 as when };
     }
-    namespace OPENAPI_TOOL_EXECUTION_FAILED {
+    namespace EXTERNAL_BUILD_FAILED {
         let category_85: string;
         export { category_85 as category };
         let when_85: string;
         export { when_85 as when };
+        let details_34: string;
+        export { details_34 as details };
+    }
+    namespace SCHEMA_DISCOVERY_FAILED {
+        let category_86: string;
+        export { category_86 as category };
+        let when_86: string;
+        export { when_86 as when };
+        let details_35: string;
+        export { details_35 as details };
+    }
+    namespace OPENAPI_SPEC_LOAD_FAILED {
+        let category_87: string;
+        export { category_87 as category };
+        let when_87: string;
+        export { when_87 as when };
+    }
+    namespace OPENAPI_OPERATION_NOT_FOUND {
+        let category_88: string;
+        export { category_88 as category };
+        let when_88: string;
+        export { when_88 as when };
+    }
+    namespace OPENAPI_TOOL_EXECUTION_FAILED {
+        let category_89: string;
+        export { category_89 as category };
+        let when_89: string;
+        export { when_89 as when };
     }
 }
 
