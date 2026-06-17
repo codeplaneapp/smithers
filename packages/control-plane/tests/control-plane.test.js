@@ -229,6 +229,51 @@ describe("ControlPlaneStore", () => {
     }
   });
 
+  test("audit export defaults malformed stored metadata to empty objects", () => {
+    const { sqlite, store } = makeStore();
+    try {
+      store.createOrg({ orgId: "org_corrupt_metadata", slug: "corrupt-metadata", name: "Corrupt Metadata", createdAtMs: 1 });
+      store.createProject({
+        orgId: "org_corrupt_metadata",
+        projectId: "project_corrupt",
+        slug: "corrupt",
+        name: "Corrupt",
+        metadata: { ok: true },
+        createdAtMs: 2,
+      });
+      store.upsertIdentityProvider({
+        orgId: "org_corrupt_metadata",
+        providerId: "idp_corrupt",
+        type: "oidc",
+        issuer: "https://idp.test",
+        metadata: { ok: true },
+        createdAtMs: 3,
+        updatedAtMs: 3,
+      });
+      store.recordAuditEvent({
+        orgId: "org_corrupt_metadata",
+        action: "metadata.corrupt",
+        targetType: "org",
+        targetId: "org_corrupt_metadata",
+        occurredAtMs: 4,
+        metadata: { ok: true },
+      });
+
+      sqlite.query("UPDATE _smithers_cp_projects SET metadata_json = ? WHERE project_id = ?").run("{bad", "project_corrupt");
+      sqlite.query("UPDATE _smithers_cp_identity_providers SET metadata_json = ? WHERE provider_id = ?").run("{bad", "idp_corrupt");
+      sqlite.query("UPDATE _smithers_cp_audit_events SET metadata_json = ? WHERE action = ?").run("{bad", "metadata.corrupt");
+
+      const exported = store.exportOrgAudit({ orgId: "org_corrupt_metadata", exportedAtMs: 5 });
+
+      expect(exported.projects[0].metadata).toEqual({});
+      expect(exported.identityProviders[0].metadata).toEqual({});
+      expect(exported.auditEvents.find((event) => event.action === "metadata.corrupt")?.metadata).toEqual({});
+    }
+    finally {
+      sqlite.close();
+    }
+  });
+
   test("org-wide secret refs rotate through the non-null project key", () => {
     const { sqlite, store } = makeStore();
     try {
