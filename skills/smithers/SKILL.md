@@ -215,11 +215,12 @@ component. Reach for these before writing your own loop:
 - `<ClassifyAndRoute>` / `<GatherAndSynthesize>`: route to specialists / fan-out-fan-in
 
 More ship in the box (`<CheckSuite>`, `<DecisionTable>`, `<Poller>`,
-`<Runbook>`, `<DriftDetector>`, `<ContentPipeline>`, `<LoopUntilScored>`,
-`<TryCatchFinally>`, `<ContinueAsNew>`) and the catalog grows; check the docs
-for the current set. Each is ~20–40 lines of JSX over the substrate, so read,
-fork, or copy them. ~90 more ready-to-edit recipes live in `examples/` (listed
-below).
+`<Runbook>`, `<DriftDetector>`, `<ContentPipeline>`, `<TryCatchFinally>`,
+`<ContinueAsNew>`) and the catalog grows; check the docs for the current set.
+Each is ~20–40 lines of JSX over the substrate, so read, fork, or copy them.
+Seeded local-pack components, such as `<LoopUntilScored>`, live under
+`.smithers/components/` after `smithers init`. ~90 more ready-to-edit recipes
+live in `examples/` (listed below).
 
 ## Beyond control flow: the production surface
 
@@ -252,7 +253,7 @@ and components**) from runtime state, which is gitignored.
 │                        #   provider instances (ClaudeCodeAgent, Codex, …).
 │                        #   Workflows import { agents } from "../agents".
 │                        #   Generated from ~/.smithers/accounts.json. Manage
-│                        #   accounts with `smithers agent add|list|remove`.
+│                        #   accounts with `smithers agents add|list|remove`.
 ├── smithers.config.ts   # repoCommands { lint, test, coverage } the workflows call
 ├── workflows/           # WHERE WORKFLOWS GO. One .tsx per workflow (implement,
 │                        #   review, plan, ralph, debug, research, …). These are
@@ -263,10 +264,11 @@ and components**) from runtime state, which is gitignored.
 │                        #   renders it as a tag:
 │                        #     import PlanPrompt from "../prompts/plan.mdx";
 │                        #     <PlanPrompt prompt={ctx.input.prompt} />
-├── components/          # WHERE COMPONENTS GO. Reusable workflow .tsx pieces and
-│                        #   their Zod output schemas (ValidationLoop, Review,
-│                        #   LoopUntilScored, ForEachFeature, …). Imported by
-│                        #   workflows like any React-style component.
+├── components/          # WHERE COMPONENTS GO. Seeded local-pack reusable workflow
+│                        #   .tsx pieces and their Zod output schemas
+│                        #   (ValidationLoop, Review, LoopUntilScored,
+│                        #   ForEachFeature, …). Imported by workflows like any
+│                        #   React-style component.
 ├── ui/                  # workflow UI sources for the `smithers ui` command
 ├── specs/  tickets/     # feature specs and tickets some workflows read/write
 │
