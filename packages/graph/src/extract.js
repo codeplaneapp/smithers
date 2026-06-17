@@ -60,13 +60,13 @@ function isZodObject(value) {
 }
 /**
  * @param {unknown} value
- * @returns {boolean}
+ * @returns {value is any}
  */
 function isDrizzleTable(value) {
     if (!value || typeof value !== "object")
         return false;
     try {
-        const name = getTableName(value);
+        const name = getTableName(/** @type {any} */ (value));
         return typeof name === "string" && name.length > 0;
     }
     catch {
@@ -89,7 +89,7 @@ function resolveOutput(raw) {
     }
     const outputTable = isDrizzleTable(outputRaw) ? outputRaw : null;
     const outputTableName = outputTable
-        ? getTableName(outputTable)
+        ? getTableName(/** @type {any} */ (outputTable))
         : typeof outputRaw === "string"
             ? outputRaw
             : "";
@@ -119,6 +119,8 @@ function parseHeartbeatTimeoutMs(raw) {
 }
 /**
  * @param {Record<string, unknown>} raw
+ * @param {boolean} [isAgent]
+ * @returns {{ retries: number; retryPolicy: import("./RetryPolicy.ts").RetryPolicy | undefined }}
  */
 function resolveRetryConfig(raw, isAgent = false) {
     const noRetry = Boolean(raw.noRetry);
@@ -135,12 +137,12 @@ function resolveRetryConfig(raw, isAgent = false) {
         : defaultNoRetryForContinueOnFail
             ? (isAgent ? 1 : 0)
             : hasExplicitRetries
-                ? raw.retries
+                ? /** @type {number} */ (raw.retries)
                 : Infinity;
     const retryPolicy = hasExplicitRetryPolicy
-        ? raw.retryPolicy
+        ? /** @type {import("./RetryPolicy.ts").RetryPolicy} */ (raw.retryPolicy)
         : retries > 0
-            ? { backoff: "exponential", initialDelayMs: 1000 }
+            ? /** @type {import("./RetryPolicy.ts").RetryPolicy} */ ({ backoff: "exponential", initialDelayMs: 1000 })
             : undefined;
     return { retries, retryPolicy };
 }
@@ -153,7 +155,7 @@ function toXmlNode(node) {
         return { kind: "text", text: node.text };
     }
     const element = {
-        kind: "element",
+        kind: /** @type {"element"} */ ("element"),
         tag: node.tag,
         props: node.props ?? {},
         children: node.children.map(toXmlNode),
@@ -173,7 +175,7 @@ function getRalphIteration(opts, id) {
     if (map instanceof Map) {
         return map.get(id) ?? fallback;
     }
-    const value = map[id];
+    const value = /** @type {Record<string, number>} */ (map)[id];
     return typeof value === "number" ? value : fallback;
 }
 /**
@@ -236,7 +238,7 @@ function approvalAutoApprove(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
         return undefined;
     }
-    const raw = value;
+    const raw = /** @type {Record<string, unknown>} */ (value);
     return {
         ...(typeof raw.after === "number" ? { after: raw.after } : {}),
         ...(typeof raw.audit === "boolean" ? { audit: raw.audit } : {}),
@@ -343,7 +345,9 @@ export function extractGraph(root, opts) {
     if (!root) {
         return { xml: null, tasks: [], mountedTaskIds: [] };
     }
+    /** @type {TaskDescriptor[]} */
     const tasks = [];
+    /** @type {string[]} */
     const mountedTaskIds = [];
     const seen = new Set();
     const seenRalph = new Set();
@@ -451,7 +455,7 @@ export function extractGraph(root, opts) {
                     heartbeatTimeoutMs: parseHeartbeatTimeoutMs(raw),
                     continueOnFail: Boolean(raw.continueOnFail),
                     cachePolicy: raw.cache && typeof raw.cache === "object"
-                        ? raw.cache
+                        ? /** @type {import("./CachePolicy.ts").CachePolicy<unknown>} */ (raw.cache)
                         : undefined,
                     label: typeof raw.label === "string" ? raw.label : undefined,
                     meta: {
@@ -484,7 +488,7 @@ export function extractGraph(root, opts) {
                 heartbeatTimeoutMs: parseHeartbeatTimeoutMs(raw) ?? DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS,
                 continueOnFail: Boolean(raw.continueOnFail),
                 cachePolicy: raw.cache && typeof raw.cache === "object"
-                    ? raw.cache
+                    ? /** @type {import("./CachePolicy.ts").CachePolicy<unknown>} */ (raw.cache)
                     : undefined,
                 label: typeof raw.label === "string" ? raw.label : undefined,
                 meta: {
@@ -649,24 +653,24 @@ export function extractGraph(root, opts) {
                 heartbeatTimeoutMs,
                 continueOnFail: Boolean(raw.continueOnFail),
                 cachePolicy: raw.cache && typeof raw.cache === "object"
-                    ? raw.cache
+                    ? /** @type {import("./CachePolicy.ts").CachePolicy<unknown>} */ (raw.cache)
                     : undefined,
                 hijack: Boolean(raw.hijack),
                 onHijackExit: raw.onHijackExit === "reopen" ? "reopen" : "complete",
-                agent: raw.agent,
+                agent: /** @type {TaskDescriptor["agent"]} */ (raw.agent),
                 prompt,
                 staticPayload: isAgent || isCompute
                     ? undefined
                     : (raw.__smithersPayload ?? raw.__payload ?? raw.children),
                 computeFn: isCompute
-                    ? raw.__smithersComputeFn
+                    ? /** @type {() => unknown} */ (raw.__smithersComputeFn)
                     : undefined,
                 label: typeof raw.label === "string" ? raw.label : undefined,
                 meta: raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta)
-                    ? raw.meta
+                    ? /** @type {Record<string, unknown>} */ (raw.meta)
                     : undefined,
                 scorers: raw.scorers && typeof raw.scorers === "object" && !Array.isArray(raw.scorers)
-                    ? raw.scorers
+                    ? /** @type {import("./ScorersMap.ts").ScorersMap} */ (raw.scorers)
                     : undefined,
                 memoryConfig: raw.memory && typeof raw.memory === "object" && !Array.isArray(raw.memory)
                     ? raw.memory

@@ -23,6 +23,7 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "allowJs": true,
+    "checkJs": true,
     "allowImportingTsExtensions": true,
     "rootDir": "src"
   },

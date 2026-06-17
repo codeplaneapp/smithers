@@ -3,15 +3,16 @@
 /** @typedef {import("../HostText.ts").HostText} HostText */
 // @smithers-type-exports-end
 
-import { resolveStableId } from "@smithers-orchestrator/graph/utils/tree-ids";
+import { resolveStableId } from "../utils/tree-ids.js";
 import { getTableName } from "drizzle-orm";
-import { DEFAULT_MERGE_QUEUE_CONCURRENCY, WORKTREE_EMPTY_PATH_ERROR, } from "@smithers-orchestrator/graph/constants";
+import { DEFAULT_MERGE_QUEUE_CONCURRENCY, WORKTREE_EMPTY_PATH_ERROR, } from "../constants.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { resolveWorktreePath } from "@smithers-orchestrator/graph/worktree-path";
+import { resolveWorktreePath } from "../worktree-path.js";
 
 /** @typedef {import("../ExtractOptions.ts").ExtractOptions} ExtractOptions */
 /** @typedef {import("../ExtractResult.ts").ExtractResult} ExtractResult */
 /** @typedef {import("../HostNode.ts").HostNode} HostNode */
+/** @typedef {import("../TaskDescriptor.ts").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("../XmlNode.ts").XmlNode} XmlNode */
 
 // TODO(migration): Delegate extractFromHost to
@@ -48,13 +49,13 @@ const DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS = envHeartbeatTimeoutMs();
 const DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS = envHeartbeatTimeoutMs();
 /**
  * @param {unknown} value
- * @returns {boolean}
+ * @returns {value is any}
  */
 function isDrizzleTable(value) {
     if (!value || typeof value !== "object")
         return false;
     try {
-        const name = getTableName(value);
+        const name = getTableName(/** @type {any} */ (value));
         return typeof name === "string" && name.length > 0;
     }
     catch {
@@ -63,7 +64,7 @@ function isDrizzleTable(value) {
 }
 /**
  * @param {unknown} value
- * @returns {boolean}
+ * @returns {value is import("zod").ZodObject<any>}
  */
 function isZodObject(value) {
     return Boolean(value && typeof value === "object" && "shape" in value);
@@ -84,6 +85,15 @@ function parseHeartbeatTimeoutMs(raw) {
     return Math.floor(candidate);
 }
 /**
+ * @param {unknown} value
+ * @returns {Record<string, unknown>}
+ */
+function recordOrEmpty(value) {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? /** @type {Record<string, unknown>} */ (value)
+        : {};
+}
+/**
  * @param {HostNode} node
  * @returns {XmlNode}
  */
@@ -92,7 +102,7 @@ function toXmlNode(node) {
         return { kind: "text", text: node.text };
     }
     const element = {
-        kind: "element",
+        kind: /** @type {"element"} */ ("element"),
         tag: node.tag,
         props: node.props ?? {},
         children: node.children.map(toXmlNode),
@@ -112,11 +122,13 @@ function getRalphIteration(opts, id) {
     if (map instanceof Map) {
         return map.get(id) ?? fallback;
     }
-    const value = map[id];
+    const value = /** @type {Record<string, number>} */ (map)[id];
     return typeof value === "number" ? value : fallback;
 }
 /**
  * @param {Record<string, unknown>} raw
+ * @param {boolean} [isAgent]
+ * @returns {{ retries: number; retryPolicy: import("../RetryPolicy.ts").RetryPolicy | undefined }}
  */
 function resolveRetryConfig(raw, isAgent = false) {
     const noRetry = Boolean(raw.noRetry);
@@ -139,7 +151,7 @@ function resolveRetryConfig(raw, isAgent = false) {
     const retryPolicy = hasExplicitRetryPolicy
         ? /** @type {import("../RetryPolicy.ts").RetryPolicy} */ (raw.retryPolicy)
         : retries > 0
-            ? { backoff: "exponential", initialDelayMs: 1000 }
+            ? /** @type {import("../RetryPolicy.ts").RetryPolicy} */ ({ backoff: "exponential", initialDelayMs: 1000 })
             : undefined;
     return { retries, retryPolicy };
 }
@@ -152,7 +164,9 @@ export function extractFromHost(root, opts) {
     if (!root) {
         return { xml: null, tasks: [], mountedTaskIds: [] };
     }
+    /** @type {TaskDescriptor[]} */
     const tasks = [];
+    /** @type {string[]} */
     const mountedTaskIds = [];
     const seen = new Set();
     const seenRalph = new Set();
@@ -276,7 +290,7 @@ export function extractFromHost(root, opts) {
             }
             const outputTable = isDrizzleTable(outputRaw) ? outputRaw : null;
             const outputTableName = outputTable
-                ? getTableName(outputTable)
+                ? getTableName(/** @type {any} */ (outputTable))
                 : typeof outputRaw === "string"
                     ? outputRaw
                     : "";
@@ -285,7 +299,9 @@ export function extractFromHost(root, opts) {
             const timeoutMs = typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
             const heartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
             const continueOnFail = Boolean(raw.continueOnFail);
-            const cachePolicy = raw.cache && typeof raw.cache === "object" ? raw.cache : undefined;
+            const cachePolicy = raw.cache && typeof raw.cache === "object"
+                ? /** @type {import("../CachePolicy.ts").CachePolicy<unknown>} */ (raw.cache)
+                : undefined;
             const dependsOn = Array.isArray(raw.dependsOn)
                 ? raw.dependsOn.filter((v) => typeof v === "string")
                 : undefined;
@@ -340,9 +356,9 @@ export function extractFromHost(root, opts) {
                         }
                         return result.output;
                     },
-                    label: raw.label,
+                    label: typeof raw.label === "string" ? raw.label : undefined,
                     meta: {
-                        ...raw.meta,
+                        ...recordOrEmpty(raw.meta),
                         __subflow: true,
                         __subflowMode: mode,
                         __subflowInput: raw.__smithersSubflowInput,
@@ -374,7 +390,7 @@ export function extractFromHost(root, opts) {
             }
             const outputTable = isDrizzleTable(outputRaw) ? outputRaw : null;
             const outputTableName = outputTable
-                ? getTableName(outputTable)
+                ? getTableName(/** @type {any} */ (outputTable))
                 : typeof outputRaw === "string"
                     ? outputRaw
                     : "";
@@ -383,7 +399,9 @@ export function extractFromHost(root, opts) {
             const timeoutMs = typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
             const heartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw) ?? DEFAULT_SANDBOX_TASK_HEARTBEAT_TIMEOUT_MS;
             const continueOnFail = Boolean(raw.continueOnFail);
-            const cachePolicy = raw.cache && typeof raw.cache === "object" ? raw.cache : undefined;
+            const cachePolicy = raw.cache && typeof raw.cache === "object"
+                ? /** @type {import("../CachePolicy.ts").CachePolicy<unknown>} */ (raw.cache)
+                : undefined;
             const dependsOn = Array.isArray(raw.dependsOn)
                 ? raw.dependsOn.filter((v) => typeof v === "string")
                 : undefined;
@@ -468,9 +486,9 @@ export function extractFromHost(root, opts) {
                         },
                     });
                 },
-                label: raw.label,
+                label: typeof raw.label === "string" ? raw.label : undefined,
                 meta: {
-                    ...raw.meta,
+                    ...recordOrEmpty(raw.meta),
                     __sandbox: true,
                     __sandboxRuntime: runtime,
                     __sandboxProvider: provider,
@@ -520,12 +538,12 @@ export function extractFromHost(root, opts) {
             }
             const outputTable = isDrizzleTable(outputRaw) ? outputRaw : null;
             const outputTableName = outputTable
-                ? getTableName(outputTable)
+                ? getTableName(/** @type {any} */ (outputTable))
                 : typeof outputRaw === "string"
                     ? outputRaw
                     : "";
             const outputRef = !outputTable && isZodObject(outputRaw) ? outputRaw : undefined;
-            const outputSchema = raw.outputSchema ?? outputRef;
+            const outputSchema = isZodObject(raw.outputSchema) ? raw.outputSchema : outputRef;
             const waitAsync = Boolean(raw.waitAsync);
             const timeoutMs = typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
             const heartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
@@ -564,9 +582,9 @@ export function extractFromHost(root, opts) {
                 prompt: undefined,
                 staticPayload: undefined,
                 computeFn: undefined,
-                label: raw.label,
+                label: typeof raw.label === "string" ? raw.label : undefined,
                 meta: {
-                    ...raw.meta,
+                    ...recordOrEmpty(raw.meta),
                     __waitForEvent: true,
                     __eventName: raw.__smithersEventName ?? raw.event,
                     __correlationId: raw.__smithersCorrelationId ?? raw.correlationId,
@@ -646,9 +664,9 @@ export function extractFromHost(root, opts) {
                 prompt: undefined,
                 staticPayload: undefined,
                 computeFn: undefined,
-                label: raw.label ?? `timer:${nodeId}`,
+                label: typeof raw.label === "string" ? raw.label : `timer:${nodeId}`,
                 meta: {
-                    ...raw.meta,
+                    ...recordOrEmpty(raw.meta),
                     __timer: true,
                     __timerType: hasDuration ? "duration" : "absolute",
                     ...(hasDuration ? { __timerDuration: duration } : {}),
@@ -698,19 +716,21 @@ export function extractFromHost(root, opts) {
             }
             const outputTable = isDrizzleTable(outputRaw) ? outputRaw : null;
             const outputTableName = outputTable
-                ? getTableName(outputTable)
+                ? getTableName(/** @type {any} */ (outputTable))
                 : typeof outputRaw === "string"
                     ? outputRaw
                     : "";
             const outputRef = !outputTable && isZodObject(outputRaw) ? outputRaw : undefined;
-            const outputSchema = raw.outputSchema ?? outputRef;
+            const outputSchema = isZodObject(raw.outputSchema) ? raw.outputSchema : outputRef;
             const needsApproval = Boolean(raw.needsApproval);
             const waitAsync = Boolean(raw.waitAsync);
+            /** @type {TaskDescriptor["approvalMode"]} */
             const approvalMode = raw.approvalMode === "decision" ||
                 raw.approvalMode === "select" ||
                 raw.approvalMode === "rank"
                 ? raw.approvalMode
                 : "gate";
+            /** @type {TaskDescriptor["approvalOnDeny"]} */
             const approvalOnDeny = raw.approvalOnDeny === "continue" ||
                 raw.approvalOnDeny === "skip" ||
                 raw.approvalOnDeny === "fail"
@@ -735,31 +755,36 @@ export function extractFromHost(root, opts) {
             const approvalAllowedUsers = Array.isArray(raw.approvalAllowedUsers)
                 ? raw.approvalAllowedUsers.filter((value) => typeof value === "string")
                 : undefined;
-            const approvalAutoApprove = raw.approvalAutoApprove && typeof raw.approvalAutoApprove === "object" && !Array.isArray(raw.approvalAutoApprove)
+            const approvalAutoApproveRaw = raw.approvalAutoApprove && typeof raw.approvalAutoApprove === "object" && !Array.isArray(raw.approvalAutoApprove)
+                ? /** @type {Record<string, unknown>} */ (raw.approvalAutoApprove)
+                : undefined;
+            const approvalAutoApprove = approvalAutoApproveRaw
                 ? {
-                    ...(typeof raw.approvalAutoApprove.after === "number"
-                        ? { after: raw.approvalAutoApprove.after }
+                    ...(typeof approvalAutoApproveRaw.after === "number"
+                        ? { after: approvalAutoApproveRaw.after }
                         : {}),
-                    ...(typeof raw.approvalAutoApprove.audit === "boolean"
-                        ? { audit: raw.approvalAutoApprove.audit }
+                    ...(typeof approvalAutoApproveRaw.audit === "boolean"
+                        ? { audit: approvalAutoApproveRaw.audit }
                         : {}),
-                    ...(typeof raw.approvalAutoApprove.conditionMet === "boolean"
-                        ? { conditionMet: raw.approvalAutoApprove.conditionMet }
+                    ...(typeof approvalAutoApproveRaw.conditionMet === "boolean"
+                        ? { conditionMet: approvalAutoApproveRaw.conditionMet }
                         : {}),
-                    ...(typeof raw.approvalAutoApprove.revertOnMet === "boolean"
-                        ? { revertOnMet: raw.approvalAutoApprove.revertOnMet }
+                    ...(typeof approvalAutoApproveRaw.revertOnMet === "boolean"
+                        ? { revertOnMet: approvalAutoApproveRaw.revertOnMet }
                         : {}),
                 }
                 : undefined;
             const skipIf = Boolean(raw.skipIf);
-            const agent = raw.agent;
+            const agent = /** @type {TaskDescriptor["agent"]} */ (raw.agent);
             const kind = raw.__smithersKind;
             const isAgent = kind === "agent" || Boolean(agent);
             const { retries, retryPolicy } = resolveRetryConfig(raw, isAgent);
             const timeoutMs = typeof raw.timeoutMs === "number" ? raw.timeoutMs : null;
             const parsedHeartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
             const continueOnFail = Boolean(raw.continueOnFail);
-            const cachePolicy = raw.cache && typeof raw.cache === "object" ? raw.cache : undefined;
+            const cachePolicy = raw.cache && typeof raw.cache === "object"
+                ? /** @type {import("../CachePolicy.ts").CachePolicy<unknown>} */ (raw.cache)
+                : undefined;
             const heartbeatTimeoutMs = parsedHeartbeatTimeoutMs ??
                 (isAgent ? DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS : null);
             const prompt = isAgent ? String(raw.children ?? "") : undefined;
@@ -768,7 +793,7 @@ export function extractFromHost(root, opts) {
                     `Check that bunfig.toml has a top-level preload (not under [run]) and mdxPlugin() is registered.`);
             }
             const isCompute = kind === "compute" && typeof raw.__smithersComputeFn === "function";
-            const computeFn = isCompute ? raw.__smithersComputeFn : undefined;
+            const computeFn = isCompute ? /** @type {() => unknown} */ (raw.__smithersComputeFn) : undefined;
             const staticPayload = isAgent || isCompute
                 ? undefined
                 : (raw.__smithersPayload ?? raw.__payload ?? raw.children);
@@ -811,17 +836,23 @@ export function extractFromHost(root, opts) {
                 continueOnFail,
                 cachePolicy,
                 hijack: Boolean(raw.hijack),
-                onHijackExit: raw.onHijackExit === "reopen" ? "reopen" : "complete",
+                onHijackExit: /** @type {"reopen" | "complete"} */ (raw.onHijackExit === "reopen" ? "reopen" : "complete"),
                 agent,
                 prompt,
                 staticPayload,
                 computeFn,
-                label: raw.label,
-                meta: raw.meta,
-                scorers: raw.scorers,
+                label: typeof raw.label === "string" ? raw.label : undefined,
+                meta: raw.meta && typeof raw.meta === "object" && !Array.isArray(raw.meta)
+                    ? /** @type {Record<string, unknown>} */ (raw.meta)
+                    : undefined,
+                scorers: raw.scorers && typeof raw.scorers === "object" && !Array.isArray(raw.scorers)
+                    ? /** @type {import("../ScorersMap.ts").ScorersMap} */ (raw.scorers)
+                    : undefined,
                 parallelGroupId: parallelGroup?.id,
                 parallelMaxConcurrency: parallelGroup?.max,
-                memoryConfig: raw.memory ?? undefined,
+                memoryConfig: raw.memory && typeof raw.memory === "object" && !Array.isArray(raw.memory)
+                    ? /** @type {TaskDescriptor["memoryConfig"]} */ (raw.memory)
+                    : undefined,
             };
             // Worktree path is captured in typed fields (worktreeId/worktreePath) and
             // consumed by the engine; avoid attaching untyped ad-hoc properties.
