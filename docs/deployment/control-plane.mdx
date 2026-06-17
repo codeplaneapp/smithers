@@ -111,7 +111,7 @@ store.putSecretRef({
   ref: "arn:aws:secretsmanager:us-east-1:123:secret:deploy",
 });
 
-// Check whether the project is within its quota.
+// Check whether recorded project usage exceeds the configured limit.
 const quota = store.checkUsageLimit({
   orgId: org.orgId,
   projectId: project.projectId,
@@ -121,6 +121,8 @@ const quota = store.checkUsageLimit({
 });
 // quota is null when no matching limit exists; otherwise it includes
 // { usedQuantity, remainingQuantity, exceeded, limitQuantity, ...limitMetadata }.
+// `period` is a label used to match a configured limit; `checkUsageLimit()` does not reset usage automatically for calendar periods.
+// Pass sinceMs/untilMs when you need the used quantity scoped to a billing or reporting window.
 
 const audit = store.exportOrgAudit({ orgId: org.orgId });
 ```
