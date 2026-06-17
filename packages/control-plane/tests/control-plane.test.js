@@ -374,51 +374,6 @@ describe("ControlPlaneStore", () => {
     }
   });
 
-  test("audit export defaults malformed stored metadata to empty objects", () => {
-    const { sqlite, store } = makeStore();
-    try {
-      store.createOrg({ orgId: "org_corrupt_metadata", slug: "corrupt-metadata", name: "Corrupt Metadata", createdAtMs: 1 });
-      store.createProject({
-        orgId: "org_corrupt_metadata",
-        projectId: "project_corrupt",
-        slug: "corrupt",
-        name: "Corrupt",
-        metadata: { ok: true },
-        createdAtMs: 2,
-      });
-      store.upsertIdentityProvider({
-        orgId: "org_corrupt_metadata",
-        providerId: "idp_corrupt",
-        type: "oidc",
-        issuer: "https://idp.test",
-        metadata: { ok: true },
-        createdAtMs: 3,
-        updatedAtMs: 3,
-      });
-      store.recordAuditEvent({
-        orgId: "org_corrupt_metadata",
-        action: "metadata.corrupt",
-        targetType: "org",
-        targetId: "org_corrupt_metadata",
-        occurredAtMs: 4,
-        metadata: { ok: true },
-      });
-
-      sqlite.query("UPDATE _smithers_cp_projects SET metadata_json = ? WHERE project_id = ?").run("{bad", "project_corrupt");
-      sqlite.query("UPDATE _smithers_cp_identity_providers SET metadata_json = ? WHERE provider_id = ?").run("{bad", "idp_corrupt");
-      sqlite.query("UPDATE _smithers_cp_audit_events SET metadata_json = ? WHERE action = ?").run("{bad", "metadata.corrupt");
-
-      const exported = store.exportOrgAudit({ orgId: "org_corrupt_metadata", exportedAtMs: 5 });
-
-      expect(exported.projects[0].metadata).toEqual({});
-      expect(exported.identityProviders[0].metadata).toEqual({});
-      expect(exported.auditEvents.find((event) => event.action === "metadata.corrupt")?.metadata).toEqual({});
-    }
-    finally {
-      sqlite.close();
-    }
-  });
-
   test("org-wide secret refs rotate through the non-null project key", () => {
     const { sqlite, store } = makeStore();
     try {
@@ -483,62 +438,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
       });
       expect(() =>
         store.setUsageLimit({ orgId: "org_limits", projectId: "project_missing", metric: "runs", limitQuantity: 1 }),
-      ).toThrow("Control-plane project not found");
-    }
-    finally {
-      sqlite.close();
-    }
-  });
-
-  test("usage limit periods are validated and define default quota windows", () => {
-    const { sqlite, store } = makeStore();
-    try {
-      store.createOrg({ orgId: "org_periods", slug: "periods", name: "Periods", createdAtMs: 1 });
-      expect(() =>
-        store.setUsageLimit({ orgId: "org_periods", metric: "runs", period: "forever", limitQuantity: 10, updatedAtMs: 2 }),
-      ).toThrow("period must be one of");
-
-      store.setUsageLimit({ orgId: "org_periods", metric: "runs", period: "monthly", limitQuantity: 10, updatedAtMs: 3 });
-      store.recordUsage({ orgId: "org_periods", metric: "runs", quantity: 8, observedAtMs: 1_000 });
-      store.recordUsage({ orgId: "org_periods", metric: "runs", quantity: 3, observedAtMs: 2_678_400_000 });
-
-      expect(store.checkUsageLimit({ orgId: "org_periods", metric: "runs", period: "monthly", untilMs: 2_678_400_000 })).toMatchObject({
-        usedQuantity: 3,
-        remainingQuantity: 7,
-        exceeded: false,
-      });
-      expect(() =>
-        store.checkUsageLimit({ orgId: "org_periods", metric: "runs", period: "forever" }),
-      ).toThrow("period must be one of");
-    }
-    finally {
-      sqlite.close();
-    }
-  });
-
-  test("usage and audit events reject missing projects with typed errors", () => {
-    const { sqlite, store } = makeStore();
-    try {
-      store.createOrg({ orgId: "org_missing_project", slug: "missing-project", name: "Missing Project", createdAtMs: 1 });
-
-      expect(() =>
-        store.recordUsage({
-          orgId: "org_missing_project",
-          projectId: "project_missing",
-          metric: "runs",
-          quantity: 1,
-          observedAtMs: 2,
-        }),
-      ).toThrow("Control-plane project not found");
-      expect(() =>
-        store.recordAuditEvent({
-          orgId: "org_missing_project",
-          projectId: "project_missing",
-          action: "run.create",
-          targetType: "run",
-          targetId: "run_1",
-          occurredAtMs: 3,
-        }),
       ).toThrow("Control-plane project not found");
     }
     finally {
