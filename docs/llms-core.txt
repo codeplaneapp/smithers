@@ -1419,7 +1419,7 @@ If no Gateway is reachable on the default local port, `bunx smithers-orchestrato
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[72]:
+commands[73]:
   - name: init
     purpose: Install the workflow pack into .smithers/ (local) or ~/.smithers/ (--global)
     flags[6]{name,short,type,default,desc}:
@@ -1964,11 +1964,21 @@ commands[72]:
       specPath,string,true,File path or URL to OpenAPI spec
   - name: token.issue
     purpose: Issue a local short-lived Gateway bearer token grant
-    flags[4]{name,short,type,default,desc}:
+    flags[6]{name,short,type,default,desc}:
       scopes,,string,run:read,Comma or space separated Gateway scopes
       role,,string,operator,Role recorded on the token grant
       user-id,,string,,User ID recorded on the token grant
       ttl,,string,1h,Token lifetime such as 15m or 1h
+      action-id,,string,gateway,Action id allowed to resolve the brokered action token
+      reveal-token,,boolean,false,Include the raw bearer token in CLI output
+  - name: token.exec
+    purpose: Resolve an action token locally and inject the bearer into a child process environment
+    flags[5]{name,short,type,default,desc}:
+      handle,,string,,Brokered action token handle
+      action-id,,string,gateway,Action id expected by the brokered token
+      scopes,,string,,Comma or space separated scopes required for this action
+      env,,string,SMITHERS_API_KEY,Environment variable that receives the bearer token
+      command,,string,,Shell command to run with the injected token
   - name: token.revoke
     purpose: Revoke a locally issued Gateway bearer token
     args[1]{name,type,required,desc}:

@@ -17,16 +17,22 @@ docker compose -f deploy/reference/docker-compose.yml up
 
 The Gateway listens on `7331` inside the compose network and Caddy exposes HTTP/TLS. The compose file mounts a SQLite volume at `/data` and reads short-lived bearer grants from `/data/tokens.json`. If `/data/tokens.json` does not exist, the Gateway starts with an empty in-memory token set and denies token auth until you mount or write a token store.
 
-Issue a local token grant:
+Issue a local token grant. By default, the command returns a scoped action handle and writes the bearer-keyed grant to the local token store without printing the bearer token. Use `--reveal-token` only for manual operator workflows that need to copy the raw bearer.
 
 ```bash
-bunx smithers-orchestrator token issue --scopes run:read,run:write,approval:submit --ttl 1h
+bunx smithers-orchestrator token issue --scopes run:read,run:write,approval:submit --ttl 1h --action-id gateway
 ```
 
-Copy the resulting grant into the token store used by the deployment. Revoke it with:
+Copy the resulting grant store entry into the token store used by the deployment. Revoking the bearer token also revokes its action handles and records the revocation in the audit trail:
 
 ```bash
 bunx smithers-orchestrator token revoke <token>
+```
+
+Automation can hand a broker handle to an action without exposing the bearer in model-visible context by resolving it locally and injecting the bearer only into the child process environment:
+
+```bash
+bunx smithers-orchestrator token exec --handle <action-handle> --action-id gateway --scopes run:read --command 'curl -H "Authorization: Bearer $SMITHERS_API_KEY" http://localhost:7331/v1/runs'
 ```
 
 ## Single Host
