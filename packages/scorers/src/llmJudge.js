@@ -12,12 +12,19 @@
  * in the `reason`) do not prematurely close the object.
  *
  * @param {string} text
- * @returns {Record<string, unknown> | undefined}
+ * @returns {Record<string, unknown> | unknown[] | number | undefined}
  */
 function parseJudgeJson(text) {
     const trimmed = text.trim();
     try {
-        return JSON.parse(trimmed);
+        const parsed = JSON.parse(trimmed);
+        if (typeof parsed === "number") {
+            return parsed;
+        }
+        if (parsed && typeof parsed === "object") {
+            return parsed;
+        }
+        return undefined;
     }
     catch {
         // fall through to balanced-brace extraction
@@ -108,7 +115,16 @@ export function llmJudge(config) {
         // text, then fall back to the outermost balanced-brace object so that a
         // brace inside the judge's `reason` string does not truncate the match.
         const parsed = parseJudgeJson(text);
-        if (parsed && typeof parsed === "object") {
+        if (typeof parsed === "number") {
+            return {
+                score: Number.isFinite(parsed)
+                    ? Math.max(0, Math.min(1, parsed))
+                    : 0,
+                reason: undefined,
+                meta: { raw: text },
+            };
+        }
+        if (parsed) {
             const rawScore = Number(parsed.score);
             return {
                 score: Number.isFinite(rawScore)
