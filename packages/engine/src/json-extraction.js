@@ -21,7 +21,7 @@ export function extractBalancedJson(str) {
             escape = true;
             continue;
         }
-        if (c === '"' && !escape) {
+        if (c === '"') {
             inString = !inString;
             continue;
         }
