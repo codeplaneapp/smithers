@@ -66,6 +66,24 @@ function makeDriver(overrides = {}) {
   });
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function waitFor(condition) {
+  for (let i = 0; i < 20; i += 1) {
+    if (condition())
+      return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
 describe("normalizeInputRow", () => {
   test("leaves primitives unchanged", () => {
     expect(normalizeInputRow(null)).toBeNull();
@@ -361,6 +379,36 @@ describe("SmithersCtx output access", () => {
     });
     expect(ctx.output("rows", { nodeId: "task", iteration: 0 }).value).toBe("exact");
   });
+
+  test("resolveRow falls back to an unscoped producer across loop boundaries", () => {
+    const ctx = makeCtx({
+      iteration: 3,
+      iterations: { outer: 3 },
+      outputs: {
+        rows: [
+          { nodeId: "upstream", iteration: 0, value: "outside-loop" },
+          { nodeId: "upstream@@outer=2", iteration: 0, value: "stale-loop" },
+        ],
+      },
+    });
+
+    expect(ctx.output("rows", { nodeId: "upstream" }).value).toBe("outside-loop");
+    expect(ctx.outputMaybe("rows", { nodeId: "upstream", iteration: 3 }))
+      .toBeUndefined();
+  });
+
+  test("recordDeferredDep stores valid deferred deps and ignores empty node ids", () => {
+    const ctx = makeCtx();
+
+    ctx.recordDeferredDep("", ["missing"]);
+    ctx.recordDeferredDep("blocked", ["missing"]);
+    ctx.recordDeferredDep("unknown", null);
+
+    expect(ctx._deferredDeps).toEqual([
+      { nodeId: "blocked", waitingOn: ["missing"] },
+      { nodeId: "unknown", waitingOn: [] },
+    ]);
+  });
 });
 
 describe("SmithersCtx latestArray", () => {
@@ -506,5 +554,236 @@ describe("WorkflowDriver", () => {
     const result = await driver.run({ runId: "run-unknown", input: {} });
     expect(result.status).toBe("failed");
     expect(result.error.message).toContain("Unknown engine decision");
+  });
+
+  test("fails finished runs with deferred deps as DEPENDENCY_DEADLOCK", async () => {
+    const driver = makeDriver({
+      workflow: {
+        db: null,
+        zodToKeyName: new Map(),
+        build: (ctx) => {
+          ctx.recordDeferredDep("blocked-task", ["missing-upstream"]);
+          return { ctx };
+        },
+      },
+      session: makeSession({
+        submitGraph: () => ({
+          _tag: "Finished",
+          result: { runId: "run-deadlock", status: "finished" },
+        }),
+      }),
+    });
+
+    const result = await driver.run({ runId: "run-deadlock", input: {} });
+
+    expect(result.status).toBe("failed");
+    expect(result.error.name).toBe("SmithersError");
+    expect(result.error.code).toBe("DEPENDENCY_DEADLOCK");
+    expect(result.error.message).toContain("'blocked-task' never ran");
+    expect(result.error.message).toContain("'missing-upstream'");
+  });
+
+  test("reports out-of-order task completions without waiting for slower siblings", async () => {
+    const slow = deferred();
+    const fast = deferred();
+    const completed = [];
+    const driver = makeDriver({
+      executeTask: (task) => task.nodeId === "slow" ? slow.promise : fast.promise,
+      session: makeSession({
+        taskCompleted: ({ nodeId, output }) => {
+          completed.push({ nodeId, output });
+          return completed.length === 1
+            ? { _tag: "Wait", reason: { _tag: "Event" } }
+            : { _tag: "Finished", result: { runId: "run-ooo", status: "finished" } };
+        },
+      }),
+    });
+    driver.activeRunId = "run-ooo";
+    driver.activeOptions = { input: {} };
+
+    const firstDecisionPromise = driver.executeTasks([
+      { nodeId: "slow", iteration: 0 },
+      { nodeId: "fast", iteration: 0 },
+    ]);
+    fast.resolve("fast-output");
+    const firstDecision = await firstDecisionPromise;
+
+    expect(firstDecision).toEqual({ _tag: "Wait", reason: { _tag: "Event" } });
+    expect(completed).toEqual([{ nodeId: "fast", output: "fast-output" }]);
+    expect(driver.inflightTasks.size).toBe(1);
+
+    const secondDecisionPromise = driver.handleWait({ _tag: "Event" });
+    slow.resolve("slow-output");
+    const secondDecision = await secondDecisionPromise;
+
+    expect(secondDecision).toEqual({
+      _tag: "Finished",
+      result: { runId: "run-ooo", status: "finished" },
+    });
+    expect(completed).toEqual([
+      { nodeId: "fast", output: "fast-output" },
+      { nodeId: "slow", output: "slow-output" },
+    ]);
+  });
+
+  test("reports failed task completions and falls back to getNextDecision", async () => {
+    const failure = new Error("executor failed");
+    const failed = [];
+    const driver = makeDriver({
+      executeTask: () => {
+        throw failure;
+      },
+      session: makeSession({
+        taskFailed: ({ nodeId, error }) => {
+          failed.push({ nodeId, error });
+          return undefined;
+        },
+        getNextDecision: () => ({
+          _tag: "Finished",
+          result: { runId: "run-failed-task", status: "finished" },
+        }),
+      }),
+    });
+    driver.activeRunId = "run-failed-task";
+    driver.activeOptions = { input: {} };
+
+    const decision = await driver.executeTasks([{ nodeId: "boom", iteration: 0 }]);
+
+    expect(decision).toEqual({
+      _tag: "Finished",
+      result: { runId: "run-failed-task", status: "finished" },
+    });
+    expect(failed).toEqual([{ nodeId: "boom", error: failure }]);
+  });
+
+  test("rerenders, continues as new, and drains in-flight work before terminal exits", async () => {
+    const slow = deferred();
+    const decisions = [
+      { _tag: "ReRender", context: { runId: "run-loop", iteration: 1, outputs: {} } },
+      { _tag: "Execute", tasks: [{ nodeId: "slow", iteration: 0 }] },
+      { _tag: "ContinueAsNew", transition: { next: true } },
+    ];
+    const driver = makeDriver({
+      executeTask: () => slow.promise,
+      continueAsNew: (transition, context) => ({
+        runId: context.runId,
+        status: "continued",
+        output: transition,
+      }),
+      session: makeSession({
+        submitGraph: () => decisions.shift(),
+        taskCompleted: () => decisions.shift(),
+      }),
+    });
+
+    const resultPromise = driver.run({ runId: "run-loop", input: {} });
+    await waitFor(() => driver.inflightTasks.size === 1);
+    expect(driver.inflightTasks.size).toBe(1);
+    slow.resolve("done");
+    const result = await resultPromise;
+
+    expect(result).toEqual({
+      runId: "run-loop",
+      status: "continued",
+      output: { next: true },
+    });
+    expect(driver.inflightTasks.size).toBe(0);
+  });
+
+  test("drains in-flight tasks before returning Failed decisions", async () => {
+    const slow = deferred();
+    const error = new Error("run failed");
+    const driver = makeDriver({
+      executeTask: () => slow.promise,
+      session: makeSession({
+        submitGraph: () => ({ _tag: "Execute", tasks: [{ nodeId: "slow", iteration: 0 }] }),
+        taskCompleted: () => ({ _tag: "Failed", error }),
+      }),
+    });
+
+    const resultPromise = driver.run({ runId: "run-failed", input: {} });
+    await waitFor(() => driver.inflightTasks.size === 1);
+    expect(driver.inflightTasks.size).toBe(1);
+    slow.resolve("done");
+    const result = await resultPromise;
+
+    expect(result).toEqual({ runId: "run-failed", status: "failed", error });
+    expect(driver.inflightTasks.size).toBe(0);
+  });
+
+  test("handles wait statuses, custom wait handlers, retry decisions, and timer fallback", async () => {
+    const approvalDriver = makeDriver();
+    approvalDriver.activeRunId = "run-wait";
+    await expect(approvalDriver.handleWait({ _tag: "Approval" }))
+      .resolves.toEqual({ runId: "run-wait", status: "waiting-approval" });
+    await expect(approvalDriver.handleWait({ _tag: "Event" }))
+      .resolves.toEqual({ runId: "run-wait", status: "waiting-event" });
+    await expect(approvalDriver.handleWait({ _tag: "Timer", resumeAtMs: Date.now() }))
+      .resolves.toEqual({ runId: "run-wait", status: "waiting-timer" });
+
+    const customDriver = makeDriver({
+      onWait: (reason, context) => ({
+        runId: context.runId,
+        status: "custom",
+        output: reason._tag,
+      }),
+    });
+    customDriver.activeRunId = "run-custom-wait";
+    await expect(customDriver.handleWait({ _tag: "HotReload" }))
+      .resolves.toEqual({ runId: "run-custom-wait", status: "custom", output: "HotReload" });
+
+    const retryDriver = makeDriver({
+      session: makeSession({
+        getNextDecision: () => ({
+          _tag: "Finished",
+          result: { runId: "run-retry", status: "finished" },
+        }),
+      }),
+    });
+    retryDriver.activeRunId = "run-retry";
+    retryDriver.activeOptions = { input: {} };
+    await expect(retryDriver.handleWait({ _tag: "RetryBackoff", waitMs: 0 }))
+      .resolves.toEqual({
+        _tag: "Finished",
+        result: { runId: "run-retry", status: "finished" },
+      });
+  });
+
+  test("cancels through session decisions and aborted execution", async () => {
+    const finishedCancelDriver = makeDriver({
+      session: makeSession({
+        cancelRequested: () => ({
+          _tag: "Finished",
+          result: { runId: "run-cancel", status: "finished", output: "cancelled-cleanly" },
+        }),
+      }),
+    });
+    finishedCancelDriver.activeRunId = "run-cancel";
+    await expect(finishedCancelDriver.cancelRun()).resolves.toEqual({
+      runId: "run-cancel",
+      status: "finished",
+      output: "cancelled-cleanly",
+    });
+
+    const failedCancelError = new Error("cancel failed");
+    const failedCancelDriver = makeDriver({
+      session: makeSession({
+        cancelRequested: () => ({ _tag: "Failed", error: failedCancelError }),
+      }),
+    });
+    failedCancelDriver.activeRunId = "run-cancel-failed";
+    await expect(failedCancelDriver.cancelRun()).resolves.toEqual({
+      runId: "run-cancel-failed",
+      status: "failed",
+      error: failedCancelError,
+    });
+
+    const controller = new AbortController();
+    controller.abort();
+    const abortedDriver = makeDriver();
+    abortedDriver.activeRunId = "run-aborted";
+    abortedDriver.activeOptions = { input: {}, signal: controller.signal };
+    await expect(abortedDriver.executeTasks([{ nodeId: "never", iteration: 0 }]))
+      .resolves.toEqual({ runId: "run-aborted", status: "cancelled" });
   });
 });
