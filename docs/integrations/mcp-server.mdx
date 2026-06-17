@@ -34,6 +34,18 @@ bunx smithers-orchestrator --mcp --surface both
 
 Use `--surface raw` only for direct CLI parity. Prefer the semantic surface for new integrations: every tool returns a `{ ok, data, error }` envelope with Zod-validated input and output schemas.
 
+Scope the semantic surface when a client should not receive every Smithers control tool:
+
+```bash
+# Expose only selected semantic tools
+bunx smithers-orchestrator --mcp --allowed-tools list_workflows,get_run
+
+# Expose only tools annotated as read-only
+bunx smithers-orchestrator --mcp --read-only
+```
+
+`--allowed-tools` accepts a comma-separated list of semantic tool names. Passing an empty allowlist intentionally exposes no semantic tools. `--read-only` removes semantic tools with write or control side effects, such as starting runs, resolving approvals, or reverting attempts. With `--surface both`, these controls apply to the semantic toolset only; raw CLI-mirroring tools are still registered by the raw surface.
+
 ### Register manually
 
 For clients that read JSON config directly:

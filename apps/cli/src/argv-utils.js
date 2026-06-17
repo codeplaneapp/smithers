@@ -2,6 +2,7 @@ const BUILTIN_FLAGS_WITH_VALUES = new Set([
     "--format",
     "--filter-output",
     "--surface",
+    "--allowed-tools",
     "--token-limit",
     "--token-offset",
 ]);
@@ -22,10 +23,27 @@ function normalizeMcpSurface(value) {
 }
 
 /**
+ * @param {string | undefined} value
+ * @returns {readonly string[]}
+ */
+function normalizeMcpAllowedTools(value) {
+    if (value === undefined) {
+        throw new Error("Missing value for --allowed-tools. Expected a comma-separated semantic tool allowlist.");
+    }
+    return value
+        .split(",")
+        .map((toolName) => toolName.trim())
+        .filter((toolName) => toolName.length > 0);
+}
+
+/**
  * @param {string[]} argv
  */
 export function parseMcpSurfaceArgv(argv) {
     let surface = "semantic";
+    /** @type {readonly string[] | undefined} */
+    let allowedTools;
+    let readOnly = false;
     const filtered = [];
     for (let index = 0; index < argv.length; index++) {
         const arg = argv[index];
@@ -38,9 +56,22 @@ export function parseMcpSurfaceArgv(argv) {
             surface = normalizeMcpSurface(arg.slice("--surface=".length));
             continue;
         }
+        if (arg === "--allowed-tools") {
+            allowedTools = normalizeMcpAllowedTools(argv[index + 1]);
+            index += 1;
+            continue;
+        }
+        if (arg.startsWith("--allowed-tools=")) {
+            allowedTools = normalizeMcpAllowedTools(arg.slice("--allowed-tools=".length));
+            continue;
+        }
+        if (arg === "--read-only") {
+            readOnly = true;
+            continue;
+        }
         filtered.push(arg);
     }
-    return { surface, argv: filtered };
+    return { surface, argv: filtered, allowedTools, readOnly };
 }
 
 /**
