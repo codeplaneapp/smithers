@@ -548,32 +548,61 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
       sqlite.close();
     }
   });
-
-  test("foreign keys prevent orphan projects and cascade org deletion", () => {
+  test("usage and audit events reject missing projects with typed errors", () => {
     const { sqlite, store } = makeStore();
     try {
+      store.createOrg({ orgId: "org_missing_project", slug: "missing-project", name: "Missing Project", createdAtMs: 1 });
+
       expect(() =>
-        store.createProject({
-          orgId: "missing",
+        store.recordUsage({
+          orgId: "org_missing_project",
           projectId: "project_missing",
-          slug: "missing",
-          name: "Missing",
+          metric: "runs",
+          quantity: 1,
+          observedAtMs: 2,
         }),
-      ).toThrow();
-
-      store.createOrg({ orgId: "org_delete", slug: "delete", name: "Delete", createdAtMs: 1 });
-      store.createProject({ orgId: "org_delete", projectId: "project_delete", slug: "project", name: "Project", createdAtMs: 2 });
-      store.recordUsage({ orgId: "org_delete", projectId: "project_delete", metric: "runs", quantity: 1, observedAtMs: 3 });
-
-      sqlite.query("DELETE FROM _smithers_cp_orgs WHERE org_id = ?").run("org_delete");
-      expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_projects").get().count).toBe(0);
-      expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_usage_events").get().count).toBe(0);
-      expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_audit_events").get().count).toBe(0);
+      ).toThrow("Control-plane project not found");
+      expect(() =>
+        store.recordAuditEvent({
+          orgId: "org_missing_project",
+          projectId: "project_missing",
+          action: "run.create",
+          targetType: "run",
+          targetId: "run_1",
+          occurredAtMs: 3,
+        }),
+      ).toThrow("Control-plane project not found");
     }
     finally {
       sqlite.close();
     }
   });
+
+  test("foreign keys prevent orphan projects and cascade org deletion", () => {
+  const { sqlite, store } = makeStore();
+  try {
+    expect(() =>
+      store.createProject({
+        orgId: "missing",
+        projectId: "project_missing",
+        slug: "missing",
+        name: "Missing",
+      }),
+    ).toThrow();
+
+    store.createOrg({ orgId: "org_delete", slug: "delete", name: "Delete", createdAtMs: 1 });
+    store.createProject({ orgId: "org_delete", projectId: "project_delete", slug: "project", name: "Project", createdAtMs: 2 });
+    store.recordUsage({ orgId: "org_delete", projectId: "project_delete", metric: "runs", quantity: 1, observedAtMs: 3 });
+
+    sqlite.query("DELETE FROM _smithers_cp_orgs WHERE org_id = ?").run("org_delete");
+    expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_projects").get().count).toBe(0);
+    expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_usage_events").get().count).toBe(0);
+    expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_audit_events").get().count).toBe(0);
+  }
+  finally {
+    sqlite.close();
+  }
+});
 
   test("unique constraints reject duplicate org and project identities", () => {
     const { sqlite, store } = makeStore();
