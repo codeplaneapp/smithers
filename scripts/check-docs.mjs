@@ -2674,6 +2674,32 @@ function checkWatchAndSteerDocsMatchCurrentUiSurface() {
   }
 }
 
+function checkReadmeAvoidsDeprecatedRalphPromotion() {
+  const readme = readFileSync(README, "utf8");
+  const required = [
+    "![Live workflow runs: some succeeded, some running, some paused on an approval gate, every run resumable and rewindable.]",
+    "| `<Loop>`     | Repeat tasks until a condition is met  |",
+    "<Loop until={ctx.latest(\"validate\")?.approved} maxIterations={5}>",
+    "</Loop>",
+  ];
+  const forbidden = [
+    "![Live runs in Smithers Studio:",
+    "| `<Ralph>`    | Loop until a condition is met  |",
+    "<Ralph until=",
+    "</Ralph>",
+  ];
+  const missing = required.filter((needle) => !readme.includes(needle));
+  const stale = forbidden.filter((needle) => readme.includes(needle));
+  if (missing.length || stale.length) {
+    failed = true;
+    console.error("\n✗ README must avoid stale Studio alt text and deprecated Ralph promotion:");
+    if (missing.length) console.error(`    missing: ${missing.map((needle) => `README.md:${needle}`).join(", ")}`);
+    if (stale.length) console.error(`    stale: ${stale.map((needle) => `README.md:${needle}`).join(", ")}`);
+  } else {
+    console.log("✓ README uses current hero alt text and Loop primitive guidance");
+  }
+}
+
 function checkCliOverviewCommandCatalogMatchesCli() {
   const docs = readFileSync(CLI_OVERVIEW, "utf8");
   const block = docs.match(/```toon\ncommands\[(\d+)\]:\n([\s\S]*?)\n```/);
@@ -3874,6 +3900,7 @@ checkPiPluginDocsMatchPackageRuntime();
 checkVcsHelperDocsMatchCurrentExports();
 checkTimeTravelDocsMatchCurrentExports();
 checkWatchAndSteerDocsMatchCurrentUiSurface();
+checkReadmeAvoidsDeprecatedRalphPromotion();
 checkCliOverviewCommandCatalogMatchesCli();
 checkCliOverviewWorkflowRunFlagsMatchSchema();
 checkToolDocsMatchCurrentRuntimeLogging();
