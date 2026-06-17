@@ -16,7 +16,7 @@ export function useGatewayWorkflows(params: ListWorkflowsRequest = {}): GatewayA
   const live = useLiveQuery((q) => q.from({ row: collection }), [collection]);
   const refetch = useCallback(async () => {
     await registry.invalidate(gatewayKeys.workflows(params.filter));
-  }, [registry, collection]);
+  }, [registry, collection, params]);
 
   const data = (live.data ?? []) as GatewayWorkflowRow[] as ListWorkflowsResponse;
   return {

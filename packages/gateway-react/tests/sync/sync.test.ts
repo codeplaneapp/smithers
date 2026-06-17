@@ -4,6 +4,8 @@
 // the only seam is a fake `SyncTransport` whose rpc/stream handlers return real
 // promises and real async iterables (no hook logic is faked).
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // happy-dom errors if registered twice across test files in the same bun run.
 if (typeof globalThis.document === "undefined") {
@@ -487,6 +489,23 @@ describe("useGatewayRunStream", () => {
 });
 
 describe("legacy synced hooks over collections", () => {
+  test("list hook refetch callbacks depend on params", () => {
+    const hooks = [
+      "useGatewayApprovals.ts",
+      "useGatewayRuns.ts",
+      "useGatewayWorkflows.ts",
+    ];
+
+    for (const hook of hooks) {
+      const source = readFileSync(
+        fileURLToPath(new URL(`../../src/${hook}`, import.meta.url)),
+        "utf8",
+      );
+      expect(source).toContain("const refetch = useCallback(async () => {");
+      expect(source).toMatch(/\}, \[[^\]]*\bparams\b[^\]]*\]\);/);
+    }
+  });
+
   test("useGatewayRuns lists rows from listRuns", async () => {
     const registry = createGatewayCollections({
       client: makeTransport((method) => {
