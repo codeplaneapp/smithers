@@ -1,0 +1,15 @@
+export type SemanticToolName =
+    | "list_workflows"
+    | "run_workflow"
+    | "list_runs"
+    | "get_run"
+    | "watch_run"
+    | "explain_run"
+    | "list_pending_approvals"
+    | "resolve_approval"
+    | "ask_human"
+    | "get_node_detail"
+    | "revert_attempt"
+    | "list_artifacts"
+    | "get_chat_transcript"
+    | "get_run_events";

@@ -6360,6 +6360,8 @@ async function main() {
                 const server = createSemanticMcpServer({
                     name: "smithers",
                     version: readPackageVersion(),
+                    allowedTools: mcpArgs.allowedTools,
+                    readOnly: mcpArgs.readOnly,
                 });
                 if (mcpArgs.surface === "both") {
                     registerRawToolsOnMcpServer(server);
