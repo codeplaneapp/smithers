@@ -29,22 +29,49 @@ describe("protocol runtime constants", () => {
   });
 
   test("node output error codes cover malformed rows and payload limits", () => {
-    expect(NODE_OUTPUT_ERROR_CODES).toContain("MalformedOutputRow");
-    expect(NODE_OUTPUT_ERROR_CODES).toContain("PayloadTooLarge");
-    expect(NODE_OUTPUT_ERROR_CODES).toContain("SchemaConversionError");
+    expect(NODE_OUTPUT_ERROR_CODES).toEqual([
+      "InvalidRunId",
+      "InvalidNodeId",
+      "InvalidIteration",
+      "RunNotFound",
+      "NodeNotFound",
+      "IterationNotFound",
+      "NodeHasNoOutput",
+      "SchemaConversionError",
+      "MalformedOutputRow",
+      "PayloadTooLarge",
+    ]);
   });
 
   test("node diff error codes cover dirty worktrees and attempt states", () => {
-    expect(NODE_DIFF_ERROR_CODES).toContain("WorkingTreeDirty");
-    expect(NODE_DIFF_ERROR_CODES).toContain("AttemptNotFound");
-    expect(NODE_DIFF_ERROR_CODES).toContain("AttemptNotFinished");
+    expect(NODE_DIFF_ERROR_CODES).toEqual([
+      "InvalidRunId",
+      "InvalidNodeId",
+      "InvalidIteration",
+      "RunNotFound",
+      "NodeNotFound",
+      "AttemptNotFound",
+      "AttemptNotFinished",
+      "VcsError",
+      "WorkingTreeDirty",
+      "DiffTooLarge",
+    ]);
   });
 
   test("jump-to-frame error codes cover confirmation busy rate-limit and auth paths", () => {
-    expect(JUMP_TO_FRAME_ERROR_CODES).toContain("ConfirmationRequired");
-    expect(JUMP_TO_FRAME_ERROR_CODES).toContain("Busy");
-    expect(JUMP_TO_FRAME_ERROR_CODES).toContain("RateLimited");
-    expect(JUMP_TO_FRAME_ERROR_CODES).toContain("Unauthorized");
+    expect(JUMP_TO_FRAME_ERROR_CODES).toEqual([
+      "InvalidRunId",
+      "InvalidFrameNo",
+      "RunNotFound",
+      "FrameOutOfRange",
+      "ConfirmationRequired",
+      "Busy",
+      "UnsupportedSandbox",
+      "VcsError",
+      "RewindFailed",
+      "RateLimited",
+      "Unauthorized",
+    ]);
   });
 
   test("all error code lists are duplicate-free", () => {
