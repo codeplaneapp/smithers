@@ -45,6 +45,16 @@ describe("jsonSchemaToZod", () => {
         expect(() => schema.parse(-1)).toThrow();
         expect(() => schema.parse(101)).toThrow();
     });
+    test("converts number and integer enums", () => {
+        const numeric = jsonSchemaToZod({ type: "number", enum: [1.5, 2.5] }, emptySpec);
+        expect(numeric.parse(1.5)).toBe(1.5);
+        expect(() => numeric.parse(3.5)).toThrow();
+
+        const integer = jsonSchemaToZod({ type: "integer", enum: [1, 2] }, emptySpec);
+        expect(integer.parse(2)).toBe(2);
+        expect(() => integer.parse(3)).toThrow();
+        expect(() => integer.parse(1.5)).toThrow();
+    });
     test("converts boolean type", () => {
         const schema = jsonSchemaToZod({ type: "boolean" }, emptySpec);
         expect(schema.parse(true)).toBe(true);
@@ -111,6 +121,13 @@ describe("jsonSchemaToZod", () => {
     test("handles unknown type as z.any()", () => {
         const schema = jsonSchemaToZod({ description: "mysterious" }, emptySpec);
         expect(schema.parse("anything")).toBe("anything");
+    });
+    test("converts typeless enum", () => {
+        const schema = jsonSchemaToZod({ enum: ["draft", "published", 1, null] }, emptySpec);
+        expect(schema.parse("draft")).toBe("draft");
+        expect(schema.parse(1)).toBe(1);
+        expect(schema.parse(null)).toBe(null);
+        expect(() => schema.parse("archived")).toThrow();
     });
     test("converts composed schemas and unions", () => {
         const allOf = jsonSchemaToZod({

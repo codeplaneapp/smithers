@@ -76,6 +76,9 @@ export function jsonSchemaToZod(schema, spec, visited = new Set()) {
         return maybeDescribe(z.null(), s);
     }
     // Fallback
+    if (s.enum && s.enum.length > 0) {
+        return maybeDescribe(buildLiteralUnion(s.enum), s);
+    }
     const desc = s.description ? `${s.description} (untyped)` : "untyped schema";
     return z.any().describe(desc);
 }
@@ -120,6 +123,9 @@ function buildNumber(s) {
         num = num.min(s.minimum);
     if (s.maximum !== undefined)
         num = num.max(s.maximum);
+    if (s.enum && s.enum.length > 0) {
+        num = z.intersection(num, buildLiteralUnion(s.enum));
+    }
     return maybeDescribe(maybeNullable(maybeDefault(num, s), s), s);
 }
 /**
@@ -165,6 +171,16 @@ function buildUnion(variants, spec, visited, parent) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+/**
+ * @param {unknown[]} values
+ * @returns {z.ZodType}
+ */
+function buildLiteralUnion(values) {
+    const literals = values.map((value) => z.literal(value));
+    if (literals.length === 1)
+        return literals[0];
+    return z.union(literals);
+}
 /**
  * @param {z.ZodType} schema
  * @param {SchemaObject} s
