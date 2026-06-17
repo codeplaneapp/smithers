@@ -220,7 +220,11 @@ function describeDeadlock(state) {
             }
             else {
                 const depState = state.states.get(stateKeyFor(dep)) ?? "pending";
-                unmet.push(`'${depId}' (${depState})`);
+                if (depState !== "finished" &&
+                    depState !== "skipped" &&
+                    !(depState === "failed" && dep.continueOnFail)) {
+                    unmet.push(`'${depId}' (${depState})`);
+                }
             }
         }
         if (unmet.length > 0) {

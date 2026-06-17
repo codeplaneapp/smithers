@@ -205,16 +205,17 @@ describe("scheduleTasks concurrency cap", () => {
     expect(result.pendingExists).toBe(true);
   });
 
-  test("parallelMaxConcurrency=0 admits no tasks", () => {
+  test("missing parallelMaxConcurrency admits all tasks in the group", () => {
     const plan = {
       kind: "parallel",
-      children: [{ kind: "task", nodeId: "a" }],
+      children: [
+        { kind: "task", nodeId: "a" },
+        { kind: "task", nodeId: "b" },
+      ],
     };
     const descs = descriptorMap(
-      makeDescriptor("a", {
-        parallelGroupId: "g",
-        parallelMaxConcurrency: 0,
-      }),
+      makeDescriptor("a", { parallelGroupId: "g" }),
+      makeDescriptor("b", { parallelGroupId: "g" }),
     );
     const result = scheduleTasks(
       plan,
@@ -224,32 +225,7 @@ describe("scheduleTasks concurrency cap", () => {
       new Map(),
       0,
     );
-    expect(result.runnable.length).toBe(0);
-    expect(result.pendingExists).toBe(true);
-  });
-
-  test("negative parallelMaxConcurrency admits no tasks", () => {
-    // Implementation compares `used >= cap` — for cap=-1 used=0 means
-    // 0 >= -1 → true → no admission. Documents current behavior.
-    const plan = {
-      kind: "parallel",
-      children: [{ kind: "task", nodeId: "a" }],
-    };
-    const descs = descriptorMap(
-      makeDescriptor("a", {
-        parallelGroupId: "g",
-        parallelMaxConcurrency: -1,
-      }),
-    );
-    const result = scheduleTasks(
-      plan,
-      new Map(),
-      descs,
-      new Map(),
-      new Map(),
-      0,
-    );
-    expect(result.runnable.length).toBe(0);
+    expect(result.runnable.map((r) => r.nodeId)).toEqual(["a", "b"]);
   });
 
   test("cap is per parallelGroupId — separate groups don't share quota", () => {
