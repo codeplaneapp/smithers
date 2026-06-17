@@ -10,8 +10,12 @@
  * throwaway schema that is dropped afterwards).
  */
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import pg from "pg";
+import { z } from "zod";
+import { SmithersDb } from "../src/adapter.js";
 import { SqlMessageStorage } from "../src/sql-message-storage.js";
+import { zodToTable } from "../src/zodToTable.js";
 
 // node-postgres returns int8 (BIGINT) as a string by default to avoid precision
 // loss; Smithers stores millisecond timestamps and booleans in BIGINT columns
@@ -172,5 +176,47 @@ describe("SqlMessageStorage postgres dialect", () => {
     test("listEventHistory honors the IN (...) type filter", async () => {
         const rows = await storage.listEventHistory("run-1", { types: ["node.started"] });
         expect(rows.length).toBe(2);
+    });
+
+    test("SmithersDb exercises postgres output row adapter branches", async () => {
+        await storage.execute(`DROP TABLE IF EXISTS "pg_adapter_output"`);
+        await storage.execute(`
+            CREATE TABLE "pg_adapter_output" (
+                run_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                iteration BIGINT NOT NULL,
+                title TEXT NOT NULL,
+                approved BIGINT NOT NULL,
+                PRIMARY KEY (run_id, node_id, iteration)
+            )
+        `);
+        const table = zodToTable("pg_adapter_output", z.object({
+            title: z.string(),
+            approved: z.boolean(),
+        }));
+        const adapter = new SmithersDb(new Database(":memory:"));
+        adapter.internalStorage = storage;
+        adapter.db = { _: { fullSchema: { pgAdapterOutput: table } } };
+
+        await adapter.upsertOutputRow(table, { runId: "run-pg", nodeId: "node", iteration: 0 }, {
+            title: "first",
+            approved: false,
+        });
+        await adapter.upsertOutputRow(table, { runId: "run-pg", nodeId: "node", iteration: 0 }, {
+            title: "second",
+            approved: true,
+        });
+
+        const row = await adapter.getRawNodeOutputForIteration("pg_adapter_output", "run-pg", "node", 0);
+        expect(row).toMatchObject({
+            run_id: "run-pg",
+            node_id: "node",
+            iteration: 0,
+            title: "second",
+            approved: true,
+        });
+
+        await adapter.deleteOutputRow("pg_adapter_output", { runId: "run-pg", nodeId: "node", iteration: 0 });
+        expect(await adapter.getRawNodeOutputForIteration("pg_adapter_output", "run-pg", "node", 0)).toBeNull();
     });
 });

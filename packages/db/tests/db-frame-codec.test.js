@@ -72,4 +72,18 @@ describe("frame-codec", () => {
         expect(delta.ops).toEqual([]);
         expect(applyFrameDelta(xml, delta)).toBe(xml);
     });
+    test("rejects unsupported serialized delta versions", () => {
+        expect(() => parseFrameDelta(JSON.stringify({ version: 2, ops: [] }))).toThrow(/Unsupported frame delta version/);
+    });
+    test("rejects invalid path operations", () => {
+        const xml = canonicalizeXml(workflowNode([taskNode("plan::0", "pending")]));
+        expect(() => applyFrameDelta(xml, {
+            version: 1,
+            ops: [{ op: "insert", path: ["props", "name"], value: "bad" }],
+        })).toThrow(/Invalid insert path/);
+        expect(() => applyFrameDelta(xml, {
+            version: 1,
+            ops: [{ op: "replace", path: ["children", 0], value: null }],
+        })).toThrow(/Invalid frame delta op/);
+    });
 });

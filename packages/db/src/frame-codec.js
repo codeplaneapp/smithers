@@ -240,7 +240,11 @@ function applyOps(root, ops) {
             current = insertAtPath(current, op.path, op.value);
             continue;
         }
-        current = removeAtPath(current, op.path);
+        if (op.op === "remove") {
+            current = removeAtPath(current, op.path);
+            continue;
+        }
+        throw new Error(`Invalid frame delta op: ${String(op.op)}`);
     }
     return current;
 }
