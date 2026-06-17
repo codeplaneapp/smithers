@@ -72,6 +72,7 @@ import { WATCH_MIN_INTERVAL_MS, runWatchLoop, watchIntervalSecondsToMs, } from "
 import { createSemanticMcpServer } from "./mcp/semantic-server.js";
 import { issueSmithersBrokerToken, parseTokenScopes, readSmithersTokenStore, resolveSmithersActionTokenFromStore, revokeSmithersToken, smithersTokenStorePath, writeSmithersTokenStore, } from "./token-store.js";
 import { resolveSmithersDocsSource } from "./docs-command.js";
+import { reportReplayResult } from "./reportReplayResult.js";
 import pc from "picocolors";
 import crypto from "node:crypto";
 import React from "react";
@@ -5418,10 +5419,11 @@ const cli = Cli.create({
                     branchLabel: c.options.label,
                     restoreVcs: c.options.restoreVcs,
                 });
-                process.stderr.write(`[smithers] Forked run ${result.runId} from ${c.options.runId}:${c.options.frame}\n`);
-                if (result.vcsRestored) {
-                    process.stderr.write(`[smithers] VCS state restored to ${result.vcsPointer}\n`);
-                }
+                reportReplayResult({
+                    result,
+                    parentRunId: c.options.runId,
+                    parentFrame: c.options.frame,
+                });
                 // Now resume the forked run
                 process.stderr.write(`[smithers] Resuming forked run...\n`);
                 const workflow = await loadWorkflow(c.args.workflow);
