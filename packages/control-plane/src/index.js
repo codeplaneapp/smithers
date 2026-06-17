@@ -290,7 +290,16 @@ function parseJsonObject(value) {
     if (typeof value !== "string" || value.trim().length === 0) {
         return {};
     }
-    const parsed = JSON.parse(value);
+    let parsed;
+    try {
+        parsed = JSON.parse(value);
+    }
+    catch (error) {
+        console.warn("control-plane: ignoring malformed metadata_json.", {
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return {};
+    }
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
 }
 
