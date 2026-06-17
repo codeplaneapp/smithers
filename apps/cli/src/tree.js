@@ -237,8 +237,7 @@ export async function runTreeWatch(input) {
                         attempt = 0;
                     } else if (event.kind === "delta" && snapshot) {
                         try {
-                            const nextRoot = applyDelta(snapshot.root, event.delta);
-                            snapshot = { ...snapshot, root: nextRoot, seq: event.delta.seq };
+                            snapshot = applyDelta(snapshot, event.delta);
                             emit(snapshot);
                             attempt = 0;
                         } catch (err) {

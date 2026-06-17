@@ -49,11 +49,48 @@ function makeStream() {
     };
 }
 
+function makeStreamWithWriteHook(onWrite) {
+    let out = "";
+    return {
+        write(chunk) {
+            out += String(chunk);
+            onWrite(out);
+        },
+        get value() { return out; },
+    };
+}
+
+function workflowFrameXml(taskState) {
+    return JSON.stringify({
+        kind: "element",
+        tag: "smithers:workflow",
+        props: { name: "watch-delta-fixture" },
+        children: [
+            {
+                kind: "element",
+                tag: "smithers:task",
+                props: { id: "task-a::0", state: taskState },
+                children: [],
+            },
+        ],
+    });
+}
+
 async function openMemoryDb() {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);
     ensureSmithersTables(db);
     return { sqlite, adapter: new SmithersDb(db) };
+}
+
+async function insertFrame(adapter, runId, frameNo, taskState) {
+    await adapter.insertFrame({
+        runId,
+        frameNo,
+        createdAtMs: Date.now(),
+        xmlHash: `hash-${frameNo}`,
+        xmlJson: workflowFrameXml(taskState),
+    });
 }
 
 describe("renderDevToolsTree", () => {
@@ -206,6 +243,53 @@ describe("runTreeOnce", () => {
                 abortSignal: abort.signal,
             });
             expect(result.exitCode).toBe(130);
+        } finally {
+            sqlite.close();
+        }
+    });
+
+    test("--watch applies the first delta to the full snapshot without crashing", async () => {
+        const { sqlite, adapter } = await openMemoryDb();
+        await adapter.insertRun({
+            runId: "watch-delta-run",
+            workflowName: "wf",
+            status: "running",
+            createdAtMs: 1_000,
+            startedAtMs: 1_000,
+            finishedAtMs: null,
+        });
+        await insertFrame(adapter, "watch-delta-run", 0, "pending");
+        const abort = new AbortController();
+        const stderr = makeStream();
+        let insertedDeltaFrame = false;
+        const stdout = makeStreamWithWriteHook((value) => {
+            const lines = value.trim().split("\n").filter(Boolean);
+            if (lines.length >= 1 && !insertedDeltaFrame) {
+                insertedDeltaFrame = true;
+                void insertFrame(adapter, "watch-delta-run", 1, "finished");
+            }
+            if (lines.length >= 2) {
+                abort.abort();
+            }
+        });
+        try {
+            const result = await runTreeWatch({
+                adapter,
+                runId: "watch-delta-run",
+                json: true,
+                watch: true,
+                color: false,
+                stdout,
+                stderr,
+                abortSignal: abort.signal,
+            });
+            expect(result.exitCode).toBe(130);
+            expect(stderr.value).not.toContain("InvalidDelta");
+            const snapshots = stdout.value.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+            expect(snapshots).toHaveLength(2);
+            expect(snapshots[0].seq).toBe(0);
+            expect(snapshots[1].seq).toBe(1);
+            expect(snapshots[1].root.children[0].props.state).toBe("finished");
         } finally {
             sqlite.close();
         }
