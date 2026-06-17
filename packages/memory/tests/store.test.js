@@ -3,6 +3,8 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createMemoryStore } from "../src/store/index.js";
+import { namespaceToString } from "../src/namespaceToString.js";
+import { parseNamespace } from "../src/parseNamespace.js";
 function createTestDb() {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);
@@ -62,6 +64,18 @@ describe("MemoryStore - Working Memory", () => {
         const fact = await store.getFact(WF_NS, "ephemeral");
         expect(fact.ttlMs).toBe(5000);
     });
+    test("setFact with ttlMs=0 stores and expires the fact", async () => {
+        await store.setFact(WF_NS, "immediate", "temp", 0);
+        const stored = await store.getFact(WF_NS, "immediate");
+        expect(stored.ttlMs).toBe(0);
+        await new Promise((r) => setTimeout(r, 1));
+        const deleted = await store.deleteExpiredFacts();
+        expect(deleted).toBeGreaterThanOrEqual(1);
+        await expect(store.getFact(WF_NS, "immediate")).resolves.toBeUndefined();
+    });
+    test("setFact rejects undefined values as a wrapped write failure", async () => {
+        await expect(store.setFact(WF_NS, "undefined", undefined)).rejects.toThrow(/memory setFact|DB_WRITE_FAILED/);
+    });
     test("deleteExpiredFacts removes expired facts", async () => {
         // Set a fact with very short TTL in the past
         await store.setFact(WF_NS, "expired", "old", 1);
@@ -100,6 +114,50 @@ describe("MemoryStore - Working Memory", () => {
             },
         });
         await expect(writeStore.setFact(WF_NS, "x", 1)).rejects.toThrow(/memory setFact|DB_WRITE_FAILED/);
+    });
+    test("wraps store operation failures with operation-specific Smithers errors", async () => {
+        const cases = [
+            ["getFact", (brokenStore) => brokenStore.getFact(WF_NS, "x"), /memory getFact|DB_QUERY_FAILED/],
+            ["setFact", (brokenStore) => brokenStore.setFact(WF_NS, "x", 1), /memory setFact|DB_WRITE_FAILED/],
+            ["deleteFact", (brokenStore) => brokenStore.deleteFact(WF_NS, "x"), /memory deleteFact|DB_WRITE_FAILED/],
+            ["listFacts", (brokenStore) => brokenStore.listFacts(WF_NS), /memory listFacts|DB_QUERY_FAILED/],
+            ["createThread", (brokenStore) => brokenStore.createThread(WF_NS), /memory createThread|DB_WRITE_FAILED/],
+            ["getThread", (brokenStore) => brokenStore.getThread("thread-1"), /memory getThread|DB_QUERY_FAILED/],
+            ["deleteThread", (brokenStore) => brokenStore.deleteThread("thread-1"), /memory deleteThreadMessages|DB_WRITE_FAILED/],
+            [
+                "saveMessage",
+                (brokenStore) => brokenStore.saveMessage({
+                    id: "msg-1",
+                    threadId: "thread-1",
+                    role: "user",
+                    contentJson: '"hello"',
+                }),
+                /memory saveMessage|DB_WRITE_FAILED/,
+            ],
+            ["listMessages", (brokenStore) => brokenStore.listMessages("thread-1"), /memory listMessages|DB_QUERY_FAILED/],
+            ["countMessages", (brokenStore) => brokenStore.countMessages("thread-1"), /memory countMessages|DB_QUERY_FAILED/],
+            ["deleteExpiredFacts", (brokenStore) => brokenStore.deleteExpiredFacts(), /memory deleteExpiredFacts|DB_WRITE_FAILED/],
+        ];
+
+        for (const [name, operation, expected] of cases) {
+            const { db, sqlite } = createTestDb();
+            const brokenStore = createMemoryStore(db);
+            sqlite.close();
+            await expect(operation(brokenStore), name).rejects.toThrow(expected);
+        }
+    });
+    test("deleteExpiredFacts uses rowsAffected when a driver does not expose changes", async () => {
+        const storeWithRowsAffected = createMemoryStore({
+            delete() {
+                return {
+                    where() {
+                        return Promise.resolve({ rowsAffected: 7 });
+                    },
+                };
+            },
+        });
+
+        await expect(storeWithRowsAffected.deleteExpiredFacts()).resolves.toBe(7);
     });
 });
 describe("MemoryStore - Threads", () => {
@@ -180,6 +238,18 @@ describe("MemoryStore - Messages", () => {
         const messages = await store.listMessages(thread.threadId, 3);
         expect(messages).toHaveLength(3);
     });
+    test("listMessages with limit=0 returns no messages", async () => {
+        const thread = await store.createThread(WF_NS);
+        await store.saveMessage({
+            id: "msg-1",
+            threadId: thread.threadId,
+            role: "user",
+            contentJson: '"hello"',
+        });
+
+        const messages = await store.listMessages(thread.threadId, 0);
+        expect(messages).toEqual([]);
+    });
     test("countMessages", async () => {
         const thread = await store.createThread(WF_NS);
         expect(await store.countMessages(thread.threadId)).toBe(0);
@@ -196,5 +266,16 @@ describe("MemoryStore - Messages", () => {
             contentJson: '"response"',
         });
         expect(await store.countMessages(thread.threadId)).toBe(2);
+    });
+});
+describe("Memory namespace codec", () => {
+    test("roundtrips percent-encoded ids for enumerated namespace kinds", () => {
+        for (const kind of ["workflow", "agent", "user", "global"]) {
+            const namespace = { kind, id: `prefix%:${kind}:suffix%25` };
+            const encoded = namespaceToString(namespace);
+            expect(encoded).toContain("%25");
+            expect(encoded).toContain("%3A");
+            expect(parseNamespace(encoded)).toEqual(namespace);
+        }
     });
 });
