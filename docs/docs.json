@@ -159,6 +159,7 @@
               "workflows/triage-run",
               "workflows/report-slideshow",
               "workflows/monitor-smithers",
+              "workflows/monitor",
               "workflows/eval-author"
             ]
           }
