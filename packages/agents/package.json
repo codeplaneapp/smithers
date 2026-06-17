@@ -45,6 +45,11 @@
       "import": "./src/document-parsing/createDocumentParsingToolset.js",
       "default": "./src/document-parsing/createDocumentParsingToolset.js"
     },
+    "./image-generation/createImageGenerationTool": {
+      "types": "./src/image-generation/createImageGenerationTool.d.ts",
+      "import": "./src/image-generation/createImageGenerationTool.js",
+      "default": "./src/image-generation/createImageGenerationTool.js"
+    },
     "./*": {
       "types": "./src/index.d.ts",
       "import": "./src/*.js",

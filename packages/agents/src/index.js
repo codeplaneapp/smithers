@@ -37,6 +37,10 @@
 /** @typedef {import("./cli-surface/CliAgentSurfaceTypes.ts").CliAgentSurfaceOptionMapping} CliAgentSurfaceOptionMapping */
 /** @typedef {import("./cli-surface/CliAgentSurfaceTypes.ts").CliAgentSurfaceResumeContract} CliAgentSurfaceResumeContract */
 /** @typedef {import("./cli-surface/CliAgentSurfaceTypes.ts").CliAgentUnsupportedFlag} CliAgentUnsupportedFlag */
+/** @typedef {import("./image-generation/ImageGenerationProvider.ts").ImageGenerationProvider} ImageGenerationProvider */
+/** @typedef {import("./image-generation/ImageGenerationRequest.ts").ImageGenerationRequest} ImageGenerationRequest */
+/** @typedef {import("./image-generation/ImageGenerationResult.ts").ImageGenerationResult} ImageGenerationResult */
+/** @typedef {import("./image-generation/ImageGenerationToolOptions.ts").ImageGenerationToolOptions} ImageGenerationToolOptions */
 // @smithers-type-exports-end
 
 export { BaseCliAgent } from "./BaseCliAgent/index.js";
@@ -66,5 +70,6 @@ export {
 } from "./cli-capabilities/index.js";
 export { createSmithersAgentContract } from "./agent-contract/createSmithersAgentContract.js";
 export { renderSmithersAgentPromptGuidance } from "./agent-contract/renderSmithersAgentPromptGuidance.js";
+export { createImageGenerationTool } from "./image-generation/createImageGenerationTool.js";
 export { zodToOpenAISchema } from "./zodToOpenAISchema.js";
 export { sanitizeForOpenAI } from "./sanitizeForOpenAI.js";
