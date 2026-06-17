@@ -335,6 +335,33 @@ function projectKey(projectId) {
 }
 
 /**
+ * @param {unknown} error
+ * @param {string} constraint
+ */
+function isUniqueConstraintError(error, constraint) {
+    return error instanceof Error && error.message.includes(`UNIQUE constraint failed: ${constraint}`);
+}
+
+/**
+ * @param {unknown} error
+ * @param {{ entity: "org" | "team" | "project"; slug: string; orgId?: string }} input
+ */
+function throwDuplicateSlugError(error, input) {
+    const details = {
+        kind: `control-plane.${input.entity}`,
+        id: input.slug,
+        slug: input.slug,
+        ...(input.orgId ? { orgId: input.orgId } : {}),
+    };
+    throw new SmithersError(
+        "DUPLICATE_ID",
+        `Duplicate control-plane ${input.entity} slug: ${input.slug}`,
+        details,
+        { cause: error },
+    );
+}
+
+/**
  * @param {Record<string, unknown>} row
  * @returns {ControlPlaneOrg}
  */
@@ -513,11 +540,20 @@ export class ControlPlaneStore {
      */
     createOrg(input) {
         const orgId = optionalId("orgId", input.orgId);
+        const orgSlug = slug("slug", input.slug);
         const createdAtMs = timestamp(input.createdAtMs);
-        this.sqlite.query(`
+        try {
+            this.sqlite.query(`
 INSERT INTO _smithers_cp_orgs (org_id, slug, name, created_at_ms)
 VALUES (?, ?, ?, ?)
-`).run(orgId, slug("slug", input.slug), nonEmptyString("name", input.name), createdAtMs);
+`).run(orgId, orgSlug, nonEmptyString("name", input.name), createdAtMs);
+        }
+        catch (error) {
+            if (isUniqueConstraintError(error, "_smithers_cp_orgs.slug")) {
+                throwDuplicateSlugError(error, { entity: "org", slug: orgSlug });
+            }
+            throw error;
+        }
         this.recordAuditEvent({
             orgId,
             actorId: "system",
@@ -550,11 +586,20 @@ LIMIT 1
     createTeam(input) {
         const orgId = requiredId("orgId", input.orgId);
         const teamId = optionalId("teamId", input.teamId);
+        const teamSlug = slug("slug", input.slug);
         const createdAtMs = timestamp(input.createdAtMs);
-        this.sqlite.query(`
+        try {
+            this.sqlite.query(`
 INSERT INTO _smithers_cp_teams (org_id, team_id, slug, name, created_at_ms)
 VALUES (?, ?, ?, ?, ?)
-`).run(orgId, teamId, slug("slug", input.slug), nonEmptyString("name", input.name), createdAtMs);
+`).run(orgId, teamId, teamSlug, nonEmptyString("name", input.name), createdAtMs);
+        }
+        catch (error) {
+            if (isUniqueConstraintError(error, "_smithers_cp_teams.org_id, _smithers_cp_teams.slug")) {
+                throwDuplicateSlugError(error, { entity: "team", slug: teamSlug, orgId });
+            }
+            throw error;
+        }
         this.recordAuditEvent({
             orgId,
             action: "team.create",
@@ -603,12 +648,21 @@ ON CONFLICT(org_id, team_id, user_id) DO UPDATE SET role = excluded.role
     createProject(input) {
         const orgId = requiredId("orgId", input.orgId);
         const projectId = optionalId("projectId", input.projectId);
+        const projectSlug = slug("slug", input.slug);
         const metadata = jsonObject(input.metadata);
         const createdAtMs = timestamp(input.createdAtMs);
-        this.sqlite.query(`
+        try {
+            this.sqlite.query(`
 INSERT INTO _smithers_cp_projects (org_id, project_id, slug, name, metadata_json, created_at_ms)
 VALUES (?, ?, ?, ?, ?, ?)
-`).run(orgId, projectId, slug("slug", input.slug), nonEmptyString("name", input.name), JSON.stringify(metadata), createdAtMs);
+`).run(orgId, projectId, projectSlug, nonEmptyString("name", input.name), JSON.stringify(metadata), createdAtMs);
+        }
+        catch (error) {
+            if (isUniqueConstraintError(error, "_smithers_cp_projects.org_id, _smithers_cp_projects.slug")) {
+                throwDuplicateSlugError(error, { entity: "project", slug: projectSlug, orgId });
+            }
+            throw error;
+        }
         this.recordAuditEvent({
             orgId,
             projectId,
