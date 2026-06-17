@@ -15,7 +15,7 @@ export function useGatewayRuns(params: ListRunsRequest = {}): GatewayAsyncState<
   const live = useLiveQuery((q) => q.from({ row: collection }), [collection]);
   const refetch = useCallback(async () => {
     await registry.invalidate(gatewayKeys.runs(params));
-  }, [registry, collection]);
+  }, [registry, collection, params]);
 
   const data = (live.data ?? []) as GatewayRunSummaryRow[] as GatewayRpcPayload<"listRuns">;
   return {
