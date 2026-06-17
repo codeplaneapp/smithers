@@ -97,3 +97,8 @@ export {
   createBraveSearchProvider,
   createSerperSearchProvider,
 } from "./web-search/index.js";
+
+
+export { createTranscriptionTool } from "./transcription/createTranscriptionTool.js";
+
+>>>>>>> 2cb1d27a (✨ feat(agents): add Whisper and Deepgram transcription tool)
