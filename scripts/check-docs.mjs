@@ -2633,44 +2633,32 @@ function readCliOverviewToonFlags(commandName) {
   };
 }
 
-function checkStudioDocsMatchCurrentAppSurface() {
+function checkWatchAndSteerDocsMatchCurrentUiSurface() {
   const files = new Map([
-    [PACKAGE_CONFIGURATION_REFERENCE, readFileSync(PACKAGE_CONFIGURATION_REFERENCE, "utf8")],
-    [CUSTOM_WORKFLOW_UI_GUIDE, readFileSync(CUSTOM_WORKFLOW_UI_GUIDE, "utf8")],
     [WATCH_AND_STEER_GUIDE, readFileSync(WATCH_AND_STEER_GUIDE, "utf8")],
-    [STUDIO_APP_PACKAGE_JSON, readFileSync(STUDIO_APP_PACKAGE_JSON, "utf8")],
-    [STUDIO_APP_README, readFileSync(STUDIO_APP_README, "utf8")],
-    [STUDIO_RUNS_PARSE_SOURCE, readFileSync(STUDIO_RUNS_PARSE_SOURCE, "utf8")],
-    [ROOT_PACKAGE_JSON, readFileSync(ROOT_PACKAGE_JSON, "utf8")],
   ]);
   const required = [
-    [STUDIO_APP_PACKAGE_JSON, '"name": "@smithers-orchestrator/smithers-studio-2"'],
-    [ROOT_PACKAGE_JSON, '"dev:studio": "bun apps/smithers-studio-2/scripts/dev.ts"'],
-    [STUDIO_RUNS_PARSE_SOURCE, "parseWorkflowUiPaths"],
-    [STUDIO_RUNS_PARSE_SOURCE, "workflowKey"],
-    [STUDIO_RUNS_PARSE_SOURCE, "uiPath"],
-    [PACKAGE_CONFIGURATION_REFERENCE, "`@smithers-orchestrator/smithers-studio-2` | Next Smithers Studio UI shell for browsing workspaces, launching workflows, watching live runs, and embedding custom workflow UIs"],
-    [CUSTOM_WORKFLOW_UI_GUIDE, "Studio 2's Runs surface"],
-    [WATCH_AND_STEER_GUIDE, "## Studio: the visual console"],
-    [WATCH_AND_STEER_GUIDE, "`pnpm dev:studio` starts the Studio 2 dev stack"],
-    [STUDIO_APP_README, "`pnpm dev:studio` from the repo root starts the Smithers Gateway, workspace API, and Studio 2 together."],
-    [STUDIO_APP_README, "The **Runs** and **Workflows** surfaces use this for"],
+    [WATCH_AND_STEER_GUIDE, "## Visual workflow views"],
+    [WATCH_AND_STEER_GUIDE, "`bunx smithers-orchestrator ui`"],
+    [WATCH_AND_STEER_GUIDE, "Smithers workflow UI surface"],
+    [WATCH_AND_STEER_GUIDE, "not a GUI you click through"],
+    [WATCH_AND_STEER_GUIDE, "no GUI required"],
   ];
   const forbidden = [
-    [PACKAGE_CONFIGURATION_REFERENCE, "Smithers Studio UI shell for browsing and driving workflow runs (coming soon)"],
-    [CUSTOM_WORKFLOW_UI_GUIDE, "Studio 2 (coming soon)"],
+    [WATCH_AND_STEER_GUIDE, "## Studio: the visual console"],
     [WATCH_AND_STEER_GUIDE, "## Studio: the visual console (coming soon)"],
-    [WATCH_AND_STEER_GUIDE, "Studio is coming soon"],
-    [WATCH_AND_STEER_GUIDE, "When Studio ships"],
-    [WATCH_AND_STEER_GUIDE, "Until it lands"],
-    [STUDIO_APP_README, "`npm run dev` from the repo root starts the Smithers Gateway and Studio 2 together."],
-    [STUDIO_APP_README, "until it lands, Runs"],
+    [WATCH_AND_STEER_GUIDE, "Studio 2"],
+    [WATCH_AND_STEER_GUIDE, "pnpm dev:studio"],
+    [WATCH_AND_STEER_GUIDE, "PWA"],
+    [WATCH_AND_STEER_GUIDE, "web app"],
+    [WATCH_AND_STEER_GUIDE, "/images/studio-2/"],
+    [WATCH_AND_STEER_GUIDE, "/images/0.23.0/smithers-pwa.png"],
   ];
   const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
   const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
   if (missing.length || stale.length) {
     failed = true;
-    console.error("\n✗ Studio docs must match the current Studio 2 app surface:");
+    console.error("\n✗ watch-and-steer docs must match the current workflow UI surface:");
     if (missing.length) {
       console.error(
         `    missing: ${missing.map(([file, needle]) => `${displayPath(file)}:${needle}`).join(", ")}`,
@@ -2682,7 +2670,7 @@ function checkStudioDocsMatchCurrentAppSurface() {
       );
     }
   } else {
-    console.log("✓ Studio docs match current Studio 2 app surface");
+    console.log("✓ watch-and-steer docs match current workflow UI surface");
   }
 }
 
@@ -3885,7 +3873,7 @@ checkPackageConfigurationDocsMatchRootConfig();
 checkPiPluginDocsMatchPackageRuntime();
 checkVcsHelperDocsMatchCurrentExports();
 checkTimeTravelDocsMatchCurrentExports();
-checkStudioDocsMatchCurrentAppSurface();
+checkWatchAndSteerDocsMatchCurrentUiSurface();
 checkCliOverviewCommandCatalogMatchesCli();
 checkCliOverviewWorkflowRunFlagsMatchSchema();
 checkToolDocsMatchCurrentRuntimeLogging();

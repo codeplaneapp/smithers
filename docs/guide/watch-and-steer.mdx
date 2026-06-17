@@ -24,47 +24,21 @@ You never memorize the commands; you drive it through your agent. Anything `wait
   <img src="/images/why/runs-live.gif" alt="A Smithers run streaming live step transitions into a tree as each task starts and finishes" />
 </Frame>
 
-## Studio: the visual console
+## Visual workflow views
 
-For eyes-on instead of a transcript, Studio is the Smithers operations console: one window for watching runs and workspaces. In this repo, `pnpm dev:studio` starts the Studio 2 dev stack. Open it by asking ("Open Studio so I can watch the kanban board"), then browse runs and workspaces, watch them update live, and drop into an embedded terminal, all in one window.
+The default watch path is still the agent-driven CLI loop above, not a GUI you click through. When a workflow ships a purpose-built browser view, ask your agent to open it with `bunx smithers-orchestrator ui`.
 
-<Frame caption="Studio's home surface lists your workspaces and a live operations strip, so you start every session knowing exactly what is in flight.">
-  <img src="/images/studio-2/home.png" alt="Smithers Studio home screen showing recent workspaces and a live operations strip" />
-</Frame>
-
-The Runs surface is the live view: each run streams its step tree and inspector as the agent works, with no refresh and no polling.
-
-<Frame caption="The Runs surface streams live run events into a tree and inspector, so you can follow a run's every step visually as it happens.">
-  <img src="/images/studio-2/runs-live.gif" alt="Studio Runs surface streaming live run events into a step tree with a node inspector" />
-</Frame>
-
-Color only ever means run state, so running, paused, and failed read at a glance. A command palette jumps you to any run, workspace, or surface.
-
-<Frame caption="The Cmd-K command palette jumps to any run or surface, so the console scales from one run to dozens without a hunt.">
-  <img src="/images/studio-2/command-palette.gif" alt="Opening the Studio command palette and navigating to a surface" />
-</Frame>
-
-Need to get hands-on inside a run's workspace? Studio embeds a real terminal, a live shell in the same window you are watching from.
-
-<Frame caption="A real shell embedded in the workspace surface, so you can inspect or intervene inside a run without leaving the console.">
-  <img src="/images/studio-2/workspace-terminal.png" alt="Studio in-app workspace terminal running a live shell" />
-</Frame>
+The Smithers workflow UI surface renders the browser UI that lives with that workflow, such as a kanban board, approval dashboard, or review surface. It is for the run you are steering, not a separate product console you must learn before Smithers is useful.
 
 <Note>
-The CLI watch loop (`ps`, `chat --follow`, `inspect --watch`) and the installable web app remain the always-available paths, and work on any machine, with any agent, no GUI required.
+The CLI watch loop (`ps`, `chat --follow`, `inspect --watch`) remains the always-available path, and works on any machine, with any agent, no GUI required.
 </Note>
 
-## A browser and remote view
+## Browser and remote access
 
-You do not have to be at the machine that started the run. Ask your agent to serve it and you get an HTTP control plane you can reach from a browser: your laptop watching a run on a remote box, or a teammate following along.
+You do not have to be at the machine that started the run. Ask your agent to serve the run or open its workflow UI, and you get an HTTP control plane you can reach from a browser: your laptop watching a run on a remote box, or a teammate following along.
 
-The installable Smithers web app is that browser-native surface: open it, install it like any PWA, and talk to it the same way you talk to your agent in the terminal.
-
-<Frame caption="The installable Smithers web app: a browser-native, install-to-home-screen surface for talking to Smithers from anywhere, not just the terminal.">
-  <img src="/images/0.23.0/smithers-pwa.png" alt="The installable Smithers web app in dark mode showing the welcome hero and composer" />
-</Frame>
-
-For programmatic and multi-user access (bots, dashboards, schedulers authenticating once and streaming events), the [Gateway](/integrations/gateway) is the headless control plane behind all of it.
+For programmatic and multi-user access (bots, dashboards, schedulers authenticating once and streaming events), the [Gateway](/integrations/gateway) is the headless control plane behind the same run data.
 
 ## Steering from here
 
