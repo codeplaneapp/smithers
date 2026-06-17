@@ -39,6 +39,20 @@ type OpenApiToolsOptions = {
   include?: string[];                // operationId allowlist
   exclude?: string[];                // operationId blocklist
   namePrefix?: string;               // prefix generated tool names
+  operations?: Record<
+    string,
+    | false
+    | {
+        include?: boolean;           // false skips this operation
+        name?: string;               // agent-facing tool name
+        description?: string;        // agent-facing tool description
+        responseExamples?: Array<{
+          status?: string | number;
+          description?: string;
+          value: unknown;
+        }>;
+      }
+  >;
 };
 ```
 
@@ -82,6 +96,8 @@ For each operation:
 ## Filtering
 
 `include` / `exclude` accept arrays of `operationId`. If both are set, exclude wins. Useful for limiting an agent's surface area to a specific feature ("just the inventory endpoints"). `namePrefix` prefixes generated tool names without changing the operationIds used for filtering.
+
+Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
 
 ## Observability
 

@@ -77,6 +77,19 @@ type OpenApiAuth$1 = {
     in: "header" | "query";
 };
 
+type OpenApiToolResponseExample = {
+    status?: string | number;
+    description?: string;
+    value: unknown;
+};
+
+type OpenApiOperationCuration = false | {
+    include?: boolean;
+    name?: string;
+    description?: string;
+    responseExamples?: OpenApiToolResponseExample[];
+};
+
 type OpenApiToolsOptions$5 = {
     baseUrl?: string;
     headers?: Record<string, string>;
@@ -84,6 +97,7 @@ type OpenApiToolsOptions$5 = {
     include?: string[];
     exclude?: string[];
     namePrefix?: string;
+    operations?: Record<string, OpenApiOperationCuration>;
 };
 
 type OperationObject = {

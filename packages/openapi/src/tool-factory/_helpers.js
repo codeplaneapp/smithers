@@ -162,6 +162,64 @@ export function executeToolEffect(operation, args, baseUrl, options) {
 // ---------------------------------------------------------------------------
 /**
  * @param {ParsedOperation} operation
+ * @param {OpenApiToolsOptions} options
+ * @returns {false | Exclude<NonNullable<OpenApiToolsOptions["operations"]>[string], false> | undefined}
+ */
+export function getOperationCuration(operation, options) {
+    return options.operations?.[operation.operationId];
+}
+/**
+ * @param {ParsedOperation} operation
+ * @param {OpenApiToolsOptions} options
+ * @returns {boolean}
+ */
+export function shouldIncludeOperation(operation, options) {
+    const curation = getOperationCuration(operation, options);
+    if (curation === false || curation?.include === false)
+        return false;
+    if (options.include && !options.include.includes(operation.operationId))
+        return false;
+    if (options.exclude && options.exclude.includes(operation.operationId))
+        return false;
+    return true;
+}
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function formatExampleValue(value) {
+    if (typeof value === "string")
+        return value;
+    try {
+        return JSON.stringify(value, null, 2);
+    }
+    catch {
+        return String(value);
+    }
+}
+/**
+ * @param {ParsedOperation} operation
+ * @param {OpenApiToolsOptions} options
+ * @returns {string}
+ */
+export function buildToolDescription(operation, options) {
+    const curation = getOperationCuration(operation, options);
+    const description = curation && curation !== false && curation.description
+        ? curation.description
+        : operation.summary || operation.description || operation.operationId;
+    const responseExamples = curation && curation !== false ? curation.responseExamples : undefined;
+    if (!responseExamples || responseExamples.length === 0)
+        return description;
+    const examples = responseExamples.map((example) => {
+        const status = example.status === undefined ? "" : `${example.status} `;
+        const label = example.description ? `${status}${example.description}` : status.trim();
+        const value = formatExampleValue(example.value);
+        return label ? `${label}\n${value}` : value;
+    });
+    return `${description}\n\nResponse examples:\n${examples.join("\n\n")}`;
+}
+/**
+ * @param {ParsedOperation} operation
  * @param {OpenApiSpec} spec
  * @param {string} baseUrl
  * @param {OpenApiToolsOptions} options
@@ -169,10 +227,12 @@ export function executeToolEffect(operation, args, baseUrl, options) {
  */
 export function createToolFromOperation(operation, spec, baseUrl, options) {
     const inputSchema = buildOperationSchema(operation.parameters, operation.requestBody, spec);
-    const description = operation.summary || operation.description || operation.operationId;
+    const curation = getOperationCuration(operation, options);
+    const description = buildToolDescription(operation, options);
     const prefix = options.namePrefix ?? "";
+    const operationName = curation && curation !== false && curation.name ? curation.name : operation.operationId;
     return {
-        name: `${prefix}${operation.operationId}`,
+        name: `${prefix}${operationName}`,
         tool: tool({
             description,
             inputSchema: zodSchema(inputSchema),
@@ -215,13 +275,17 @@ export function createOpenApiToolsFromSpec(spec, options) {
     const baseUrl = resolveBaseUrl(spec, options);
     /** @type {Record<string, OpenApiTool>} */
     const tools = {};
+    /** @type {Record<string, string>} */
+    const operationIdByToolName = {};
     for (const op of operations) {
-        // Apply include/exclude filters
-        if (options.include && !options.include.includes(op.operationId))
-            continue;
-        if (options.exclude && options.exclude.includes(op.operationId))
+        if (!shouldIncludeOperation(op, options))
             continue;
         const { name, tool: t } = createToolFromOperation(op, spec, baseUrl, options);
+        const existingOperationId = operationIdByToolName[name];
+        if (existingOperationId) {
+            throw new Error(`Duplicate OpenAPI tool name "${name}" for operations "${existingOperationId}" and "${op.operationId}". Use OpenAPI tool curation options to give each generated tool a unique name.`);
+        }
+        operationIdByToolName[name] = op.operationId;
         tools[name] = t;
     }
     return tools;
@@ -237,6 +301,9 @@ export function createOpenApiToolFromSpec(spec, operationId, options) {
     const op = operations.find((o) => o.operationId === operationId);
     if (!op) {
         throw new Error(`Operation "${operationId}" not found in spec. Available: ${operations.map((o) => o.operationId).join(", ")}`);
+    }
+    if (!shouldIncludeOperation(op, options)) {
+        throw new Error(`Operation "${operationId}" is excluded by OpenAPI tool curation options.`);
     }
     const baseUrl = resolveBaseUrl(spec, options);
     return createToolFromOperation(op, spec, baseUrl, options).tool;
