@@ -1305,7 +1305,7 @@ function extractTypeProperties(source, typePattern) {
   let depth = 0;
   for (const line of match[1].split("\n")) {
     if (depth === 0) {
-      const property = line.match(/^\s*([A-Za-z_$][\w$]*)\??:/);
+      const property = line.match(/^\s*(?:readonly\s+)?([A-Za-z_$][\w$]*)\??:/);
       if (property?.[1]) properties.push(property[1]);
     }
     for (const char of line) {
@@ -1349,6 +1349,43 @@ function checkRunOptionsDocsMatchSourceType() {
     console.error(problems.map((problem) => `    ${problem}`).join("\n"));
   } else {
     console.log("✓ RunOptions docs and declarations match the source type");
+  }
+}
+
+function checkSmithersWorkflowDocsMatchSourceType() {
+  const source = readFileSync(join(root, "packages/driver/src/WorkflowDefinition.ts"), "utf8");
+  const docs = readFileSync(TYPES_REFERENCE, "utf8");
+
+  const sourceProps = extractTypeProperties(source, /export type WorkflowDefinition<Schema = unknown> = \{([\s\S]*?)\n\};/);
+  const docProps = extractTypeProperties(docs, /interface SmithersWorkflow<Schema = unknown> \{([\s\S]*?)\n\}/);
+
+  const problems = [];
+  if (!sourceProps) problems.push("could not parse packages/driver/src/WorkflowDefinition.ts WorkflowDefinition");
+  if (!docProps) problems.push("could not parse docs/reference/types.mdx SmithersWorkflow");
+
+  if (sourceProps && docProps) {
+    const missing = sourceProps.filter((prop) => !docProps.includes(prop));
+    const extra = docProps.filter((prop) => !sourceProps.includes(prop));
+    if (missing.length) problems.push(`types docs missing: ${missing.join(", ")}`);
+    if (extra.length) problems.push(`types docs extra: ${extra.join(", ")}`);
+  }
+
+  const required = [
+    [TYPES_REFERENCE, 'readonly zodToKeyName?: Map<import("zod").ZodObject<import("zod").ZodRawShape>, string>;'],
+  ];
+  const missingRequired = required.filter(([file, needle]) => !readFileSync(file, "utf8").includes(needle));
+  if (missingRequired.length) {
+    problems.push(
+      `missing exact field text: ${missingRequired.map(([file, needle]) => `${displayPath(file)}:${needle}`).join(", ")}`,
+    );
+  }
+
+  if (problems.length) {
+    failed = true;
+    console.error("\n✗ SmithersWorkflow docs must match WorkflowDefinition:");
+    console.error(problems.map((problem) => `    ${problem}`).join("\n"));
+  } else {
+    console.log("✓ SmithersWorkflow docs match WorkflowDefinition");
   }
 }
 
@@ -3829,6 +3866,7 @@ checkGatewayCancelRunDocsMatchRuntimeErrors();
 checkGatewaySubmitApprovalDocsMatchRuntimeErrors();
 checkHotReloadDocsMatchRuntimeDefaults();
 checkRunOptionsDocsMatchSourceType();
+checkSmithersWorkflowDocsMatchSourceType();
 checkSmithersCtxDocsMatchDriverDeclaration();
 checkCreateSmithersPostgresDocsMatchFactory();
 checkCreateSmithersApiDocsMatchSourceType();

@@ -4749,6 +4749,7 @@ interface SmithersWorkflow<Schema = unknown> {
   readonly build: (ctx: SmithersCtx<Schema>) => JSX.Element;
   readonly opts: SmithersWorkflowOptions;
   readonly schemaRegistry?: Map<string, SchemaRegistryEntry>;
+  readonly zodToKeyName?: Map<import("zod").ZodObject<import("zod").ZodRawShape>, string>;
 }
 
 type SmithersWorkflowOptions = {
