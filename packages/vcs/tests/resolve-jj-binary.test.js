@@ -4,7 +4,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import { Effect } from "effect";
 import * as BunContext from "@effect/platform-bun/BunContext";
-import { resolveJjBinary } from "../src/resolveJjBinary.js";
+import { resolveBundledJjPath, resolveJjBinary } from "../src/resolveJjBinary.js";
 import { runJj } from "../src/jj.js";
 
 const ENV_KEY = "SMITHERS_JJ_PATH";
@@ -53,6 +53,32 @@ describe("resolveJjBinary", () => {
 		expect(resolved.source).not.toBe("env");
 		if (resolved.source === "path") expect(resolved.path).toBe("jj");
 		else expect(resolved.source).toBe("bundled");
+	});
+
+	test("resolves the bundled binary when the platform package binary exists", async () => {
+		const manifest = path.join(os.tmpdir(), "jj-package", "package.json");
+		const resolved = resolveBundledJjPath({
+			platform: "darwin",
+			arch: "x64",
+			resolvePackage: () => manifest,
+			fileExists: (file) => String(file).endsWith(path.join("bin", "jj")),
+		});
+		expect(resolved).toBe(path.join(manifest, "..", "bin", "jj"));
+	});
+
+	test("returns null when bundled package resolution throws", () => {
+		const resolved = resolveBundledJjPath({
+			platform: "darwin",
+			arch: "x64",
+			resolvePackage: () => {
+				throw new Error("missing optional package");
+			},
+		});
+		expect(resolved).toBeNull();
+	});
+
+	test("returns null on unsupported platforms", () => {
+		expect(resolveBundledJjPath({ platform: "freebsd", arch: "x64" })).toBeNull();
 	});
 
 	test("runJj spawns the resolved binary (override branch)", async () => {

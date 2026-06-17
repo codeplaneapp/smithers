@@ -1,9 +1,3 @@
-/**
- * Tests for findVcsRoot — https://github.com/jjhub-ai/smithers/issues/112
- *
- * In colocated repos (both .git and .jj exist), jj should take priority
- * so ensureWorktree creates jj workspaces and getJjPointer works.
- */
 import { describe, expect, test, afterEach } from "bun:test";
 import { Effect } from "effect";
 import { findVcsRoot as findVcsRootEffect } from "../src/find-root.js";
@@ -60,8 +54,17 @@ describe("findVcsRoot", () => {
     test("walks up to find VCS root from subdirectory", () => {
         const dir = makeTmpDir();
         dirs.push(dir);
-        mkdirSync(join(dir, ".jj"));
+        mkdirSync(join(dir, ".git"));
         const sub = join(dir, "a", "b", "c");
+        mkdirSync(sub, { recursive: true });
+        const result = findVcsRoot(sub);
+        expect(result).toEqual({ type: "git", root: dir });
+    });
+    test("walks up to find jj root from subdirectory", () => {
+        const dir = makeTmpDir();
+        dirs.push(dir);
+        mkdirSync(join(dir, ".jj"));
+        const sub = join(dir, "src");
         mkdirSync(sub, { recursive: true });
         const result = findVcsRoot(sub);
         expect(result).toEqual({ type: "jj", root: dir });

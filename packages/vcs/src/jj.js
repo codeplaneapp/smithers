@@ -120,6 +120,26 @@ function withSnapshotTimeout(effect, label) {
     }));
 }
 /**
+ * Parse the snapshot values returned by the two jj commands in
+ * {@link captureWorkspaceSnapshot}.
+ *
+ * @param {string} logStdout stdout from `jj log -r @ ...`
+ * @param {string} opStdout stdout from `jj operation log ...`
+ * @returns {WorkspaceSnapshot | null}
+ */
+export function parseWorkspaceSnapshot(logStdout, opStdout) {
+    const [commitId, changeId] = logStdout.split("\n").map((part) => part.trim());
+    if (!commitId)
+        return null;
+    const operationId = opStdout
+        .split(/\r?\n/)
+        .map((part) => part.trim())
+        .find(Boolean);
+    if (!operationId)
+        return null;
+    return { commitId, changeId: changeId ?? "", operationId };
+}
+/**
  * Capture the current working-copy state as a restorable handle.
  *
  * Step 1 (`jj log -r @`) forces exactly one working-copy snapshot and returns the
@@ -136,16 +156,10 @@ export function captureWorkspaceSnapshot(cwd) {
         const logRes = yield* withSnapshotTimeout(runJj(["log", "-r", "@", "--no-graph", "-T", 'commit_id ++ "\\n" ++ change_id'], { cwd }), "jj snapshot log");
         if (logRes.code !== 0)
             return null;
-        const [commitId, changeId] = logRes.stdout.split("\n").map((part) => part.trim());
-        if (!commitId)
-            return null;
         const opRes = yield* withSnapshotTimeout(runJj(["--ignore-working-copy", "operation", "log", "--no-graph", "--limit", "1", "-T", "self.id()"], { cwd }), "jj snapshot op");
         if (opRes.code !== 0)
             return null;
-        const operationId = opRes.stdout.trim();
-        if (!operationId)
-            return null;
-        return { commitId, changeId: changeId ?? "", operationId };
+        return parseWorkspaceSnapshot(logRes.stdout, opRes.stdout);
     }).pipe(Effect.annotateLogs({ cwd: cwd ?? "" }), Effect.withLogSpan("vcs:jj-snapshot"));
 }
 /**

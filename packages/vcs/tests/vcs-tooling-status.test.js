@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import { resolveGitBinary } from "../src/resolveGitBinary.js";
-import { vcsToolingStatus } from "../src/vcsToolingStatus.js";
+import { runsVersion, vcsToolingStatus } from "../src/vcsToolingStatus.js";
 
 const JJ_KEY = "SMITHERS_JJ_PATH";
 const GIT_KEY = "SMITHERS_GIT_PATH";
@@ -48,6 +48,11 @@ describe("resolveGitBinary", () => {
 		delete process.env[GIT_KEY];
 		expect(resolveGitBinary()).toEqual({ path: "git", source: "path" });
 	});
+
+	test("ignores SMITHERS_GIT_PATH when the file does not exist", () => {
+		process.env[GIT_KEY] = path.join(os.tmpdir(), "definitely-not-here-git");
+		expect(resolveGitBinary()).toEqual({ path: "git", source: "path" });
+	});
 });
 
 describe("vcsToolingStatus", () => {
@@ -71,5 +76,29 @@ describe("vcsToolingStatus", () => {
 		const status = vcsToolingStatus();
 		expect(status.git).toEqual({ path: fake, source: "env" });
 		expect(status.ok).toBe(true);
+	});
+
+	test("reports ok false when neither resolved binary runs --version", async () => {
+		const brokenJj = await writeBinary("jj", 1);
+		const brokenGit = await writeBinary("git", 1);
+		process.env[JJ_KEY] = brokenJj;
+		process.env[GIT_KEY] = brokenGit;
+		expect(vcsToolingStatus()).toEqual({ jj: null, git: null, ok: false });
+	});
+
+	test("reports jj null while git remains usable", async () => {
+		const brokenJj = await writeBinary("jj", 1);
+		const git = await writeBinary("git");
+		process.env[JJ_KEY] = brokenJj;
+		process.env[GIT_KEY] = git;
+		expect(vcsToolingStatus()).toEqual({
+			jj: null,
+			git: { path: git, source: "env" },
+			ok: true,
+		});
+	});
+
+	test("treats spawnSync exceptions as unusable binaries", async () => {
+		expect(runsVersion({ path: "\0", source: "path" })).toBe(false);
 	});
 });

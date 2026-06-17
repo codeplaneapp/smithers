@@ -1,5 +1,6 @@
 import { Effect } from 'effect';
 import * as _effect_platform_CommandExecutor from '@effect/platform/CommandExecutor';
+import { existsSync } from 'node:fs';
 
 /**
  * Walk up from `startDir` to find the nearest directory containing `.jj` or `.git`.
@@ -65,6 +66,15 @@ declare function runJj(args: string[], opts?: RunJjOptions): Effect.Effect<RunJj
  * @returns {Effect.Effect<string | null, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
  */
 declare function getJjPointer(cwd?: string): Effect.Effect<string | null, never, _effect_platform_CommandExecutor.CommandExecutor>;
+/**
+ * Parse the snapshot values returned by the two jj commands in
+ * {@link captureWorkspaceSnapshot}.
+ *
+ * @param {string} logStdout stdout from `jj log -r @ ...`
+ * @param {string} opStdout stdout from `jj operation log ...`
+ * @returns {WorkspaceSnapshot | null}
+ */
+declare function parseWorkspaceSnapshot(logStdout: string, opStdout: string): WorkspaceSnapshot | null;
 /**
  * Capture the current working-copy state as a restorable handle.
  *
@@ -170,6 +180,20 @@ type ResolvedBinary = {
 declare function resolveGitBinary(): ResolvedBinary;
 
 /**
+ * Locate the bundled `jj` binary for the current host, or null when no platform
+ * package is installed (unsupported target, `--no-optional` install, or not yet
+ * published). Resolution goes through the package's `package.json` so it works
+ * regardless of hoisting layout.
+ *
+ * @returns {string | null}
+ */
+declare function resolveBundledJjPath({ platform, arch, resolvePackage, fileExists, }?: {
+    platform?: NodeJS.Platform | undefined;
+    arch?: NodeJS.Architecture | undefined;
+    resolvePackage?: NodeJS.RequireResolve | undefined;
+    fileExists?: typeof existsSync | undefined;
+}): string | null;
+/**
  * Resolve the `jj` executable Smithers should spawn.
  *
  * Order of preference:
@@ -185,6 +209,14 @@ declare function resolveGitBinary(): ResolvedBinary;
  */
 declare function resolveJjBinary(): ResolvedBinary;
 
+/**
+ * Whether `<bin> --version` exits 0. Best-effort: a missing binary, a non-zero
+ * exit, or a spawn error all read as "not usable".
+ *
+ * @param {import("./ResolvedBinary.js").ResolvedBinary} bin
+ * @returns {boolean}
+ */
+declare function runsVersion(bin: ResolvedBinary): boolean;
 /**
  * Probe whether a usable `jj` and/or `git` exists for the current host, using
  * the override → bundled → PATH resolution for jj and override → PATH for git.
@@ -216,4 +248,4 @@ type VcsToolingStatus = {
     ok: boolean;
 };
 
-export { type JjRevertResult, type RunJjOptions, type RunJjResult, type VcsToolingStatus, type WorkspaceAddOptions, type WorkspaceInfo, type WorkspaceResult, type WorkspaceSnapshot, captureWorkspaceSnapshot, findVcsRoot, getJjPointer, isJjRepo, resolveGitBinary, resolveJjBinary, revertToJjPointer, runJj, vcsToolingStatus, workspaceAdd, workspaceClose, workspaceList };
+export { type JjRevertResult, type RunJjOptions, type RunJjResult, type VcsToolingStatus, type WorkspaceAddOptions, type WorkspaceInfo, type WorkspaceResult, type WorkspaceSnapshot, captureWorkspaceSnapshot, findVcsRoot, getJjPointer, isJjRepo, parseWorkspaceSnapshot, resolveBundledJjPath, resolveGitBinary, resolveJjBinary, revertToJjPointer, runJj, runsVersion, vcsToolingStatus, workspaceAdd, workspaceClose, workspaceList };

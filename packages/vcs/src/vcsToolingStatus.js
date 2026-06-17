@@ -21,7 +21,7 @@ const VERSION_PROBE_TIMEOUT_MS = 2_000;
  * @param {import("./ResolvedBinary.js").ResolvedBinary} bin
  * @returns {boolean}
  */
-function runsVersion(bin) {
+export function runsVersion(bin) {
 	try {
 		const res = spawnSync(bin.path, ["--version"], {
 			stdio: "ignore",
