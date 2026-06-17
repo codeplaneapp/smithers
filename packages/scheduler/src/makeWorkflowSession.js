@@ -467,7 +467,10 @@ export function makeWorkflowSession(options = {}) {
    */
     function decide(depth = 0) {
         if (depth > 10) {
-            return { _tag: "Wait", reason: { _tag: "ExternalTrigger" } };
+            return {
+                _tag: "Failed",
+                error: new SmithersError("SCHEDULER_ERROR", "Exceeded scheduler decide() depth guard.", { depth }),
+            };
         }
         if (state.cancelled) {
             return finishedResult("cancelled");
