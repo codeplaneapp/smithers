@@ -235,6 +235,13 @@ describe("error code catalog", () => {
     expect(isKnownSmithersErrorCode("RUN_NOT_FOUND")).toBe(true);
   });
 
+  test("recognizes account package error codes", () => {
+    expect(isKnownSmithersErrorCode("ACCOUNT_INVALID")).toBe(true);
+    expect(isKnownSmithersErrorCode("ACCOUNT_NOT_FOUND")).toBe(true);
+    expect(isKnownSmithersErrorCode("ACCOUNT_DUPLICATE_LABEL")).toBe(true);
+    expect(isKnownSmithersErrorCode("ACCOUNTS_FILE_INVALID")).toBe(true);
+  });
+
   test("rejects unknown codes", () => {
     expect(isKnownSmithersErrorCode("NOT_A_CODE")).toBe(false);
   });

@@ -306,6 +306,22 @@ export const smithersErrorDefinitions = {
         category: "agents",
         when: "An internal agent diagnostic check exceeds the per-check timeout budget.",
     },
+    ACCOUNT_INVALID: {
+        category: "integrations",
+        when: "An account entry, label, provider, or provider-specific configuration is invalid.",
+    },
+    ACCOUNT_NOT_FOUND: {
+        category: "integrations",
+        when: "An account operation references a label that is not registered.",
+    },
+    ACCOUNT_DUPLICATE_LABEL: {
+        category: "integrations",
+        when: "An account add operation would create a duplicate label without replace enabled.",
+    },
+    ACCOUNTS_FILE_INVALID: {
+        category: "integrations",
+        when: "The accounts.json file is not valid JSON or does not match the expected account registry schema.",
+    },
     DB_MISSING_COLUMNS: {
         category: "database",
         when: "A table used by Smithers does not expose required columns such as runId or nodeId.",

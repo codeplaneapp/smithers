@@ -5869,7 +5869,8 @@ type KnownSmithersErrorCode =
   | "SCHEMA_CHANGE_HOT" | "HOT_OVERLAY_FAILED" | "HOT_RELOAD_INVALID_MODULE"
   | "SCORER_FAILED" | "WORKFLOW_EXISTS" | "CLI_DB_NOT_FOUND" | "CLI_AGENT_UNSUPPORTED"
   | "PI_HTTP_ERROR" | "EXTERNAL_BUILD_FAILED" | "SCHEMA_DISCOVERY_FAILED"
-  | "OPENAPI_SPEC_LOAD_FAILED" | "OPENAPI_OPERATION_NOT_FOUND" | "OPENAPI_TOOL_EXECUTION_FAILED";
+  | "OPENAPI_SPEC_LOAD_FAILED" | "OPENAPI_OPERATION_NOT_FOUND" | "OPENAPI_TOOL_EXECUTION_FAILED"
+  | "ACCOUNT_INVALID" | "ACCOUNT_NOT_FOUND" | "ACCOUNT_DUPLICATE_LABEL" | "ACCOUNTS_FILE_INVALID";
 
 // =============================================================================
 // Server
@@ -6589,6 +6590,10 @@ try {
 | `OPENAPI_SPEC_LOAD_FAILED` | An OpenAPI spec cannot be loaded or parsed. | -- |
 | `OPENAPI_OPERATION_NOT_FOUND` | The requested operationId does not exist in the OpenAPI spec. | -- |
 | `OPENAPI_TOOL_EXECUTION_FAILED` | An OpenAPI tool call fails during HTTP execution. | -- |
+| `ACCOUNT_INVALID` | An account entry, label, provider, or provider-specific configuration is invalid. | -- |
+| `ACCOUNT_NOT_FOUND` | An account operation references a label that is not registered. | -- |
+| `ACCOUNT_DUPLICATE_LABEL` | An account add operation would create a duplicate label without replace enabled. | -- |
+| `ACCOUNTS_FILE_INVALID` | The accounts.json file is not valid JSON or does not match the expected account registry schema. | -- |
 
 ## HTTP API Errors
 
