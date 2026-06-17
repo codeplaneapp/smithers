@@ -1281,6 +1281,7 @@ type CliAgentSurfaceManifestEntry = CliAgentSurfaceManifestEntry$2;
 type CliAgentSurfaceOptionMapping = CliAgentSurfaceOptionMapping$1;
 type CliAgentSurfaceResumeContract = CliAgentSurfaceResumeContract$1;
 type CliAgentUnsupportedFlag = CliAgentUnsupportedFlag$1;
+<<<<<<<<< HEAD
 type ImageGenerationRequest = {
     prompt: string;
     model?: string;
@@ -1337,5 +1338,37 @@ type CreateTranscriptionToolOptions = {
     fetch?: typeof fetch;
 };
 declare function createTranscriptionTool(options: CreateTranscriptionToolOptions): ai.Tool;
+||||||||| parent of 2cb1d27a (✨ feat(agents): add Whisper and Deepgram transcription tool)
+=========
+type TranscriptionProvider = "whisper" | "deepgram";
+type TranscriptionToolInput = {
+    audioUrl?: string;
+    audioBase64?: string;
+    mimeType?: string;
+    language?: string;
+    prompt?: string;
+};
+type TranscriptionToolResult = {
+    text: string;
+    language?: string;
+    durationSeconds?: number;
+    provider: TranscriptionProvider;
+};
+type CreateTranscriptionToolOptions = {
+    provider: TranscriptionProvider;
+    apiKey: string;
+    model?: string;
+    baseUrl?: string;
+    description?: string;
+    fetch?: typeof fetch;
+};
+declare function createTranscriptionTool(options: CreateTranscriptionToolOptions): ai.Tool;
+>>>>>>>>> 2cb1d27a (✨ feat(agents): add Whisper and Deepgram transcription tool)
 
+<<<<<<<<< HEAD
 export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateTranscriptionToolOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, createAmpCapabilityRegistry, createAntigravityCapabilityRegistry, createForgeCapabilityRegistry, createImageGenerationTool, createSmithersAgentContract, createTranscriptionTool, createVibeCapabilityRegistry, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+||||||||| parent of 2cb1d27a (✨ feat(agents): add Whisper and Deepgram transcription tool)
+export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, VibeAgent, type VibeAgentOptions, createAmpCapabilityRegistry, createAntigravityCapabilityRegistry, createForgeCapabilityRegistry, createSmithersAgentContract, createVibeCapabilityRegistry, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+=========
+export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateTranscriptionToolOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, createAmpCapabilityRegistry, createAntigravityCapabilityRegistry, createForgeCapabilityRegistry, createSmithersAgentContract, createTranscriptionTool, createVibeCapabilityRegistry, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+>>>>>>>>> 2cb1d27a (✨ feat(agents): add Whisper and Deepgram transcription tool)
