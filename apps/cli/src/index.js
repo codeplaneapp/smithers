@@ -5781,17 +5781,40 @@ const cli = Cli.create({
             return c.error({ code: "PATH_NOT_FOUND", message: `Path does not exist: ${target}`, exitCode: 1 });
         }
         try {
-            const proc = spawn("open", ["-b", c.options.bundleId, target], {
-                stdio: "ignore",
-                detached: true,
+            const launch = await new Promise((resolveLaunch) => {
+                const proc = spawn("open", ["-b", c.options.bundleId, target], {
+                    stdio: ["ignore", "ignore", "pipe"],
+                });
+                let stderr = "";
+                proc.stderr?.setEncoding("utf8");
+                proc.stderr?.on("data", (chunk) => {
+                    stderr += chunk;
+                });
+                proc.on("error", (err) => {
+                    resolveLaunch({ ok: false, error: err, stderr });
+                });
+                proc.on("close", (code, signal) => {
+                    resolveLaunch({ ok: code === 0, code, signal, stderr });
+                });
             });
-            proc.unref();
-            proc.on("error", () => {});
+            if (!launch.ok) {
+                const stderr = launch.stderr?.trim() ?? "";
+                const detail = stderr || launch.error?.message || (launch.signal ? `open exited with signal ${launch.signal}` : `open exited with code ${launch.code ?? 1}`);
+                return c.error({
+                    code: "GUI_LAUNCH_FAILED",
+                    message: `Smithers Studio app is not installed or not registered with LaunchServices. Install/register the native app, or pass --bundle-id <actual.bundle.id>. ${detail}`,
+                    exitCode: 1,
+                });
+            }
             console.log(`Opening ${target} in Smithers GUI…`);
             return c.ok({ opened: target, bundleId: c.options.bundleId });
         }
         catch (err) {
-            return c.error({ code: "GUI_LAUNCH_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+            return c.error({
+                code: "GUI_LAUNCH_FAILED",
+                message: `Smithers Studio app is not installed or not registered with LaunchServices. Install/register the native app, or pass --bundle-id <actual.bundle.id>. ${err?.message ?? String(err)}`,
+                exitCode: 1,
+            });
         }
     },
 })
