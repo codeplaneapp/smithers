@@ -55,14 +55,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     blastRadius: blastRadiusSchema,
 });
 const gatherer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a dependency and context gatherer. Given a list of changed files,
 trace imports, find CODEOWNERS entries, locate related test files and documentation.
 Be thorough: check package.json, tsconfig paths, import graphs, and doc references.`,
 });
 const blastRadiusAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a blast-radius analyst. Given changed files and their dependency context,
 determine which services, tests, and docs are impacted. Assign a risk level to each service

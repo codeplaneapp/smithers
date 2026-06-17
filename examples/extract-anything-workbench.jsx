@@ -43,18 +43,18 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     preview: previewSchema,
 });
 const extractorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a typed extractor. Given arbitrary input and a target schema,
 extract structured fields with confidence scores. Be precise and honest about confidence.`,
 });
 const validatorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     instructions: `You are a schema validator. Check extracted data against the target schema.
 Flag missing fields, type mismatches, and low-confidence values. Be strict.`,
 });
 const previewAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     instructions: `You are an extraction reviewer. Compare validated candidates and pick the
 best extractor. Summarise what was extracted and whether the pipeline should adopt it.`,
 });

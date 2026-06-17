@@ -85,7 +85,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     typedCalls: typedCallSchema,
 });
 const contractParser = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are an OpenAPI and JSON Schema specialist. Parse raw API specifications
 into a normalized contract source representation. Identify all endpoints, HTTP methods,
@@ -93,7 +93,7 @@ operation IDs, request/response schemas, parameters, and shared model definition
 Handle both OpenAPI 3.x and JSON Schema drafts. Resolve $ref pointers and inline definitions.`,
 });
 const interfaceGenerator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a TypeScript interface generator. Given a parsed contract source,
 produce strongly-typed TypeScript interfaces and equivalent zod schemas for every model
@@ -102,7 +102,7 @@ its input and output types. Prefer precise types over 'any'. Use branded types w
 or dates appear. Ensure naming consistency across interfaces.`,
 });
 const typedCallBuilder = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a typed API call builder. Given generated interfaces and operation
 signatures, produce sample typed calls for every endpoint. Validate that request payloads

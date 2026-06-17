@@ -39,7 +39,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
  * @param {string} focus
  */
 const makeSpecialist = (role, focus) => new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a ${role}. Focus exclusively on: ${focus}
 Be thorough but stay in your lane. Don't comment on areas outside your expertise.`,
@@ -49,7 +49,7 @@ const qualityReviewer = makeSpecialist("Code Quality Reviewer", "readability, ma
 const architectureReviewer = makeSpecialist("Architecture Reviewer", "design patterns, coupling, scalability, API design, dependency direction, separation of concerns");
 const performanceReviewer = makeSpecialist("Performance Reviewer", "N+1 queries, unnecessary allocations, missing caching, algorithmic complexity, bundle size");
 const moderator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     instructions: `You are a review moderator. Synthesize multiple specialist reviews into
 a single coherent verdict. Prioritize critical issues, deduplicate overlapping feedback,
 and produce actionable recommendations.`,

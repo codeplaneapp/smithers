@@ -50,14 +50,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const scheduler = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a scheduling agent. Determine whether it is time to probe
 MCP servers based on the configured interval and last probe timestamp. Check system
 time and compare against the last run.`,
 });
 const prober = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are an MCP health prober. Exercise the given MCP server by listing
 its tools and invoking a lightweight canary call. Measure latency, check whether the
@@ -65,7 +65,7 @@ tool list matches the known baseline, and flag any capability drift. Be precise 
 latency measurements and capability comparisons.`,
 });
 const checker = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a results analyst. Compare the current probe results against
 the previous baseline. Determine whether any change is material — an outage, a new
@@ -73,7 +73,7 @@ capability appearing or disappearing, or a latency regression beyond the thresho
 Only flag material changes; ignore noise.`,
 });
 const reporter = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, bash },
     instructions: `You are a concise incident reporter. When material changes are detected,
 produce a clear, actionable report with specific recommendations. If nothing material

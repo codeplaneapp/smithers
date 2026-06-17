@@ -91,35 +91,35 @@ const { Workflow, Task, Branch, Approval, smithers, outputs } = createExampleSmi
 });
 
 const routerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a query router. Decide whether the question can be answered
 from stable memory, requires retrieval, requires tool/database lookup, or lacks enough context.`,
 });
 
 const plannerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are an agentic RAG planner. Break the question into subqueries,
 choose source types, and list evidence gaps that must be closed before answering.`,
 });
 
 const retrieverAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are an evidence retriever. Search the requested corpus or source
 type and return atomic claims with source IDs, locations, and confidence scores.`,
 });
 
 const writerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are a cited-answer writer. Every factual sentence must map to
 source IDs. Do not invent citations. Preserve open questions instead of guessing.`,
 });
 
 const judgeAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are a citation and faithfulness judge. Check whether the answer
 is fully supported by the evidence and name every unsupported sentence or missing fact.`,

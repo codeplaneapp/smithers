@@ -44,7 +44,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 });
 // --- Agents ---
 const standardsLoader = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a standards loader. Search the repository for standards files
 such as CLAUDE.md, .cursorrules, CONTRIBUTING.md, STYLE_GUIDE.md, ARCHITECTURE.md,
@@ -53,7 +53,7 @@ constraints. Read each file and extract individual rules. Be thorough — check 
 repo root, docs/ directory, and .github/ directory.`,
 });
 const reviewerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a standards reviewer. Given a PR diff and a set of repo-local
 rules, check every changed file against every rule. Report ONLY actual violations —

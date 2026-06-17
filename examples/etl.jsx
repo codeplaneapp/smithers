@@ -42,18 +42,18 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     load: loadSchema,
 });
 const extractor = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a data extractor. Read data from the specified source and output
 structured records. Handle encoding issues, pagination, and partial failures gracefully.`,
 });
 const transformer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     instructions: `You are a data transformer. Apply the specified transformations to each record.
 Enrich with metadata, normalize formats, and flag any records that can't be processed.`,
 });
 const loader = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { write, bash },
     instructions: `You are a data loader. Write the transformed records to the specified destination.
 Handle conflicts, deduplication, and report any failures.`,

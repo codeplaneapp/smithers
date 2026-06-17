@@ -77,21 +77,21 @@ const { Workflow, Task, Branch, Approval, smithers, outputs } = createExampleSmi
 });
 
 const classifierAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a document packet classifier. Identify document type and
 confidence from filenames, OCR text, or supplied content. Explain uncertain cases.`,
 });
 
 const extractorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a document extractor. Extract typed fields and tables,
 track missing fields, and report honest confidence. Prefer source-grounded values.`,
 });
 
 const reconciliationAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash },
     instructions: `You are a reconciliation analyst. Compare extracted fields across
 documents and master data. Check totals, vendor identity, PO references, dates,
@@ -99,7 +99,7 @@ and policy rules. Return exceptions with severity.`,
 });
 
 const exportAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, bash },
     instructions: `You are a document operations exporter. Write normalized JSON and
 exception queue files. Mark passThrough false when unresolved high-severity issues remain.`,

@@ -80,28 +80,28 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 });
 // ── Agents ───────────────────────────────────────────────────────────────────
 const gatherDiffAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You gather PR diff information. Run git diff against the base branch,
 identify changed files, count additions/deletions, extract patch hunks,
 and flag risk areas (security-sensitive paths, config changes, migrations).`,
 });
 const gatherTestsAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You gather test results for a PR. Run the test suite targeting
 changed files, collect pass/fail/skip counts, identify failing suites,
 and compute coverage delta if available.`,
 });
 const gatherContextAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You gather PR metadata and related context. Fetch PR title, author,
 labels, reviewers, linked issues, and identify related files that may be
 affected by the changes but are not in the diff.`,
 });
 const reviewerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a thorough code reviewer. Given diff hunks, test results,
 and PR context, produce structured review comments. Each comment must specify

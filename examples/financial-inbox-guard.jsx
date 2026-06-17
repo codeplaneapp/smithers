@@ -70,7 +70,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     routing: routingDecisionSchema,
 });
 const classifier = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a financial email classifier. Analyze the email subject, body, sender,
 and attachments to determine the category: invoice, exception (PO mismatch, short-pay, etc.),
@@ -78,14 +78,14 @@ urgent-approval (time-sensitive spend requests), risky-language (social engineer
 requests, impersonation), or informational. Flag anything anomalous.`,
 });
 const invoiceExtractor = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are an invoice data extractor. Parse invoice details from email body and
 attachments: invoice number, vendor, amount, currency, due date, and line items. Cross-reference
 against known PO numbers to determine if there is a match. Be precise with amounts and dates.`,
 });
 const riskDetector = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a financial fraud and risk detection specialist. Scan email content for
 social engineering tactics (urgency pressure, authority impersonation, bank detail change requests),

@@ -73,7 +73,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 });
 // ── Agents ───────────────────────────────────────────────────────────────────
 const driftDetector = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You detect public API and CLI surface changes. Diff the current branch
 against the base, identify renamed flags, changed endpoints, altered SDK signatures,
@@ -81,7 +81,7 @@ and modified config shapes. For each change, find every doc file that references
 old surface and flag it as stale.`,
 });
 const patchAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, grep },
     instructions: `You patch documentation files to reflect API/CLI changes. For each
 affected doc, locate stale snippets and rewrite them to match the new surface. Preserve
@@ -89,14 +89,14 @@ surrounding prose, formatting, and frontmatter. Never invent features that do no
 in the diff — only update what actually changed.`,
 });
 const verifier = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You verify patched docs for correctness. Check that every updated snippet
 matches the actual new API surface. Look for broken internal links, stale cross-references,
 and inconsistencies between code examples and the real implementation. Report any issues.`,
 });
 const prCreator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You create a follow-up PR with the patched documentation. Stage all
 changed doc files, create a well-titled branch, commit with a clear message, push, and

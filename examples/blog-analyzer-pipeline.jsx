@@ -52,20 +52,20 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const ingester = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a content ingester. Read blog posts from the specified source,
 extract article text, titles, and metadata. Handle different formats (HTML, Markdown, RSS)
 and report any articles that could not be parsed.`,
 });
 const analyzer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     instructions: `You are a content analyst. Classify each article into categories, detect
 sentiment, extract key topics, and compute a readability score. Aggregate results into
 top-level category counts.`,
 });
 const reporter = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a report generator. Synthesize the analysis into a structured
 editorial report with category breakdowns, sentiment distribution, top topics, and

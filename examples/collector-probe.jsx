@@ -75,14 +75,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const collectorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a telemetry collector. Given raw invocation data, aggregate
 timing, cost, and quality metrics. Compute running statistics (mean, p95) across
 the sample window. Be precise with numbers and preserve all sample data.`,
 });
 const anomalyAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash },
     instructions: `You are an anomaly detector for AI agent telemetry. Compare current
 aggregates against the provided baselines. Flag drift when quality drops more than 5%,

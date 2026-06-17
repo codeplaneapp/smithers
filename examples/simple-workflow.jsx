@@ -21,11 +21,11 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 });
 // Create agents
 const researchAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     instructions: "You are a research assistant. Provide concise summaries and key points.",
 });
 const writerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     instructions: "You are a technical writer. Write clear, engaging content.",
 });
 // Export workflow

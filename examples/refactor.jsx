@@ -52,20 +52,20 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     summary: summarySchema,
 });
 const analyzer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a static analysis agent. Find all occurrences of the pattern
 that needs refactoring. Be thorough — don't miss any.`,
 });
 const refactorer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, edit, grep },
     instructions: `You are a refactoring agent. Apply the specified refactoring to the given file.
 Make precise, minimal changes. Preserve behavior exactly. Don't change formatting
 of lines you're not refactoring.`,
 });
 const verifier = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a verification agent. Run typecheck, tests, and lint to ensure
 the refactoring didn't break anything.`,

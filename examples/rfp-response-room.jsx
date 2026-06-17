@@ -93,35 +93,35 @@ const { Workflow, Task, Branch, Approval, smithers, outputs } = createExampleSmi
 });
 
 const parserAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are an RFP intake analyst. Parse the source RFP into a requirement
 matrix with stable IDs, mandatory flags, topics, and submission instructions.`,
 });
 
 const plannerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a proposal manager. Build an answer plan that maps each
 requirement to approved source material, owner roles, and risks.`,
 });
 
 const draftAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are an RFP response drafter. Use only approved source material,
 cite source IDs, mark low-confidence answers, and never invent capabilities.`,
 });
 
 const reviewerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a proposal reviewer. Check drafts for source support,
 policy compliance, overclaims, and reviewer-specific blockers.`,
 });
 
 const packagerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, bash },
     instructions: `You are a proposal packager. Assemble reviewed answers into the
 requested output files, list open questions, and mark whether the package is ready.`,

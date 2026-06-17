@@ -95,7 +95,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     brief: briefSchema,
 });
 const classifierAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a meeting intent classifier. Given a calendar event with its title,
 description, attendees, and source, determine the meeting intent, priority level, account tier,
@@ -103,21 +103,21 @@ and any flags (e.g. at-risk renewal, executive attendee, competitor mentioned). 
 and use all available signals.`,
 });
 const crmAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a CRM context gatherer. Given an account name and attendees,
 pull the relevant account record, opportunity stage, ARR, owner, open support tickets,
 last touch date, and recent CRM notes. Summarize the account health concisely.`,
 });
 const attendeeAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are an attendee research specialist. Given a list of meeting attendees,
 look up each person's title, role in the buying process, LinkedIn profile, and any recent
 activity or engagement signals. Classify each attendee's influence level.`,
 });
 const briefingAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are an executive briefing writer. Given meeting classification, CRM context,
 attendee profiles, and meeting history, synthesize a concise, actionable prep brief. Include

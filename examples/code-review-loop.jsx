@@ -27,7 +27,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     output: outputSchema,
 });
 const reviewAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     output: Output.object({ schema: reviewSchema }),
     instructions: `You are a senior code reviewer. Review the codebase thoroughly.
@@ -35,7 +35,7 @@ If everything looks good, set approved to true and say "LGTM" in feedback.
 If there are issues, set approved to false and list specific issues to fix.`,
 });
 const fixAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep }, // Remove edit to prevent actual changes
     instructions: `You are a senior software engineer. Analyze the issues and describe what fixes would be needed.
 Do NOT actually make changes - just describe what you WOULD fix.

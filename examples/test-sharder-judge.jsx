@@ -49,26 +49,26 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     adjudication: adjudicationSchema,
 });
 const changeAnalyzer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, grep, read },
     instructions: `You are a change analyzer. Inspect the diff and surrounding context
 to determine which files changed, what modules are affected, and the overall risk level.`,
 });
 const testSelector = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, grep, read },
     instructions: `You are a test selector. Given a change analysis, identify the highest-signal
 tests to run first. Prioritize tests that directly cover changed code paths. Defer tests
 that are unlikely to be affected.`,
 });
 const testRunner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a test runner. Execute the assigned test file and report the result.
 Capture the status, duration, and any error messages.`,
 });
 const adjudicator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     instructions: `You are a result adjudicator. Analyze test results and decide whether
 the change is safe (green), uncertain and needs more tests (yellow), or broken (red).
 If uncertainty remains, recommend expanding to deferred tests.`,

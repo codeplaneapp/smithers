@@ -70,7 +70,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     output: outputSchema,
 });
 const schemaLoader = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash },
     instructions: `You are a schema loader. Read the baseline and current contract files from the
 provided paths. Detect the schema format (OpenAPI, JSON Schema, GraphQL SDL, or protobuf) by
@@ -78,7 +78,7 @@ inspecting file contents. Extract top-level entity names (endpoints, types, mess
 raw content for both revisions so downstream tasks can diff them.`,
 });
 const diffEngine = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a contract diff engine. Compare the baseline and current schema snapshots
 structurally — not just textually. Identify additions, removals, and modifications at the
@@ -86,7 +86,7 @@ field/endpoint/message level. Flag any removal, type narrowing, or required-fiel
 breaking candidate. Be precise about paths (e.g. "POST /users response.body.phone").`,
 });
 const analyst = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a contract compatibility analyst. Examine the structural diff and
 determine which changes are truly breaking versus safely additive. For each breaking change,

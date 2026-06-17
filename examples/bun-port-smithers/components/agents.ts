@@ -132,7 +132,7 @@ function writerAgent(repo: string, kind = "phase-a-implement"): any {
   if (!useRealAgents) return makeDryAgent(kind);
   return new ClaudeCodeAgent({
     cwd: repo,
-    model: process.env.BUN_PORT_WRITER_MODEL ?? "claude-sonnet-4-20250514",
+    model: process.env.BUN_PORT_WRITER_MODEL ?? "claude-sonnet-4-6",
     permissionMode: "acceptEdits",
     allowedTools: process.env.BUN_PORT_WRITER_ALLOWED_TOOLS?.split(",") ?? [
       "Read",

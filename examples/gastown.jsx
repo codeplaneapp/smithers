@@ -230,7 +230,7 @@ function useBeads() {
 // ═══════════════════════════════════════════════════════════════════════════
 /** Mayor: town-level orchestrator that decomposes goals into beads */
 const mayorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are the Mayor — Gas Town's global coordinator.
 
@@ -253,7 +253,7 @@ Prefer many small beads over few large ones.`,
  *   load-context → branch-setup → implement → commit → self-review → build-check → submit
  */
 const polecatAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, edit, bash, grep },
     instructions: `You are a Polecat — a self-cleaning worker agent.
 
@@ -282,7 +282,7 @@ const polecatAgent = new Agent({
  * Processes MRs through: ready → claimed → preparing → merging → merged
  */
 const refineryAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You are the Refinery — Gas Town's merge queue processor.
 
@@ -310,7 +310,7 @@ You do NOT write code. You merge, gate, and report.`,
 });
 /** Witness: monitors polecat health and dispatches protocol messages */
 const witnessAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are the Witness — Gas Town's polecat monitor.
 
@@ -336,7 +336,7 @@ Report a summary of all agent health status.`,
 });
 /** Report agent: synthesizes convoy results */
 const reportAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     instructions: `Summarize a Gas Town convoy's results.
 Include: convoy ID, total beads, merged/rejected/failed/deferred counts,
 a merge log showing each branch's phase and result, and a brief narrative.`,

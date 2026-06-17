@@ -48,25 +48,25 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     finalize: finalizeSchema,
 });
 const codeAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You are a code agent. Analyze the proposed patch, identify changed files,
 and summarize the diff so downstream verification steps know what to check.`,
 });
 const verifier = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a verification agent. Run the specified check command and report
 whether it passed or failed. Include raw output and error counts.`,
 });
 const gatekeeper = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     instructions: `You are a plausibility gatekeeper. Aggregate verification results and decide
 whether the patch meets the plausibility bar for promotion. A patch is promoted only if all
 critical checks pass and the overall plausibility score exceeds the configured threshold.`,
 });
 const finalizer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a finalization agent. Based on the gate decision, either merge the patch,
 leave a blocking comment, or request updates from the author.`,

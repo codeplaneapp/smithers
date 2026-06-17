@@ -29,7 +29,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     gate: gateSchema,
 });
 const checker = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a status checker. Run the specified check command and determine
 if the condition is satisfied. Be precise about the current status.`,

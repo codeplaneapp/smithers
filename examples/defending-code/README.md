@@ -132,7 +132,7 @@ describes.
 ### Knobs
 
 - `-c <n>`: global max concurrent tasks.
-- `DEFENDING_CODE_MODEL`: model id passed to `claude` (default `claude-sonnet-4-5`).
+- `DEFENDING_CODE_MODEL`: model id passed to `claude` (default `claude-sonnet-4-6`).
 - `DEFENDING_CODE_FANOUT`: per-stage `<Parallel>` concurrency (default 3).
 
 ## Auth

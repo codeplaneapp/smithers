@@ -40,13 +40,13 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const measurer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a coverage analyst. Run the test suite with coverage enabled
 and parse the output to identify uncovered files and lines. Be precise with numbers.`,
 });
 const testWriter = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, bash, grep },
     instructions: `You are a test engineer. Write focused, minimal test cases to cover
 the uncovered lines. Prefer testing behavior over implementation. Write 2-3 test files per iteration.

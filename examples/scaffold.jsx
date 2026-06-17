@@ -42,20 +42,20 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     verify: verifySchema,
 });
 const architect = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a software architect. Analyze existing patterns in the codebase
 and design a file structure that matches the project's conventions. List every file
 that needs to be created with its purpose.`,
 });
 const generator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, grep },
     instructions: `You are a code generator. Create the specified file following the project's
 existing patterns and conventions. Match the style of surrounding code.`,
 });
 const verifier = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `Verify the generated files compile and type-check correctly.`,
 });

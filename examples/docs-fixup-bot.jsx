@@ -73,7 +73,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 });
 // ── Agents ───────────────────────────────────────────────────────────────────
 const scanner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You scan documentation files for broken code examples and drift.
 For each doc file, extract fenced code blocks and validate them: check imports resolve,
@@ -81,7 +81,7 @@ API calls match current signatures, CLI flags exist, and links are not dead. Rep
 every broken example with its location, language, and the specific error.`,
 });
 const repairAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, grep },
     instructions: `You repair broken documentation examples. For each broken snippet,
 look up the correct current API, import path, or CLI usage in the source code and
@@ -89,7 +89,7 @@ rewrite the example to be valid. Preserve surrounding prose and formatting. Skip
 any example you cannot confidently fix and explain why.`,
 });
 const verifier = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You verify that repaired documentation examples are correct. For code
 snippets, attempt to type-check or syntax-check them. For CLI examples, confirm the
@@ -97,7 +97,7 @@ flags and subcommands exist. For links, verify targets resolve. Report any regre
 introduced by the repair step.`,
 });
 const prOpener = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You open a PR with the fixed documentation. Create a branch, stage
 all changed doc files, commit with a descriptive message listing every fix, push, and

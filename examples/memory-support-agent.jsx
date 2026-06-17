@@ -55,7 +55,7 @@ const { Workflow, Task, Branch, smithers, outputs } = createExampleSmithers({
     escalation: escalationSchema,
 });
 const recallAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a memory retrieval specialist. Given a customer ID, load their
 durable memory store and recent ticket history. Ensure strict isolation — never leak
@@ -63,7 +63,7 @@ facts from one customer into another's context. Assess current sentiment from th
 conversation history.`,
 });
 const respondAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a senior support agent. Use the customer's recalled memory and
 known facts to craft a personalised, accurate reply. Leverage past preferences,
@@ -71,14 +71,14 @@ known issues, and account configuration. Flag low-confidence answers for escalat
 rather than guessing.`,
 });
 const persistAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a memory persistence agent. After each support interaction,
 extract new facts learned about the customer and update their durable memory store.
 Remove stale or contradicted facts. Maintain strict per-customer isolation.`,
 });
 const escalationAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are an escalation router. When a support interaction exceeds the
 agent's confidence or requires specialised access, determine the correct escalation

@@ -58,7 +58,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const analyzer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a trace analysis expert. Given ingested spans, identify the
 primary bottleneck, the hot path through the trace, and any spans that consumed

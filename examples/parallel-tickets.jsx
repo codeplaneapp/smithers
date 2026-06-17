@@ -106,7 +106,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 // ─── Agents ────────────────────────────────────────────────────────────────
 
 const TRIAGE_MODEL = "claude-opus-4-5";
-const IMPLEMENTER_MODEL = "claude-sonnet-4-5";
+const IMPLEMENTER_MODEL = "claude-sonnet-4-6";
 const RESEARCHER_MODEL = "claude-haiku-4-5";
 const REVIEWER_MODEL = "gpt-5.5";
 

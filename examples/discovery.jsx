@@ -29,7 +29,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     discovery: discoverySchema,
 });
 const scanner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a codebase scanner. Thoroughly explore the target directory,
 categorize everything you find, and output structured findings.

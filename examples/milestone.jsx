@@ -42,13 +42,13 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     progress: progressSchema,
 });
 const implementer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, edit, bash, grep },
     instructions: `You are a milestone implementer. Complete the specified milestone
 requirements. Make clean, focused changes. Commit after each logical unit.`,
 });
 const validator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a milestone validator. Run all checks for the current milestone.
 Be strict — only pass if all criteria are met.`,

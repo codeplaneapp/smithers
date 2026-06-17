@@ -38,17 +38,17 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     merge: mergeSchema,
 });
 const splitter = new ClaudeCodeAgent({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     systemPrompt: `You are a work splitter. Analyze the input and divide it into
 independent, equally-sized chunks that can be processed in parallel.`,
 });
 const processor = new ClaudeCodeAgent({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     systemPrompt: `You are a worker. Process your assigned item according to the instructions.
 Be thorough but focused on just your item.`,
 });
 const merger = new ClaudeCodeAgent({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     systemPrompt: `You are an aggregator. Combine multiple worker results into a single
 coherent output. Resolve any conflicts. Produce a clean summary.`,
 });

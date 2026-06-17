@@ -46,14 +46,14 @@ const { Workflow, Task, Branch, Approval, smithers, outputs } = createExampleSmi
     action: actionSchema,
 });
 const gatherer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You are an incident evidence gatherer. Inspect logs, metrics, and recent
 deployments to build a clear picture of what went wrong. Focus on error rates,
 affected services, and the timeline of events.`,
 });
 const advisor = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a deployment advisor. Given evidence of a failed deployment,
 determine whether to rollback, mitigate in place, or observe. Consider data safety,

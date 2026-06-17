@@ -60,28 +60,28 @@ const { Workflow, Task, Branch, smithers, outputs } = createExampleSmithers({
     outcome: outcomeSchema,
 });
 const classifier = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a support ticket classifier. Analyze the inbound ticket and determine
 its category, customer sentiment, confidence level, and whether it should be escalated.
 Escalate when risk is high, sentiment is angry, or the issue involves data loss / security.`,
 });
 const retriever = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a knowledge-base retrieval specialist. Given a classified support ticket,
 search for relevant documentation, FAQ entries, and past resolutions. Return the most relevant
 articles with relevance scores. Aim for high coverage so the draft agent can compose a reply.`,
 });
 const drafter = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are a support response drafter. Using the classification and retrieved knowledge,
 compose a helpful, accurate reply. Match the tone to the customer's sentiment — be empathetic with
 frustrated users, concise with technical users. Include actionable next steps.`,
 });
 const escalator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are an escalation specialist. When a ticket cannot be safely deflected,
 prepare a thorough escalation package with context, priority, and recommended assignee

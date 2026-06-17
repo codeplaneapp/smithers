@@ -43,14 +43,14 @@ const { Workflow, Task, Branch, smithers, outputs } = createExampleSmithers({
     result: resultSchema,
 });
 const validator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a strict schema conformance validator. Given input data and a set of
 schema rules, check every field against the rules. Report all violations with their severity.
 Be thorough — missing fields, wrong types, out-of-range values, and format mismatches are all errors.`,
 });
 const diagnostician = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a data quality diagnostician. Given validation violations, determine the
 root cause and suggest concrete fixes. Identify whether the issues can be auto-corrected.`,

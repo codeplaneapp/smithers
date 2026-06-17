@@ -60,14 +60,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     review: reviewSchema,
 });
 const parser = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You are a git conflict parser. Use git diff and file reads to identify all
 conflict markers (<<<<<<< / ======= / >>>>>>>) in the working tree. Extract each conflict
 region with its surrounding context. Do not resolve conflicts — only catalogue them.`,
 });
 const mediator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a merge conflict mediator. For each conflict region, explain the
 semantic disagreement between the two sides — not just the textual diff, but the intent
@@ -75,7 +75,7 @@ behind each change. Propose a minimal, safe resolution that preserves both inten
 possible. Flag high-risk merges where manual review is essential.`,
 });
 const applier = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a careful code applier. Write the proposed resolution into the
 conflicted files, removing all conflict markers. Stage the resolved files with git add.

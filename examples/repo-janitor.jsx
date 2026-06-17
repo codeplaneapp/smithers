@@ -53,21 +53,21 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     prSummary: prSummarySchema,
 });
 const scanner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, grep, read },
     instructions: `You are a repo scanner. Identify maintenance items in the codebase without
 making any changes. Look for compiler warnings, stale TODOs, broken examples, formatting
 inconsistencies, and docs drift. Be precise about file paths and line numbers.`,
 });
 const maintenanceAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, bash, grep },
     instructions: `You are a maintenance agent. Apply low-risk, mechanical fixes to the codebase.
 Never change logic or public APIs. Stick to safe transformations: removing dead imports,
 updating stale comments, fixing broken links, normalizing formatting. If a fix feels risky, skip it.`,
 });
 const prCreator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a PR author. Create a well-structured pull request summarizing
 all maintenance work performed. Use conventional commit style. Group changes by category.`,

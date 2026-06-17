@@ -67,14 +67,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     crmRecord: crmRecordSchema,
 });
 const enrichmentAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a firmographic enrichment specialist. Given a company name and lead context,
 research the company's industry, size, funding, tech stack, recent news, and competitive landscape.
 Return structured enrichment data to support lead scoring and sales outreach.`,
 });
 const profilerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a lead profiling strategist. Given raw lead intake and firmographic enrichment,
 determine the account segment, ICP fit score, buyer persona, key pain points, and recommended

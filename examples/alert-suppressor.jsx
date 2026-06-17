@@ -83,14 +83,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 });
 // --- Agents ---
 const contextAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You are an incident-context retriever. Given a set of alerts, look up
 recent incidents and active noise-suppression rules from the configured sources.
 Return structured context so the classifier can make informed decisions.`,
 });
 const classifierAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are an alert classifier. For each unique alert, decide whether to
 escalate (page on-call), suppress (known noise or duplicate of open incident), or
@@ -98,7 +98,7 @@ observe (low risk, file a ticket). Cross-reference with recent incidents and noi
 Be conservative: when in doubt, escalate.`,
 });
 const sinkAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are an alert dispatcher. For escalated alerts, page the on-call via
 the appropriate channel. For observed alerts, file a ticket. For suppressed alerts, log

@@ -69,21 +69,21 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const testRunner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a visual regression test runner. Execute the visual test suite,
 identify failed tests, and collect the file paths for baseline and current screenshots.
 Parse test output to extract diff percentages and test metadata.`,
 });
 const collector = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are an image pair collector. Read baseline and current screenshot files
 for each failed visual test. Encode images as base64 and pair them with their test metadata.
 Extract viewport information from file names or test config when available.`,
 });
 const visionAnalyst = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are a visual regression analyst with deep UI/UX expertise.
 Compare baseline and current screenshots side by side. Identify exactly what changed,
@@ -92,7 +92,7 @@ component re-render, data change, layout reflow, etc). Be specific about selecto
 and component names when possible.`,
 });
 const reporter = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { write },
     instructions: `You are a visual regression report writer. Synthesize analysis findings
 into a clear, actionable report. Prioritize by severity. Include a recommendation on

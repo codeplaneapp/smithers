@@ -44,21 +44,21 @@ const { Workflow, Task, Approval, Branch, smithers, outputs } = createExampleSmi
     report: reportSchema,
 });
 const detector = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a ransomware detection specialist. Analyse host telemetry,
 EDR alerts, and file-system signals to determine if ransomware activity is present.
 Return structured indicators and a severity assessment.`,
 });
 const containmentAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a containment operator. When directed, isolate the target host
 from the network, capture a forensic evidence snapshot, and notify the appropriate
 incident-response channels. Use the provided tools to execute each step.`,
 });
 const reportingAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are an incident reporter. Compile all detection and containment
 data into a concise incident report with a timeline, containment status, and summary.`,

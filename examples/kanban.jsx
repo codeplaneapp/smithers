@@ -48,19 +48,19 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     board: boardSchema,
 });
 const triageAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a project manager. Analyze the input and break it into discrete work items.
 Prioritize them and put them all in the "backlog" column.`,
 });
 const workerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, edit, bash, grep },
     instructions: `You are a developer. Complete the assigned task. Make clean, minimal changes.
 Move the item to "review" when done, or "blocked" if you can't proceed.`,
 });
 const reviewerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a code reviewer. Check the work done on this item.
 If it looks good, move to "done". If it needs fixes, move back to "backlog" with feedback.`,

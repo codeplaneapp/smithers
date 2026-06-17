@@ -42,14 +42,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     changelog: changelogSchema,
 });
 const analyst = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a git historian. Analyze commits, categorize them by type
 (feature, fix, refactor, docs, test, chore, breaking), and extract meaningful summaries.
 Look beyond commit messages — check the actual diff context when messages are vague.`,
 });
 const writer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { write },
     instructions: `You are a changelog writer. Generate clear, user-facing changelogs.
 Group by category with emojis. Highlight breaking changes prominently.

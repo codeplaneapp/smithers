@@ -59,14 +59,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     deployAction: deployActionSchema,
 });
 const telemetryCollector = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a telemetry collector for deployment streams. Query the provided
 metrics endpoints, log sources, and trace stores to gather latency percentiles, error rates,
 throughput, log anomalies, and trace warnings. Normalize all values for consistent comparison.`,
 });
 const comparator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash },
     instructions: `You are a deployment telemetry comparator. Given stable and canary telemetry
 snapshots, compute deltas across all dimensions: latency, error rate, throughput. Identify
@@ -74,7 +74,7 @@ anomalies unique to the canary. Flag risk signals with severity levels. Be preci
 percentage changes and use statistical significance where sample sizes allow.`,
 });
 const judge = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a canary deployment judge. Based on the telemetry comparison, render a
 promote/hold/rollback decision. Promote if all metrics are within acceptable thresholds. Hold if

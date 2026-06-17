@@ -53,19 +53,19 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const scanner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a dependency analyst. Check for outdated packages and assess
 each update's risk level (major/minor/patch, breaking changes).`,
 });
 const updater = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, edit, read },
     instructions: `You are a dependency updater. Update the specified package.
 For major updates, check the changelog for breaking changes and apply necessary code fixes.`,
 });
 const verifier = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `Run the full verification suite to check nothing is broken.`,
 });

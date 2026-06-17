@@ -37,19 +37,19 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     verdict: verdictSchema,
 });
 const proposer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You argue FOR the proposed approach. Find evidence in the codebase.
 Build strong arguments. Rebut the opponent's points with specifics.`,
 });
 const opponent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You argue AGAINST the proposed approach. Find counter-evidence.
 Identify risks, costs, and alternatives. Rebut the proposer's points.`,
 });
 const judge = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are an impartial judge. Weigh both sides' arguments based on
 evidence quality, not rhetoric. Make a clear decision with conditions and risk mitigation.`,

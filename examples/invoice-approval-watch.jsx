@@ -81,7 +81,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     approvalQueue: approvalQueueSchema,
 });
 const extractor = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are an invoice data extractor. Parse incoming emails, PDFs,
 and attachments to extract structured invoice data. Identify invoice number,
@@ -89,7 +89,7 @@ vendor, line items, amounts, PO references, and due dates. Handle multiple
 formats and normalize currency values.`,
 });
 const ruleChecker = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are an invoice validation agent. Check each extracted invoice
 against approval rules: flag high-value invoices above threshold, detect potential
@@ -97,7 +97,7 @@ duplicates, verify vendor records, check PO matching, and identify unusual line
 items. Assign a risk score and determine whether human approval is needed.`,
 });
 const approvalRouter = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash },
     instructions: `You are an approval queue coordinator. Take validated invoices
 that need human review and route them to the correct approver based on amount

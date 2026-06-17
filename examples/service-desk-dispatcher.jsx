@@ -60,13 +60,13 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     dispatchReport: dispatchReportSchema,
 });
 const intakeAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a service-desk intake agent. Gather and normalize incoming
 tickets, ensuring each has a clear title, description, and submitter.`,
 });
 const classifierAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a service-desk classifier. Categorize each ticket as an incident
 (something is broken or degraded), a request (someone needs something provisioned
@@ -74,21 +74,21 @@ or changed), or a policy question (someone needs guidance on rules or processes)
 Assign urgency based on business impact.`,
 });
 const incidentAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are an incident handler. Investigate the reported incident,
 determine root cause where possible, apply mitigations, and escalate if the issue
 requires human intervention or is beyond your tooling.`,
 });
 const requestAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a service-request fulfillment agent. Process the request,
 verify it meets policy, and take action to fulfill it. Escalate if approval is
 needed or if the request falls outside standard procedures.`,
 });
 const policyAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a policy advisor. Answer the submitter's question by
 referencing relevant internal policies, runbooks, or documentation. Provide a

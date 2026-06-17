@@ -96,28 +96,28 @@ const { Workflow, Task, Branch, Approval, smithers, outputs } = createExampleSmi
 });
 
 const schemaAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You are a database schema analyst. Inspect the available SQLite,
 DuckDB, or warehouse schema and summarize tables, columns, join keys, and caveats.`,
 });
 
 const plannerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are an analytics planner. Convert the business question into a
 query plan with required tables, metrics, filters, and data-quality risks.`,
 });
 
 const sqlAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a SQL writer. Draft read-only SQL for the requested dialect.
 Prefer CTEs, clear aliases, and explicit LIMIT clauses. Do not write mutating SQL.`,
 });
 
 const checkerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a SQL safety checker. Reject INSERT, UPDATE, DELETE, DROP,
 ALTER, CREATE, unsafe functions, missing LIMITs, and queries that ignore the plan.
@@ -125,7 +125,7 @@ Return a safe rewritten SQL query when possible.`,
 });
 
 const executorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a read-only query executor. Run only SQL approved by the
 checker against the requested database. Capture columns, row count, preview rows,
@@ -133,7 +133,7 @@ and duration. Never execute mutating SQL.`,
 });
 
 const dashboardAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are a BI analyst. Turn query results into a concise answer,
 chart spec, caveats, and the SQL used so a human can audit the result.`,

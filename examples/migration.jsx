@@ -54,19 +54,19 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const analyzer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a migration analyst. Scan the codebase to find all files
 that need changes for the migration. Assess complexity and identify breaking changes.`,
 });
 const migrator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, edit, grep },
     instructions: `You are a code migrator. Apply the specified migration to the given file.
 Make minimal, precise changes. Preserve formatting and comments.`,
 });
 const validator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a CI validator. Run typecheck, tests, and lint to verify
 the migration didn't break anything. Report all errors found.`,

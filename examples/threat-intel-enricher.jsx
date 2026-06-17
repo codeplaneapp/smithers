@@ -84,21 +84,21 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     caseRecord: caseRecordSchema,
 });
 const enrichmentAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a threat intelligence enrichment specialist. Given a set of indicators,
 query external threat feeds, CVE databases, and reputation services. Return structured
 enrichment data including known-malicious flags, threat-feed matches, and relevant CVEs.`,
 });
 const internalContextAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are an internal security context gatherer. Given alert indicators,
 look up affected assets in the CMDB, pull recent authentication and network logs,
 and find any prior incidents involving the same indicators or assets.`,
 });
 const analystAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a senior security analyst. Given ingested alert data plus external
 and internal enrichment, determine the recommended severity, identify the likely attack vector,

@@ -39,13 +39,13 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const setupAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are an environment setup agent. Prepare the test environment.
 Install dependencies, start services, verify connectivity.`,
 });
 const checkAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a smoke test runner. Execute the specified check and report
 pass/fail with timing. Be precise about errors.`,

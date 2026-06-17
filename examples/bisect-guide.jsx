@@ -43,13 +43,13 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 });
 // --- Agents ---
 const testRunnerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     output: Output.object({ schema: bisectStepSchema }),
     instructions: `You are a test runner for git bisect. Given a commit SHA, check it out and run the specified test command. Report the raw output and exit code. Do NOT interpret pass/fail — just report what happened.`,
 });
 const adjudicatorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     output: Output.object({ schema: adjudicationSchema }),
     instructions: `You are a bisect adjudicator. Given a test result (output + exit code), determine whether this commit is "good", "bad", or "skip" (ambiguous/flaky). Consider timeouts, partial failures, and infrastructure noise. Update the search bounds accordingly. Mark culpritFound when low >= high.`,
