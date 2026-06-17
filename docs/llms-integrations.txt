@@ -2525,6 +2525,252 @@ Before accepting a community connector, verify:
 
 ---
 
+## Community Connectors
+
+> Package long-tail integrations as manifest-declared tools, triggers, and auth requirements.
+
+Community connectors are package-level integration descriptors. They let a maintainer publish one connector package that projects agent-callable tools and triggers onto Smithers' existing Tier 0 substrate instead of adding one workflow node per app.
+
+A connector package is declarative at the boundary: the manifest says what tool and trigger surfaces exist, which auth grants they require, and which runtime adapter should load them. Runtime code may still live in the package, but Smithers only discovers it through the loader contract below.
+
+## Package Layout
+
+```text
+smithers-connector-acme/
+  package.json
+  smithers.connector.json
+  openapi/acme.yaml
+  mcp/server.json
+  src/index.ts
+  README.md
+```
+
+`smithers.connector.json` is the contract. `package.json` should expose the loader module with a normal ESM export and include a `smithers.connector` field that points at the manifest:
+
+```json
+{
+  "name": "smithers-connector-acme",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "smithers": {
+    "connector": "./smithers.connector.json"
+  }
+}
+```
+
+## Manifest Format
+
+The manifest format id is `smithers.connector.v1`. Unknown top-level keys are ignored, but unknown keys inside `tools`, `triggers`, `auth`, and `surfaces` must fail validation so package authors notice typos before an agent receives the tool catalog.
+
+```json
+{
+  "schema": "smithers.connector.v1",
+  "id": "acme",
+  "name": "Acme",
+  "version": "0.1.0",
+  "description": "Curated Acme tools for Smithers agents.",
+  "loader": "./src/index.ts",
+  "auth": {
+    "oauth": {
+      "provider": "acme",
+      "grant": "authorization_code_pkce",
+      "scopes": ["tickets:read", "tickets:write"],
+      "tenantKey": "workspace_id"
+    }
+  },
+  "surfaces": {
+    "openapi": {
+      "spec": "./openapi/acme.yaml",
+      "baseUrl": "https://api.acme.example"
+    },
+    "mcp": {
+      "command": "node",
+      "args": ["./dist/mcp-server.js"]
+    },
+    "webhooks": {
+      "provider": "acme",
+      "signature": "hmac-sha256",
+      "idempotencyKey": "$.event_id"
+    }
+  },
+  "tools": [
+    {
+      "name": "acme_create_ticket",
+      "surface": "openapi",
+      "operationId": "createTicket",
+      "description": "Create one Acme ticket after checking for an existing ticket with the same external id.",
+      "auth": "oauth",
+      "scopes": ["tickets:write"],
+      "sideEffect": true,
+      "idempotency": {
+        "key": "externalId",
+        "required": true
+      }
+    },
+    {
+      "name": "acme_search_tickets",
+      "surface": "mcp",
+      "tool": "search_tickets",
+      "description": "Search Acme tickets by text, status, assignee, or customer.",
+      "auth": "oauth",
+      "scopes": ["tickets:read"],
+      "sideEffect": false
+    }
+  ],
+  "triggers": [
+    {
+      "name": "acme_ticket_updated",
+      "surface": "webhook",
+      "event": "ticket.updated",
+      "auth": "oauth",
+      "scopes": ["tickets:read"],
+      "dedupe": {
+        "key": "$.event_id"
+      },
+      "payloadSchema": {
+        "type": "object",
+        "required": ["ticketId"],
+        "properties": {
+          "ticketId": { "type": "string" }
+        }
+      }
+    }
+  ],
+  "tokenBroker": {
+    "audience": "acme",
+    "defaultTtlSeconds": 300,
+    "allowedActions": ["acme_create_ticket", "acme_search_tickets"]
+  }
+}
+```
+
+## Loader Contract
+
+A Smithers connector loader must:
+
+1. validate the manifest before loading package code.
+2. resolve auth through the OAuth plane and token broker, never by handing durable credentials to an LLM-visible tool call.
+3. project tools from `surfaces.openapi`, `surfaces.mcp`, or the package loader into AI SDK-compatible tools.
+4. register triggers from `surfaces.webhooks` with signature verification and dedupe before workflow dispatch.
+5. enforce scopes for every tool and trigger invocation against the connected user and tenant.
+6. Preserve idempotency metadata so retries and resumes can avoid duplicate write-side effects.
+
+Loader modules export one named `loadConnector` function:
+
+```ts
+export type SmithersConnectorContext = {
+  manifest: unknown;
+  connection: {
+    userId: string;
+    tenantId?: string;
+    scopes: string[];
+  };
+  tokenBroker: {
+    issue(input: {
+      audience: string;
+      scopes: string[];
+      action: string;
+      ttlSeconds?: number;
+    }): Promise<{ token: string; expiresAt: string }>;
+  };
+};
+
+export async function loadConnector(ctx: SmithersConnectorContext) {
+  return {
+    tools: {},
+    triggers: [],
+  };
+}
+```
+
+The loader may add custom tools that cannot be represented by OpenAPI or MCP, but those tools still need manifest entries. The manifest remains the auditable catalog Smithers can show to agents and humans.
+
+## Tool Declarations
+
+Each tool declaration describes one agent-callable capability, not one raw endpoint. Prefer a small curated surface with clear names and task-shaped descriptions.
+
+Required fields:
+
+| Field | Purpose |
+|---|---|
+| `name` | Stable tool name exposed to the agent. Prefix with the connector id. |
+| `surface` | `openapi`, `mcp`, or `custom`. |
+| `description` | Agent-facing behavior, limits, and recovery guidance. |
+| `auth` | Auth profile key, or `none` for public tools. |
+| `scopes` | Minimum delegated scopes required for this action. |
+| `sideEffect` | `true` for writes, sends, charges, deletes, or external state changes. |
+
+OpenAPI tools bind with `operationId`. MCP tools bind with the upstream MCP `tool` name. Custom tools bind to code returned by `loadConnector`.
+
+Side-effecting tools must declare `idempotency.required: true` unless the upstream provider supplies an equivalent idempotency key, request id, or natural unique key.
+
+## Trigger Declarations
+
+Triggers describe external events that can start or resume workflows. They are not workflow nodes and should not grow into a provider-specific palette.
+
+Required fields:
+
+| Field | Purpose |
+|---|---|
+| `name` | Stable trigger id exposed to workflow authors. |
+| `surface` | `webhook`, `poll`, or `mcp`. |
+| `event` | Provider event name or polling resource. |
+| `auth` | Auth profile key required to subscribe or poll. |
+| `dedupe.key` | JSONPath or provider event id used for idempotent dispatch. |
+
+Webhook triggers must declare the provider signature scheme and payload mapper through `surfaces.webhooks`. Poll triggers must declare interval bounds and cursor storage requirements in the manifest before registration.
+
+## Auth Requirements
+
+Connector auth declarations are requirements, not secrets. The OAuth plane owns authorization-code + PKCE flows, encrypted refresh-token storage, single-flight refresh, and per-user/per-tenant scoping.
+
+Supported auth profiles:
+
+| Profile | Use |
+|---|---|
+| `oauth` | Delegated per-user OAuth through the Smithers OAuth plane. |
+| `apiKey` | User-supplied key stored in the credential vault, exposed only through the token broker. |
+| `none` | Public or local-only tools. |
+
+Do not put tokens, client secrets, refresh tokens, service-account credentials, or shared bot tokens in a connector package. Runtime calls receive scoped action tokens from the `tokenBroker`, and the broker exchanges or unwraps provider credentials outside the agent transcript.
+
+## Tier 0 Integration Points
+
+Community connectors plug into existing universal surfaces:
+
+| Tier 0 surface | Connector field | Loader behavior |
+|---|---|---|
+| OAuth plane | `auth.oauth` | Resolve delegated user consent, tenant key, scopes, and refresh lifecycle. |
+| Scoped token broker | `tokenBroker` and per-tool `scopes` | Issue short-lived, revocable, auditable action tokens the LLM never sees. |
+| OpenAPI tools | `surfaces.openapi` + `tools[].operationId` | Build curated tools with `createOpenApiTools`; never dump every endpoint by default. |
+| MCP client | `surfaces.mcp` + `tools[].tool` | Pass selected MCP tools through with names and descriptions from the manifest. |
+| Webhook ingress | `surfaces.webhooks` + `triggers[]` | Verify signatures, map payloads, dedupe events, and dispatch workflows. |
+| Generic HTTP / sandbox | `surface: "custom"` | Run package code for cases that cannot be expressed as OpenAPI or MCP. |
+
+## Anti-Patterns
+
+- Do not add a node per app. Connectors contribute agent tools and triggers, not a giant fixed-schema workflow palette.
+- Do not publish every OpenAPI operation as a tool. Collapse noisy endpoint sets into task-shaped actions.
+- Do not bypass delegated OAuth with service-account or shared-bot tokens.
+- Do not refresh tokens independently in each tool call; refresh must go through the single-flight OAuth/token broker path.
+- Do not omit idempotency from write tools or webhook triggers.
+- Do not hide tool behavior in package code when it can be declared in the manifest.
+
+## Review Checklist
+
+Before accepting a community connector, verify:
+
+- The manifest validates as `smithers.connector.v1`.
+- Every tool has a clear description, auth profile, scope list, and side-effect marker.
+- Every write tool has idempotency metadata.
+- Every trigger has signature verification or polling cursor rules plus dedupe.
+- OAuth scopes are the minimum needed for the declared tools and triggers.
+- The package uses OpenAPI, MCP, webhook ingress, or the token broker instead of inventing a parallel integration plane.
+
+---
+
 ## Ecosystem
 
 > Community projects built on Smithers.
