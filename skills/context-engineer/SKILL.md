@@ -52,7 +52,7 @@ backpressure → approve → execute → report.
 - **Build a context inventory** (`inventory-context`): scan the repo, available
   tools/commands, `.smithers/skills`, and memory to draft the contract. Fill gaps
   with explicit `assumptions`; list what's truly `missingInputs`.
-- **Grill — only to reduce risk** (`grill-until-clear`, the `<GrillMe>`
+- **Grill — only to reduce risk** (`context-engineer:grill`, the `<GrillMe>`
   component): ask **one question at a time**, each with a **recommended answer +
   the reason**, and stop the moment the remaining ambiguity no longer changes the
   plan. **Never ask what's discoverable** from repo/docs/tools/memory — auto-answer
