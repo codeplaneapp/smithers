@@ -9,9 +9,14 @@ import { applyDiffBundle } from "./effect/diff-bundle.js";
 /**
  * @param {TaskDescriptor[]} tasks
  * @param {SmithersWorkflow<any>} workflow
- * @param {{ rootDir?: string; workflowPath?: string | null }} [opts]
+ * @param {{
+ *   rootDir?: string;
+ *   workflowPath?: string | null;
+ *   executeChildWorkflow?: typeof executeChildWorkflow;
+ * }} [opts]
  */
 export function attachSubflowComputeFns(tasks, workflow, opts = {}) {
+    const runChildWorkflow = opts.executeChildWorkflow ?? executeChildWorkflow;
     for (const task of tasks) {
         if (!task.meta?.__subflow || task.computeFn)
             continue;
@@ -20,7 +25,7 @@ export function attachSubflowComputeFns(tasks, workflow, opts = {}) {
             continue;
         const subflowInput = task.meta.__subflowInput;
         task.computeFn = async () => {
-            const result = await executeChildWorkflow(workflow, {
+            const result = await runChildWorkflow(workflow, {
                 workflow: subflowWorkflow,
                 input: subflowInput,
                 rootDir: opts.rootDir,
@@ -39,9 +44,18 @@ export function attachSubflowComputeFns(tasks, workflow, opts = {}) {
 /**
  * @param {TaskDescriptor[]} tasks
  * @param {SmithersWorkflow<any>} workflow
- * @param {{ rootDir?: string; workflowPath?: string | null }} [opts]
+ * @param {{
+ *   rootDir?: string;
+ *   workflowPath?: string | null;
+ *   executeChildWorkflow?: typeof executeChildWorkflow;
+ *   executeSandbox?: typeof executeSandbox;
+ *   applyDiffBundle?: typeof applyDiffBundle;
+ * }} [opts]
  */
 export function attachSandboxComputeFns(tasks, workflow, opts = {}) {
+    const runSandbox = opts.executeSandbox ?? executeSandbox;
+    const runChildWorkflow = opts.executeChildWorkflow ?? executeChildWorkflow;
+    const applySandboxDiffBundle = opts.applyDiffBundle ?? applyDiffBundle;
     for (const task of tasks) {
         if (!task.meta?.__sandbox || task.computeFn)
             continue;
@@ -58,14 +72,14 @@ export function attachSandboxComputeFns(tasks, workflow, opts = {}) {
         const sandboxConfig = task.meta.__sandboxConfig && typeof task.meta.__sandboxConfig === "object"
             ? task.meta.__sandboxConfig
             : {};
-        task.computeFn = async () => executeSandbox({
+        task.computeFn = async () => runSandbox({
             parentWorkflow: workflow,
             sandboxId: task.nodeId,
             provider: sandboxProvider,
             runtime: sandboxRuntime,
             workflow: sandboxWorkflow,
-            executeChildWorkflow,
-            applyDiffBundle,
+            executeChildWorkflow: runChildWorkflow,
+            applyDiffBundle: applySandboxDiffBundle,
             input: sandboxInput,
             rootDir: task.worktreePath ?? opts.rootDir ?? process.cwd(),
             allowNetwork: sandboxAllowNetwork,
