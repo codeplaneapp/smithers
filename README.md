@@ -11,7 +11,7 @@ Tell your coding agent to do real, multi-step work, then Smithers runs it for mi
 days with crash recovery, retries, human approvals, and full observability. The same
 workflow runs across Claude Code, Codex, Pi, AI SDK models, and remote sandboxes.
 
-![Live runs in Smithers Studio: some succeeded, some running, some paused on an approval gate, every run resumable and rewindable.](./marketing/0.22.0/assets/runs-live.gif)
+![Live workflow runs: some succeeded, some running, some paused on an approval gate, every run resumable and rewindable.](./marketing/0.22.0/assets/runs-live.gif)
 
 *A workflow run is a list of steps you can watch, pause, approve, and rewind. The run above shows several in flight at once.*
 
@@ -274,17 +274,17 @@ finished work.
 
 ### Components
 
-| Component    | Purpose                        |
-| ------------ | ------------------------------ |
-| `<Workflow>` | Root container                 |
-| `<Task>`     | AI or static task node         |
-| `<Sequence>` | Ordered execution              |
-| `<Parallel>` | Concurrent execution           |
-| `<Branch>`   | Conditional execution          |
-| `<Ralph>`    | Loop until a condition is met  |
+| Component    | Purpose                         |
+| ------------ | ------------------------------- |
+| `<Workflow>` | Root container                  |
+| `<Task>`     | AI or static task node          |
+| `<Sequence>` | Ordered execution               |
+| `<Parallel>` | Concurrent execution            |
+| `<Branch>`   | Conditional execution           |
+| `<Loop>`     | Repeat tasks until a condition is met  |
 
 ```tsx
-<Ralph until={ctx.latest("validate")?.approved} maxIterations={5}>
+<Loop until={ctx.latest("validate")?.approved} maxIterations={5}>
   <Task id="implement" output={outputs.implement} agent={coder}>
     Fix based on feedback
   </Task>
@@ -292,7 +292,7 @@ finished work.
   <Task id="validate" output={outputs.review} agent={reviewer}>
     Review the implementation
   </Task>
-</Ralph>
+</Loop>
 ```
 
 There are many more: approvals, merge queues, sub-workflows, signals, timers, sagas, and
