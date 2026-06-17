@@ -15,10 +15,10 @@ describe("zodToCreateTableSQL", () => {
         expect(ddl).toContain("iteration INTEGER NOT NULL DEFAULT 0");
         expect(ddl).toContain("PRIMARY KEY (run_id, node_id, iteration)");
     });
-    test("maps z.number() to INTEGER", () => {
+    test("maps z.number() to REAL", () => {
         const schema = z.object({ count: z.number() });
         const ddl = zodToCreateTableSQL("nums", schema);
-        expect(ddl).toContain('"count" INTEGER');
+        expect(ddl).toContain('"count" REAL');
     });
     test("maps z.boolean() to INTEGER", () => {
         const schema = z.object({ active: z.boolean() });
@@ -48,7 +48,7 @@ describe("zodToCreateTableSQL", () => {
     test("handles nullable fields", () => {
         const schema = z.object({ nullable: z.number().nullable() });
         const ddl = zodToCreateTableSQL("null_test", schema);
-        expect(ddl).toContain('"nullable" INTEGER');
+        expect(ddl).toContain('"nullable" REAL');
     });
     test("generated DDL executes without error", () => {
         const schema = z.object({

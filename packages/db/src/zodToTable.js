@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, primaryKey, } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, primaryKey, } from "drizzle-orm/sqlite-core";
 import { unwrapZodType } from "./unwrapZodType.js";
 import { camelToSnake } from "./utils/camelToSnake.js";
 /**
@@ -7,12 +7,19 @@ import { camelToSnake } from "./utils/camelToSnake.js";
 function getZodBaseTypeName(zodType) {
     return zodType._zod?.def?.type ?? "unknown";
 }
+function isIntegerNumberType(zodType, baseTypeName) {
+    if (baseTypeName === "int")
+        return true;
+    const def = zodType._zod?.def;
+    return def?.format === "safeint" ||
+        def?.checks?.some((check) => check?._zod?.def?.check === "number_format");
+}
 /**
  * Generates a Drizzle sqliteTable from a Zod object schema.
  *
  * Each Zod field is mapped to a SQLite column:
  * - z.string() / z.enum() -> text column
- * - z.number() -> integer column
+ * - z.number() -> real column
  * - z.boolean() -> integer column with boolean mode
  * - z.array() / z.object() / complex -> text column with json mode
  *
@@ -32,10 +39,11 @@ export function zodToTable(tableName, schema, opts) {
         const colName = camelToSnake(key);
         const baseType = unwrapZodType(zodType);
         const baseTypeName = getZodBaseTypeName(baseType);
-        if (baseTypeName === "number" ||
-            baseTypeName === "int" ||
-            baseTypeName === "float") {
+        if (isIntegerNumberType(baseType, baseTypeName)) {
             columns[key] = integer(colName);
+        }
+        else if (baseTypeName === "number" || baseTypeName === "float") {
+            columns[key] = real(colName);
         }
         else if (baseTypeName === "boolean") {
             columns[key] = integer(colName, { mode: "boolean" });

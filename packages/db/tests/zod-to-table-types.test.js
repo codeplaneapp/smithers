@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { getTableName } from "drizzle-orm";
+import { zodToCreateTableSQL } from "../src/zodToCreateTableSQL.js";
 import { zodToTable } from "../src/zodToTable.js";
 describe("zodToTable", () => {
     test("creates table from simple schema", () => {
@@ -25,9 +26,28 @@ describe("zodToTable", () => {
         expect(Object.keys(table)).toContain("name");
     });
     test("maps number to real column", () => {
-        const schema = z.object({ score: z.number() });
+        const schema = z.object({
+            score: z.number(),
+            confidence: z.number().min(0).max(1),
+        });
         const table = zodToTable("test_number", schema);
-        expect(Object.keys(table)).toContain("score");
+        const ddl = zodToCreateTableSQL("test_number", schema);
+        expect(table.score.getSQLType()).toBe("real");
+        expect(table.confidence.getSQLType()).toBe("real");
+        expect(ddl).toContain('"score" REAL');
+        expect(ddl).toContain('"confidence" REAL');
+    });
+    test("maps integer number schemas to integer columns", () => {
+        const schema = z.object({
+            count: z.number().int(),
+            exact: z.int(),
+        });
+        const table = zodToTable("test_integer", schema);
+        const ddl = zodToCreateTableSQL("test_integer", schema);
+        expect(table.count.getSQLType()).toBe("integer");
+        expect(table.exact.getSQLType()).toBe("integer");
+        expect(ddl).toContain('"count" INTEGER');
+        expect(ddl).toContain('"exact" INTEGER');
     });
     test("maps boolean to integer(boolean) column", () => {
         const schema = z.object({ active: z.boolean() });

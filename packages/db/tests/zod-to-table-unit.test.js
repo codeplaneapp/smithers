@@ -16,14 +16,14 @@ describe("zodToTable", () => {
         expect(nameCol.type).toBe("TEXT");
         sqlite.close();
     });
-    test("maps z.number() to integer column", () => {
+    test("maps z.number() to real column", () => {
         const sqlite = new Database(":memory:");
         const ddl = zodToCreateTableSQL("test_nums", z.object({ count: z.number() }));
         sqlite.run(ddl);
         const cols = sqlite.query("PRAGMA table_info(test_nums)").all();
         const countCol = cols.find((c) => c.name === "count");
         expect(countCol).toBeDefined();
-        expect(countCol.type).toBe("INTEGER");
+        expect(countCol.type).toBe("REAL");
         sqlite.close();
     });
     test("maps z.boolean() to integer column (boolean mode)", () => {
@@ -116,7 +116,7 @@ describe("zodToTable", () => {
         const cols = sqlite.query("PRAGMA table_info(test_nullable)").all();
         const countCol = cols.find((c) => c.name === "count");
         expect(countCol).toBeDefined();
-        expect(countCol.type).toBe("INTEGER");
+        expect(countCol.type).toBe("REAL");
         sqlite.close();
     });
     test("handles z.union() as json text column", () => {

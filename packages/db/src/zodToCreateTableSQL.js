@@ -7,15 +7,21 @@ import { camelToSnake } from "./utils/camelToSnake.js";
 function getZodBaseTypeName(zodType) {
     return zodType._zod?.def?.type ?? "unknown";
 }
+function isIntegerNumberType(zodType, baseTypeName) {
+    if (baseTypeName === "int")
+        return true;
+    const def = zodType._zod?.def;
+    return def?.format === "safeint" ||
+        def?.checks?.some((check) => check?._zod?.def?.check === "number_format");
+}
 function sqliteTypeFor(zodFieldSchema) {
     const baseType = unwrapZodType(zodFieldSchema);
     const baseTypeName = getZodBaseTypeName(baseType);
-    if (baseTypeName === "number" ||
-        baseTypeName === "int" ||
-        baseTypeName === "float" ||
-        baseTypeName === "boolean") {
+    if (baseTypeName === "boolean" || isIntegerNumberType(baseType, baseTypeName)) {
         return "INTEGER";
     }
+    if (baseTypeName === "number" || baseTypeName === "float")
+        return "REAL";
     return "TEXT";
 }
 function sqliteKindFor(zodFieldSchema) {

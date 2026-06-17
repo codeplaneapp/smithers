@@ -53,10 +53,10 @@ describe("zodToTable advanced", () => {
         expect(() => sqlite.exec(ddl)).not.toThrow();
         sqlite.close();
     });
-    test("handles optional number field (unwraps to INTEGER)", () => {
+    test("handles optional number field (unwraps to REAL)", () => {
         const schema = z.object({ score: z.number().optional() });
         const ddl = zodToCreateTableSQL("opt_num", schema);
-        expect(ddl).toContain('"score" INTEGER');
+        expect(ddl).toContain('"score" REAL');
     });
     test("handles nullable boolean field (unwraps to INTEGER)", () => {
         const schema = z.object({ flag: z.boolean().nullable() });

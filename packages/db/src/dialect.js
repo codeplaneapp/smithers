@@ -131,8 +131,8 @@ export function translatePlaceholders(dialect, sql) {
 
 /**
  * Map a single SQLite column type keyword (`INTEGER`, `REAL`, `BLOB`, `TEXT`) to
- * the dialect equivalent. Used by the Zod→DDL generator, which only ever emits
- * `INTEGER` or `TEXT`.
+ * the dialect equivalent. Used by the Zod→DDL generator for schema-derived
+ * columns such as `INTEGER`, `REAL`, and `TEXT`.
  *
  * @param {Dialect} dialect
  * @param {string} sqliteType
