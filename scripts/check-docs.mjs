@@ -2651,7 +2651,6 @@ function checkStudioDocsMatchCurrentAppSurface() {
     [STUDIO_RUNS_PARSE_SOURCE, "workflowKey"],
     [STUDIO_RUNS_PARSE_SOURCE, "uiPath"],
     [PACKAGE_CONFIGURATION_REFERENCE, "`@smithers-orchestrator/smithers-studio-2` | Next Smithers Studio UI shell for browsing workspaces, launching workflows, watching live runs, and embedding custom workflow UIs"],
-    [CUSTOM_WORKFLOW_UI_GUIDE, "Studio 2's Runs surface"],
     [WATCH_AND_STEER_GUIDE, "## Studio: the visual console"],
     [WATCH_AND_STEER_GUIDE, "`pnpm dev:studio` starts the Studio 2 dev stack"],
     [STUDIO_APP_README, "`pnpm dev:studio` from the repo root starts the Smithers Gateway, workspace API, and Studio 2 together."],
@@ -3789,11 +3788,11 @@ function checkGatewaySdkDocsMatchExports() {
     ],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
-      "The Worker has two Gateway-auth branches:",
+      "The proxy usually has two Gateway-auth branches:",
     ],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
-      "If `GATEWAY_AUTH_TOKEN` is set, the Worker strips browser-supplied Gateway credentials and trusted-proxy headers, adds `Authorization: Bearer <service-token>`, and forwards the request without minting user identity headers.",
+      "If `GATEWAY_AUTH_TOKEN` is set, the proxy strips browser-supplied Gateway credentials and trusted-proxy headers, adds `Authorization: Bearer <service-token>`, and forwards the request without minting user identity headers.",
     ],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
@@ -3801,19 +3800,15 @@ function checkGatewaySdkDocsMatchExports() {
     ],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
-      "gatewayAuthToken` selects the service-token branch",
+      "For local work, use `bunx smithers-orchestrator ui` first.",
     ],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
-      "The outer `apps/smithers` Gateway client wrapper rewrites WebSocket URLs to `/v1/rpc`, which is why the Vite proxy enables `ws: true` there.",
+      "The page at `/workflows/<key>` is served by the Gateway, so `new SmithersGatewayClient()` calls `fetch(\"/v1/rpc/getRun\", ...)` on the same origin and streams use the boot `wsPath`.",
     ],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
-      "Gateway-hosted iframe bundles that call `new SmithersGatewayClient()` directly use the boot `wsPath` (`/` by default)",
-    ],
-    [
-      CUSTOM_WORKFLOW_UI_GUIDE,
-      "Stream sockets depend on the client used: the outer app wrapper upgrades via `/v1/rpc`, while plain hosted bundles use the boot `wsPath`.",
+      "Custom UIs may be embedded in an iframe, or opened directly by smithers ui.",
     ],
     [CUSTOM_WORKFLOW_UI_GUIDE, "SyncProvider` + `useSyncQuery` / `useSyncMutation` / `useSyncSubscription"],
     [CUSTOM_WORKFLOW_UI_GUIDE, "useGatewayQuery` / `useGatewayMutation` / `useGatewayRunStream"],

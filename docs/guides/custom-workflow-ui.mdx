@@ -1,11 +1,11 @@
 ---
 title: Custom Workflow UIs
-description: Build a first-class browser UI for your workflow (vanilla SDK or React hooks) and ship it through the Smithers Gateway, the apps/smithers PWA, and same-origin Smithers Cloud / Plue deployments.
+description: Build a first-class browser UI for your workflow with smithers ui, the Gateway, gateway-client, and gateway-react.
 ---
 
-A custom workflow UI is a small browser bundle that *lives next to your workflow* and talks to the Smithers Gateway over the same RPC and WebSocket protocol the Gateway already serves. You write it once, the Gateway builds and serves it at `/workflows/<key>`, and every Smithers surface that knows about Gateway runs (the [Smithers PWA](https://smithers.sh), Studio 2's Runs surface, the `bunx smithers-orchestrator ui` CLI, or your own embed) can render it for a run with a stable `?runId=` deep link.
+A custom workflow UI is a small browser bundle that *lives next to your workflow* and talks to the Smithers Gateway over the same RPC and WebSocket protocol the Gateway already serves. You write it once in `.smithers/ui/<workflow>.tsx`, the Gateway builds and serves it at `/workflows/<key>`, and `bunx smithers-orchestrator ui` opens it for a run with a stable `?runId=` deep link.
 
-This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run with Smithers UI and the Gateway (such as in Smithers Cloud or behind Plue).
+This guide covers the whole shape: vanilla SDK boot, React hooks, the boot config the iframe receives, live event subscriptions (with automatic pushed updates and resilient reconnection), node-output and diff reads, approvals and signals, the crucial stale-data-free update model to avoid data bleeding across runs, DevTools observability streams, sample tests, and the same-origin proxy patterns you reach for when custom UIs run through smithers ui and the Gateway.
 
 For the underlying RPC and event protocol, see [Gateway](/integrations/gateway). For two compact end-to-end examples, see [Workflow UI (React)](/examples/workflow-ui-react) and [Workflow UI (Vanilla)](/examples/workflow-ui-vanilla).
 
@@ -15,7 +15,7 @@ Local launch is one command:
 bunx smithers-orchestrator ui RUN_ID
 ```
 
-If no Gateway is reachable on the local port, `bunx smithers-orchestrator ui` starts `smithers gateway` for the workspace and waits for it before opening the browser. `smithers gateway` automatically mounts any `.smithers/ui/<workflow>.tsx` file whose name matches a discovered workflow id, so a hand-written `.smithers/gateway.ts` is not required for local UI launch. Use `--no-autostart` to require an already-running Gateway, or `--gateway <url>` to point at a remote one.
+If no Gateway is reachable on the local port, `bunx smithers-orchestrator ui` starts `bunx smithers-orchestrator gateway` for the workspace and waits for it before opening the browser. The Gateway automatically mounts any `.smithers/ui/<workflow>.tsx` file whose name matches a discovered workflow id, so a hand-written `.smithers/gateway.ts` is not required for local UI launch. Use `--no-autostart` to require an already-running Gateway, or `--gateway <url>` to point at a remote one.
 
 ## How a custom UI is wired
 
@@ -25,7 +25,7 @@ Three pieces collaborate:
 
 2. **The Gateway serves an HTML shell.** Hitting `/workflows/vcs` returns a tiny HTML document with a `<div id="root">`, the bundled script, and a global `__SMITHERS_GATEWAY_UI__` object (the [`GatewayUiBootConfig`](#the-boot-config)) set before your script runs. The shell uses `?runId=<id>` from the query string to scope a session to one run; if it is omitted, your UI is responsible for showing a picker or empty state.
 
-3. **The host embeds the shell same-origin.** `apps/smithers` mounts it as `<iframe src="/workflows/<key>?runId=<id>">`. Because the host and Gateway share an origin (via the Worker / Vite proxy described [below](#same-origin-proxy-patterns)), the iframe's RPC calls and WebSocket all reach the real Gateway without CORS or token shuttling. Studio 2's Runs surface and the `bunx smithers-orchestrator ui` command embed the same URL.
+3. **smithers ui opens the shell same-origin.** `bunx smithers-orchestrator ui RUN_ID` resolves the run's workflow, ensures a Gateway is reachable, and opens `/workflows/<key>?runId=<id>` in the browser. Because the page is served by the Gateway origin, its RPC calls and WebSocket streams reach the real Gateway without CORS or token shuttling.
 
 ## Two SDKs: pick by appetite
 
@@ -160,8 +160,8 @@ A custom UI almost never holds a token. The Gateway accepts auth via three mecha
 
 In practice this means one of:
 
-- **Local dev.** Vite's dev server proxies `/v1/rpc`, `/health`, and `/workflows/*` to the Gateway. The browser sees one origin; the Gateway is configured with `mode: "token"` and a single dev token Vite injects. See [Local dev setup](#local-dev-setup).
-- **Smithers Cloud.** A Cloudflare Worker terminates the user's session (WorkOS / Auth0 / GitHub) and proxies `/v1/rpc`, `/health`, and `/workflows/*` to a private Gateway. It forwards `x-user-id`, `x-user-scopes`, `x-user-role`, and `x-smithers-token-id` to the Gateway, which trusts those headers because it is configured `mode: "trusted-proxy"`. The browser never holds a Gateway credential. See [Smithers Cloud / Plue same-origin proxy](#smithers-cloud--plue-same-origin-proxy).
+- **Local smithers ui.** The CLI opens the Gateway-served `/workflows/<key>?runId=<id>` page directly. The browser sees one origin and the Gateway can use the local token or key configured for that process. See [Local dev setup](#local-dev-setup).
+- **Your own host.** Put the Gateway behind a reverse proxy that serves `/v1/rpc`, `/health`, and `/workflows/*` on the same origin as the page embedding the UI. A trusted proxy can terminate the user's session, strip browser-supplied identity headers, and forward only the identity headers it validated. See [Trusted same-origin proxy](#trusted-same-origin-proxy).
 - **Bring-your-own token.** Pass `new SmithersGatewayClient({ token, baseUrl })` if you really do hold a token at the UI layer. Useful for tooling and one-off bots; avoid it in user-facing surfaces.
 
 The hooks read no auth state of their own. They call `client.rpc(...)`, and the client carries whatever `token` / `headers` you set when you constructed it (or that the trusted-proxy stripped and rewrote on the way in).
@@ -230,52 +230,43 @@ If you build your own read on top of `useGatewayRpc` (via the `deps` option) or 
 
 ## Same-origin proxy patterns
 
-Custom UIs are embedded in an iframe and may be served from a different origin than the Gateway. The robust path is to put the Gateway behind a same-origin proxy on the host that embeds the iframe, so the iframe's `fetch("/v1/rpc/...")` and `new WebSocket("wss://<host>/")` both hit the Gateway without CORS or token shuttling.
+Custom UIs may be embedded in an iframe, or opened directly by smithers ui. The robust path is to serve the UI shell and Gateway RPC from the same origin, so the page's `fetch("/v1/rpc/...")` and `new WebSocket("wss://<host>/")` both hit the Gateway without CORS or token shuttling.
 
 ### Local dev setup
 
-The `apps/smithers` Vite config wires up the Gateway proxy **when the `SMITHERS_GATEWAY_PROXY_TARGET` env var is set**. When it is unset, the dev server stays gateway-less and those paths 404 (the app's gateway store reads that as "offline"). The relevant excerpt:
-
-```ts
-// apps/smithers/vite.config.ts
-const gatewayTarget = process.env.SMITHERS_GATEWAY_PROXY_TARGET;
-if (gatewayTarget) {
-  proxy["/v1/rpc"]    = { target: gatewayTarget, changeOrigin: true, ws: true };
-  proxy["/health"]    = { target: gatewayTarget, changeOrigin: true };
-  proxy["/workflows"] = { target: gatewayTarget, changeOrigin: true };
-}
-```
-
-The outer `apps/smithers` Gateway client wrapper rewrites WebSocket URLs to `/v1/rpc`, which is why the Vite proxy enables `ws: true` there. Gateway-hosted iframe bundles that call `new SmithersGatewayClient()` directly use the boot `wsPath` (`/` by default); proxy that path too or pass a `WebSocket` override if the iframe needs streams in local dev. `/workflows` only serves the HTML shell and the bundled JS, so it stays HTTP-only. Then:
+For local work, use `bunx smithers-orchestrator ui` first. It starts or reuses a Gateway, resolves the run's workflow, and opens the Gateway-hosted `/workflows/<key>?runId=<id>` page:
 
 ```bash
-export SMITHERS_GATEWAY_PROXY_TARGET=http://127.0.0.1:7331
-bunx smithers-orchestrator up <workflow> -d            # or `bun .smithers/scripts/<workflow>.ts`
-(cd apps/smithers && bun dev)
+bunx smithers-orchestrator up WORKFLOW -d
+bunx smithers-orchestrator ui RUN_ID
 ```
 
-The browser sees a single origin. The iframe at `/workflows/<key>` is served by the Vite-proxied Gateway; its `SmithersGatewayClient` calls `fetch("/v1/rpc/getRun", ...)` on the same origin. Stream sockets depend on the client used: the outer app wrapper upgrades via `/v1/rpc`, while plain hosted bundles use the boot `wsPath`. No CORS, no token in the browser.
+If you want the Gateway to stay alive between browser launches, run it yourself and point the UI command at it:
 
-### Smithers Cloud / Plue same-origin proxy
+```bash
+bunx smithers-orchestrator gateway --port 7331
+bunx smithers-orchestrator ui RUN_ID --gateway http://127.0.0.1:7331
+```
 
-In Cloud (or any deployment behind Plue, our hosted code-platform that fronts custom workflow UIs), a single Cloudflare Worker terminates user sessions and forwards three disjoint route families:
+The browser sees a single origin. The page at `/workflows/<key>` is served by the Gateway, so `new SmithersGatewayClient()` calls `fetch("/v1/rpc/getRun", ...)` on the same origin and streams use the boot `wsPath`. No CORS, no token shuttling.
+
+### Trusted same-origin proxy
+
+If you embed a custom workflow UI in your own host, put the Gateway behind a reverse proxy that forwards the Gateway route families on the host's origin:
 
 ```
 /api/auth/*    →  WorkOS / Auth0 / GitHub (user session terminator)
 /v1/rpc/*      →  Smithers Gateway   (RPC, trusted-proxy headers or service token attached)
 /workflows/*   →  Smithers Gateway   (HTML shell + bundle)
 /health        →  Smithers Gateway   (liveness)
-/api/repos/*   →  Plue jjhub         (code hosting REST)
 ```
 
-The Worker has two Gateway-auth branches:
+The proxy usually has two Gateway-auth branches:
 
-1. **Service-token branch.** If `GATEWAY_AUTH_TOKEN` is set, the Worker strips browser-supplied Gateway credentials and trusted-proxy headers, adds `Authorization: Bearer <service-token>`, and forwards the request without minting user identity headers.
-2. **Trusted-proxy branch.** If no service token is configured, the Worker validates the user's session, strips client-supplied trusted-proxy headers (`x-user-id`, `x-user-scopes`, `x-user-role`, `x-smithers-token-id`), and re-injects them from the validated session plus a small allowlist of scopes (`run:read`, `run:write`, `approval:submit`, `signal:submit`, `cron:read`, `cron:write`, `observability:read`).
+1. **Service-token branch.** If `GATEWAY_AUTH_TOKEN` is set, the proxy strips browser-supplied Gateway credentials and trusted-proxy headers, adds `Authorization: Bearer <service-token>`, and forwards the request without minting user identity headers.
+2. **Trusted-proxy branch.** If no service token is configured, the proxy validates the user's session, strips client-supplied trusted-proxy headers (`x-user-id`, `x-user-scopes`, `x-user-role`, `x-smithers-token-id`), and re-injects them from the validated session plus a small allowlist of scopes (`run:read`, `run:write`, `approval:submit`, `signal:submit`, `cron:read`, `cron:write`, `observability:read`).
 
-The Gateway auth mode determines which branch preserves per-user identity. In `mode: "trusted-proxy"`, the Gateway reads role, scopes, user id, and token id from the trusted headers the Worker set. In `mode: "token"` or `mode: "jwt"`, the Gateway reads the bearer credential and ignores trusted-proxy identity headers; use the service-token branch only when service identity is acceptable. The browser never sees a Gateway credential; the iframe's RPC calls and WebSocket upgrades flow through the Worker.
-
-The exact Worker is in `apps/smithers/src/worker.ts`; its `isGatewayProxyRoute`, `isAuthProxyRoute`, and `isPlatformProxyRoute` predicates split the route families. `stripTrustedProxyHeaders` and `stripGatewayCredentialHeaders` remove browser-supplied identity and Gateway credentials before either branch runs; `gatewayAuthToken` selects the service-token branch. Use it as the reference implementation when you stand up your own same-origin proxy.
+The Gateway auth mode determines which branch preserves per-user identity. In `mode: "trusted-proxy"`, the Gateway reads role, scopes, user id, and token id from the trusted headers the proxy set. In `mode: "token"` or `mode: "jwt"`, the Gateway reads the bearer credential and ignores trusted-proxy identity headers; use the service-token branch only when service identity is acceptable. The browser never sees a Gateway credential; the iframe's RPC calls and WebSocket upgrades flow through the proxy.
 
 The same shape works behind any reverse proxy (Cloudflare, Cloudflare Access, Caddy, nginx, an internal API gateway): terminate session, strip identity headers off the request, set them from the validated session, forward to the Gateway. Trusted-proxy mode is **only safe behind something you control** that strips and rewrites identity headers; the Gateway docs call this out explicitly.
 
@@ -291,9 +282,6 @@ bunx smithers-orchestrator ui RUN_ID                   # specific run
 bunx smithers-orchestrator gateway --port 7331         # serves every workspace workflow + its .smithers/ui/*.tsx
 bunx smithers-orchestrator ui RUN_ID --gateway http://127.0.0.1:7331   # point ui at it (--no-autostart never spawns one)
 
-# (Optional) Boot the apps/smithers PWA against the same Gateway.
-cd apps/smithers && bun dev
-# Visit http://localhost:5173/gw/<workflowKey>/<runId>
 ```
 
 The `bunx smithers-orchestrator ui` command resolves the most recent run when invoked without an id, prints the URL it opened, and exits. When no Gateway answers on the local port it **auto-starts one** (auto-mounting `.smithers/ui/<workflowKey>.tsx`); pass `--no-autostart` to disable that, or `--gateway <url>` to point at an existing one. Note: `up --serve` is a per-run HTTP server, **not** a full Gateway, so `ui` needs a Gateway.
@@ -304,18 +292,18 @@ A custom UI has two layers worth testing:
 
 1. **The bundle parses and boots without a network.** A Bun test that imports the module under a happy-dom registrator and asserts the React tree renders covers a regression-class of "the bundle broke because of a Vite/tsup mishap" failures cheaply. The reference is `packages/gateway-react/tests/gatewayReactBehavior.test.ts`; it constructs spy clients, drives every hook, and asserts they never surface a previous input's result after a re-render.
 
-2. **The host embeds it and the run flows through.** A real-backend Playwright test that boots a Gateway, registers a workflow with a `ui:` entry, executes a run to completion, and drives a real browser that:
-   - deep-links to `/gw/<key>/<runId>`,
+2. **The Gateway serves it and the run flows through.** A real-backend Playwright test that boots a Gateway, registers a workflow with a `ui:` entry, executes a run to completion, and drives a real browser that:
+   - deep-links to `/workflows/<key>?runId=<id>`,
    - asserts the iframe rendered the custom UI,
    - asserts `data-testid="demo-run-id"` matches `?runId=` (proof the boot path works),
    - flips to the native inspector and back.
 
-The canonical example is `apps/smithers/tests/e2e/gatewayUi.spec.ts` with the fixture at `apps/smithers/tests/fixtures/gatewayFixture.tsx`. Two demo bundles ship today:
+The server package's Gateway UI tests are the closest in-repo reference for the serving contract. Two useful fixture styles are:
 
-- `apps/smithers/tests/fixtures/demoWorkflowUi.ts`: a dependency-free vanilla bundle that reads `?runId=` from `location.search` and renders a heading. Use it to assert the bundle path without coupling to a UI library.
-- `apps/smithers/tests/fixtures/demoReactWorkflowUi.tsx`: the same demo on `gateway-react`. Drives `createGatewayReactRoot`, `useGatewayRun`, and `useGatewayActions` against the real fixture Gateway; proves the React hooks survive an iframe boundary, a stale-data transition, and a button-driven action.
+- A dependency-free vanilla bundle that reads `?runId=` from `location.search` and renders a heading. Use it to assert the bundle path without coupling to a UI library.
+- The same demo on `gateway-react`. Drive `createGatewayReactRoot`, `useGatewayRun`, and `useGatewayActions` against the real fixture Gateway to prove the React hooks survive an iframe boundary, a stale-data transition, and a button-driven action.
 
-Add your own fixture under the same folder and register it with `gateway.register("<key>", workflow, { ui: { entry: "…" } })` in `gatewayFixture.tsx`. The fixture executes the run to completion *before* binding the port so Playwright never races the run's tree.
+Register your fixture with `gateway.register("<key>", workflow, { ui: { entry: "..." } })`. Execute the run to completion *before* binding the port so Playwright never races the run's tree.
 
 ## Reference
 
