@@ -2386,6 +2386,9 @@ export class Gateway {
             if ((req.method ?? "GET") === "POST" && rpcMatch) {
                 return this.handleHttpRpc(req, res, decodeURIComponent(rpcMatch[1]));
             }
+            if ((req.method ?? "GET") === "POST" && url.pathname === "/v1/electric/write") {
+                return this.handleElectricWrite(req, res);
+            }
             if ((req.method ?? "GET") === "POST" && (req.url ?? "/") === "/rpc") {
                 return this.handleHttpRpc(req, res);
             }
@@ -3266,6 +3269,118 @@ export class Gateway {
             code: "UNAUTHORIZED",
             message: "Unsupported auth mode",
         };
+    }
+    /**
+   * @param {IncomingMessage} req
+   * @param {ServerResponse} res
+   */
+    async handleElectricWrite(req, res) {
+        const requestId = headerValue(req, "x-request-id") ?? randomUUID();
+        const baseContext = {
+            connectionId: `electric-write:${requestId}`,
+            transport: "http",
+            role: null,
+            scopes: [],
+            userId: null,
+            tokenId: null,
+            subscribedRuns: null,
+            devtoolsStreams: null,
+        };
+        let context = baseContext;
+        try {
+            const authResult = await this.authenticateRequest(req, bearerTokenFromHeaders(req));
+            if (authResult.ok === false) {
+                return sendJson(res, statusForRpcError(authResult.code), {
+                    ok: false,
+                    code: authResult.code,
+                    message: authResult.message,
+                    details: authResult.details,
+                });
+            }
+            context = {
+                ...baseContext,
+                role: authResult.role,
+                scopes: [...authResult.scopes],
+                userId: authResult.userId ?? null,
+                tokenId: authResult.tokenId ?? null,
+            };
+            const body = asObject(await readBody(req, this.maxBodyBytes));
+            if (!body) {
+                return sendJson(res, 400, { ok: false, code: "INVALID_REQUEST", message: "Electric write body must be a JSON object" });
+            }
+            const method = validateGatewayMethodName(asString(body.method));
+            const params = body.params ?? body.vars ?? {};
+            if (!hasScope(context.scopes, method, this.extensions)) {
+                const forbidden = responseForbidden(requestId, method, this.extensions);
+                return sendJson(res, statusForRpcError(forbidden.error?.code), {
+                    ok: false,
+                    code: forbidden.error?.code,
+                    message: forbidden.error?.message,
+                    requiredScope: forbidden.error?.requiredScope,
+                });
+            }
+            // Writes always flow through the gateway RPC path, NOT through Electric
+            // shapes (§5.5). The previous implementation opened a raw BEGIN/COMMIT
+            // directly on every workflow's shared Postgres connection to grab a
+            // txid. That bypassed the single-permit semaphore that serializes ALL
+            // access to that one physical connection (SqlMessageStorage), so the
+            // ~1s event-bridge tail, heartbeats, and any concurrent run sharing the
+            // DB interleaved their statements into the manually-opened transaction
+            // — an RPC-failure ROLLBACK could discard unrelated committed-intended
+            // work, and two concurrent electric writes collided on a nested BEGIN.
+            // It also fired on embedded PGlite (dialect "postgres", single
+            // connection), which is never an Electric source. The endpoint now runs
+            // the RPC exactly like any other and lets the engine's own serialized
+            // transactions commit the synced rows.
+            const frame = {
+                type: "req",
+                id: requestId,
+                method,
+                params,
+            };
+            const response = await this.executeRpc(context, frame, () => this.routeRequest(context, frame));
+            if (!response.ok) {
+                return sendJson(res, statusForRpcError(response.error?.code), {
+                    ok: false,
+                    code: response.error?.code,
+                    message: response.error?.message,
+                    details: response.error,
+                });
+            }
+            // Optimistic txid matching needs the txid of the transaction that
+            // actually writes the synced row. For detached RPCs (launchRun
+            // enqueues; run/event/node rows commit later in the engine's own
+            // serialized transactions) the gateway cannot observe that txid
+            // without the engine surfacing it, so it returns null rather than a
+            // fabricated post-hoc txid that would hang awaitTxId until timeout.
+            // The Electric collection reconciles optimistic state when the row
+            // arrives in the shape stream; threading the engine write txid for
+            // tight no-flicker matching is a documented follow-up (§5.5).
+            emitGatewayLog("info", "Gateway Electric write committed", {
+                ...gatewayContextAnnotations(context),
+                requestId,
+                method,
+            }, "gateway:electric-write");
+            return sendJson(res, 200, {
+                ok: true,
+                payload: response.payload,
+                txid: null,
+            });
+        }
+        catch (error) {
+            emitGatewayLog(isSmithersError(error) ? "warning" : "error", "Gateway Electric write failed", {
+                ...gatewayContextAnnotations(context),
+                requestId,
+                ...gatewayErrorAnnotations(error),
+            }, "gateway:electric-write");
+            const message = error?.message ?? "Electric write failed";
+            const status = message.includes("valid JSON") ? 400 : message.includes("exceeds") ? 413 : 500;
+            return sendJson(res, status, {
+                ok: false,
+                code: status === 413 ? "PAYLOAD_TOO_LARGE" : status === 400 ? "INVALID_JSON" : "SERVER_ERROR",
+                message,
+            });
+        }
     }
     /**
    * @param {IncomingMessage} req

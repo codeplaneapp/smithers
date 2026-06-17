@@ -121,6 +121,7 @@
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/devtools": "workspace:*",
     "@smithers-orchestrator/driver": "workspace:*",
+    "@smithers-orchestrator/electric-proxy": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
     "@smithers-orchestrator/errors": "workspace:*",
     "@smithers-orchestrator/gateway": "workspace:*",

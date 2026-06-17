@@ -26,5 +26,6 @@ export type CollectionDef<TRow extends object, TKey extends string | number = st
       where?: string;
       columns?: string[];
     };
+    rows?: (row: Record<string, unknown>) => TRow;
   };
 };

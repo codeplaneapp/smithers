@@ -1,0 +1,59 @@
+# Real (no-mocks) ElectricSQL + Postgres fixture for the smithers electric-proxy.
+#
+# Brings up a Postgres-of-record with wal_level=logical (required by Electric's
+# logical replication) and an ElectricSQL HTTP shape server in front of it.
+# The smithers electric-proxy (packages/electric-proxy) fronts Electric to add
+# auth + scope + grant-based where-clause filtering; here Electric runs with
+# ELECTRIC_INSECURE=true because the proxy is the auth layer, not Electric.
+#
+# Bring up:
+#   docker compose -f deploy/electric/docker-compose.yml -p smithers-electric-test up -d
+# Tear down (remove volumes too):
+#   docker compose -f deploy/electric/docker-compose.yml -p smithers-electric-test down -v
+#
+# Ports are env-configurable so concurrent runs / CI can avoid collisions.
+
+services:
+  postgres:
+    image: postgres:16-bookworm
+    # wal_level=logical is the hard requirement for Electric (design §5.3, §11.7).
+    # Electric creates its own publication + replication slot at startup.
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+    environment:
+      POSTGRES_USER: smithers
+      POSTGRES_PASSWORD: smithers_pw
+      POSTGRES_DB: smithers
+    ports:
+      - "${SMITHERS_PG_PORT:-54329}:5432"
+    volumes:
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smithers -d smithers"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  electric:
+    image: electricsql/electric:1.7.1
+    environment:
+      # Electric connects to Postgres over the internal compose network.
+      # sslmode=disable because the fixture Postgres has no TLS.
+      DATABASE_URL: postgresql://smithers:smithers_pw@postgres:5432/smithers?sslmode=disable
+      # No gatekeeper: the smithers proxy is our auth layer.
+      ELECTRIC_INSECURE: "true"
+    ports:
+      - "${SMITHERS_ELECTRIC_PORT:-30001}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

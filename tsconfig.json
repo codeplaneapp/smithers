@@ -91,6 +91,12 @@
         "./packages/driver/src/*.js",
         "./packages/driver/src/*/index.js"
       ],
+      "@smithers-orchestrator/electric-proxy": [
+        "./packages/electric-proxy/src/index.ts"
+      ],
+      "@smithers-orchestrator/electric-proxy/*": [
+        "./packages/electric-proxy/src/*.ts"
+      ],
       "@smithers-orchestrator/engine": [
         "./packages/engine/src/index.js"
       ],

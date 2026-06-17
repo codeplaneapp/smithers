@@ -6936,6 +6936,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/db` | SQLite/Drizzle adapter, table setup, run-state derivation, schema helpers, and output tables | Data Model, Run State |
 | `@smithers-orchestrator/devtools` | Snapshot, tree, diff, node lookup, task collection, and DevTools run-store helpers behind the CLI inspect commands | Debugging, CLI Overview |
 | `@smithers-orchestrator/driver` | Runtime driver contracts: `RunOptions`, `RunResult`, `RunStatus`, `SmithersCtx`, outputs, task runtime, interop, and child process helpers | Run Workflow, Execution Model |
+| `@smithers-orchestrator/electric-proxy` | ElectricSQL shape proxy for cloud sync, scoped shape access, rate limits, stripped auth forwarding, and shape metrics | Production Hardening, Gateway |
 | `@smithers-orchestrator/engine` | Workflow rendering/execution API: `runWorkflow`, `renderFrame`, `workflow`, `Smithers`, `fragment`, signals, and Effect versioning | Render Frame, Run Workflow |
 | `@smithers-orchestrator/errors` | Error definitions, known codes, JSON serialization, docs URLs, and type guards | Errors |
 | `@smithers-orchestrator/gateway` | Stable Gateway RPC contracts, auth scopes, deployment metadata, and generated OpenAPI schema | Gateway, RPC |

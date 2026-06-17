@@ -288,6 +288,29 @@ Two PR #286 gaps are closed here:
 
 ### 5.3 Cloud: ElectricSQL shapes over `_smithers_*`
 
+> **IMPLEMENTATION DIRECTIVE (2026-06-16, maintainer decision — Phase 7).**
+> The phase-7 gate CONFIRMED PGlite (0.5.1) cannot be an Electric source: it runs
+> Postgres single-connection with no walsender, so it serves no logical-replication
+> slot. Accepted. The clean architecture is therefore:
+>
+> - **The Electric source is ALWAYS real Postgres, never PGlite.** Cloud = managed
+>   Postgres with `wal_level=logical`. Dev/test = a **Dockerized real Postgres +
+>   `electricsql/electric` + the smithers-electric-proxy** (e.g. `deploy/electric/
+>   docker-compose.yml` + a `tests/fixtures` helper). That real Docker fixture is the
+>   NO-MOCKS backend Phase 7 is built and e2e-tested against, and the blueprint for
+>   the cloud deploy. Do not fake Electric or stand up nonexistent prod infra.
+> - **Local self-host / end user needs NO Electric and NO PGlite-as-source.** They
+>   keep the local SQLite client replica synced over the existing gateway transport
+>   (built in phase 2). Electric is a cloud-only path.
+> - **One clean SyncSource seam, no fragile branches.** `createElectricCollection`
+>   is just another implementation of the phase-2 `SyncSource` interface, with the
+>   SAME collection shape + key as the gateway source so every gateway-react hook is
+>   identical across sources. The source is chosen ONCE at boot from `backendStore`;
+>   NO feature/consumer code branches on backend type (`if (backend === …)`).
+>   Lazy-import the Electric source only on the cloud path so local loads none of it.
+> - **Writes never flow through shapes** — always the gateway/RPC + write-endpoint
+>   (Postgres `txid`) path, matching §5.5.
+
 Cloud (real Postgres) syncs via Electric shapes. smithers ships its own Electric
 deployment and a **smithers-electric-proxy**, modeled directly on plue's Go proxy
 but for the `_smithers_*` schema:

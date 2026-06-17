@@ -39,6 +39,12 @@ Recommended database practices:
 
 `pg`, `@electric-sql/pglite`, and `@electric-sql/pglite-socket` are optional dependencies loaded only when you take this path; the explicit synchronous `bun:sqlite` path needs none of them. On Postgres, take database-native backups and connection-pool sizing in place of the SQLite file-and-WAL backup guidance above.
 
+### Electric Cloud Sync
+
+Cloud GUI replicas use `@smithers-orchestrator/electric-proxy` in front of ElectricSQL. Run it only against managed PostgreSQL configured for logical replication: set `wal_level=logical`, create a publication that includes every `_smithers_*` table plus workflow output tables, and provision a replication slot for Electric. PGlite is not a valid Electric source because it runs with `wal_level=replica` and cannot create logical replication slots.
+
+The proxy is the public shape endpoint. It authenticates the same scoped Gateway tokens, maps `run:read` to read-only shape access, injects workspace/run/user predicates from the grant, strips `Authorization` before forwarding to Electric, and enforces 60 shape opens per minute, 50 active shapes, and a 4 MiB per-frame payload limit. Writes do not go through Electric shapes: clients post to `/v1/electric/write`, the Gateway applies the existing RPC mutation under scope checks, returns the PostgreSQL txid, and TanStack DB holds optimistic state until Electric streams that txid back.
+
 ## Access Control
 
 Expose the Gateway only behind TLS. Use scoped bearer grants for automation and short TTLs for human-triggered actions.

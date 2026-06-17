@@ -1,9 +1,12 @@
 {
-  "name": "@smithers-orchestrator/gateway-client",
-  "version": "0.24.1",
-  "description": "Browser-first client SDK for the Smithers Gateway RPC and event stream APIs",
+  "name": "@smithers-orchestrator/electric-proxy",
+  "version": "0.24.0",
+  "description": "Auth, scope, rate-limit, and observability proxy for Smithers ElectricSQL Shapes",
   "type": "module",
   "sideEffects": false,
+  "bin": {
+    "smithers-electric-proxy": "./bin/smithers-electric-proxy.ts"
+  },
   "exports": {
     ".": {
       "types": "./src/index.ts",
@@ -17,7 +20,8 @@
     }
   },
   "files": [
-    "src/"
+    "src/",
+    "bin/"
   ],
   "scripts": {
     "build": "node ../../node_modules/tsup/dist/cli-default.js --dts-only",
@@ -25,9 +29,7 @@
     "test": "bun test tests"
   },
   "dependencies": {
-    "@smithers-orchestrator/gateway": "workspace:*",
-    "@tanstack/db": "^0.6.8",
-    "@tanstack/electric-db-collection": "0.3.6"
+    "@smithers-orchestrator/gateway": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

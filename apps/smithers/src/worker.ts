@@ -246,7 +246,15 @@ function isAuthProxyRoute(pathname: string): boolean {
 }
 
 function isGatewayProxyRoute(pathname: string): boolean {
-  return pathname === "/health" || pathname.startsWith("/v1/rpc") || pathname.startsWith("/workflows");
+  return pathname === "/health" ||
+    pathname.startsWith("/v1/rpc") ||
+    // The Electric write endpoint is a gateway HTTP route (writes always flow
+    // through the gateway/RPC path, never through shapes — design §5.5), so it
+    // is forwarded to the same gateway upstream as /v1/rpc. The Electric READ
+    // shapes (/v1/shape) are a SEPARATE cloud service fronted by
+    // smithers-electric-proxy at its own URL, never same-origin.
+    pathname.startsWith("/v1/electric/write") ||
+    pathname.startsWith("/workflows");
 }
 
 /**

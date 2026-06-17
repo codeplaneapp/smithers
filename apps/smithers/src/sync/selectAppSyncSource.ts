@@ -1,5 +1,6 @@
-import { createGatewaySyncSource, type SyncSource, type SyncTransport } from "@smithers-orchestrator/gateway-client";
+import { createElectricSyncSource, createGatewaySyncSource, type SyncSource, type SyncTransport } from "@smithers-orchestrator/gateway-client";
 import type { SyncSourceHooks } from "@smithers-orchestrator/gateway-react";
+import { getStoredAuthorization } from "../auth/authClient";
 import { useBackendStore } from "../app/backendStore";
 
 type SelectAppSyncSourceOptions = {
@@ -12,18 +13,34 @@ type SelectAppSyncSourceOptions = {
  * of the design's "one UI surface over a pluggable sync source" (§5.1). The
  * choice is made once here so UIs import collections/hooks and never a source.
  *
- * Phase 2 ships a single source: the local gateway transport, which reads
- * through `SmithersDb` and so works against SQLite/PGlite/Postgres unchanged.
- * Phase 7 adds `createElectricCollection` for the `platform` (cloud) backend;
- * the switch below is where it plugs in, with no change to any consuming UI.
+ * The local gateway transport reads through `SmithersDb` and works against
+ * SQLite/PGlite/Postgres unchanged. The platform backend uses Electric shapes
+ * for reads and the Gateway write endpoint for txid-matched mutations.
  */
 export function selectAppSyncSource(options: SelectAppSyncSourceOptions): SyncSource {
   const mode = useBackendStore.getState().mode;
-  switch (mode) {
-    // Phase 7: `platform` (cloud jjhub) will return the Electric source here.
-    case "platform":
-    case "gateway":
-    default:
-      return createGatewaySyncSource({ transport: options.transport, ...options.hooks });
+  const appOrigin = typeof location === "undefined" ? "" : location.origin;
+  // ElectricSQL runs as a SEPARATE cloud service fronted by the
+  // smithers-electric-proxy at its own URL — it is NOT served same-origin by the
+  // app worker (which only forwards /v1/rpc, /v1/electric/write, /workflows,
+  // /health). So the Electric read source is selected ONLY when its proxy URL is
+  // explicitly configured; otherwise platform mode falls back to the gateway
+  // transport (served same-origin) so the default app path never points at an
+  // unserved /v1/shape. The write endpoint IS a same-origin gateway route.
+  const electricProxyUrl = import.meta.env.VITE_SMITHERS_ELECTRIC_PROXY_URL;
+  if (mode === "platform" && electricProxyUrl) {
+    return createElectricSyncSource({
+      shapeUrl: electricProxyUrl,
+      writeUrl: import.meta.env.VITE_SMITHERS_ELECTRIC_WRITE_URL || `${appOrigin}/v1/electric/write`,
+      headers: {
+        authorization: () => {
+          const authorization = getStoredAuthorization();
+          return authorization ?? "";
+        },
+      },
+      fallbackTransport: options.transport,
+      ...options.hooks,
+    });
   }
+  return createGatewaySyncSource({ transport: options.transport, ...options.hooks });
 }

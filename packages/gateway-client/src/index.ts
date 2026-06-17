@@ -35,8 +35,15 @@ export {
   type GatewayCollectionConfig,
   type GatewayCollectionStreamConfig,
 } from "./sync/createGatewayCollection.ts";
+export {
+  createElectricCollection,
+  type CreateElectricCollectionOptions,
+  type ElectricWriteCommit,
+  type ElectricWriteRequest,
+} from "./sync/createElectricCollection.ts";
 export { createConnectionObserver } from "./sync/createConnectionObserver.ts";
 export { createGatewaySyncSource } from "./sync/createGatewaySyncSource.ts";
+export { createElectricSyncSource, type ElectricSyncSourceOptions } from "./sync/createElectricSyncSource.ts";
 export type { CollectionDef } from "./sync/CollectionDef.ts";
 export type { ConnectionObserver } from "./sync/ConnectionObserver.ts";
 export type { GatewayConnectionState, GatewayConnectionStatus } from "./sync/GatewayConnectionState.ts";
