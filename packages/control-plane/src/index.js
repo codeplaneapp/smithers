@@ -371,6 +371,33 @@ function throwDuplicateSlugError(error, input) {
 }
 
 /**
+ * @param {unknown} error
+ * @param {string} constraint
+ */
+function isUniqueConstraintError(error, constraint) {
+    return error instanceof Error && error.message.includes(`UNIQUE constraint failed: ${constraint}`);
+}
+
+/**
+ * @param {unknown} error
+ * @param {{ entity: "org" | "team" | "project"; slug: string; orgId?: string }} input
+ */
+function throwDuplicateSlugError(error, input) {
+    const details = {
+        kind: `control-plane.${input.entity}`,
+        id: input.slug,
+        slug: input.slug,
+        ...(input.orgId ? { orgId: input.orgId } : {}),
+    };
+    throw new SmithersError(
+        "DUPLICATE_ID",
+        `Duplicate control-plane ${input.entity} slug: ${input.slug}`,
+        details,
+        { cause: error },
+    );
+}
+
+/**
  * @param {Record<string, unknown>} row
  * @returns {ControlPlaneOrg}
  */
