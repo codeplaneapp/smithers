@@ -6,7 +6,7 @@ const LOCAL_GRAPH_SPECIFIER = "../../graph/src/index.js";
  * @param {string} specifier
  * @returns {Promise<CoreModule | null>}
  */
-async function importCoreModule(specifier) {
+export async function importCoreModule(specifier) {
     try {
         return (await import(specifier));
     }
@@ -17,10 +17,10 @@ async function importCoreModule(specifier) {
 /**
  * @returns {Promise<ExtractGraph>}
  */
-export async function resolveExtractGraph() {
+export async function resolveExtractGraph(importModule = importCoreModule) {
     const modules = [
-        await importCoreModule(GRAPH_SPECIFIER),
-        await importCoreModule(LOCAL_GRAPH_SPECIFIER),
+        await importModule(GRAPH_SPECIFIER),
+        await importModule(LOCAL_GRAPH_SPECIFIER),
     ];
     for (const mod of modules) {
         const fn = mod?.extractGraph;
