@@ -95,3 +95,4 @@ export {
   createSerperSearchProvider,
 } from "./web-search/index.js";
 
+export { createElevenLabsTextToSpeechTool } from "./createElevenLabsTextToSpeechTool.js";
