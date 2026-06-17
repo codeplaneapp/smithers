@@ -13,12 +13,13 @@ import { resolve } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 import { Effect, Metric } from "effect";
 import { WebSocketServer } from "ws";
-import { runWorkflow } from "@smithers-orchestrator/engine";
+import { resolveSchema, runWorkflow } from "@smithers-orchestrator/engine";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
 import { signalRun } from "@smithers-orchestrator/engine/signals";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { loadInput } from "@smithers-orchestrator/db/snapshot";
 import { devtoolsActiveSubscribers, devtoolsBackpressureDisconnectTotal, devtoolsDeltaBuildMs, devtoolsEventBytes, devtoolsEventTotal, devtoolsSnapshotBuildMs, devtoolsSubscribeTotal, gatewayApprovalDecisionsTotal, gatewayAuthEventsTotal, gatewayConnectionsActive, gatewayConnectionsClosedTotal, gatewayConnectionsTotal, gatewayCronTriggersTotal, gatewayErrorsTotal, gatewayHeartbeatTicksTotal, gatewayMessagesReceivedTotal, gatewayMessagesSentTotal, gatewayRpcCallsTotal, gatewayRpcDuration, gatewayRunsCompletedTotal, gatewayRunsStartedTotal, gatewaySignalsTotal, gatewayWebhooksReceivedTotal, gatewayWebhooksRejectedTotal, gatewayWebhooksVerifiedTotal, } from "@smithers-orchestrator/observability/metrics";
 import { runFork, runPromise } from "./smithersRuntime.js";
 import { prometheusContentType, renderPrometheusMetrics } from "@smithers-orchestrator/observability";
@@ -298,6 +299,24 @@ function parseJson(value) {
     catch {
         return null;
     }
+}
+/**
+ * @param {Record<string, unknown> | undefined} row
+ * @returns {Record<string, unknown>}
+ */
+function normalizeRerunInput(row) {
+    if (!row || typeof row !== "object") {
+        return {};
+    }
+    if ("payload" in row) {
+        const { runId: _runId, payload, ...rest } = row;
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+            return { ...payload, ...rest };
+        }
+        return rest;
+    }
+    const { runId: _runId, ...rest } = row;
+    return rest;
 }
 /**
  * @param {unknown} run
@@ -4539,11 +4558,11 @@ export class Gateway {
                 if (!resolved) {
                     return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
                 }
-                const client = (resolved.workflow.db.session?.client ?? resolved.workflow.db.$client);
-                const row = client?.query?.("SELECT payload FROM input WHERE run_id = ? LIMIT 1").get(runId);
-                const input = typeof row?.payload === "string"
-                    ? parseJson(row.payload) ?? {}
-                    : row?.payload ?? {};
+                const inputTable = resolveSchema(resolved.workflow.db).input;
+                if (!inputTable) {
+                    return responseError(frame.id, "MISSING_INPUT_TABLE", "Schema must include input table");
+                }
+                const input = normalizeRerunInput(await loadInput(resolved.workflow.db, inputTable, runId));
                 return this.routeRequest(connection, {
                     type: "req",
                     id: frame.id,

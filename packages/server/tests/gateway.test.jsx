@@ -62,6 +62,20 @@ function createValueWorkflow(dbPath) {
 /**
  * @param {string} dbPath
  */
+function createSchemaInputValueWorkflow(dbPath) {
+    const { smithers, Workflow, Task, outputs } = createSmithers({
+        input: z.object({ value: z.number().optional() }),
+        outputA: z.object({ value: z.number() }),
+    }, { dbPath });
+    return smithers((ctx) => (<Workflow name="gateway-basic">
+      <Task id="task1" output={outputs.outputA}>
+        {{ value: Number(ctx.input.value ?? 1) }}
+      </Task>
+    </Workflow>));
+}
+/**
+ * @param {string} dbPath
+ */
 function createApprovalWorkflow(dbPath) {
     const api = createSmithers({
         selection: z.object({
@@ -488,6 +502,50 @@ describe("Gateway", () => {
         });
         expect(diff.ok).toBe(true);
         expect(diff.payload.outputsChanged.length).toBeGreaterThan(0);
+        await client.close();
+    });
+    test("reruns with the original schema-backed input row", async () => {
+        const dbPath = makeDbPath("rerun-input");
+        dbPaths.push(dbPath);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["runs"],
+            heartbeatMs: 100,
+            auth: {
+                mode: "token",
+                tokens: {
+                    "op-token": {
+                        role: "operator",
+                        scopes: ["*"],
+                        userId: "user:will",
+                    },
+                },
+            },
+        });
+        gateway.register("basic", createSchemaInputValueWorkflow(dbPath));
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port = getPort(server);
+        const { client } = await connectGateway(port, "op-token");
+        const first = await client.request("runs.create", {
+            workflow: "basic",
+            input: { value: 42 },
+        });
+        expect(first.ok).toBe(true);
+        const sourceRunId = first.payload.runId;
+        await waitForRunStatus(client, sourceRunId, ["finished"]);
+        const rerun = await client.request("runs.rerun", {
+            runId: sourceRunId,
+            newRunId: "rerun-schema-input",
+        });
+        expect(rerun.ok).toBe(true);
+        await waitForRunStatus(client, "rerun-schema-input", ["finished"]);
+        const output = await client.request("getNodeOutput", {
+            runId: "rerun-schema-input",
+            nodeId: "task1",
+            iteration: 0,
+        });
+        expect(output.ok).toBe(true);
+        expect(output.payload.row).toMatchObject({ value: 42 });
         await client.close();
     });
     test("enforces approval-level scopes/users and returns rich pending approval metadata", async () => {
