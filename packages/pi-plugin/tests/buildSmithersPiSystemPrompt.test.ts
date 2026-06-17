@@ -77,4 +77,19 @@ describe("buildSmithersPiSystemPrompt", () => {
       expect(prompt).not.toMatch(pattern);
     }
   });
+
+  test("documents only registered Smithers PI CLI flags", () => {
+    const contract = createSmithersAgentContract({
+      serverName: "smithers",
+      toolSurface: "semantic",
+      tools: [],
+    });
+
+    const prompt = buildSmithersPiSystemPrompt("Base system prompt\n", "Docs body", contract);
+
+    expect(prompt).toContain("`--smithers-url`");
+    expect(prompt).toContain("`--smithers-key`");
+    expect(prompt).not.toContain("`-u`");
+    expect(prompt).not.toContain("`-k`");
+  });
 });
