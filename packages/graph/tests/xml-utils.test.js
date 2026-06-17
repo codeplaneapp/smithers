@@ -80,6 +80,12 @@ describe("parseXmlJson", () => {
         const result = parseXmlJson("null");
         expect(result).toBeNull();
     });
+    test("throws for invalid JSON", () => {
+        expect(() => parseXmlJson("not-json")).toThrow();
+    });
+    test("throws for an empty string", () => {
+        expect(() => parseXmlJson("")).toThrow();
+    });
     test("roundtrips through canonicalize and parse", () => {
         const node = {
             kind: "element",
