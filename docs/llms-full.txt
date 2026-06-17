@@ -7583,7 +7583,7 @@ The removal dropped the OpenTUI dependency and the `apps/cli/src/tui/` tree from
 | Run detail | `inspect --watch` |
 | Node attempts, tools, and output | `node --watch`, `output`, `diff` |
 | Rendered DevTools tree | `tree --watch` |
-| Desktop control plane | `gui` and the CLI overview |
+| Local control plane | `ps --watch`, `inspect --watch`, and the CLI overview |
 | Remote or browser control plane | `up --serve`, Gateway, and MCP Server |
 
 For a browser or remote control plane, `up --serve` exposes an HTTP API; the Gateway and MCP Server docs explain multi-user and agent-driven access.
