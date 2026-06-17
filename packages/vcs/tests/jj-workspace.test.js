@@ -4,6 +4,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import { Effect } from "effect";
 import * as BunContext from "@effect/platform-bun/BunContext";
+import { renderPrometheusMetrics } from "@smithers-orchestrator/observability";
 import * as vcsEffects from "../src/jj.js";
 
 const JJ_ENV = "SMITHERS_JJ_PATH";
@@ -24,6 +25,14 @@ const vcs = {
     getJjPointer: (cwd) => runVcs(vcsEffects.getJjPointer(cwd)),
     revertToJjPointer: (pointer, cwd) => runVcs(vcsEffects.revertToJjPointer(pointer, cwd)),
 };
+function vcsDurationCount() {
+    const match = renderPrometheusMetrics().match(/^smithers_vcs_duration_ms_count (\d+(?:\.\d+)?)$/m);
+    return match ? Number(match[1]) : 0;
+}
+function vcsDurationSum() {
+    const match = renderPrometheusMetrics().match(/^smithers_vcs_duration_ms_sum (\d+(?:\.\d+)?)$/m);
+    return match ? Number(match[1]) : 0;
+}
 /**
  * @param {string} script
  * @param {() => Promise<void>} fn
@@ -106,6 +115,38 @@ describe("runJj", () => {
             }
             await fs.rm(tmp, { recursive: true, force: true });
         }
+    });
+    test("records vcs duration when spawning jj fails", async () => {
+        const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "jj-missing-metric-"));
+        const badJj = path.join(tmp, "not-a-command");
+        await fs.mkdir(badJj);
+        const prevJj = process.env[JJ_ENV];
+        const before = vcsDurationCount();
+        try {
+            process.env[JJ_ENV] = badJj;
+            const res = await vcs.runJj(["--version"]);
+            expect(res.code).toBe(127);
+            expect(vcsDurationCount()).toBe(before + 1);
+        }
+        finally {
+            if (prevJj === undefined) {
+                delete process.env[JJ_ENV];
+            }
+            else {
+                process.env[JJ_ENV] = prevJj;
+            }
+            await fs.rm(tmp, { recursive: true, force: true });
+        }
+    });
+    test("records vcs duration when jj pointer lookup times out", async () => {
+        await withFakeJj(`sleep 5; exit 0`, async () => {
+            const before = vcsDurationCount();
+            const beforeSum = vcsDurationSum();
+            const pointer = await vcs.getJjPointer();
+            expect(pointer).toBe(null);
+            expect(vcsDurationCount()).toBe(before + 1);
+            expect(vcsDurationSum() - beforeSum).toBeGreaterThanOrEqual(1_000);
+        });
     });
 });
 describe("isJjRepo", () => {
