@@ -1,5 +1,6 @@
 /** @jsxImportSource smithers-orchestrator */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { createHmac } from "node:crypto";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
@@ -126,6 +127,35 @@ function createAuthWorkflow(dbPath) {
       </api.Task>
     </api.Workflow>));
     return { workflow, db: api.db, tables: api.tables };
+}
+/**
+ * @param {string} dbPath
+ */
+function createSignalHostWorkflow(dbPath) {
+    const api = createSmithers({
+        done: z.object({ ok: z.boolean() }),
+    }, { dbPath });
+    const workflow = api.smithers(() => (<api.Workflow name="gateway-signal-host">
+      <api.Task id="noop" output={api.outputs.done}>
+        {{ ok: true }}
+      </api.Task>
+    </api.Workflow>));
+    return { workflow, db: api.db };
+}
+/**
+ * @param {string} dbPath
+ * @param {string} runId
+ */
+function readValueOutput(dbPath, runId) {
+    const db = new Database(dbPath, { readonly: true });
+    try {
+        return db
+            .query("SELECT value FROM output_a WHERE run_id = ? AND node_id = 'task1' LIMIT 1")
+            .get(runId)?.value;
+    }
+    finally {
+        db.close();
+    }
 }
 class GatewayClient {
     ws;
@@ -767,6 +797,15 @@ describe("Gateway", () => {
         expect(triggered.ok).toBe(true);
         expect(typeof triggered.payload.runId).toBe("string");
         await waitForRunStatus(client, triggered.payload.runId, ["finished"]);
+        expect(readValueOutput(dbPath, triggered.payload.runId)).toBe(9);
+        const aliasTriggered = await client.request("cronRun", {
+            workflow: "basic",
+            input: { value: 14 },
+        });
+        expect(aliasTriggered.ok).toBe(true);
+        expect(typeof aliasTriggered.payload.runId).toBe("string");
+        await waitForRunStatus(client, aliasTriggered.payload.runId, ["finished"]);
+        expect(readValueOutput(dbPath, aliasTriggered.payload.runId)).toBe(14);
         const removed = await client.request("cron.remove", {
             cronId: added.payload.cronId,
         });
@@ -774,6 +813,117 @@ describe("Gateway", () => {
         const empty = await client.request("cron.list");
         expect(empty.ok).toBe(true);
         expect(empty.payload).toEqual([]);
+        await client.close();
+    });
+    test("supports hijackRun and reruns a finished run with the original input", async () => {
+        const dbPath = makeDbPath("rerun");
+        dbPaths.push(dbPath);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["runs"],
+            heartbeatMs: 100,
+            auth: {
+                mode: "token",
+                tokens: {
+                    "operator-token": {
+                        role: "operator",
+                        scopes: ["*"],
+                        userId: "user:will",
+                    },
+                },
+            },
+        });
+        gateway.register("basic", createValueWorkflow(dbPath));
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port = getPort(server);
+        const { client } = await connectGateway(port, "operator-token");
+        const created = await client.request("runs.create", {
+            workflow: "basic",
+            input: { value: 12 },
+        });
+        expect(created.ok).toBe(true);
+        await waitForRunStatus(client, created.payload.runId, ["finished"]);
+        const hijacked = await client.request("hijackRun", {
+            runId: created.payload.runId,
+        });
+        expect(hijacked.ok).toBe(true);
+        expect(hijacked.payload).toMatchObject({
+            runId: created.payload.runId,
+            status: "hijack-ready",
+        });
+        expect(typeof hijacked.payload.sessionId).toBe("string");
+        const rerunId = "rerun-copy";
+        const rerun = await client.request("runs.rerun", {
+            runId: created.payload.runId,
+            newRunId: rerunId,
+        });
+        expect(rerun.ok).toBe(true);
+        expect(rerun.payload.runId).toBe(rerunId);
+        await waitForRunStatus(client, rerunId, ["finished"]);
+        expect(readValueOutput(dbPath, rerunId)).toBe(12);
+        await client.close();
+    });
+    test("delivers signals through both gateway signal RPC method names", async () => {
+        const dbPath = makeDbPath("signals");
+        dbPaths.push(dbPath);
+        const signalHost = createSignalHostWorkflow(dbPath);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["runs"],
+            heartbeatMs: 100,
+            auth: {
+                mode: "token",
+                tokens: {
+                    "operator-token": {
+                        role: "operator",
+                        scopes: ["*"],
+                        userId: "user:will",
+                    },
+                },
+            },
+        });
+        gateway.register("signal-host", signalHost.workflow);
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port = getPort(server);
+        const { client } = await connectGateway(port, "operator-token");
+        const adapter = new SmithersDb(signalHost.db);
+        const runId = "gateway-signal-run";
+        await adapter.insertRun({
+            runId,
+            workflowName: "signal-host",
+            status: "waiting-event",
+            createdAtMs: Date.now(),
+        });
+        const sent = await client.request("signals.send", {
+            runId,
+            signalName: "deploy.ready",
+            data: { ok: true },
+            correlationId: "ticket-42",
+        });
+        expect(sent.ok).toBe(true);
+        expect(sent.payload).toMatchObject({
+            runId,
+            signalName: "deploy.ready",
+            correlationId: "ticket-42",
+        });
+        const submitted = await client.request("submitSignal", {
+            runId,
+            correlationKey: "manual.resume",
+            payload: { ok: "alias" },
+        });
+        expect(submitted.ok).toBe(true);
+        expect(submitted.payload).toMatchObject({
+            runId,
+            signalName: "manual.resume",
+            correlationId: "manual.resume",
+        });
+        const deploySignals = await adapter.listSignals(runId, { signalName: "deploy.ready" });
+        expect(deploySignals).toHaveLength(1);
+        expect(JSON.parse(deploySignals[0].payloadJson)).toEqual({ ok: true });
+        expect(deploySignals[0].receivedBy).toBe("user:will");
+        const aliasSignals = await adapter.listSignals(runId, { signalName: "manual.resume" });
+        expect(aliasSignals).toHaveLength(1);
+        expect(JSON.parse(aliasSignals[0].payloadJson)).toEqual({ ok: "alias" });
         await client.close();
     });
     test("propagates gateway auth context into workflow tasks", async () => {

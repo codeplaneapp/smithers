@@ -122,6 +122,54 @@ describe("HTTP Server", () => {
         }
     }
     /**
+   * @param {SmithersDb} adapter
+   * @param {string} runId
+   * @param {string} workflowName
+   */
+    async function seedWaitingTimerRun(adapter, runId, workflowName) {
+        const now = Date.now();
+        await adapter.insertRun({
+            runId,
+            workflowName,
+            status: "waiting-timer",
+            createdAtMs: now,
+        });
+        await adapter.insertNode({
+            runId,
+            nodeId: "cooldown",
+            iteration: 0,
+            state: "waiting-timer",
+            lastAttempt: 1,
+            updatedAtMs: now,
+            outputTable: "",
+            label: "Cooldown",
+        });
+        await adapter.insertAttempt({
+            runId,
+            nodeId: "cooldown",
+            iteration: 0,
+            attempt: 1,
+            state: "waiting-timer",
+            startedAtMs: now,
+            finishedAtMs: null,
+            errorJson: null,
+            metaJson: JSON.stringify({
+                timer: {
+                    timerId: "cooldown",
+                    timerType: "duration",
+                    createdAtMs: now,
+                    firesAtMs: now + 60_000,
+                    firedAtMs: null,
+                    duration: "1m",
+                },
+            }),
+            responseText: null,
+            cached: false,
+            jjPointer: null,
+            jjCwd: null,
+        });
+    }
+    /**
    * @param {string} name
    * @param {string} dbPath
    * @param {{ needsApproval?: boolean; slow?: boolean; value?: number }} [options]
@@ -254,6 +302,59 @@ const fakeAgent = {
             expect(status).toBe(413);
             expect(data.error.code).toBe("PAYLOAD_TOO_LARGE");
         });
+        test("requires runId when resume is true", async () => {
+            const dbPath = resolve(testDir, "resume-requires-id.db");
+            const workflowPath = writeTestWorkflow("resume-requires-id", dbPath);
+            startTestServer();
+            const { status, data } = await request("/v1/runs", {
+                method: "POST",
+                body: { workflowPath, resume: true },
+            });
+            expect(status).toBe(400);
+            expect(data.error.code).toBe("RUN_ID_REQUIRED");
+        });
+        test("rejects duplicate run ids without resume", async () => {
+            const dbPath = resolve(testDir, "duplicate-run.db");
+            const workflowPath = writeTestWorkflow("duplicate-run", dbPath);
+            const runId = "duplicate-run-id";
+            startTestServer();
+            const first = await request("/v1/runs", {
+                method: "POST",
+                body: { workflowPath, runId },
+            });
+            expect(first.status).toBe(200);
+            await waitForPersistedRun(dbPath, runId);
+            const second = await request("/v1/runs", {
+                method: "POST",
+                body: { workflowPath, runId },
+            });
+            expect(second.status).toBe(409);
+            expect(second.data.error.code).toBe("RUN_ALREADY_EXISTS");
+        });
+        test("resume returns running for a fresh persisted heartbeat", async () => {
+            const dbPath = resolve(testDir, "fresh-heartbeat.db");
+            const workflowPath = writeTestWorkflow("fresh-heartbeat", dbPath);
+            const db = new Database(dbPath);
+            ensureSmithersTables(db);
+            const adapter = new SmithersDb(db);
+            const runId = "fresh-heartbeat-run";
+            await adapter.insertRun({
+                runId,
+                workflowName: "fresh-heartbeat",
+                status: "running",
+                createdAtMs: Date.now(),
+                startedAtMs: Date.now(),
+                heartbeatAtMs: Date.now(),
+                runtimeOwnerId: "worker-1",
+            });
+            startTestServer();
+            const { status, data } = await request("/v1/runs", {
+                method: "POST",
+                body: { workflowPath, runId, resume: true },
+            });
+            expect(status).toBe(200);
+            expect(data).toEqual({ runId, status: "running" });
+        });
     });
     describe("GET /v1/runs/:runId", () => {
         test("returns run status after starting", async () => {
@@ -328,6 +429,26 @@ const fakeAgent = {
             });
             expect(status).toBe(404);
             expect(data.error.code).toBe("NOT_FOUND");
+        });
+        test("cancels waiting timers and records TimerCancelled", async () => {
+            const { db, cleanup } = buildDb();
+            ensureSmithersTables(db);
+            const adapter = new SmithersDb(db);
+            const runId = "waiting-timer-cancel";
+            await seedWaitingTimerRun(adapter, runId, "timer-flow");
+            startTestServer({ db });
+            const { status, data } = await request(`/v1/runs/${runId}/cancel`, {
+                method: "POST",
+            });
+            expect(status).toBe(200);
+            expect(data.runId).toBe(runId);
+            const run = await adapter.getRun(runId);
+            expect(run?.status).toBe("cancelled");
+            const attempts = await adapter.listAttempts(runId, "cooldown", 0);
+            expect(attempts[0]?.state).toBe("cancelled");
+            const events = await adapter.listEventsByType(runId, "TimerCancelled");
+            expect(events).toHaveLength(1);
+            cleanup();
         });
     });
     describe("POST /v1/runs/:runId/resume", () => {
@@ -492,6 +613,50 @@ const fakeAgent = {
             expect(res.status).toBe(404);
             const data = await res.json();
             expect(data.error.code).toBe("NOT_FOUND");
+        });
+    });
+    describe("POST /v1/runs/:runId/signals/:signalName", () => {
+        test("delivers a signal to a persisted run", async () => {
+            const { db, cleanup } = buildDb();
+            ensureSmithersTables(db);
+            const adapter = new SmithersDb(db);
+            const runId = "http-signal-run";
+            await adapter.insertRun({
+                runId,
+                workflowName: "signal-flow",
+                status: "waiting-event",
+                createdAtMs: Date.now(),
+            });
+            startTestServer({ db });
+            const { status, data } = await request(`/v1/runs/${runId}/signals/${encodeURIComponent("deploy.ready")}`, {
+                method: "POST",
+                body: {
+                    data: { ok: true },
+                    correlationId: "ticket-42",
+                    receivedBy: "http-test",
+                },
+            });
+            expect(status).toBe(200);
+            expect(data).toMatchObject({
+                runId,
+                signalName: "deploy.ready",
+                correlationId: "ticket-42",
+            });
+            const signals = await adapter.listSignals(runId, { signalName: "deploy.ready" });
+            expect(signals).toHaveLength(1);
+            expect(JSON.parse(signals[0].payloadJson)).toEqual({ ok: true });
+            expect(signals[0].receivedBy).toBe("http-test");
+            cleanup();
+        });
+    });
+    describe("GET /metrics", () => {
+        test("returns Prometheus metrics from the real HTTP server", async () => {
+            startTestServer();
+            const res = await fetch(`http://localhost:${port}/metrics`);
+            const text = await res.text();
+            expect(res.status).toBe(200);
+            expect(res.headers.get("content-type")).toContain("text/plain");
+            expect(text).toContain("smithers_");
         });
     });
     describe("GET /v1/runs (list runs)", () => {
