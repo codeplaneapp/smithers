@@ -1,5 +1,5 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { accountsRoot } from "./accountsRoot.js";
 
 /**
@@ -26,17 +26,5 @@ export function defaultConfigDir(label, env = process.env) {
         );
     }
     const root = accountsRoot(env);
-    const dir = join(root, "accounts", label);
-    // Defense-in-depth: a valid label can never escape, but assert the resolved
-    // path stays under the accounts root so a future regex change can't silently
-    // reintroduce traversal.
-    const base = resolve(root, "accounts");
-    const resolved = resolve(dir);
-    if (resolved !== join(base, label) && !resolved.startsWith(base + "/")) {
-        throw new SmithersError(
-            "ACCOUNT_INVALID",
-            `Invalid account label ${JSON.stringify(label)}: resolved path escapes the accounts directory.`,
-        );
-    }
-    return dir;
+    return join(root, "accounts", label);
 }
