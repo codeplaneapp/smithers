@@ -347,7 +347,7 @@ describe("semantic tool definitions", () => {
             waitForStartMs: 0,
         });
         expect(missingDefault.isError).toBe(true);
-        expect(missingDefault.structuredContent.error.code).toBe("INTERNAL_ERROR");
+        expect(missingDefault.structuredContent.error.code).toBe("WORKFLOW_MISSING_DEFAULT");
 
         writeFileSync(join(harness.cwd, ".smithers", "workflows", "quick.tsx"), [
             "/** @jsxImportSource smithers-orchestrator */",
@@ -597,19 +597,32 @@ describe("semantic tool definitions", () => {
             approvals: [],
             attempts: [],
         });
+        const missingGetRun = await missingHarness.call("get_run", {
+            runId: "missing",
+        });
+        expect(missingGetRun.isError).toBe(true);
+        expect(missingGetRun.structuredContent.error.code).toBe("RUN_NOT_FOUND");
+
+        const missingExplain = await missingHarness.call("explain_run", {
+            runId: "missing",
+        });
+        expect(missingExplain.isError).toBe(true);
+        expect(missingExplain.structuredContent.error.code).toBe("RUN_NOT_FOUND");
+
         const missingWatch = await missingHarness.call("watch_run", {
             runId: "missing",
             intervalMs: 1,
             timeoutMs: 0,
         });
         expect(missingWatch.isError).toBe(true);
-        expect(missingWatch.structuredContent.error.code).toBe("INTERNAL_ERROR");
+        expect(missingWatch.structuredContent.error.code).toBe("RUN_NOT_FOUND");
 
         const missingEvents = await missingHarness.call("get_run_events", {
             runId: "missing",
             limit: 1,
         });
         expect(missingEvents.isError).toBe(true);
+        expect(missingEvents.structuredContent.error.code).toBe("RUN_NOT_FOUND");
 
         const harness = makeHarness();
         const noApproval = await harness.call("resolve_approval", {
@@ -617,7 +630,7 @@ describe("semantic tool definitions", () => {
             runId: "missing",
         });
         expect(noApproval.isError).toBe(true);
-        expect(noApproval.structuredContent.error.code).toBe("INTERNAL_ERROR");
+        expect(noApproval.structuredContent.error.code).toBe("INVALID_INPUT");
 
         const wrongIteration = await harness.call("resolve_approval", {
             action: "approve",
@@ -625,12 +638,13 @@ describe("semantic tool definitions", () => {
             iteration: 9,
         });
         expect(wrongIteration.isError).toBe(true);
+        expect(wrongIteration.structuredContent.error.code).toBe("INVALID_INPUT");
 
         const ambiguous = await harness.call("resolve_approval", {
             action: "deny",
             workflowName: "demo",
         });
         expect(ambiguous.isError).toBe(true);
-        expect(ambiguous.structuredContent.error.code).toBe("INTERNAL_ERROR");
+        expect(ambiguous.structuredContent.error.code).toBe("INVALID_INPUT");
     });
 });
