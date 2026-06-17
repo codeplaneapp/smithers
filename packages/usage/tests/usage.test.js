@@ -56,6 +56,8 @@ describe("parseDurationSeconds", () => {
         expect(parseDurationSeconds(null)).toBeUndefined();
         expect(parseDurationSeconds("")).toBeUndefined();
         expect(parseDurationSeconds("nope")).toBeUndefined();
+        expect(parseDurationSeconds("nope1s")).toBeUndefined();
+        expect(parseDurationSeconds("1sx")).toBeUndefined();
     });
 });
 
