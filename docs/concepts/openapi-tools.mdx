@@ -104,6 +104,8 @@ Use `operations` for per-operation curation keyed by the original `operationId`.
 
 Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
 
+Use `operations` for per-operation curation keyed by the original `operationId`. Set an entry to `false` or `{ include: false }` to skip that endpoint, set `name` to rename the generated tool, set `description` to replace the spec summary/description with agent-facing instructions, and add `responseExamples` to append concrete response shapes to the tool description. This lets a connector expose a small curated set instead of dumping every endpoint as an agent-callable tool. `include` / `exclude` still use the original `operationId`, not the curated name.
+
 ## Observability
 
 OpenAPI tool calls update the exported Effect metrics (`openApiToolCallsTotal`, `openApiToolCallErrorsTotal`, `openApiToolDuration`) and carry Effect log annotations/spans with the operation id, method, and path. The current tool factory does not emit `OpenApiToolCalled` onto the Smithers run event bus; that event variant is typed/categorized for future event-bus integration.
