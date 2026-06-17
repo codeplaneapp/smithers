@@ -137,6 +137,7 @@ const INTEGRATIONS_PAGES = [
   "integrations/mcp-toolset.mdx",
   "integrations/tools.mdx",
   "integrations/common-tools.mdx",
+  "integrations/community-connectors.mdx",
   "integrations/ecosystem.mdx",
   "integrations/pi-integration.mdx",
 ];
