@@ -116,10 +116,11 @@ function diagnoseSurfaceContract(entry) {
 }
 
 /**
+ * @param {CliAgentCapabilityReportEntry[]} [entries]
  * @returns {CliAgentCapabilityDoctorReport}
  */
-export function getCliAgentCapabilityDoctorReport() {
-    const agents = getCliAgentCapabilityReport().map((entry) => {
+export function getCliAgentCapabilityDoctorReport(entries = getCliAgentCapabilityReport()) {
+    const agents = entries.map((entry) => {
         const issues = [
             ...diagnoseCapabilityRegistry(entry.capabilities),
             ...diagnoseSurfaceContract(entry),
