@@ -299,6 +299,8 @@ function extractTextFromJsonPayload(raw) {
     }
     const chunks = [];
     for (const parsed of parsedLines) {
+        if (typeof parsed?.role === "string" && parsed.role !== "assistant")
+            continue;
         let text;
         if (parsed?.type === "text" && typeof parsed?.part?.text === "string") {
             text = parsed.part.text;
