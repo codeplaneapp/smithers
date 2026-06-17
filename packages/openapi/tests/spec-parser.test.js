@@ -122,6 +122,60 @@ describe("extractOperations", () => {
         expect(getPet.parameters[0].in).toBe("path");
         expect(getPet.parameters[0].required).toBe(true);
     });
+    test("merges path-level parameters and lets operation-level parameters override matching keys", () => {
+        const ops = extractOperations({
+            openapi: "3.0.0",
+            info: { title: "Path Params", version: "1.0.0" },
+            paths: {
+                "/orgs/{orgId}/pets": {
+                    parameters: [
+                        {
+                            name: "orgId",
+                            in: "path",
+                            required: true,
+                            description: "Path-level org id",
+                            schema: { type: "string", pattern: "org_[0-9]+" },
+                        },
+                        {
+                            name: "includeArchived",
+                            in: "query",
+                            description: "Shared archive filter",
+                            schema: { type: "boolean", default: false },
+                        },
+                    ],
+                    get: {
+                        operationId: "listOrgPets",
+                        parameters: [
+                            {
+                                name: "orgId",
+                                in: "path",
+                                required: true,
+                                description: "Operation-level org id",
+                                schema: { type: "string", minLength: 3 },
+                            },
+                            {
+                                name: "limit",
+                                in: "query",
+                                schema: { type: "integer" },
+                            },
+                        ],
+                        responses: { "200": { description: "ok" } },
+                    },
+                },
+            },
+        });
+
+        const listOrgPets = ops.find((o) => o.operationId === "listOrgPets");
+        expect(listOrgPets.parameters.map((p) => `${p.in}:${p.name}`)).toEqual([
+            "query:includeArchived",
+            "path:orgId",
+            "query:limit",
+        ]);
+        expect(listOrgPets.parameters.find((p) => p.name === "orgId")).toMatchObject({
+            description: "Operation-level org id",
+            schema: { type: "string", minLength: 3 },
+        });
+    });
     test("handles empty paths", () => {
         const ops = extractOperations({
             openapi: "3.0.0",

@@ -1,9 +1,16 @@
 // ---------------------------------------------------------------------------
 // Tool factory tests — creation of AI SDK tools from specs
 // ---------------------------------------------------------------------------
-import { describe, test, expect } from "bun:test";
+import { afterEach, describe, test, expect, mock } from "bun:test";
 import { createOpenApiToolsSync, createOpenApiToolSync, listOperations, } from "../src/tool-factory.js";
 import { petStoreSpec, complexSchemaSpec } from "./fixtures.js";
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+    globalThis.fetch = originalFetch;
+});
+
 describe("createOpenApiToolsSync", () => {
     test("creates tools for all operations", () => {
         const tools = createOpenApiToolsSync(petStoreSpec);
@@ -30,6 +37,13 @@ describe("createOpenApiToolsSync", () => {
         });
         expect(Object.keys(tools)).not.toContain("deletePet");
         expect(Object.keys(tools).length).toBe(3);
+    });
+    test("applies exclude after include when both filters are provided", () => {
+        const tools = createOpenApiToolsSync(petStoreSpec, {
+            include: ["listPets", "getPet", "deletePet"],
+            exclude: ["getPet"],
+        });
+        expect(Object.keys(tools).sort()).toEqual(["deletePet", "listPets"]);
     });
     test("applies name prefix", () => {
         const tools = createOpenApiToolsSync(petStoreSpec, {
@@ -83,6 +97,30 @@ describe("createOpenApiToolsSync", () => {
             baseUrl: "https://custom.api.example.com",
         });
         expect(Object.keys(tools).length).toBeGreaterThan(0);
+    });
+    test("falls back to localhost when no base URL option or server is present", async () => {
+        const specWithoutServers = {
+            openapi: "3.0.0",
+            info: { title: "Local", version: "1.0.0" },
+            paths: {
+                "/health": {
+                    get: {
+                        operationId: "getHealth",
+                        responses: { "200": { description: "ok" } },
+                    },
+                },
+            },
+        };
+        const mockFetch = mock(() => Promise.resolve(new Response("ok")));
+        globalThis.fetch = mockFetch;
+
+        const tools = createOpenApiToolsSync(specWithoutServers);
+        await tools.getHealth.execute({});
+
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        const [url, init] = mockFetch.mock.calls[0];
+        expect(url).toBe("http://localhost/health");
+        expect(init.method).toBe("GET");
     });
     test("creates tools from complex schema spec", () => {
         const tools = createOpenApiToolsSync(complexSchemaSpec);
