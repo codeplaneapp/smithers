@@ -158,6 +158,29 @@ describe("useGatewayExtensionAction", () => {
 });
 
 describe("useGatewayExtensionStream", () => {
+  test("does not report streaming before the subscription effect starts", async () => {
+    const streamingSnapshots: boolean[] = [];
+    const client = {
+      streamExtension: async function* () {
+        await new Promise(() => {});
+      },
+    } as unknown as SmithersGatewayClient;
+
+    function Probe() {
+      const snapshot = useGatewayExtensionStream("logs", "tail");
+      streamingSnapshots.push(snapshot.streaming);
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(
+      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
+    );
+
+    expect(streamingSnapshots[0]).toBe(false);
+    await harness.unmount();
+  });
+
   test("re-renders with a fresh backoff literal do NOT re-subscribe", async () => {
     // The hook used to depend on `options.backoff` as an unstable object
     // reference, so every parent re-render would tear down + resubscribe.
