@@ -80,7 +80,7 @@ export function createOpenCodeCapabilityRegistry(opts = {}) {
  *
  * Usage:
  *   const agent = new OpenCodeAgent({
- *     model: "anthropic/claude-opus-4-20250514",
+ *     model: "anthropic/claude-opus-4-8",
  *     yolo: true,
  *   });
  *   const result = await agent.generate({
