@@ -45,19 +45,20 @@ export function runJj(args, opts = {}) {
     }
     return Effect.scoped(Effect.gen(function* () {
         const start = performance.now();
-        yield* Effect.logDebug(`jj ${args.join(" ")}`);
-        const process = yield* Command.start(command);
-        const stdoutFiber = yield* Effect.fork(collectUtf8(process.stdout));
-        const stderrFiber = yield* Effect.fork(collectUtf8(process.stderr));
-        const exitCode = yield* process.exitCode;
-        const stdout = yield* Fiber.join(stdoutFiber);
-        const stderr = yield* Fiber.join(stderrFiber);
-        yield* Metric.update(vcsDuration, performance.now() - start);
-        return {
-            code: Number(exitCode),
-            stdout,
-            stderr,
-        };
+        return yield* Effect.gen(function* () {
+            yield* Effect.logDebug(`jj ${args.join(" ")}`);
+            const process = yield* Command.start(command);
+            const stdoutFiber = yield* Effect.fork(collectUtf8(process.stdout));
+            const stderrFiber = yield* Effect.fork(collectUtf8(process.stderr));
+            const exitCode = yield* process.exitCode;
+            const stdout = yield* Fiber.join(stdoutFiber);
+            const stderr = yield* Fiber.join(stderrFiber);
+            return {
+                code: Number(exitCode),
+                stdout,
+                stderr,
+            };
+        }).pipe(Effect.ensuring(Effect.suspend(() => Metric.update(vcsDuration, performance.now() - start))));
     })).pipe(Effect.annotateLogs({
         vcs: "jj",
         cwd: opts.cwd ?? "",
