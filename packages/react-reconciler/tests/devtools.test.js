@@ -45,8 +45,8 @@ describe("devtools: bippy + custom reconciler", () => {
         // NOW import React/Smithers (reconciler will see the installed hook)
         const [rendererMod, componentsMod, schemaMod, reactMod] = await Promise.all([
             import("@smithers-orchestrator/react-reconciler/dom/renderer"),
-            import("../src/components/index.js"),
-            import("./schema.js"),
+            import("@smithers-orchestrator/components"),
+            import("../../smithers/tests/schema.js"),
             import("react"),
         ]);
         React = reactMod.default;

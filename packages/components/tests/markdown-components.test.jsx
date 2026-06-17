@@ -92,6 +92,15 @@ describe("markdownComponents", () => {
         });
     });
     describe("tables", () => {
+        test("table renders children with trailing newline", () => {
+            expect(render("table", {}, "rows")).toBe("rows\n");
+        });
+        test("thead passes through children exactly", () => {
+            expect(render("thead", {}, "| Header |\n")).toBe("| Header |\n");
+        });
+        test("tbody passes through children exactly", () => {
+            expect(render("tbody", {}, "| Data |\n")).toBe("| Data |\n");
+        });
         test("tr renders with pipe separators", () => {
             expect(render("tr", {}, "cells")).toBe("| cells\n");
         });
