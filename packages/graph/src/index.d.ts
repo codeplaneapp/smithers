@@ -128,6 +128,8 @@ type TaskDescriptor$1 = {
     ralphId?: string;
     dependsOn?: string[];
     needs?: Record<string, string>;
+    /** Logical id of the task whose final agent session this task forks. Gates execution and seeds the session. */
+    forkSource?: string;
     worktreeId?: string;
     worktreePath?: string;
     worktreeBranch?: string;
