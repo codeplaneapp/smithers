@@ -240,7 +240,7 @@ function makeMemoryStore(db) {
                 .from(smithersMemoryMessages)
                 .where(eq(smithersMemoryMessages.threadId, threadId))
                 .orderBy(smithersMemoryMessages.createdAtMs);
-            if (limit) {
+            if (limit !== undefined) {
                 query = query.limit(limit);
             }
             return query;
