@@ -20,8 +20,11 @@ export function parseDurationSeconds(value) {
     const re = /(\d+(?:\.\d+)?)(ms|us|µs|ns|s|m|h)/g;
     let total = 0;
     let matched = false;
+    let position = 0;
     let match;
     while ((match = re.exec(trimmed)) !== null) {
+        if (match.index !== position) return undefined;
+        position = re.lastIndex;
         matched = true;
         const amount = Number(match[1]);
         switch (match[2]) {
@@ -34,5 +37,5 @@ export function parseDurationSeconds(value) {
             case "ns": total += amount / 1_000_000_000; break;
         }
     }
-    return matched ? total : undefined;
+    return matched && position === trimmed.length ? total : undefined;
 }
