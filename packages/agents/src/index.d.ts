@@ -6,6 +6,32 @@ import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
 import * as zod_v4_core from 'zod/v4/core';
 
+type ElevenLabsTextToSpeechInput = {
+    text: string;
+    voiceId?: string;
+    modelId?: string;
+    voiceSettings?: Record<string, unknown>;
+};
+type ElevenLabsTextToSpeechResult = {
+    audioBase64: string;
+    contentType: string;
+    voiceId: string;
+    modelId: string;
+    byteLength: number;
+};
+type ElevenLabsTextToSpeechToolOptions = {
+    apiKey: string;
+    defaultVoiceId?: string;
+    defaultModelId?: string;
+    baseUrl?: string;
+    fetch?: typeof fetch;
+};
+type ElevenLabsTextToSpeechToolset = {
+    tools: Record<"elevenlabs_text_to_speech", ai.Tool>;
+    toolNames: ["elevenlabs_text_to_speech"];
+};
+declare function createElevenLabsTextToSpeechTool(options: ElevenLabsTextToSpeechToolOptions): ElevenLabsTextToSpeechToolset;
+
 type CliAgentCapabilityAdapterId$1 = "claude" | "amp" | "antigravity" | "codex" | "forge" | "gemini" | "kimi" | "opencode" | "pi" | "vibe";
 
 type CliAgentSurfaceOptionMapping$1 = {
@@ -1314,4 +1340,4 @@ declare function createImageGenerationTool(provider: ImageGenerationProvider, op
 }): Record<string, ai.Tool>;
 declare function createImageGenerationTool(provider: ImageGenerationProvider, options?: ImageGenerationToolOptions): ai.Tool;
 
-export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, VibeAgent, type VibeAgentOptions, createAmpCapabilityRegistry, createAntigravityCapabilityRegistry, createForgeCapabilityRegistry, createImageGenerationTool, createSmithersAgentContract, createVibeCapabilityRegistry, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type ElevenLabsTextToSpeechInput, type ElevenLabsTextToSpeechResult, type ElevenLabsTextToSpeechToolOptions, type ElevenLabsTextToSpeechToolset, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, VibeAgent, type VibeAgentOptions, createAmpCapabilityRegistry, createAntigravityCapabilityRegistry, createElevenLabsTextToSpeechTool, createForgeCapabilityRegistry, createImageGenerationTool, createSmithersAgentContract, createVibeCapabilityRegistry, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
