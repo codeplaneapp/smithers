@@ -114,18 +114,22 @@ export function annotateSmithersTrace(attributes = {}) {
  */
 export function withSmithersSpan(name, effect, attributes) {
     const spanAttributes = makeSmithersSpanAttributes(attributes);
-    const annotations = correlationContextToLogAnnotations(getCurrentCorrelationContext());
-    let program = effect;
-    if (Object.keys(spanAttributes).length > 0) {
-        program = program.pipe(Effect.annotateSpans(spanAttributes));
-    }
-    if (hasAttributes(attributes)) {
-        program = program.pipe(Effect.annotateLogs(attributes));
-    }
-    if (annotations) {
-        program = program.pipe(Effect.annotateLogs(annotations));
-    }
-    return program.pipe(Effect.withLogSpan(name), Effect.withSpan(inferSmithersSpanName(name, attributes)));
+    return Effect.suspend(() => {
+        const annotations = correlationContextToLogAnnotations(getCurrentCorrelationContext());
+        let program = effect;
+        if (Object.keys(spanAttributes).length > 0) {
+            program = program.pipe(Effect.annotateSpans(spanAttributes));
+        }
+        if (hasAttributes(attributes)) {
+            program = program.pipe(Effect.annotateLogs(attributes));
+        }
+        if (annotations) {
+            program = program.pipe(Effect.annotateLogs(annotations));
+        }
+        return program.pipe(Effect.withLogSpan(name), Effect.withSpan(inferSmithersSpanName(name, attributes), {
+            attributes: spanAttributes,
+        }));
+    });
 }
 /** @type {Layer.Layer<TracingService, never, never>} */
 export const TracingServiceLive = Layer.succeed(TracingService, {
