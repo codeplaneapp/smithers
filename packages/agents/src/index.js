@@ -106,4 +106,13 @@ export {
 
 export { createTranscriptionTool } from "./transcription/createTranscriptionTool.js";
 
->>>>>>> 2cb1d27a (✨ feat(agents): add Whisper and Deepgram transcription tool)
+
+export {
+  createGroundedWebSearchToolset,
+  createExaSearchProvider,
+  createTavilySearchProvider,
+  createBraveSearchProvider,
+  createSerperSearchProvider,
+} from "./web-search/index.js";
+
+>>>>>>> ce5c4a6c (🔎 feat(agents): add resilient multi-provider grounded web search)
