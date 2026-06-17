@@ -70,7 +70,7 @@ import { formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport
 import { parseDurationMs, supervisorLoopEffect, } from "./supervisor.js";
 import { WATCH_MIN_INTERVAL_MS, runWatchLoop, watchIntervalSecondsToMs, } from "./watch.js";
 import { createSemanticMcpServer } from "./mcp/semantic-server.js";
-import { parseTokenScopes, readSmithersTokenStore, smithersTokenStorePath, writeSmithersTokenStore, } from "./token-store.js";
+import { issueSmithersBrokerToken, parseTokenScopes, readSmithersTokenStore, resolveSmithersActionTokenFromStore, revokeSmithersToken, smithersTokenStorePath, writeSmithersTokenStore, } from "./token-store.js";
 import { resolveSmithersDocsSource } from "./docs-command.js";
 import pc from "picocolors";
 import crypto from "node:crypto";
@@ -2521,6 +2521,8 @@ const tokenCli = Cli.create({
         role: z.string().default("operator").describe("Role recorded on the token grant"),
         userId: z.string().optional().describe("User id recorded on the token grant"),
         ttl: z.string().default("1h").describe("Token lifetime, such as 15m or 1h"),
+        actionId: z.string().default("gateway").describe("Action id allowed to resolve the brokered action token"),
+        revealToken: z.boolean().default(false).describe("Include the raw bearer token in CLI output"),
     }),
     run(c) {
         const fail = (opts) => {
@@ -2529,29 +2531,75 @@ const tokenCli = Cli.create({
         };
         try {
             const ttlMs = parseDurationMs(c.options.ttl, "ttl");
-            const now = Date.now();
-            const token = `smithers_${crypto.randomBytes(32).toString("base64url")}`;
-            const tokenId = crypto.createHash("sha256").update(token).digest("hex").slice(0, 16);
-            const grant = {
-                tokenId,
+            const issued = issueSmithersBrokerToken({
+                store: readSmithersTokenStore(),
                 role: c.options.role,
                 scopes: parseTokenScopes(c.options.scopes),
                 ...(c.options.userId ? { userId: c.options.userId } : {}),
-                issuedAtMs: now,
-                expiresAtMs: now + ttlMs,
-            };
-            const store = readSmithersTokenStore();
-            store.tokens[token] = grant;
-            writeSmithersTokenStore(store);
+                actionId: c.options.actionId,
+                ttlMs,
+            });
+            writeSmithersTokenStore(issued.store);
             return c.ok({
-                token,
-                grant,
+                ...(c.options.revealToken ? { token: issued.token } : {}),
+                grant: c.options.revealToken ? issued.grant : { ...issued.grant, secret: undefined },
+                actionToken: issued.actionToken,
                 storePath: smithersTokenStorePath(),
             });
         }
         catch (err) {
             return fail({
                 code: err instanceof SmithersError ? err.code : "TOKEN_ISSUE_FAILED",
+                message: err?.message ?? String(err),
+                exitCode: 1,
+            });
+        }
+    },
+})
+    .command("exec", {
+    description: "Resolve an action token locally and inject the bearer into a child process environment.",
+    options: z.object({
+        handle: z.string().describe("Brokered action token handle"),
+        actionId: z.string().default("gateway").describe("Action id expected by the brokered token"),
+        scopes: z.string().default("").describe("Comma or space separated scopes required for this action"),
+        env: z.string().default("SMITHERS_API_KEY").describe("Environment variable that receives the bearer token"),
+        command: z.string().describe("Shell command to run with the injected token"),
+    }),
+    async run(c) {
+        const fail = (opts) => {
+            commandExitOverride = opts.exitCode ?? 1;
+            return c.error(opts);
+        };
+        try {
+            const resolved = resolveSmithersActionTokenFromStore(c.options.handle, {
+                actionId: c.options.actionId,
+                scopes: parseTokenScopes(c.options.scopes),
+            });
+            const child = spawn(c.options.command, {
+                shell: true,
+                stdio: "inherit",
+                env: {
+                    ...process.env,
+                    [c.options.env]: resolved.token,
+                },
+            });
+            const exitCode = await new Promise((resolveExit) => {
+                child.on("error", () => resolveExit(1));
+                child.on("exit", (code, signal) => {
+                    if (typeof code === "number")
+                        resolveExit(code);
+                    else
+                        resolveExit(signal ? 1 : 0);
+                });
+            });
+            commandExitOverride = exitCode;
+            return exitCode === 0
+                ? c.ok({ ok: true, tokenId: resolved.grant.tokenId, actionId: resolved.actionToken.actionId })
+                : fail({ code: "TOKEN_EXEC_FAILED", message: `Command exited with status ${exitCode}`, exitCode });
+        }
+        catch (err) {
+            return fail({
+                code: err instanceof SmithersError ? err.code : "TOKEN_EXEC_FAILED",
                 message: err?.message ?? String(err),
                 exitCode: 1,
             });
@@ -2565,7 +2613,7 @@ const tokenCli = Cli.create({
     }),
     run(c) {
         const store = readSmithersTokenStore();
-        const grant = store.tokens[c.args.token];
+        const grant = revokeSmithersToken(store, c.args.token);
         if (!grant) {
             commandExitOverride = 1;
             return c.error({
@@ -2574,11 +2622,10 @@ const tokenCli = Cli.create({
                 exitCode: 1,
             });
         }
-        grant.revokedAtMs = Date.now();
         writeSmithersTokenStore(store);
         return c.ok({
             revoked: true,
-            tokenId: grant.tokenId ?? crypto.createHash("sha256").update(c.args.token).digest("hex").slice(0, 16),
+            tokenId: grant.tokenId,
             storePath: smithersTokenStorePath(),
         });
     },
