@@ -11,6 +11,7 @@ description: Provider-backed AI SDK agent wrappers for Anthropic, OpenAI, and He
 import {
   AnthropicAgent,
   OpenAIAgent,
+  createHttpTool,
   tools,
 } from "smithers-orchestrator";
 import { stepCountIs } from "ai";
@@ -101,6 +102,25 @@ const local = new OpenAIAgent({
 ```
 
 Use the `createOpenAI` path when you need provider-level configuration beyond `baseURL` and `apiKey`; in that form, `baseURL` and `apiKey` belong in the `createOpenAI` config, not in the `OpenAIAgent` constructor.
+
+## Generic HTTP Tool
+
+`createHttpTool()` returns an AI SDK tool that can call any REST endpoint without an OpenAPI spec. Use it as the universal escape hatch when no curated connector or MCP server exists yet.
+
+```ts
+const http = createHttpTool({
+  defaultHeaders: { "user-agent": "smithers-workflow" },
+});
+
+const ops = new AnthropicAgent({
+  model: "claude-fable-5",
+  tools: { http },
+  instructions: "Use the HTTP tool only for APIs the workflow explicitly names.",
+  stopWhen: stepCountIs(20),
+});
+```
+
+The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `auth` (`bearer`, `basic`, or custom header), and `timeoutMs`. Results include `ok`, `status`, `statusText`, response `headers`, and a parsed JSON or text `body`.
 
 ## Hermes
 

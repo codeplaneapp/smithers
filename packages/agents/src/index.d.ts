@@ -1256,6 +1256,46 @@ declare function listCliAgentSurfaceManifests(): CliAgentSurfaceManifestEntry$1[
 declare const CLI_AGENT_SURFACE_MANIFEST: readonly CliAgentSurfaceManifestEntry$1[];
 type CliAgentSurfaceManifestEntry$1 = CliAgentSurfaceManifestEntry$2;
 
+type HttpToolAuth = {
+    type: "bearer";
+    token: string;
+} | {
+    type: "basic";
+    username: string;
+    password: string;
+} | {
+    type: "header";
+    name: string;
+    value: string;
+};
+type HttpToolInput = {
+    method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
+    url: string;
+    headers?: Record<string, string>;
+    query?: Record<string, string | number | boolean | null | undefined>;
+    body?: unknown;
+    auth?: HttpToolAuth;
+    timeoutMs?: number;
+};
+type HttpToolOutput = {
+    ok: boolean;
+    status: number;
+    statusText: string;
+    headers: Record<string, string>;
+    body: unknown;
+};
+type CreateHttpToolOptions = {
+    description?: string;
+    defaultHeaders?: Record<string, string>;
+};
+/**
+ * Create an AI SDK tool that can call any REST API without an OpenAPI spec.
+ *
+ * @param {CreateHttpToolOptions} [options]
+ * @returns {Tool}
+ */
+declare function createHttpTool(options?: CreateHttpToolOptions): ai.Tool;
+
 type AgentCapabilityRegistry = AgentCapabilityRegistry$6;
 type AgentGenerateOptions = AgentGenerateOptions$4;
 type AgentLike = AgentLike$1;
@@ -1372,3 +1412,6 @@ export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike
 =========
 export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateTranscriptionToolOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, createAmpCapabilityRegistry, createAntigravityCapabilityRegistry, createForgeCapabilityRegistry, createSmithersAgentContract, createTranscriptionTool, createVibeCapabilityRegistry, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
 >>>>>>>>> 2cb1d27a (✨ feat(agents): add Whisper and Deepgram transcription tool)
+||||||| parent of 6e36814a (✨ feat(agents): expose generic HTTP tool)
+export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateTranscriptionToolOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, createAmpCapabilityRegistry, createAntigravityCapabilityRegistry, createForgeCapabilityRegistry, createSmithersAgentContract, createTranscriptionTool, createVibeCapabilityRegistry, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, type CreateTranscriptionToolOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, type TranscriptionProvider, type TranscriptionToolInput, type TranscriptionToolResult, VibeAgent, type VibeAgentOptions, createAmpCapabilityRegistry, createAntigravityCapabilityRegistry, createForgeCapabilityRegistry, createHttpTool, createSmithersAgentContract, createTranscriptionTool, createVibeCapabilityRegistry, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
