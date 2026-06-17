@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
     buildUsageReport,
+    claudeOauthUsage,
     decodeJwtClaims,
     formatRelativeReset,
     formatUsageReports,
@@ -91,6 +92,35 @@ describe("parseClaudeOauthUsage", () => {
     test("tolerates junk", () => {
         expect(parseClaudeOauthUsage(null)).toEqual([]);
         expect(parseClaudeOauthUsage({ five_hour: { utilization: "x" } })).toEqual([]);
+    });
+});
+
+describe("claudeOauthUsage", () => {
+    test("does not send expired Claude OAuth tokens", async () => {
+        const configDir = mkdtempSync(join(tmpdir(), "smithers-claude-"));
+        tempDirs.push(configDir);
+        writeFileSync(join(configDir, ".credentials.json"), JSON.stringify({
+            claudeAiOauth: {
+                accessToken: "expired-token",
+                expiresAt: Date.now() - 1,
+            },
+        }));
+        const originalFetch = globalThis.fetch;
+        let fetchCalls = 0;
+        globalThis.fetch = /** @type {typeof fetch} */ (async () => {
+            fetchCalls += 1;
+            return new Response("{}");
+        });
+        try {
+            const result = await claudeOauthUsage({ configDir });
+            expect(fetchCalls).toBe(0);
+            expect(result).toMatchObject({
+                source: "none",
+                error: "Claude OAuth token expired; run `claude` to refresh",
+            });
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
     });
 });
 
