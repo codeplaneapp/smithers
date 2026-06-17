@@ -275,7 +275,7 @@ type BaseCliAgentOptions = BaseCliAgentOptions$2;
 type CliOutputInterpreter$8 = CliOutputInterpreter$a;
 
 type OpenCodeAgentOptions$1 = BaseCliAgentOptions & {
-    /** Model identifier (e.g., "anthropic/claude-opus-4-20250514", "openai/gpt-5.4") */
+    /** Model identifier (e.g., "anthropic/claude-opus-4-8", "openai/gpt-5.4") */
     model?: string;
     /** OpenCode agent name (maps to --agent flag, selects predefined agent config) */
     agentName?: string;
