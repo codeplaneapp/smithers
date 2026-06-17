@@ -404,6 +404,33 @@ export function makeWorkflowSession(options = {}) {
         }
     }
     /**
+   * @param {string} eventName
+   * @param {unknown} payload
+   * @param {string | null} correlationId
+   */
+    function applyEventReceived(eventName, payload, correlationId) {
+        for (const descriptor of state.descriptors.values()) {
+            const key = stateKeyFor(descriptor);
+            const taskState = state.states.get(key);
+            const expected = typeof descriptor.meta?.__eventName === "string"
+                ? descriptor.meta.__eventName
+                : undefined;
+            const expectedCorrelation = typeof descriptor.meta?.__correlationId === "string"
+                ? descriptor.meta.__correlationId
+                : undefined;
+            if (taskState === "waiting-event" &&
+                (!expected || expected === eventName) &&
+                (expectedCorrelation === undefined || expectedCorrelation === correlationId)) {
+                state.states.set(key, "finished");
+                state.outputs.set(key, {
+                    nodeId: descriptor.nodeId,
+                    iteration: descriptor.iteration,
+                    output: payload,
+                });
+            }
+        }
+    }
+    /**
    * @param {TaskDescriptor} descriptor
    * @param {unknown} error
    * @returns {EngineDecision}
@@ -734,51 +761,11 @@ export function makeWorkflowSession(options = {}) {
             return decide();
         }),
         eventReceived: (eventName, payload, correlationId = null) => Effect.sync(() => {
-            for (const descriptor of state.descriptors.values()) {
-                const key = stateKeyFor(descriptor);
-                const taskState = state.states.get(key);
-                const expected = typeof descriptor.meta?.__eventName === "string"
-                    ? descriptor.meta.__eventName
-                    : undefined;
-                const expectedCorrelation = typeof descriptor.meta?.__correlationId === "string"
-                    ? descriptor.meta.__correlationId
-                    : undefined;
-                if (taskState === "waiting-event" &&
-                    (!expected || expected === eventName) &&
-                    (expectedCorrelation === undefined || expectedCorrelation === correlationId)) {
-                    state.states.set(key, "finished");
-                    state.outputs.set(key, {
-                        nodeId: descriptor.nodeId,
-                        iteration: descriptor.iteration,
-                        output: payload,
-                    });
-                }
-            }
+            applyEventReceived(eventName, payload, correlationId);
             return decide();
         }),
         signalReceived: (signalName, payload, correlationId = null) => Effect.sync(() => {
-            for (const descriptor of state.descriptors.values()) {
-                const key = stateKeyFor(descriptor);
-                const taskState = state.states.get(key);
-                const expected = typeof descriptor.meta?.__signalName === "string"
-                    ? descriptor.meta.__signalName
-                    : typeof descriptor.meta?.__eventName === "string"
-                        ? descriptor.meta.__eventName
-                        : undefined;
-                const expectedCorrelation = typeof descriptor.meta?.__correlationId === "string"
-                    ? descriptor.meta.__correlationId
-                    : undefined;
-                if (taskState === "waiting-event" &&
-                    (!expected || expected === signalName) &&
-                    (expectedCorrelation === undefined || expectedCorrelation === correlationId)) {
-                    state.states.set(key, "finished");
-                    state.outputs.set(key, {
-                        nodeId: descriptor.nodeId,
-                        iteration: descriptor.iteration,
-                        output: payload,
-                    });
-                }
-            }
+            applyEventReceived(signalName, payload, correlationId);
             return decide();
         }),
         timerFired: (nodeId, firedAtMs = nowMs()) => Effect.sync(() => {
