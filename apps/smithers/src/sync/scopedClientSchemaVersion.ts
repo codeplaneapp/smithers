@@ -22,8 +22,8 @@ import { gatewayClientSchemaVersion } from "./gatewayClientSchemaVersion";
  * non-deterministically. User-identity changes drop the durable copy through
  * `appGatewayCollections.reset()` on the remote-mode swap instead.
  */
-export function scopedClientSchemaVersion(): string {
+export async function scopedClientSchemaVersion(): Promise<string> {
   const mode = useBackendStore.getState().mode;
   const baseUrl = useAuthStore.getState().gatewayBaseUrl || "same-origin";
-  return `${gatewayClientSchemaVersion}|${mode}|${baseUrl}`;
+  return `${await gatewayClientSchemaVersion()}|${mode}|${baseUrl}`;
 }

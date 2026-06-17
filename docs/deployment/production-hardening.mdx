@@ -33,9 +33,11 @@ Recommended database practices:
 
 ### PostgreSQL and PGlite
 
+`openSmithersBackend(schemas, opts)` is the async resolver used by the local Gateway path. It resolves `opts.backend`, then `SMITHERS_BACKEND=sqlite|pglite|postgres`, then `backend` in `.smithers/smithers.config.ts`, defaulting fresh workspaces to PGlite under `.smithers/pg/`. Use `--backend sqlite` on CLI commands to keep a legacy SQLite store explicitly.
+
 `createSmithersPostgres(schemas, opts)` runs the same durable engine, and the same crash-and-resume guarantees, on PostgreSQL or an embedded PGlite through the SQL dialect seam in `packages/db/src/dialect.js`. Point it at managed Postgres with `{ provider: "postgres", connectionString }`, pass a node-postgres connection config with `{ provider: "postgres", connection }`, or run an in-process PGlite with `{ provider: "pglite", dataDir }`. The factory is async and returns the same `createSmithers` API plus a `close()` teardown.
 
-`pg`, `@electric-sql/pglite`, and `@electric-sql/pglite-socket` are optional dependencies installed only when you take this path; the default synchronous `bun:sqlite` path needs none of them. On Postgres, take database-native backups and connection-pool sizing in place of the SQLite file-and-WAL backup guidance above.
+`pg`, `@electric-sql/pglite`, and `@electric-sql/pglite-socket` are optional dependencies loaded only when you take this path; the explicit synchronous `bun:sqlite` path needs none of them. On Postgres, take database-native backups and connection-pool sizing in place of the SQLite file-and-WAL backup guidance above.
 
 ## Access Control
 

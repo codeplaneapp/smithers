@@ -493,6 +493,10 @@ export class SmithersGatewayClient {
     return this.rpc("listRuns", params);
   }
 
+  getSchemaSignature(params: GatewayRpcParams<"getSchemaSignature"> = {}) {
+    return this.rpc("getSchemaSignature", params);
+  }
+
   listWorkflows(params: GatewayRpcParams<"listWorkflows"> = {}) {
     return this.rpc("listWorkflows", params);
   }

@@ -92,6 +92,7 @@ export { gatewayWebhooksRejectedTotal } from "./gatewayWebhooksRejectedTotal.js"
 export { devtoolsSubscribeTotal } from "./devtoolsSubscribeTotal.js";
 export { devtoolsEventTotal } from "./devtoolsEventTotal.js";
 export { devtoolsBackpressureDisconnectTotal } from "./devtoolsBackpressureDisconnectTotal.js";
+export { gatewayRunEventBackpressureDisconnectTotal } from "./gatewayRunEventBackpressureDisconnectTotal.js";
 export { eventsEmittedTotal } from "./eventsEmittedTotal.js";
 export { taskHeartbeatsTotal } from "./taskHeartbeatsTotal.js";
 export { taskHeartbeatTimeoutTotal } from "./taskHeartbeatTimeoutTotal.js";

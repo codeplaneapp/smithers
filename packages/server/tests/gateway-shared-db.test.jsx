@@ -110,6 +110,23 @@ describe("gateway — many workflows sharing one DB", () => {
     const resolved = await waitFor(() => gateway.resolveRun("only-beta"));
     expect(resolved?.workflowKey).toBe("beta");
   });
+
+  test("getSchemaSignature exposes the migration head over RPC", async () => {
+    dbPath = makeDbPath("schema-signature");
+    const wf = createSharedDbWorkflows(dbPath);
+    gateway = new Gateway({ heartbeatMs: 1000 });
+    gateway.register("alpha", wf.alpha);
+
+    const response = await gateway.routeRequest(
+      { role: "operator", scopes: ["run:read"], userId: "test" },
+      { id: "schema", method: "getSchemaSignature", params: {} },
+    );
+
+    expect(response.ok).toBe(true);
+    expect(response.payload.schemaVersion).toBe("0016");
+    expect(typeof response.payload.signature).toBe("string");
+    expect(typeof response.payload.components._smithers_runs).toBe("string");
+  });
 });
 
 describe("gateway — resolveRunWorkflowKey precedence", () => {

@@ -127,6 +127,7 @@ describe("Gateway RPC contract", () => {
       "submitSignal",
       "getRun",
       "listRuns",
+      "getSchemaSignature",
       "listWorkflows",
       "listApprovals",
       "streamRunEvents",
@@ -159,6 +160,7 @@ describe("Gateway RPC contract", () => {
     expect(canonicalGatewayRpcMethod("cron.trigger")).toBe("cronRun");
     expect(getGatewayRpcDefinition("runs.create")?.method).toBe("launchRun");
     expect(getRequiredScopeForGatewayMethod("health")).toBe("run:read");
+    expect(getRequiredScopeForGatewayMethod("getSchemaSignature")).toBe("run:read");
     expect(getRequiredScopeForGatewayMethod("approvals.list")).toBe("run:read");
     expect(getRequiredScopeForGatewayMethod("streamDevTools")).toBe("observability:read");
     expect(getRequiredScopeForGatewayMethod("workflows.list")).toBe("run:read");

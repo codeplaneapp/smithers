@@ -1,5 +1,30 @@
 # apps/smithers sync glue changelog
 
+## 0.5.0 — server-driven client schemaVersion (2026-06-16)
+
+Milestone 3 of `.smithers/specs/postgres-tanstack-sync.md` (phase 12.3). The
+persisted-collection schema version now comes from the server, not a bundled
+constant, so a server schema bump drives the client cold re-sync.
+
+### Added
+
+- **`getSchemaSignature` RPC sourcing.** `gatewayClientSchemaVersion` resolves
+  `${schemaVersion}:${signature}` from the gateway's new `getSchemaSignature`
+  RPC (backed by `_smithers_schema_migrations` head + a stable internal-table
+  signature). `scopedClientSchemaVersion` still folds backend identity (mode +
+  base URL) on top. Supersedes the 0.4.0 bundled-constant note below.
+
+### Fixed
+
+- **Offline fallback no longer sticks.** A gateway that is unreachable at
+  startup yields `${BUNDLED}:offline` for that attempt only — the memo is
+  dropped on failure so the next caller re-attempts and adopts the real server
+  signature once RPC recovers. Memoizing the offline answer would have pinned
+  every collection for the whole app lifetime and blocked a server schema bump
+  from ever clearing the persisted replica. The fetcher is a default-valued DI
+  seam so the retry path is unit-tested without module mocks
+  (`gatewayClientSchemaVersion.test.ts`).
+
 ## 0.4.0 — client SQLite persistence + pluggable SyncSource (2026-06-16)
 
 Milestone 2 of `.smithers/specs/postgres-tanstack-sync.md` (phase 12.2). Warm

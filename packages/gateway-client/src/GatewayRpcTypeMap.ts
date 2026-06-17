@@ -6,6 +6,8 @@ import type {
   CronListRequest,
   CronRunRequest,
   GatewayRpcMethod,
+  GetSchemaSignatureRequest,
+  GetSchemaSignatureResponse,
   HijackRunRequest,
   HijackRunResponse,
   LaunchRunRequest,
@@ -38,6 +40,7 @@ export type GatewayRpcRequestMap = {
   submitSignal: SubmitSignalRequest;
   getRun: GetRunRequest;
   listRuns: ListRunsRequest;
+  getSchemaSignature: GetSchemaSignatureRequest;
   listWorkflows: ListWorkflowsRequest;
   listApprovals: ListApprovalsRequest;
   streamRunEvents: StreamRunEventsRequest;
@@ -60,6 +63,7 @@ export type GatewayRpcResponseMap = {
   submitSignal: Record<string, unknown>;
   getRun: Record<string, unknown>;
   listRuns: Array<Record<string, unknown>>;
+  getSchemaSignature: GetSchemaSignatureResponse;
   listWorkflows: ListWorkflowsResponse;
   listApprovals: ListApprovalsResponse;
   streamRunEvents: StreamRunEventsResponse;

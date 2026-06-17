@@ -79,6 +79,7 @@ export type GatewayRpcMethod =
   | "submitSignal"
   | "getRun"
   | "listRuns"
+  | "getSchemaSignature"
   | "listWorkflows"
   | "listApprovals"
   | "streamRunEvents"
@@ -176,6 +177,14 @@ export type ListRunsRequest = {
     status?: string;
     limit?: number;
   };
+};
+
+export type GetSchemaSignatureRequest = Record<string, never>;
+
+export type GetSchemaSignatureResponse = {
+  schemaVersion: string;
+  signature: string;
+  components?: Record<string, string>;
 };
 
 export type GatewayWorkflowSummary = {
@@ -542,6 +551,24 @@ export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "Internal"],
     exampleRequest: { filter: { status: "finished", limit: 20 } },
     exampleResponse: [{ runId: "run_01", workflowKey: "deploy", status: "finished", createdAtMs: 1710000000000 }],
+  },
+  {
+    version: SMITHERS_API_VERSION,
+    method: "getSchemaSignature",
+    title: "Get Schema Signature",
+    description: "Return the server Smithers schema migration head and table-catalog signature used by client persistence.",
+    maturity: "stable",
+    transport: "http+websocket",
+    requiredScope: "run:read",
+    requestSchema: objectSchema({}),
+    responseSchema: objectSchema({
+      schemaVersion: stringSchema("Current _smithers_schema_migrations head id."),
+      signature: stringSchema("Stable hash of the server schema catalog."),
+      components: objectSchema({}, [], "Per-table schema component hashes.", true),
+    }, ["schemaVersion", "signature"]),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "Internal"],
+    exampleRequest: {},
+    exampleResponse: { schemaVersion: "0016", signature: "sha256" },
   },
   {
     version: SMITHERS_API_VERSION,

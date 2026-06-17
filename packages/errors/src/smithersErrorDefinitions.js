@@ -322,6 +322,11 @@ export const smithersErrorDefinitions = {
         category: "database",
         when: "A database write or migration fails, including after SQLite retry exhaustion.",
     },
+    SMITHERS_MIGRATION_REQUIRED: {
+        category: "database",
+        when: "A legacy bun:sqlite store holds run data but the resolved backend is pglite/postgres, so the history would be invisible until it is migrated with `smithers migrate`.",
+        details: "{ dbPath, runCount, schemaVersion, resolvedBackend }",
+    },
     STORAGE_ERROR: {
         category: "database",
         when: "A storage service operation fails before surfacing a more specific database code.",

@@ -17,9 +17,10 @@ import { runWorkflow } from "@smithers-orchestrator/engine";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
 import { signalRun } from "@smithers-orchestrator/engine/signals";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { getSmithersSchemaSignature } from "@smithers-orchestrator/db/getSmithersSchemaSignature";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { devtoolsActiveSubscribers, devtoolsBackpressureDisconnectTotal, devtoolsDeltaBuildMs, devtoolsEventBytes, devtoolsEventTotal, devtoolsSnapshotBuildMs, devtoolsSubscribeTotal, gatewayApprovalDecisionsTotal, gatewayAuthEventsTotal, gatewayConnectionsActive, gatewayConnectionsClosedTotal, gatewayConnectionsTotal, gatewayCronTriggersTotal, gatewayErrorsTotal, gatewayHeartbeatTicksTotal, gatewayMessagesReceivedTotal, gatewayMessagesSentTotal, gatewayRpcCallsTotal, gatewayRpcDuration, gatewayRunsCompletedTotal, gatewayRunsStartedTotal, gatewaySignalsTotal, gatewayWebhooksReceivedTotal, gatewayWebhooksRejectedTotal, gatewayWebhooksVerifiedTotal, } from "@smithers-orchestrator/observability/metrics";
+import { devtoolsActiveSubscribers, devtoolsBackpressureDisconnectTotal, devtoolsDeltaBuildMs, devtoolsEventBytes, devtoolsEventTotal, devtoolsSnapshotBuildMs, devtoolsSubscribeTotal, gatewayApprovalDecisionsTotal, gatewayAuthEventsTotal, gatewayConnectionsActive, gatewayConnectionsClosedTotal, gatewayConnectionsTotal, gatewayCronTriggersTotal, gatewayErrorsTotal, gatewayHeartbeatTicksTotal, gatewayMessagesReceivedTotal, gatewayMessagesSentTotal, gatewayRpcCallsTotal, gatewayRpcDuration, gatewayRunEventBackpressureDisconnectTotal, gatewayRunsCompletedTotal, gatewayRunsStartedTotal, gatewaySignalsTotal, gatewayWebhooksReceivedTotal, gatewayWebhooksRejectedTotal, gatewayWebhooksVerifiedTotal, } from "@smithers-orchestrator/observability/metrics";
 import { runFork, runPromise } from "./smithersRuntime.js";
 import { prometheusContentType, renderPrometheusMetrics } from "@smithers-orchestrator/observability";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
@@ -48,6 +49,7 @@ import { DEFAULT_OPERATOR_UI_ENTRY } from "./gatewayUi/defaultOperatorUi.js";
 /** @typedef {import("./GatewayWebhookRunConfig.js").GatewayWebhookRunConfig} GatewayWebhookRunConfig */
 /** @typedef {import("./GatewayWebhookSignalConfig.js").GatewayWebhookSignalConfig} GatewayWebhookSignalConfig */
 /** @typedef {import("./ConnectRequest.js").ConnectRequest} ConnectRequest */
+/** @typedef {{ streamId: string, runId: string, heartbeat: unknown, outboundQueue: Record<string, unknown>[], flushPending: boolean, backpressureDisconnected: boolean }} RunEventStreamState */
 /** @typedef {import("./GatewayAuthConfig.js").GatewayAuthConfig} GatewayAuthConfig */
 /** @typedef {import("./GatewayOperatorUiConfig.js").GatewayOperatorUiConfig} GatewayOperatorUiConfig */
 /** @typedef {import("./GatewayOptions.js").GatewayOptions} GatewayOptions */
@@ -137,6 +139,14 @@ const DEFAULT_REQUEST_TIMEOUT = 60_000;
 const DEFAULT_OUT_OF_PROCESS_EVENT_BRIDGE_POLL_MS = 1_000;
 const OUT_OF_PROCESS_EVENT_BRIDGE_PAGE_LIMIT = 500;
 const RUN_EVENT_HEARTBEAT_MS = 1_000;
+// Per-subscriber outbound backpressure for streamRunEvents. Each run event
+// stream owns a bounded queue drained against the WS socket's bufferedAmount.
+// A consumer that lets the socket stay congested past the high-water mark and
+// overflows the queue is disconnected (run.error: BackpressureDisconnect) so a
+// single slow WebSocket cannot wedge the server with unbounded buffering.
+const RUN_EVENT_STREAM_OUTBOUND_QUEUE_LIMIT = 1_000;
+const RUN_EVENT_STREAM_WS_BUFFERED_HIGH_WATER_BYTES = 8 * 1024 * 1024;
+const RUN_EVENT_STREAM_DRAIN_RETRY_MS = 10;
 const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "continued"]);
 export const GATEWAY_RPC_MAX_PAYLOAD_BYTES = DEFAULT_MAX_BODY_BYTES;
 export const GATEWAY_RPC_MAX_DEPTH = 32;
@@ -1742,7 +1752,14 @@ export class Gateway {
                 ts: nowMs(),
             });
         }, RUN_EVENT_HEARTBEAT_MS);
-        connection.runEventStreams.set(streamId, { runId, heartbeat });
+        connection.runEventStreams.set(streamId, {
+            streamId,
+            runId,
+            heartbeat,
+            outboundQueue: [],
+            flushPending: false,
+            backpressureDisconnected: false,
+        });
         return () => this.unregisterRunEventSubscriber(connection, streamId);
     }
     /**
@@ -1775,10 +1792,90 @@ export class Gateway {
    * @param {Record<string, unknown>} frame
    */
     sendRunEventStreamFrame(connection, streamId, frame) {
-        this.sendEvent(connection, "run.event", {
-            streamId,
-            ...frame,
+        const stream = connection.runEventStreams?.get(streamId);
+        if (!stream) {
+            // Stream is not (or no longer) registered; deliver directly so any
+            // legacy/out-of-band caller still works, then bail out of the queue.
+            this.sendEvent(connection, "run.event", { streamId, ...frame });
+            return;
+        }
+        if (stream.backpressureDisconnected) {
+            return;
+        }
+        if (stream.outboundQueue.length >= RUN_EVENT_STREAM_OUTBOUND_QUEUE_LIMIT) {
+            this.disconnectRunEventStreamForBackpressure(connection, stream);
+            return;
+        }
+        stream.outboundQueue.push(frame);
+        this.drainRunEventStream(connection, stream);
+    }
+    /**
+   * Drain a run event stream's outbound queue against the socket's buffered
+   * bytes. If the socket is congested past the high-water mark we re-arm a
+   * short retry instead of dropping frames; the queue cap (enforced at enqueue
+   * time) is what bounds memory and trips the slow-consumer disconnect.
+   * @param {ConnectionState} connection
+   * @param {RunEventStreamState} stream
+   */
+    drainRunEventStream(connection, stream) {
+        if (stream.flushPending || stream.backpressureDisconnected) {
+            return;
+        }
+        stream.flushPending = true;
+        queueMicrotask(() => {
+            try {
+                while (stream.outboundQueue.length > 0 &&
+                    !stream.backpressureDisconnected &&
+                    connection.ws.readyState === connection.ws.OPEN) {
+                    const ws = connection.ws;
+                    if (typeof ws.bufferedAmount === "number" &&
+                        ws.bufferedAmount > RUN_EVENT_STREAM_WS_BUFFERED_HIGH_WATER_BYTES) {
+                        setTimeout(() => {
+                            stream.flushPending = false;
+                            this.drainRunEventStream(connection, stream);
+                        }, RUN_EVENT_STREAM_DRAIN_RETRY_MS);
+                        return;
+                    }
+                    const frame = stream.outboundQueue.shift();
+                    if (!frame) {
+                        continue;
+                    }
+                    this.sendEvent(connection, "run.event", { streamId: stream.streamId, ...frame });
+                }
+            }
+            finally {
+                stream.flushPending = false;
+            }
         });
+    }
+    /**
+   * Tear down a single slow run event subscriber whose outbound queue overflowed.
+   * The WS connection itself stays open so other streams keep receiving events.
+   * @param {ConnectionState} connection
+   * @param {RunEventStreamState} stream
+   */
+    disconnectRunEventStreamForBackpressure(connection, stream) {
+        if (stream.backpressureDisconnected) {
+            return;
+        }
+        stream.backpressureDisconnected = true;
+        stream.outboundQueue.length = 0;
+        emitGatewayEffect(Metric.increment(gatewayRunEventBackpressureDisconnectTotal));
+        emitGatewayLog("warning", "run event stream disconnected for backpressure", {
+            runId: stream.runId,
+            streamId: stream.streamId,
+            queueLimit: RUN_EVENT_STREAM_OUTBOUND_QUEUE_LIMIT,
+        }, "gateway:run-events");
+        this.sendEvent(connection, "run.error", {
+            streamId: stream.streamId,
+            runId: stream.runId,
+            error: {
+                version: SMITHERS_API_VERSION,
+                code: "BackpressureDisconnect",
+                message: `Run event stream outbound queue exceeded ${RUN_EVENT_STREAM_OUTBOUND_QUEUE_LIMIT} frames; disconnecting slow consumer.`,
+            },
+        });
+        this.unregisterRunEventSubscriber(connection, stream.streamId);
     }
     /**
    * @param {ConnectionState} connection
@@ -3810,6 +3907,18 @@ export class Gateway {
                 const limit = asOptionalPositiveInt(params.limit ?? filter.limit, "limit") ?? 50;
                 const status = asString(params.status) ?? asString(filter.status);
                 return responseOk(frame.id, await this.listRunsAcrossWorkflows(limit, status));
+            }
+            case "getSchemaSignature": {
+                const firstEntry = this.workflows.values().next().value;
+                if (!firstEntry) {
+                    return responseOk(frame.id, {
+                        schemaVersion: "0000",
+                        signature: createHash("sha256").update("empty").digest("hex"),
+                        components: {},
+                    });
+                }
+                const adapter = firstEntry.adapter ?? this.adapterForWorkflow(firstEntry.workflow);
+                return responseOk(frame.id, await getSmithersSchemaSignature(adapter));
             }
             case "workflows.list":
             case "listWorkflows": {

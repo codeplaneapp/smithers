@@ -3727,6 +3727,319 @@ paths:
                           - observability:read
                       refresh:
                         type: string
+  /v1/rpc/getSchemaSignature:
+    post:
+      operationId: getSchemaSignature
+      summary: "Get Schema Signature"
+      description: "Return the server Smithers schema migration head and table-catalog signature used by client persistence."
+      tags:
+        - "Gateway RPC"
+      security:
+        -
+          bearerAuth:
+            - run:read
+      x-smithers-api-version: v1
+      x-smithers-maturity: stable
+      x-smithers-transport: "http+websocket"
+      x-smithers-required-scope: run:read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - method
+                - params
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  description: "Optional caller request id."
+                method:
+                  const: getSchemaSignature
+                params:
+                  type: object
+                  properties: {}
+                  required: []
+                  additionalProperties: false
+            example:
+              id: getSchemaSignature-1
+              method: getSchemaSignature
+              params: {}
+      responses:
+        200:
+          description: "Get Schema Signature response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - payload
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: true
+                  apiVersion:
+                    const: v1
+                  payload:
+                    type: object
+                    properties:
+                      schemaVersion:
+                        type: string
+                        description: "Current _smithers_schema_migrations head id."
+                      signature:
+                        type: string
+                        description: "Stable hash of the server schema catalog."
+                      components:
+                        type: object
+                        description: "Per-table schema component hashes."
+                        properties: {}
+                        required: []
+                        additionalProperties: true
+                    required:
+                      - schemaVersion
+                      - signature
+                    additionalProperties: false
+              example:
+                type: res
+                id: getSchemaSignature-1
+                ok: true
+                apiVersion: v1
+                payload:
+                  schemaVersion: 0016
+                  signature: sha256
+        400:
+          description: "The request shape is invalid."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - observability:read
+                      refresh:
+                        type: string
+        401:
+          description: "Authentication failed or the token expired."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - observability:read
+                      refresh:
+                        type: string
+        403:
+          description: "The token is missing the required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - observability:read
+                      refresh:
+                        type: string
+        500:
+          description: "The Gateway encountered an internal error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - observability:read
+                      refresh:
+                        type: string
   /v1/rpc/listWorkflows:
     post:
       operationId: listWorkflows

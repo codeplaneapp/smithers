@@ -174,6 +174,7 @@ try {
 | `DB_REQUIRES_BUN_SQLITE` | The database adapter is not backed by a Bun SQLite client with `exec()`. | -- |
 | `DB_QUERY_FAILED` | A database read query throws or rejects while running inside an Effect. | -- |
 | `DB_WRITE_FAILED` | A database write or migration fails, including after SQLite retry exhaustion. | -- |
+| `SMITHERS_MIGRATION_REQUIRED` | A legacy bun:sqlite store has run data but the resolved backend is PGlite/Postgres, so the history would be invisible until you run `smithers migrate`. | `{ dbPath, runCount, schemaVersion, resolvedBackend }` |
 | `STORAGE_ERROR` | A storage service operation fails before surfacing a more specific database code. | -- |
 
 ## Effect / Runtime

@@ -124,6 +124,37 @@ describe("createSmithers", () => {
     }
   });
 
+  test("fails loud instead of silently degrading when a non-sqlite backend is requested", () => {
+    const schema = { result: z.object({ value: z.string() }) };
+
+    // Explicit opts.backend
+    expect(() => createSmithers(schema, { dbPath: makeDbPath("smithers-pglite-"), backend: "pglite" })).toThrow(
+      /createSmithers\(\) is the synchronous bun:sqlite backend.*openSmithersBackend/s,
+    );
+    expect(() => createSmithers(schema, { dbPath: makeDbPath("smithers-pg-"), backend: "postgres" })).toThrow(
+      /cannot serve the "postgres" backend/,
+    );
+
+    // SMITHERS_BACKEND env (what `smithers up --backend pglite` sets before
+    // importing a workflow). The selection must take effect, not be ignored.
+    process.env.SMITHERS_BACKEND = "pglite";
+    try {
+      expect(() => createSmithers(schema, { dbPath: makeDbPath("smithers-env-pglite-") })).toThrow(
+        /SMITHERS_BACKEND=sqlite/,
+      );
+    } finally {
+      delete process.env.SMITHERS_BACKEND;
+    }
+
+    // Explicit sqlite (and the default) still open bun:sqlite normally.
+    const api = createSmithers(schema, { dbPath: makeDbPath("smithers-sqlite-"), backend: "sqlite" });
+    try {
+      expect(api.db.$client).toBeDefined();
+    } finally {
+      closeApi(api);
+    }
+  });
+
   test("reuses hot APIs and rejects hot schema changes", () => {
     process.env.SMITHERS_HOT = "1";
     const dbPath = makeDbPath("smithers-hot-");

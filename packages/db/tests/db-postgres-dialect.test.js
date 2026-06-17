@@ -77,6 +77,18 @@ describe("SqlMessageStorage postgres dialect", () => {
         expect(names.has("_smithers_time_travel_audit")).toBe(true);
     });
 
+    test("ensureSchema records the shared schema migration ledger idempotently", async () => {
+        const before = await storage.queryAll("SELECT id FROM _smithers_schema_migrations ORDER BY id");
+        const ids = before.map((row) => row.id);
+        expect(ids).toContain("0001_current_tables");
+        expect(ids).toContain("0014_current_indexes");
+        expect(ids).toContain("0016_add_workspace_checkpoints");
+
+        await storage.ensureSchema();
+        const after = await storage.queryAll("SELECT id FROM _smithers_schema_migrations ORDER BY id");
+        expect(after.map((row) => row.id)).toEqual(ids);
+    });
+
     test("upsert inserts then updates on conflict (BIGINT ms timestamp round-trips as number)", async () => {
         await storage.upsert(
             "_smithers_runs",

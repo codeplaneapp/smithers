@@ -1641,7 +1641,7 @@ commands[72]:
     purpose: Start or resume a workflow execution
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[28]{name,short,type,default,desc}:
+    flags[30]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -1670,6 +1670,7 @@ commands[72]:
       host,,string,127.0.0.1,HTTP bind address when --serve
       auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
+      backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
   - name: eval
     purpose: Run a workflow over JSON/JSONL cases and write a regression report
     args[1]{name,type,required,desc}:
@@ -1722,9 +1723,10 @@ commands[72]:
       max-concurrent,c,number,3,Max runs resumed per poll
   - name: gateway
     purpose: Serve the multi-run Gateway RPC/WS control plane for the workspace DB; unlike up --serve, this is not tied to one run
-    flags[2]{name,short,type,default,desc}:
+    flags[3]{name,short,type,default,desc}:
       host,H,string,127.0.0.1,Gateway bind address
       port,p,number,7331,Gateway port
+      backend,,enum,,Workspace storage backend (sqlite|pglite|postgres)
   - name: monitor
     purpose: Watch a single run, diagnose a stall or failure, and optionally apply the smallest safe self-fix behind an approval gate
     args[1]{name,type,required,desc}:
@@ -2082,7 +2084,7 @@ commands[72]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,true,Workflow ID
-    flags[29]{name,short,type,default,desc}:
+    flags[30]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2111,6 +2113,7 @@ commands[72]:
       host,,string,127.0.0.1,HTTP bind address when --serve
       auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
+      backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
       prompt,p,string,,Shorthand for input.prompt when --input is omitted
   - name: workflow.path
     purpose: Resolve a workflow ID to its entry file path
@@ -6062,6 +6065,7 @@ type KnownSmithersErrorCode =
   | "TOOL_GIT_REMOTE_DISABLED" | "TOOL_COMMAND_FAILED" | "TOOL_GREP_FAILED"
   | "AGENT_CLI_ERROR" | "AGENT_CONFIG_INVALID" | "AGENT_RPC_FILE_ARGS" | "AGENT_BUILD_COMMAND" | "AGENT_DIAGNOSTIC_TIMEOUT"
   | "DB_MISSING_COLUMNS" | "DB_REQUIRES_BUN_SQLITE" | "DB_QUERY_FAILED" | "DB_WRITE_FAILED"
+  | "SMITHERS_MIGRATION_REQUIRED"
   | "STORAGE_ERROR" | "INTERNAL_ERROR" | "PROCESS_ABORTED" | "PROCESS_TIMEOUT"
   | "PROCESS_IDLE_TIMEOUT" | "PROCESS_SPAWN_FAILED" | "TASK_RUNTIME_UNAVAILABLE"
   | "SCHEMA_CHANGE_HOT" | "HOT_OVERLAY_FAILED" | "HOT_RELOAD_INVALID_MODULE"
@@ -6727,6 +6731,7 @@ try {
 | `DB_REQUIRES_BUN_SQLITE` | The database adapter is not backed by a Bun SQLite client with `exec()`. | -- |
 | `DB_QUERY_FAILED` | A database read query throws or rejects while running inside an Effect. | -- |
 | `DB_WRITE_FAILED` | A database write or migration fails, including after SQLite retry exhaustion. | -- |
+| `SMITHERS_MIGRATION_REQUIRED` | A legacy bun:sqlite store has run data but the resolved backend is PGlite/Postgres, so the history would be invisible until you run `smithers migrate`. | `{ dbPath, runCount, schemaVersion, resolvedBackend }` |
 | `STORAGE_ERROR` | A storage service operation fails before surfacing a more specific database code. | -- |
 
 ## Effect / Runtime
@@ -6817,7 +6822,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 
 | Import path | Entry file | Purpose |
 |---|---|---|
-| `smithers-orchestrator` | `./src/index.js` | Core API: `createSmithers`, components, `runWorkflow`, `renderMdx`, errors |
+| `smithers-orchestrator` | `./src/index.js` | Core API: `createSmithers`, `openSmithersBackend`, components, `runWorkflow`, `renderMdx`, errors |
 | `smithers-orchestrator/gateway` | `./src/gateway.js` | Gateway server primitives from `@smithers-orchestrator/server/gateway` |
 | `smithers-orchestrator/gateway-client` | `./src/gateway-client.js` | Typed client helpers from `@smithers-orchestrator/gateway-client` |
 | `smithers-orchestrator/gateway-react` | `./src/gateway-react.js` | React hooks and providers for gateway-backed UIs |
@@ -6888,7 +6893,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 
 ```ts
 // Core API
-import { createSmithers, runWorkflow } from "smithers-orchestrator";
+import { createSmithers, openSmithersBackend, runWorkflow } from "smithers-orchestrator";
 
 // Tools
 import { defineTool, bash, read, write } from "smithers-orchestrator/tools";

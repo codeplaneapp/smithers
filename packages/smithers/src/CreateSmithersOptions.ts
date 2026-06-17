@@ -6,4 +6,11 @@ export type CreateSmithersOptions = {
 	alertPolicy?: SmithersAlertPolicy;
 	dbPath?: string;
 	journalMode?: string;
+	/**
+	 * Backend the caller resolved this API to. The synchronous `createSmithers`
+	 * only serves `"sqlite"`; `"pglite"`/`"postgres"` require the async
+	 * `openSmithersBackend` factory and fail loud here rather than silently
+	 * opening bun:sqlite.
+	 */
+	backend?: "sqlite" | "pglite" | "postgres";
 };

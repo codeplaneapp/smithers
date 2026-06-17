@@ -79,7 +79,7 @@ commands[72]:
     purpose: Start or resume a workflow execution
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[28]{name,short,type,default,desc}:
+    flags[30]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -108,6 +108,7 @@ commands[72]:
       host,,string,127.0.0.1,HTTP bind address when --serve
       auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
+      backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
   - name: eval
     purpose: Run a workflow over JSON/JSONL cases and write a regression report
     args[1]{name,type,required,desc}:
@@ -160,9 +161,10 @@ commands[72]:
       max-concurrent,c,number,3,Max runs resumed per poll
   - name: gateway
     purpose: Serve the multi-run Gateway RPC/WS control plane for the workspace DB; unlike up --serve, this is not tied to one run
-    flags[2]{name,short,type,default,desc}:
+    flags[3]{name,short,type,default,desc}:
       host,H,string,127.0.0.1,Gateway bind address
       port,p,number,7331,Gateway port
+      backend,,enum,,Workspace storage backend (sqlite|pglite|postgres)
   - name: monitor
     purpose: Watch a single run, diagnose a stall or failure, and optionally apply the smallest safe self-fix behind an approval gate
     args[1]{name,type,required,desc}:
@@ -520,7 +522,7 @@ commands[72]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,true,Workflow ID
-    flags[29]{name,short,type,default,desc}:
+    flags[30]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -549,6 +551,7 @@ commands[72]:
       host,,string,127.0.0.1,HTTP bind address when --serve
       auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
+      backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
       prompt,p,string,,Shorthand for input.prompt when --input is omitted
   - name: workflow.path
     purpose: Resolve a workflow ID to its entry file path

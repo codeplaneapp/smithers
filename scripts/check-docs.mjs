@@ -908,8 +908,8 @@ function checkGatewayRpcReferenceDocsMatchRegistry() {
   const extraDocs = actualDocs.filter((name) => !expectedDocs.includes(name));
   const problems = [];
 
-  if (definitions.length !== 19) {
-    problems.push(`expected 19 Gateway RPC definitions, found ${definitions.length}`);
+  if (definitions.length !== 20) {
+    problems.push(`expected 20 Gateway RPC definitions, found ${definitions.length}`);
   }
   for (const name of missingDocs) problems.push(`missing docs/rpc/${name}`);
   for (const name of extraDocs) problems.push(`unexpected docs/rpc/${name}`);
@@ -3584,7 +3584,9 @@ function checkGatewaySdkDocsMatchExports() {
     [GATEWAY_REACT_USE_GATEWAY_NODE_OUTPUT, readFileSync(GATEWAY_REACT_USE_GATEWAY_NODE_OUTPUT, "utf8")],
   ]);
   const required = [
-    [GATEWAY_CLIENT_INDEX, 'export { createGatewayCollection, type GatewayCollectionConfig } from "./sync/createGatewayCollection.ts";'],
+    [GATEWAY_CLIENT_INDEX, "createGatewayCollection"],
+    [GATEWAY_CLIENT_INDEX, "createGatewaySyncSource"],
+    [GATEWAY_CLIENT_INDEX, "gatewayCollectionDefs"],
     [GATEWAY_CLIENT_INDEX, 'export { gatewayKeys } from "./sync/gatewayKeys.ts";'],
     [GATEWAY_CLIENT_INDEX, "createSmithersGatewayTransport"],
     [GATEWAY_CLIENT_INDEX, "GatewayExtensionStreamFrame"],
@@ -3628,12 +3630,12 @@ function checkGatewaySdkDocsMatchExports() {
     [GATEWAY_REACT_ASYNC_STATE, "error: Error | undefined;"],
     [GATEWAY_REACT_ASYNC_STATE, "loading: boolean;"],
     [GATEWAY_REACT_ASYNC_STATE, "refetch: () => Promise<void>;"],
-    [GATEWAY_REACT_USE_GATEWAY_RUN, "const collection = runId ? registry.run(runId) : undefined;"],
+    [GATEWAY_REACT_USE_GATEWAY_RUN, "useLiveQuery("],
     [GATEWAY_REACT_USE_GATEWAY_RPC, "): GatewayAsyncState<GatewayRpcPayload<Method>>"],
     [GATEWAY_REACT_USE_GATEWAY_NODE_OUTPUT, 'return useGatewayRpc(\n    "getNodeOutput",'],
     [GATEWAY_INTEGRATION, "createGatewayCollection"],
+    [GATEWAY_INTEGRATION, "createGatewaySyncSource"],
     [GATEWAY_INTEGRATION, "gatewayCollectionDefs"],
-    [GATEWAY_INTEGRATION, "createGatewayCollections"],
     [GATEWAY_INTEGRATION, "gatewayKeys"],
     [GATEWAY_INTEGRATION, "createSmithersGatewayTransport"],
     [GATEWAY_INTEGRATION, "useGatewayExtensionResource"],

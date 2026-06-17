@@ -366,6 +366,20 @@ function buildSmithersApi(config) {
  * ```
  */
 export function createSmithers(schemas, opts) {
+    // Honor an explicitly requested backend instead of silently opening
+    // bun:sqlite. `createSmithers` is the synchronous SQLite path; PGlite and
+    // Postgres provision over the wire asynchronously, so a workflow that wants
+    // them must use the async `openSmithersBackend` factory (which returns this
+    // exact API). When `--backend pglite|postgres` / `SMITHERS_BACKEND` selects a
+    // non-SQLite backend but the workflow still calls `createSmithers`, fail loud
+    // (design decision 4: never silently degrade) instead of running on SQLite.
+    const requestedBackend = (opts?.backend ?? process.env.SMITHERS_BACKEND ?? "").toLowerCase();
+    if (requestedBackend === "pglite" || requestedBackend === "postgres") {
+        throw new SmithersError("INVALID_INPUT", `createSmithers() is the synchronous bun:sqlite backend and cannot serve the "${requestedBackend}" backend. ` +
+            `Author the workflow with the async factory instead:\n\n` +
+            `  const { smithers, Workflow, outputs } = await openSmithersBackend(schemas);\n\n` +
+            `or run on SQLite with \`--backend sqlite\` (or SMITHERS_BACKEND=sqlite, or backend:"sqlite" in smithers.config.ts).`, { requestedBackend });
+    }
     // Resolve the DB path from the nearest .smithers/ anchor so that running a
     // workflow from a subdirectory always creates/uses the project-root DB, not
     // a new one at CWD. An explicit opts.dbPath overrides this entirely.

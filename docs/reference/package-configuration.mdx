@@ -15,7 +15,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 
 | Import path | Entry file | Purpose |
 |---|---|---|
-| `smithers-orchestrator` | `./src/index.js` | Core API: `createSmithers`, components, `runWorkflow`, `renderMdx`, errors |
+| `smithers-orchestrator` | `./src/index.js` | Core API: `createSmithers`, `openSmithersBackend`, components, `runWorkflow`, `renderMdx`, errors |
 | `smithers-orchestrator/gateway` | `./src/gateway.js` | Gateway server primitives from `@smithers-orchestrator/server/gateway` |
 | `smithers-orchestrator/gateway-client` | `./src/gateway-client.js` | Typed client helpers from `@smithers-orchestrator/gateway-client` |
 | `smithers-orchestrator/gateway-react` | `./src/gateway-react.js` | React hooks and providers for gateway-backed UIs |
@@ -86,7 +86,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 
 ```ts
 // Core API
-import { createSmithers, runWorkflow } from "smithers-orchestrator";
+import { createSmithers, openSmithersBackend, runWorkflow } from "smithers-orchestrator";
 
 // Tools
 import { defineTool, bash, read, write } from "smithers-orchestrator/tools";

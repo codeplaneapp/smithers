@@ -71,13 +71,13 @@ Gateway client exports:
 
 | Package | Exports |
 |---|---|
-| `smithers-orchestrator/gateway-client` | `SmithersGatewayClient`, `SmithersGatewayConnection`, `GatewayRpcError`, `gatewayBackoffDelay`, RPC frame/type-map types, extension envelope helpers/types, `GatewayUiBootConfig`, `SmithersGatewayClientOptions`, `createGatewayCollection`, `gatewayCollectionDefs`, `flattenGatewayRunNode`, `snapshotToGatewayRunNode`, `reconcileSnapshotNodes`, collection row types, `syncBackoffDelay`, `syncKeyFingerprint`, `syncKeyMatches`, `gatewayKeys`, `createSmithersGatewayTransport` |
-| `smithers-orchestrator/gateway-react` | `SmithersGatewayProvider`, `createGatewayReactRoot`, `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayApprovals`, `useGatewayNodeOutput`, `useGatewayRunEvents`, `useGatewayActions`, `useGatewayRpc`, `useSmithersGateway`, `useGatewayExtensionResource`, `useGatewayExtensionAction`, `useGatewayExtensionStream`, `SyncProvider`, `createGatewayCollections`, `useSyncClient`, `useSyncQuery`, `useSyncMutation`, `useSyncSubscription`, `useGatewayQuery`, `useGatewayMutation`, `useGatewayRunStream`, `useGatewayRunTree`, `useGatewayConnectionStatus` |
+| `smithers-orchestrator/gateway-client` | `SmithersGatewayClient`, `SmithersGatewayConnection`, `GatewayRpcError`, `gatewayBackoffDelay`, RPC frame/type-map types, extension envelope helpers/types, `GatewayUiBootConfig`, `SmithersGatewayClientOptions`, `createGatewayCollection`, `createGatewaySyncSource`, `createConnectionObserver`, `gatewayCollectionDefs`, `syncBackoffDelay`, `syncKeyFingerprint`, `syncKeyMatches`, `gatewayKeys`, `createSmithersGatewayTransport` |
+| `smithers-orchestrator/gateway-react` | `SmithersGatewayProvider`, `createGatewayReactRoot`, `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayApprovals`, `useGatewayNodeOutput`, `useGatewayRunEvents`, `useGatewayActions`, `useGatewayRpc`, `useSmithersGateway`, `useGatewayExtensionResource`, `useGatewayExtensionAction`, `useGatewayExtensionStream`, `SyncProvider`, `useSyncClient`, `useSyncQuery`, `useSyncMutation`, `useSyncSubscription`, `useGatewayQuery`, `useGatewayMutation`, `useGatewayRunStream` |
 
 ## RPC methods (TOON)
 
 ```toon
-rpc[19]{method,params,returns,scope,transport}:
+rpc[20]{method,params,returns,scope,transport}:
   launchRun,workflow/input?/options.runId?/options.idempotencyKey?,{runId/workflow},run:write,http+websocket
   resumeRun,runId/options.force?,{runId/status},run:write,http+websocket
   cancelRun,runId,{runId/status:cancelling},run:write,http+websocket
@@ -87,6 +87,7 @@ rpc[19]{method,params,returns,scope,transport}:
   submitSignal,runId/correlationKey/payload?/signalName?,Delivery metadata,signal:submit,http+websocket
   getRun,runId,Run record + optional runState,run:read,http+websocket
   listRuns,filter.status?/filter.limit?,Run summaries,run:read,http+websocket
+  getSchemaSignature,{},Schema version/signature,run:read,http+websocket
   listWorkflows,filter.hasUi?,Workflow summaries,run:read,http+websocket
   listApprovals,filter.runId?/filter.workflow?/filter.limit?,Pending approvals,run:read,http+websocket
   streamRunEvents,runId/afterSeq?,{streamId/runId/afterSeq/currentSeq},run:read,websocket

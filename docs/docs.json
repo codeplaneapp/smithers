@@ -227,6 +227,7 @@
               "rpc/submit-signal",
               "rpc/get-run",
               "rpc/list-runs",
+              "rpc/get-schema-signature",
               "rpc/list-workflows",
               "rpc/list-approvals",
               "rpc/stream-run-events",
