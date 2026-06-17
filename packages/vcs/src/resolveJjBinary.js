@@ -31,14 +31,19 @@ const BUNDLED_PACKAGES = {
  *
  * @returns {string | null}
  */
-function bundledJjPath() {
-	const pkg = BUNDLED_PACKAGES[`${process.platform}-${process.arch}`];
+export function resolveBundledJjPath({
+	platform = process.platform,
+	arch = process.arch,
+	resolvePackage = require.resolve,
+	fileExists = existsSync,
+} = {}) {
+	const pkg = BUNDLED_PACKAGES[`${platform}-${arch}`];
 	if (!pkg) return null;
-	const binary = process.platform === "win32" ? "jj.exe" : "jj";
+	const binary = platform === "win32" ? "jj.exe" : "jj";
 	try {
-		const manifest = require.resolve(`${pkg}/package.json`);
+		const manifest = resolvePackage(`${pkg}/package.json`);
 		const candidate = join(manifest, "..", "bin", binary);
-		return existsSync(candidate) ? candidate : null;
+		return fileExists(candidate) ? candidate : null;
 	} catch {
 		return null;
 	}
@@ -61,7 +66,7 @@ function bundledJjPath() {
 export function resolveJjBinary() {
 	const override = process.env.SMITHERS_JJ_PATH;
 	if (override && existsSync(override)) return { path: override, source: "env" };
-	const bundled = bundledJjPath();
+	const bundled = resolveBundledJjPath();
 	if (bundled) return { path: bundled, source: "bundled" };
 	return { path: "jj", source: "path" };
 }
