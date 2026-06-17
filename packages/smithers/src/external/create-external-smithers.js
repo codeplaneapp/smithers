@@ -18,6 +18,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { prepareOutputSchemas } from "../prepareOutputSchemas.js";
 /** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>} SmithersWorkflow */
 /**
@@ -63,33 +64,6 @@ export function hostNodeToReact(node, agents) {
     }
     const children = node.children.map((child) => hostNodeToReact(child, agents));
     return React.createElement(node.tag, rawProps, ...children);
-}
-/**
- * @param {Record<string, any>} schemas
- */
-function prepareOutputSchemas(schemas) {
-    const counts = new Map();
-    for (const [name, zodSchema] of Object.entries(schemas)) {
-        if (name === "input")
-            continue;
-        counts.set(zodSchema, (counts.get(zodSchema) ?? 0) + 1);
-    }
-    const zodToKeyName = new Map();
-    const ambiguousZodSchemas = new Set();
-    for (const [name, zodSchema] of Object.entries(schemas)) {
-        if (name === "input")
-            continue;
-        if ((counts.get(zodSchema) ?? 0) > 1) {
-            ambiguousZodSchemas.add(zodSchema);
-            zodToKeyName.set(zodSchema.clone(), name);
-            continue;
-        }
-        zodToKeyName.set(zodSchema, name);
-    }
-    return {
-        zodToKeyName,
-        ambiguousZodSchemas,
-    };
 }
 /**
  * Create a SmithersWorkflow from an external build function.

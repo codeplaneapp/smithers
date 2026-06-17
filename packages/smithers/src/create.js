@@ -19,6 +19,7 @@ import { POSTGRES } from "@smithers-orchestrator/db/dialect";
 import { resolve, join } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
+import { prepareOutputSchemas } from "./prepareOutputSchemas.js";
 /** @typedef {import("@smithers-orchestrator/components").ApprovalProps<any, any>} ApprovalProps */
 /** @typedef {import("@smithers-orchestrator/components").SandboxProps} SandboxProps */
 /** @typedef {import("@smithers-orchestrator/components").SignalProps<any>} SignalProps */
@@ -51,41 +52,6 @@ function computeSchemaSig(schemas, dbPath) {
         parts.push(`${name}:${ddl}`);
     }
     return parts.join("\n");
-}
-/**
- * Duplicate schema objects need distinct output refs so Task `output={outputs.foo}`
- * can still resolve the intended table by identity.
- * @param {Record<string, any>} schemas
- */
-function prepareOutputSchemas(schemas) {
-    const counts = new Map();
-    for (const [name, zodSchema] of Object.entries(schemas)) {
-        if (name === "input")
-            continue;
-        counts.set(zodSchema, (counts.get(zodSchema) ?? 0) + 1);
-    }
-    const outputs = {
-        ...schemas,
-    };
-    const zodToKeyName = new Map();
-    const ambiguousZodSchemas = new Set();
-    for (const [name, zodSchema] of Object.entries(schemas)) {
-        if (name === "input")
-            continue;
-        if ((counts.get(zodSchema) ?? 0) > 1) {
-            ambiguousZodSchemas.add(zodSchema);
-            const aliasSchema = zodSchema.clone();
-            outputs[name] = aliasSchema;
-            zodToKeyName.set(aliasSchema, name);
-            continue;
-        }
-        zodToKeyName.set(zodSchema, name);
-    }
-    return {
-        outputs,
-        zodToKeyName,
-        ambiguousZodSchemas,
-    };
 }
 /**
  * @param {Record<string, string>} [base]

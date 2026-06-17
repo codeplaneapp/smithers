@@ -6,6 +6,7 @@ import { Database } from "bun:sqlite";
 import React from "react";
 import { z } from "zod";
 import { createSmithers } from "../src/create.js";
+import { prepareOutputSchemas } from "../src/prepareOutputSchemas.js";
 import {
   createExternalSmithers,
   hostNodeToReact,
@@ -34,6 +35,30 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe("prepareOutputSchemas", () => {
+  test("creates stable alias outputs for duplicate schema objects", () => {
+    const shared = z.object({ value: z.string() });
+    const unique = z.object({ ok: z.boolean() });
+    const prepared = prepareOutputSchemas({
+      input: z.object({ prompt: z.string() }),
+      first: shared,
+      second: shared,
+      result: unique,
+    });
+
+    expect(prepared.outputs.input).toBeDefined();
+    expect(prepared.outputs.first).not.toBe(shared);
+    expect(prepared.outputs.second).not.toBe(shared);
+    expect(prepared.outputs.first).not.toBe(prepared.outputs.second);
+    expect(prepared.outputs.result).toBe(unique);
+    expect(prepared.ambiguousZodSchemas.has(shared)).toBe(true);
+    expect(prepared.zodToKeyName.get(prepared.outputs.first)).toBe("first");
+    expect(prepared.zodToKeyName.get(prepared.outputs.second)).toBe("second");
+    expect(prepared.zodToKeyName.get(unique)).toBe("result");
+    expect(prepared.zodToKeyName.has(shared)).toBe(false);
+  });
 });
 
 describe("createSmithers", () => {
