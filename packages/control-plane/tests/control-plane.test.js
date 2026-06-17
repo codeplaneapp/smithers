@@ -326,6 +326,36 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
     }
   });
 
+  test("usage and audit events reject missing projects with typed errors", () => {
+    const { sqlite, store } = makeStore();
+    try {
+      store.createOrg({ orgId: "org_missing_project", slug: "missing-project", name: "Missing Project", createdAtMs: 1 });
+
+      expect(() =>
+        store.recordUsage({
+          orgId: "org_missing_project",
+          projectId: "project_missing",
+          metric: "runs",
+          quantity: 1,
+          observedAtMs: 2,
+        }),
+      ).toThrow("Control-plane project not found");
+      expect(() =>
+        store.recordAuditEvent({
+          orgId: "org_missing_project",
+          projectId: "project_missing",
+          action: "run.create",
+          targetType: "run",
+          targetId: "run_1",
+          occurredAtMs: 3,
+        }),
+      ).toThrow("Control-plane project not found");
+    }
+    finally {
+      sqlite.close();
+    }
+  });
+
   test("foreign keys prevent orphan projects and cascade org deletion", () => {
     const { sqlite, store } = makeStore();
     try {

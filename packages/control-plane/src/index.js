@@ -823,6 +823,9 @@ ORDER BY provider_id
     recordUsage(input) {
         const orgId = requiredId("orgId", input.orgId);
         const projectId = input.projectId ? requiredId("projectId", input.projectId) : null;
+        if (projectId) {
+            assertProjectExists(this.sqlite, orgId, projectId);
+        }
         const observedAtMs = timestamp(input.observedAtMs);
         const metadata = jsonObject(input.metadata);
         this.sqlite.query(`
@@ -1050,6 +1053,9 @@ ORDER BY name
     recordAuditEvent(input) {
         const orgId = requiredId("orgId", input.orgId);
         const projectId = input.projectId ? requiredId("projectId", input.projectId) : null;
+        if (projectId) {
+            assertProjectExists(this.sqlite, orgId, projectId);
+        }
         const occurredAtMs = timestamp(input.occurredAtMs);
         const metadata = jsonObject(input.metadata);
         this.sqlite.query(`
