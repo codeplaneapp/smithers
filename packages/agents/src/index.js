@@ -90,3 +90,10 @@ export { createHttpTool } from "./http/createHttpTool.js";
 export { zodToOpenAISchema } from "./zodToOpenAISchema.js";
 export { sanitizeForOpenAI } from "./sanitizeForOpenAI.js";
 export { createTranscriptionTool } from "./transcription/createTranscriptionTool.js";
+export {
+  createGroundedWebSearchToolset,
+  createExaSearchProvider,
+  createTavilySearchProvider,
+  createBraveSearchProvider,
+  createSerperSearchProvider,
+} from "./web-search/index.js";
