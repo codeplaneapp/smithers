@@ -43,6 +43,12 @@ describe("accountsRoot / accountsFilePath / defaultConfigDir", () => {
         const env = { HOME: "/tmp/home" };
         expect(accountsRoot(env)).toBe("/tmp/home/.smithers");
     });
+    test("treats empty SMITHERS_HOME as unset", () => {
+        const env = { SMITHERS_HOME: "", HOME: "/tmp/home" };
+        expect(accountsRoot(env)).toBe("/tmp/home/.smithers");
+        expect(accountsFilePath(env)).toBe("/tmp/home/.smithers/accounts.json");
+        expect(defaultConfigDir("foo", env)).toBe("/tmp/home/.smithers/accounts/foo");
+    });
     test("rejects path-traversal labels", () => {
         const env = { SMITHERS_HOME: "/tmp/x" };
         for (const bad of ["../../../../etc", "..", "../foo", "foo/bar", "foo\\bar", "/abs", "", "  ", "a b", "a;b"]) {
@@ -146,6 +152,51 @@ describe("readAccounts / writeAccounts / addAccount / removeAccount", () => {
         }, { env, replace: true });
         expect(replaced.configDir).toBe("/c");
         expect(listAccounts(env)).toHaveLength(1);
+    });
+    test("addAccount preserves existing addedAt when replacing an account", () => {
+        const env = newSmithersHome();
+        const original = addAccount({
+            label: "x",
+            provider: "claude-code",
+            configDir: "/a",
+            addedAt: "2026-01-01T00:00:00.000Z",
+        }, { env });
+        const replaced = addAccount({
+            label: "x",
+            provider: "claude-code",
+            configDir: "/b",
+        }, { env, replace: true });
+        expect(replaced.addedAt).toBe(original.addedAt);
+        expect(listAccounts(env)[0].addedAt).toBe(original.addedAt);
+    });
+    test("addAccount accepts empty apiKey and persists api-provider models", () => {
+        const env = newSmithersHome();
+        const account = addAccount({
+            label: "openai-env",
+            provider: "openai-api",
+            apiKey: "",
+            model: "gpt-5",
+        }, { env });
+        expect(account.apiKey).toBe("");
+        expect(account.model).toBe("gpt-5");
+        expect(listAccounts(env)[0]).toMatchObject({
+            label: "openai-env",
+            provider: "openai-api",
+            apiKey: "",
+            model: "gpt-5",
+        });
+    });
+    test("addAccount omits empty model strings", () => {
+        const env = newSmithersHome();
+        const account = addAccount({
+            label: "openai-env",
+            provider: "openai-api",
+            apiKey: "sk",
+            model: "",
+        }, { env });
+        expect(account).not.toHaveProperty("model");
+        const raw = JSON.parse(readFileSync(accountsFilePath(env), "utf8"));
+        expect(raw.accounts[0]).not.toHaveProperty("model");
     });
     test("addAccount validates provider/configDir/apiKey", () => {
         const env = newSmithersHome();

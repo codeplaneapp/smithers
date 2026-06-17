@@ -37,7 +37,7 @@ export function addAccount(account, options = {}) {
     const persisted = {
         label: account.label,
         provider: account.provider,
-        addedAt: account.addedAt ?? new Date().toISOString(),
+        addedAt: account.addedAt ?? existing.accounts[conflict]?.addedAt ?? new Date().toISOString(),
     };
     if (account.configDir) persisted.configDir = account.configDir;
     if (account.apiKey !== undefined) persisted.apiKey = account.apiKey;
