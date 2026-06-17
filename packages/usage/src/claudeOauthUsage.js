@@ -25,6 +25,9 @@ export async function claudeOauthUsage(account) {
     if (!creds) {
         return { source: "none", error: "No Claude OAuth credentials in configDir or Keychain" };
     }
+    if (typeof creds.expiresAt === "number" && creds.expiresAt <= Date.now()) {
+        return { source: "none", error: "Claude OAuth token expired; run `claude` to refresh" };
+    }
     try {
         const res = await fetch(USAGE_URL, {
             headers: {
