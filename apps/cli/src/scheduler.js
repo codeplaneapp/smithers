@@ -22,7 +22,7 @@ function acquireSchedulerDbEffect() {
  * @param {number} now
  * @returns {Effect.Effect<void, never>}
  */
-function processCronEffect(adapter, job, now) {
+export function processCronEffect(adapter, job, now) {
     return Effect.gen(function* () {
         yield* Effect.logInfo(`[smithers-cron] Triggering due workflow: ${job.workflowPath} (Schedule: ${job.pattern})`);
         yield* Effect.try({
@@ -57,7 +57,7 @@ function processCronEffect(adapter, job, now) {
  * @param {SmithersDb} adapter
  * @returns {Effect.Effect<void, never>}
  */
-function schedulerTickEffect(adapter) {
+export function schedulerTickEffect(adapter) {
     return Effect.withLogSpan("scheduler:poll")(Effect.gen(function* () {
         const crons = yield* adapter.listCronsEffect(true).pipe(Effect.catchAll((error) => Effect.logWarning(`[smithers-cron] Tick failed: ${formatError(error)}`).pipe(Effect.as([]))));
         const now = Date.now();
@@ -72,7 +72,7 @@ function schedulerTickEffect(adapter) {
 /**
  * @param {number} pollIntervalMs
  */
-function schedulerLoopEffect(pollIntervalMs) {
+export function schedulerLoopEffect(pollIntervalMs) {
     return Effect.scoped(Effect.gen(function* () {
         const { adapter } = yield* acquireSchedulerDbEffect();
         yield* Effect.logInfo("[smithers-cron] Starting background scheduler loop...");
