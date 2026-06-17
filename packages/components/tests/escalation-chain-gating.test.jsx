@@ -178,4 +178,56 @@ describe("EscalationChain gates levels on the real escalation decision", () => {
         );
         expect(failure.tasks.map((t) => t.nodeId)).toContain("incident-level-1");
     });
+    test("default failure predicate escalates on error and failed results", async () => {
+        for (const levelResult of [
+            { nodeId: "incident-level-0", iteration: 0, error: "boom" },
+            { nodeId: "incident-level-0", iteration: 0, failed: true },
+        ]) {
+            const result = await renderWithOutputs(
+                <EscalationChain
+                    id="incident"
+                    levels={[
+                        { agent, output: "level_out", label: "First" },
+                        { agent: otherAgent, output: "level_out", label: "Second" },
+                    ]}
+                    escalationOutput="escalation_out"
+                >
+                    triage incident
+                </EscalationChain>,
+                { level_out: [levelResult] },
+            );
+            const ids = result.tasks.map((t) => t.nodeId);
+            expect(ids).toContain("incident-level-1");
+            expect(result.tasks.find((t) => t.nodeId === "incident-check-0").computeFn()).toEqual({
+                escalated: true,
+                fromLevel: 0,
+                toLevel: 1,
+            });
+        }
+    });
+    test("human fallback uses the default request when no humanRequest is provided", async () => {
+        const result = await renderWithOutputs(
+            <EscalationChain
+                id="incident"
+                levels={[{ agent, output: "level_out", label: "First" }]}
+                escalationOutput="escalation_out"
+                humanFallback
+            >
+                triage incident
+            </EscalationChain>,
+            {
+                level_out: [
+                    { nodeId: "incident-level-0", iteration: 0, failed: true },
+                ],
+            },
+        );
+        const fallback = result.tasks.find(
+            (task) => task.nodeId === "incident-human-fallback",
+        );
+        expect(fallback.needsApproval).toBe(true);
+        expect(fallback.label).toBe("Escalation requires human review");
+        expect(fallback.meta.requestSummary).toBe(
+            "All 1 automated levels have been exhausted.",
+        );
+    });
 });

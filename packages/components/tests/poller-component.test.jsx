@@ -171,4 +171,48 @@ describe("Poller", () => {
         expect(summaryRows[0].satisfied).toBe(true);
         cleanup();
     });
+    workflowTest("onTimeout fail exhausts attempts and fails the run", async () => {
+        const { Workflow, Task, Sequence, smithers, outputs, tables, db, cleanup, } = createTestSmithers({
+            check: z.object({
+                satisfied: z.boolean(),
+                status: z.string(),
+                observedAtAttempt: z.number(),
+            }),
+            summary: z.object({
+                attempts: z.number(),
+            }),
+        });
+        let calls = 0;
+        const workflow = smithers((ctx) => {
+            const checks = ctx.outputs("check");
+            return (<Workflow name="poller-timeout-fail">
+          <Sequence>
+            <Poller id="deploy" check={() => {
+                    calls += 1;
+                    return {
+                        satisfied: false,
+                        status: "pending",
+                        observedAtAttempt: calls,
+                    };
+                }} checkOutput={outputs.check} maxAttempts={2} intervalMs={1} onTimeout="fail"/>
+
+            <Task id="summary" output={outputs.summary}>
+              {{ attempts: checks.length }}
+            </Task>
+          </Sequence>
+        </Workflow>);
+        });
+        const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+        expect(result.status).toBe("failed");
+        expect(calls).toBe(2);
+        const checkRows = db
+            .select()
+            .from(tables.check)
+            .all()
+            .sort((a, b) => a.iteration - b.iteration);
+        const summaryRows = db.select().from(tables.summary).all();
+        expect(checkRows.map((row) => row.satisfied)).toEqual([false, false]);
+        expect(summaryRows).toHaveLength(0);
+        cleanup();
+    });
 });
