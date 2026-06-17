@@ -1,4 +1,5 @@
 import type { RunAuthContext } from "./RunAuthContext.ts";
+import type { OutputSnapshot } from "./OutputSnapshot.ts";
 import type { SmithersEvent } from "@smithers-orchestrator/observability/SmithersEvent";
 
 export type HotReloadOptions = {
@@ -34,6 +35,9 @@ export type RunOptions = {
   auth?: RunAuthContext | null;
   config?: Record<string, unknown>;
   cliAgentToolsDefault?: "all" | "explicit-only";
+  initialOutputs?: OutputSnapshot;
+  initialIteration?: number;
+  initialIterations?: Record<string, number> | ReadonlyMap<string, number>;
   resumeClaim?: {
     claimOwnerId: string;
     claimHeartbeatAtMs: number;

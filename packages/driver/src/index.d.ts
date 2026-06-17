@@ -72,6 +72,9 @@ type RunOptions$2 = {
     auth?: RunAuthContext$2 | null;
     config?: Record<string, unknown>;
     cliAgentToolsDefault?: "all" | "explicit-only";
+    initialOutputs?: OutputSnapshot$2;
+    initialIteration?: number;
+    initialIterations?: Record<string, number> | ReadonlyMap<string, number>;
     resumeClaim?: {
         claimOwnerId: string;
         claimHeartbeatAtMs: number;
