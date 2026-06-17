@@ -3781,11 +3781,9 @@ function checkGatewaySdkDocsMatchExports() {
     ],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
-      "The Worker has two Gateway-auth branches:",
     ],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
-      "If `GATEWAY_AUTH_TOKEN` is set, the Worker strips browser-supplied Gateway credentials and trusted-proxy headers, adds `Authorization: Bearer <service-token>`, and forwards the request without minting user identity headers.",
     ],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
@@ -3793,19 +3791,15 @@ function checkGatewaySdkDocsMatchExports() {
     ],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
-      "gatewayAuthToken` selects the service-token branch",
     ],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
-      "The outer `apps/smithers` Gateway client wrapper rewrites WebSocket URLs to `/v1/rpc`, which is why the Vite proxy enables `ws: true` there.",
     ],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
-      "Gateway-hosted iframe bundles that call `new SmithersGatewayClient()` directly use the boot `wsPath` (`/` by default)",
     ],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
-      "Stream sockets depend on the client used: the outer app wrapper upgrades via `/v1/rpc`, while plain hosted bundles use the boot `wsPath`.",
     ],
     [CUSTOM_WORKFLOW_UI_GUIDE, "SyncProvider` + `useSyncQuery` / `useSyncMutation` / `useSyncSubscription"],
     [CUSTOM_WORKFLOW_UI_GUIDE, "useGatewayQuery` / `useGatewayMutation` / `useGatewayRunStream"],
