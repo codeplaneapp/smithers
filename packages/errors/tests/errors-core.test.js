@@ -343,6 +343,17 @@ describe("fromTaggedError", () => {
     });
     expect(normalized?.cause).toBe(cause);
   });
+
+  test("omits WorkflowFailed status details when status is absent", () => {
+    const normalized = fromTaggedError({
+      _tag: "WorkflowFailed",
+      message: "workflow failed",
+      details: { childRunId: "child-1" },
+    });
+
+    expect(normalized?.code).toBe("WORKFLOW_EXECUTION_FAILED");
+    expect(normalized?.details).toEqual({ childRunId: "child-1" });
+  });
 });
 
 describe("toSmithersError", () => {
@@ -439,6 +450,46 @@ describe("toSmithersError", () => {
     );
     expect(wrapped.code).toBe("TASK_TIMEOUT");
     expect(wrapped.details).toEqual({ nodeId: "n1", attempt: 1, timeoutMs: 100 });
+  });
+
+  test("returns label-less duck-typed Smithers errors without wrapping", () => {
+    const cause = { code: "INVALID_INPUT", message: "bad payload" };
+
+    const normalized = toSmithersError(cause);
+
+    expect(normalized).toBe(cause);
+  });
+
+  test("uses message as the summary fallback when wrapping duck-typed Smithers errors", () => {
+    const cause = { code: "INVALID_INPUT", message: "bad payload" };
+
+    const wrapped = toSmithersError(cause, "validate");
+
+    expect(wrapped).toBeInstanceOf(SmithersError);
+    expect(wrapped).not.toBe(cause);
+    expect(wrapped.code).toBe("INVALID_INPUT");
+    expect(wrapped.summary).toBe("validate: bad payload");
+    expect(wrapped.details).toEqual({ operation: "validate" });
+    expect(wrapped.cause).toBe(cause);
+  });
+
+  test("returns label-less tagged errors after normalization without double-wrapping", () => {
+    const tagged = {
+      _tag: "InvalidInput",
+      message: "bad payload",
+      details: { field: "name" },
+    };
+
+    expect(isSmithersError(tagged)).toBe(false);
+
+    const normalized = toSmithersError(tagged);
+
+    expect(normalized).toBeInstanceOf(SmithersError);
+    expect(normalized).not.toBe(tagged);
+    expect(normalized.code).toBe("INVALID_INPUT");
+    expect(normalized.summary).toBe("bad payload");
+    expect(normalized.details).toEqual({ field: "name" });
+    expect(normalized.cause).toBeUndefined();
   });
 });
 
