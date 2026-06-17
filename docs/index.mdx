@@ -20,7 +20,7 @@ mode: "custom"
       <div className="relative z-10 flex-1 flex flex-col items-start">
 
         {/* Badge */}
-        <div className="inline-flex items-center gap-2.5 px-3 py-1.5 rounded-full border border-slate-200/50 dark:border-white/5 bg-slate-100 dark:bg-white/[0.02] shadow-sm text-slate-700 dark:text-slate-300 text-xs font-bold uppercase tracking-[0.1em] mb-8">
+        <div className="inline-flex items-center gap-2.5 px-3 py-1.5 rounded-full border border-slate-200/50 dark:border-white/5 bg-slate-100 dark:bg-white/5 shadow-sm text-slate-700 dark:text-slate-300 text-xs font-bold uppercase tracking-[0.1em] mb-8">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00D2A0] opacity-50"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00D2A0]"></span>
@@ -44,7 +44,7 @@ mode: "custom"
           <a href="/guide/get-started" className="inline-flex items-center justify-center px-8 py-3.5 text-base font-bold text-white dark:text-[#030712] bg-[#000] dark:bg-[#00D2A0] rounded-xl transition-all hover:scale-[1.02] shadow-[0_10px_30px_-10px_rgba(0,0,0,0.5)] dark:shadow-[0_10px_30px_-10px_rgba(0,210,160,0.3)]">
             Read the docs
           </a>
-          <a href="/introduction" className="inline-flex items-center justify-center px-8 py-3.5 text-base font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-white/[0.02] border border-transparent dark:border-white/5 rounded-xl transition-all hover:bg-slate-200 dark:hover:bg-white/[0.05]">
+          <a href="/introduction" className="inline-flex items-center justify-center px-8 py-3.5 text-base font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-white/5 border border-transparent dark:border-white/5 rounded-xl transition-all hover:bg-slate-200 dark:hover:bg-white/10">
             Docs for agents →
           </a>
         </div>
@@ -59,7 +59,7 @@ mode: "custom"
           </div>
           <div className="absolute -inset-0.5 bg-gradient-to-r from-[#00D2A0] to-[#047857] rounded-xl blur opacity-0 group-hover:opacity-20 transition duration-500"></div>
           <div
-            className="relative flex items-center justify-between gap-4 px-5 py-3 bg-white dark:bg-[#0A0D15] border border-slate-200 dark:border-white/[0.08] rounded-xl cursor-pointer transition-all duration-300 active:scale-[0.98]"
+            className="relative flex items-center justify-between gap-4 px-5 py-3 bg-white dark:bg-[#0A0D15] border border-slate-200 dark:border-white/10 rounded-xl cursor-pointer transition-all duration-300 active:scale-[0.98]"
             onClick={() => {
               navigator.clipboard.writeText('bunx smithers-orchestrator init');
               const t = document.getElementById('copy-text');
@@ -87,7 +87,7 @@ mode: "custom"
             </div>
           </div>
           <div className="mt-3 ml-1 text-xs text-slate-400 dark:text-slate-500">
-            Installs the <code className="text-[11px] bg-slate-100 dark:bg-white/[0.05] rounded px-1">smithers</code> skill into your agents and scaffolds ready-made workflows.
+            Installs the <code className="text-[11px] bg-slate-100 dark:bg-white/10 rounded px-1">smithers</code> skill into your agents and scaffolds ready-made workflows.
           </div>
         </div>
       </div>
@@ -96,9 +96,9 @@ mode: "custom"
       <div className="relative group flex-1 w-full min-w-0 lg:max-w-[50%] perspective-1000 mt-12 lg:mt-0">
         <div className="absolute -inset-1 bg-[#00D2A0]/10 rounded-[2rem] blur-xl opacity-0 group-hover:opacity-40 transition duration-1000"></div>
 
-        <div className="relative rounded-2xl border border-slate-200/50 dark:border-white/[0.08] bg-[#F8FAFC] dark:bg-[#0A0D15] shadow-2xl dark:shadow-[0_40px_80px_-20px_rgba(0,0,0,0.6)] overflow-hidden transition-all duration-500 transform-gpu lg:rotate-y-[-2deg] lg:rotate-x-[1deg] group-hover:rotate-0">
+        <div className="relative rounded-2xl border border-slate-200/50 dark:border-white/10 bg-[#F8FAFC] dark:bg-[#0A0D15] shadow-2xl dark:shadow-[0_40px_80px_-20px_rgba(0,0,0,0.6)] overflow-hidden transition-all duration-500 transform-gpu lg:rotate-y-[-2deg] lg:rotate-x-[1deg] group-hover:rotate-0">
 
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/50 dark:border-white/5 bg-slate-100/50 dark:bg-white/[0.01]">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200/50 dark:border-white/5 bg-slate-100/50 dark:bg-white/5">
             <div className="flex items-center gap-2 px-1">
               <div className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></div>
               <div className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></div>
@@ -138,7 +138,7 @@ mode: "custom"
                 <span className="text-[10px] uppercase tracking-wider text-[#FFBD2E]">waiting</span>
               </div>
             </div>
-            <div className="mt-6 pt-4 border-t border-slate-100 dark:border-white/[0.05] text-[11px] text-slate-400 dark:text-slate-600">
+            <div className="mt-6 pt-4 border-t border-slate-100 dark:border-white/10 text-[11px] text-slate-400 dark:text-slate-600">
               crash-safe · resumes from the last persisted step
             </div>
           </div>
@@ -154,7 +154,7 @@ mode: "custom"
     </span>
     <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
       {["Claude Code", "Codex", "Cursor", "Gemini", "Pi", "Antigravity", "Kimi", "+ any AI SDK model"].map((name) => (
-        <span key={name} className="px-3.5 py-1.5 rounded-full border border-slate-200 dark:border-white/[0.06] bg-white dark:bg-white/[0.02] text-sm font-semibold text-slate-700 dark:text-slate-300">
+        <span key={name} className="px-3.5 py-1.5 rounded-full border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-sm font-semibold text-slate-700 dark:text-slate-300">
           {name}
         </span>
       ))}
@@ -167,7 +167,7 @@ mode: "custom"
   {/* ── Why: the layer that doesn't change ── */}
   <section className="relative py-24 px-6 max-w-4xl mx-auto">
     <div className="text-center mb-12">
-      <div className="inline-flex items-center px-4 py-1.5 rounded-full border border-slate-200 dark:border-white/5 bg-slate-100/50 dark:bg-white/[0.02] text-slate-700 dark:text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-6">Why Smithers</div>
+      <div className="inline-flex items-center px-4 py-1.5 rounded-full border border-slate-200 dark:border-white/5 bg-slate-100/50 dark:bg-white/5 text-slate-700 dark:text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-6">Why Smithers</div>
       <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-6 leading-[1.1]">
         The right way to build an agent <br className="hidden sm:block" /> changes every six months.
       </h2>
@@ -178,14 +178,14 @@ mode: "custom"
 
     {/* Three layers */}
     <div className="flex flex-col gap-3 max-w-2xl mx-auto">
-      <div className="flex items-center justify-between gap-4 px-6 py-4 rounded-2xl border border-slate-200/60 dark:border-white/[0.04] bg-slate-100/40 dark:bg-[#0B1221]/40">
+      <div className="flex items-center justify-between gap-4 px-6 py-4 rounded-2xl border border-slate-200/60 dark:border-white/5 bg-slate-100/40 dark:bg-[#0B1221]/40">
         <div>
           <strong className="block text-slate-900 dark:text-white font-bold">Model</strong>
           <span className="text-sm text-slate-500 dark:text-slate-400">Claude, GPT, Gemini, Kimi</span>
         </div>
         <span className="text-[10px] font-bold uppercase tracking-widest text-[#F87171]">Volatile · weekly</span>
       </div>
-      <div className="flex items-center justify-between gap-4 px-6 py-4 rounded-2xl border border-slate-200/60 dark:border-white/[0.04] bg-slate-100/40 dark:bg-[#0B1221]/40">
+      <div className="flex items-center justify-between gap-4 px-6 py-4 rounded-2xl border border-slate-200/60 dark:border-white/5 bg-slate-100/40 dark:bg-[#0B1221]/40">
         <div>
           <strong className="block text-slate-900 dark:text-white font-bold">Topology</strong>
           <span className="text-sm text-slate-500 dark:text-slate-400">ReAct, crew, swarm, background agents</span>
@@ -203,15 +203,15 @@ mode: "custom"
 
     {/* Three guarantees */}
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-12">
-      <div className="p-6 rounded-2xl bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/[0.04]">
+      <div className="p-6 rounded-2xl bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/5">
         <strong className="block text-slate-900 dark:text-white font-bold mb-1.5">Durable</strong>
         <span className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Every step is checkpointed the moment it finishes. A crash, a closed laptop, a flaky tool: all resume points.</span>
       </div>
-      <div className="p-6 rounded-2xl bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/[0.04]">
+      <div className="p-6 rounded-2xl bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/5">
         <strong className="block text-slate-900 dark:text-white font-bold mb-1.5">Composable</strong>
         <span className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Review loops, panels, debates, sagas. Named patterns are small TSX components on the substrate. Read them, fork them.</span>
       </div>
-      <div className="p-6 rounded-2xl bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/[0.04]">
+      <div className="p-6 rounded-2xl bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/5">
         <strong className="block text-slate-900 dark:text-white font-bold mb-1.5">Observable</strong>
         <span className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">Every transition, attempt, and approval is a SQLite row. Prometheus metrics and traces with no setup.</span>
       </div>
@@ -219,7 +219,7 @@ mode: "custom"
   </section>
 
   {/* ── Two doors: human docs + agent docs ── */}
-  <section className="relative py-16 px-6 max-w-5xl mx-auto border-t border-slate-200 dark:border-white/[0.02]">
+  <section className="relative py-16 px-6 max-w-5xl mx-auto border-t border-slate-200 dark:border-white/5">
     <div className="text-center mb-12">
       <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-[1.1]">
         Two ways in.
@@ -229,7 +229,7 @@ mode: "custom"
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
       {/* For humans */}
-      <a href="/guide/get-started" className="group block p-8 rounded-[2rem] bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/[0.04] hover:bg-slate-100 dark:hover:bg-[#0B1221]/80 transition-colors">
+      <a href="/guide/get-started" className="group block p-8 rounded-[2rem] bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/5 hover:bg-slate-100 dark:hover:bg-[#0B1221]/80 transition-colors">
         <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-3">For humans</div>
         <strong className="block text-2xl font-bold tracking-tight text-slate-900 dark:text-white mb-3">Get started</strong>
         <p className="text-slate-600 dark:text-slate-400 leading-relaxed mb-5">
@@ -239,12 +239,12 @@ mode: "custom"
       </a>
 
       {/* For agents */}
-      <a href="/introduction" className="group block p-8 rounded-[2rem] bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/[0.04] hover:bg-slate-100 dark:hover:bg-[#0B1221]/80 transition-colors">
+      <a href="/introduction" className="group block p-8 rounded-[2rem] bg-slate-100/50 dark:bg-[#0B1221]/50 border border-slate-200/50 dark:border-white/5 hover:bg-slate-100 dark:hover:bg-[#0B1221]/80 transition-colors">
         <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-3">For agents</div>
         <strong className="block text-2xl font-bold tracking-tight text-slate-900 dark:text-white mb-3">Docs for agents</strong>
         <p className="text-slate-600 dark:text-slate-400 leading-relaxed mb-5">
           The full API, components, and patterns, written for the coding agent that authors and runs your workflows. Or feed it{" "}
-          <code className="text-[13px] bg-white dark:bg-white/[0.05] rounded px-1">/llms-full.txt</code> directly.
+          <code className="text-[13px] bg-white dark:bg-white/10 rounded px-1">/llms-full.txt</code> directly.
         </p>
         <span className="text-[#00D2A0] font-semibold group-hover:underline">Read the agent docs →</span>
       </a>
