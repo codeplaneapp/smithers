@@ -523,6 +523,32 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
     }
   });
 
+  test("usage limit periods are validated and define default quota windows", () => {
+    const { sqlite, store } = makeStore();
+    try {
+      store.createOrg({ orgId: "org_periods", slug: "periods", name: "Periods", createdAtMs: 1 });
+      expect(() =>
+        store.setUsageLimit({ orgId: "org_periods", metric: "runs", period: "forever", limitQuantity: 10, updatedAtMs: 2 }),
+      ).toThrow("period must be one of");
+
+      store.setUsageLimit({ orgId: "org_periods", metric: "runs", period: "monthly", limitQuantity: 10, updatedAtMs: 3 });
+      store.recordUsage({ orgId: "org_periods", metric: "runs", quantity: 8, observedAtMs: 1_000 });
+      store.recordUsage({ orgId: "org_periods", metric: "runs", quantity: 3, observedAtMs: 2_678_400_000 });
+
+      expect(store.checkUsageLimit({ orgId: "org_periods", metric: "runs", period: "monthly", untilMs: 2_678_400_000 })).toMatchObject({
+        usedQuantity: 3,
+        remainingQuantity: 7,
+        exceeded: false,
+      });
+      expect(() =>
+        store.checkUsageLimit({ orgId: "org_periods", metric: "runs", period: "forever" }),
+      ).toThrow("period must be one of");
+    }
+    finally {
+      sqlite.close();
+    }
+  });
+
   test("foreign keys prevent orphan projects and cascade org deletion", () => {
     const { sqlite, store } = makeStore();
     try {
