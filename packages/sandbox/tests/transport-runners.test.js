@@ -479,6 +479,40 @@ describe("sandbox transport runners", () => {
         });
     });
 
+    test("codeplane executor reports unsupported direct command execution", async () => {
+        await withEnv({ CODEPLANE_API_URL: "http://codeplane.test", CODEPLANE_API_KEY: "test-key" }, async () => {
+            const handle = await runExecutor(CodeplaneSandboxExecutorLive, (executor) =>
+                executor.create(configFor(tempDir("smithers-codeplane-"), "run-codeplane", "sandbox", "codeplane")),
+            );
+
+            await expect(
+                runExecutor(CodeplaneSandboxExecutorLive, (executor) => executor.execute("npm test", handle)),
+            ).rejects.toThrow("remote Codeplane worker integration");
+        });
+    });
+
+    test("macOS fallback execute reports the missing sandbox-exec binary", async () => {
+        await withPlatform("darwin", () =>
+            withBunWhich(() => null, async () => {
+                const rootDir = tempDir("smithers-sandbox-exec-missing-");
+                const sandboxRoot = join(rootDir, ".smithers", "sandboxes", "run-no-exec", "sandbox");
+                const handle = {
+                    runtime: "bubblewrap",
+                    runId: "run-no-exec",
+                    sandboxId: "sandbox",
+                    sandboxRoot,
+                    requestPath: join(sandboxRoot, "request"),
+                    resultPath: join(sandboxRoot, "result"),
+                    allowNetwork: false,
+                };
+
+                await expect(
+                    runExecutor(BubblewrapSandboxExecutorLive, (executor) => executor.execute("npm test", handle)),
+                ).rejects.toThrow("sandbox-exec");
+            }),
+        );
+    });
+
     test("runtime selection covers all transport layer branches", async () => {
         expect(layerForSandboxRuntime("docker")).toBeDefined();
         expect(layerForSandboxRuntime("codeplane")).toBeDefined();

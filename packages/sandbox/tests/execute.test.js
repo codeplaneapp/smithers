@@ -261,6 +261,17 @@ describe("executeSandbox", () => {
         }
     });
 
+    test("rejects sandbox execution when no runtime database is available", async () => {
+        const runtime = createRuntime(undefined);
+
+        await expect(
+            runInRuntime(runtime, {
+                sandboxId: "sandbox-no-db",
+                parentWorkflow: { build: () => null },
+            }),
+        ).rejects.toThrow("Sandbox execution requires a task runtime database");
+    });
+
     test("runs a registered provider, materializes its bundle, and applies accepted diff bundles", async () => {
         const { adapter, db, sqlite } = createDb();
         const rootDir = tempDir("smithers-sandbox-provider-");
@@ -482,6 +493,127 @@ describe("executeSandbox", () => {
             ).rejects.toThrow("must include either bundlePath or status");
 
             expect(cleanupCalls).toEqual(["sandbox-provider-cleanup"]);
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
+    test("materializes provider bundle paths and rejects invalid provider results", async () => {
+        const resultPath = tempDir("smithers-provider-materialized-");
+        const materialized = await __executeSandboxInternals.materializeProviderResult(
+            {
+                bundlePath: resultPath,
+                remoteRunId: "remote-run",
+                workspaceId: "workspace-1",
+                containerId: "container-1",
+            },
+            tempDir("smithers-provider-default-"),
+        );
+
+        expect(materialized).toEqual({
+            bundlePath: resultPath,
+            remoteRunId: "remote-run",
+            workspaceId: "workspace-1",
+            containerId: "container-1",
+        });
+        await expect(
+            __executeSandboxInternals.materializeProviderResult(null, tempDir("smithers-provider-null-")),
+        ).rejects.toThrow("invalid result");
+        await expect(
+            __executeSandboxInternals.materializeProviderResult(
+                { status: "running" },
+                tempDir("smithers-provider-status-"),
+            ),
+        ).rejects.toThrow("must include either bundlePath or status");
+    });
+
+    test("rejects accepted provider diff bundles without an applier", async () => {
+        const { adapter, db, sqlite } = createDb();
+        const runtime = createRuntime(db, { runId: "run-provider-no-applier" });
+        try {
+            await expect(
+                runInRuntime(runtime, {
+                    sandboxId: "sandbox-provider-no-applier",
+                    provider: {
+                        id: "no-applier-provider",
+                        run: async () => ({
+                            status: "finished",
+                            output: { changed: true },
+                            diffBundle: onePatchDiffBundle(),
+                        }),
+                    },
+                    runtime: undefined,
+                    reviewDiffs: false,
+                }),
+            ).rejects.toThrow("no diff applier was provided");
+
+            expect(await adapter.getSandbox("run-provider-no-applier", "sandbox-provider-no-applier")).toMatchObject({
+                status: "failed",
+            });
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
+    test("rejects malformed accepted provider diff bundles before applying", async () => {
+        const { adapter, db, sqlite } = createDb();
+        const runtime = createRuntime(db, { runId: "run-provider-bad-diff" });
+        let applied = false;
+        try {
+            await expect(
+                runInRuntime(runtime, {
+                    sandboxId: "sandbox-provider-bad-diff",
+                    provider: {
+                        id: "bad-diff-provider",
+                        run: async () => ({
+                            status: "finished",
+                            output: { changed: true },
+                            diffBundle: { patches: [] },
+                        }),
+                    },
+                    runtime: undefined,
+                    reviewDiffs: false,
+                    applyDiffBundle: async () => {
+                        applied = true;
+                    },
+                }),
+            ).rejects.toThrow("diffBundle is malformed");
+
+            expect(applied).toBe(false);
+            expect(await adapter.getSandbox("run-provider-bad-diff", "sandbox-provider-bad-diff")).toMatchObject({
+                status: "failed",
+            });
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
+    test("runs configured transport commands through the selected executor", async () => {
+        const { adapter, db, sqlite } = createDb();
+        const runtime = createRuntime(db, { runId: "run-transport-command" });
+        let childCalled = false;
+        try {
+            await expect(
+                withCodeplaneEnv(() =>
+                    runInRuntime(runtime, {
+                        sandboxId: "sandbox-transport-command",
+                        config: { command: "echo should-run-in-sandbox" },
+                        executeChildWorkflow: async () => {
+                            childCalled = true;
+                            return { runId: "child-never", status: "finished", output: {} };
+                        },
+                    }),
+                ),
+            ).rejects.toThrow("Codeplane sandbox command execution requires");
+
+            expect(childCalled).toBe(false);
+            expect(await adapter.getSandbox("run-transport-command", "sandbox-transport-command")).toMatchObject({
+                status: "failed",
+                workspaceId: "run-transport-command:sandbox-transport-command",
+            });
         }
         finally {
             sqlite.close();
