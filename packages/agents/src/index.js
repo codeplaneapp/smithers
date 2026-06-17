@@ -37,15 +37,21 @@
 /** @typedef {import("./cli-surface/CliAgentSurfaceTypes.ts").CliAgentSurfaceOptionMapping} CliAgentSurfaceOptionMapping */
 /** @typedef {import("./cli-surface/CliAgentSurfaceTypes.ts").CliAgentSurfaceResumeContract} CliAgentSurfaceResumeContract */
 /** @typedef {import("./cli-surface/CliAgentSurfaceTypes.ts").CliAgentUnsupportedFlag} CliAgentUnsupportedFlag */
+<<<<<<<<< HEAD
 /** @typedef {import("./image-generation/ImageGenerationProvider.ts").ImageGenerationProvider} ImageGenerationProvider */
 /** @typedef {import("./image-generation/ImageGenerationRequest.ts").ImageGenerationRequest} ImageGenerationRequest */
 /** @typedef {import("./image-generation/ImageGenerationResult.ts").ImageGenerationResult} ImageGenerationResult */
 /** @typedef {import("./image-generation/ImageGenerationToolOptions.ts").ImageGenerationToolOptions} ImageGenerationToolOptions */
-||||||| parent of 6e36814a (✨ feat(agents): expose generic HTTP tool)
 /** @typedef {import("./http/CreateHttpToolOptions.ts").CreateHttpToolOptions} CreateHttpToolOptions */
 /** @typedef {import("./http/HttpToolAuth.ts").HttpToolAuth} HttpToolAuth */
 /** @typedef {import("./http/HttpToolInput.ts").HttpToolInput} HttpToolInput */
 /** @typedef {import("./http/HttpToolOutput.ts").HttpToolOutput} HttpToolOutput */
+=========
+/** @typedef {import("./http/CreateHttpToolOptions.ts").CreateHttpToolOptions} CreateHttpToolOptions */
+/** @typedef {import("./http/HttpToolAuth.ts").HttpToolAuth} HttpToolAuth */
+/** @typedef {import("./http/HttpToolInput.ts").HttpToolInput} HttpToolInput */
+/** @typedef {import("./http/HttpToolOutput.ts").HttpToolOutput} HttpToolOutput */
+>>>>>>>>> 6e36814a (✨ feat(agents): expose generic HTTP tool)
 // @smithers-type-exports-end
 
 export { BaseCliAgent } from "./BaseCliAgent/index.js";
@@ -75,9 +81,12 @@ export {
 } from "./cli-capabilities/index.js";
 export { createSmithersAgentContract } from "./agent-contract/createSmithersAgentContract.js";
 export { renderSmithersAgentPromptGuidance } from "./agent-contract/renderSmithersAgentPromptGuidance.js";
+<<<<<<<<< HEAD
 export { createImageGenerationTool } from "./image-generation/createImageGenerationTool.js";
-||||||| parent of 6e36814a (✨ feat(agents): expose generic HTTP tool)
 export { createHttpTool } from "./http/createHttpTool.js";
+=========
+export { createHttpTool } from "./http/createHttpTool.js";
+>>>>>>>>> 6e36814a (✨ feat(agents): expose generic HTTP tool)
 export { zodToOpenAISchema } from "./zodToOpenAISchema.js";
 export { sanitizeForOpenAI } from "./sanitizeForOpenAI.js";
 export { createTranscriptionTool } from "./transcription/createTranscriptionTool.js";

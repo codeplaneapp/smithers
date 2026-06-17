@@ -670,6 +670,25 @@ const ops = new AnthropicAgent({
 
 The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `auth` (`bearer`, `basic`, or custom header), and `timeoutMs`. Results include `ok`, `status`, `statusText`, response `headers`, and a parsed JSON or text `body`.
 
+## Generic HTTP Tool
+
+`createHttpTool()` returns an AI SDK tool that can call any REST endpoint without an OpenAPI spec. Use it as the universal escape hatch when no curated connector or MCP server exists yet.
+
+```ts
+const http = createHttpTool({
+  defaultHeaders: { "user-agent": "smithers-workflow" },
+});
+
+const ops = new AnthropicAgent({
+  model: "claude-fable-5",
+  tools: { http },
+  instructions: "Use the HTTP tool only for APIs the workflow explicitly names.",
+  stopWhen: stepCountIs(20),
+});
+```
+
+The tool input accepts `method`, `url`, `headers`, `query`, `body`, optional `auth` (`bearer`, `basic`, or custom header), and `timeoutMs`. Results include `ok`, `status`, `statusText`, response `headers`, and a parsed JSON or text `body`.
+
 ## Hermes
 
 [Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) exposes an OpenAI-compatible HTTP API, so `HermesAgent` is a convenience subclass of `OpenAIAgent` that points the provider at your Hermes server and disables native structured output by default (a local Hermes server may not honor JSON-schema response formats).
