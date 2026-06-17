@@ -268,6 +268,7 @@
           "integrations/integrations",
           "integrations/tools",
           "integrations/common-tools",
+          "integrations/community-connectors",
           "concepts/openapi-tools",
           "integrations/cli-agents",
           "integrations/sdk-agents",
