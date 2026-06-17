@@ -46,14 +46,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     approval: approvalSchema,
 });
 const fetcher = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a config diff fetcher. Given file paths or git refs, collect the
 raw diffs for environment files, Helm values, Terraform plans, and Kubernetes manifests.
 Classify each file by kind and identify the service it belongs to.`,
 });
 const explainer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a config change analyst. Given collected diffs from infrastructure
 config files (Helm, Terraform, k8s manifests, env files), produce a blast-radius analysis.

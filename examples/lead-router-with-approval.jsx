@@ -52,21 +52,21 @@ const { Workflow, Task, Branch, Approval, smithers, outputs } = createExampleSmi
     sink: sinkSchema,
 });
 const intakeAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a lead intake specialist. Parse raw lead data from any source
 (webhook payloads, emails, form submissions) into a structured lead record.
 Normalise company names, infer employee count when missing, and extract buying intent.`,
 });
 const scoringAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a lead scoring and routing engine. Evaluate leads on firmographic fit,
 buying intent, and deal size. Assign a 0-100 score, a tier, and a recommended route.
 Flag borderline cases (score 40-70) as needing human approval.`,
 });
 const sinkAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a CRM integration agent. Create or update CRM records and task
 assignments based on the scored and approved lead. Output the record ID and next action.`,

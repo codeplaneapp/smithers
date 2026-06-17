@@ -78,28 +78,28 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     incidentNote: incidentNoteSchema,
 });
 const traceFetcher = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, grep },
     instructions: `You are a distributed-tracing specialist. Query trace backends to find
 the slowest and most error-prone spans within the breach window. Identify the bottleneck
 span and pick a representative trace ID for follow-up investigation.`,
 });
 const logFetcher = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, grep, read },
     instructions: `You are a log analyst. Search logs for the affected service within the breach
 window. Count errors, surface the top error messages, and flag any anomalous patterns that
 deviate from the service's normal baseline.`,
 });
 const changeFetcher = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a change-tracking investigator. Look up recent deployments, config
 changes, and feature-flag flips for the affected service around the breach window. Identify
 the single most suspicious change that correlates with the SLO violation.`,
 });
 const synthesizer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are an incident analyst. Given trace context, log context, and change
 history, construct a clear causal chain explaining why the SLO was breached. Be specific

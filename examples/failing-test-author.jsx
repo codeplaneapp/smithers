@@ -48,14 +48,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const issueReader = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a bug triage specialist. Read the issue description and any
 traceback provided, then identify the affected component, minimal reproduction steps,
 and the gap between expected and actual behavior. Be precise and concise.`,
 });
 const testAuthor = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, grep },
     instructions: `You are a test engineer. Write the smallest possible failing test that
 reproduces the reported bug. The test must fail for the right reason — it should assert
@@ -63,7 +63,7 @@ the expected behavior that is currently broken. Follow existing test conventions
 codebase. Do NOT attempt to fix the bug.`,
 });
 const testRunner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `Run the specified test file and report whether it fails. The test MUST
 fail to confirm it captures the bug. If it passes, report that verification failed.`,

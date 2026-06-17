@@ -70,22 +70,22 @@ const { Workflow, Task, Branch, smithers, outputs } = createExampleSmithers({
 });
 // --- Agents ---
 const inspectorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You are a git inspector. Examine the repository state: check for conflicts, ongoing rebases, cherry-pick state, and generated files that have diverged. Report raw findings without interpretation.`,
 });
 const diagnosisAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a git diagnosis expert. Given raw inspection data about a broken branch, determine the root cause—bad rebase, partial cherry-pick, divergent generated files, or a mix. Explain what happened and rate the severity.`,
 });
 const planAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a git recovery planner. Given a diagnosis, produce the minimal sequence of commands to restore the branch to a healthy state. Mark each command as safe (non-destructive) or unsafe. Prefer the smallest possible recovery—abort and redo only when strictly necessary.`,
 });
 const executionAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a careful command executor. Run ONLY commands marked as safe. Skip anything destructive. Report the output and exit code of each command you run.`,
 });

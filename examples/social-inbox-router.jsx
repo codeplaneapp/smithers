@@ -89,7 +89,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     routerOutput: routerOutputSchema,
 });
 const classifierAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a social inbox classifier. Given a batch of social messages,
 categorize each as lead (buying intent, demo requests, partnership inquiries),
@@ -98,21 +98,21 @@ feature complaints), or follow-up (ongoing conversations needing a response).
 Return a confidence score and brief reasoning for each classification.`,
 });
 const leadAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a sales development assistant. For each identified lead,
 draft a personalized reply, determine the appropriate CRM action, and assign a
 priority level based on the sender's title, company, and message intent.`,
 });
 const supportAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a support triage specialist. For each support message,
 create a ticket with a subject line, determine urgency, draft a helpful initial
 reply, and flag whether escalation to engineering is needed.`,
 });
 const followUpAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a relationship manager. For each follow-up item,
 provide context on the conversation history, draft a thoughtful reply, and

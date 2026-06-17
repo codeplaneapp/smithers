@@ -58,7 +58,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 const CONFIDENCE_THRESHOLD = 0.85;
 const MIN_FIELDS_FOR_ROUTING = 3;
 const extractorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a receipt extraction agent. Read the provided receipt file or
 text and extract structured fields (merchant, total, date, currency, line items).
@@ -66,7 +66,7 @@ For each field, assign a confidence score between 0 and 1. Stream partial result
 as you identify each field — you do not need every field to produce output.`,
 });
 const consumerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are a partial-state consumer. Evaluate the extracted fields and
 their confidence scores. Determine whether enough high-confidence fields are present
@@ -74,7 +74,7 @@ to route the receipt downstream. A field is "high confidence" if its score is >=
 At least ${MIN_FIELDS_FOR_ROUTING} high-confidence fields are needed for routing.`,
 });
 const routingAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a receipt routing agent. Based on the extracted and validated
 fields, decide which downstream process should handle this receipt: expense-report

@@ -90,35 +90,35 @@ const { Workflow, Task, Branch, Approval, smithers, outputs } = createExampleSmi
 });
 
 const parserAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a scheduling request parser. Extract title, attendees,
 duration, time window, timezone, and constraints from email or chat messages.`,
 });
 
 const calendarAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a calendar availability agent. Check free/busy data,
 room calendars, and supplied availability fixtures. Return candidate slots with conflicts.`,
 });
 
 const policyAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are a scheduling policy checker. Enforce work hours, buffers,
 focus blocks, meeting-free days, and "never create events without approval" rules.`,
 });
 
 const replyAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are an executive assistant. Rank candidate slots and draft a
 clear, polite reply that proposes the best options without committing to a write.`,
 });
 
 const writerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a calendar/email writer. Only act after approval. Use the
 provided idempotency key to avoid duplicate events or duplicate replies.`,

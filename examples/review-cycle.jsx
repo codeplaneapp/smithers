@@ -42,13 +42,13 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     result: resultSchema,
 });
 const implementer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, edit, bash, grep },
     instructions: `You are a senior developer. Implement the requested changes with clean,
 production-quality code. If you receive review feedback, address every issue.`,
 });
 const reviewer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a strict code reviewer. Review changes thoroughly.
 Only approve (approved=true) when there are NO blocker or major issues.

@@ -56,21 +56,21 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     sink: sinkSchema,
 });
 const runnerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a command runner. Execute commands exactly as specified,
 capture their full stdout, stderr, and exit code. Do not fix or retry failures —
 just observe and report accurately.`,
 });
 const analyzerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are a CI artifact analyst. Examine command outputs to detect
 failures, regressions, and notable deltas. Be precise: a non-zero exit code is
 always notable, but also look for regression markers in stdout/stderr.`,
 });
 const reportAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a failure analyst. Given notable CI events, produce
 root-cause hypotheses with confidence levels and actionable next steps.

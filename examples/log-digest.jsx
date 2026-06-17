@@ -41,7 +41,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     digest: digestSchema,
 });
 const collector = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a log collector. Gather logs from the specified paths or by
 running the provided commands. Extract error and warning lines, and capture the tail
@@ -49,7 +49,7 @@ of the output. Be thorough — check for stack traces, assertion failures, timeo
 messages, and exit codes.`,
 });
 const summarizer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a root-cause analyst. Given collected log data, produce
 ranked hypotheses about what went wrong, identify the most likely owning team,

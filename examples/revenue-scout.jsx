@@ -58,7 +58,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     handoff: handoffSchema,
 });
 const classifier = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a revenue signal classifier. Scan support conversations,
 form submissions, and email threads for latent sales opportunities.
@@ -67,14 +67,14 @@ language, budget mentions, competitor comparisons, and renewal timing cues.
 Mark conversations with no signal as "none".`,
 });
 const extractor = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a sales intelligence extractor. For each flagged conversation,
 extract structured opportunity data: customer details, signal type, product interest,
 key quotes, and estimated deal urgency. Be precise — sales reps will act on this.`,
 });
 const router = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash },
     instructions: `You are a CRM handoff coordinator. Take extracted opportunities and
 prepare them for sales team routing. Assign priority based on urgency and estimated

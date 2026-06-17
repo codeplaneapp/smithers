@@ -51,14 +51,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     forward: forwardSchema,
 });
 const extractorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a structured data extractor. Given messy unstructured text or file paths,
 identify the primary entity and extract all relevant fields into typed key-value pairs.
 Assign a confidence score to each field. Preserve raw snippets that support your extractions.`,
 });
 const validatorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a data validation specialist. Review extracted fields for correctness,
 consistency, and completeness. Flag issues, correct obvious errors, and compute an overall

@@ -74,7 +74,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 });
 
 const plannerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are an E2E test planner. Explore the product brief, existing tests,
 and app routes. Produce a focused Playwright plan with flows, steps, assertions,
@@ -82,7 +82,7 @@ and risk. Prefer user-visible behavior over implementation details.`,
 });
 
 const generatorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, bash, grep },
     instructions: `You are a Playwright test generator. Write tests under tests/generated
 or the requested test directory. Keep selectors stable, set up fixtures explicitly,
@@ -90,14 +90,14 @@ and do not weaken assertions to make tests pass.`,
 });
 
 const runnerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a Playwright runner. Execute the requested command, collect
 failure messages, traces, screenshots, and summarize pass/fail status precisely.`,
 });
 
 const healerAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, bash, grep },
     instructions: `You are a Playwright test healer. Repair broken selectors, waits,
 fixtures, and setup. Preserve the user-story assertions unless you explicitly
@@ -105,7 +105,7 @@ explain why an assertion was invalid.`,
 });
 
 const reporterAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are an E2E QA reporter. Summarize generated coverage, remaining
 failures, artifacts, and concrete follow-up actions.`,

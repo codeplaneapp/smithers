@@ -54,14 +54,14 @@ const { Workflow, Task, Approval, smithers, outputs } = createExampleSmithers({
     review: reviewSchema,
 });
 const classifier = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash },
     instructions: `You are a runbook analyst. Classify each step as safe or risky based on
 its blast radius, reversibility, and impact on production state. Be conservative —
 anything that modifies state or could cause downtime is risky.`,
 });
 const executor = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, bash, grep },
     instructions: `You are a runbook executor. Run the given step carefully and report the
 outcome. Capture all relevant output. If a step fails, do NOT retry — report the failure

@@ -43,7 +43,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     triageReport: triageReportSchema,
 });
 const classifier = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a triage specialist. Classify incoming items by category,
 priority, and routing. Be consistent and fair in prioritization.
@@ -53,7 +53,7 @@ Use "ignore" for items that don't need action.`,
  * @param {string} role
  */
 const makeHandler = (role) => new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a ${role} handler. Take appropriate action on the assigned item.
 If you can handle it, do so. If it needs human attention, escalate with details.`,

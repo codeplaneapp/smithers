@@ -49,14 +49,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     validation: validationSchema,
 });
 const issueAnalyzer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are an issue analyst. Given a bug report, stack trace, or issue description,
 extract the essential reproduction details: language, dependencies, error signature, and minimal
 steps to trigger the bug. Be precise — downstream agents rely on your output to build a working harness.`,
 });
 const environmentBuilder = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, write, read },
     instructions: `You are an environment builder. Given an issue analysis, produce a minimal Dockerfile,
 repro script, and any fixture files needed to reproduce the bug in an isolated container.
@@ -64,7 +64,7 @@ Keep the image small — use alpine bases where possible. The repro script shoul
 when the bug is present so validation can check the exit code.`,
 });
 const reproValidator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You are a repro validator. Build the Docker image from the generated Dockerfile,
 run the repro command, and verify the bug manifests. Capture stdout, stderr, and exit code.

@@ -63,14 +63,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     action: actionSchema,
 });
 const moderator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a trust & safety content moderator. Analyze content against policy guidelines.
 Classify risk level and policy category with high precision. Flag specific segments that violate policy.
 When confidence is below 0.85 or the content is ambiguous, mark for human review.`,
 });
 const actionAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash },
     instructions: `You are a trust & safety action handler. Based on moderation results, take the appropriate
 policy action: approve safe content, apply modifications for borderline cases, reject clear violations,

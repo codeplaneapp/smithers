@@ -67,25 +67,25 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     packet: packetSchema,
 });
 const orchestrator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a compliance planning agent. Given a compliance framework and scope,
 identify the controls that need evidence and plan which sources to query for each.`,
 });
 const fetcher = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You are an evidence fetcher. Collect raw evidence from the assigned source
 using the preferred method (API call, MCP tool, or browser fallback). Return the raw payload.`,
 });
 const normalizer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are an evidence normalizer. Take raw evidence payloads and extract
 structured findings: compliance status, severity, and key fields.`,
 });
 const packetAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { write },
     instructions: `You are a compliance packet assembler. Aggregate normalized findings into
 a final review packet with per-control verdicts, evidence references, and recommendations.`,

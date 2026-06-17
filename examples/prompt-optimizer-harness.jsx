@@ -63,21 +63,21 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const generator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write },
     instructions: `You are a prompt engineer. Given a task description and optional prior feedback,
 generate a candidate prompt that maximizes clarity, specificity, and test-case coverage.
 Include few-shot examples when beneficial.`,
 });
 const evaluator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a prompt evaluator. Run each test case against the candidate prompt,
 compare outputs to expected results, and score objectively. Be strict — partial matches
 score partial credit. Report every failure with a clear reason.`,
 });
 const optimizer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, grep },
     instructions: `You are a prompt optimizer. Analyze evaluation failures, identify patterns,
 and revise the prompt to address the most impactful issues first. Preserve what already works.

@@ -78,14 +78,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     notification: notificationSchema,
 });
 const extractorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a customer feedback analyst. Given a batch of feedback items,
 identify recurring themes and pain points, classify sentiment for each item,
 and surface the most actionable insights. Be specific about severity and frequency.`,
 });
 const notifierAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a feedback routing specialist. Given extracted themes and pain points,
 decide which deserve a Slack alert, which warrant a Jira ticket, and compose a digest

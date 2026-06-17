@@ -32,7 +32,7 @@ const mcp = await createMcpToolset({
 // tools: as its `tools` record. (Running the LLM needs ANTHROPIC_API_KEY.)
 const agent = new AnthropicAgent({
   id: "mcp-agent",
-  model: "claude-sonnet-4-20250514",
+  model: "claude-sonnet-4-6",
   instructions: "Use the available tools to answer. Prefer calling a tool over guessing.",
   tools: mcp.tools,
 });

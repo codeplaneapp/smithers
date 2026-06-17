@@ -30,7 +30,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     plan: planSchema,
 });
 const planner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a technical architect. Analyze the codebase and requirements,
 then produce a detailed implementation plan. Break work into small, independent tasks.

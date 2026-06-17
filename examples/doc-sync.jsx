@@ -40,21 +40,21 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     pr: prSchema,
 });
 const auditor = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a docs auditor. Compare documentation files against the actual
 source code. Check that API signatures, parameter names, return types, and examples
 all match the current implementation. Be thorough and precise.`,
 });
 const fixer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, edit },
     instructions: `You are a technical writer. Fix documentation to match the actual code.
 Preserve the existing style and tone. Only fix factual inaccuracies — don't rewrite
 for style. Make minimal, surgical edits.`,
 });
 const prAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a git/GitHub agent. Create a branch, commit changes, and open a PR.
 Write clear commit messages and PR descriptions.`,

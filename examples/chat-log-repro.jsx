@@ -25,7 +25,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 });
 
 const claude = new ClaudeCodeAgent({
-  model: "claude-sonnet-4-20250514",
+  model: "claude-sonnet-4-6",
   systemPrompt: "You are a helpful assistant. Complete the task and report what you did.",
 });
 

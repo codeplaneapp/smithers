@@ -42,14 +42,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const runner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a command executor. Run the given command, capture its exit code,
 measure wall-clock duration, and produce a short signature of the output (e.g. hash of
 key lines or a recognisable fingerprint). Return the structured result.`,
 });
 const detector = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You are an anomaly detector. Compare the latest command run against previous
 runs. Flag anything notable: non-zero exit codes, duration regressions beyond threshold,
@@ -57,7 +57,7 @@ changed output signatures, or meaningful diffs in stdout. Be precise about why s
 is notable and avoid false positives.`,
 });
 const reporter = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are an escalation reporter. Summarise the anomalies detected during
 the watchdog loop into a concise, actionable report suitable for on-call engineers or

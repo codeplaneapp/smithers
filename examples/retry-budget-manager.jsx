@@ -60,7 +60,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const stepRunner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You are a step executor. Run the given step, capture its result including
 latency and any error details. Classify failures accurately: transient (network blips,
@@ -68,7 +68,7 @@ temporary unavailability), persistent (bad config, missing resource), quota (rat
 capacity), timeout (deadline exceeded). Report honestly — never mask failures.`,
 });
 const policyController = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are a retry policy controller. Analyse the failure class, remaining budget,
 and history of previous attempts. Use exponential backoff for transient failures, immediate
@@ -76,7 +76,7 @@ escalation for persistent ones, and cooldown periods for quota errors. Be conser
 wasting budget on hopeless retries is worse than escalating early.`,
 });
 const escalationAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write },
     instructions: `You are an escalation analyst. When the retry budget is exhausted or the
 policy controller flags escalation, produce a clear severity assessment, a concrete

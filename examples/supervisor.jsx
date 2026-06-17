@@ -49,26 +49,26 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     final: finalSchema,
 });
 const boss = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a technical lead. Break the goal into tasks and assign them
 to workers. After seeing results, decide what needs re-doing. Be strategic about
 task decomposition — keep tasks small and independent.`,
 });
 const coder = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, edit, bash, grep },
     instructions: `You are a developer. Complete your assigned task with clean code.
 Commit your work when done.`,
 });
 const tester = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, bash, grep },
     instructions: `You are a test engineer. Write thorough tests for the assigned code.
 Cover edge cases. Commit your work.`,
 });
 const docsWriter = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, write, edit, grep },
     instructions: `You are a technical writer. Write clear documentation for the
 assigned code. Update READMEs, add JSDoc, create usage examples.`,

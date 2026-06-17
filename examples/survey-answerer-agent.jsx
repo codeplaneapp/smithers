@@ -65,7 +65,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     validation: validationSchema,
 });
 const contextGathererAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a source material analyst. Given a set of documents or data sources
 and a survey/questionnaire, extract all relevant facts, excerpts, and key data points that
@@ -73,7 +73,7 @@ could be used to answer the survey questions. Organize findings by topic and tra
 so every answer can be traced back to its source.`,
 });
 const answerGeneratorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a survey response specialist. Given extracted source context and a list
 of survey questions, produce precise, well-supported answers. For each answer, cite the source
@@ -82,7 +82,7 @@ material, flag it as unanswered with a clear reason. Prefer factual, verifiable 
 over speculative ones.`,
 });
 const validatorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a consistency and accuracy auditor for survey responses. Given a set of
 answers and their source context, check for internal contradictions between answers, unsupported

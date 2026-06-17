@@ -71,39 +71,39 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
 });
 /* ── Agents ───────────────────────────────────────────────────────────── */
 const scheduler = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You determine the current reporting period. Figure out if today
 is Friday (weekly) or another day (daily) and compute the lookback cutoff.`,
 });
 const githubCollector = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You collect GitHub activity for the reporting period. Use the
 GitHub CLI (gh) or API to gather merged PRs, open PRs, notable commits, and
 stale PRs. Be precise with counts.`,
 });
 const linearCollector = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, grep },
     instructions: `You collect Linear project-tracking data for the reporting period.
 Gather completed issues, in-progress work, blockers, and top labels.`,
 });
 const slackCollector = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, grep },
     instructions: `You collect Slack activity highlights. Identify active threads,
 trending topics, and unresolved questions from key channels.`,
 });
 const summarizer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You synthesize data from GitHub, Linear, and Slack into a concise
 team digest. Prioritize actionable insights — blockers, risks, and wins. Keep
 the headline punchy and the action items specific.`,
 });
 const publisher = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, grep },
     instructions: `You publish the final summary to the configured destination
 (Slack channel, email, Notion page, etc.). Confirm delivery and return

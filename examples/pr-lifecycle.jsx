@@ -58,19 +58,19 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     merge: mergeSchema,
 });
 const gitAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read },
     instructions: `You are a git operations agent. Handle rebasing, pushing, and merging.
 Resolve conflicts when possible. Always use non-interactive git commands.`,
 });
 const reviewAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You are a self-review agent. Review the PR diff thoroughly.
 Focus on critical issues only. Approve if no blockers found.`,
 });
 const ciAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a CI monitor. Check PR status using gh CLI.
 Report check statuses and mergeability.`,

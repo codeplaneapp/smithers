@@ -49,13 +49,13 @@ const { Workflow, Task, Branch, smithers, outputs } = createExampleSmithers({
     output: outputSchema,
 });
 const runner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a benchmark runner. Execute the given benchmark command,
 parse the output, and return structured metric values.`,
 });
 const analyst = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a performance analyst. Given benchmark regressions,
 investigate root causes by inspecting recent changes, resource usage, or

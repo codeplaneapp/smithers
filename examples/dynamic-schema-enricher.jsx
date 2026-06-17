@@ -62,14 +62,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     typedOutput: typedOutputSchema,
 });
 const resolverAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a schema resolution specialist. Given a document's source, tenant, and family,
 determine the correct output schema to use. Look up tenant-specific field overrides, select the
 appropriate schema family, and return the full field specification with types and requirements.`,
 });
 const extractorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a structured data extractor. Given raw document content and a target schema
 specification, extract every field defined in the schema. Flag any required fields that are missing

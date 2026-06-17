@@ -45,13 +45,13 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const scanner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a thorough auditor. Scan systematically and categorize findings
 by severity. Don't miss anything but also don't over-report.`,
 });
 const investigator = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are a finding investigator. For each item, determine if it's a real
 issue or a false positive. Provide specific, actionable recommendations.`,

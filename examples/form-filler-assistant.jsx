@@ -67,21 +67,21 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     submission: submissionSchema,
 });
 const extractorAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a document field extractor. Given source documents and user input,
 identify all form-relevant fields you can extract with high confidence. Flag any required
 fields that are missing or ambiguous. Be precise about confidence scores.`,
 });
 const clarificationAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read },
     instructions: `You are a form-filling assistant that asks clear, concise follow-up questions
 to collect missing required fields. When the user provides answers, validate them against
 the expected format and merge them into the known field set.`,
 });
 const submissionAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, write },
     instructions: `You are a form submission agent. Given a validated payload and a target
 form or API endpoint, submit the data using the appropriate method. For APIs, use curl

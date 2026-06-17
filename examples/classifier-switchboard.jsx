@@ -62,13 +62,13 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     summary: summarySchema,
 });
 const intakeAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash },
     instructions: `You are an intake processor. Normalize incoming messages, tickets, and files
 into a structured format for classification. Extract key content and metadata.`,
 });
 const classifierAgent = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     instructions: `You are a classifier. Assign each item to exactly one domain: support, sales,
 security, or billing. Provide a confidence score and priority level.
 Be decisive — pick the single best domain even when items touch multiple areas.`,
@@ -78,7 +78,7 @@ Be decisive — pick the single best domain even when items touch multiple areas
  * @param {Record<string, any>} toolset
  */
 const makeDomainHandler = (role, toolset) => new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: toolset,
     instructions: `You are the ${role} handler. Process the routed item according to
 ${role} best practices. Resolve if possible, otherwise escalate with clear reasoning.`,

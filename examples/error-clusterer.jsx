@@ -75,7 +75,7 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     kbUpdate: kbUpdateSchema,
 });
 const ingester = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash, read, grep },
     instructions: `You are an error ingester. Read error logs from the provided sources
 (CI logs, API error endpoints, runtime crash reports). Normalize each error into a
@@ -83,14 +83,14 @@ canonical form with a stable fingerprint derived from the error message and stac
 Strip variable parts (timestamps, request IDs, line numbers) to produce consistent signatures.`,
 });
 const explainer = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep, bash },
     instructions: `You are an error analyst. For each error cluster, determine the root cause,
 suggest a remediation, and assign a severity. Reference existing documentation or runbooks
 when available. Be specific and actionable — vague advice like "check the logs" is not helpful.`,
 });
 const updater = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { write, bash },
     instructions: `You are a knowledge base maintainer. Write error explanations and remediation
 steps to the configured KB path as structured entries. Create ticket stubs for critical/high

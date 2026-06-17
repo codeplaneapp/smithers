@@ -51,14 +51,14 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     report: reportSchema,
 });
 const commandRunner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { bash },
     instructions: `You are a test runner. Execute the provided test command exactly as given.
 Capture stdout, stderr, exit code, and wall-clock duration. Parse the output to extract
 a short failure signature (the key error message or stack trace head). Do not modify the command.`,
 });
 const analyst = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, bash, grep },
     instructions: `You are a flake analyst. Examine the evidence from multiple test runs.
 Identify patterns in timing, error signatures, and environmental factors that explain

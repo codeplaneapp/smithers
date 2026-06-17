@@ -48,23 +48,23 @@ const { Workflow, Task, smithers, outputs } = createExampleSmithers({
     publish: publishSchema,
 });
 const outliner = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { read, grep },
     instructions: `You are a content strategist. Create detailed outlines with clear structure.
 Consider the target audience and purpose.`,
 });
 const drafter = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     instructions: `You are a technical writer. Write high-quality content from outlines.
 Follow the structure exactly. Be thorough but concise.`,
 });
 const editor = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     instructions: `You are an editor. Improve clarity, fix errors, tighten prose.
 Don't change the meaning or structure — just make it better.`,
 });
 const publisher = new Agent({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     tools: { write },
     instructions: `You are a publisher. Format content for the target medium and write it to a file.`,
 });
