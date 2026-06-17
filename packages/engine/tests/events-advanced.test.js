@@ -77,6 +77,20 @@ describe("EventBus", () => {
         expect(inserted).toHaveLength(1);
         expect(inserted[0].runId).toBe("seq-test");
     });
+    test("does not advance local seq when DB assigns event seq", async () => {
+        const inserted = [];
+        const mockDb = {
+            insertEventWithNextSeqEffect: (row) => {
+                inserted.push(row);
+                return Effect.void;
+            },
+        };
+        const bus = new EventBus({ db: mockDb, startSeq: 42 });
+        await Effect.runPromise(bus.emitEvent(makeEvent({ runId: "db-assigned-seq" })));
+        expect(inserted).toHaveLength(1);
+        expect(inserted[0].seq).toBeUndefined();
+        expect(bus.seq).toBe(42);
+    });
     test("works without DB (no persistence)", async () => {
         const bus = new EventBus({});
         const events = [];
