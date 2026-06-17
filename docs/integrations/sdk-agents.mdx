@@ -147,6 +147,25 @@ Limits:
 
 Pass a raw `ToolLoopAgent` directly if you prefer; the wrappers are convenience, not a separate runtime.
 
+## Transcription Tool
+
+Use `createTranscriptionTool` when an SDK agent needs to transcribe audio as part of its tool loop. The tool accepts either an `audioUrl` or `audioBase64` input and normalizes Whisper or Deepgram responses to `{ text, provider, language?, durationSeconds? }`.
+
+```ts
+import { AnthropicAgent, createTranscriptionTool } from "@smithers-orchestrator/agents";
+
+const transcribeAudio = createTranscriptionTool({
+  provider: "deepgram", // or "whisper"
+  apiKey: process.env.DEEPGRAM_API_KEY!,
+});
+
+const agent = new AnthropicAgent({
+  model: "claude-fable-5",
+  tools: { transcribeAudio },
+  instructions: "Transcribe audio clips and summarize the result.",
+});
+```
+
 ## Example: Dual Setup
 
 ```ts

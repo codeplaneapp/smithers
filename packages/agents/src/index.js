@@ -73,3 +73,4 @@ export { renderSmithersAgentPromptGuidance } from "./agent-contract/renderSmithe
 export { createImageGenerationTool } from "./image-generation/createImageGenerationTool.js";
 export { zodToOpenAISchema } from "./zodToOpenAISchema.js";
 export { sanitizeForOpenAI } from "./sanitizeForOpenAI.js";
+export { createTranscriptionTool } from "./transcription/createTranscriptionTool.js";
