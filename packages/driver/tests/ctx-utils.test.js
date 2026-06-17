@@ -786,4 +786,48 @@ describe("WorkflowDriver", () => {
     await expect(abortedDriver.executeTasks([{ nodeId: "never", iteration: 0 }]))
       .resolves.toEqual({ runId: "run-aborted", status: "cancelled" });
   });
+
+  test("reports scheduler wait only when waiting on pending tasks", async () => {
+    const waits = [];
+    const task = { nodeId: "task-1", iteration: 0 };
+    const driver = makeDriver({
+      onSchedulerWait: (durationMs, context) => waits.push({ durationMs, context }),
+      session: makeSession({
+        taskCompleted: () => ({ _tag: "Finished", result: { runId: "run-1", status: "finished" } }),
+      }),
+    });
+    driver.activeRunId = "run-1";
+    driver.activeOptions = { input: {} };
+    driver.settledTasks.push({
+      key: "task-1::0",
+      task,
+      kind: "completed",
+      output: "ready",
+    });
+
+    await driver.nextCompletionDecision();
+
+    expect(waits).toEqual([]);
+
+    let finishTask;
+    const pendingTask = { nodeId: "task-2", iteration: 0 };
+    driver.executeTask = () => new Promise((resolve) => {
+      finishTask = resolve;
+    });
+    driver.startInflightTask(pendingTask, {
+      runId: "run-1",
+      options: { input: {} },
+    });
+    const decisionPromise = driver.nextCompletionDecision();
+    await Promise.resolve();
+    finishTask("done");
+    await decisionPromise;
+
+    expect(waits).toHaveLength(1);
+    expect(waits[0].durationMs).toBeGreaterThan(0);
+    expect(waits[0].context).toEqual({
+      runId: "run-1",
+      tasks: [pendingTask],
+    });
+  });
 });
