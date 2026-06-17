@@ -61,15 +61,18 @@ bunx smithers-orchestrator diff <run-id> <node-id>    # a node's DiffBundle for 
 
 You don't have to hand-build the deck. The seeded **`report-slideshow`** workflow
 takes a run, reads its persisted state, and emits the self-contained HTML
-slideshow for you (it reuses the `capture:slideshow` renderer):
+slideshow for you:
 
 ```bash
-bunx smithers-orchestrator workflow run report-slideshow --input '{"runId":"<run-id>"}'
+bunx smithers-orchestrator workflow run report-slideshow --input '{"targetRunId":"<run-id>"}'
 ```
 
 Reach for it to bootstrap the report, then hand-tighten the decisions and
-next-run slides. The `context-engineer` flagship calls the same component as its
-`report` step, and `monitor-smithers` can attach one to its periodic digest.
+next-run slides. The workflow has its own deterministic `gather` step and
+agent-backed `render` step; `targetRunId` is the input name because `runId` is
+reserved for the report workflow's own run. For ongoing monitoring with an HTML
+report, use the separate `monitor` workflow. `monitor-smithers` is a fleet
+watchdog that emits a triage digest rather than attaching a slideshow.
 
 ## Progress is events, not "working on it"
 
