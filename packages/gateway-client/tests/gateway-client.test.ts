@@ -375,6 +375,7 @@ describe("SmithersGatewayClient WebSocket helpers", () => {
     ws.dispatchEvent(new Event("error"));
 
     await expect(pending).rejects.toThrow("Gateway WebSocket failed to open");
+    expect(ws.closeCalls).toBe(1);
   });
 
   test("aborts a pending WebSocket open and closes the socket", async () => {

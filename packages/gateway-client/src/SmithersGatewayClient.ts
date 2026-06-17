@@ -271,6 +271,7 @@ export class SmithersGatewayClient {
       };
       const onError = () => {
         cleanup();
+        ws.close();
         reject(new Error("Gateway WebSocket failed to open."));
       };
       const onAbort = () => {
