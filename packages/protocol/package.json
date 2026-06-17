@@ -6,7 +6,9 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./src/index.d.ts"
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
     },
     "./errors": {
       "types": "./src/index.d.ts",

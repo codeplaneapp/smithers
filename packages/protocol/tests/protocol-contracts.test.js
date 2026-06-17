@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DEVTOOLS_PROTOCOL_VERSION } from "../src/devtools.js";
 import {
   DEVTOOLS_ERROR_CODES,
@@ -7,11 +10,51 @@ import {
   NODE_OUTPUT_ERROR_CODES,
 } from "../src/errors/index.js";
 
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+
 function expectNoDuplicates(values) {
   expect(new Set(values).size).toBe(values.length);
 }
 
 describe("protocol runtime constants", () => {
+  test("package root exposes runtime constants", () => {
+    const result = spawnSync(
+      "node",
+      [
+        "--input-type=module",
+        "--eval",
+        `
+          import {
+            DEVTOOLS_ERROR_CODES,
+            DEVTOOLS_PROTOCOL_VERSION,
+            JUMP_TO_FRAME_ERROR_CODES,
+            NODE_DIFF_ERROR_CODES,
+            NODE_OUTPUT_ERROR_CODES,
+          } from "@smithers-orchestrator/protocol";
+
+          console.log(JSON.stringify({
+            DEVTOOLS_ERROR_CODES,
+            DEVTOOLS_PROTOCOL_VERSION,
+            JUMP_TO_FRAME_ERROR_CODES,
+            NODE_DIFF_ERROR_CODES,
+            NODE_OUTPUT_ERROR_CODES,
+          }));
+        `,
+      ],
+      { cwd: repoRoot, encoding: "utf8" },
+    );
+
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      DEVTOOLS_ERROR_CODES,
+      DEVTOOLS_PROTOCOL_VERSION,
+      JUMP_TO_FRAME_ERROR_CODES,
+      NODE_DIFF_ERROR_CODES,
+      NODE_OUTPUT_ERROR_CODES,
+    });
+  });
+
   test("devtools protocol version is the v1 wire contract", () => {
     expect(DEVTOOLS_PROTOCOL_VERSION).toBe(1);
   });
