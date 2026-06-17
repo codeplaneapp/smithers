@@ -50,7 +50,7 @@ export function useGatewayExtensionStream<T = unknown>(
   const [frames, setFrames] = useState<T[]>([]);
   const [latest, setLatest] = useState<T>();
   const [error, setError] = useState<Error>();
-  const [streaming, setStreaming] = useState(enabled);
+  const [streaming, setStreaming] = useState(false);
 
   useEffect(() => {
     if (!enabled || !namespace || !key) {
