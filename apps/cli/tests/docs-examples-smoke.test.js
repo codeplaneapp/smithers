@@ -62,6 +62,40 @@ const NON_STANDALONE_WORKFLOW_SNIPPETS = [
     "docs/guides/alerting.mdx#2",
     "docs/recipes.mdx#7",
 ];
+const CURRENT_MODEL_DOCS = {
+    "docs/examples/approval-gate.mdx": {
+        banned: ["claude-sonnet-4-5-20250929"],
+        required: ["claude-sonnet-4-6"],
+    },
+    "docs/examples/claude-plugin-orchestrator.mdx": {
+        banned: ["claude-sonnet-4-5-20250929"],
+        required: ["claude-sonnet-4-6"],
+    },
+    "docs/examples/dynamic-plan.mdx": {
+        banned: ["claude-sonnet-4-5-20250929"],
+        required: ["claude-sonnet-4-6"],
+    },
+    "docs/examples/loop.mdx": {
+        banned: ["claude-sonnet-4-5-20250929"],
+        required: ["claude-sonnet-4-6"],
+    },
+    "docs/examples/multi-agent-review.mdx": {
+        banned: ["claude-sonnet-4-5-20250929"],
+        required: ["claude-sonnet-4-6"],
+    },
+    "docs/examples/tools-agent.mdx": {
+        banned: ["claude-sonnet-4-5-20250929"],
+        required: ["claude-sonnet-4-6"],
+    },
+    "docs/examples/workflow-quickstart.mdx": {
+        banned: ["claude-sonnet-4-5-20250929"],
+        required: ["claude-sonnet-4-6"],
+    },
+    "docs/why/background-agents.mdx": {
+        banned: ["claude-opus-4-5"],
+        required: ["claude-opus-4-8"],
+    },
+};
 
 /**
  * @param {string} path
@@ -241,3 +275,15 @@ test("complete single-file workflow snippets in docs render as graphs", () => {
         .filter((label) => !allowedNonStandalone.has(label));
     expect(unclassified).toEqual([]);
 }, 120_000);
+
+test("agent-facing docs use current Claude model ids", () => {
+    for (const [file, expectations] of Object.entries(CURRENT_MODEL_DOCS)) {
+        const text = readFileSync(resolve(REPO_ROOT, file), "utf8");
+        for (const model of expectations.banned) {
+            expect(text.includes(model), `${file} should not include ${model}`).toBe(false);
+        }
+        for (const model of expectations.required) {
+            expect(text.includes(model), `${file} should include ${model}`).toBe(true);
+        }
+    }
+});
