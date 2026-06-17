@@ -1281,5 +1281,37 @@ type CliAgentSurfaceManifestEntry = CliAgentSurfaceManifestEntry$2;
 type CliAgentSurfaceOptionMapping = CliAgentSurfaceOptionMapping$1;
 type CliAgentSurfaceResumeContract = CliAgentSurfaceResumeContract$1;
 type CliAgentUnsupportedFlag = CliAgentUnsupportedFlag$1;
+type ImageGenerationRequest = {
+    prompt: string;
+    model?: string;
+    size?: string;
+    count?: number;
+    seed?: number;
+    style?: string;
+};
+type ImageGenerationResult = {
+    provider?: string;
+    model?: string;
+    images: Array<{
+        url?: string;
+        base64?: string;
+        mimeType?: string;
+        revisedPrompt?: string;
+    }>;
+};
+type ImageGenerationProvider = {
+    name?: string;
+    generateImage(request: ImageGenerationRequest): Promise<ImageGenerationResult> | ImageGenerationResult;
+};
+type ImageGenerationToolOptions = {
+    name?: string;
+    description?: string;
+    model?: string;
+    asToolset?: boolean;
+};
+declare function createImageGenerationTool(provider: ImageGenerationProvider, options: ImageGenerationToolOptions & {
+    asToolset: true;
+}): Record<string, ai.Tool>;
+declare function createImageGenerationTool(provider: ImageGenerationProvider, options?: ImageGenerationToolOptions): ai.Tool;
 
-export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, VibeAgent, type VibeAgentOptions, createAmpCapabilityRegistry, createAntigravityCapabilityRegistry, createForgeCapabilityRegistry, createSmithersAgentContract, createVibeCapabilityRegistry, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, VibeAgent, type VibeAgentOptions, createAmpCapabilityRegistry, createAntigravityCapabilityRegistry, createForgeCapabilityRegistry, createImageGenerationTool, createSmithersAgentContract, createVibeCapabilityRegistry, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
