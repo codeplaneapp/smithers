@@ -276,6 +276,8 @@ export class WorkflowDriver {
     baseOutputs = {};
     /** @type {Map<string, Promise<{ key: string; task: TaskDescriptor; kind: "completed" | "failed" | "cancelled"; output?: unknown; error?: unknown }>>} */
     inflightTasks = new Map();
+    /** @type {Map<string, TaskDescriptor>} */
+    inflightTaskDescriptors = new Map();
     /** @type {Array<{ key: string; task: TaskDescriptor; kind: "completed" | "failed" | "cancelled"; output?: unknown; error?: unknown }>} */
     settledTasks = [];
     /**
@@ -490,10 +492,12 @@ export class WorkflowDriver {
             }
         })().then((settled) => {
             this.inflightTasks.delete(key);
+            this.inflightTaskDescriptors.delete(key);
             this.settledTasks.push(settled);
             return settled;
         });
         this.inflightTasks.set(key, promise);
+        this.inflightTaskDescriptors.set(key, task);
     }
     /**
    * Wait for the next settled task (or an optional deadline) and report it to
@@ -506,9 +510,12 @@ export class WorkflowDriver {
         if (!this.session) {
             throw new Error("WorkflowSession is not initialized.");
         }
-        const waitStart = performance.now();
+        let waitedTasks = [];
+        let waitStart = 0;
         try {
             if (this.settledTasks.length === 0 && this.inflightTasks.size > 0) {
+                waitedTasks = [...this.inflightTaskDescriptors.values()];
+                waitStart = performance.now();
                 const racers = [...this.inflightTasks.values()];
                 if (deadlineMs != null) {
                     racers.push(sleepWithAbort(deadlineMs, this.activeOptions?.signal).then(() => null));
@@ -517,10 +524,12 @@ export class WorkflowDriver {
             }
         }
         finally {
-            await this.onSchedulerWait?.(performance.now() - waitStart, {
-                runId: this.activeRunId,
-                tasks: [],
-            });
+            if (waitedTasks.length > 0) {
+                await this.onSchedulerWait?.(performance.now() - waitStart, {
+                    runId: this.activeRunId,
+                    tasks: waitedTasks,
+                });
+            }
         }
         if (this.activeOptions?.signal?.aborted) {
             return this.cancelRun();
