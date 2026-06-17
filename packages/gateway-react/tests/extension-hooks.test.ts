@@ -247,4 +247,55 @@ describe("useGatewayExtensionStream", () => {
     expect(snapshot?.latest).toEqual({ line: 60 });
     await harness.unmount();
   });
+
+  test("surfaces a stream error, reconnects, and keeps subsequent frames", async () => {
+    const calls: Array<{ namespace: string; key: string; params: unknown }> = [];
+    const firstError = new Error("socket dropped");
+    async function* failingThenLive(namespace: string, key: string, params: unknown) {
+      calls.push({ namespace, key, params });
+      if (calls.length === 1) {
+        yield { seq: 1 };
+        throw firstError;
+      }
+      yield { seq: 2 };
+      await new Promise(() => {});
+    }
+    const client = {
+      streamExtension: failingThenLive,
+    } as unknown as SmithersGatewayClient;
+
+    let snapshot: ReturnType<typeof useGatewayExtensionStream<{ seq: number }>> | undefined;
+    function Probe() {
+      snapshot = useGatewayExtensionStream<{ seq: number }>(
+        "logs",
+        "tail",
+        { runId: "run-1" },
+        { backoff: { baseMs: 0, maxMs: 0, jitter: 0 } },
+      );
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(
+      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
+    );
+
+    for (let i = 0; i < 10 && calls.length < 2; i += 1) {
+      await act(async () => {
+        await Promise.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    expect(calls).toEqual([
+      { namespace: "logs", key: "tail", params: { runId: "run-1" } },
+      { namespace: "logs", key: "tail", params: { runId: "run-1" } },
+    ]);
+    expect(snapshot?.error).toBe(firstError);
+    expect(snapshot?.streaming).toBe(true);
+    expect(snapshot?.frames).toEqual([{ seq: 1 }, { seq: 2 }]);
+    expect(snapshot?.latest).toEqual({ seq: 2 });
+
+    await harness.unmount();
+  });
 });

@@ -23,9 +23,11 @@ import {
   createGatewayCollections,
   useGatewayApprovals,
   useGatewayConnectionStatus,
+  useGatewayMutation,
   useGatewayQuery,
   useGatewayRun,
   useGatewayRunEvents,
+  useGatewayRunStream,
   useGatewayRunTree,
   useGatewayRuns,
   useGatewayWorkflows,
@@ -286,6 +288,66 @@ describe("useSyncMutation optimistic + rollback", () => {
   });
 });
 
+describe("useGatewayMutation", () => {
+  test("runs the named gateway RPC and exposes success state", async () => {
+    const calls: Array<{ method: string; params: unknown }> = [];
+    const registry = createGatewayCollections({
+      client: makeTransport((method, params) => {
+        calls.push({ method, params });
+        return Promise.resolve({ runId: (params as { runId: string }).runId, accepted: true });
+      }).transport,
+    });
+
+    let mutation: ReturnType<typeof useGatewayMutation<{ runId: string }, { runId: string; accepted: boolean }>> | undefined;
+    function Probe() {
+      mutation = useGatewayMutation<{ runId: string }, { runId: string; accepted: boolean }>("approveRun");
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+
+    await act(async () => {
+      await mutation?.mutate({ runId: "run-1" });
+    });
+    await settle();
+
+    expect(calls).toEqual([{ method: "approveRun", params: { runId: "run-1" } }]);
+    expect(mutation?.status).toBe("success");
+    expect(mutation?.data).toEqual({ runId: "run-1", accepted: true });
+    expect(mutation?.error).toBeUndefined();
+
+    await harness.unmount();
+  });
+
+  test("surfaces gateway RPC errors through mutateSafe", async () => {
+    const registry = createGatewayCollections({
+      client: makeTransport(() => Promise.reject(new Error("approval denied"))).transport,
+    });
+
+    let mutation: ReturnType<typeof useGatewayMutation<{ runId: string }, { ok: boolean }>> | undefined;
+    function Probe() {
+      mutation = useGatewayMutation<{ runId: string }, { ok: boolean }>("approveRun");
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+
+    let result: { ok: boolean } | undefined;
+    await act(async () => {
+      result = await mutation?.mutateSafe({ runId: "run-1" });
+    });
+    await settle();
+
+    expect(result).toBeUndefined();
+    expect(mutation?.status).toBe("error");
+    expect(mutation?.error?.message).toBe("approval denied");
+
+    await harness.unmount();
+  });
+});
+
 describe("useSyncSubscription frames + backpressure", () => {
   test("frames pushed by the transport appear in the bounded buffer", async () => {
     const stream = makeTransport(() => Promise.reject(new Error("not used")));
@@ -364,6 +426,61 @@ describe("useSyncSubscription frames + backpressure", () => {
     await harness.render(provider(registry, createElement(Probe, { runId: "r2" })));
     await waitFor(() => result?.frames.length === 0);
     await waitFor(() => stream.opens.some((o) => String((o.params as { runId?: string }).runId) === "r2"));
+
+    await harness.unmount();
+  });
+});
+
+describe("useGatewayRunStream", () => {
+  test("subscribes to streamRunEvents for the provided run id", async () => {
+    const stream = makeTransport(() => Promise.reject(new Error("not used")));
+    const registry = createGatewayCollections({ client: stream.transport });
+
+    let result: ReturnType<typeof useGatewayRunStream> | undefined;
+    function Probe() {
+      result = useGatewayRunStream("run-1", { maxFrames: 2 });
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => stream.opens.length === 1);
+    expect(stream.opens[0]).toMatchObject({
+      scope: "streamRunEvents",
+      params: { runId: "run-1" },
+    });
+
+    await act(async () => {
+      stream.push("streamRunEvents", "run-1", { key: gatewayKeys.runEvents("run-1"), seq: 1, event: "run.event", payload: { seq: 1 } });
+      stream.push("streamRunEvents", "run-1", { key: gatewayKeys.runEvents("run-1"), seq: 2, event: "run.event", payload: { seq: 2 } });
+      stream.push("streamRunEvents", "run-1", { key: gatewayKeys.runEvents("run-1"), seq: 3, event: "run.event", payload: { seq: 3 } });
+    });
+    await waitFor(() => result?.last?.seq === 3);
+
+    expect(result?.frames.map((frame) => frame.seq)).toEqual([2, 3]);
+    expect(result?.dropped).toBeGreaterThanOrEqual(1);
+
+    await harness.unmount();
+  });
+
+  test("does not open a stream when no run id is provided", async () => {
+    const stream = makeTransport(() => Promise.reject(new Error("not used")));
+    const registry = createGatewayCollections({ client: stream.transport });
+
+    let result: ReturnType<typeof useGatewayRunStream> | undefined;
+    function Probe() {
+      result = useGatewayRunStream(undefined);
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await settle();
+
+    expect(stream.opens).toHaveLength(0);
+    expect(result?.frames).toEqual([]);
+    expect(result?.last).toBeUndefined();
+    expect(result?.dropped).toBe(0);
 
     await harness.unmount();
   });
