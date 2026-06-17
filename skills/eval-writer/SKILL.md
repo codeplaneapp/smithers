@@ -78,8 +78,8 @@ import { llmJudge } from "smithers-orchestrator/scorers";
 <Task id="draft" output={outputs.notes} agent={writer}
   scorers={{
     schema:    { scorer: schemaAdherenceScorer() },
-    grounded:  { scorer: faithfulnessScorer() },
-    onTopic:   { scorer: relevancyScorer() },
+    grounded:  { scorer: faithfulnessScorer(claude) },
+    onTopic:   { scorer: relevancyScorer(claude) },
     quality:   { scorer: llmJudge({
                    id: "completeness",
                    name: "Completeness",
@@ -98,7 +98,8 @@ import { llmJudge } from "smithers-orchestrator/scorers";
 (shape held), and `llmJudge(...)` (rubric-as-judge) are the workhorses. `llmJudge`
 takes `{ id, name, description, judge, instructions, promptTemplate }` — a `judge`
 agent and a `promptTemplate(input)` that asks for `{ score, reason }` JSON, **not**
-a `{ model, prompt }` pair. Sample expensive judges with
+a `{ model, prompt }` pair. `faithfulnessScorer(judge)` and
+`relevancyScorer(judge)` also require a judge agent. Sample expensive judges with
 `sampling: { type: "ratio", rate: 0.1 }`. Inspect:
 
 ```bash
