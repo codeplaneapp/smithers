@@ -89,6 +89,25 @@ describe("aggregateScores", () => {
         expect(result).toHaveLength(1);
         expect(result[0].scorerName).toBe("Latency");
     });
+    it("combines filters and escapes single quotes in SQL predicates", async () => {
+        const queries = [];
+        const mockAdapter = {
+            rawQuery: async (sql) => {
+                queries.push(sql);
+                return [];
+            },
+        };
+        await aggregateScores(mockAdapter, {
+            runId: "run-'quoted'",
+            nodeId: "node-1",
+            scorerId: "score-'id'",
+        });
+        expect(queries).toHaveLength(1);
+        expect(queries[0]).toContain("run_id = 'run-''quoted'''");
+        expect(queries[0]).toContain("node_id = 'node-1'");
+        expect(queries[0]).toContain("scorer_id = 'score-''id'''");
+        expect(queries[0]).toContain(" AND ");
+    });
     it("computes p50 (median) correctly", async () => {
         // Insert 5 scores: 0.1, 0.3, 0.5, 0.7, 0.9
         await insertScore({ score: 0.1 });
@@ -100,5 +119,49 @@ describe("aggregateScores", () => {
         expect(result).toHaveLength(1);
         // Median of [0.1, 0.3, 0.5, 0.7, 0.9] is 0.5
         expect(result[0].p50).toBeCloseTo(0.5, 1);
+    });
+    it("computes even-length p50 and stddev from score rows", async () => {
+        await insertScore({ score: 0.2 });
+        await insertScore({ score: 0.4 });
+        await insertScore({ score: 0.6 });
+        await insertScore({ score: 0.8 });
+        const result = await aggregateScores(adapter);
+        expect(result).toHaveLength(1);
+        expect(result[0].p50).toBeCloseTo(0.5, 5);
+        expect(result[0].stddev).toBeCloseTo(Math.sqrt(0.05), 5);
+    });
+    it("defaults nullable aggregate columns and missing score rows to zero", async () => {
+        let callCount = 0;
+        const mockAdapter = {
+            rawQuery: async () => {
+                callCount++;
+                if (callCount === 1) {
+                    return [
+                        {
+                            scorer_id: "nullable",
+                            scorer_name: "Nullable",
+                            cnt: 1,
+                            mean: null,
+                            min_score: null,
+                            max_score: null,
+                        },
+                    ];
+                }
+                return [];
+            },
+        };
+        const result = await aggregateScores(mockAdapter);
+        expect(result).toEqual([
+            {
+                scorerId: "nullable",
+                scorerName: "Nullable",
+                count: 1,
+                mean: 0,
+                min: 0,
+                max: 0,
+                p50: 0,
+                stddev: 0,
+            },
+        ]);
     });
 });

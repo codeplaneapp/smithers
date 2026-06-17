@@ -79,4 +79,18 @@ describe("llmJudge response parsing (regression: brace in reason)", () => {
         expect(result.score).toBe(0);
         expect(result.reason).toBe("Failed to parse judge response as JSON");
     });
+
+    test("valid top-level numeric JSON is used as the judge score", async () => {
+        const scorer = makeScorer("0.9");
+        const result = await scorer.score(input);
+        expect(result.score).toBe(0.9);
+        expect(result.reason).toBeUndefined();
+    });
+
+    test("valid top-level array JSON is parsed but has no judge score field", async () => {
+        const arrayScorer = makeScorer('[{"score": 0.9, "reason": "array wrapper"}]');
+        const arrayResult = await arrayScorer.score(input);
+        expect(arrayResult.score).toBe(0);
+        expect(arrayResult.reason).toBeUndefined();
+    });
 });

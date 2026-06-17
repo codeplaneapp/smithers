@@ -99,6 +99,40 @@ describe("llmJudge", () => {
         expect(result.score).toBe(0.7);
         expect(result.reason).toBe("OK");
     });
+    it("falls back to JSON.stringify for non-string non-text judge responses", async () => {
+        const mockAgent = {
+            generate: mock(async () => ({ score: 0.65, reason: "object body" })),
+        };
+        const scorer = llmJudge({
+            id: "object-judge",
+            name: "Object Judge",
+            description: "d",
+            judge: mockAgent,
+            instructions: "Judge.",
+            promptTemplate: ({ output }) => `Eval: ${String(output)}`,
+        });
+        const result = await scorer.score({ input: "", output: "test" });
+        expect(result.score).toBe(0.65);
+        expect(result.reason).toBe("object body");
+    });
+    it("returns 0 for non-numeric judge scores", async () => {
+        const mockAgent = {
+            generate: mock(async () => ({
+                text: '{ "score": "not a number", "reason": "bad score" }',
+            })),
+        };
+        const scorer = llmJudge({
+            id: "nan-judge",
+            name: "NaN Judge",
+            description: "d",
+            judge: mockAgent,
+            instructions: "Judge.",
+            promptTemplate: () => "eval",
+        });
+        const result = await scorer.score({ input: "", output: "" });
+        expect(result.score).toBe(0);
+        expect(result.reason).toBe("bad score");
+    });
     it("handles unparseable response gracefully", async () => {
         const mockAgent = {
             generate: mock(async () => ({

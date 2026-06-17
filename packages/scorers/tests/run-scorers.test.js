@@ -271,6 +271,74 @@ describe("runScorersBatch", () => {
             scorerId: "async-one",
         });
     });
+    it("runScorersAsync persists live rows through the adapter", async () => {
+        let resolvePersisted;
+        const persisted = new Promise((resolve) => {
+            resolvePersisted = resolve;
+        });
+        const adapter = {
+            rows: [],
+            insertScorerResult: mock((row) => {
+                adapter.rows.push(row);
+                resolvePersisted(row);
+                const { Effect } = require("effect");
+                return Effect.succeed(undefined);
+            }),
+        };
+        runScorersAsync(
+            {
+                asyncPersisted: {
+                    scorer: createScorer({
+                        id: "async-persisted",
+                        name: "Async Persisted",
+                        description: "d",
+                        score: async () => ({
+                            score: 0.42,
+                            reason: "stored",
+                            meta: { mode: "async" },
+                        }),
+                    }),
+                },
+            },
+            makeContext(),
+            adapter,
+        );
+        await expect(persisted).resolves.toMatchObject({
+            runId: "run-1",
+            nodeId: "task-1",
+            scorerId: "async-persisted",
+            scorerName: "Async Persisted",
+            source: "live",
+            score: 0.42,
+            reason: "stored",
+        });
+        expect(adapter.insertScorerResult).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(adapter.rows[0].metaJson)).toEqual({ mode: "async" });
+    });
+    it("runScorersAsync handles persistence failures without throwing synchronously", async () => {
+        const { Effect } = require("effect");
+        const adapter = {
+            insertScorerResult: mock(() =>
+                Effect.fail(new Error("persist failed")),
+            ),
+        };
+        expect(() =>
+            runScorersAsync(
+                {
+                    asyncFailure: {
+                        scorer: createScorer({
+                            id: "async-failure",
+                            name: "Async Failure",
+                            description: "d",
+                            score: async () => ({ score: 0.3 }),
+                        }),
+                    },
+                },
+                makeContext(),
+                adapter,
+            ),
+        ).not.toThrow();
+    });
     it("passes correct scorer input fields", async () => {
         let receivedInput;
         const scorers = {
