@@ -44,6 +44,10 @@ export function validateForkSources(tasks) {
     // fork edge. Used only for cycle detection.
     /** @type {Map<string, Set<string>>} */
     const adjacency = new Map();
+    /**
+     * @param {string} from
+     * @param {string} to
+     */
     const addEdge = (from, to) => {
         const cleanedFrom = logicalId(from);
         const cleanedTo = logicalId(to);
