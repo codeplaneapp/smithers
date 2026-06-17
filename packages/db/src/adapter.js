@@ -325,23 +325,6 @@ function isAlertActiveStatus(status) {
     return status !== undefined && status !== null && ACTIVE_ALERT_STATUSES.has(status);
 }
 /**
- * Returns the row unchanged. Historically this helper relabeled
- * stale-heartbeat "running" rows as "continued", which is wrong: "continued"
- * is reserved for runs that successfully forked into a new run, and
- * `deriveRunState` then maps "continued" → "succeeded" — so a dead workflow
- * was being reported as a success. Heartbeat-based classification now lives
- * exclusively in `deriveRunState`, which correctly returns "stale" or
- * "orphaned". This shim is kept so the `listRuns` / `getRun` call sites
- * continue to compile; remove it once they call `deriveRunState` directly.
- *
- * @template T
- * @param {T} row
- * @returns {T}
- */
-function classifyRunRowStatus(row) {
-    return row;
-}
-/**
  * @template A, E
  * @param {Effect.Effect<A, E>} effect
  * @returns {RunnableEffect<A, E>}
@@ -899,11 +882,10 @@ export class SmithersDb {
    */
     getRun(runId) {
         return this.read(`get run ${runId}`, async () => {
-            const row = await this.internalStorage.queryOne(`SELECT *
+            return this.internalStorage.queryOne(`SELECT *
          FROM _smithers_runs
          WHERE run_id = ?
          LIMIT 1`, [runId]);
-            return row ? classifyRunRowStatus(row) : undefined;
         });
     }
     /**
@@ -962,7 +944,7 @@ export class SmithersDb {
          ${whereSql}
          ORDER BY created_at_ms DESC
          LIMIT ?`, [...params, limit]);
-            return rows.map((row) => classifyRunRowStatus(row));
+            return rows;
         });
     }
     /**
