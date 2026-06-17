@@ -124,6 +124,25 @@ function extractTaskInfo(fiber) {
     };
 }
 /**
+ * @param {Fiber | null} fiber
+ * @param {number} depth
+ * @param {DevToolsNode[]} out
+ * @returns {void}
+ */
+function collectSmithersDescendants(fiber, depth, out) {
+    let child = fiber;
+    while (child) {
+        const childNode = fiberToNode(child, depth);
+        if (childNode) {
+            out.push(childNode);
+        }
+        else {
+            collectSmithersDescendants(child.child, depth, out);
+        }
+        child = child.sibling;
+    }
+}
+/**
  * @param {Fiber} fiber
  * @param {number} depth
  * @returns {DevToolsNode | null}
@@ -134,24 +153,7 @@ function fiberToNode(fiber, depth) {
         return null;
     const id = getFiberId(fiber) ?? setFiberId(fiber);
     const children = [];
-    let child = fiber.child;
-    while (child) {
-        const childNode = fiberToNode(child, depth + 1);
-        if (childNode) {
-            children.push(childNode);
-        }
-        else {
-            // Recurse through non-Smithers fibers to find nested Smithers nodes.
-            let grandchild = child.child;
-            while (grandchild) {
-                const gc = fiberToNode(grandchild, depth + 1);
-                if (gc)
-                    children.push(gc);
-                grandchild = grandchild.sibling;
-            }
-        }
-        child = child.sibling;
-    }
+    collectSmithersDescendants(fiber.child, depth + 1, children);
     return {
         id,
         type: nodeType,
