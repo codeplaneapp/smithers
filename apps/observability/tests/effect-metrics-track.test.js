@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { trackEvent } from "@smithers-orchestrator/observability/metrics";
+import { metricsServiceAdapter, trackEvent } from "@smithers-orchestrator/observability/metrics";
 // trackEvent returns an Effect — we test that it produces an Effect for each event type
 // without throwing, and that the returned effect is well-formed.
 /**
@@ -9,7 +9,152 @@ import { trackEvent } from "@smithers-orchestrator/observability/metrics";
 function runTrack(event) {
     return Effect.runPromise(trackEvent(event));
 }
+function snapshotMetrics() {
+    return Effect.runPromise(metricsServiceAdapter.snapshot());
+}
+/**
+ * @param {Record<string, string>} labels
+ */
+function metricLabelsKey(labels) {
+    return JSON.stringify(Object.entries(labels).sort(([left], [right]) => left.localeCompare(right)));
+}
+/**
+ * @param {string} name
+ * @param {Record<string, string>} [labels]
+ */
+function metricSnapshotKey(name, labels = {}) {
+    return `${name}|${metricLabelsKey(labels)}`;
+}
+/**
+ * @param {Map<string, any>} before
+ * @param {Map<string, any>} after
+ * @param {string} name
+ * @param {Record<string, string>} [labels]
+ */
+function metricValueDelta(before, after, name, labels = {}) {
+    const key = metricSnapshotKey(name, labels);
+    return (after.get(key)?.value ?? 0) - (before.get(key)?.value ?? 0);
+}
+/**
+ * @param {Map<string, any>} before
+ * @param {Map<string, any>} after
+ * @param {string} name
+ * @param {Record<string, string>} [labels]
+ */
+function histogramDelta(before, after, name, labels = {}) {
+    const key = metricSnapshotKey(name, labels);
+    return {
+        count: (after.get(key)?.count ?? 0) - (before.get(key)?.count ?? 0),
+        sum: (after.get(key)?.sum ?? 0) - (before.get(key)?.sum ?? 0),
+    };
+}
 describe("trackEvent", () => {
+    test("emits run lifecycle counter and active-run gauge values", async () => {
+        const before = await snapshotMetrics();
+        await runTrack({
+            type: "RunStarted",
+            runId: "run-metrics-1",
+            timestampMs: Date.now(),
+        });
+        const afterStarted = await snapshotMetrics();
+        expect(metricValueDelta(before, afterStarted, "smithers.events.emitted_total")).toBe(1);
+        expect(metricValueDelta(before, afterStarted, "smithers.runs.total")).toBe(1);
+        expect(metricValueDelta(before, afterStarted, "smithers.runs.active")).toBe(1);
+        await runTrack({
+            type: "RunFinished",
+            runId: "run-metrics-1",
+            timestampMs: Date.now(),
+        });
+        const afterFinished = await snapshotMetrics();
+        expect(metricValueDelta(afterStarted, afterFinished, "smithers.events.emitted_total")).toBe(1);
+        expect(metricValueDelta(afterStarted, afterFinished, "smithers.runs.finished_total")).toBe(1);
+        expect(metricValueDelta(afterStarted, afterFinished, "smithers.runs.active")).toBe(-1);
+    });
+    test("emits token metrics with model, agent, and context bucket labels", async () => {
+        const labels = { agent: "claude-code", model: "claude-sonnet-4-20250514" };
+        const before = await snapshotMetrics();
+        await runTrack({
+            type: "TokenUsageReported",
+            runId: "run-token-metrics",
+            nodeId: "node-token-metrics",
+            model: labels.model,
+            agent: labels.agent,
+            inputTokens: 125_000,
+            outputTokens: 7_500,
+            cacheReadTokens: 2_000,
+            cacheWriteTokens: 1_000,
+            reasoningTokens: 500,
+            timestampMs: Date.now(),
+        });
+        const after = await snapshotMetrics();
+        expect(metricValueDelta(before, after, "smithers.events.emitted_total")).toBe(1);
+        expect(metricValueDelta(before, after, "smithers.tokens.input_total", labels)).toBe(125_000);
+        expect(metricValueDelta(before, after, "smithers.tokens.output_total", labels)).toBe(7_500);
+        expect(metricValueDelta(before, after, "smithers.tokens.cache_read_total", labels)).toBe(2_000);
+        expect(metricValueDelta(before, after, "smithers.tokens.cache_write_total", labels)).toBe(1_000);
+        expect(metricValueDelta(before, after, "smithers.tokens.reasoning_total", labels)).toBe(500);
+        expect(histogramDelta(before, after, "smithers.tokens.input_per_call", labels)).toEqual({ count: 1, sum: 125_000 });
+        expect(histogramDelta(before, after, "smithers.tokens.output_per_call", labels)).toEqual({ count: 1, sum: 7_500 });
+        expect(histogramDelta(before, after, "smithers.tokens.context_window_per_call", labels)).toEqual({ count: 1, sum: 125_000 });
+        expect(metricValueDelta(before, after, "smithers.tokens.context_window_bucket_total", {
+            ...labels,
+            bucket: "gte_100k_lt_200k",
+        })).toBe(1);
+    });
+    test("emits OpenAPI tool count, error count, and duration values", async () => {
+        const before = await snapshotMetrics();
+        await runTrack({
+            type: "OpenApiToolCalled",
+            runId: "run-openapi-metrics",
+            toolName: "get-user",
+            status: "error",
+            durationMs: 123,
+            timestampMs: Date.now(),
+        });
+        const after = await snapshotMetrics();
+        expect(metricValueDelta(before, after, "smithers.events.emitted_total")).toBe(1);
+        expect(metricValueDelta(before, after, "smithers.openapi.tool_calls")).toBe(1);
+        expect(metricValueDelta(before, after, "smithers.openapi.tool_call_errors")).toBe(1);
+        expect(histogramDelta(before, after, "smithers.openapi.tool_duration_ms")).toEqual({ count: 1, sum: 123 });
+    });
+    test("emits agent action metrics with bounded labels", async () => {
+        const before = await snapshotMetrics();
+        await runTrack({
+            type: "AgentEvent",
+            runId: "run-agent-metrics",
+            engine: "codex",
+            event: {
+                type: "action",
+                engine: "codex-cli",
+                action: {
+                    kind: "tool_call",
+                    title: "Read file",
+                },
+                level: "info",
+                phase: "running",
+                entryType: "tool",
+                ok: true,
+                timestampMs: Date.now(),
+            },
+            timestampMs: Date.now(),
+        });
+        const after = await snapshotMetrics();
+        expect(metricValueDelta(before, after, "smithers.events.emitted_total")).toBe(1);
+        expect(metricValueDelta(before, after, "smithers.agent_events_total", {
+            engine: "codex-cli",
+            event_type: "action",
+            source: "event",
+        })).toBe(1);
+        expect(metricValueDelta(before, after, "smithers.agent_actions_total", {
+            action_kind: "tool_call",
+            engine: "codex-cli",
+            entry_type: "tool",
+            level: "info",
+            ok: "true",
+            phase: "running",
+            source: "event",
+        })).toBe(1);
+    });
     test("handles SupervisorStarted event", async () => {
         await runTrack({
             type: "SupervisorStarted",
