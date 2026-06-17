@@ -89,6 +89,8 @@ store.setUsageLimit({
   period: "monthly",
   limitQuantity: 10_000_000,
 });
+// period must be "daily", "weekly", or "monthly"; checkUsageLimit uses it
+// as the default rolling window when sinceMs is omitted.
 
 // Optional: register a SAML or OIDC provider for the org.
 store.upsertIdentityProvider({
