@@ -226,6 +226,16 @@ test("OpenAPI docs cover current tool option names", () => {
     expect(docs).not.toContain("basicAuth");
 });
 
+test("OpenAPI docs document current package limitations", () => {
+    const docs = readRepoFile("docs/concepts/openapi-tools.mdx");
+
+    expect(docs).toContain("## Notes / Limitations");
+    expect(docs).toContain("Cookie parameters");
+    expect(docs).toContain("JSON request bodies");
+    expect(docs).toContain("Parameter serialization styles");
+    expect(docs).toContain("Swagger 2.0");
+});
+
 test("memory docs cover current MemoryStore method names", () => {
     const memoryStoreSource = readRepoFile("packages/memory/src/store/MemoryStore.ts");
     const docs = `${readRepoFile("docs/concepts/memory.mdx")}\n${readRepoFile("docs/reference/types.mdx")}`;

@@ -87,10 +87,14 @@ For each operation:
 
 OpenAPI tool calls update the exported Effect metrics (`openApiToolCallsTotal`, `openApiToolCallErrorsTotal`, `openApiToolDuration`) and carry Effect log annotations/spans with the operation id, method, and path. The current tool factory does not emit `OpenApiToolCalled` onto the Smithers run event bus; that event variant is typed/categorized for future event-bus integration.
 
-## Notes
+## Notes / Limitations
 
 - Schema composition (`allOf`, `anyOf`, `oneOf`) is supported; converts to Zod unions/intersections.
 - Nullable fields and defaults from the spec are preserved.
+- Cookie parameters are ignored when generating tool input schemas and requests.
+- JSON request bodies are the only request body media type generated today; non-JSON bodies such as form data, multipart uploads, and binary payloads are not encoded.
+- Parameter serialization styles are not implemented. Path parameters are URL-encoded and substituted directly, and query parameters are sent with default `URLSearchParams` serialization.
+- Swagger 2.0 objects are not supported as a first-class input format. Use OpenAPI 3.x specs with `openapi`, `paths`, and `info` fields.
 
 ---
 
