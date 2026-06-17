@@ -42,7 +42,7 @@ function snapshotRows(payload: unknown): GatewayRunNode[] {
   );
 }
 
-function eventRows(frame: { key: readonly unknown[]; seq?: number; event: string; payload: unknown }): GatewayRunEventRow[] {
+export function eventRows(frame: { key: readonly unknown[]; seq?: number; event: string; payload: unknown }): GatewayRunEventRow[] {
   if (typeof frame.seq !== "number") return [];
   return [{
     key: frame.key as GatewayRunEventRow["key"],
@@ -52,7 +52,7 @@ function eventRows(frame: { key: readonly unknown[]; seq?: number; event: string
   }];
 }
 
-function runStatusFromFrame(frame: { payload: unknown }): string | undefined {
+export function runStatusFromFrame(frame: { payload: unknown }): string | undefined {
   const payload = asRecord(frame.payload);
   const innerEvent = asString(payload.event);
   if (!innerEvent) return undefined;
@@ -77,7 +77,7 @@ function withoutVirtualFields<TRow extends Record<string, unknown>>(row: TRow): 
   return out as TRow;
 }
 
-function runRowsFromFrame(runId: string) {
+export function runRowsFromFrame(runId: string) {
   return (frame: { payload: unknown }, { collection }: { collection: Collection<GatewayRunRow, string> }) => {
     const status = runStatusFromFrame(frame);
     const current = collection.get(runId);
