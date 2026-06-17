@@ -1766,6 +1766,7 @@ function checkControlPlaneDocsMatchStoreApi() {
     [CONTROL_PLANE_GUIDE, 'import { ControlPlaneStore } from "@smithers-orchestrator/control-plane";'],
     [CONTROL_PLANE_GUIDE, "Constructing `new ControlPlaneStore(sqlite)` calls `ensureControlPlaneTables(sqlite)`."],
     [CONTROL_PLANE_GUIDE, "`checkUsageLimit()` | Return the matching limit plus `usedQuantity`, `remainingQuantity`, and `exceeded`, or `null` when no limit is configured."],
+    [CONTROL_PLANE_GUIDE, "`period` is a label used to match a configured limit; `checkUsageLimit()` does not reset usage automatically for calendar periods."],
     [CONTROL_PLANE_GUIDE, "{ usedQuantity, remainingQuantity, exceeded, limitQuantity, ...limitMetadata }"],
   ];
   const forbidden = [
