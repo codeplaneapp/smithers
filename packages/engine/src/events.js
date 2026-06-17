@@ -133,16 +133,16 @@ export class EventBus extends EventEmitter {
             type: event.type,
             payloadJson,
         };
-        const eventRow = {
-            ...nextSeqRow,
-            seq: this.seq++,
-        };
         if (typeof this.db.insertEventWithNextSeqEffect === "function") {
             return this.callDbPersistence(`insert event ${event.type}`, this.db.insertEventWithNextSeqEffect, nextSeqRow);
         }
         if (typeof this.db.insertEventWithNextSeq === "function") {
             return this.callDbPersistence(`insert event ${event.type}`, this.db.insertEventWithNextSeq, nextSeqRow);
         }
+        const eventRow = {
+            ...nextSeqRow,
+            seq: this.seq++,
+        };
         if (typeof this.db.insertEventEffect === "function") {
             return this.callDbPersistence(`insert event ${event.type}`, this.db.insertEventEffect, eventRow);
         }
