@@ -14,6 +14,8 @@
 // @smithers-type-exports-end
 
 import * as Command from "@effect/platform/Command";
+import * as fs from "node:fs";
+import * as nodePath from "node:path";
 import { Duration, Effect, Fiber, Metric, Stream } from "effect";
 import { vcsDuration } from "@smithers-orchestrator/observability/metrics";
 import { resolveJjBinary } from "./resolveJjBinary.js";
@@ -194,8 +196,6 @@ export function workspaceAdd(name, path, opts = {}) {
             yield* runJj(["workspace", "forget", name], { cwd: opts.cwd });
         }
         try {
-            const fs = require("node:fs");
-            const nodePath = require("node:path");
             if (fs.existsSync(path)) {
                 fs.rmSync(path, { recursive: true, force: true });
             }

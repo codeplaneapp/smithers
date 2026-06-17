@@ -154,6 +154,11 @@ exit 1
     });
 });
 describe("workspaceAdd", () => {
+    test("does not use CommonJS require in the ESM cleanup path", async () => {
+        const source = await fs.readFile(new URL("../src/jj.js", import.meta.url), "utf8");
+        expect(source).not.toMatch(/\brequire\(/);
+    });
+
     test("uses primary syntax: path then --name", async () => {
         const script = `
 if [[ "$1" = "workspace" && "$2" = "add" && "$4" = "--name" && "$6" = "-r" ]]; then
