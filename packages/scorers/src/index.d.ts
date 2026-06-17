@@ -2,6 +2,7 @@ import * as _smithers_agents_AgentLike from '@smithers-orchestrator/agents/Agent
 import { AgentLike as AgentLike$3 } from '@smithers-orchestrator/agents/AgentLike';
 import { ZodObject } from 'zod';
 import * as _smithers_db_adapter from '@smithers-orchestrator/db/adapter';
+import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
 import * as effect_MetricState from 'effect/MetricState';
 import * as effect_MetricKeyType from 'effect/MetricKeyType';
 import { Metric } from 'effect';
@@ -156,7 +157,46 @@ type SmithersDb$1 = _smithers_db_adapter.SmithersDb;
  * Drizzle table definition for the `_smithers_scorers` table.
  * Stores individual scorer results for each task execution.
  */
-declare const smithersScorers: any;
+type SmithersScorerColumn<Name extends string, Data, NotNull extends boolean, HasDefault extends boolean, PrimaryKey extends boolean, ColumnType extends string, DataType extends "string" | "number"> = drizzle_orm_sqlite_core.SQLiteColumn<{
+    name: Name;
+    tableName: "_smithers_scorers";
+    dataType: DataType;
+    columnType: ColumnType;
+    data: Data;
+    driverParam: Data;
+    notNull: NotNull;
+    hasDefault: HasDefault;
+    isPrimaryKey: PrimaryKey;
+    isAutoincrement: false;
+    hasRuntimeDefault: false;
+    enumValues: DataType extends "string" ? [string, ...string[]] : undefined;
+    baseColumn: never;
+    identity: undefined;
+    generated: undefined;
+}, {}, {}>;
+declare const smithersScorers: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
+    name: "_smithers_scorers";
+    schema: undefined;
+    columns: {
+        id: SmithersScorerColumn<"id", string, true, false, true, "SQLiteText", "string">;
+        runId: SmithersScorerColumn<"run_id", string, true, false, false, "SQLiteText", "string">;
+        nodeId: SmithersScorerColumn<"node_id", string, true, false, false, "SQLiteText", "string">;
+        iteration: SmithersScorerColumn<"iteration", number, true, true, false, "SQLiteInteger", "number">;
+        attempt: SmithersScorerColumn<"attempt", number, true, true, false, "SQLiteInteger", "number">;
+        scorerId: SmithersScorerColumn<"scorer_id", string, true, false, false, "SQLiteText", "string">;
+        scorerName: SmithersScorerColumn<"scorer_name", string, true, false, false, "SQLiteText", "string">;
+        source: SmithersScorerColumn<"source", string, true, false, false, "SQLiteText", "string">;
+        score: SmithersScorerColumn<"score", number, true, false, false, "SQLiteReal", "number">;
+        reason: SmithersScorerColumn<"reason", string, false, false, false, "SQLiteText", "string">;
+        metaJson: SmithersScorerColumn<"meta_json", string, false, false, false, "SQLiteText", "string">;
+        inputJson: SmithersScorerColumn<"input_json", string, false, false, false, "SQLiteText", "string">;
+        outputJson: SmithersScorerColumn<"output_json", string, false, false, false, "SQLiteText", "string">;
+        latencyMs: SmithersScorerColumn<"latency_ms", number, false, false, false, "SQLiteReal", "number">;
+        scoredAtMs: SmithersScorerColumn<"scored_at_ms", number, true, false, false, "SQLiteInteger", "number">;
+        durationMs: SmithersScorerColumn<"duration_ms", number, false, false, false, "SQLiteReal", "number">;
+    };
+    dialect: "sqlite";
+}>;
 
 /** @typedef {import("./CreateScorerConfig.js").CreateScorerConfig} CreateScorerConfig */
 /** @typedef {import("./types.js").Scorer} Scorer */
