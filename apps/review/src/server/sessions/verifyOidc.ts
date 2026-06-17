@@ -101,7 +101,7 @@ export async function verifyOidc(
   if (header.alg !== "RS256") return { ok: false, reason: "unsupported-alg" };
 
   const keys = await fetchJwks(jwksUrl, now, fetchImpl);
-  const match = keys.find((k) => k.kid === header.kid) ?? (keys.length === 1 ? keys[0] : undefined);
+  const match = keys.find((k) => k.kid === header.kid);
   if (!match) return { ok: false, reason: "unknown-key" };
 
   const key = await importJwk(match);
