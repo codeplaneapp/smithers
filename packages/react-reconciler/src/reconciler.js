@@ -396,6 +396,7 @@ const hostConfig = {
     },
     noTimeout: -1,
 };
+export const __testingHostConfig = hostConfig;
 /** @type {ReconcilerInstance} */
 const reconciler = /** @type {ReconcilerInstance} */ (Reconciler(hostConfig));
 const hookHost = globalThis;
