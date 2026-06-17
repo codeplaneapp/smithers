@@ -106,6 +106,7 @@ describe("ControlPlaneStore", () => {
         metric: "agent_runtime_ms",
         unit: "ms",
         period: "monthly",
+        untilMs: 80,
       })).toMatchObject({
         limitQuantity: 250,
         usedQuantity: 200,
@@ -240,12 +241,12 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
       store.recordUsage({ orgId: "org_limits", projectId: "project_one", metric: "runs", quantity: 2, unit: "count", observedAtMs: 6 });
       store.recordUsage({ orgId: "org_limits", projectId: "project_two", metric: "runs", quantity: 1, unit: "count", observedAtMs: 7 });
 
-      expect(store.checkUsageLimit({ orgId: "org_limits", metric: "runs", unit: "count", period: "daily" })).toMatchObject({
+      expect(store.checkUsageLimit({ orgId: "org_limits", metric: "runs", unit: "count", period: "daily", untilMs: 7 })).toMatchObject({
         usedQuantity: 3,
         remainingQuantity: 0,
         exceeded: false,
       });
-      expect(store.checkUsageLimit({ orgId: "org_limits", projectId: "project_one", metric: "runs", unit: "count", period: "daily" })).toMatchObject({
+      expect(store.checkUsageLimit({ orgId: "org_limits", projectId: "project_one", metric: "runs", unit: "count", period: "daily", untilMs: 7 })).toMatchObject({
         usedQuantity: 2,
         remainingQuantity: 0,
         exceeded: true,
@@ -253,6 +254,32 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
       expect(() =>
         store.setUsageLimit({ orgId: "org_limits", projectId: "project_missing", metric: "runs", limitQuantity: 1 }),
       ).toThrow("Control-plane project not found");
+    }
+    finally {
+      sqlite.close();
+    }
+  });
+
+  test("usage limit periods are validated and define default quota windows", () => {
+    const { sqlite, store } = makeStore();
+    try {
+      store.createOrg({ orgId: "org_periods", slug: "periods", name: "Periods", createdAtMs: 1 });
+      expect(() =>
+        store.setUsageLimit({ orgId: "org_periods", metric: "runs", period: "forever", limitQuantity: 10, updatedAtMs: 2 }),
+      ).toThrow("period must be one of");
+
+      store.setUsageLimit({ orgId: "org_periods", metric: "runs", period: "monthly", limitQuantity: 10, updatedAtMs: 3 });
+      store.recordUsage({ orgId: "org_periods", metric: "runs", quantity: 8, observedAtMs: 1_000 });
+      store.recordUsage({ orgId: "org_periods", metric: "runs", quantity: 3, observedAtMs: 2_678_400_000 });
+
+      expect(store.checkUsageLimit({ orgId: "org_periods", metric: "runs", period: "monthly", untilMs: 2_678_400_000 })).toMatchObject({
+        usedQuantity: 3,
+        remainingQuantity: 7,
+        exceeded: false,
+      });
+      expect(() =>
+        store.checkUsageLimit({ orgId: "org_periods", metric: "runs", period: "forever" }),
+      ).toThrow("period must be one of");
     }
     finally {
       sqlite.close();

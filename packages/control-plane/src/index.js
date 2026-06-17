@@ -19,6 +19,11 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
 const SLUG_RE = /^(?:[a-z0-9]|[a-z0-9][a-z0-9-]{0,62}[a-z0-9])$/;
 const ID_RE = /^[A-Za-z0-9:_-]{1,128}$/;
+const USAGE_LIMIT_PERIODS = new Map([
+    ["daily", 24 * 60 * 60 * 1000],
+    ["weekly", 7 * 24 * 60 * 60 * 1000],
+    ["monthly", 30 * 24 * 60 * 60 * 1000],
+]);
 
 /**
  * @param {ControlPlaneSqlite} sqlite
@@ -312,6 +317,17 @@ function quantity(value) {
 }
 
 /**
+ * @param {unknown} value
+ */
+function usageLimitPeriod(value) {
+    const period = nonEmptyString("period", value);
+    if (!USAGE_LIMIT_PERIODS.has(period)) {
+        throw new SmithersError("INVALID_INPUT", "period must be one of: daily, weekly, monthly.", { period });
+    }
+    return period;
+}
+
+/**
  * @param {string | null} projectId
  */
 function projectKey(projectId) {
@@ -421,7 +437,7 @@ function usageLimitRow(row) {
         projectId: row.projectId === null ? null : String(row.projectId),
         metric: String(row.metric),
         unit: String(row.unit),
-        period: String(row.period),
+        period: usageLimitPeriod(row.period),
         limitQuantity: Number(row.limitQuantity),
         updatedAtMs: Number(row.updatedAtMs),
     };
@@ -816,7 +832,7 @@ ORDER BY metric, unit
         }
         const metric = nonEmptyString("metric", input.metric);
         const unit = nonEmptyString("unit", input.unit ?? "count");
-        const period = nonEmptyString("period", input.period ?? "monthly");
+        const period = usageLimitPeriod(input.period ?? "monthly");
         const limitValue = quantity(input.limitQuantity);
         const updatedAtMs = timestamp(input.updatedAtMs);
         this.sqlite.query(`
@@ -854,7 +870,7 @@ LIMIT 1
         const projectId = input.projectId ? requiredId("projectId", input.projectId) : null;
         const metric = nonEmptyString("metric", input.metric);
         const unit = nonEmptyString("unit", input.unit ?? "count");
-        const period = nonEmptyString("period", input.period ?? "monthly");
+        const period = usageLimitPeriod(input.period ?? "monthly");
         const limitRowRaw = this.sqlite.query(`
 SELECT org_id AS orgId, project_id AS projectId, metric, unit, period, limit_quantity AS limitQuantity, updated_at_ms AS updatedAtMs
 FROM _smithers_cp_usage_limits
@@ -864,8 +880,9 @@ LIMIT 1
         if (!limitRowRaw) {
             return null;
         }
-        const sinceMs = input.sinceMs === undefined ? 0 : timestamp(input.sinceMs);
-        const untilMs = input.untilMs === undefined ? Number.MAX_SAFE_INTEGER : timestamp(input.untilMs);
+        const untilMs = input.untilMs === undefined ? timestamp(undefined) : timestamp(input.untilMs);
+        const periodMs = USAGE_LIMIT_PERIODS.get(period) ?? 0;
+        const sinceMs = input.sinceMs === undefined ? Math.max(0, untilMs - periodMs) : timestamp(input.sinceMs);
         const usageSql = projectId
             ? `
 SELECT COALESCE(SUM(quantity), 0) AS usedQuantity

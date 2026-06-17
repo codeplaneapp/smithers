@@ -66,12 +66,14 @@ type ControlPlaneUsageEvent = {
   metadata: Record<string, unknown>;
 };
 
+type ControlPlaneUsageLimitPeriod = 'daily' | 'weekly' | 'monthly';
+
 type ControlPlaneUsageLimit = {
   orgId: string;
   projectId: string | null;
   metric: string;
   unit: string;
-  period: string;
+  period: ControlPlaneUsageLimitPeriod;
   limitQuantity: number;
   updatedAtMs: number;
 };
@@ -141,12 +143,12 @@ declare class ControlPlaneStore {
   listIdentityProviders(input: { orgId: string; status?: string }): ControlPlaneIdentityProvider[];
   recordUsage(input: { orgId: string; projectId?: string | null; runId?: string | null; metric: string; quantity: number; unit?: string; observedAtMs?: number; metadata?: Record<string, unknown> }): ControlPlaneUsageEvent;
   summarizeUsage(input: { orgId: string; sinceMs?: number; untilMs?: number }): ControlPlaneUsageSummary[];
-  setUsageLimit(input: { orgId: string; projectId?: string | null; metric: string; unit?: string; period?: string; limitQuantity: number; updatedAtMs?: number }): ControlPlaneUsageLimit;
-  checkUsageLimit(input: { orgId: string; projectId?: string | null; metric: string; unit?: string; period?: string; sinceMs?: number; untilMs?: number }): ControlPlaneUsageLimitCheck | null;
+  setUsageLimit(input: { orgId: string; projectId?: string | null; metric: string; unit?: string; period?: ControlPlaneUsageLimitPeriod; limitQuantity: number; updatedAtMs?: number }): ControlPlaneUsageLimit;
+  checkUsageLimit(input: { orgId: string; projectId?: string | null; metric: string; unit?: string; period?: ControlPlaneUsageLimitPeriod; sinceMs?: number; untilMs?: number }): ControlPlaneUsageLimitCheck | null;
   putSecretRef(input: { orgId: string; projectId?: string | null; name: string; provider: string; ref: string; createdBy?: string | null; createdAtMs?: number; rotatedAtMs?: number | null }): ControlPlaneSecretRef;
   listSecretRefs(input: { orgId: string; projectId?: string | null }): ControlPlaneSecretRef[];
   recordAuditEvent(input: { orgId: string; projectId?: string | null; actorId?: string | null; action: string; targetType: string; targetId?: string | null; occurredAtMs?: number; metadata?: Record<string, unknown> }): ControlPlaneAuditEvent;
   exportOrgAudit(input: { orgId: string; sinceMs?: number; untilMs?: number; exportedAtMs?: number }): ControlPlaneExport;
 }
 
-export { type ControlPlaneAuditEvent, type ControlPlaneBillingAccount, type ControlPlaneExport, type ControlPlaneIdentityProvider, type ControlPlaneOrg, type ControlPlaneProject, type ControlPlaneSecretRef, type ControlPlaneSqlite, ControlPlaneStore, type ControlPlaneTeam, type ControlPlaneUsageEvent, type ControlPlaneUsageLimit, type ControlPlaneUsageLimitCheck, type ControlPlaneUsageSummary, ensureControlPlaneTables };
+export { type ControlPlaneAuditEvent, type ControlPlaneBillingAccount, type ControlPlaneExport, type ControlPlaneIdentityProvider, type ControlPlaneOrg, type ControlPlaneProject, type ControlPlaneSecretRef, type ControlPlaneSqlite, ControlPlaneStore, type ControlPlaneTeam, type ControlPlaneUsageEvent, type ControlPlaneUsageLimit, type ControlPlaneUsageLimitCheck, type ControlPlaneUsageLimitPeriod, type ControlPlaneUsageSummary, ensureControlPlaneTables };
