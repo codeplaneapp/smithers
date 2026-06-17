@@ -40,6 +40,11 @@
       "import": "./src/mcp/createMcpToolset.js",
       "default": "./src/mcp/createMcpToolset.js"
     },
+    "./document-parsing/createDocumentParsingToolset": {
+      "types": "./src/document-parsing/createDocumentParsingToolset.d.ts",
+      "import": "./src/document-parsing/createDocumentParsingToolset.js",
+      "default": "./src/document-parsing/createDocumentParsingToolset.js"
+    },
     "./*": {
       "types": "./src/index.d.ts",
       "import": "./src/*.js",
