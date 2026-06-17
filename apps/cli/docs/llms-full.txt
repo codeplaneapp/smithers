@@ -47,94 +47,41 @@ Changelogs are not included; see /docs/changelogs/ on the docs site.
 > Orchestrate agents at scale with composable workflows.
 
 <div style={{ fontSize: "1.35rem", fontWeight: 600, lineHeight: 1.4, marginBottom: "0.5rem" }}>
-  Orchestrate agents at scale with composable workflows.
+  Tell your coding agent what to build. Smithers runs it durably.
 </div>
 
-Smithers is a durable runtime for long-running AI coding agents. Install a skill and your
-agent writes the workflow, a composable TypeScript tree, then runs it for minutes or
-days with crash recovery, retries, human approvals, replay, and full observability across
-any agent, any model, and any machine.
+Smithers is a durable runtime for long-running AI coding agents. You drive it through the agent you already use (Claude Code, Codex, Cursor, and more): ask for an outcome, and it runs for minutes or days with crash recovery, retries, human approvals, replay, and full observability.
 
-<Note>
-These docs are split by audience, so pick your path:
+## Quickstart
 
-1. **Use Smithers through an agent** (you are a human): the **For Humans** guide. Ask your
-   coding agent for an outcome and it operates Smithers for you. No CLI or TypeScript.
-2. **Operate Smithers as an agent** (you are Claude, Codex, or another harness): the **For
-   Agents** reference, the `llms.txt` and `llms-full.txt` bundles, and the
-   Agent Operating Playbook.
-3. **Author workflows** (you are a developer): the JSX surface and
-   Components to build or fork your own.
-</Note>
-
-<Frame caption="Models make stateless calls, harnesses manage the context window around them, topologies wire agents into patterns, and Smithers runs the whole stack as durable workflows. Everything above the orchestration layer churns; that bottom layer holds still.">
-  <img src="/images/why/agent-stack.svg" alt="Four stacked layers: a model layer of stateless calls, a harness layer that manages the context window, a topology layer of orchestration patterns, and a stable Smithers orchestration layer underneath" />
-</Frame>
-
-Read the stack from the top down. The **model layer** is stateless: a request goes in,
-tokens come out, and nothing is remembered between calls. The **harness layer** wraps a
-model and manages its context window, choosing what to put in front of the model on each
-call and running the tool loop around it. Claude Code, Codex, Pi, and opencode all live
-here; this is what most people mean by "an agent."
-
-Between the harness and the orchestration layer sits the **topology layer**: the pattern
-you arrange agents in, like ReAct, crew, swarm, plan-execute, or subagent fan-out.
-Smithers adapts to all of them and can implement any of them. The **orchestration layer**
-at the bottom is Smithers itself. It wires humans, plain code, and harnesses into larger
-workflows and makes them durable, with retries, persisted state, human approvals, replay,
-and full observability. The layers above it change constantly. This one holds still.
-
-<CardGroup cols={2}>
-  <Card title="For Humans: start here" icon="compass" href="/guide/what-is-smithers">
-    The plain-language tour for people using Smithers by talking to their coding agent,
-    no CLI or TypeScript required.
-  </Card>
-  <Card title="For Agents: read this" icon="robot" href="/llms.txt">
-    The LLM-facing docs index. Agents should read it, operate Smithers for the human,
-    verify the run, and report evidence back.
-  </Card>
-  <Card title="Human prompt examples" icon="sparkles" href="/guide/what-you-can-do">
-    Concrete outcomes a human can ask for, from focused changes to long-horizon missions.
-  </Card>
-  <Card title="Agent operating playbook" icon="clipboard-check" href="/guides/agent-operating-playbook">
-    The agent contract: translate human prompts into workflows, backpressure, observability,
-    assumption tests, and reports.
-  </Card>
-</CardGroup>
-
-Here is what your agent writes and runs for you. As a human you never author this by
-hand; a workflow is a small TypeScript tree, and the rest of this page is the surface your
-agent operates on your behalf.
-
-```tsx
-/** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Sequence, Task } from "smithers-orchestrator";
-import { z } from "zod";
-
-const { Workflow, smithers, outputs } = createSmithers({
-  hello: z.object({ message: z.string() }),
-});
-
-export default smithers((ctx) => (
-  <Workflow name="hello">
-    <Sequence>
-      <Task id="greet" output={outputs.hello}>
-        {{ message: `Hello, ${ctx.input.name}` }}
-      </Task>
-    </Sequence>
-  </Workflow>
-));
-```
+One command sets everything up. From inside your project:
 
 ```bash
 bunx smithers-orchestrator init
-bunx smithers-orchestrator up workflow.tsx --input '{"name":"world"}'
 ```
 
-Outputs are validated by Zod, persisted to SQLite, and survive crashes; a crashed run
-resumes with `--resume true`. Install the
-`smithers` skill and your coding agent drives
-all of this for you.
+`init` installs the `smithers` skill into your coding agents (no `mkdir`, no `curl`) and scaffolds a `.smithers/` folder of ready-made workflows. Then just ask:
+
+> **You:** Add rate limiting and keep iterating until the tests pass.
+
+Your agent reaches for the right workflow, starts a durable run, and keeps going through retries and review loops until the work is actually done. A crash mid-run resumes from the last completed step.
+
+<CardGroup cols={2}>
+  <Card title="Get started" icon="play" href="/guide/get-started">
+    The one-command setup and your first run, start to finish.
+  </Card>
+  <Card title="What you can ask for" icon="sparkles" href="/guide/what-you-can-do">
+    Concrete outcomes, from a focused change to a long-horizon mission.
+  </Card>
+</CardGroup>
+
+<Note>
+Pick your path:
+
+- **Use Smithers through an agent** (you are a human): the For Humans guide. Ask, and your agent operates Smithers for you.
+- **Operate Smithers as an agent** (you are Claude, Codex, or another harness): the `llms.txt` index and the Agent Operating Playbook.
+- **Author workflows** (you are a developer): the JSX surface and Components.
+</Note>
 
 ## What makes Smithers different
 
@@ -152,22 +99,6 @@ all of this for you.
     Prometheus metrics. Guarantees no single agent gives you.
   </Card>
 </CardGroup>
-
-## Why Smithers
-
-We build Smithers to put power in the hands of builders. You shouldn't have to wait and
-see what the model companies decide to ship next. With composable, model- and
-harness-agnostic workflows, you can build the future you want to see today, on whatever
-model and harness is best this week.
-
-Every decision in Smithers is about making builders **more** powerful, not replacing
-them. Where other tools race to swap human craftsmanship for slop, Smithers is built to
-get **higher-quality output** out of agents, with the review loops, approvals, evals,
-and structure that real work demands.
-
-And we don't believe in one-size-fits-all orchestration. The best results come from
-**task-specific and project-specific workflows**, so Smithers ships dozens of them ready
-to run, and treats having your agent author new ones as a first-class path.
 
 ## Built-in workflows
 
@@ -200,28 +131,40 @@ bunx smithers-orchestrator workflow run kanban
   </Card>
 </CardGroup>
 
-## Examples
+## How it fits together
 
-The examples cover real patterns you can copy: multi-agent
-panels and debates, fan-out/fan-in, review and coverage loops, migrations, PR shepherding,
-Playwright test agents, cited RAG loops, SQL analyst dashboards, RFP response rooms,
-calendar approvals, document exception queues, canary judging, SLO breach explainers,
-repo janitors, and more.
+<Frame caption="Models make stateless calls, harnesses manage the context window around them, topologies wire agents into patterns, and Smithers runs the whole stack as durable workflows. Everything above the orchestration layer churns; that bottom layer holds still.">
+  <img src="/images/why/agent-stack.svg" alt="Four stacked layers: a model layer of stateless calls, a harness layer that manages the context window, a topology layer of orchestration patterns, and a stable Smithers orchestration layer underneath" />
+</Frame>
 
-<CardGroup cols={2}>
-  <Card title="Multi-agent review" icon="users" href="/examples/multi-agent-review">
-    N specialists review in parallel; a moderator synthesizes the verdict.
-  </Card>
-  <Card title="Approval gates" icon="hand" href="/examples/approval-gate">
-    Pause a run for a human decision, then resume exactly where it left off.
-  </Card>
-  <Card title="Dynamic plans" icon="diagram-project" href="/examples/dynamic-plan">
-    Let an agent plan the work, then fan the plan out across worker tasks.
-  </Card>
-  <Card title="Loops" icon="repeat" href="/examples/loop">
-    Iterate until tests pass, coverage hits target, or a reviewer approves.
-  </Card>
-</CardGroup>
+The **model layer** is stateless: a request goes in, tokens come out. The **harness layer** wraps a model and manages its context window (Claude Code, Codex, Pi, opencode). The **topology layer** is the pattern you arrange agents in (ReAct, crew, swarm, plan-execute, subagent fan-out). The **orchestration layer** at the bottom is Smithers: it wires humans, plain code, and harnesses into larger workflows and makes them durable. The layers above it change constantly. This one holds still.
+
+## Author your own (optional)
+
+You never write this by hand to use Smithers; your agent does. But when you want to, a workflow is a small TypeScript tree:
+
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, Sequence, Task } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, smithers, outputs } = createSmithers({
+  hello: z.object({ message: z.string() }),
+});
+
+export default smithers((ctx) => (
+  <Workflow name="hello">
+    <Sequence>
+      <Task id="greet" output={outputs.hello}>
+        {{ message: `Hello, ${ctx.input.name}` }}
+      </Task>
+    </Sequence>
+  </Workflow>
+));
+```
+
+Outputs are validated by Zod, persisted to SQLite, and survive crashes. See the
+JSX surface and Components for the full API.
 
 ## Any agent, any model
 
@@ -246,18 +189,17 @@ can rewind, fork, and replay any run.
 bunx smithers-orchestrator up workflow.tsx --run-id abc123 --resume true   # resume after a crash
 bunx smithers-orchestrator rewind abc123 --frame 4                         # time-travel to an earlier frame
 bunx smithers-orchestrator observability --detach                          # Grafana + Prometheus + Tempo + OTLP
-bunx smithers-orchestrator up workflow.tsx --serve --metrics               # HTTP API, SSE events, and /metrics
 ```
 
 Every run emits Prometheus metrics and OpenTelemetry traces, so you can watch token spend,
 task latency, retries, and failures across thousands of runs. See
-How It Works for the render → execute → persist loop.
+How It Works for the render, execute, persist loop.
 
 ## Eval-driven and self-improving
 
 A workflow you cannot measure is a workflow you cannot trust. Write an eval suite of input
 cases and expected results, and Smithers runs your workflow across every case and writes a
-regression report, so you know it still works before you ship a change.
+regression report:
 
 ```bash
 bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite smoke
@@ -266,8 +208,7 @@ bunx smithers-orchestrator optimize workflow.tsx --cases evals/smoke.jsonl --sui
 
 `optimize` turns a workflow on itself: it runs your eval suite, uses GEPA to rewrite the
 prompts on your agent tasks, re-runs the suite, and keeps the new prompts only when they
-score higher. Your workflow improves itself against your own rubric, and the report proves
-the gain. See Eval Suites and
+score higher. See Eval Suites and
 Workflow Optimization.
 
 ## Scale across machines
@@ -294,10 +235,7 @@ workflow:
     A 6-step worked example that introduces every core feature.
   </Card>
   <Card title="How It Works" icon="gears" href="/how-it-works">
-    The render → execute → persist loop that makes runs durable.
-  </Card>
-  <Card title="Components" icon="cubes" href="/components/workflow">
-    The full JSX surface: tasks, sequences, loops, approvals, and more.
+    The render, execute, persist loop that makes runs durable.
   </Card>
 </CardGroup>
 
@@ -1192,6 +1130,7 @@ const implementer = new AnthropicAgent({ model, instructions: "...", tools: { re
 - **Stable task IDs.** `id="implement-${i}"` or `id={Math.random()}` breaks resume. Derive from data.
 - **`useState` is not durable.** Resets on every render. Persist via `ctx` and a Task.
 - **Input is immutable.** Resuming with different `--input` is an error; the input is persisted at first run.
+- **Adding a schema field auto-migrates (SQLite).** Adding a field to a typed input or output Zod schema does not require recreating `smithers.db`. On every boot the runtime runs `CREATE TABLE IF NOT EXISTS` and then `ALTER TABLE ... ADD COLUMN` for any column the schema introduced, so new fields are added in place. If you still see `SQLiteError: table input has no column named X`, you are on a build before this boot-time migration landed (or a Postgres-backed DB, which does not auto-add columns yet); upgrade with `bunx smithers-orchestrator --version` or start a fresh run. Renaming or removing a field, or changing a field's type, is not migrated and does need a fresh DB.
 - **Code changes block resume.** A workflow source change = a different workflow. Hot reload applies changes within a running frame; resume validates the source hash of the original run. If you stop a run and the source has changed, resume is blocked. Start a new run, don't resume across edits.
 - **Cached output is re-validated.** Schema drift after caching is caught (the validator rejects the stale row), so the cache misses safely.
 - **Side-effect tasks should not be cached.** Pure work only.
@@ -1625,6 +1564,7 @@ export default smithers((ctx) => (
 ## Reactivity
 
 The tree re-renders on every frame, so branching is a normal JSX conditional. Inside a workflow function, `ctx` exposes `ctx.input` and `ctx.outputMaybe(ref, { nodeId })`. The latter returns the output of a completed task, or `undefined` if it hasn't run yet:
+The `ctx` parameter is optional: it is just a normal function argument, so a workflow that never reads `ctx.input` or `ctx.outputMaybe` can drop it entirely and write `smithers(() => ( ... ))`. Add `(ctx)` only when you actually reference dynamic input or prior task output.
 
 ```tsx
 const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
@@ -1650,6 +1590,7 @@ Always invoke as `bunx smithers-orchestrator <command>` (see Installation for wh
 ## Conventions
 
 - Persisted state lives in the nearest `smithers.db` (walk up from the working directory). Most read commands fail with a friendly message if no DB is found.
+- Task root: tools run from the project root (the nearest directory containing a `.smithers/`, walking up from the working directory), the same anchor as `smithers.db`. `up`, `workflow run`, `graph`, and `eval` all resolve the root this way, so the launch form never changes where tasks run. Override with `--root`; a resume without `--root` reuses the root the run was originally launched with.
 - Boolean flags accept either bare form (`--watch`) or explicit `--watch true|false`.
 - Global options: `--format toon|json|yaml|md|jsonl`, `--filter-output <key.path>`, `--full-output`, `--token-count`, `--token-limit N`, `--token-offset N`, `--schema`, `--llms`, `--llms-full`, `--mcp`, `--help`, `--version`.
 - MCP stdio mode: pass `--mcp` to start Smithers as an MCP server. Add `--surface semantic|raw|both` to choose the exposed tool surface.
@@ -1961,9 +1902,10 @@ commands[73]:
     purpose: Render the workflow graph without executing it
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[2]{name,short,type,default,desc}:
+    flags[3]{name,short,type,default,desc}:
       run-id,r,string,graph,Run ID for context
       input,,string,,Input JSON; overrides persisted input
+      root,,string,,Tool sandbox root directory (same anchor as up)
   - name: gui
     purpose: Open a directory as a workspace in Smithers GUI
     args[1]{name,type,required,desc}:
@@ -2425,6 +2367,7 @@ export default smithers((ctx) => (
 ## Notes
 
 - Direct children run sequentially; `<Sequence>` is only needed inside other control-flow components.
+- **Two ways to get `<Workflow>`, both equivalent.** You can either `import { Workflow } from "smithers-orchestrator"` (top-level export) or destructure it from `createSmithers(...)`; they render the identical node. The factory's `Workflow` is a thin pass-through to the same component (it injects no schema or context), unlike `Task`/`Approval`/`Sandbox`/`Signal`, which the factory wires to the run's context and your output schemas. **Convention: destructure `Workflow` from `createSmithers` alongside `Task`, `smithers`, and `outputs`** so the workflow's components all come from one place; this is what the example above and ~95% of `examples/` do. Importing `Workflow` (or `Sequence`, `Branch`, `Loop`, `Parallel`, also pure structural components) directly from `"smithers-orchestrator"` is equally valid and handy in tiny single-file workflows.
 - Custom Drizzle tables require `runId`, `nodeId`, and `iteration` columns with a composite primary key `(run_id, node_id, iteration)`. Tasks outside a `<Loop>` write `iteration = 0`.
 
 ---
@@ -3716,7 +3659,7 @@ type SuperSmithersProps = {
 
 ## <Aspects>
 
-> Declare token, latency, and cost budgets for descendant tasks.
+> Propagate token and latency budgets to descendant tasks.
 
 ```ts
 import { Aspects } from "smithers-orchestrator";
@@ -3733,17 +3676,11 @@ type LatencySloConfig = {
   onExceeded?: "fail" | "warn"; // default "fail"
 };
 
-type CostBudgetConfig = {
-  maxUsd: number;
-  onExceeded?: "fail" | "warn" | "skip-remaining"; // default "fail"
-};
-
-type TrackingConfig = { tokens?: boolean; latency?: boolean; cost?: boolean };
+type TrackingConfig = { tokens?: boolean; latency?: boolean };
 
 type AspectsProps = {
   tokenBudget?: TokenBudgetConfig;
   latencySlo?: LatencySloConfig;
-  costBudget?: CostBudgetConfig;
   tracking?: TrackingConfig; // default all true
   children?: ReactNode;
 };
@@ -3754,7 +3691,6 @@ type AspectsProps = {
   <Aspects
     tokenBudget={{ max: 100_000, perTask: 25_000, onExceeded: "warn" }}
     latencySlo={{ maxMs: 30_000, onExceeded: "fail" }}
-    costBudget={{ maxUsd: 5.0, onExceeded: "skip-remaining" }}
   >
     <Task id="analyze" output={outputs.analysis} agent={codeAgent}>
       Analyze the repository.
@@ -3768,10 +3704,10 @@ type AspectsProps = {
 
 ## Notes
 
-- Nested `<Aspects>` inherit outer budget configs wholesale. If an inner `<Aspects>` sets `tokenBudget`, `latencySlo`, or `costBudget`, that field's entire parent config object is replaced (no per-field merge). The `tracking` config is the exception: `tokens`, `latency`, and `cost` each fall back to the parent value independently.
-- Budget props are not enforced by the runtime yet. They are currently declarative metadata reserved for future token, latency, and cost enforcement.
-- `tracking` controls metric emission only.
-- Accumulator is per-run and resets on resume.
+- Nested `<Aspects>` inherit outer budget configs wholesale. If an inner `<Aspects>` sets `tokenBudget` or `latencySlo`, that field's entire parent config object is replaced (no per-field merge). The `tracking` config is the exception: `tokens` and `latency` each fall back to the parent value independently.
+- Budgets enforce at task-dispatch time. Before each descendant task runs, the engine compares the run's accumulated token total (`tokenBudget.max`) and wall-clock since the run started (`latencySlo.maxMs`) against the budget and applies `onExceeded`: `fail` raises `ASPECT_BUDGET_EXCEEDED` and fails the run, `warn` logs and continues, `skip-remaining` skips the task. The per-task limits (`perTask`) are not enforced yet.
+- Budgets enforce regardless of `tracking`; `tracking` controls metric emission only.
+- Accumulated token usage is per run and survives resume (re-seeded from persisted token-usage events).
 
 ---
 
@@ -3835,8 +3771,17 @@ Both APIs use the graph resolver, so they match the path Smithers gives worker t
 - jj-backed worktrees include colocated git metadata, so git-native CLI agents such as Codex
   resolve the worktree directory as their repository root. Do not compensate by setting an
   agent `cwd`; that defeats the worktree isolation above.
+- **jj continuously snapshots a worktree's working copy onto its bookmark.** A compute
+  `<Task>` (or helper) that detects changes with `git status --porcelain` can see a *clean*
+  tree and skip its work, because jj has already committed the working-copy edits to the
+  bookmark, and `git checkout` or `git restore` of a file in the worktree won't stick for the
+  same reason (jj re-materializes it). Detect a worktree's changes by diffing against its
+  base branch (`jj diff --from <baseBranch> --to @`, or `git diff <baseBranch>...HEAD`), not
+  by git's dirty-state, and let the merge/land step operate on the committed bookmark rather
+  than re-running `git add`/`git commit`.
 - Innermost `<Worktree>` wins when nested; duplicate ids are rejected.
 - Empty/whitespace `path` is rejected at render time.
+- A relative `path` resolves against the **launch root**, not the workflow file's directory. The launch root is `--root` (if given), else the nearest ancestor of the operator working directory that contains a `.smithers/` package, else the operator working directory. It is never `dirname(workflowFile)`, so a relative `path` like `wt-a` lands beside wherever you ran `bunx smithers-orchestrator up <path>` from, which can differ from where the workflow source lives. Pass an absolute `path` (for example `/tmp/smithers/wt-a`) when you need a deterministic location, and read back the resolved location with `ctx.worktreePath(...)` or `ctx.resolveWorktreePath(...)` rather than reconstructing it.
 
 ---
 
@@ -5724,12 +5669,10 @@ type CheckSuiteProps = {
 
 type TokenBudgetConfig = { max: number; perTask?: number; onExceeded?: "fail" | "warn" | "skip-remaining" };
 type LatencySloConfig = { maxMs: number; perTask?: number; onExceeded?: "fail" | "warn" };
-type CostBudgetConfig = { maxUsd: number; onExceeded?: "fail" | "warn" | "skip-remaining" };
-type TrackingConfig = { tokens?: boolean; latency?: boolean; cost?: boolean };
+type TrackingConfig = { tokens?: boolean; latency?: boolean };
 type AspectsProps = {
   tokenBudget?: TokenBudgetConfig;
   latencySlo?: LatencySloConfig;
-  costBudget?: CostBudgetConfig;
   tracking?: TrackingConfig;
   children?: React.ReactNode;
 };
@@ -6776,7 +6719,7 @@ try {
 | `CONTEXT_OUTSIDE_WORKFLOW` | Workflow context access happens outside an active Smithers workflow render. | -- |
 | `MISSING_OUTPUT` | Code calls `ctx.output()` for a node result that does not exist. | `{ nodeId, iteration }` |
 | `DEP_NOT_SATISFIED` | A typed dep on `<Task>` references an upstream output that has not been produced yet. | `{ taskId, depKey, resolvedNodeId }` |
-| `ASPECT_BUDGET_EXCEEDED` | Reserved for future Aspects budget enforcement; the runtime does not emit this code yet. | `{ kind, limit, current }` |
+| `ASPECT_BUDGET_EXCEEDED` | An Aspects budget (tokens or latency) has been exceeded. | `{ kind, limit, current }` |
 | `APPROVAL_OUTSIDE_TASK` | `<Approval>` is resolved outside the active task runtime. | -- |
 | `APPROVAL_OPTIONS_REQUIRED` | An approval mode that requires explicit options is missing them. | -- |
 | `WORKFLOW_MISSING_DEFAULT` | A workflow module does not export a default Smithers workflow. | -- |
@@ -7080,6 +7023,7 @@ Defined in the root `package.json` for development:
 | `dev:studio` | `bun apps/smithers-studio-2/scripts/dev.ts` | Start the Smithers Studio 2 development script |
 | `typecheck` | `tsc --noEmit` | Type-check the `src/` and `tests/` trees against `tsconfig.json` |
 | `typecheck:examples` | `tsc -p examples/tsconfig.json --noEmit` | Type-check example files against a separate config that maps `smithers-orchestrator` to `examples-entry.js` |
+| `typecheck:evals` | `tsc -p evals/tsconfig.json --noEmit` | Type-check the agent-fluency eval suite under `evals/` against its own config |
 | `lint` | `oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore -A react/no-children-prop -A unicorn/no-thenable --ignore-pattern 'packages/*/src/**/*.d.ts' packages/*/src packages/*/tests` | Lint package source and tests with oxlint |
 | `lint:fix` | `oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore -A react/no-children-prop -A unicorn/no-thenable --ignore-pattern 'packages/*/src/**/*.d.ts' --fix --fix-suggestions packages/*/src packages/*/tests` | Apply supported oxlint fixes |
 | `cli` | `bun run apps/cli/src/index.js` | Run the local development CLI entrypoint |
@@ -7672,6 +7616,35 @@ The legacy run-row `status` column maps to `RunState` like this:
 | missing / unknown text  | `unknown`                      |
 
 `recovering` is reserved for the supervisor takeover window. As of this writing, it is defined but not yet emitted by the runtime.
+<Warning>
+**`waiting-event` is overloaded; do not assume it always means "send a signal."** The same status covers two situations that need opposite recovery:
+
+1. A genuine pause on a `<Signal>` or `<WaitForEvent>`. Recover by delivering the awaited signal: `bunx smithers-orchestrator signal RUN_ID SIGNAL_NAME --data '{}'`.
+2. A run parked with no live event node: an external-trigger / hot-reload / orphan-recovery wait, an aspect or alert human-request, or an approval decided while the run was detached. Here a signal does nothing; the run needs a resume (or `retry-task` / `fork` / answering the human request) after you fix the underlying cause.
+
+Do not guess between them. Ask the runtime, which already disambiguates:
+
+```bash
+bunx smithers-orchestrator why RUN_ID     # names the real blocker and prints the exact unblock command
+bunx smithers-orchestrator inspect RUN_ID # shows whether any node is actually in waiting-event state
+```
+
+`why` reports `waiting-event` (with a ready `signal` command) only when a node is truly awaiting an event. When the run row says `waiting-event` but no node is, it reports `approval-decided-resume-required`, `retries-exhausted`, or `dependency-failed` instead, each with the matching resume / `retry-task` action.
+</Warning>
+<Warning>
+**`succeeded`/`finished` can mask failed child agents.** Run-level status is binary; `finished` or `failed`; and a run is only `failed` when it has an *unhandled* task failure. Two large classes of failed children are deliberately not treated as run-level failures: tasks marked `continueOnFail`, and agent tasks that fail with a *transient* error (rate limits, timeouts, aborts; `SESSION_ERROR`, `TASK_TIMEOUT`, `TASK_HEARTBEAT_TIMEOUT`, `TASK_ABORTED`, or `failureRetryable`). A fan-out where most agents hit provider rate limits can therefore still report `finished` → `succeeded`.
+
+Never trust the top-level status alone to conclude a run truly succeeded. Inspect per-node/agent outcomes:
+
+```bash
+bunx smithers-orchestrator inspect RUN_ID   # top-level runState plus every node's state (look for failed nodes)
+bunx smithers-orchestrator node NODE_ID      # one node's failure/error, retries, and tool calls
+bunx smithers-orchestrator events --run RUN_ID  # the full event history, including per-task failures
+bunx smithers-orchestrator scores RUN_ID     # scorer results when you gate on judged output
+```
+
+To avoid the rate-limit failures in the first place, bound fan-out concurrency with `<Parallel maxConcurrency={N}>` so you don't burst past the provider's limit.
+</Warning>
 
 ## ReasonBlocked / ReasonUnhealthy
 
@@ -7963,6 +7936,31 @@ Pick the kind to match the lifetime: `workflow` is scoped to a workflow definiti
 ```
 
 `memory` is preserved on the task descriptor as metadata for runtimes and integrations that layer memory behavior onto task execution. The direct store APIs above are the current public memory read/write surface.
+## Imperative get/set/delete inside a workflow
+
+The `memory={{ recall, remember }}` block above is **declarative metadata**; it is preserved on the task descriptor for runtimes that layer memory onto task execution, not an imperative call. To actually get, set, or delete a fact **while a run is executing**, build a store with `createMemoryStore(db)` and call it from inside a compute `<Task>` (a function task with no `agent`). The compute callback receives `deps` only; there is no injected `store`, so you create one:
+
+```tsx
+import { createMemoryStore } from "smithers-orchestrator/memory";
+import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+
+const store = createMemoryStore(drizzle(new Database("smithers.db")));
+const ns = { kind: "workflow" as const, id: "code-review" };
+
+<Task id="remember-model" output={outputs.done}>
+  {async () => {
+    await store.setFact(ns, "model", "gpt-4");           // set
+    const fact = await store.getFact(ns, "model");        // get (MemoryFact | undefined)
+    const all  = await store.listFacts(ns);               // list
+    await store.deleteFact(ns, "stale-key");              // delete
+    return { done: true };
+  }}
+</Task>
+```
+
+Create the store once at module scope (outside the workflow) and reuse it across tasks rather than re-opening the SQLite handle in every task body. Under Effect, the same operations are available as `store.setFactEffect(ns, key, value, ttlMs?)`, `store.getFactEffect(ns, key)`, etc., or via `MemoryService` (`MemoryServiceApi`), which also exposes the underlying `.store`.
+
 
 ## Processors
 
@@ -10458,6 +10456,9 @@ Limits:
 | Billing | Provider subscription / local CLI | API billing |
 | Tools | Provider CLI tool ecosystem | Smithers tools sandbox |
 | Flexibility | Native CLI flags | AI SDK `providerOptions` |
+| Structured output | Prompt-injection + text JSON extraction | Native (`supportsNativeStructuredOutput`) |
+
+**Choosing an agent for typed/JSON-output tasks.** Only `AnthropicAgent` and `OpenAIAgent` declare `supportsNativeStructuredOutput = true`, so when a `<Task>` has an `output` schema they pass it through the AI SDK's native structured-output API (`Output.object({ schema })`) and the result is schema-constrained. CLI agents (`ClaudeCodeAgent`, `CodexAgent`, etc.) do **not** set this flag: the engine falls back to injecting JSON instructions into the prompt and extracting the object from the model's text, and emits a `console.warn` ("engine ... does not support native structured output. Falling back to prompt-injection + text JSON extraction"). Schema-validation retries still run, but valid JSON shape does not guarantee meaningful values. For tasks whose primary job is producing typed/JSON output, prefer `AnthropicAgent`/`OpenAIAgent` (or, for an OpenAI-compatible endpoint that honors JSON schema, an `OpenAIAgent` with `nativeStructuredOutput` left enabled). `CodexAgent` additionally forwards the task schema to the CLI via `--output-schema` for constrained decoding, but the engine still wraps it with the prompt-injection fallback because the flag is unset.
 
 Pass a raw `ToolLoopAgent` directly if you prefer; the wrappers are convenience, not a separate runtime.
 
