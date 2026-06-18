@@ -61,6 +61,18 @@ describe("extractFromHost", () => {
         expect(result.tasks[0].outputTableName).toBe("my_table");
         expect(result.tasks[0].staticPayload).toEqual({ value: 1 });
     });
+    test("extracts human task compute functions", () => {
+        const fn = () => ({ answer: "yes" });
+        const root = hostEl("smithers:task", {
+            id: "review",
+            output: "t",
+            __smithersKind: "human",
+            __smithersComputeFn: fn,
+        });
+        const task = extractFromHost(root).tasks[0];
+        expect(task.computeFn).toBe(fn);
+        expect(task.staticPayload).toBeUndefined();
+    });
     test("extracts ordinals in order", () => {
         const root = hostEl("smithers:workflow", {}, [
             hostEl("smithers:task", { id: "a", output: "t" }),

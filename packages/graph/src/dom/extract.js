@@ -795,7 +795,7 @@ export function extractFromHost(root, opts) {
                 throw new SmithersError("MDX_PRELOAD_INACTIVE", `Task "${raw.id ?? nodeId}" prompt resolved to [object Object] — MDX preload is likely not active.\n` +
                     `Check that bunfig.toml has a top-level preload (not under [run]) and mdxPlugin() is registered.`);
             }
-            const isCompute = kind === "compute" && typeof raw.__smithersComputeFn === "function";
+            const isCompute = (kind === "compute" || kind === "human") && typeof raw.__smithersComputeFn === "function";
             const computeFn = isCompute ? /** @type {() => unknown} */ (raw.__smithersComputeFn) : undefined;
             const staticPayload = isAgent || isCompute
                 ? undefined

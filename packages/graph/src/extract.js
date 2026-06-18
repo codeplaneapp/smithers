@@ -626,7 +626,7 @@ export function extractGraph(root, opts) {
             const kind = raw.__smithersKind;
             const isAgent = kind === "agent" || Boolean(raw.agent);
             const { retries, retryPolicy } = resolveRetryConfig(raw, isAgent);
-            const isCompute = kind === "compute" && typeof raw.__smithersComputeFn === "function";
+            const isCompute = (kind === "compute" || kind === "human") && typeof raw.__smithersComputeFn === "function";
             const parsedHeartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
             const heartbeatTimeoutMs = parsedHeartbeatTimeoutMs ??
                 (isAgent ? DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS : null);

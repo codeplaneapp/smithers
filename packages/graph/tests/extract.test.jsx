@@ -176,6 +176,19 @@ describe("extractGraph", () => {
 			expect(task.staticPayload).toBeUndefined();
 		});
 
+		test("extracts human task compute functions", () => {
+			const fn = () => ({ answer: "yes" });
+			const root = hostEl("smithers:task", {
+				id: "review",
+				output: "t",
+				__smithersKind: "human",
+				__smithersComputeFn: fn,
+			});
+			const task = extractGraph(root).tasks[0];
+			expect(task.computeFn).toBe(fn);
+			expect(task.staticPayload).toBeUndefined();
+		});
+
 		test("throws a clear error for object prompts when MDX preload is inactive", () => {
 			const root = hostEl("smithers:task", {
 				id: "mdx",
