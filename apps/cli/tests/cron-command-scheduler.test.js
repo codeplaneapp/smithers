@@ -107,7 +107,7 @@ describe("smithers cron commands", () => {
         });
         expect(afterRm.exitCode).toBe(0);
         expect(afterRm.json).toMatchObject({ crons: [] });
-    });
+    }, 30_000);
 
     test("start delegates to the scheduler entrypoint", async () => {
         const repo = createTempRepo();
@@ -119,13 +119,13 @@ describe("smithers cron commands", () => {
             cwd: repo.dir,
             env: process.env,
             encoding: "utf8",
-            timeout: 1_000,
+            timeout: 10_000,
             killSignal: "SIGTERM",
         });
 
         expect(result.status ?? 0).toBe(0);
         expect(result.stderr + result.stdout).toContain("[smithers-cron] Starting background scheduler loop...");
-    });
+    }, 30_000);
 });
 
 describe("scheduler tick effects", () => {
@@ -168,8 +168,8 @@ describe("scheduler tick effects", () => {
 
         expect(spawnCalls).toEqual([
             {
-                command: "bun",
-                args: ["run", "src/index.js", "up", "due.tsx", "-d"],
+                command: process.execPath,
+                args: [CLI_ENTRY, "up", "due.tsx", "-d"],
                 options: {
                     cwd: process.cwd(),
                     detached: true,

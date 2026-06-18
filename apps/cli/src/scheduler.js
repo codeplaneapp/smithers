@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { CronExpressionParser } from "cron-parser";
 import { Effect, Schedule } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { runPromise } from "./smithersRuntime.js";
 import { findAndOpenDb } from "./find-db.js";
+const CLI_ENTRYPOINT = fileURLToPath(new URL("./index.js", import.meta.url));
 /**
  * @param {unknown} error
  */
@@ -27,7 +29,7 @@ export function processCronEffect(adapter, job, now) {
         yield* Effect.logInfo(`[smithers-cron] Triggering due workflow: ${job.workflowPath} (Schedule: ${job.pattern})`);
         yield* Effect.try({
             try: () => {
-                const proc = spawn("bun", ["run", "src/index.js", "up", job.workflowPath, "-d"], {
+                const proc = spawn(process.execPath, [CLI_ENTRYPOINT, "up", job.workflowPath, "-d"], {
                     cwd: process.cwd(),
                     detached: true,
                     stdio: "ignore",
