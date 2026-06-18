@@ -281,6 +281,27 @@ function makeSemanticAdapter(overrides = {}) {
         listAttemptsForRun: async (runId) => state.attempts.filter((attempt) => attempt.runId === runId),
         listEvents: async (_runId, afterSeq) => afterSeq < 0 ? state.events : [],
         listEventHistory: async () => state.historyEvents,
+        listWorkspaceCheckpoints: async () => [
+            {
+                seq: 0,
+                nodeId: "artifact-node",
+                iteration: 0,
+                attempt: 1,
+                tier: 1,
+                source: "hook",
+                label: "Edit output",
+                jjCwd: "/tmp/work",
+                jjCommitId: "commit-1",
+                createdAtMs: NOW - 1_000,
+            },
+        ],
+        listWorkspaceStates: async () => [
+            {
+                jjCwd: "/tmp/work",
+                jjCommitId: "commit-1",
+                jjOperationId: "op-1",
+            },
+        ],
     };
     return { adapter, state };
 }
@@ -322,6 +343,13 @@ describe("semantic tool definitions", () => {
     test("exposes the expected tools and validates run workflow resume input", async () => {
         const harness = makeHarness();
         expect([...harness.tools.keys()].sort()).toEqual([...SEMANTIC_TOOL_NAMES].sort());
+        expect(SEMANTIC_TOOL_NAMES).toContain("fork_run");
+        expect(SEMANTIC_TOOL_NAMES).toContain("replay_run");
+        expect(SEMANTIC_TOOL_NAMES).toContain("rewind_run");
+        expect(SEMANTIC_TOOL_NAMES).toContain("restore_checkpoint");
+        expect(SEMANTIC_TOOL_NAMES).toContain("list_snapshots");
+        expect(SEMANTIC_TOOL_NAMES).toContain("get_timeline");
+        expect(SEMANTIC_TOOL_NAMES).toContain("time_travel");
 
         const list = await harness.call("list_workflows");
         expect(list.structuredContent.ok).toBe(true);
@@ -589,6 +617,41 @@ describe("semantic tool definitions", () => {
         ]);
 
         expect(harness.state.cleanupCalls).toBeGreaterThanOrEqual(8);
+    });
+
+    test("serves semantic durability snapshot and restore tools", async () => {
+        const harness = makeHarness();
+
+        const snapshots = await harness.call("list_snapshots", { runId: "run-1" });
+        expect(snapshots.structuredContent.ok).toBe(true);
+        expect(snapshots.structuredContent.data.snapshots).toEqual([
+            {
+                seq: 0,
+                nodeId: "artifact-node",
+                iteration: 0,
+                attempt: 1,
+                tier: 1,
+                source: "hook",
+                label: "Edit output",
+                commitId: "commit-1",
+                operationId: "op-1",
+                cwd: "/tmp/work",
+                createdAtMs: NOW - 1_000,
+            },
+        ]);
+
+        const restore = await harness.call("restore_checkpoint", {
+            runId: "run-1",
+            nodeId: "artifact-node",
+        });
+        expect(restore.structuredContent.ok).toBe(true);
+        expect(restore.structuredContent.data).toMatchObject({
+            runId: "run-1",
+            nodeId: "artifact-node",
+            seq: 0,
+            success: false,
+        });
+        expect(restore.structuredContent.data.error).toBeString();
     });
 
     test("returns structured errors for missing and ambiguous operations", async () => {

@@ -16,7 +16,13 @@ import { buildAgentAskRequestRow, waitForHumanAnswer, } from "@smithers-orchestr
 import { buildAskKindFields, buildAskPromptText, buildAskUniqueToken, resolveAskHumanContext, } from "../ask-human.js";
 import { runWorkflow } from "@smithers-orchestrator/engine";
 import { revertToAttempt } from "@smithers-orchestrator/time-travel/revert";
+import { forkRun } from "@smithers-orchestrator/time-travel/fork";
+import { replayFromCheckpoint } from "@smithers-orchestrator/time-travel/replay";
+import { timeTravel } from "@smithers-orchestrator/time-travel/timetravel";
+import { buildTimeline, buildTimelineTree } from "@smithers-orchestrator/time-travel/timeline";
+import { jumpToFrameRoute } from "@smithers-orchestrator/server/gatewayRoutes/jumpToFrame";
 import { runPromise } from "../smithersRuntime.js";
+import { pickTargetCheckpoint, runRestoreOnce } from "../restore.js";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 /**
@@ -43,6 +49,13 @@ export const SEMANTIC_TOOL_NAMES = [
     "ask_human",
     "get_node_detail",
     "revert_attempt",
+    "fork_run",
+    "replay_run",
+    "rewind_run",
+    "restore_checkpoint",
+    "list_snapshots",
+    "get_timeline",
+    "time_travel",
     "list_artifacts",
     "get_chat_transcript",
     "get_run_events",
@@ -385,6 +398,93 @@ const revertAttemptDataSchema = z.object({
     success: z.boolean(),
     error: z.string().optional(),
     jjPointer: z.string().optional(),
+    run: runSummarySchema.nullable(),
+});
+const forkRunInputSchema = z.object({
+    parentRunId: z.string(),
+    frameNo: z.number().int().min(0),
+    resetNodes: z.array(z.string()).optional(),
+    inputOverrides: z.record(z.string(), z.unknown()).optional(),
+    branchLabel: z.string().optional(),
+});
+const forkRunDataSchema = z.object({
+    runId: z.string(),
+    parentRunId: z.string(),
+    parentFrameNo: z.number().int(),
+    branch: z.unknown(),
+    snapshot: z.unknown(),
+    run: runSummarySchema.nullable(),
+});
+const replayRunInputSchema = forkRunInputSchema.extend({
+    restoreVcs: z.boolean().default(false),
+    cwd: z.string().optional(),
+});
+const replayRunDataSchema = forkRunDataSchema.extend({
+    vcsRestored: z.boolean(),
+    vcsPointer: z.string().nullable(),
+    vcsError: z.string().optional(),
+});
+const rewindRunInputSchema = z.object({
+    runId: z.string(),
+    frameNo: z.number().int().min(0),
+    confirm: z.boolean().default(false),
+});
+const rewindRunDataSchema = z.object({
+    result: z.unknown(),
+    run: runSummarySchema.nullable(),
+});
+const restoreCheckpointInputSchema = z.object({
+    runId: z.string(),
+    nodeId: z.string(),
+    iteration: z.number().int().min(0).optional(),
+    seq: z.number().int().min(0).optional(),
+});
+const restoreCheckpointDataSchema = z.object({
+    runId: z.string(),
+    nodeId: z.string(),
+    iteration: z.number().int().nullable(),
+    seq: z.number().int(),
+    commitId: z.string(),
+    cwd: z.string(),
+    success: z.boolean(),
+    error: z.string().optional(),
+});
+const listSnapshotsInputSchema = z.object({
+    runId: z.string(),
+});
+const listSnapshotsDataSchema = z.object({
+    snapshots: z.array(z.object({
+        seq: z.number().int(),
+        nodeId: z.string(),
+        iteration: z.number().int(),
+        attempt: z.number().int(),
+        tier: z.number().int(),
+        source: z.string(),
+        label: z.string().nullable(),
+        commitId: z.string(),
+        operationId: z.string().nullable(),
+        cwd: z.string(),
+        createdAtMs: z.number(),
+    })),
+});
+const getTimelineInputSchema = z.object({
+    runId: z.string(),
+    tree: z.boolean().default(false),
+});
+const getTimelineDataSchema = z.object({
+    timeline: z.unknown(),
+});
+const timeTravelInputSchema = z.object({
+    runId: z.string(),
+    nodeId: z.string(),
+    iteration: z.number().int().min(0).default(0),
+    attempt: z.number().int().min(1).optional(),
+    restoreVcs: z.boolean().default(true),
+    resetDependents: z.boolean().default(true),
+    force: z.boolean().default(false),
+});
+const timeTravelDataSchema = z.object({
+    result: z.unknown(),
     run: runSummarySchema.nullable(),
 });
 const listArtifactsInputSchema = z.object({
@@ -1207,6 +1307,232 @@ export function createSemanticToolDefinitions(options = {}) {
                     ...(result.jjPointer ? { jjPointer: result.jjPointer } : {}),
                     run: run != null
                         ? await buildRunSummary(adapter, run)
+                        : null,
+                };
+            })),
+        },
+        {
+            name: "fork_run",
+            description: "Create a branched run from a time-travel snapshot checkpoint without starting it.",
+            inputSchema: forkRunInputSchema,
+            outputSchema: resultSchema(forkRunDataSchema),
+            annotations: {
+                readOnlyHint: false,
+                idempotentHint: false,
+            },
+            handler: (input) => executeSemanticTool("fork_run", async () => withDb(context, async (adapter) => {
+                const result = await forkRun(adapter, {
+                    parentRunId: input.parentRunId,
+                    frameNo: input.frameNo,
+                    inputOverrides: input.inputOverrides,
+                    resetNodes: input.resetNodes,
+                    branchLabel: input.branchLabel,
+                });
+                const run = await adapter.getRun(result.runId);
+                return {
+                    runId: result.runId,
+                    parentRunId: input.parentRunId,
+                    parentFrameNo: input.frameNo,
+                    branch: result.branch,
+                    snapshot: result.snapshot,
+                    run: run != null
+                        ? await buildRunSummary(adapter, run)
+                        : null,
+                };
+            })),
+        },
+        {
+            name: "replay_run",
+            description: "Fork a run from a checkpoint for replay, optionally restoring VCS state; callers can resume the returned runId.",
+            inputSchema: replayRunInputSchema,
+            outputSchema: resultSchema(replayRunDataSchema),
+            annotations: {
+                readOnlyHint: false,
+                idempotentHint: false,
+            },
+            handler: (input) => executeSemanticTool("replay_run", async () => withDb(context, async (adapter) => {
+                const result = await replayFromCheckpoint(adapter, {
+                    parentRunId: input.parentRunId,
+                    frameNo: input.frameNo,
+                    inputOverrides: input.inputOverrides,
+                    resetNodes: input.resetNodes,
+                    branchLabel: input.branchLabel,
+                    restoreVcs: input.restoreVcs,
+                    cwd: input.cwd,
+                });
+                const run = await adapter.getRun(result.runId);
+                return {
+                    runId: result.runId,
+                    parentRunId: input.parentRunId,
+                    parentFrameNo: input.frameNo,
+                    branch: result.branch,
+                    snapshot: result.snapshot,
+                    vcsRestored: result.vcsRestored,
+                    vcsPointer: result.vcsPointer ?? null,
+                    ...(result.vcsError ? { vcsError: result.vcsError } : {}),
+                    run: run != null
+                        ? await buildRunSummary(adapter, run)
+                        : null,
+                };
+            })),
+        },
+        {
+            name: "rewind_run",
+            description: "Destructive: rewind a run to a previous frame, deleting later frames and invalidating derived state. Requires confirm=true.",
+            inputSchema: rewindRunInputSchema,
+            outputSchema: resultSchema(rewindRunDataSchema),
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: false,
+            },
+            handler: (input) => executeSemanticTool("rewind_run", async () => withDb(context, async (adapter) => {
+                if (!input.confirm) {
+                    throw new SmithersError("INVALID_INPUT", "rewind_run requires confirm=true because it is destructive.", {
+                        runId: input.runId,
+                        frameNo: input.frameNo,
+                    });
+                }
+                const result = await jumpToFrameRoute({
+                    adapter,
+                    runId: input.runId,
+                    frameNo: input.frameNo,
+                    confirm: true,
+                    caller: "mcp:semantic",
+                });
+                const run = await adapter.getRun(input.runId);
+                return {
+                    result,
+                    run: run != null
+                        ? await buildRunSummary(adapter, run)
+                        : null,
+                };
+            })),
+        },
+        {
+            name: "restore_checkpoint",
+            description: "Destructive: restore the worktree to a durability checkpoint for a node, selecting the latest matching checkpoint unless seq is provided.",
+            inputSchema: restoreCheckpointInputSchema,
+            outputSchema: resultSchema(restoreCheckpointDataSchema),
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: false,
+            },
+            handler: (input) => executeSemanticTool("restore_checkpoint", async () => withDb(context, async (adapter) => {
+                const checkpoints = await adapter.listWorkspaceCheckpoints(input.runId);
+                const target = pickTargetCheckpoint(checkpoints, {
+                    nodeId: input.nodeId,
+                    iteration: input.iteration,
+                    seq: input.seq,
+                });
+                if (!target) {
+                    throw new SmithersError("CHECKPOINT_NOT_FOUND", `No matching durability checkpoint for run ${input.runId} node ${input.nodeId}${input.seq !== undefined ? ` seq ${input.seq}` : ""}`, {
+                        runId: input.runId,
+                        nodeId: input.nodeId,
+                        iteration: input.iteration,
+                        seq: input.seq,
+                    });
+                }
+                let stdoutText = "";
+                let stderrText = "";
+                const result = await runRestoreOnce({
+                    adapter,
+                    runId: input.runId,
+                    nodeId: input.nodeId,
+                    iteration: input.iteration,
+                    seq: input.seq,
+                    stdout: { write: (chunk) => { stdoutText += chunk; } },
+                    stderr: { write: (chunk) => { stderrText += chunk; } },
+                });
+                return {
+                    runId: input.runId,
+                    nodeId: input.nodeId,
+                    iteration: target.iteration ?? null,
+                    seq: target.seq,
+                    commitId: target.jjCommitId,
+                    cwd: target.jjCwd,
+                    success: result.exitCode === 0,
+                    ...(result.exitCode === 0
+                        ? {}
+                        : { error: stderrText.trim() || stdoutText.trim() || "restore failed" }),
+                };
+            })),
+        },
+        {
+            name: "list_snapshots",
+            description: "List durability workspace checkpoints for a run with matching VCS operation ids when available.",
+            inputSchema: listSnapshotsInputSchema,
+            outputSchema: resultSchema(listSnapshotsDataSchema),
+            annotations: { readOnlyHint: true },
+            handler: (input) => executeSemanticTool("list_snapshots", async () => withDb(context, async (adapter) => {
+                const [checkpoints, states] = await Promise.all([
+                    adapter.listWorkspaceCheckpoints(input.runId),
+                    adapter.listWorkspaceStates(input.runId),
+                ]);
+                const opByCommit = new Map();
+                for (const state of states) {
+                    opByCommit.set(`${state.jjCwd}\0${state.jjCommitId}`, state.jjOperationId);
+                }
+                return {
+                    snapshots: checkpoints.map((checkpoint) => ({
+                        seq: checkpoint.seq,
+                        nodeId: checkpoint.nodeId,
+                        iteration: checkpoint.iteration,
+                        attempt: checkpoint.attempt,
+                        tier: checkpoint.tier,
+                        source: checkpoint.source,
+                        label: checkpoint.label ?? null,
+                        commitId: checkpoint.jjCommitId,
+                        operationId: opByCommit.get(`${checkpoint.jjCwd}\0${checkpoint.jjCommitId}`) ?? null,
+                        cwd: checkpoint.jjCwd,
+                        createdAtMs: checkpoint.createdAtMs,
+                    })),
+                };
+            })),
+        },
+        {
+            name: "get_timeline",
+            description: "Return the time-travel timeline for a run, optionally including all child forks recursively.",
+            inputSchema: getTimelineInputSchema,
+            outputSchema: resultSchema(getTimelineDataSchema),
+            annotations: { readOnlyHint: true },
+            handler: (input) => executeSemanticTool("get_timeline", async () => withDb(context, async (adapter) => ({
+                timeline: input.tree
+                    ? await buildTimelineTree(adapter, input.runId)
+                    : await buildTimeline(adapter, input.runId),
+            }))),
+        },
+        {
+            name: "time_travel",
+            description: "Destructive: reset a run back to a prior node attempt and optionally restore VCS state. Requires force=true when the run is still running.",
+            inputSchema: timeTravelInputSchema,
+            outputSchema: resultSchema(timeTravelDataSchema),
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: false,
+            },
+            handler: (input) => executeSemanticTool("time_travel", async () => withDb(context, async (adapter) => {
+                const run = await adapter.getRun(input.runId);
+                if (run?.status === "running" && !input.force) {
+                    throw new SmithersError("RUN_STILL_RUNNING", `Run ${input.runId} is still marked running. Pass force=true to time-travel it anyway.`, {
+                        runId: input.runId,
+                    });
+                }
+                const result = await timeTravel(adapter, {
+                    runId: input.runId,
+                    nodeId: input.nodeId,
+                    iteration: input.iteration,
+                    attempt: input.attempt,
+                    resetDependents: input.resetDependents,
+                    restoreVcs: input.restoreVcs,
+                });
+                const updatedRun = await adapter.getRun(input.runId);
+                return {
+                    result,
+                    run: updatedRun != null
+                        ? await buildRunSummary(adapter, updatedRun)
                         : null,
                 };
             })),

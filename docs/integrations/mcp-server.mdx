@@ -128,7 +128,8 @@ The response is also echoed as a `text` content block, so clients that do not pa
 |---|---|---|
 | `readOnlyHint: true` | Most query tools | Tool does not modify state |
 | `readOnlyHint: false, openWorldHint: true` | `run_workflow` | Launches external processes |
-| `readOnlyHint: false, destructiveHint: true, idempotentHint: false` | `resolve_approval`, `revert_attempt` | Mutates persisted state irreversibly |
+| `readOnlyHint: false, destructiveHint: true, idempotentHint: false` | `resolve_approval`, `revert_attempt`, `rewind_run`, `restore_checkpoint`, `time_travel` | Mutates persisted state irreversibly |
+| `readOnlyHint: false, idempotentHint: false` | `fork_run`, `replay_run` | Creates new run/branch state |
 
 ---
 
@@ -525,6 +526,117 @@ Revert the workspace and frame history back to the state captured at a specific 
   run: RunSummary | null;
 }
 ```
+
+---
+
+### fork_run
+
+Create a branched run from a time-travel snapshot checkpoint without starting it.
+
+**Input:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `parentRunId` | `string` | Source run ID |
+| `frameNo` | `number` | Snapshot frame number |
+| `resetNodes` | `string[]` | Node IDs to reset to pending in the fork |
+| `inputOverrides` | `Record<string, unknown>` | Input fields to overlay on the snapshot input |
+| `branchLabel` | `string` | Optional branch label |
+
+**Output:** `{ runId, parentRunId, parentFrameNo, branch, snapshot, run }`
+
+---
+
+### replay_run
+
+Fork a run from a checkpoint for replay, optionally restoring VCS state. Resume the returned `runId` with `run_workflow` when needed.
+
+**Input:** same as `fork_run`, plus:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `restoreVcs` | `boolean` | `false` | Restore the working copy to the source frame revision |
+| `cwd` | `string` | - | Working directory used for VCS restore |
+
+**Output:** `{ runId, parentRunId, parentFrameNo, branch, snapshot, vcsRestored, vcsPointer, vcsError?, run }`
+
+---
+
+### rewind_run
+
+Rewind a run to a previous frame, deleting later frames and invalidating derived state. This is destructive and requires `confirm: true`.
+
+**Input:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `runId` | `string` | Run to rewind |
+| `frameNo` | `number` | Target frame number |
+| `confirm` | `boolean` | Must be `true` |
+
+**Output:** `{ result, run }`
+
+---
+
+### restore_checkpoint
+
+Restore the worktree to a durability checkpoint for a node. If `seq` is omitted, the latest matching checkpoint is used.
+
+**Input:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `runId` | `string` | Run containing the checkpoint |
+| `nodeId` | `string` | Node whose checkpoint should be restored |
+| `iteration` | `number` | Optional loop iteration |
+| `seq` | `number` | Optional checkpoint sequence |
+
+**Output:** `{ runId, nodeId, iteration, seq, commitId, cwd, success, error? }`
+
+---
+
+### list_snapshots
+
+List durability workspace checkpoints for a run with matching VCS operation IDs when available.
+
+**Input:** `{ runId: string }`
+
+**Output:** `{ snapshots: Array<{ seq, nodeId, iteration, attempt, tier, source, label, commitId, operationId, cwd, createdAtMs }> }`
+
+---
+
+### get_timeline
+
+Return the time-travel timeline for a run, optionally including all child forks recursively.
+
+**Input:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `runId` | `string` | required | Run ID |
+| `tree` | `boolean` | `false` | Include child forks recursively |
+
+**Output:** `{ timeline: unknown }`
+
+---
+
+### time_travel
+
+Reset a run back to a prior node attempt and optionally restore VCS state. If the run is still marked running, pass `force: true`.
+
+**Input:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `runId` | `string` | required | Run ID |
+| `nodeId` | `string` | required | Node to travel back to |
+| `iteration` | `number` | `0` | Loop iteration |
+| `attempt` | `number` | latest | Attempt number |
+| `restoreVcs` | `boolean` | `true` | Restore filesystem state |
+| `resetDependents` | `boolean` | `true` | Reset dependent nodes too |
+| `force` | `boolean` | `false` | Allow time travel when the run is still running |
+
+**Output:** `{ result, run }`
 
 ---
 

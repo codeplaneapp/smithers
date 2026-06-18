@@ -10,6 +10,13 @@ export type SemanticToolName =
     | "ask_human"
     | "get_node_detail"
     | "revert_attempt"
+    | "fork_run"
+    | "replay_run"
+    | "rewind_run"
+    | "restore_checkpoint"
+    | "list_snapshots"
+    | "get_timeline"
+    | "time_travel"
     | "list_artifacts"
     | "get_chat_transcript"
     | "get_run_events";
