@@ -317,11 +317,15 @@ commands[73]:
       input,,string,,Input JSON; overrides persisted input
       root,,string,,Tool sandbox root directory (same anchor as up)
   - name: gui
-    purpose: Open a directory as a workspace in Smithers GUI
+    purpose: Open a directory as a workspace in Smithers UI
     args[1]{name,type,required,desc}:
       path,string,false,Directory path (defaults to current working directory)
-    flags[1]{name,short,type,default,desc}:
-      bundle-id,,string,com.smithers.SmithersGUI,Smithers GUI app bundle identifier
+    flags[5]{name,short,type,default,desc}:
+      gateway,g,string,,Gateway base URL (default http://127.0.0.1:<port>)
+      port,,number,7331,Gateway port when --gateway is not set
+      workflow,w,string,,Open this workflow's UI directly skipping run lookup
+      open,,boolean,true,Open a browser; use --no-open to just print the URL
+      autostart,,boolean,true,Start a local Gateway automatically when no Gateway is reachable
   - name: ui
     purpose: Open the custom UI for a workflow run in your browser
     args[1]{name,type,required,desc}:

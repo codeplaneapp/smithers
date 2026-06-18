@@ -1963,6 +1963,78 @@ async function autoStartGateway(port) {
     }
     return false;
 }
+async function runUiCommand(c) {
+    const base = (c.options.gateway ?? `http://127.0.0.1:${c.options.port}`).replace(/\/+$/, "");
+    const fail = (code, message) => c.error({ code, message, exitCode: 1 });
+    let reachable = await fetch(`${base}/health`).then((r) => r.ok, () => false);
+    if (!reachable && c.options.autostart && !c.options.gateway) {
+        process.stderr.write(`[smithers] No Gateway at ${base}; starting one (smithers gateway --port ${c.options.port})…\n`);
+        reachable = await autoStartGateway(c.options.port);
+    }
+    if (!reachable) {
+        return fail("GATEWAY_UNREACHABLE", `No Smithers Gateway reachable at ${base}. Start one with \`smithers gateway\` (it serves workspace UIs from .smithers/ui/), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.`);
+    }
+    const rpc = async (method, params = {}) => {
+        const res = await fetch(`${base}/v1/rpc/${method}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(params),
+        });
+        const frame = await res.json().catch(() => null);
+        if (!frame || frame.type !== "res") {
+            const command = c.options.gateway
+                ? "smithers gateway"
+                : `smithers gateway --port ${c.options.port}`;
+            throw new Error(`Gateway at ${base} returned an invalid RPC frame for ${method}. Make sure this URL points at \`${command}\`, not \`smithers up --serve\` or an older per-run server.`);
+        }
+        if (!frame.ok) {
+            throw new Error(frame.error?.message ?? `Gateway RPC ${method} failed.`);
+        }
+        return frame.payload;
+    };
+    const openInBrowser = (url) => {
+        const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
+        const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+        const proc = spawn(cmd, args, { stdio: "ignore", detached: true });
+        proc.unref();
+        proc.on("error", () => { });
+    };
+    try {
+        const workflows = await rpc("listWorkflows", {});
+        const byKey = new Map((Array.isArray(workflows) ? workflows : []).map((w) => [w.key, w]));
+        let workflowKey = c.options.workflow;
+        let runId = c.args.runId;
+        if (!workflowKey) {
+            if (!runId) {
+                const runs = await rpc("listRuns", {});
+                const latest = Array.isArray(runs) ? runs[0] : undefined;
+                if (!latest) {
+                    return fail("NO_RUNS", "No runs found. Start one with `smithers up` or `smithers workflow <name>`.");
+                }
+                runId = latest.runId ? String(latest.runId) : undefined;
+                workflowKey = latest.workflowKey ? String(latest.workflowKey) : undefined;
+            }
+            if (!workflowKey && runId) {
+                const run = await rpc("getRun", { runId });
+                workflowKey = run?.workflowKey ? String(run.workflowKey) : undefined;
+            }
+        }
+        if (!workflowKey) {
+            return fail("WORKFLOW_UNRESOLVED", runId ? `Could not resolve a workflow for run ${runId}.` : "Could not resolve a workflow to open.");
+        }
+        const summary = byKey.get(workflowKey);
+        if (!summary || !summary.hasUi || !summary.uiPath) {
+            return fail("NO_UI", `Workflow "${workflowKey}" has no UI mounted on the Gateway at ${base}.`);
+        }
+        const url = `${base}${summary.uiPath}${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`;
+        if (c.options.open) openInBrowser(url);
+        console.log(`${c.options.open ? "Opening" : "UI URL:"} ${url}`);
+        return c.ok({ opened: c.options.open, url, runId: runId ?? null, workflow: workflowKey });
+    }
+    catch (err) {
+        return fail("UI_OPEN_FAILED", err?.message ?? String(err));
+    }
+}
 async function runGatewayCommand(options) {
     const localPackDir = resolvePackDirs(process.cwd()).find((dir) => dir.scope === "local")?.packDir;
     const localWorkspace = localPackDir ? dirname(localPackDir) : undefined;
@@ -5766,57 +5838,37 @@ const cli = Cli.create({
 })
     // =========================================================================
     // smithers gui [path]
-    // Opens a directory as a workspace in the Smithers GUI macOS app.
+    // Opens a directory as a workspace in the Smithers Gateway UI.
     // =========================================================================
     .command("gui", {
-    description: "Open a directory as a workspace in Smithers GUI",
+    description: "Open a directory as a workspace in Smithers UI",
     args: z.object({
         path: z.string().optional().describe("Directory path (defaults to current working directory)"),
     }),
     options: z.object({
-        bundleId: z.string().default("com.smithers.SmithersGUI").describe("Smithers GUI app bundle identifier"),
+        gateway: z.string().optional().describe("Gateway base URL (default http://127.0.0.1:<port>)."),
+        port: z.number().int().min(1).max(65535).default(7331).describe("Gateway port when --gateway is not set."),
+        workflow: z.string().optional().describe("Open this workflow's UI directly, skipping run lookup."),
+        open: z.boolean().default(true).describe("Open a browser. Use --no-open to just print the URL."),
+        autostart: z.boolean().default(true).describe("If no Gateway is reachable on the local port, start one automatically. Use --no-autostart to disable."),
     }),
+    alias: { gateway: "g", workflow: "w" },
     async run(c) {
         const input = c.args.path ?? process.cwd();
         const target = resolve(input);
         if (!existsSync(target)) {
             return c.error({ code: "PATH_NOT_FOUND", message: `Path does not exist: ${target}`, exitCode: 1 });
         }
-        try {
-            const launch = await new Promise((resolveLaunch) => {
-                const proc = spawn("open", ["-b", c.options.bundleId, target], {
-                    stdio: ["ignore", "ignore", "pipe"],
-                });
-                let stderr = "";
-                proc.stderr?.setEncoding("utf8");
-                proc.stderr?.on("data", (chunk) => {
-                    stderr += chunk;
-                });
-                proc.on("error", (err) => {
-                    resolveLaunch({ ok: false, error: err, stderr });
-                });
-                proc.on("close", (code, signal) => {
-                    resolveLaunch({ ok: code === 0, code, signal, stderr });
-                });
-            });
-            if (!launch.ok) {
-                const stderr = launch.stderr?.trim() ?? "";
-                const detail = stderr || launch.error?.message || (launch.signal ? `open exited with signal ${launch.signal}` : `open exited with code ${launch.code ?? 1}`);
-                return c.error({
-                    code: "GUI_LAUNCH_FAILED",
-                    message: `Smithers Studio app is not installed or not registered with LaunchServices. Install/register the native app, or pass --bundle-id <actual.bundle.id>. ${detail}`,
-                    exitCode: 1,
-                });
-            }
-            console.log(`Opening ${target} in Smithers GUI…`);
-            return c.ok({ opened: target, bundleId: c.options.bundleId });
+        if (!statSync(target).isDirectory()) {
+            return c.error({ code: "PATH_NOT_DIRECTORY", message: `Path is not a directory: ${target}`, exitCode: 1 });
         }
-        catch (err) {
-            return c.error({
-                code: "GUI_LAUNCH_FAILED",
-                message: `Smithers Studio app is not installed or not registered with LaunchServices. Install/register the native app, or pass --bundle-id <actual.bundle.id>. ${err?.message ?? String(err)}`,
-                exitCode: 1,
-            });
+        const previousCwd = process.cwd();
+        try {
+            process.chdir(target);
+            return await runUiCommand({ ...c, args: { runId: undefined } });
+        }
+        finally {
+            process.chdir(previousCwd);
         }
     },
 })
@@ -5842,82 +5894,7 @@ const cli = Cli.create({
     }),
     alias: { gateway: "g", workflow: "w" },
     async run(c) {
-        const base = (c.options.gateway ?? `http://127.0.0.1:${c.options.port}`).replace(/\/+$/, "");
-        const fail = (code, message) => c.error({ code, message, exitCode: 1 });
-        // The Gateway serves the UI and owns the uiPath mapping, so it must be up.
-        let reachable = await fetch(`${base}/health`).then((r) => r.ok, () => false);
-        if (!reachable && c.options.autostart && !c.options.gateway) {
-            // One-command UX: when no Gateway is reachable on the default local
-            // port, start one ourselves (it auto-mounts .smithers/ui/<id>.tsx),
-            // wait for it, then open. Skipped when --gateway points elsewhere or
-            // --no-autostart is passed.
-            process.stderr.write(`[smithers] No Gateway at ${base}; starting one (smithers gateway --port ${c.options.port})…\n`);
-            reachable = await autoStartGateway(c.options.port);
-        }
-        if (!reachable) {
-            return fail("GATEWAY_UNREACHABLE", `No Smithers Gateway reachable at ${base}. Start one with \`smithers gateway\` (it serves workspace UIs from .smithers/ui/), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.`);
-        }
-        const rpc = async (method, params = {}) => {
-            const res = await fetch(`${base}/v1/rpc/${method}`, {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify(params),
-            });
-            const frame = await res.json().catch(() => null);
-            if (!frame || frame.type !== "res") {
-                const command = c.options.gateway
-                    ? "smithers gateway"
-                    : `smithers gateway --port ${c.options.port}`;
-                throw new Error(`Gateway at ${base} returned an invalid RPC frame for ${method}. Make sure this URL points at \`${command}\`, not \`smithers up --serve\` or an older per-run server.`);
-            }
-            if (!frame.ok) {
-                throw new Error(frame.error?.message ?? `Gateway RPC ${method} failed.`);
-            }
-            return frame.payload;
-        };
-        const openInBrowser = (url) => {
-            const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
-            const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
-            const proc = spawn(cmd, args, { stdio: "ignore", detached: true });
-            proc.unref();
-            proc.on("error", () => {});
-        };
-        try {
-            const workflows = await rpc("listWorkflows", {});
-            const byKey = new Map((Array.isArray(workflows) ? workflows : []).map((w) => [w.key, w]));
-            let workflowKey = c.options.workflow;
-            let runId = c.args.runId;
-            if (!workflowKey) {
-                if (!runId) {
-                    // No run named: attach to the most recently started run.
-                    const runs = await rpc("listRuns", {});
-                    const latest = Array.isArray(runs) ? runs[0] : undefined;
-                    if (!latest) {
-                        return fail("NO_RUNS", "No runs found. Start one with `smithers up` or `smithers workflow <name>`.");
-                    }
-                    runId = latest.runId ? String(latest.runId) : undefined;
-                    workflowKey = latest.workflowKey ? String(latest.workflowKey) : undefined;
-                }
-                if (!workflowKey && runId) {
-                    const run = await rpc("getRun", { runId });
-                    workflowKey = run?.workflowKey ? String(run.workflowKey) : undefined;
-                }
-            }
-            if (!workflowKey) {
-                return fail("WORKFLOW_UNRESOLVED", runId ? `Could not resolve a workflow for run ${runId}.` : "Could not resolve a workflow to open.");
-            }
-            const summary = byKey.get(workflowKey);
-            if (!summary || !summary.hasUi || !summary.uiPath) {
-                return fail("NO_UI", `Workflow "${workflowKey}" has no UI mounted on the Gateway at ${base}.`);
-            }
-            const url = `${base}${summary.uiPath}${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`;
-            if (c.options.open) openInBrowser(url);
-            console.log(`${c.options.open ? "Opening" : "UI URL:"} ${url}`);
-            return c.ok({ opened: c.options.open, url, runId: runId ?? null, workflow: workflowKey });
-        }
-        catch (err) {
-            return fail("UI_OPEN_FAILED", err?.message ?? String(err));
-        }
+        return runUiCommand(c);
     },
 })
     // =========================================================================
@@ -5999,10 +5976,9 @@ function rewriteGuiShortcutArgv(argv) {
     const firstPositional = argv[firstPositionalIndex];
     if (KNOWN_COMMANDS.has(firstPositional)) return argv;
     const isDotShortcut = firstPositional === "." || firstPositional === "..";
-    const isAbsoluteDir = firstPositional.startsWith("/") && existsSync(firstPositional);
-    const isRelativeDir = (firstPositional.startsWith("./") || firstPositional.startsWith("../")) &&
-        existsSync(resolve(firstPositional));
-    if (!isDotShortcut && !isAbsoluteDir && !isRelativeDir) return argv;
+    const resolved = resolve(firstPositional);
+    const isExistingDir = existsSync(resolved) && statSync(resolved).isDirectory();
+    if (!isDotShortcut && !isExistingDir) return argv;
     return [
         ...argv.slice(0, firstPositionalIndex),
         "gui",
