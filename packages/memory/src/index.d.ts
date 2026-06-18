@@ -83,12 +83,14 @@ type MemoryStore$2 = {
     listFacts: (ns: MemoryNamespace$3) => Promise<MemoryFact$1[]>;
     createThread: (ns: MemoryNamespace$3, title?: string) => Promise<MemoryThread$1>;
     getThread: (threadId: string) => Promise<MemoryThread$1 | undefined>;
+    listThreads: () => Promise<MemoryThread$1[]>;
     deleteThread: (threadId: string) => Promise<void>;
     saveMessage: (msg: Omit<MemoryMessage$1, "createdAtMs"> & {
         createdAtMs?: number;
     }) => Promise<void>;
     listMessages: (threadId: string, limit?: number) => Promise<MemoryMessage$1[]>;
     countMessages: (threadId: string) => Promise<number>;
+    deleteMessages: (threadId: string, messageIds: string[]) => Promise<number>;
     deleteExpiredFacts: () => Promise<number>;
     getFactEffect: (ns: MemoryNamespace$3, key: string) => Effect.Effect<MemoryFact$1 | undefined, SmithersError>;
     setFactEffect: (ns: MemoryNamespace$3, key: string, value: unknown, ttlMs?: number) => Effect.Effect<void, SmithersError>;
@@ -96,12 +98,14 @@ type MemoryStore$2 = {
     listFactsEffect: (ns: MemoryNamespace$3) => Effect.Effect<MemoryFact$1[], SmithersError>;
     createThreadEffect: (ns: MemoryNamespace$3, title?: string) => Effect.Effect<MemoryThread$1, SmithersError>;
     getThreadEffect: (threadId: string) => Effect.Effect<MemoryThread$1 | undefined, SmithersError>;
+    listThreadsEffect: () => Effect.Effect<MemoryThread$1[], SmithersError>;
     deleteThreadEffect: (threadId: string) => Effect.Effect<void, SmithersError>;
     saveMessageEffect: (msg: Omit<MemoryMessage$1, "createdAtMs"> & {
         createdAtMs?: number;
     }) => Effect.Effect<void, SmithersError>;
     listMessagesEffect: (threadId: string, limit?: number) => Effect.Effect<MemoryMessage$1[], SmithersError>;
     countMessagesEffect: (threadId: string) => Effect.Effect<number, SmithersError>;
+    deleteMessagesEffect: (threadId: string, messageIds: string[]) => Effect.Effect<number, SmithersError>;
     deleteExpiredFactsEffect: () => Effect.Effect<number, SmithersError>;
 };
 

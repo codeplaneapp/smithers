@@ -12,13 +12,24 @@ export function TokenLimiter(maxTokens) {
    * @param {MemoryStore} store
    * @returns {Effect.Effect<void, SmithersError>}
    */
-    function processEffect(_store) {
+    function processEffect(store) {
         return Effect.gen(function* () {
-            // Token limiter operates at the thread level; without a specific thread
-            // context it logs and returns. In practice, this processor is invoked
-            // with a store that wraps a specific thread. For now, this is a no-op
-            // placeholder that documents the intended behaviour.
-            yield* Effect.logInfo(`TokenLimiter: configured for ${maxTokens} tokens (${charBudget} chars) — operates at thread level`);
+            const threads = yield* store.listThreadsEffect();
+            let deleted = 0;
+            for (const thread of threads) {
+                const messages = yield* store.listMessagesEffect(thread.threadId);
+                let charCount = messages.reduce((total, message) => total + message.contentJson.length, 0);
+                const deleteIds = [];
+                for (const message of messages) {
+                    if (charCount <= charBudget) {
+                        break;
+                    }
+                    deleteIds.push(message.id);
+                    charCount -= message.contentJson.length;
+                }
+                deleted += yield* store.deleteMessagesEffect(thread.threadId, deleteIds);
+            }
+            yield* Effect.logInfo(`TokenLimiter: deleted ${deleted} messages to enforce ${maxTokens} token budget`);
         }).pipe(Effect.annotateLogs({ processor: "TokenLimiter", maxTokens }), Effect.withLogSpan("memory:processor:token-limiter"));
     }
     return {

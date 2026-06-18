@@ -20,12 +20,14 @@ export type MemoryStore = {
   listFacts: (ns: MemoryNamespace) => Promise<MemoryFact[]>;
   createThread: (ns: MemoryNamespace, title?: string) => Promise<MemoryThread>;
   getThread: (threadId: string) => Promise<MemoryThread | undefined>;
+  listThreads: () => Promise<MemoryThread[]>;
   deleteThread: (threadId: string) => Promise<void>;
   saveMessage: (
     msg: Omit<MemoryMessage, "createdAtMs"> & { createdAtMs?: number },
   ) => Promise<void>;
   listMessages: (threadId: string, limit?: number) => Promise<MemoryMessage[]>;
   countMessages: (threadId: string) => Promise<number>;
+  deleteMessages: (threadId: string, messageIds: string[]) => Promise<number>;
   deleteExpiredFacts: () => Promise<number>;
   getFactEffect: (
     ns: MemoryNamespace,
@@ -51,6 +53,7 @@ export type MemoryStore = {
   getThreadEffect: (
     threadId: string,
   ) => Effect.Effect<MemoryThread | undefined, SmithersError>;
+  listThreadsEffect: () => Effect.Effect<MemoryThread[], SmithersError>;
   deleteThreadEffect: (
     threadId: string,
   ) => Effect.Effect<void, SmithersError>;
@@ -63,6 +66,10 @@ export type MemoryStore = {
   ) => Effect.Effect<MemoryMessage[], SmithersError>;
   countMessagesEffect: (
     threadId: string,
+  ) => Effect.Effect<number, SmithersError>;
+  deleteMessagesEffect: (
+    threadId: string,
+    messageIds: string[],
   ) => Effect.Effect<number, SmithersError>;
   deleteExpiredFactsEffect: () => Effect.Effect<number, SmithersError>;
 };

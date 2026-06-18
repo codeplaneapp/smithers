@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { Effect, Layer, Metric } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { dbQueryDuration } from "@smithers-orchestrator/observability/metrics";
@@ -194,6 +194,22 @@ function makeMemoryStore(db) {
             .limit(1)).pipe(Effect.map((rows) => rows[0]));
     }
     /**
+   * @returns {Effect.Effect<MemoryThread[], SmithersError>}
+   */
+    function listThreadsEffect() {
+        return readEffect("memory listThreads", () => db
+            .select()
+            .from(smithersMemoryThreads)
+            .orderBy(smithersMemoryThreads.createdAtMs)).pipe(Effect.map((rows) => rows.map((row) => ({
+            threadId: row.threadId,
+            namespace: row.namespace,
+            title: row.title,
+            metadataJson: row.metadataJson,
+            createdAtMs: row.createdAtMs,
+            updatedAtMs: row.updatedAtMs,
+        }))));
+    }
+    /**
    * @param {string} threadId
    * @returns {Effect.Effect<void, SmithersError>}
    */
@@ -264,6 +280,19 @@ function makeMemoryStore(db) {
             .from(smithersMemoryMessages)
             .where(eq(smithersMemoryMessages.threadId, threadId))).pipe(Effect.map((rows) => rows[0]?.count ?? 0));
     }
+    /**
+   * @param {string} threadId
+   * @param {string[]} messageIds
+   * @returns {Effect.Effect<number, SmithersError>}
+   */
+    function deleteMessagesEffect(threadId, messageIds) {
+        if (messageIds.length === 0) {
+            return Effect.succeed(0);
+        }
+        return writeEffect("memory deleteMessages", () => db
+            .delete(smithersMemoryMessages)
+            .where(and(eq(smithersMemoryMessages.threadId, threadId), inArray(smithersMemoryMessages.id, messageIds)))).pipe(Effect.map((result) => result?.changes ?? result?.rowsAffected ?? 0));
+    }
     // --- Maintenance ---
     /**
    * @returns {Effect.Effect<number, SmithersError>}
@@ -283,10 +312,12 @@ function makeMemoryStore(db) {
         listFacts: (ns) => Effect.runPromise(listFactsEffect(ns)),
         createThread: (ns, title) => Effect.runPromise(createThreadEffect(ns, title)),
         getThread: (threadId) => Effect.runPromise(getThreadEffect(threadId)),
+        listThreads: () => Effect.runPromise(listThreadsEffect()),
         deleteThread: (threadId) => Effect.runPromise(deleteThreadEffect(threadId)),
         saveMessage: (msg) => Effect.runPromise(saveMessageEffect(msg)),
         listMessages: (threadId, limit) => Effect.runPromise(listMessagesEffect(threadId, limit)),
         countMessages: (threadId) => Effect.runPromise(countMessagesEffect(threadId)),
+        deleteMessages: (threadId, messageIds) => Effect.runPromise(deleteMessagesEffect(threadId, messageIds)),
         deleteExpiredFacts: () => Effect.runPromise(deleteExpiredFactsEffect()),
         // Effect variants
         getFactEffect,
@@ -295,10 +326,12 @@ function makeMemoryStore(db) {
         listFactsEffect,
         createThreadEffect,
         getThreadEffect,
+        listThreadsEffect,
         deleteThreadEffect,
         saveMessageEffect,
         listMessagesEffect,
         countMessagesEffect,
+        deleteMessagesEffect,
         deleteExpiredFactsEffect,
     };
 }
