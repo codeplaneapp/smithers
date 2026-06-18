@@ -263,6 +263,15 @@ describe("Approval component", () => {
         const result = approvalDecisionSchema.safeParse(valid);
         expect(result.success).toBe(true);
     });
+    test("approvalDecisionSchema accepts an omitted note", () => {
+        const valid = {
+            approved: true,
+            decidedBy: null,
+            decidedAt: null,
+        };
+        const result = approvalDecisionSchema.safeParse(valid);
+        expect(result.success).toBe(true);
+    });
     test("approvalDecisionSchema rejects invalid decidedAt", () => {
         const invalid = {
             approved: true,

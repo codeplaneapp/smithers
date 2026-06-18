@@ -43,7 +43,9 @@ const getAdapterNamespace = (adapter) => {
 };
 export const approvalDurableDeferredSuccessSchema = Schema.Struct({
     approved: Schema.Boolean,
-    note: Schema.NullOr(Schema.String),
+    // `note` is omitted entirely when no note was provided; if a string was
+    // provided, preserve it exactly (including the empty string).
+    note: Schema.optional(Schema.String),
     decidedBy: Schema.NullOr(Schema.String),
     decisionJson: Schema.NullOr(Schema.String),
     autoApproved: Schema.Boolean,
@@ -237,7 +239,11 @@ export const awaitWaitForEventDurableDeferred = (adapter, runId, nodeId, iterati
 export const bridgeApprovalResolve = async (adapter, runId, nodeId, iteration, resolution) => {
     await resolveBridgeDeferred(makeDurableDeferredBridgeExecutionId(adapter, runId, nodeId, iteration), makeApprovalDurableDeferred(nodeId), Exit.succeed({
         approved: resolution.approved,
-        note: resolution.note ?? null,
+        // Only carry a `note` when a string was provided; omitting the key keeps
+        // note-less decisions valid against optional string schemas.
+        ...(typeof resolution.note === "string"
+            ? { note: resolution.note }
+            : {}),
         decidedBy: resolution.decidedBy ?? null,
         decisionJson: resolution.decisionJson ?? null,
         autoApproved: resolution.autoApproved ?? false,

@@ -8,6 +8,10 @@ import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { Effect } from "effect";
 const contractSchemas = {
     decision: approvalDecisionSchema,
+    optionalDecision: z.object({
+        approved: z.boolean(),
+        note: z.string().optional(),
+    }),
     eventOut: z.object({ ok: z.boolean() }),
     result: z.object({ value: z.number() }),
 };
@@ -62,6 +66,40 @@ describe("durable deferred contract", () => {
                     nodeId: "after",
                     iteration: 0,
                     value: 1,
+                }),
+            ]);
+        }
+        finally {
+            cleanup();
+        }
+    });
+    test("approval without a note validates optional note output schemas", async () => {
+        const { smithers, outputs, tables, db, cleanup } = buildContractSmithers();
+        try {
+            const workflow = smithers(() => jsx(Workflow, {
+                name: "durable-deferred-approval-optional-note",
+                children: jsx(Approval, {
+                    id: "gate",
+                    output: outputs.optionalDecision,
+                    request: { title: "Approve without note" },
+                }),
+            }));
+            const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+            expect(first.status).toBe("waiting-approval");
+            await Effect.runPromise(approveNode(new SmithersDb(db), first.runId, "gate", 0));
+            const resumed = await Effect.runPromise(runWorkflow(workflow, {
+                input: {},
+                runId: first.runId,
+                resume: true,
+            }));
+            expect(resumed.status).toBe("finished");
+            const decisionRows = await db.select().from(tables.optionalDecision);
+            expect(decisionRows).toEqual([
+                expect.objectContaining({
+                    runId: first.runId,
+                    nodeId: "gate",
+                    iteration: 0,
+                    approved: true,
                 }),
             ]);
         }

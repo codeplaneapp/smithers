@@ -66,7 +66,10 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 const SmithersSqlite = Context.GenericTag("smithers/effect/sqlite");
 class ApprovalDecision extends Schema.Class("ApprovalDecision")({
     approved: Schema.Boolean,
-    note: Schema.NullOr(Schema.String),
+    // `note` is omitted entirely when no note was provided so optional-string
+    // approval outputs validate. If a string was provided, preserve it exactly
+    // (including the empty string).
+    note: Schema.optional(Schema.String),
     decidedBy: Schema.NullOr(Schema.String),
     decidedAt: Schema.NullOr(Schema.String),
 }) {
@@ -448,7 +451,11 @@ async function executeStepHandle(handle, ctx, decodedInput, env) {
         const approval = await adapter.getApproval(runtime.runId, handle.id, runtime.iteration);
         return encodeSchema(ApprovalDecision, {
             approved: approval?.status === "approved",
-            note: approval?.note ?? null,
+            // Only include `note` when a string was provided; omitting the key
+            // keeps note-less decisions valid against optional string schemas.
+            ...(typeof approval?.note === "string"
+                ? { note: approval.note }
+                : {}),
             decidedBy: approval?.decidedBy ?? null,
             decidedAt: null,
         });

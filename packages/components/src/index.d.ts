@@ -920,7 +920,7 @@ declare function Approval<Row>(props: ApprovalProps$1<Row>): React.ReactElement 
  */
 declare const approvalDecisionSchema: z.ZodObject<{
     approved: z.ZodBoolean;
-    note: z.ZodNullable<z.ZodString>;
+    note: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     decidedBy: z.ZodNullable<z.ZodString>;
     decidedAt: z.ZodNullable<z.ZodString>;
 }, z.core.$strip>;

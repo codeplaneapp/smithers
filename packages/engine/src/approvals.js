@@ -121,7 +121,9 @@ export function approveNode(adapter, runId, nodeId, iteration, note, decidedBy, 
         yield* Effect.promise(() =>
             bridgeApprovalResolve(adapter, runId, nodeId, iteration, {
                 approved: true,
-                note: note ?? null,
+                // Pass the note through as-is (string | undefined); bridgeApprovalResolve
+                // omits the `note` key when it is absent so optional string schemas validate.
+                note,
                 decidedBy: decidedBy ?? null,
                 decisionJson: serializeDecision(decision),
                 autoApproved,
@@ -218,7 +220,9 @@ export function denyNode(adapter, runId, nodeId, iteration, note, decidedBy, dec
         yield* Effect.promise(() =>
             bridgeApprovalResolve(adapter, runId, nodeId, iteration, {
                 approved: false,
-                note: note ?? null,
+                // Pass the note through as-is (string | undefined); bridgeApprovalResolve
+                // omits the `note` key when it is absent so optional string schemas validate.
+                note,
                 decidedBy: decidedBy ?? null,
                 decisionJson: serializeDecision(decision),
             }).catch((bridgeError) => {

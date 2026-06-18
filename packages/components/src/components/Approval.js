@@ -21,7 +21,10 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
 export const approvalDecisionSchema = z.object({
     approved: z.boolean(),
-    note: z.string().nullable(),
+    // `note` is omitted entirely when no note was provided, so the default
+    // decision schema must accept an absent key (optional) as well as the
+    // legacy null/string shapes.
+    note: z.string().nullable().optional(),
     decidedBy: z.string().nullable(),
     decidedAt: z.string().datetime().nullable(),
 });
@@ -69,6 +72,25 @@ function defaultSchemaForMode(mode) {
         default:
             return approvalDecisionSchema;
     }
+}
+/**
+ * @param {{ status?: string | null; note?: string | null; decidedBy?: string | null; decidedAtMs?: number | null } | undefined | null} approval
+ * @param {import("zod").ZodObject<import("zod").ZodRawShape>} outputSchema
+ * @returns {Record<string, unknown>}
+ */
+function buildDecisionPayload(approval, outputSchema) {
+    const base = {
+        approved: approval?.status === "approved",
+        decidedBy: approval?.decidedBy ?? null,
+        decidedAt: approval?.decidedAtMs != null ? new Date(approval.decidedAtMs).toISOString() : null,
+    };
+    if (typeof approval?.note === "string") {
+        return { ...base, note: approval.note };
+    }
+    if (outputSchema.safeParse(base).success) {
+        return base;
+    }
+    return { ...base, note: null };
 }
 /**
  * @param {ApprovalMode | undefined} mode
@@ -120,6 +142,8 @@ export function Approval(props) {
     const mode = props.mode ?? "approve";
     const approvalMode = normalizeMode(mode);
     const options = normalizeOptions(props.options);
+    const outputSchema = props.outputSchema ??
+        (isZodObject(props.output) ? props.output : defaultSchemaForMode(mode));
     if ((mode === "select" || mode === "rank") && (!options || options.length === 0)) {
         throw new SmithersError("APPROVAL_OPTIONS_REQUIRED", `Approval ${props.id} requires options when mode="${mode}".`);
     }
@@ -175,19 +199,13 @@ export function Approval(props) {
                     : approval?.note ?? null,
             };
         }
-        return {
-            approved: approval?.status === "approved",
-            note: approval?.note ?? null,
-            decidedBy: approval?.decidedBy ?? null,
-            decidedAt: approval?.decidedAtMs != null ? new Date(approval.decidedAtMs).toISOString() : null,
-        };
+        return buildDecisionPayload(approval, outputSchema);
     };
     return React.createElement("smithers:task", {
         id: props.id,
         key: props.key,
         output: props.output,
-        outputSchema: props.outputSchema ??
-            (isZodObject(props.output) ? props.output : defaultSchemaForMode(mode)),
+        outputSchema,
         dependsOn: props.dependsOn,
         needs: props.needs,
         needsApproval: true,
