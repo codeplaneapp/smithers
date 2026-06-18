@@ -82,6 +82,20 @@ describe("jsonSchemaToZod", () => {
         expect(schema.parse({ name: "Bob" })).toEqual({ name: "Bob" });
         expect(() => schema.parse({ age: 30 })).toThrow();
     });
+    test("converts typed additionalProperties", () => {
+        const schema = jsonSchemaToZod({
+            type: "object",
+            properties: {
+                name: { type: "string" },
+            },
+            additionalProperties: { type: "number" },
+        }, emptySpec);
+        expect(schema.parse({ name: "Alice", score: 42 })).toEqual({
+            name: "Alice",
+            score: 42,
+        });
+        expect(() => schema.parse({ name: "Alice", score: "high" })).toThrow();
+    });
     test("converts nullable type", () => {
         const schema = jsonSchemaToZod({ type: "string", nullable: true }, emptySpec);
         expect(schema.parse("hello")).toBe("hello");

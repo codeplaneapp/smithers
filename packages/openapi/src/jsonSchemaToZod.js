@@ -145,7 +145,10 @@ function buildObject(s, spec, visited) {
         props[key] = zodProp;
     }
     let obj = z.object(props);
-    if (s.additionalProperties === true || s.additionalProperties === undefined) {
+    if (typeof s.additionalProperties === "object" && s.additionalProperties !== null) {
+        obj = obj.catchall(jsonSchemaToZod(s.additionalProperties, spec, visited));
+    }
+    else if (s.additionalProperties === true || s.additionalProperties === undefined) {
         // Allow additional properties — use catchall for objects with props
         if (Object.keys(props).length > 0) {
             obj = obj.catchall(z.unknown());
