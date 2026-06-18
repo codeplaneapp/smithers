@@ -232,6 +232,31 @@ declare namespace smithersErrorDefinitions {
         let details_4: string;
         export { details_4 as details };
     }
+    namespace TASK_HIJACK_UNSUPPORTED {
+        let category: string;
+        let when: string;
+        let details: string;
+    }
+    namespace TASK_FORK_SOURCE_NOT_FOUND {
+        let category: string;
+        let when: string;
+        let details: string;
+    }
+    namespace TASK_FORK_SOURCE_NOT_COMPLETE {
+        let category: string;
+        let when: string;
+        let details: string;
+    }
+    namespace TASK_FORK_SESSION_UNAVAILABLE {
+        let category: string;
+        let when: string;
+        let details: string;
+    }
+    namespace TASK_FORK_CYCLE {
+        let category: string;
+        let when: string;
+        let details: string;
+    }
     namespace RUN_NOT_FOUND {
         let category_11: string;
         export { category_11 as category };
@@ -569,6 +594,10 @@ declare namespace smithersErrorDefinitions {
         export { category_58 as category };
         let when_58: string;
         export { when_58 as when };
+    }
+    namespace AGENT_CONFIG_INVALID {
+        let category: string;
+        let when: string;
     }
     namespace AGENT_RPC_FILE_ARGS {
         let category_59: string;

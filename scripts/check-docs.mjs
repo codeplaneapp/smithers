@@ -25,6 +25,7 @@ const README = join(root, "README.md");
 const TIMER_COMPONENT_DOC = join(DOCS, "components/timer.mdx");
 const SANDBOX_COMPONENT_DOC = join(DOCS, "components/sandbox.mdx");
 const ERROR_DEFINITIONS = join(root, "packages/errors/src/smithersErrorDefinitions.js");
+const ERROR_DECLARATIONS = join(root, "packages/errors/src/index.d.ts");
 const SMITHERS_PACKAGE_JSON = join(root, "packages/smithers/package.json");
 const SMITHERS_FACADE_SOURCE = join(root, "packages/smithers/src/index.js");
 const SMITHERS_FACADE_DECLARATIONS = join(root, "packages/smithers/src/index.d.ts");
@@ -248,6 +249,27 @@ function checkKnownErrorCodeUnion(codes) {
     if (extra.length) console.error(`    extra: ${extra.join(", ")}`);
   } else {
     console.log("✓ KnownSmithersErrorCode docs match built-in codes");
+  }
+}
+
+function checkErrorDeclarationCodes(codes) {
+  const declarations = readFileSync(ERROR_DECLARATIONS, "utf8");
+  const match = declarations.match(/declare namespace smithersErrorDefinitions \{([\s\S]*?)\n\}/);
+  const declared = match
+    ? [...match[1].matchAll(/^\s{4}namespace\s+([A-Z0-9_]+)\s+\{/gm)].map((codeMatch) => codeMatch[1])
+    : [];
+  const missing = codes.filter((code) => !declared.includes(code));
+  const extra = declared.filter((code) => !codes.includes(code));
+  const duplicates = [...new Set(declared.filter((code, index) => declared.indexOf(code) !== index))];
+  if (!match || missing.length || extra.length || duplicates.length) {
+    failed = true;
+    console.error("\n✗ packages/errors/src/index.d.ts does not match smithersErrorDefinitions:");
+    if (!match) console.error("    declare namespace smithersErrorDefinitions block not found");
+    if (missing.length) console.error(`    missing: ${missing.join(", ")}`);
+    if (extra.length) console.error(`    extra: ${extra.join(", ")}`);
+    if (duplicates.length) console.error(`    duplicate: ${duplicates.join(", ")}`);
+  } else {
+    console.log("✓ error declarations match built-in codes");
   }
 }
 
@@ -3859,6 +3881,7 @@ function checkGatewaySdkDocsMatchExports() {
 const errorCodes = readErrorDefinitionCodes();
 checkErrorReferenceCodes(errorCodes);
 checkKnownErrorCodeUnion(errorCodes);
+checkErrorDeclarationCodes(errorCodes);
 checkGatewayTypeDocs();
 checkFacadeDeclarations();
 checkDocumentedSmithersImportsMatchFacade();

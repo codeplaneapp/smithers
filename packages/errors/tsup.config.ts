@@ -2,7 +2,7 @@ import { defineConfig } from "tsup";
 
 export default defineConfig({
   entry: { index: "src/index.js" },
-  dts: { only: true, resolve: false },
+  dts: { only: true, resolve: true },
   outDir: "src",
   clean: false,
   format: ["esm"],
