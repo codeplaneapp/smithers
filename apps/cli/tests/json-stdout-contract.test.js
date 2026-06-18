@@ -120,6 +120,27 @@ async function seedJsonContractFixture(repo, adapter, sqlite) {
         computedAtMs: now - 4_000,
         sizeBytes: Buffer.byteLength(diffJson, "utf8"),
     });
+    await adapter.upsertWorkspaceState({
+        runId: "json-run",
+        jjCwd: repo.dir,
+        jjCommitId: "target",
+        jjOperationId: "op-target",
+        createdAtMs: now - 3_000,
+    });
+    await adapter.insertWorkspaceCheckpoint({
+        runId: "json-run",
+        nodeId: "node-a",
+        iteration: 0,
+        attempt: 1,
+        seq: 0,
+        jjCwd: repo.dir,
+        jjCommitId: "target",
+        source: "hook",
+        tier: 1,
+        label: "JSON contract",
+        toolUseId: null,
+        createdAtMs: now - 2_500,
+    });
 }
 
 /**
@@ -139,6 +160,17 @@ function expectStdoutJson(label, result) {
             cause: error,
         });
     }
+}
+
+/**
+ * @param {string} label
+ * @param {{ stdout: string; stderr: string; exitCode: number }} result
+ */
+function expectStdoutJsonObject(label, result) {
+    expectStdoutJson(label, result);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed, `${label} stdout should be a JSON object`).toBeObject();
+    expect(Array.isArray(parsed), `${label} stdout should not be a JSON array`).toBe(false);
 }
 
 describe("CLI --json stdout contract", () => {
@@ -165,6 +197,19 @@ describe("CLI --json stdout contract", () => {
                     format: null,
                 });
                 expectStdoutJson(entry.label, result);
+            }
+
+            const objectCases = [
+                { label: "snapshots", args: ["snapshots", "json-run", "--json"] },
+                { label: "timeline", args: ["timeline", "json-run", "--json"] },
+            ];
+
+            for (const entry of objectCases) {
+                const result = runSmithers(entry.args, {
+                    cwd: repo.dir,
+                    format: null,
+                });
+                expectStdoutJsonObject(entry.label, result);
             }
         }
         finally {

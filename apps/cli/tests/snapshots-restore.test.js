@@ -37,9 +37,9 @@ describe("smithers snapshots", () => {
         const out = capture();
         await runSnapshotsOnce({ adapter: snapAdapter, runId: "r1", json: true, stdout: out });
         const parsed = JSON.parse(out.get());
-        expect(parsed).toHaveLength(2);
-        expect(parsed[1].operationId).toBe("op111111yyy");
-        expect(parsed[1].label).toBe("Edit a.ts");
+        expect(parsed.snapshots).toHaveLength(2);
+        expect(parsed.snapshots[1].operationId).toBe("op111111yyy");
+        expect(parsed.snapshots[1].label).toBe("Edit a.ts");
     });
 
     test("empty run is reported, not an error", async () => {

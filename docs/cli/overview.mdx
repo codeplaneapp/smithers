@@ -391,7 +391,7 @@ commands[73]:
       runId,string,true,Run ID
     flags[2]{name,short,type,default,desc}:
       tree,,boolean,false,Include all child forks recursively
-      json,,boolean,false,Output as JSON
+      json,j,boolean,false,Output as JSON
   - name: tree
     purpose: Print DevTools snapshot as an XML tree
     args[1]{name,type,required,desc}:
@@ -435,7 +435,7 @@ commands[73]:
     args[1]{name,type,required,desc}:
       runId,string,true,Run ID to list snapshots for
     flags[1]{name,short,type,default,desc}:
-      json,,boolean,false,Emit rows as JSON
+      json,j,boolean,false,Emit rows as JSON
   - name: restore
     purpose: Restore a worktree to a durability checkpoint (latest for the node, or --seq)
     args[2]{name,type,required,desc}:

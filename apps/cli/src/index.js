@@ -2632,10 +2632,10 @@ const tokenCli = Cli.create({
     },
 });
 // ---------------------------------------------------------------------------
-// DevTools live-run commands (tree / diff / output / rewind)
+// DevTools live-run commands (tree / diff / output / rewind / snapshots)
 // ---------------------------------------------------------------------------
 
-const DEVTOOLS_COMMANDS = new Set(["tree", "diff", "output", "rewind"]);
+const DEVTOOLS_COMMANDS = new Set(["tree", "diff", "output", "rewind", "snapshots"]);
 
 /**
  * Lets `main()` preserve devtools exit codes instead of Incur's generic
@@ -2652,7 +2652,7 @@ let lastDevtoolsCommandOutcome;
  * - Emits an `smithers_cli_command_total{cmd,exit}` counter and a
  *   `smithers_cli_command_duration_ms{cmd}` histogram via the
  *   observability package.
- * @param {"tree"|"diff"|"output"|"rewind"} cmd
+ * @param {"tree"|"diff"|"output"|"rewind"|"snapshots"} cmd
  * @param {{ args: any; options: any }} c
  * @param {() => Promise<number>} handler
  */
@@ -5023,6 +5023,7 @@ const cli = Cli.create({
     options: z.object({
         json: z.boolean().default(false).describe("Emit rows as JSON"),
     }),
+    alias: { json: "j" },
     run(c) {
         return runDevtoolsCommandWithTelemetry("snapshots", c, async () => {
             const { runSnapshotsOnce } = await import("./snapshots.js");
@@ -5032,7 +5033,7 @@ const cli = Cli.create({
                     adapter,
                     runId: c.args.runId,
                     json: c.options.json,
-                    stdout: process.stdout,
+                    stdout: c.options.json ? { write: writeStdoutSync } : process.stdout,
                 });
                 return result.exitCode;
             } finally {
@@ -5726,6 +5727,7 @@ const cli = Cli.create({
         tree: z.boolean().default(false).describe("Include all child forks recursively"),
         json: z.boolean().default(false).describe("Output as JSON"),
     }),
+    alias: { json: "j" },
     async run(c) {
         const fail = (opts) => {
             commandExitOverride = opts.exitCode ?? 1;
@@ -5738,7 +5740,8 @@ const cli = Cli.create({
                 if (c.options.tree) {
                     const tree = await buildTimelineTree(adapter, c.args.runId);
                     if (c.options.json) {
-                        console.log(JSON.stringify(formatTimelineAsJson(tree), null, 2));
+                        writeStdoutSync(`${JSON.stringify({ timeline: formatTimelineAsJson(tree) }, null, 2)}\n`);
+                        return undefined;
                     }
                     else {
                         console.log(formatTimelineForTui(tree));
@@ -5748,7 +5751,8 @@ const cli = Cli.create({
                 const timeline = await buildTimeline(adapter, c.args.runId);
                 const tree = { timeline, children: [] };
                 if (c.options.json) {
-                    console.log(JSON.stringify(formatTimelineAsJson(tree), null, 2));
+                    writeStdoutSync(`${JSON.stringify({ timeline: formatTimelineAsJson(tree) }, null, 2)}\n`);
+                    return undefined;
                 }
                 else {
                     console.log(formatTimelineForTui(tree));
@@ -6179,6 +6183,57 @@ function runRawJsonAgentCommandIfMatched(argv) {
 }
 /**
  * @param {string[]} argv
+ * @returns {Promise<boolean>}
+ */
+async function runRawJsonTimelineCommandIfMatched(argv) {
+    const positionals = [];
+    let jsonOutput = false;
+    let treeOutput = false;
+    for (let index = 0; index < argv.length; index++) {
+        const arg = argv[index];
+        if (arg === "-j" || arg === "--json") {
+            jsonOutput = true;
+            continue;
+        }
+        if (arg === "--tree") {
+            treeOutput = true;
+            continue;
+        }
+        if (arg === "--format") {
+            if (argv[index + 1] !== "json") {
+                return false;
+            }
+            jsonOutput = true;
+            index += 1;
+            continue;
+        }
+        if (arg === "--format=json") {
+            jsonOutput = true;
+            continue;
+        }
+        if (arg.startsWith("-")) {
+            return false;
+        }
+        positionals.push(arg);
+    }
+    if (!jsonOutput || positionals.length !== 2 || positionals[0] !== "timeline") {
+        return false;
+    }
+    const { buildTimeline, buildTimelineTree, formatTimelineAsJson } = await import("@smithers-orchestrator/time-travel/timeline");
+    const { adapter, cleanup } = await findAndOpenDb();
+    try {
+        const tree = treeOutput
+            ? await buildTimelineTree(adapter, positionals[1])
+            : { timeline: await buildTimeline(adapter, positionals[1]), children: [] };
+        writeStdoutSync(`${JSON.stringify({ timeline: formatTimelineAsJson(tree) }, null, 2)}\n`);
+        return true;
+    }
+    finally {
+        cleanup();
+    }
+}
+/**
+ * @param {string[]} argv
  */
 function rewriteWorkflowCommandArgv(argv) {
     const workflowIndex = findFirstPositionalIndex(argv);
@@ -6223,6 +6278,16 @@ function rewriteEventsJsonFlagArgv(argv) {
         return argv;
     }
     return argv.map((arg) => (arg === "--json" ? "-j" : arg));
+}
+/**
+ * @param {string[]} argv
+ */
+function rewriteTimelineJsonFlagArgv(argv) {
+    const commandIndex = findFirstPositionalIndex(argv);
+    if (commandIndex < 0 || argv[commandIndex] !== "timeline") {
+        return argv;
+    }
+    return argv.map((arg, idx) => (idx > commandIndex && arg === "--json" ? "-j" : arg));
 }
 /**
  * @param {unknown} value
@@ -6395,6 +6460,10 @@ async function main() {
     argv = rewriteWorkflowCommandArgv(argv);
     argv = rewriteEventsJsonFlagArgv(argv);
     argv = rewriteDevtoolsJsonFlagArgv(argv);
+    argv = rewriteTimelineJsonFlagArgv(argv);
+    if (await runRawJsonTimelineCommandIfMatched(argv)) {
+        return;
+    }
     if (argvRequestsJsonMode(argv)) {
         setJsonMode(true);
     }
