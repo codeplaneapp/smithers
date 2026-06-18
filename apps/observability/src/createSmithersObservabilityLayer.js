@@ -45,5 +45,11 @@ function makeService(options) {
  */
 export function createSmithersObservabilityLayer(options = {}) {
     const resolved = resolveSmithersObservabilityOptions(options);
-    return Layer.mergeAll(BunContext.layer, Logger.replace(Logger.defaultLogger, resolveLogger(resolved.logFormat)), Logger.minimumLogLevel(resolved.logLevel), createSmithersOtelLayer(resolved), MetricsServiceLive, TracingServiceLive, Layer.succeed(SmithersObservability, makeService(resolved)));
+    const loggerLayers = resolved.installLogger
+        ? [
+            Logger.replace(Logger.defaultLogger, resolveLogger(resolved.logFormat)),
+            Logger.minimumLogLevel(resolved.logLevel),
+        ]
+        : [];
+    return Layer.mergeAll(BunContext.layer, ...loggerLayers, createSmithersOtelLayer(resolved), MetricsServiceLive, TracingServiceLive, Layer.succeed(SmithersObservability, makeService(resolved)));
 }

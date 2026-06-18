@@ -33,6 +33,7 @@ describe("resolveSmithersObservabilityOptions", () => {
         expect(result.serviceName).toBe("smithers");
         expect(result.logFormat).toBe("logfmt");
         expect(result.logLevel).toBe(LogLevel.Info);
+        expect(result.installLogger).toBe(true);
     });
     test("explicit options override defaults", () => {
         const result = resolveSmithersObservabilityOptions({
@@ -41,12 +42,14 @@ describe("resolveSmithersObservabilityOptions", () => {
             serviceName: "my-service",
             logFormat: "json",
             logLevel: "debug",
+            installLogger: false,
         });
         expect(result.enabled).toBe(true);
         expect(result.endpoint).toBe("http://custom:4317");
         expect(result.serviceName).toBe("my-service");
         expect(result.logFormat).toBe("json");
         expect(result.logLevel).toBe(LogLevel.Debug);
+        expect(result.installLogger).toBe(false);
     });
     test("env vars used when no options provided", () => {
         process.env.SMITHERS_OTEL_ENABLED = "true";

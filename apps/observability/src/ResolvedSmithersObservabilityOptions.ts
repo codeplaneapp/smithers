@@ -7,4 +7,5 @@ export type ResolvedSmithersObservabilityOptions = {
   readonly serviceName: string;
   readonly logFormat: SmithersLogFormat;
   readonly logLevel: LogLevel.LogLevel;
+  readonly installLogger: boolean;
 };

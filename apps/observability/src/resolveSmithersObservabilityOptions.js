@@ -75,5 +75,6 @@ export function resolveSmithersObservabilityOptions(options = {}) {
             ? resolveLogFormat(options.logFormat)
             : resolveLogFormat(process.env.SMITHERS_LOG_FORMAT),
         logLevel: resolveLogLevel(options.logLevel ?? process.env.SMITHERS_LOG_LEVEL),
+        installLogger: options.installLogger !== false,
     };
 }

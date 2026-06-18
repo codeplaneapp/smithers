@@ -7,7 +7,7 @@ import { SmithersLoggerLayer } from "./util/logger.ts";
 const ObservabilityLayer = Layer.mergeAll(CorrelationContextLive, MetricsServiceLive, TracingServiceLive);
 const SmithersCoreLayer = Layer.mergeAll(ObservabilityLayer, SchedulerLive.pipe(Layer.provide(ObservabilityLayer)), WorkflowSessionLive);
 const SmithersWorkflowEngineLayer = Layer.suspend(() => WorkflowEngine.layerMemory);
-const SmithersRuntimeLayer = Layer.mergeAll(SmithersLoggerLayer, SmithersCoreLayer, SmithersWorkflowEngineLayer, createSmithersRuntimeLayer()).pipe(Layer.orDie);
+const SmithersRuntimeLayer = Layer.mergeAll(SmithersLoggerLayer, SmithersCoreLayer, SmithersWorkflowEngineLayer, createSmithersRuntimeLayer({ installLogger: false })).pipe(Layer.orDie);
 const runtime = ManagedRuntime.make(SmithersRuntimeLayer);
 setSmithersLogRunner({
     runFork(effect) {
