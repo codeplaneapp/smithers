@@ -1,388 +1,341 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { jumpToFrame } from "@smithers-orchestrator/time-travel/jumpToFrame";
+import { listRewindAuditRows } from "@smithers-orchestrator/time-travel/rewindAudit";
+import { resetRewindLocksForTests } from "@smithers-orchestrator/time-travel/rewindLock";
 
 const RUN_ID = "case12-run";
 const REWIND_TO_FRAME = 2;
+const WRITER_NODE_ID = "task:writer";
+const WRITER_CWD = "/tmp/case12-writer";
 
-type FrameRow = {
-  run_id: string;
-  frame_no: number;
-  xml_json: string;
-  vcs_revision: string;
+type RevertCall = {
+  pointer: string;
+  cwd?: string;
 };
 
-type NodeRow = {
-  run_id: string;
-  node_id: string;
-  iteration: number;
-  state: string;
-  last_attempt: number | null;
-  updated_at_ms: number;
+type FrameRow = {
+  frame_no: number;
+  xml_json: string;
 };
 
 type EventRow = {
-  run_id: string;
   seq: number;
   type: string;
+  payload_json: string;
 };
 
-type AuditRow = {
-  id: number;
-  run_id: string;
-  from_frame_no: number;
-  to_frame_no: number;
-  caller: string;
-  timestamp_ms: number;
-  result: string;
-  duration_ms: number | null;
+type NodeRow = {
+  state: string;
+  last_attempt: number | null;
 };
 
-function buildDb(): Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE _smithers_runs (
-      run_id TEXT PRIMARY KEY,
-      workflow_name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      vcs_type TEXT,
-      vcs_root TEXT,
-      vcs_revision TEXT
-    );
-    CREATE TABLE _smithers_frames (
-      run_id TEXT NOT NULL,
-      frame_no INTEGER NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      xml_json TEXT NOT NULL,
-      xml_hash TEXT NOT NULL,
-      vcs_revision TEXT,
-      PRIMARY KEY (run_id, frame_no)
-    );
-    CREATE TABLE _smithers_nodes (
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL DEFAULT 0,
-      state TEXT NOT NULL,
-      last_attempt INTEGER,
-      updated_at_ms INTEGER NOT NULL,
-      output_table TEXT NOT NULL,
-      PRIMARY KEY (run_id, node_id, iteration)
-    );
-    CREATE TABLE _smithers_node_diffs (
+function buildDb(): { sqlite: Database; adapter: SmithersDb } {
+  const sqlite = new Database(":memory:");
+  const db = drizzle(sqlite);
+  ensureSmithersTables(db);
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS out_writer (
       run_id TEXT NOT NULL,
       node_id TEXT NOT NULL,
       iteration INTEGER NOT NULL,
-      base_ref TEXT NOT NULL,
-      frame_no INTEGER NOT NULL,
-      diff_json TEXT NOT NULL,
-      PRIMARY KEY (run_id, node_id, iteration, base_ref)
-    );
-    CREATE TABLE _smithers_events (
-      run_id TEXT NOT NULL,
-      seq INTEGER NOT NULL,
-      timestamp_ms INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      PRIMARY KEY (run_id, seq)
-    );
-    CREATE TABLE _smithers_time_travel_audit (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      run_id TEXT NOT NULL,
-      from_frame_no INTEGER NOT NULL,
-      to_frame_no INTEGER NOT NULL,
-      caller TEXT NOT NULL,
-      timestamp_ms INTEGER NOT NULL,
-      result TEXT NOT NULL,
-      duration_ms INTEGER
+      value TEXT,
+      PRIMARY KEY (run_id, node_id, iteration)
     );
   `);
-  return db;
+  return { sqlite, adapter: new SmithersDb(db) };
 }
 
-function seedRun(db: Database): void {
-  db.query(
-    `INSERT INTO _smithers_runs
-       (run_id, workflow_name, status, created_at_ms, vcs_type, vcs_root, vcs_revision)
-     VALUES (?, 'case12-workflow', 'running', ?, 'jj', '/tmp/case12', 'rev-frame-5')`,
-  ).run(RUN_ID, 1_000);
+async function seedRun(adapter: SmithersDb, sqlite: Database): Promise<void> {
+  await adapter.insertRun({
+    runId: RUN_ID,
+    workflowName: "case12-workflow",
+    status: "running",
+    createdAtMs: 1_000,
+    startedAtMs: 1_000,
+    heartbeatAtMs: 1_500,
+    runtimeOwnerId: "worker:case12",
+    vcsType: "jj",
+    vcsRoot: "/tmp/case12",
+    vcsRevision: "live-before-rewind",
+  });
 
   for (let frameNo = 0; frameNo <= 5; frameNo += 1) {
-    db.query(
-      `INSERT INTO _smithers_frames
-         (run_id, frame_no, created_at_ms, xml_json, xml_hash, vcs_revision)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(
-      RUN_ID,
+    await adapter.insertFrame({
+      runId: RUN_ID,
       frameNo,
-      1_000 + frameNo * 100,
-      JSON.stringify({ frame: frameNo, payload: `state-at-${frameNo}` }),
-      `hash-${frameNo}`,
-      `rev-frame-${frameNo}`,
-    );
+      createdAtMs: 1_000 + frameNo * 100,
+      xmlJson: JSON.stringify({ frame: frameNo, payload: `state-at-${frameNo}` }),
+      xmlHash: `hash-${frameNo}`,
+    });
+    await adapter.insertEventWithNextSeq({
+      runId: RUN_ID,
+      timestampMs: 1_000 + frameNo * 100,
+      type: "FrameAdvanced",
+      payloadJson: JSON.stringify({ frameNo }),
+    });
   }
 
-  db.query(
-    `INSERT INTO _smithers_nodes
-       (run_id, node_id, iteration, state, last_attempt, updated_at_ms, output_table)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(RUN_ID, "task:writer", 0, "finished", 5, 1_500, "out_writer");
+  await adapter.insertNode({
+    runId: RUN_ID,
+    nodeId: WRITER_NODE_ID,
+    iteration: 0,
+    state: "finished",
+    lastAttempt: 2,
+    updatedAtMs: 1_600,
+    outputTable: "out_writer",
+    label: "writer",
+  });
+  await adapter.insertAttempt({
+    runId: RUN_ID,
+    nodeId: WRITER_NODE_ID,
+    iteration: 0,
+    attempt: 0,
+    state: "finished",
+    startedAtMs: 1_050,
+    finishedAtMs: 1_075,
+    jjPointer: "rev-frame-1",
+    jjCwd: WRITER_CWD,
+  });
+  await adapter.insertAttempt({
+    runId: RUN_ID,
+    nodeId: WRITER_NODE_ID,
+    iteration: 0,
+    attempt: 1,
+    state: "finished",
+    startedAtMs: 1_150,
+    finishedAtMs: 1_175,
+    jjPointer: "rev-frame-2",
+    jjCwd: WRITER_CWD,
+  });
+  await adapter.insertAttempt({
+    runId: RUN_ID,
+    nodeId: WRITER_NODE_ID,
+    iteration: 0,
+    attempt: 2,
+    state: "finished",
+    startedAtMs: 1_350,
+    finishedAtMs: 1_375,
+    jjPointer: "rev-frame-5",
+    jjCwd: WRITER_CWD,
+  });
 
-  for (let frameNo = 0; frameNo <= 5; frameNo += 1) {
-    db.query(
-      `INSERT INTO _smithers_node_diffs
-         (run_id, node_id, iteration, base_ref, frame_no, diff_json)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(
-      RUN_ID,
-      "task:writer",
-      0,
-      `base-${frameNo}`,
-      frameNo,
-      JSON.stringify({ at: frameNo }),
-    );
-  }
-
-  for (let seq = 1; seq <= 6; seq += 1) {
-    db.query(
-      `INSERT INTO _smithers_events
-         (run_id, seq, timestamp_ms, type, payload_json)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(
-      RUN_ID,
-      seq,
-      1_000 + seq * 100,
-      "FrameAdvanced",
-      JSON.stringify({ seq }),
-    );
-  }
-}
-
-function rewind(
-  db: Database,
-  runId: string,
-  toFrameNo: number,
-  caller: string,
-  nowMs: number,
-): { fromFrameNo: number; toFrameNo: number; truncatedFrames: number; truncatedEvents: number } {
-  const fromRow = db
-    .query("SELECT MAX(frame_no) AS frame FROM _smithers_frames WHERE run_id = ?")
-    .get(runId) as { frame: number | null };
-  const fromFrameNo = Number(fromRow?.frame ?? 0);
-
-  const targetFrame = db
+  sqlite
     .query(
-      `SELECT vcs_revision, xml_json
-         FROM _smithers_frames
-        WHERE run_id = ? AND frame_no = ?`,
+      `INSERT INTO _smithers_node_diffs
+         (run_id, node_id, iteration, base_ref, diff_json, computed_at_ms, size_bytes)
+       VALUES (?, ?, 0, ?, ?, ?, ?)`,
     )
-    .get(runId, toFrameNo) as Pick<FrameRow, "vcs_revision" | "xml_json"> | null;
-  if (!targetFrame) {
-    throw new Error(`frame ${toFrameNo} not found for run ${runId}`);
-  }
+    .run(RUN_ID, WRITER_NODE_ID, "base-before", JSON.stringify({ at: 1 }), 1_180, 8);
+  sqlite
+    .query(
+      `INSERT INTO _smithers_node_diffs
+         (run_id, node_id, iteration, base_ref, diff_json, computed_at_ms, size_bytes)
+       VALUES (?, ?, 0, ?, ?, ?, ?)`,
+    )
+    .run(RUN_ID, WRITER_NODE_ID, "base-after", JSON.stringify({ at: 5 }), 1_380, 8);
+  sqlite
+    .query(
+      `INSERT INTO out_writer (run_id, node_id, iteration, value)
+       VALUES (?, ?, 0, ?)`,
+    )
+    .run(RUN_ID, WRITER_NODE_ID, "post-frame-2-output");
+}
 
-  db.transaction(() => {
-    db.query(
-      `DELETE FROM _smithers_frames WHERE run_id = ? AND frame_no > ?`,
-    ).run(runId, toFrameNo);
-    db.query(
-      `DELETE FROM _smithers_node_diffs WHERE run_id = ? AND frame_no > ?`,
-    ).run(runId, toFrameNo);
-    db.query(
-      `DELETE FROM _smithers_events WHERE run_id = ? AND seq > ?`,
-    ).run(runId, toFrameNo);
-    db.query(
-      `UPDATE _smithers_nodes
-          SET state = 'pending',
-              last_attempt = NULL,
-              updated_at_ms = ?
-        WHERE run_id = ?`,
-    ).run(nowMs, runId);
-    db.query(
-      `UPDATE _smithers_runs
-          SET vcs_revision = ?, status = 'recovering'
-        WHERE run_id = ?`,
-    ).run(targetFrame.vcs_revision, runId);
-    db.query(
-      `INSERT INTO _smithers_time_travel_audit
-         (run_id, from_frame_no, to_frame_no, caller, timestamp_ms, result, duration_ms)
-       VALUES (?, ?, ?, ?, ?, 'success', 0)`,
-    ).run(runId, fromFrameNo, toFrameNo, caller, nowMs);
-  })();
-
-  const remaining = db
-    .query("SELECT COUNT(*) AS c FROM _smithers_frames WHERE run_id = ?")
-    .get(runId) as { c: number };
-  return {
-    fromFrameNo,
-    toFrameNo,
-    truncatedFrames: fromFrameNo - toFrameNo,
-    truncatedEvents: fromFrameNo - toFrameNo,
-  };
+async function listFrameNos(adapter: SmithersDb): Promise<number[]> {
+  const frames = await adapter.listFrames(RUN_ID, 20);
+  return frames.map((frame) => frame.frameNo).sort((a, b) => a - b);
 }
 
 describe("case 12: rewind reverts VCS, subsequent frames reflect rewound state, audit entry exists", () => {
-  test("rewind to frame K rolls back state, reverts VCS pointer, writes audit row", () => {
-    const db = buildDb();
+  test("real jumpToFrame rolls back state, reverts VCS pointer, writes audit row and event", async () => {
+    resetRewindLocksForTests();
+    const { sqlite, adapter } = buildDb();
     try {
-      seedRun(db);
+      await seedRun(adapter, sqlite);
 
-      const before = db
-        .query("SELECT vcs_revision FROM _smithers_runs WHERE run_id = ?")
-        .get(RUN_ID) as { vcs_revision: string };
-      expect(before.vcs_revision).toBe("rev-frame-5");
+      expect(await listFrameNos(adapter)).toEqual([0, 1, 2, 3, 4, 5]);
+      const attemptsBefore = await adapter.listAttempts(RUN_ID, WRITER_NODE_ID, 0);
+      expect(attemptsBefore.map((attempt) => attempt.attempt).sort()).toEqual([0, 1, 2]);
 
-      const beforeFrames = db
-        .query("SELECT frame_no FROM _smithers_frames WHERE run_id = ? ORDER BY frame_no ASC")
-        .all(RUN_ID) as Array<Pick<FrameRow, "frame_no">>;
-      expect(beforeFrames.map((row) => row.frame_no)).toEqual([0, 1, 2, 3, 4, 5]);
+      const revertCalls: RevertCall[] = [];
+      const result = await jumpToFrame({
+        adapter,
+        runId: RUN_ID,
+        frameNo: REWIND_TO_FRAME,
+        confirm: true,
+        caller: "user:owner",
+        nowMs: () => 9_000,
+        getCurrentPointerImpl: async (cwd?: string) => `live:${cwd ?? ""}`,
+        revertToPointerImpl: async (pointer: string, cwd?: string) => {
+          revertCalls.push({ pointer, cwd });
+          return { success: true };
+        },
+      });
 
-      const beforeEvents = db
-        .query("SELECT seq FROM _smithers_events WHERE run_id = ? ORDER BY seq ASC")
-        .all(RUN_ID) as Array<Pick<EventRow, "seq">>;
-      expect(beforeEvents.map((row) => row.seq)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(result).toMatchObject({
+        ok: true,
+        newFrameNo: REWIND_TO_FRAME,
+        revertedSandboxes: 1,
+        deletedFrames: 3,
+        deletedAttempts: 1,
+      });
+      expect(revertCalls).toEqual([{ pointer: "rev-frame-2", cwd: WRITER_CWD }]);
 
-      const summary = rewind(db, RUN_ID, REWIND_TO_FRAME, "user:owner", 9_000);
-      expect(summary.fromFrameNo).toBe(5);
-      expect(summary.toFrameNo).toBe(REWIND_TO_FRAME);
-      expect(summary.truncatedFrames).toBe(3);
+      const run = await adapter.getRun(RUN_ID);
+      expect(run?.status).toBe("running");
+      expect(run?.runtimeOwnerId).toBeNull();
+      expect(run?.heartbeatAtMs).toBeNull();
 
-      const after = db
-        .query("SELECT vcs_revision, status FROM _smithers_runs WHERE run_id = ?")
-        .get(RUN_ID) as { vcs_revision: string; status: string };
-      expect(after.vcs_revision).toBe(`rev-frame-${REWIND_TO_FRAME}`);
-      expect(after.status).toBe("recovering");
+      expect(await listFrameNos(adapter)).toEqual([0, 1, 2]);
+      const remainingAttempts = await adapter.listAttempts(RUN_ID, WRITER_NODE_ID, 0);
+      expect(remainingAttempts.map((attempt) => attempt.attempt).sort()).toEqual([0, 1]);
 
-      const afterFrames = db
-        .query("SELECT frame_no FROM _smithers_frames WHERE run_id = ? ORDER BY frame_no ASC")
-        .all(RUN_ID) as Array<Pick<FrameRow, "frame_no">>;
-      expect(afterFrames.map((row) => row.frame_no)).toEqual([0, 1, 2]);
-
-      const afterEvents = db
-        .query("SELECT seq FROM _smithers_events WHERE run_id = ? ORDER BY seq ASC")
-        .all(RUN_ID) as Array<Pick<EventRow, "seq">>;
-      expect(afterEvents.map((row) => row.seq)).toEqual([1, 2]);
-
-      const node = db
+      const node = sqlite
         .query("SELECT state, last_attempt FROM _smithers_nodes WHERE run_id = ? AND node_id = ?")
-        .get(RUN_ID, "task:writer") as Pick<NodeRow, "state" | "last_attempt">;
+        .get(RUN_ID, WRITER_NODE_ID) as NodeRow;
       expect(node.state).toBe("pending");
       expect(node.last_attempt).toBeNull();
 
-      const diffs = db
-        .query("SELECT frame_no FROM _smithers_node_diffs WHERE run_id = ? ORDER BY frame_no ASC")
-        .all(RUN_ID) as Array<{ frame_no: number }>;
-      expect(diffs.every((row) => row.frame_no <= REWIND_TO_FRAME)).toBe(true);
+      const outputCount = sqlite
+        .query("SELECT COUNT(*) AS count FROM out_writer WHERE run_id = ?")
+        .get(RUN_ID) as { count: number };
+      expect(outputCount.count).toBe(0);
 
-      const audits = db
-        .query(
-          `SELECT id, run_id, from_frame_no, to_frame_no, caller, timestamp_ms, result, duration_ms
-             FROM _smithers_time_travel_audit
-            WHERE run_id = ?
-            ORDER BY id ASC`,
-        )
-        .all(RUN_ID) as Array<AuditRow>;
+      const diffCount = sqlite
+        .query("SELECT COUNT(*) AS count FROM _smithers_node_diffs WHERE run_id = ?")
+        .get(RUN_ID) as { count: number };
+      expect(diffCount.count).toBe(0);
+
+      const audits = await listRewindAuditRows(adapter, { runId: RUN_ID });
       expect(audits).toHaveLength(1);
-      expect(audits[0]?.from_frame_no).toBe(5);
-      expect(audits[0]?.to_frame_no).toBe(REWIND_TO_FRAME);
-      expect(audits[0]?.result).toBe("success");
-      expect(audits[0]?.caller).toBe("user:owner");
-      expect(audits[0]?.timestamp_ms).toBe(9_000);
+      expect(audits[0]).toMatchObject({
+        runId: RUN_ID,
+        fromFrameNo: 5,
+        toFrameNo: REWIND_TO_FRAME,
+        caller: "user:owner",
+        result: "success",
+        durationMs: 0,
+      });
+
+      const events = sqlite
+        .query("SELECT seq, type, payload_json FROM _smithers_events WHERE run_id = ? ORDER BY seq ASC")
+        .all(RUN_ID) as EventRow[];
+      expect(events.map((event) => event.type)).toEqual([
+        "FrameAdvanced",
+        "FrameAdvanced",
+        "FrameAdvanced",
+        "FrameAdvanced",
+        "FrameAdvanced",
+        "FrameAdvanced",
+        "TimeTravelJumped",
+      ]);
+      expect(JSON.parse(events.at(-1)?.payload_json ?? "{}")).toMatchObject({
+        runId: RUN_ID,
+        fromFrameNo: 5,
+        toFrameNo: REWIND_TO_FRAME,
+        caller: "user:owner",
+      });
     } finally {
-      db.close();
+      sqlite.close();
+      resetRewindLocksForTests();
     }
   });
 
-  test("subsequent frames after rewind reflect the rewound state and continue from K+1", () => {
-    const db = buildDb();
+  test("subsequent real frames after rewind continue from K+1", async () => {
+    resetRewindLocksForTests();
+    const { sqlite, adapter } = buildDb();
     try {
-      seedRun(db);
-      rewind(db, RUN_ID, REWIND_TO_FRAME, "user:owner", 9_000);
+      await seedRun(adapter, sqlite);
+      await jumpToFrame({
+        adapter,
+        runId: RUN_ID,
+        frameNo: REWIND_TO_FRAME,
+        confirm: true,
+        caller: "user:owner",
+        nowMs: () => 9_000,
+        getCurrentPointerImpl: async () => "live",
+        revertToPointerImpl: async () => ({ success: true }),
+      });
 
       const nextFrameNo = REWIND_TO_FRAME + 1;
-      db.query(
-        `INSERT INTO _smithers_frames
-           (run_id, frame_no, created_at_ms, xml_json, xml_hash, vcs_revision)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run(
-        RUN_ID,
-        nextFrameNo,
-        10_000,
-        JSON.stringify({ frame: nextFrameNo, payload: "post-rewind" }),
-        `hash-${nextFrameNo}-post`,
-        `rev-frame-${nextFrameNo}-post`,
-      );
-      db.query(
-        `INSERT INTO _smithers_events
-           (run_id, seq, timestamp_ms, type, payload_json)
-         VALUES (?, ?, ?, ?, ?)`,
-      ).run(
-        RUN_ID,
-        nextFrameNo,
-        10_000,
-        "FrameAdvanced",
-        JSON.stringify({ seq: nextFrameNo, postRewind: true }),
-      );
+      await adapter.insertFrame({
+        runId: RUN_ID,
+        frameNo: nextFrameNo,
+        createdAtMs: 10_000,
+        xmlJson: JSON.stringify({ frame: nextFrameNo, payload: "post-rewind" }),
+        xmlHash: `hash-${nextFrameNo}-post`,
+      });
 
-      const frames = db
+      const frames = sqlite
         .query(
-          "SELECT frame_no, xml_json, vcs_revision FROM _smithers_frames WHERE run_id = ? ORDER BY frame_no ASC",
+          "SELECT frame_no, xml_json FROM _smithers_frames WHERE run_id = ? ORDER BY frame_no ASC",
         )
-        .all(RUN_ID) as Array<Pick<FrameRow, "frame_no" | "xml_json" | "vcs_revision">>;
+        .all(RUN_ID) as FrameRow[];
       expect(frames.map((row) => row.frame_no)).toEqual([0, 1, 2, 3]);
-      const tail = frames[frames.length - 1];
-      expect(tail?.frame_no).toBe(REWIND_TO_FRAME + 1);
-      expect(tail?.vcs_revision).toBe(`rev-frame-${REWIND_TO_FRAME + 1}-post`);
+      const tail = frames.at(-1);
+      expect(tail?.frame_no).toBe(nextFrameNo);
       expect(JSON.parse(tail?.xml_json ?? "{}")).toMatchObject({
-        frame: REWIND_TO_FRAME + 1,
+        frame: nextFrameNo,
         payload: "post-rewind",
       });
 
-      const events = db
-        .query("SELECT seq FROM _smithers_events WHERE run_id = ? ORDER BY seq ASC")
-        .all(RUN_ID) as Array<Pick<EventRow, "seq">>;
-      expect(events.map((row) => row.seq)).toEqual([1, 2, REWIND_TO_FRAME + 1]);
-
-      const audits = db
-        .query("SELECT id FROM _smithers_time_travel_audit WHERE run_id = ?")
-        .all(RUN_ID) as Array<Pick<AuditRow, "id">>;
+      const audits = await listRewindAuditRows(adapter, { runId: RUN_ID });
       expect(audits).toHaveLength(1);
     } finally {
-      db.close();
+      sqlite.close();
+      resetRewindLocksForTests();
     }
   });
 
-  test("audit entry exists for every rewind invocation (multiple rewinds stack)", () => {
-    const db = buildDb();
+  test("audit entry exists for every real rewind invocation", async () => {
+    resetRewindLocksForTests();
+    const { sqlite, adapter } = buildDb();
     try {
-      seedRun(db);
+      await seedRun(adapter, sqlite);
 
-      rewind(db, RUN_ID, 4, "user:first", 8_000);
-      rewind(db, RUN_ID, 1, "user:second", 9_000);
+      await jumpToFrame({
+        adapter,
+        runId: RUN_ID,
+        frameNo: 4,
+        confirm: true,
+        caller: "user:first",
+        nowMs: () => 8_000,
+        getCurrentPointerImpl: async () => "live-first",
+        revertToPointerImpl: async () => ({ success: true }),
+      });
+      await jumpToFrame({
+        adapter,
+        runId: RUN_ID,
+        frameNo: 1,
+        confirm: true,
+        caller: "user:second",
+        nowMs: () => 9_000,
+        getCurrentPointerImpl: async () => "live-second",
+        revertToPointerImpl: async () => ({ success: true }),
+      });
 
-      const audits = db
-        .query(
-          `SELECT id, from_frame_no, to_frame_no, caller, result
-             FROM _smithers_time_travel_audit
-            WHERE run_id = ?
-            ORDER BY id ASC`,
-        )
-        .all(RUN_ID) as Array<AuditRow>;
+      const audits = await listRewindAuditRows(adapter, { runId: RUN_ID });
       expect(audits).toHaveLength(2);
-      expect(audits[0]?.from_frame_no).toBe(5);
-      expect(audits[0]?.to_frame_no).toBe(4);
-      expect(audits[0]?.caller).toBe("user:first");
-      expect(audits[0]?.result).toBe("success");
-      expect(audits[1]?.from_frame_no).toBe(4);
-      expect(audits[1]?.to_frame_no).toBe(1);
-      expect(audits[1]?.caller).toBe("user:second");
-      expect(audits[1]?.result).toBe("success");
-
-      const run = db
-        .query("SELECT vcs_revision FROM _smithers_runs WHERE run_id = ?")
-        .get(RUN_ID) as { vcs_revision: string };
-      expect(run.vcs_revision).toBe("rev-frame-1");
+      expect(audits[0]).toMatchObject({
+        fromFrameNo: 5,
+        toFrameNo: 4,
+        caller: "user:first",
+        result: "success",
+      });
+      expect(audits[1]).toMatchObject({
+        fromFrameNo: 4,
+        toFrameNo: 1,
+        caller: "user:second",
+        result: "success",
+      });
+      expect(await listFrameNos(adapter)).toEqual([0, 1]);
     } finally {
-      db.close();
+      sqlite.close();
+      resetRewindLocksForTests();
     }
   });
 });
