@@ -307,6 +307,65 @@ describe("buildOperationSchema", () => {
         const schema = buildOperationSchema(params, requestBody, emptySpec);
         expect(schema.parse({ ownerId: "owner1", body: { name: "Rex" } })).toEqual({ ownerId: "owner1", body: { name: "Rex" } });
     });
+    test("keeps a parameter named body distinct from request body", () => {
+        const params = [
+            { name: "body", in: "query", required: true, schema: { type: "string" } },
+        ];
+        const requestBody = {
+            required: true,
+            content: {
+                "application/json": {
+                    schema: {
+                        type: "object",
+                        required: ["name"],
+                        properties: {
+                            name: { type: "string" },
+                        },
+                    },
+                },
+            },
+        };
+        const schema = buildOperationSchema(params, requestBody, emptySpec);
+        expect(schema.parse({ body: "metadata", requestBody: { name: "Rex" } })).toEqual({
+            body: "metadata",
+            requestBody: { name: "Rex" },
+        });
+        expect(() => schema.parse({ body: { name: "Rex" } })).toThrow();
+    });
+    test("keeps body and requestBody parameters distinct from request body", () => {
+        const params = [
+            { name: "body", in: "query", required: true, schema: { type: "string" } },
+            { name: "requestBody", in: "query", required: true, schema: { type: "string" } },
+        ];
+        const requestBody = {
+            required: true,
+            content: {
+                "application/json": {
+                    schema: {
+                        type: "object",
+                        required: ["name"],
+                        properties: {
+                            name: { type: "string" },
+                        },
+                    },
+                },
+            },
+        };
+        const schema = buildOperationSchema(params, requestBody, emptySpec);
+        expect(schema.parse({
+            body: "metadata",
+            requestBody: "param-value",
+            _requestBody: { name: "Rex" },
+        })).toEqual({
+            body: "metadata",
+            requestBody: "param-value",
+            _requestBody: { name: "Rex" },
+        });
+        expect(() => schema.parse({
+            body: "metadata",
+            requestBody: { name: "Rex" },
+        })).toThrow();
+    });
     test("returns empty object schema when no params or body", () => {
         const schema = buildOperationSchema([], undefined, emptySpec);
         expect(schema.parse({})).toEqual({});

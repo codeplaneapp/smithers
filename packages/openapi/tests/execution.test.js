@@ -140,4 +140,102 @@ describe("OpenAPI tool execution", () => {
         const [, init] = mockFetch.mock.calls[0];
         expect(init.headers["X-Request-Id"]).toBe("req-123");
     });
+    test("query parameter named body does not replace request body", async () => {
+        const spec = {
+            openapi: "3.0.0",
+            info: { title: "Body Collision API", version: "1.0.0" },
+            servers: [{ url: "https://api.example.com" }],
+            paths: {
+                "/search": {
+                    post: {
+                        operationId: "search",
+                        parameters: [
+                            {
+                                name: "body",
+                                in: "query",
+                                required: true,
+                                schema: { type: "string" },
+                            },
+                        ],
+                        requestBody: {
+                            required: true,
+                            content: {
+                                "application/json": {
+                                    schema: {
+                                        type: "object",
+                                        required: ["query"],
+                                        properties: {
+                                            query: { type: "string" },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        responses: { 200: { description: "OK" } },
+                    },
+                },
+            },
+        };
+        const tools = createOpenApiToolsSync(spec);
+        await tools.search.execute({
+            body: "metadata",
+            requestBody: { query: "needle" },
+        });
+        const [url, init] = mockFetch.mock.calls[0];
+        expect(url).toContain("body=metadata");
+        expect(init.body).toBe(JSON.stringify({ query: "needle" }));
+    });
+    test("query parameters named body and requestBody do not replace request body", async () => {
+        const spec = {
+            openapi: "3.0.0",
+            info: { title: "Body Collision API", version: "1.0.0" },
+            servers: [{ url: "https://api.example.com" }],
+            paths: {
+                "/search": {
+                    post: {
+                        operationId: "search",
+                        parameters: [
+                            {
+                                name: "body",
+                                in: "query",
+                                required: true,
+                                schema: { type: "string" },
+                            },
+                            {
+                                name: "requestBody",
+                                in: "query",
+                                required: true,
+                                schema: { type: "string" },
+                            },
+                        ],
+                        requestBody: {
+                            required: true,
+                            content: {
+                                "application/json": {
+                                    schema: {
+                                        type: "object",
+                                        required: ["query"],
+                                        properties: {
+                                            query: { type: "string" },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        responses: { 200: { description: "OK" } },
+                    },
+                },
+            },
+        };
+        const tools = createOpenApiToolsSync(spec);
+        await tools.search.execute({
+            body: "metadata",
+            requestBody: "param-value",
+            _requestBody: { query: "needle" },
+        });
+        const [url, init] = mockFetch.mock.calls[0];
+        expect(url).toContain("body=metadata");
+        expect(url).toContain("requestBody=param-value");
+        expect(init.body).toBe(JSON.stringify({ query: "needle" }));
+    });
 });
