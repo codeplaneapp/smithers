@@ -108,7 +108,7 @@ function sendGapResync(ws: ServerWebSocket<unknown>, streamId: string, seq: numb
     event: "run.gap_resync",
     seq,
     stateVersion: seq,
-    payload: { streamId, runId: "run-1", seq, event: "run.gap_resync" },
+    payload: { streamId, runId: "run-1", seq },
   }));
 }
 
@@ -298,6 +298,7 @@ describe("streamRunEventsResilient reconnect-resume (real WS server)", () => {
     const client = new SmithersGatewayClient({ baseUrl: running.baseUrl });
     const controller = new AbortController();
     const seen: number[] = [];
+    const reconnectBackoffs: number[] = [];
 
     await (async () => {
       for await (const frame of client.streamRunEventsResilient(
@@ -309,10 +310,11 @@ describe("streamRunEventsResilient reconnect-resume (real WS server)", () => {
           healthyAfterMs: 60_000,
           // jitter 0 => deterministic delay == baseMs * factor**attempt.
           backoff: { baseMs: 30, maxMs: 5_000, factor: 2, jitter: 0 },
+          onReconnect: ({ backoffMs }) => reconnectBackoffs.push(backoffMs),
         },
       )) {
         const payload = frame.payload as { seq: number; event: string };
-        if (payload.event === "run.gap_resync") {
+        if (frame.event === "run.gap_resync") {
           continue;
         }
         seen.push(payload.seq);
@@ -323,16 +325,9 @@ describe("streamRunEventsResilient reconnect-resume (real WS server)", () => {
     expect(seen).toEqual([1]);
     // 4 connections: 3 flapping replays-then-close + 1 live.
     expect(running.connectionCount).toBe(4);
-    // Inter-connection gaps approximate the escalating sleeps (attempt 0,1,2 =>
-    // ~30, ~60, ~120ms). The discriminating assertion vs the bug: the last gap
-    // is meaningfully larger than the first. If backoff had reset on the replay
-    // frame, all gaps would hover near the base 30ms and this would fail.
-    const opens = running.connectionOpenedAt;
-    expect(opens.length).toBe(4);
-    const gaps = opens.slice(1).map((t, i) => t - opens[i]!);
-    // Each successive sleep grows; allow scheduler slop but require clear growth.
-    expect(gaps[1]!).toBeGreaterThan(gaps[0]! + 10);
-    expect(gaps[2]!).toBeGreaterThan(gaps[1]! + 10);
+    // The discriminating assertion vs the bug: if backoff reset on replay-only
+    // gap_resync frames, every reconnect would report the base 30ms delay.
+    expect(reconnectBackoffs).toEqual([30, 60, 120]);
   });
 
   test("a sustained healthy connection resets backoff so the next drop reconnects fast", async () => {

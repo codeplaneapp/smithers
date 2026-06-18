@@ -381,7 +381,7 @@ export class SmithersGatewayClient {
           { runId: params.runId, ...(typeof lastSeq === "number" ? { afterSeq: lastSeq } : {}) },
           { signal },
         )) {
-          const isReplay = isObject(frame.payload) && frame.payload.event === "run.gap_resync";
+          const isReplay = frame.event === "run.gap_resync";
           // Reset backoff only after the connection is demonstrably healthy: a
           // live (non-replay) frame, or any frame past the healthy threshold.
           // A bare replay frame at connection start is NOT proof of liveness.
