@@ -25,7 +25,7 @@ function countWindow(get, suffix, id, label, nowMs) {
     const remaining = int(get(`x-ratelimit-remaining-${suffix}`));
     if (limit === undefined && remaining === undefined) return undefined;
     const resetSeconds = parseDurationSeconds(get(`x-ratelimit-reset-${suffix}`));
-    const used = limit !== undefined && remaining !== undefined ? limit - remaining : undefined;
+    const used = limit !== undefined && remaining !== undefined ? Math.max(0, limit - remaining) : undefined;
     return {
         id,
         label,

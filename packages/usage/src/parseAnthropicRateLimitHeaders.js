@@ -22,7 +22,7 @@ function countWindow(get, prefix, id, label) {
     const remaining = int(get(`${prefix}-remaining`));
     if (limit === undefined && remaining === undefined) return undefined;
     const reset = get(`${prefix}-reset`);
-    const used = limit !== undefined && remaining !== undefined ? limit - remaining : undefined;
+    const used = limit !== undefined && remaining !== undefined ? Math.max(0, limit - remaining) : undefined;
     return {
         id,
         label,

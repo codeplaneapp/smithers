@@ -168,6 +168,19 @@ describe("rate-limit header parsers", () => {
         expect(windows[0]).toMatchObject({ id: "requests-per-min", remaining: 99, used: 1 });
         expect(windows[0].resetsAt).toBe(isoIn(360));
     });
+    test("count windows never report negative used values", () => {
+        const anthropicWindows = parseAnthropicRateLimitHeaders(getter({
+            "anthropic-ratelimit-requests-limit": "100",
+            "anthropic-ratelimit-requests-remaining": "120",
+        }));
+        expect(anthropicWindows[0]).toMatchObject({ limit: 100, remaining: 120, used: 0 });
+
+        const openAiWindows = parseOpenAiRateLimitHeaders(getter({
+            "x-ratelimit-limit-requests": "100",
+            "x-ratelimit-remaining-requests": "120",
+        }), NOW);
+        expect(openAiWindows[0]).toMatchObject({ limit: 100, remaining: 120, used: 0 });
+    });
     test("no headers -> no windows", () => {
         expect(parseAnthropicRateLimitHeaders(getter({}))).toEqual([]);
         expect(parseOpenAiRateLimitHeaders(getter({}), NOW)).toEqual([]);
