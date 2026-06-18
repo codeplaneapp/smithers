@@ -3,6 +3,7 @@ import {
   type SmithersAgentContract,
 } from "@smithers-orchestrator/agents/agent-contract";
 import type { SmithersPiRunContext } from "./SmithersPiRunContext.js";
+import { normalizeState } from "./runtime/normalizeState.js";
 
 function toolRef(contract: SmithersAgentContract, name: string, prefix = "smithers_") {
   return contract.tools.some((tool) => tool.name === name) ? `\`${prefix}${name}\`` : undefined;
@@ -103,9 +104,10 @@ export function buildSmithersPiSystemPrompt(
     sections.push(`Run: ${activeRun.runId} (${activeRun.workflowName})`);
     sections.push(`Status: ${activeRun.status}`);
 
-    const waitingNodes = activeRun.nodeStates.filter(
-      (node) => node.state === "waiting-approval" || node.state === "waiting-timer",
-    );
+    const waitingNodes = activeRun.nodeStates.filter((node) => {
+      const state = normalizeState(node.state);
+      return state === "waiting-approval" || state === "waiting-timer";
+    });
     if (waitingNodes.length > 0) {
       sections.push(`Nodes waiting approval: ${waitingNodes.map((node) => node.nodeId).join(", ")}`);
     }

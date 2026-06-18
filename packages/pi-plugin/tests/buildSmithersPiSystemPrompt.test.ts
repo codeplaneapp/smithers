@@ -92,4 +92,26 @@ describe("buildSmithersPiSystemPrompt", () => {
     expect(prompt).not.toContain("`-u`");
     expect(prompt).not.toContain("`-k`");
   });
+
+  test("reports active approval nodes with non-canonical state strings", () => {
+    const contract = createSmithersAgentContract({
+      serverName: "smithers",
+      toolSurface: "semantic",
+      tools: [],
+    });
+
+    const prompt = buildSmithersPiSystemPrompt("Base system prompt\n", "Docs body", contract, {
+      runId: "run-approval",
+      workflowName: "deploy",
+      status: "running",
+      nodeStates: [
+        { nodeId: "node-waiting", state: "Waiting Approval" },
+        { nodeId: "node-running", state: "running" },
+      ],
+      errors: [],
+    });
+
+    expect(prompt).toContain("Nodes waiting approval: node-waiting");
+    expect(prompt).not.toContain("node-running");
+  });
 });

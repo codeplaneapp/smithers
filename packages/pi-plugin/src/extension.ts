@@ -15,6 +15,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { buildSmithersPiSystemPrompt } from "./buildSmithersPiSystemPrompt.js";
 import { DevToolsClient } from "./runtime/DevToolsClient.js";
 import { DevToolsStore } from "./runtime/DevToolsStore.js";
+import { normalizeState } from "./runtime/normalizeState.js";
 import { RunInspector } from "./views/RunInspector.js";
 
 type ExtensionAPI = PiExtensionAPI & {
@@ -499,7 +500,7 @@ export function extension(pi: ExtensionAPI) {
     handler: async (_args: string, ctx: ExtensionContext) => {
       const waiting = [...runs.values()].flatMap((run) =>
         collectNodeStates(run)
-          .filter((node) => node.state === "waiting-approval")
+          .filter((node) => normalizeState(node.state) === "waiting-approval")
           .map((node) => ({ run, node })),
       );
       if (waiting.length === 0) {

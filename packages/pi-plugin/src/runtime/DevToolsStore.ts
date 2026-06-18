@@ -2,6 +2,7 @@ import { applyDelta } from "@smithers-orchestrator/devtools";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import type { DevToolsDelta, DevToolsNode, DevToolsSnapshot } from "@smithers-orchestrator/protocol";
 import { DevToolsClient } from "./DevToolsClient.js";
+import { normalizeState } from "./normalizeState.js";
 
 type DevToolsGapResync = {
   fromSeq: number;
@@ -98,10 +99,6 @@ function selectionKey(node: DevToolsNode) {
 function stateString(node: DevToolsNode | undefined) {
   const raw = node?.props.state;
   return typeof raw === "string" ? raw : undefined;
-}
-
-function normalizeState(raw: string | undefined) {
-  return (raw ?? "unknown").trim().toLowerCase().replace(/[_\s]/g, "-");
 }
 
 function runStatusForRoot(root: DevToolsNode | undefined, fallback: string) {
