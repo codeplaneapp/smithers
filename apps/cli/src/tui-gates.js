@@ -159,10 +159,11 @@ export async function handleHumanRequests(adapter, runId) {
 
         const responseJson = JSON.stringify(value);
         const approval = await adapter.getApproval(fresh.runId, fresh.nodeId, iterationOf(fresh));
+        // Persist before waking the node; the resumed task reads this answer immediately.
+        await adapter.answerHumanRequest(fresh.requestId, responseJson, answeredAtMs, "smithers:tui");
         if (approval?.status === "requested") {
             await Effect.runPromise(approveNode(adapter, fresh.runId, fresh.nodeId, iterationOf(fresh), responseJson, "smithers:tui"));
         }
-        await adapter.answerHumanRequest(fresh.requestId, responseJson, answeredAtMs, "smithers:tui");
         answered++;
         log.success(`Answered ${displayNode(fresh.nodeId)}.`);
     }
