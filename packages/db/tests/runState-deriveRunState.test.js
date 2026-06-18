@@ -182,6 +182,22 @@ describe("deriveRunState — waiting states", () => {
             correlationKey: "order:42",
         });
     });
+
+    test("waiting-event with parkedEventBlock → distinct blocked kind", () => {
+        const view = deriveRunState({
+            run: makeRun({ status: "waiting-event" }),
+            parkedEventBlock: {
+                kind: "approval-decided-resume-required",
+                nodeId: "after-approval",
+            },
+            now: NOW,
+        });
+        expect(view.state).toBe("waiting-event");
+        expect(view.blocked).toEqual({
+            kind: "approval-decided-resume-required",
+            nodeId: "after-approval",
+        });
+    });
 });
 
 describe("deriveRunState — fallbacks", () => {

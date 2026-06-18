@@ -51,14 +51,20 @@ The legacy run-row `status` column maps to `RunState` like this:
 1. A genuine pause on a [`<Signal>`](/components/signal) or [`<WaitForEvent>`](/components/wait-for-event). Recover by delivering the awaited signal: `bunx smithers-orchestrator signal RUN_ID SIGNAL_NAME --data '{}'`.
 2. A run parked with no live event node: an external-trigger / hot-reload / orphan-recovery wait, an aspect or alert human-request, or an approval decided while the run was detached. Here a signal does nothing; the run needs a resume (or `retry-task` / `fork` / answering the human request) after you fix the underlying cause.
 
-Do not guess between them. Ask the runtime, which already disambiguates:
+Do not guess between them. Ask the runtime, which already disambiguates on
+`RunStateView.blocked.kind`:
 
 ```bash
 bunx smithers-orchestrator why RUN_ID     # names the real blocker and prints the exact unblock command
-bunx smithers-orchestrator inspect RUN_ID # shows whether any node is actually in waiting-event state
+bunx smithers-orchestrator inspect RUN_ID # includes runState.blocked.kind
 ```
 
-`why` reports `waiting-event` (with a ready `signal` command) only when a node is truly awaiting an event. When the run row says `waiting-event` but no node is, it reports `approval-decided-resume-required`, `retries-exhausted`, or `dependency-failed` instead, each with the matching resume / `retry-task` action.
+`runState.blocked.kind === "event"` means a node is truly awaiting an event.
+When the run row says `waiting-event` but no node is, `runState.blocked.kind`
+is `approval-decided-resume-required` for a detached approval continuation, or
+`external-trigger` for a generic parked external wait. `why` still provides the
+most detailed unblock command and may report other blockers such as
+`retries-exhausted` or `dependency-failed`.
 </Warning>
 <Warning>
 **`succeeded`/`finished` can mask failed child agents.** Run-level status is binary; `finished` or `failed`; and a run is only `failed` when it has an *unhandled* task failure. Two large classes of failed children are deliberately not treated as run-level failures: tasks marked [`continueOnFail`](/components/task), and agent tasks that fail with a *transient* error (rate limits, timeouts, aborts; `SESSION_ERROR`, `TASK_TIMEOUT`, `TASK_HEARTBEAT_TIMEOUT`, `TASK_ABORTED`, or `failureRetryable`). A fan-out where most agents hit provider rate limits can therefore still report `finished` → `succeeded`.
@@ -86,6 +92,8 @@ type ReasonBlocked =
   | { kind: "approval"; nodeId: string; requestedAt: string }
   | { kind: "event";    nodeId: string; correlationKey: string }
   | { kind: "timer";    nodeId: string; wakeAt: string }
+  | { kind: "approval-decided-resume-required"; nodeId: string }
+  | { kind: "external-trigger" }
   | { kind: "provider"; nodeId: string; code: "rate-limit" | "auth" | "timeout" }
   | { kind: "tool";     nodeId: string; toolName: string; code: string }
 
@@ -98,9 +106,10 @@ type ReasonUnhealthy =
 ```
 
 Timestamps are ISO-8601 strings. Current `computeRunState` / `deriveRunState`
-emits `approval`, `event`, and `timer` blocked reasons, plus
-`engine-heartbeat-stale` unhealthy reasons. The other variants are reserved
-by the public type and may appear on future run-state surfaces.
+emits `approval`, `event`, `timer`, `approval-decided-resume-required`, and
+`external-trigger` blocked reasons, plus `engine-heartbeat-stale` unhealthy
+reasons. The other variants are reserved by the public type and may appear on
+future run-state surfaces.
 
 ## RunStateView
 
@@ -114,13 +123,14 @@ type RunStateView = {
 };
 ```
 
-`blocked` is present for a `waiting-*` state only when `computeRunState` can
-load the matching pending approval/timer/event context, or when that context
-is supplied to `deriveRunState`. A `waiting-*` state can be returned without
-`blocked` when the supporting row is unavailable. `unhealthy` is present for
-current `stale` and `orphaned` results. `recovering` is reserved by the type
-but is not currently emitted by the DB derivation. Terminal states
-(`succeeded`, `failed`, `cancelled`) carry neither.
+`blocked` is present for a `waiting-*` state when `computeRunState` can load
+matching pending approval/timer/event context, when a parked `waiting-event`
+run has no event-waiting node, or when that context is supplied to
+`deriveRunState`. A `waiting-*` state can be returned without `blocked` when
+the supporting row is unavailable. `unhealthy` is present for current `stale`
+and `orphaned` results. `recovering` is reserved by the type but is not
+currently emitted by the DB derivation. Terminal states (`succeeded`, `failed`,
+`cancelled`) carry neither.
 
 ## computeRunState
 

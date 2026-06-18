@@ -148,6 +148,19 @@ describe("computeRunState", () => {
         });
     });
 
+    test("waiting-event without waiting-event node exposes approval-decided resume blocker", async () => {
+        const adapter = makeAdapter({
+            run: makeRun({ status: "waiting-event" }),
+            nodes: [{ nodeId: "after-approval", iteration: 0, state: "pending" }],
+        });
+        const view = await computeRunState(adapter, "run-1", { now: NOW });
+        expect(view.state).toBe("waiting-event");
+        expect(view.blocked).toEqual({
+            kind: "approval-decided-resume-required",
+            nodeId: "after-approval",
+        });
+    });
+
     test("golden snapshot shape is stable", async () => {
         const adapter = makeAdapter({ run: makeRun({ status: "finished" }) });
         const view = await computeRunState(adapter, "run-1", { now: NOW });

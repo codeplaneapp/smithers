@@ -13,6 +13,7 @@ export function deriveRunState(input) {
         pendingApproval = null,
         pendingTimer = null,
         pendingEvent = null,
+        parkedEventBlock = null,
         now = Date.now(),
         staleThresholdMs = RUN_STATE_HEARTBEAT_STALE_MS,
     } = input;
@@ -55,16 +56,19 @@ export function deriveRunState(input) {
                   }
                 : { ...base, state: "waiting-timer" };
         case "waiting-event":
-            return pendingEvent
-                ? {
-                      ...base,
-                      state: "waiting-event",
-                      blocked: {
-                          kind: "event",
-                          nodeId: pendingEvent.nodeId,
-                          correlationKey: pendingEvent.correlationKey,
-                      },
-                  }
+            if (pendingEvent) {
+                return {
+                    ...base,
+                    state: "waiting-event",
+                    blocked: {
+                        kind: "event",
+                        nodeId: pendingEvent.nodeId,
+                        correlationKey: pendingEvent.correlationKey,
+                    },
+                };
+            }
+            return parkedEventBlock
+                ? { ...base, state: "waiting-event", blocked: parkedEventBlock }
                 : { ...base, state: "waiting-event" };
         case "running":
             return classifyRunning(run, now, staleThresholdMs, base);

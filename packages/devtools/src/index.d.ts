@@ -189,6 +189,11 @@ type ReasonBlocked = {
     nodeId: string;
     wakeAt: string;
 } | {
+    kind: "approval-decided-resume-required";
+    nodeId: string;
+} | {
+    kind: "external-trigger";
+} | {
     kind: "provider";
     nodeId: string;
     code: "rate-limit" | "auth" | "timeout";

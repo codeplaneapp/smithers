@@ -17,6 +17,7 @@ export async function computeRunStateFromRow(adapter, run, options = {}) {
     let pendingApproval = null;
     let pendingTimer = null;
     let pendingEvent = null;
+    let parkedEventBlock = null;
 
     if (run.status === "waiting-approval") {
         pendingApproval = await loadPendingApproval(adapter, run.runId);
@@ -24,6 +25,9 @@ export async function computeRunStateFromRow(adapter, run, options = {}) {
         pendingTimer = await loadPendingTimer(adapter, run.runId);
     } else if (run.status === "waiting-event") {
         pendingEvent = await loadPendingEvent(adapter, run.runId);
+        if (pendingEvent == null) {
+            parkedEventBlock = await loadParkedEventBlock(adapter, run.runId);
+        }
     }
 
     return deriveRunState({
@@ -31,6 +35,7 @@ export async function computeRunStateFromRow(adapter, run, options = {}) {
         pendingApproval,
         pendingTimer,
         pendingEvent,
+        parkedEventBlock,
         now: options.now,
         staleThresholdMs: options.staleThresholdMs,
     });
@@ -99,4 +104,20 @@ async function loadPendingEvent(adapter, runId) {
         };
     }
     return null;
+}
+
+/**
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ */
+async function loadParkedEventBlock(adapter, runId) {
+    const nodes = await adapter.listNodes(runId);
+    const pending = nodes.find((node) => node.state === "pending");
+    if (pending) {
+        return {
+            kind: "approval-decided-resume-required",
+            nodeId: pending.nodeId,
+        };
+    }
+    return { kind: "external-trigger" };
 }
