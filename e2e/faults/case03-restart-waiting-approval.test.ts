@@ -1,341 +1,204 @@
-import { Database } from "bun:sqlite";
-import { describe, expect, onTestFinished, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import React from "react";
+import { Effect } from "effect";
+import { z } from "zod";
+import type { SQLiteTable } from "drizzle-orm/sqlite-core";
+import {
+  Approval,
+  Sequence,
+  Task,
+  Workflow,
+  approvalDecisionSchema,
+  createSmithers,
+  runWorkflow,
+} from "smithers-orchestrator";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { Gateway, type SmithersWorkflow } from "@smithers-orchestrator/server/gateway";
 import { corruptHeartbeat } from "../harness/corruptHeartbeat.ts";
 
-type ApprovalRow = {
-  run_id: string;
-  node_id: string;
-  iteration: number;
-  status: string;
-  requested_at_ms: number | null;
-  decided_at_ms: number | null;
-  request_json: string | null;
-  decision_json: string | null;
-};
-
-type RunRow = {
-  run_id: string;
-  status: string;
-  heartbeat_at_ms: number | null;
-  runtime_owner_id: string | null;
-};
-
-type NodeRow = {
-  run_id: string;
-  node_id: string;
-  iteration: number;
-  state: string;
-};
-
-type EventRow = {
-  run_id: string;
-  seq: number;
-  type: string;
-  payload_json: string;
-};
-
-const TARGET_NODE_ID = "approve-deploy";
-const TARGET_ITERATION = 4;
-const ORIGINAL_OWNER = "engine-pid-original";
-const SUPERVISOR_OWNER = "engine-pid-supervisor";
 const RUN_ID = "run-case03";
+const WORKFLOW_NAME = "case03-workflow";
+const APPROVAL_NODE_ID = "approve-deploy";
+const RESULT_NODE_ID = "deploy";
+const OPERATOR_TOKEN = "operator-token";
 
-function buildDb(): Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE _smithers_runs (
-      run_id TEXT PRIMARY KEY,
-      workflow_name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      started_at_ms INTEGER,
-      heartbeat_at_ms INTEGER,
-      runtime_owner_id TEXT
-    );
-    CREATE TABLE _smithers_nodes (
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL DEFAULT 0,
-      state TEXT NOT NULL,
-      updated_at_ms INTEGER NOT NULL,
-      output_table TEXT NOT NULL,
-      PRIMARY KEY (run_id, node_id, iteration)
-    );
-    CREATE TABLE _smithers_approvals (
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL,
-      requested_at_ms INTEGER,
-      decided_at_ms INTEGER,
-      note TEXT,
-      decided_by TEXT,
-      request_json TEXT,
-      decision_json TEXT,
-      auto_approved INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (run_id, node_id, iteration)
-    );
-    CREATE TABLE _smithers_events (
-      run_id TEXT NOT NULL,
-      seq INTEGER NOT NULL,
-      timestamp_ms INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      PRIMARY KEY (run_id, seq)
-    );
-  `);
-  return db;
-}
-
-function seedWaitingApproval(db: Database, now: number): void {
-  db.query(
-    `INSERT INTO _smithers_runs
-       (run_id, workflow_name, status, created_at_ms, started_at_ms, heartbeat_at_ms, runtime_owner_id)
-     VALUES (?, 'case03-workflow', 'waiting-approval', ?, ?, ?, ?)`,
-  ).run(RUN_ID, now - 5_000, now - 4_000, now - 1_000, ORIGINAL_OWNER);
-
-  db.query(
-    `INSERT INTO _smithers_nodes
-       (run_id, node_id, iteration, state, updated_at_ms, output_table)
-     VALUES (?, ?, ?, 'waiting-approval', ?, 'out_node')`,
-  ).run(RUN_ID, TARGET_NODE_ID, TARGET_ITERATION, now - 1_000);
-
-  db.query(
-    `INSERT INTO _smithers_approvals
-       (run_id, node_id, iteration, status, requested_at_ms, request_json, auto_approved)
-     VALUES (?, ?, ?, 'requested', ?, ?, 0)`,
-  ).run(
-    RUN_ID,
-    TARGET_NODE_ID,
-    TARGET_ITERATION,
-    now - 1_500,
-    JSON.stringify({ prompt: "approve production deploy?", waitAsync: false }),
+function makeDbPath(): string {
+  return join(
+    tmpdir(),
+    `smithers-case03-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
   );
 }
 
-function snapshotApproval(db: Database): ApprovalRow {
-  return db
-    .query(
-      `SELECT run_id, node_id, iteration, status, requested_at_ms,
-              decided_at_ms, request_json, decision_json
-         FROM _smithers_approvals
-        WHERE run_id = ? AND node_id = ? AND iteration = ?`,
-    )
-    .get(RUN_ID, TARGET_NODE_ID, TARGET_ITERATION) as ApprovalRow;
+function queryClient(db: unknown) {
+  return (db as { $client?: unknown; session?: { client?: unknown } }).$client
+    ?? (db as { session?: { client?: unknown } }).session?.client;
 }
 
-function readRun(db: Database): RunRow {
-  return db
-    .query(
-      `SELECT run_id, status, heartbeat_at_ms, runtime_owner_id
-         FROM _smithers_runs WHERE run_id = ?`,
-    )
-    .get(RUN_ID) as RunRow;
+function outputTable(table: unknown): SQLiteTable {
+  return table as SQLiteTable;
 }
 
-function readNode(db: Database): NodeRow {
-  return db
-    .query(
-      `SELECT run_id, node_id, iteration, state
-         FROM _smithers_nodes
-        WHERE run_id = ? AND node_id = ? AND iteration = ?`,
-    )
-    .get(RUN_ID, TARGET_NODE_ID, TARGET_ITERATION) as NodeRow;
-}
-
-function supervisorTakeover(db: Database, now: number): void {
-  db.query(
-    `UPDATE _smithers_runs
-        SET runtime_owner_id = ?,
-            heartbeat_at_ms = ?,
-            status = 'waiting-approval'
-      WHERE run_id = ?`,
-  ).run(SUPERVISOR_OWNER, now, RUN_ID);
-
-  const seq =
-    (
-      db
-        .query(
-          `SELECT COALESCE(MAX(seq), 0) AS max_seq FROM _smithers_events WHERE run_id = ?`,
-        )
-        .get(RUN_ID) as { max_seq: number }
-    ).max_seq + 1;
-
-  db.query(
-    `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
-     VALUES (?, ?, ?, 'RunStateChanged', ?)`,
-  ).run(
-    RUN_ID,
-    seq,
-    now,
-    JSON.stringify({
-      runId: RUN_ID,
-      from: "stale",
-      to: "waiting-approval",
-      actor: SUPERVISOR_OWNER,
-      reason: "supervisor-takeover",
-    }),
+function createApprovalWorkflow(dbPath: string) {
+  const api = createSmithers(
+    {
+      input: z.object({ value: z.number().optional() }),
+      decision: approvalDecisionSchema,
+      deploy: z.object({ value: z.number() }),
+    },
+    { dbPath },
   );
+  const { smithers, outputs, db, tables } = api;
+  const workflow = smithers((ctx) =>
+    React.createElement(
+      Workflow,
+      { name: WORKFLOW_NAME },
+      React.createElement(
+        Sequence,
+        null,
+        React.createElement(Approval, {
+          id: APPROVAL_NODE_ID,
+          output: outputs.decision,
+          request: { title: "Approve production deploy?" },
+        }),
+        React.createElement(Task, {
+          id: RESULT_NODE_ID,
+          output: outputs.deploy,
+          children: { value: Number(ctx.input.value ?? 1) },
+        }),
+      ),
+    ),
+  );
+  return { workflow, db, tables };
 }
 
-function submitApprovalDecision(
-  db: Database,
-  approved: boolean,
-  decidedBy: string,
-  now: number,
-): void {
-  db.transaction(() => {
-    db.query(
-      `UPDATE _smithers_approvals
-          SET status = ?,
-              decided_at_ms = ?,
-              decided_by = ?,
-              decision_json = ?
-        WHERE run_id = ? AND node_id = ? AND iteration = ?`,
-    ).run(
-      approved ? "approved" : "denied",
-      now,
-      decidedBy,
-      JSON.stringify({ approved }),
-      RUN_ID,
-      TARGET_NODE_ID,
-      TARGET_ITERATION,
-    );
+function getPort(server: { address(): unknown }): number {
+  const addr = server.address();
+  if (!addr || typeof addr === "string" || typeof (addr as { port?: unknown }).port !== "number") {
+    throw new Error("Gateway server did not expose a port");
+  }
+  return (addr as { port: number }).port;
+}
 
-    db.query(
-      `UPDATE _smithers_nodes
-          SET state = 'pending', updated_at_ms = ?
-        WHERE run_id = ? AND node_id = ? AND iteration = ?`,
-    ).run(now, RUN_ID, TARGET_NODE_ID, TARGET_ITERATION);
+async function postRpc(
+  port: number,
+  method: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  return fetch(`http://127.0.0.1:${port}/v1/rpc/${method}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${OPERATOR_TOKEN}`,
+    },
+    body: JSON.stringify(body),
+  });
+}
 
-    db.query(
-      `UPDATE _smithers_runs SET status = 'running' WHERE run_id = ?`,
-    ).run(RUN_ID);
-
-    const seq =
-      (
-        db
-          .query(
-            `SELECT COALESCE(MAX(seq), 0) AS max_seq FROM _smithers_events WHERE run_id = ?`,
-          )
-          .get(RUN_ID) as { max_seq: number }
-      ).max_seq + 1;
-
-    db.query(
-      `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(
-      RUN_ID,
-      seq,
-      now,
-      approved ? "ApprovalGranted" : "ApprovalDenied",
-      JSON.stringify({
-        runId: RUN_ID,
-        nodeId: TARGET_NODE_ID,
-        iteration: TARGET_ITERATION,
-        timestampMs: now,
-      }),
-    );
-  })();
+async function waitForFinishedRun(adapter: SmithersDb, runId: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const run = await adapter.getRun(runId);
+    if (run?.status === "finished") {
+      return;
+    }
+    if (run?.status === "failed" || run?.status === "cancelled") {
+      throw new Error(`Run reached terminal status ${run.status}`);
+    }
+    await Bun.sleep(25);
+  }
+  throw new Error("Timed out waiting for resumed run to finish");
 }
 
 describe("case03 restart during waiting-approval", () => {
-  test("approval row persists across engine death and supervisor takeover", async () => {
-    const db = buildDb();
-    onTestFinished(() => db.close());
+  const dbPaths: string[] = [];
+  let gateway: Gateway | undefined;
 
-    const t0 = Date.now();
-    seedWaitingApproval(db, t0);
-
-    const seeded = snapshotApproval(db);
-    expect(seeded.status).toBe("requested");
-    expect(seeded.node_id).toBe(TARGET_NODE_ID);
-    expect(seeded.iteration).toBe(TARGET_ITERATION);
-    expect(seeded.decided_at_ms).toBeNull();
-
-    await corruptHeartbeat(db, RUN_ID, "stale");
-
-    const afterCrash = snapshotApproval(db);
-    expect(afterCrash.status).toBe("requested");
-    expect(afterCrash.node_id).toBe(seeded.node_id);
-    expect(afterCrash.iteration).toBe(seeded.iteration);
-    expect(afterCrash.requested_at_ms).toBe(seeded.requested_at_ms);
-    expect(afterCrash.request_json).toBe(seeded.request_json);
-    expect(afterCrash.decided_at_ms).toBeNull();
-
-    supervisorTakeover(db, t0 + 2_000);
-
-    const afterTakeover = snapshotApproval(db);
-    expect(afterTakeover.status).toBe("requested");
-    expect(afterTakeover.node_id).toBe(seeded.node_id);
-    expect(afterTakeover.iteration).toBe(seeded.iteration);
-    expect(afterTakeover.request_json).toBe(seeded.request_json);
-    expect(afterTakeover.decided_at_ms).toBeNull();
-
-    const runAfterTakeover = readRun(db);
-    expect(runAfterTakeover.status).toBe("waiting-approval");
-    expect(runAfterTakeover.runtime_owner_id).toBe(SUPERVISOR_OWNER);
-    expect(runAfterTakeover.heartbeat_at_ms).not.toBeNull();
-    expect(runAfterTakeover.heartbeat_at_ms!).toBeGreaterThanOrEqual(t0);
+  afterEach(async () => {
+    if (gateway) {
+      await gateway.close();
+      gateway = undefined;
+    }
+    for (const dbPath of dbPaths) {
+      rmSync(dbPath, { force: true });
+      rmSync(`${dbPath}-shm`, { force: true });
+      rmSync(`${dbPath}-wal`, { force: true });
+    }
+    dbPaths.length = 0;
   });
 
-  test("approval decision after takeover resumes the exact node and iteration", async () => {
-    const db = buildDb();
-    onTestFinished(() => db.close());
+  test("real engine resume re-enters the workflow at the waiting node", async () => {
+    const dbPath = makeDbPath();
+    dbPaths.push(dbPath);
+    const { workflow, db, tables } = createApprovalWorkflow(dbPath);
+    ensureSmithersTables(db);
+    const adapter = new SmithersDb(db);
+    const sqlite = queryClient(db);
+    if (!sqlite || typeof (sqlite as { query?: unknown }).query !== "function") {
+      throw new Error("Expected createSmithers to expose a Bun SQLite client");
+    }
 
-    const t0 = Date.now();
-    seedWaitingApproval(db, t0);
-    await corruptHeartbeat(db, RUN_ID, "stale");
-    supervisorTakeover(db, t0 + 2_000);
+    const first = await Effect.runPromise(
+      runWorkflow(workflow, {
+        runId: RUN_ID,
+        input: { value: 7 },
+      }),
+    );
+    expect(first.status).toBe("waiting-approval");
 
-    submitApprovalDecision(db, true, "alice", t0 + 3_000);
+    const requested = await adapter.getApproval(RUN_ID, APPROVAL_NODE_ID, 0);
+    expect(requested?.status).toBe("requested");
+    await corruptHeartbeat(sqlite as Parameters<typeof corruptHeartbeat>[0], RUN_ID, "stale");
 
-    const decided = snapshotApproval(db);
-    expect(decided.status).toBe("approved");
-    expect(decided.node_id).toBe(TARGET_NODE_ID);
-    expect(decided.iteration).toBe(TARGET_ITERATION);
-    expect(decided.decided_at_ms).toBe(t0 + 3_000);
-    expect(decided.decision_json).toBe(JSON.stringify({ approved: true }));
+    gateway = new Gateway({
+      auth: {
+        mode: "token",
+        tokens: {
+          [OPERATOR_TOKEN]: {
+            role: "operator",
+            scopes: ["run:read", "approval:submit"],
+            userId: "user:operator",
+          },
+        },
+      },
+    });
+    gateway.register(WORKFLOW_NAME, workflow as SmithersWorkflow);
+    const server = (await gateway.listen({ port: 0, host: "127.0.0.1" })) as { address(): unknown };
+    const port = getPort(server);
 
-    const node = readNode(db);
-    expect(node.state).toBe("pending");
-    expect(node.node_id).toBe(TARGET_NODE_ID);
-    expect(node.iteration).toBe(TARGET_ITERATION);
+    const approved = await postRpc(port, "submitApproval", {
+      runId: RUN_ID,
+      nodeId: APPROVAL_NODE_ID,
+      iteration: 0,
+      approved: true,
+      note: "ship it",
+    });
+    expect(approved.status).toBe(200);
 
-    const run = readRun(db);
-    expect(run.status).toBe("running");
+    await waitForFinishedRun(adapter, RUN_ID);
 
-    const events = db
-      .query(
-        `SELECT run_id, seq, type, payload_json
-           FROM _smithers_events
-          WHERE run_id = ? AND type = 'ApprovalGranted'`,
-      )
-      .all(RUN_ID) as EventRow[];
-    expect(events.length).toBe(1);
-    const payload = JSON.parse(events[0]!.payload_json) as {
-      runId: string;
-      nodeId: string;
-      iteration: number;
-    };
-    expect(payload.runId).toBe(RUN_ID);
-    expect(payload.nodeId).toBe(TARGET_NODE_ID);
-    expect(payload.iteration).toBe(TARGET_ITERATION);
+    const decisionRows = await db.select().from(outputTable(tables.decision));
+    expect(decisionRows).toEqual([
+      expect.objectContaining({
+        runId: RUN_ID,
+        nodeId: APPROVAL_NODE_ID,
+        iteration: 0,
+        approved: true,
+        note: "ship it",
+        decidedBy: "user:operator",
+      }),
+    ]);
 
-    const otherIteration = db
-      .query(
-        `SELECT COUNT(*) AS n FROM _smithers_approvals
-          WHERE run_id = ? AND iteration != ?`,
-      )
-      .get(RUN_ID, TARGET_ITERATION) as { n: number };
-    expect(otherIteration.n).toBe(0);
-  });
-
-  test.skip("real engine resume re-enters the workflow at the waiting node", () => {
-    // SKIP: requires booting the engine subprocess + gateway RPC client.
-    // The contract tested above (DB-level resumeRunIfNeeded inputs) is what
-    // packages/server/src/gateway.js feeds into resumeRunIfNeeded, so this
-    // sub-assertion is covered indirectly. Promote once an in-process
-    // engine harness exists in /e2e/harness/.
+    const deployRows = await db.select().from(outputTable(tables.deploy));
+    expect(deployRows).toEqual([
+      expect.objectContaining({
+        runId: RUN_ID,
+        nodeId: RESULT_NODE_ID,
+        iteration: 0,
+        value: 7,
+      }),
+    ]);
   });
 });
