@@ -23,6 +23,7 @@ const vcs = {
     workspaceList: (cwd) => runVcs(vcsEffects.workspaceList(cwd)),
     workspaceClose: (name, opts) => runVcs(vcsEffects.workspaceClose(name, opts)),
     getJjPointer: (cwd) => runVcs(vcsEffects.getJjPointer(cwd)),
+    captureWorkspaceSnapshot: (cwd) => runVcs(vcsEffects.captureWorkspaceSnapshot(cwd)),
     revertToJjPointer: (pointer, cwd) => runVcs(vcsEffects.revertToJjPointer(pointer, cwd)),
 };
 function vcsDurationCount() {
@@ -480,6 +481,135 @@ exit 1
         await withFakeJj(script, async () => {
             const ptr = await vcs.getJjPointer(tmpCwd);
             expect(ptr).toBe("ptr");
+        });
+        try {
+            await fs.rm(tmpCwd, { recursive: true, force: true });
+        }
+        catch { }
+    });
+});
+describe("captureWorkspaceSnapshot", () => {
+    test("captures commit, change, and operation ids from jj output", async () => {
+        const script = `
+if [[ "$1" = "log" && "$2" = "-r" && "$3" = "@" && "$4" = "--no-graph" && "$5" = "-T" ]]; then
+  printf "commit-123\\nchange-456\\n"
+  exit 0
+fi
+if [[ "$1" = "--ignore-working-copy" && "$2" = "operation" && "$3" = "log" && "$4" = "--no-graph" && "$5" = "--limit" && "$6" = "1" && "$7" = "-T" && "$8" = "self.id()" ]]; then
+  printf "op-789\\n"
+  exit 0
+fi
+exit 1
+`;
+        await withFakeJj(script, async () => {
+            const snapshot = await vcs.captureWorkspaceSnapshot();
+            expect(snapshot).toEqual({
+                commitId: "commit-123",
+                changeId: "change-456",
+                operationId: "op-789",
+            });
+        });
+    });
+    test("returns null when snapshot log fails", async () => {
+        const script = `
+if [[ "$1" = "log" ]]; then
+  echo "not a jj repo" 1>&2
+  exit 7
+fi
+exit 1
+`;
+        await withFakeJj(script, async () => {
+            const snapshot = await vcs.captureWorkspaceSnapshot();
+            expect(snapshot).toBeNull();
+        });
+    });
+    test("returns null when snapshot log has an empty commit id", async () => {
+        const script = `
+if [[ "$1" = "log" ]]; then
+  printf "\\nchange-only\\n"
+  exit 0
+fi
+if [[ "$1" = "--ignore-working-copy" && "$2" = "operation" && "$3" = "log" ]]; then
+  echo "op-present"
+  exit 0
+fi
+exit 1
+`;
+        await withFakeJj(script, async () => {
+            const snapshot = await vcs.captureWorkspaceSnapshot();
+            expect(snapshot).toBeNull();
+        });
+    });
+    test("returns null when operation log fails", async () => {
+        const script = `
+if [[ "$1" = "log" ]]; then
+  printf "commit-present\\nchange-present\\n"
+  exit 0
+fi
+if [[ "$1" = "--ignore-working-copy" && "$2" = "operation" && "$3" = "log" ]]; then
+  echo "op failed" 1>&2
+  exit 8
+fi
+exit 1
+`;
+        await withFakeJj(script, async () => {
+            const snapshot = await vcs.captureWorkspaceSnapshot();
+            expect(snapshot).toBeNull();
+        });
+    });
+    test("returns null when operation id is empty", async () => {
+        const script = `
+if [[ "$1" = "log" ]]; then
+  printf "commit-present\\nchange-present\\n"
+  exit 0
+fi
+if [[ "$1" = "--ignore-working-copy" && "$2" = "operation" && "$3" = "log" ]]; then
+  exit 0
+fi
+exit 1
+`;
+        await withFakeJj(script, async () => {
+            const snapshot = await vcs.captureWorkspaceSnapshot();
+            expect(snapshot).toBeNull();
+        });
+    });
+    test("returns null when the snapshot command times out", async () => {
+        const script = `
+if [[ "$1" = "log" ]]; then
+  sleep 2
+  printf "commit-after-timeout\\nchange-after-timeout\\n"
+  exit 0
+fi
+exit 1
+`;
+        await withFakeJj(script, async () => {
+            const snapshot = await vcs.captureWorkspaceSnapshot();
+            expect(snapshot).toBeNull();
+        });
+    });
+    test("propagates cwd to snapshot commands", async () => {
+        const tmpCwd = await fs.mkdtemp(path.join(os.tmpdir(), "jj-snapshot-"));
+        await fs.writeFile(path.join(tmpCwd, ".snapshot-sentinel"), "x");
+        const script = `
+if [[ "$1" = "log" ]]; then
+  [[ -f ./.snapshot-sentinel ]] || exit 9
+  printf "commit-cwd\\nchange-cwd\\n"
+  exit 0
+fi
+if [[ "$1" = "--ignore-working-copy" && "$2" = "operation" && "$3" = "log" ]]; then
+  [[ -f ./.snapshot-sentinel ]] || exit 9
+  echo "op-cwd"
+  exit 0
+fi
+exit 1
+`;
+        await withFakeJj(script, async () => {
+            const snapshot = await vcs.captureWorkspaceSnapshot(tmpCwd);
+            expect(snapshot).toEqual({
+                commitId: "commit-cwd",
+                changeId: "change-cwd",
+                operationId: "op-cwd",
+            });
         });
         try {
             await fs.rm(tmpCwd, { recursive: true, force: true });
