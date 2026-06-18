@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { addAccount } from "@smithers-orchestrator/accounts";
@@ -76,6 +76,18 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).toContain("claude: [providers.anthropicProd]");
         // user-specified model wins over the default
         expect(generated).toContain('model: "gpt-5"');
+    });
+
+    test("does not serialize both configDir and apiKey for malformed account entries", () => {
+        const env = newSmithersHome();
+        writeFileSync(join(env.SMITHERS_HOME, "accounts.json"), JSON.stringify({
+            version: 1,
+            accounts: [
+                { label: "claude-mixed", provider: "claude-code", configDir: "/tmp/claude", apiKey: "sk-leak" },
+            ],
+        }));
+
+        expect(() => generateAgentsTs(env)).toThrow(/configDir.*apiKey|apiKey.*configDir/);
     });
 
     test("falls back to detection-based output when no accounts are registered", () => {

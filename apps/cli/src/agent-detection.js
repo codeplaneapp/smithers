@@ -664,7 +664,7 @@ function renderAccountProviderLine(account, homeDir) {
     const opts = [];
     if (model) opts.push(`model: ${JSON.stringify(model)}`);
     if (account.configDir) opts.push(`configDir: ${pathLiteral(account.configDir, homeDir)}`);
-    if (account.apiKey) opts.push(`apiKey: ${JSON.stringify(account.apiKey)}`);
+    else if (account.apiKey) opts.push(`apiKey: ${JSON.stringify(account.apiKey)}`);
     if (account.provider === "codex" || account.provider === "openai-api") {
         opts.push("skipGitRepoCheck: true");
     }

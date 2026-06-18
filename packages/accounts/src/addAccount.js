@@ -22,6 +22,9 @@ export function addAccount(account, options = {}) {
     if (!VALID_PROVIDERS.has(account.provider)) {
         throw new SmithersError("ACCOUNT_INVALID", `account.provider must be one of ${[...VALID_PROVIDERS].join(", ")}, got ${JSON.stringify(account.provider)}`);
     }
+    if (typeof account.configDir === "string" && typeof account.apiKey === "string") {
+        throw new SmithersError("ACCOUNT_INVALID", `${account.provider} account "${account.label}" must set configDir or apiKey, never both`);
+    }
     if (SUBSCRIPTION_PROVIDERS.has(account.provider) && (!account.configDir || !account.configDir.trim())) {
         throw new SmithersError("ACCOUNT_INVALID", `${account.provider} accounts require a non-empty configDir`);
     }

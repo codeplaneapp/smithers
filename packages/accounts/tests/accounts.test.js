@@ -97,6 +97,12 @@ describe("parseAccountsFile", () => {
             accounts: [{ label: "x", provider: "openai-api" }],
         }))).toThrow(/apiKey/);
     });
+    test("rejects entries with both configDir and apiKey", () => {
+        expect(() => parseAccountsFile(JSON.stringify({
+            version: 1,
+            accounts: [{ label: "mixed", provider: "claude-code", configDir: "/p1", apiKey: "sk-leak" }],
+        }))).toThrow(/configDir.*apiKey|apiKey.*configDir/);
+    });
     test("rejects duplicate labels", () => {
         expect(() => parseAccountsFile(JSON.stringify({
             version: 1,
@@ -208,6 +214,8 @@ describe("readAccounts / writeAccounts / addAccount / removeAccount", () => {
             .toThrow(/configDir/);
         expect(() => addAccount({ label: "y", provider: "openai-api" }, { env }))
             .toThrow(/apiKey/);
+        expect(() => addAccount({ label: "mixed", provider: "claude-code", configDir: "/x", apiKey: "sk-leak" }, { env }))
+            .toThrow(/configDir.*apiKey|apiKey.*configDir/);
     });
     test("removeAccount deletes by label; throws or no-ops for missing", () => {
         const env = newSmithersHome();

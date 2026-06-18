@@ -76,6 +76,9 @@ export function parseAccountsFile(raw) {
         seenLabels.add(e.label);
         const isSubscription = SUBSCRIPTION_PROVIDERS.has(e.provider);
         const isApiKey = API_KEY_PROVIDERS.has(e.provider);
+        if (typeof e.configDir === "string" && typeof e.apiKey === "string") {
+            throw new SmithersError("ACCOUNTS_FILE_INVALID", `accounts.json: ${e.label} (${e.provider}) must set configDir or apiKey, never both`);
+        }
         if (isSubscription && (typeof e.configDir !== "string" || !e.configDir.trim())) {
             throw new SmithersError("ACCOUNTS_FILE_INVALID", `accounts.json: ${e.label} (${e.provider}) requires a non-empty configDir`);
         }
