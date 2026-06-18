@@ -1,3 +1,4 @@
+import { EngineError } from "./EngineError.js";
 import { SmithersError } from "./SmithersError.js";
 import { fromTaggedError } from "./fromTaggedError.js";
 /**
@@ -19,6 +20,17 @@ export function errorToJson(error) {
             summary: error.summary,
             docsUrl: error.docsUrl,
             details: error.details,
+        };
+    }
+    if (error instanceof EngineError) {
+        return {
+            name: error.name,
+            code: error.code,
+            message: error.message,
+            stack: error.stack,
+            cause: error.cause,
+            summary: error.message,
+            details: error.context,
         };
     }
     if (error instanceof Error) {
