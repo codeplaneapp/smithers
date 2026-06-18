@@ -255,8 +255,6 @@ test("smithers init rejects unknown templates in option validation before writin
     expect(result.json.message).toContain("Invalid input");
     expect(result.json.fieldErrors).toEqual([
         {
-            code: "invalid_union",
-            missing: false,
             path: "template",
             expected: "",
             received: "",
