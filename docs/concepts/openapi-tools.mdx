@@ -65,13 +65,21 @@ Pass the spec itself as the first argument to `createOpenApiTools(input, options
 | `loadSpecSync(input)` | Load and parse a spec from object, local file path, or raw text. It does not fetch URLs. |
 | `jsonSchemaToZod(schema, spec, visited?)` / `buildOperationSchema(parameters, requestBody, spec)` | Lower-level schema conversion helpers. |
 
-## CLI preview
+## CLI
+
+Generate a reusable AI SDK tools module:
+
+```bash
+bunx smithers-orchestrator openapi generate ./api/openapi.yaml ./src/openapi-tools.js
+```
+
+The generated module imports `createOpenApiToolsSync`, creates the tools from the spec, and exports them as both `tools` and the default export.
 
 ```bash
 bunx smithers-orchestrator openapi list ./api/openapi.yaml
 ```
 
-Lists every operationId, method, path, and summary. Useful for auditing what an agent will be able to call before wiring it up.
+`openapi list` previews every operationId, method, path, and summary. Useful for auditing what an agent will be able to call before wiring it up.
 
 ## What gets generated
 

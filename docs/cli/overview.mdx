@@ -56,7 +56,7 @@ If no Gateway is reachable on the default local port, `bunx smithers-orchestrato
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[73]:
+commands[74]:
   - name: init
     purpose: Install the workflow pack into .smithers/ (local) or ~/.smithers/ (--global)
     flags[6]{name,short,type,default,desc}:
@@ -599,6 +599,11 @@ commands[73]:
     purpose: Preview tools generated from an OpenAPI spec
     args[1]{name,type,required,desc}:
       specPath,string,true,File path or URL to OpenAPI spec
+  - name: openapi.generate
+    purpose: Generate an AI SDK tools module from an OpenAPI spec
+    args[2]{name,type,required,desc}:
+      specPath,string,true,File path to OpenAPI spec
+      outputPath,string,true,Output JavaScript file for generated tools
   - name: token.issue
     purpose: Issue a local short-lived Gateway bearer token grant
     flags[6]{name,short,type,default,desc}:

@@ -1439,7 +1439,7 @@ If no Gateway is reachable on the default local port, `bunx smithers-orchestrato
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[73]:
+commands[74]:
   - name: init
     purpose: Install the workflow pack into .smithers/ (local) or ~/.smithers/ (--global)
     flags[6]{name,short,type,default,desc}:
@@ -1982,6 +1982,11 @@ commands[73]:
     purpose: Preview tools generated from an OpenAPI spec
     args[1]{name,type,required,desc}:
       specPath,string,true,File path or URL to OpenAPI spec
+  - name: openapi.generate
+    purpose: Generate an AI SDK tools module from an OpenAPI spec
+    args[2]{name,type,required,desc}:
+      specPath,string,true,File path to OpenAPI spec
+      outputPath,string,true,Output JavaScript file for generated tools
   - name: token.issue
     purpose: Issue a local short-lived Gateway bearer token grant
     flags[6]{name,short,type,default,desc}:
@@ -7915,13 +7920,21 @@ Pass the spec itself as the first argument to `createOpenApiTools(input, options
 | `loadSpecSync(input)` | Load and parse a spec from object, local file path, or raw text. It does not fetch URLs. |
 | `jsonSchemaToZod(schema, spec, visited?)` / `buildOperationSchema(parameters, requestBody, spec)` | Lower-level schema conversion helpers. |
 
-## CLI preview
+## CLI
+
+Generate a reusable AI SDK tools module:
+
+```bash
+bunx smithers-orchestrator openapi generate ./api/openapi.yaml ./src/openapi-tools.js
+```
+
+The generated module imports `createOpenApiToolsSync`, creates the tools from the spec, and exports them as both `tools` and the default export.
 
 ```bash
 bunx smithers-orchestrator openapi list ./api/openapi.yaml
 ```
 
-Lists every operationId, method, path, and summary. Useful for auditing what an agent will be able to call before wiring it up.
+`openapi list` previews every operationId, method, path, and summary. Useful for auditing what an agent will be able to call before wiring it up.
 
 ## What gets generated
 

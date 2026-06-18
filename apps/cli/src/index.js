@@ -2,9 +2,9 @@
 import { setJsonMode } from "./util/logger.ts";
 import { findFirstPositionalIndex, parseMcpSurfaceArgv, rewriteBareResumeFlagArgv } from "./argv-utils.js";
 import { CLI_JSON_ARGUMENT_MAX_BYTES, parseJsonArgument, parseJsonInput } from "./json-args.js";
-import { resolve, dirname, basename } from "node:path";
+import { resolve, dirname, basename, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { readFileSync, existsSync, openSync, statSync, writeSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Effect, Fiber } from "effect";
 import { Cli, Mcp as IncurMcp, z } from "incur";
@@ -2484,6 +2484,19 @@ const agentsCli = Cli.create({
 const openapiListArgs = z.object({
     specPath: z.string().describe("Path or URL to an OpenAPI spec"),
 });
+const openapiGenerateArgs = z.object({
+    specPath: z.string().describe("Path to an OpenAPI spec"),
+    outputPath: z.string().describe("Output JavaScript file for generated tools"),
+});
+/**
+ * @param {string} fromDir
+ * @param {string} targetPath
+ * @returns {string}
+ */
+function relativeImportPath(fromDir, targetPath) {
+    const rel = relative(fromDir, targetPath).split("\\").join("/");
+    return rel.startsWith(".") ? rel : `./${rel}`;
+}
 const openapiCli = Cli.create({
     name: "openapi",
     description: "Generate AI SDK tools from OpenAPI specs.",
@@ -2508,6 +2521,39 @@ const openapiCli = Cli.create({
         catch (err) {
             console.error(`Error: ${err?.message ?? String(err)}`);
             return c.error({ code: "OPENAPI_LIST_FAILED", message: err?.message ?? String(err) });
+        }
+    },
+})
+    .command("generate", {
+    description: "Generate an AI SDK tools module from an OpenAPI spec.",
+    args: openapiGenerateArgs,
+    async run(c) {
+        try {
+            const { createOpenApiToolsSync } = await import("@smithers-orchestrator/openapi/tool-factory");
+            const specPath = resolve(process.cwd(), c.args.specPath);
+            const outputPath = resolve(process.cwd(), c.args.outputPath);
+            const outputDir = dirname(outputPath);
+            const importPath = relativeImportPath(outputDir, specPath);
+            const tools = createOpenApiToolsSync(specPath);
+            const toolCount = Object.keys(tools).length;
+            mkdirSync(outputDir, { recursive: true });
+            writeFileSync(outputPath, [
+                'import { fileURLToPath } from "node:url";',
+                'import { createOpenApiToolsSync } from "smithers-orchestrator/openapi";',
+                "",
+                `const specPath = fileURLToPath(new URL(${JSON.stringify(importPath)}, import.meta.url));`,
+                "",
+                "export const tools = createOpenApiToolsSync(specPath);",
+                "",
+                "export default tools;",
+                "",
+            ].join("\n"), "utf8");
+            console.log(`Generated ${toolCount} OpenAPI tool(s) at ${outputPath}`);
+            return c.ok({ outputPath, toolCount });
+        }
+        catch (err) {
+            console.error(`Error: ${err?.message ?? String(err)}`);
+            return c.error({ code: "OPENAPI_GENERATE_FAILED", message: err?.message ?? String(err) });
         }
     },
 });
