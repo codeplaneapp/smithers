@@ -194,6 +194,53 @@ describe("DB migration edges", () => {
     sqlite.close();
   });
 
+  test("forward migration adds scorer context columns to legacy scorer tables", () => {
+    const sqlite = new Database(":memory:");
+    sqlite.exec(`
+      CREATE TABLE _smithers_scorers (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        iteration INTEGER NOT NULL DEFAULT 0,
+        attempt INTEGER NOT NULL DEFAULT 0,
+        scorer_id TEXT NOT NULL,
+        scorer_name TEXT NOT NULL,
+        source TEXT NOT NULL,
+        score REAL NOT NULL,
+        reason TEXT,
+        meta_json TEXT,
+        input_json TEXT,
+        output_json TEXT,
+        latency_ms REAL,
+        scored_at_ms INTEGER NOT NULL,
+        duration_ms REAL
+      );
+      INSERT INTO _smithers_scorers (id, run_id, node_id, scorer_id, scorer_name, source, score, scored_at_ms)
+        VALUES ('score-legacy', 'run-1', 'node-1', 'accuracy', 'Accuracy', 'batch', 0.8, 1000);
+    `);
+    const db = drizzle(sqlite);
+    ensureSmithersTables(db);
+
+    const cols = sqlite.query('PRAGMA table_info("_smithers_scorers")').all().map((c) => c.name);
+    expect(cols).toContain("ground_truth_json");
+    expect(cols).toContain("context_json");
+
+    sqlite.run(
+      `UPDATE _smithers_scorers SET ground_truth_json = ?, context_json = ? WHERE id = ?`,
+      [
+        JSON.stringify({ expected: "answer" }),
+        JSON.stringify({ docs: ["source"] }),
+        "score-legacy",
+      ],
+    );
+    const row = sqlite
+      .query("SELECT ground_truth_json, context_json FROM _smithers_scorers WHERE id = ?")
+      .get("score-legacy");
+    expect(JSON.parse(row.ground_truth_json)).toEqual({ expected: "answer" });
+    expect(JSON.parse(row.context_json)).toEqual({ docs: ["source"] });
+    sqlite.close();
+  });
+
   test("malformed JSON in valueJson / xmlJson / configJson is caught at deserialize layer with a useful error", () => {
     // The DB stores TEXT — so writing arbitrary bytes succeeds. The contract
     // is that the deserialize layer (JSON.parse on read) surfaces the

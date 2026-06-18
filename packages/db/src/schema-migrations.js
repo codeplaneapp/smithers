@@ -473,6 +473,25 @@ function buildMigrations(context) {
                 return { table: "_smithers_workspace_checkpoints" };
             },
         },
+        {
+            id: "0017_add_scorer_context_columns",
+            name: "Add scorer context correlation columns",
+            checksum: "packages/db/migrations/0017_add_scorer_context_columns.sql",
+            isApplied: (sqlite) => {
+                const columns = tableColumnNames(sqlite, "_smithers_scorers");
+                return columns.has("ground_truth_json") && columns.has("context_json");
+            },
+            up: (sqlite) => {
+                const addedColumns = [];
+                if (addColumnIfMissing(sqlite, "_smithers_scorers", "ground_truth_json", "ground_truth_json TEXT")) {
+                    addedColumns.push("ground_truth_json");
+                }
+                if (addColumnIfMissing(sqlite, "_smithers_scorers", "context_json", "context_json TEXT")) {
+                    addedColumns.push("context_json");
+                }
+                return { table: "_smithers_scorers", addedColumns };
+            },
+        },
     ];
 }
 

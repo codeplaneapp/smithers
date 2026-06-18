@@ -117,10 +117,24 @@ export type CronRow = {
 };
 
 export type ScorerResultRow = {
+  readonly id?: string;
   readonly runId: string;
   readonly nodeId?: string;
+  readonly iteration?: number;
+  readonly attempt?: number;
   readonly scorerId?: string;
+  readonly scorerName?: string;
+  readonly source?: string;
+  readonly score?: number;
+  readonly reason?: string | null;
+  readonly metaJson?: string | null;
+  readonly inputJson?: string | null;
+  readonly outputJson?: string | null;
+  readonly groundTruthJson?: string | null;
+  readonly contextJson?: string | null;
+  readonly latencyMs?: number | null;
   readonly scoredAtMs?: number;
+  readonly durationMs?: number | null;
   readonly [key: string]: unknown;
 };
 

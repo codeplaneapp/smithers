@@ -388,4 +388,30 @@ describe("runScorersBatch", () => {
         expect(receivedInput.context).toBe("source material");
         expect(receivedInput.groundTruth).toEqual({ expected: "answer" });
     });
+    it("persists context and groundTruth JSON with scorer results", async () => {
+        const adapter = createMockAdapter();
+        const scorers = {
+            persisted: {
+                scorer: createScorer({
+                    id: "persisted-context",
+                    name: "Persisted Context",
+                    description: "d",
+                    score: async () => ({ score: 0.91 }),
+                }),
+            },
+        };
+        await runScorersBatch(scorers, makeContext({
+            context: { docs: ["source-a"], traceId: "trace-1" },
+            groundTruth: { expected: "answer" },
+        }), adapter);
+        expect(adapter.insertScorerResult).toHaveBeenCalledTimes(1);
+        const insertedRow = adapter.rows[0];
+        expect(JSON.parse(insertedRow.contextJson)).toEqual({
+            docs: ["source-a"],
+            traceId: "trace-1",
+        });
+        expect(JSON.parse(insertedRow.groundTruthJson)).toEqual({
+            expected: "answer",
+        });
+    });
 });

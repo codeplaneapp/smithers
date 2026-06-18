@@ -28,6 +28,8 @@ const selectRow: SelectScorer = {
     metaJson: null,
     inputJson: null,
     outputJson: null,
+    groundTruthJson: null,
+    contextJson: null,
     latencyMs: null,
     scoredAtMs: 1_700_000_000_000,
     durationMs: null,

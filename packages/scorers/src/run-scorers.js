@@ -125,6 +125,8 @@ function runSingleScorerEffect(key, binding, ctx, adapter, source, eventBus) {
                 metaJson: result.meta ? JSON.stringify(result.meta) : null,
                 inputJson: safeJsonStringify(ctx.input),
                 outputJson: safeJsonStringify(ctx.output),
+                groundTruthJson: safeJsonStringify(ctx.groundTruth),
+                contextJson: safeJsonStringify(ctx.context),
                 latencyMs: ctx.latencyMs ?? null,
                 scoredAtMs: nowMs(),
                 durationMs,

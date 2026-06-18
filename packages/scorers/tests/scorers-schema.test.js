@@ -20,6 +20,8 @@ describe("smithersScorers schema", () => {
         "meta_json" TEXT,
         "input_json" TEXT,
         "output_json" TEXT,
+        "ground_truth_json" TEXT,
+        "context_json" TEXT,
         "latency_ms" REAL,
         "scored_at_ms" INTEGER NOT NULL,
         "duration_ms" REAL
@@ -42,6 +44,8 @@ describe("smithersScorers schema", () => {
             metaJson: JSON.stringify({ model: "claude" }),
             inputJson: JSON.stringify({ prompt: "test" }),
             outputJson: JSON.stringify({ result: "ok" }),
+            groundTruthJson: JSON.stringify({ expected: "ok" }),
+            contextJson: JSON.stringify({ docs: ["source"] }),
             latencyMs: 123.45,
             scoredAtMs: Date.now(),
             durationMs: 50.2,
@@ -57,6 +61,8 @@ describe("smithersScorers schema", () => {
         expect(rows[0].scorerName).toBe("Accuracy Scorer");
         expect(rows[0].source).toBe("live");
         expect(rows[0].reason).toBe("High quality output");
+        expect(JSON.parse(rows[0].groundTruthJson)).toEqual({ expected: "ok" });
+        expect(JSON.parse(rows[0].contextJson)).toEqual({ docs: ["source"] });
         expect(rows[0].latencyMs).toBe(123.45);
         sqlite.close();
     });
@@ -77,6 +83,8 @@ describe("smithersScorers schema", () => {
         "meta_json" TEXT,
         "input_json" TEXT,
         "output_json" TEXT,
+        "ground_truth_json" TEXT,
+        "context_json" TEXT,
         "latency_ms" REAL,
         "scored_at_ms" INTEGER NOT NULL,
         "duration_ms" REAL
@@ -105,6 +113,8 @@ describe("smithersScorers schema", () => {
         "meta_json" TEXT,
         "input_json" TEXT,
         "output_json" TEXT,
+        "ground_truth_json" TEXT,
+        "context_json" TEXT,
         "latency_ms" REAL,
         "scored_at_ms" INTEGER NOT NULL,
         "duration_ms" REAL
@@ -154,6 +164,8 @@ describe("smithersScorers schema", () => {
         "meta_json" TEXT,
         "input_json" TEXT,
         "output_json" TEXT,
+        "ground_truth_json" TEXT,
+        "context_json" TEXT,
         "latency_ms" REAL,
         "scored_at_ms" INTEGER NOT NULL,
         "duration_ms" REAL

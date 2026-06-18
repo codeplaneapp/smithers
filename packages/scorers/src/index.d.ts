@@ -75,6 +75,8 @@ type ScoreRow$1 = {
     metaJson: string | null;
     inputJson: string | null;
     outputJson: string | null;
+    groundTruthJson: string | null;
+    contextJson: string | null;
     latencyMs: number | null;
     scoredAtMs: number;
     durationMs: number | null;
@@ -193,6 +195,8 @@ declare const smithersScorers: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
         metaJson: SmithersScorerColumn<"meta_json", string, false, false, false, "SQLiteText", "string">;
         inputJson: SmithersScorerColumn<"input_json", string, false, false, false, "SQLiteText", "string">;
         outputJson: SmithersScorerColumn<"output_json", string, false, false, false, "SQLiteText", "string">;
+        groundTruthJson: SmithersScorerColumn<"ground_truth_json", string, false, false, false, "SQLiteText", "string">;
+        contextJson: SmithersScorerColumn<"context_json", string, false, false, false, "SQLiteText", "string">;
         latencyMs: SmithersScorerColumn<"latency_ms", number, false, false, false, "SQLiteReal", "number">;
         scoredAtMs: SmithersScorerColumn<"scored_at_ms", number, true, false, false, "SQLiteInteger", "number">;
         durationMs: SmithersScorerColumn<"duration_ms", number, false, false, false, "SQLiteReal", "number">;

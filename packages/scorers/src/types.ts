@@ -83,6 +83,8 @@ export type ScoreRow = {
   metaJson: string | null;
   inputJson: string | null;
   outputJson: string | null;
+  groundTruthJson: string | null;
+  contextJson: string | null;
   latencyMs: number | null;
   scoredAtMs: number;
   durationMs: number | null;

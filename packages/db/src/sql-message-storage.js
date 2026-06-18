@@ -321,6 +321,8 @@ const CREATE_TABLE_STATEMENTS = [
     meta_json TEXT,
     input_json TEXT,
     output_json TEXT,
+    ground_truth_json TEXT,
+    context_json TEXT,
     latency_ms REAL,
     scored_at_ms INTEGER NOT NULL,
     duration_ms REAL

@@ -14,6 +14,8 @@ export const smithersScorers = sqliteTable("_smithers_scorers", {
     metaJson: text("meta_json"),
     inputJson: text("input_json"),
     outputJson: text("output_json"),
+    groundTruthJson: text("ground_truth_json"),
+    contextJson: text("context_json"),
     latencyMs: real("latency_ms"),
     scoredAtMs: integer("scored_at_ms").notNull(),
     durationMs: real("duration_ms"),
