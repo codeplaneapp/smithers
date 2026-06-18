@@ -45,6 +45,7 @@ export class RunInspector {
   private readonly theme: Theme;
   private readonly onClose: () => void;
   private readonly onNotify: (message: string, level?: "info" | "warning" | "error") => void;
+  private readonly unsubscribeStore: () => void;
   private focus: FocusPane = "tree";
   private cachedLines: string[] | undefined;
   private cachedWidth = 0;
@@ -61,7 +62,7 @@ export class RunInspector {
     this.theme = options.theme ?? {};
     this.onClose = options.onClose ?? (() => undefined);
     this.onNotify = options.onNotify ?? (() => undefined);
-    store.subscribe(() => this.invalidate());
+    this.unsubscribeStore = store.subscribe(() => this.invalidate());
   }
 
   handleInput(data: string) {
@@ -162,6 +163,7 @@ export class RunInspector {
   }
 
   dispose() {
+    this.unsubscribeStore();
     this.store.disconnect();
   }
 

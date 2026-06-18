@@ -119,6 +119,18 @@ describe("DevToolsStore", () => {
     expect(lines).toContain("RUNNING");
     store.disconnect();
   });
+
+  test("RunInspector dispose removes its store listener", () => {
+    const store = new DevToolsStore({ ghostNodeCap: 8 });
+    const client = new DevToolsClient({ baseUrl: "http://127.0.0.1:1" });
+    const inspector = new RunInspector(store, client);
+
+    expect((store as unknown as { listeners: Set<unknown> }).listeners.size).toBe(1);
+
+    inspector.dispose();
+
+    expect((store as unknown as { listeners: Set<unknown> }).listeners.size).toBe(0);
+  });
 });
 
 describe("DevToolsClient integration", () => {
