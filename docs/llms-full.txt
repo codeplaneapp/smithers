@@ -1445,7 +1445,7 @@ If no Gateway is reachable on the default local port, `bunx smithers-orchestrato
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[74]:
+commands[75]:
   - name: init
     purpose: Install the workflow pack into .smithers/ (local) or ~/.smithers/ (--global)
     flags[6]{name,short,type,default,desc}:
@@ -1724,6 +1724,8 @@ commands[74]:
       port,,number,7331,Gateway port when --gateway is not set
       workflow,w,string,,Open this workflow's UI directly skipping run lookup
       open,,boolean,true,Open a browser; use --no-open to just print the URL
+  - name: tui
+    purpose: Pick a workflow, start a run, and live-render its status card in the terminal
   - name: revert
     purpose: Revert the workspace to a previous task attempt's filesystem state
     args[1]{name,type,required,desc}:
