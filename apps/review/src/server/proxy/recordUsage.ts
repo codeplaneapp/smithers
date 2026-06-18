@@ -5,6 +5,7 @@ import type { UsageSummary } from "./parseUsage.ts";
 
 export interface RecordedUsage {
   costUsd: number;
+  recorded: boolean;
 }
 
 /**
@@ -27,6 +28,15 @@ export async function recordUsage(
   const costUsd =
     (options.summary.inputTokens * price.input) / 1_000_000 +
     (options.summary.outputTokens * price.output) / 1_000_000;
+  if (options.sessionHash) {
+    const reservation = await db
+      .prepare(
+        "UPDATE sessions SET spent_usd = spent_usd + ? WHERE hash = ? AND spent_usd + ? <= spend_cap_usd",
+      )
+      .bind(costUsd, options.sessionHash, costUsd)
+      .run();
+    if ((reservation.meta.changes ?? 0) !== 1) return { costUsd, recorded: false };
+  }
   await db
     .prepare(
       "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -43,11 +53,5 @@ export async function recordUsage(
       options.now,
     )
     .run();
-  if (options.sessionHash) {
-    await db
-      .prepare("UPDATE sessions SET spent_usd = spent_usd + ? WHERE hash = ?")
-      .bind(costUsd, options.sessionHash)
-      .run();
-  }
-  return { costUsd };
+  return { costUsd, recorded: true };
 }

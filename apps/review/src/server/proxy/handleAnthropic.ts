@@ -41,12 +41,10 @@ function teeForMetering(
     const reader = b.getReader();
     const decoder = new TextDecoder();
     let acc = "";
-    const cap = 1 << 20;
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        if (acc.length >= cap) continue;
         acc += decoder.decode(value, { stream: true });
       }
       acc += decoder.decode();
