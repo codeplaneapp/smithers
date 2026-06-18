@@ -28,5 +28,8 @@
   },
   "include": [
     "src/**/*"
+  ],
+  "exclude": [
+    "src/index.d.ts"
   ]
 }

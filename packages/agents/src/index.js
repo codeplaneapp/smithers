@@ -45,14 +45,6 @@
 /** @typedef {import("./http/HttpToolAuth.ts").HttpToolAuth} HttpToolAuth */
 /** @typedef {import("./http/HttpToolInput.ts").HttpToolInput} HttpToolInput */
 /** @typedef {import("./http/HttpToolOutput.ts").HttpToolOutput} HttpToolOutput */
-/** @typedef {import("./http/CreateHttpToolOptions.ts").CreateHttpToolOptions} CreateHttpToolOptions */
-/** @typedef {import("./http/HttpToolAuth.ts").HttpToolAuth} HttpToolAuth */
-/** @typedef {import("./http/HttpToolInput.ts").HttpToolInput} HttpToolInput */
-/** @typedef {import("./http/HttpToolOutput.ts").HttpToolOutput} HttpToolOutput */
-/** @typedef {import("./http/CreateHttpToolOptions.ts").CreateHttpToolOptions} CreateHttpToolOptions */
-/** @typedef {import("./http/HttpToolAuth.ts").HttpToolAuth} HttpToolAuth */
-/** @typedef {import("./http/HttpToolInput.ts").HttpToolInput} HttpToolInput */
-/** @typedef {import("./http/HttpToolOutput.ts").HttpToolOutput} HttpToolOutput */
 // @smithers-type-exports-end
 
 export { BaseCliAgent } from "./BaseCliAgent/index.js";
