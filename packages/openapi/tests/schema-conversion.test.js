@@ -286,6 +286,28 @@ describe("buildOperationSchema", () => {
             body: { name: "Fido" },
         });
     });
+    test("builds schema from the first non-JSON request body when JSON is absent", () => {
+        const requestBody = {
+            required: true,
+            content: {
+                "application/x-www-form-urlencoded": {
+                    schema: {
+                        type: "object",
+                        required: ["email"],
+                        properties: {
+                            email: { type: "string" },
+                            subscribe: { type: "boolean" },
+                        },
+                    },
+                },
+            },
+        };
+        const schema = buildOperationSchema([], requestBody, emptySpec);
+        expect(schema.parse({ body: { email: "a@example.com", subscribe: true } })).toEqual({
+            body: { email: "a@example.com", subscribe: true },
+        });
+        expect(() => schema.parse({})).toThrow();
+    });
     test("builds schema with both params and body", () => {
         const params = [
             { name: "ownerId", in: "path", required: true, schema: { type: "string" } },

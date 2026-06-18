@@ -103,6 +103,36 @@ describe("extractOperations", () => {
         expect(createPet.requestBody).toBeDefined();
         const jsonSchema = createPet.requestBody?.content["application/json"]?.schema;
         expect(jsonSchema).toBeDefined();
+        expect(createPet.requestBodyMediaType).toBe("application/json");
+    });
+    test("records fallback request body media type when JSON is absent", () => {
+        const ops = extractOperations({
+            openapi: "3.0.0",
+            info: { title: "Forms", version: "1.0.0" },
+            paths: {
+                "/uploads": {
+                    post: {
+                        operationId: "uploadFile",
+                        requestBody: {
+                            required: true,
+                            content: {
+                                "multipart/form-data": {
+                                    schema: {
+                                        type: "object",
+                                        required: ["file"],
+                                        properties: {
+                                            file: { type: "string", format: "binary" },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        responses: { "200": { description: "ok" } },
+                    },
+                },
+            },
+        });
+        expect(ops[0].requestBodyMediaType).toBe("multipart/form-data");
     });
     test("resolves $ref in request body", () => {
         const ops = extractOperations(refSpec);

@@ -48,6 +48,77 @@ describe("OpenAPI tool execution", () => {
         expect(init.body).toBe(JSON.stringify({ name: "Fido", tag: "dog" }));
         expect(init.headers["Content-Type"]).toBe("application/json");
     });
+    test("POST request with multipart form body", async () => {
+        const tools = createOpenApiToolsSync({
+            openapi: "3.0.0",
+            info: { title: "Uploads", version: "1.0.0" },
+            servers: [{ url: "https://api.example.com" }],
+            paths: {
+                "/uploads": {
+                    post: {
+                        operationId: "uploadFile",
+                        requestBody: {
+                            required: true,
+                            content: {
+                                "multipart/form-data": {
+                                    schema: {
+                                        type: "object",
+                                        required: ["file"],
+                                        properties: {
+                                            file: { type: "string", format: "binary" },
+                                            purpose: { type: "string" },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        responses: { "200": { description: "ok" } },
+                    },
+                },
+            },
+        });
+        await tools.uploadFile.execute({ body: { file: "contents", purpose: "avatar" } });
+        const [, init] = mockFetch.mock.calls[0];
+        expect(init.body).toBeInstanceOf(FormData);
+        expect(init.body.get("file")).toBe("contents");
+        expect(init.body.get("purpose")).toBe("avatar");
+        expect(init.headers["Content-Type"]).toBeUndefined();
+    });
+    test("POST request with urlencoded form body", async () => {
+        const tools = createOpenApiToolsSync({
+            openapi: "3.0.0",
+            info: { title: "Forms", version: "1.0.0" },
+            servers: [{ url: "https://api.example.com" }],
+            paths: {
+                "/subscriptions": {
+                    post: {
+                        operationId: "subscribe",
+                        requestBody: {
+                            required: true,
+                            content: {
+                                "application/x-www-form-urlencoded": {
+                                    schema: {
+                                        type: "object",
+                                        required: ["email"],
+                                        properties: {
+                                            email: { type: "string" },
+                                            optIn: { type: "boolean" },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        responses: { "200": { description: "ok" } },
+                    },
+                },
+            },
+        });
+        await tools.subscribe.execute({ body: { email: "a@example.com", optIn: true } });
+        const [, init] = mockFetch.mock.calls[0];
+        expect(init.body).toBeInstanceOf(URLSearchParams);
+        expect(init.body.toString()).toBe("email=a%40example.com&optIn=true");
+        expect(init.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+    });
     test("DELETE request", async () => {
         const tools = createOpenApiToolsSync(petStoreSpec);
         const deletePet = tools.deletePet;

@@ -10,6 +10,24 @@ import { jsonSchemaToZod } from "./jsonSchemaToZod.js";
 /** @typedef {import("./RequestBodyObject.ts").RequestBodyObject} RequestBodyObject */
 
 /**
+ * @param {RequestBodyObject | undefined} requestBody
+ * @returns {{ mediaType: string; content: NonNullable<RequestBodyObject["content"]>[string] } | undefined}
+ */
+export function selectRequestBodyContent(requestBody) {
+    const content = requestBody?.content;
+    if (!content)
+        return undefined;
+    if (content["application/json"]) {
+        return { mediaType: "application/json", content: content["application/json"] };
+    }
+    const firstEntry = Object.entries(content)[0];
+    if (!firstEntry)
+        return undefined;
+    const [mediaType, mediaContent] = firstEntry;
+    return { mediaType, content: mediaContent };
+}
+
+/**
  * Build a single Zod object schema for an operation's input, combining:
  * - path parameters
  * - query parameters
@@ -42,9 +60,11 @@ export function buildOperationSchema(parameters, requestBody, spec) {
     }
     // Request body
     if (requestBody) {
-        const jsonContent = requestBody.content?.["application/json"];
-        if (jsonContent?.schema) {
-            const bodySchema = jsonSchemaToZod(jsonContent.schema, spec);
+        const selectedContent = selectRequestBodyContent(requestBody);
+        if (selectedContent) {
+            const bodySchema = selectedContent.content.schema
+                ? jsonSchemaToZod(selectedContent.content.schema, spec)
+                : z.any();
             // If the body schema is an object, merge its properties
             // into the top-level props under a "body" key
             if (requestBody.required) {

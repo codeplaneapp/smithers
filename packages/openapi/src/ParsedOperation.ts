@@ -10,5 +10,6 @@ export type ParsedOperation = {
 	description: string;
 	parameters: ParameterObject[];
 	requestBody?: RequestBodyObject;
+	requestBodyMediaType?: string;
 	deprecated: boolean;
 };

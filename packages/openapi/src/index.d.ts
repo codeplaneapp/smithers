@@ -60,6 +60,7 @@ type ParsedOperation$2 = {
     description: string;
     parameters: ParameterObject$1[];
     requestBody?: RequestBodyObject$1;
+    requestBodyMediaType?: string;
     deprecated: boolean;
 };
 

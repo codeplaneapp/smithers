@@ -75,6 +75,97 @@ export function buildUrl(baseUrl, path, pathParams, queryParams, options) {
     return fullUrl.toString();
 }
 /**
+ * @param {unknown} value
+ * @returns {string | Blob}
+ */
+function toFormValue(value) {
+    if (value instanceof Blob)
+        return value;
+    if (typeof value === "string")
+        return value;
+    return String(value);
+}
+/**
+ * @param {unknown} body
+ * @returns {FormData}
+ */
+function buildFormData(body) {
+    const formData = new FormData();
+    if (body && typeof body === "object" && !(body instanceof Blob) && !(body instanceof ArrayBuffer)) {
+        for (const [key, value] of Object.entries(body)) {
+            if (value === undefined)
+                continue;
+            if (Array.isArray(value)) {
+                for (const item of value) {
+                    formData.append(key, toFormValue(item));
+                }
+            }
+            else {
+                formData.append(key, toFormValue(value));
+            }
+        }
+        return formData;
+    }
+    formData.append("body", toFormValue(body));
+    return formData;
+}
+/**
+ * @param {unknown} body
+ * @returns {URLSearchParams}
+ */
+function buildUrlEncodedBody(body) {
+    const params = new URLSearchParams();
+    if (body && typeof body === "object" && !(body instanceof Blob) && !(body instanceof ArrayBuffer)) {
+        for (const [key, value] of Object.entries(body)) {
+            if (value === undefined)
+                continue;
+            if (Array.isArray(value)) {
+                for (const item of value) {
+                    params.append(key, String(item));
+                }
+            }
+            else {
+                params.append(key, String(value));
+            }
+        }
+        return params;
+    }
+    params.set("body", String(body));
+    return params;
+}
+/**
+ * @param {unknown} body
+ * @returns {BodyInit}
+ */
+function buildRawBody(body) {
+    if (body instanceof Blob || body instanceof ArrayBuffer || typeof body === "string") {
+        return body;
+    }
+    return JSON.stringify(body);
+}
+/**
+ * @param {unknown} body
+ * @param {string | undefined} mediaType
+ * @param {Record<string, string>} headers
+ * @returns {BodyInit}
+ */
+function serializeRequestBody(body, mediaType, headers) {
+    const requestMediaType = mediaType ?? "application/json";
+    if (requestMediaType.includes("multipart/form-data")) {
+        delete headers["Content-Type"];
+        return buildFormData(body);
+    }
+    if (requestMediaType.includes("application/x-www-form-urlencoded")) {
+        headers["Content-Type"] = requestMediaType;
+        return buildUrlEncodedBody(body);
+    }
+    headers["Content-Type"] = requestMediaType;
+    if (requestMediaType.includes("application/json") || requestMediaType.includes("+json")) {
+        return JSON.stringify(body);
+    }
+    return buildRawBody(body);
+}
+/**
  * @param {ParsedOperation} operation
  * @param {Record<string, unknown>} args
  * @param {string} baseUrl
@@ -119,9 +210,8 @@ export async function executeRequest(operation, args, baseUrl, options) {
     };
     // Request body
     if (args.body !== undefined) {
-        headers["Content-Type"] = "application/json";
+        fetchInit.body = serializeRequestBody(args.body, operation.requestBodyMediaType, headers);
         fetchInit.headers = headers;
-        fetchInit.body = JSON.stringify(args.body);
     }
     const response = await fetch(url, fetchInit);
     const contentType = response.headers.get("content-type") ?? "";

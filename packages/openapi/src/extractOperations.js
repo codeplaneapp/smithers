@@ -4,6 +4,7 @@
 import { deref } from "./ref-resolver.js";
 import { HTTP_METHODS, } from "./types.js";
 import { mergeParameters, generateOperationId } from "./_specHelpers.js";
+import { selectRequestBodyContent } from "./buildOperationSchema.js";
 
 /** @typedef {import("./OpenApiSpec.ts").OpenApiSpec} OpenApiSpec */
 /** @typedef {import("./ParsedOperation.ts").ParsedOperation} ParsedOperation */
@@ -33,6 +34,7 @@ export function extractOperations(spec) {
             const requestBody = operation.requestBody
                 ? deref(spec, operation.requestBody)
                 : undefined;
+            const requestBodyMediaType = selectRequestBodyContent(requestBody)?.mediaType;
             const operationId = operation.operationId ?? generateOperationId(method, path);
             operations.push({
                 operationId,
@@ -42,6 +44,7 @@ export function extractOperations(spec) {
                 description: operation.description ?? operation.summary ?? "",
                 parameters: mergedParams,
                 requestBody,
+                requestBodyMediaType,
                 deprecated: operation.deprecated ?? false,
             });
         }
