@@ -24,7 +24,7 @@ function extractLastAssistantMessage(messages) {
 }
 /**
  * @param {unknown} parsed
- * @param {{ sawDeltaSinceBoundary: boolean }} state
+ * @param {{ sawDeltaSinceBoundary: boolean; lastFinalText?: string }} state
  * @returns {string[]}
  */
 function extractCliStreamTextChunks(parsed, state) {
@@ -45,6 +45,24 @@ function extractCliStreamTextChunks(parsed, state) {
     const emitFinal = (text) => {
         if (text && !state.sawDeltaSinceBoundary) {
             chunks.push(text);
+            state.lastFinalText = text;
+        }
+        state.sawDeltaSinceBoundary = false;
+    };
+    /**
+   * The end-of-run `result` payload echoes the final assistant message — e.g.
+   * Claude Code emits a complete `assistant` line AND a `result` line that both
+   * carry the same answer, with no deltas in between. Treat `result` as a
+   * fallback: surface it only when nothing already covered this turn and it is
+   * not a verbatim repeat of the text we just emitted. Without this the answer
+   * is streamed (and persisted as a NodeOutput) twice, so every consumer — the
+   * TUI, `smithers chat`, the gateway UI — shows it doubled.
+   * @param {string | undefined} text
+   */
+    const emitResult = (text) => {
+        if (text && !state.sawDeltaSinceBoundary && text !== state.lastFinalText) {
+            chunks.push(text);
+            state.lastFinalText = text;
         }
         state.sawDeltaSinceBoundary = false;
     };
@@ -103,7 +121,7 @@ function extractCliStreamTextChunks(parsed, state) {
         emitFinal(extractTextFromJsonValue(message));
     }
     if (type === "result") {
-        emitFinal(extractTextFromJsonValue(record.result ?? record.response ?? record.output ?? record));
+        emitResult(extractTextFromJsonValue(record.result ?? record.response ?? record.output ?? record));
     }
     if (type === "turn_end" && message?.role === "assistant") {
         emitFinal(extractTextFromJsonValue(message));
@@ -132,7 +150,7 @@ export function createAgentStdoutTextEmitter(options) {
     const { outputFormat, onText } = options;
     let buffer = "";
     let emittedAnyText = false;
-    const state = { sawDeltaSinceBoundary: false };
+    const state = { sawDeltaSinceBoundary: false, lastFinalText: undefined };
     /**
    * @param {string | undefined} text
    */
