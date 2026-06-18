@@ -86,19 +86,24 @@ describe("host config defensive branches", () => {
         expect(() => __testingHostConfig.requestPostPaintCallback()).not.toThrow();
     });
 
-    test("container mutation stubs update the headless root", () => {
-        const container = { root: null };
+    test("container mutation stubs preserve ordered root children", () => {
+        const container = { root: null, roots: [] };
         const first = __testingHostConfig.createInstance("smithers:task", { id: "first" });
         const second = __testingHostConfig.createInstance("smithers:task", { id: "second" });
+        const third = __testingHostConfig.createInstance("smithers:task", { id: "third" });
 
         __testingHostConfig.appendChildToContainer(container, first);
         expect(container.root).toBe(first);
 
         __testingHostConfig.insertInContainerBefore(container, second, first);
-        expect(container.root).toBe(second);
+        expect(container.root.children.map((child) => child.props.id)).toEqual(["second", "first"]);
+
+        __testingHostConfig.appendChildToContainer(container, third);
+        expect(container.root.children.map((child) => child.props.id)).toEqual(["second", "first", "third"]);
 
         __testingHostConfig.removeChildFromContainer(container);
         expect(container.root).toBeNull();
+        expect(container.roots).toEqual([]);
     });
 
     test("bindToConsole dispatches to the selected console method with log fallback", () => {

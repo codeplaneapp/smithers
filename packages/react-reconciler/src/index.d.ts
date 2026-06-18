@@ -12,6 +12,7 @@ type SmithersRendererOptions$1 = {
 
 type HostContainer$1 = {
     root: HostNode$1 | null;
+    roots?: HostNode$1[];
 };
 
 declare class SmithersRenderer {

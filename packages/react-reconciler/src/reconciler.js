@@ -62,6 +62,40 @@ function createElement(type, props) {
     };
 }
 let currentUpdatePriority = 1;
+/**
+ * @param {readonly HostNode[]} roots
+ * @returns {HostNode | null}
+ */
+function materializeRoot(roots) {
+    if (roots.length === 0)
+        return null;
+    if (roots.length === 1)
+        return roots[0];
+    return {
+        kind: "element",
+        tag: "smithers:fragment",
+        props: {},
+        rawProps: {},
+        children: roots,
+    };
+}
+/**
+ * @param {HostContainer} container
+ * @returns {HostNode[]}
+ */
+function ensureContainerRoots(container) {
+    if (Array.isArray(container.roots))
+        return container.roots;
+    container.roots = container.root ? [container.root] : [];
+    return container.roots;
+}
+/**
+ * @param {HostContainer} container
+ * @returns {void}
+ */
+function refreshContainerRoot(container) {
+    container.root = materializeRoot(ensureContainerRoots(container));
+}
 const hostConfig = {
     supportsMutation: true,
     supportsPersistence: false,
@@ -127,7 +161,12 @@ const hostConfig = {
    * @returns {void}
    */
     appendChildToContainer(container, child) {
-        container.root = child;
+        const roots = ensureContainerRoots(container);
+        const existing = roots.indexOf(child);
+        if (existing >= 0)
+            roots.splice(existing, 1);
+        roots.push(child);
+        refreshContainerRoot(container);
     },
     /**
    * @param {MutableHostElement} parent
@@ -141,10 +180,20 @@ const hostConfig = {
     },
     /**
    * @param {HostContainer} container
+   * @param {HostNode} [child]
    * @returns {void}
    */
-    removeChildFromContainer(container) {
-        container.root = null;
+    removeChildFromContainer(container, child) {
+        const roots = ensureContainerRoots(container);
+        if (child) {
+            const idx = roots.indexOf(child);
+            if (idx >= 0)
+                roots.splice(idx, 1);
+        }
+        else {
+            roots.length = 0;
+        }
+        refreshContainerRoot(container);
     },
     /**
    * @param {MutableHostElement} parent
@@ -165,11 +214,20 @@ const hostConfig = {
     /**
    * @param {HostContainer} container
    * @param {HostNode} child
-   * @param {HostNode} _beforeChild
+   * @param {HostNode} beforeChild
    * @returns {void}
    */
-    insertInContainerBefore(container, child, _beforeChild) {
-        container.root = child;
+    insertInContainerBefore(container, child, beforeChild) {
+        const roots = ensureContainerRoots(container);
+        const existing = roots.indexOf(child);
+        if (existing >= 0)
+            roots.splice(existing, 1);
+        const idx = roots.indexOf(beforeChild);
+        if (idx >= 0)
+            roots.splice(idx, 0, child);
+        else
+            roots.push(child);
+        refreshContainerRoot(container);
     },
     /**
    * @param {MutableHostElement} _instance
@@ -246,7 +304,8 @@ const hostConfig = {
    * @returns {void}
    */
     clearContainer(container) {
-        container.root = null;
+        ensureContainerRoots(container).length = 0;
+        refreshContainerRoot(container);
     },
     /**
    * @returns {number}
@@ -421,7 +480,7 @@ export class SmithersRenderer {
    */
     constructor(options = {}) {
         this.extractGraph = options.extractGraph;
-        this.container = { root: null };
+        this.container = { root: null, roots: [] };
         this.root = reconciler.createContainer(this.container, 0, null, false, null, "", reconciler.defaultOnUncaughtError, reconciler.defaultOnCaughtError, reconciler.defaultOnRecoverableError, null);
     }
     /**

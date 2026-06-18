@@ -69,4 +69,13 @@ describe("SmithersRenderer", () => {
         expect(root.tag).toBe("smithers:task");
         expect(root.props.id).toBe("second");
     });
+    it("preserves all ordered top-level Fragment children", async () => {
+        const renderer = new SmithersRenderer({ extractGraph: graphFrom });
+        await renderer.render(React.createElement(React.Fragment, null, React.createElement("smithers:task", { id: "first", output: "out" }), React.createElement("smithers:task", { id: "second", output: "out" }), React.createElement("smithers:task", { id: "third", output: "out" })));
+
+        const root = renderer.getRoot();
+        expect(root.kind).toBe("element");
+        expect(root.tag).toBe("smithers:fragment");
+        expect(root.children.map((child) => child.props.id)).toEqual(["first", "second", "third"]);
+    });
 });
