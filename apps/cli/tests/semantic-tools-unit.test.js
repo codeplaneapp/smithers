@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
+import { SmithersError } from "@smithers-orchestrator/errors";
 import {
     SEMANTIC_TOOL_NAMES,
     createSemanticToolDefinitions,
@@ -347,7 +348,7 @@ describe("semantic tool definitions", () => {
             waitForStartMs: 0,
         });
         expect(missingDefault.isError).toBe(true);
-        expect(missingDefault.structuredContent.error.code).toBe("INTERNAL_ERROR");
+        expect(missingDefault.structuredContent.error.code).toBe("WORKFLOW_MISSING_DEFAULT");
 
         writeFileSync(join(harness.cwd, ".smithers", "workflows", "quick.tsx"), [
             "/** @jsxImportSource smithers-orchestrator */",
@@ -603,13 +604,37 @@ describe("semantic tool definitions", () => {
             timeoutMs: 0,
         });
         expect(missingWatch.isError).toBe(true);
-        expect(missingWatch.structuredContent.error.code).toBe("INTERNAL_ERROR");
+        expect(missingWatch.structuredContent.error.code).toBe("RUN_NOT_FOUND");
+        expect(missingWatch.structuredContent.error.details).toMatchObject({
+            runId: "missing",
+        });
+
+        const missingRun = await missingHarness.call("get_run", {
+            runId: "missing",
+        });
+        expect(missingRun.isError).toBe(true);
+        expect(missingRun.structuredContent.error.code).toBe("RUN_NOT_FOUND");
+        expect(missingRun.structuredContent.error.message).toContain("Run not found: missing");
 
         const missingEvents = await missingHarness.call("get_run_events", {
             runId: "missing",
             limit: 1,
         });
         expect(missingEvents.isError).toBe(true);
+        expect(missingEvents.structuredContent.error.code).toBe("RUN_NOT_FOUND");
+
+        const dbFailure = new SmithersError("CLI_DB_NOT_FOUND", "No smithers.db found at project anchor /tmp/no-db.");
+        const dbHarness = createSemanticToolDefinitions({
+            cwd: () => "/tmp/no-db",
+            openDb: async () => {
+                throw dbFailure;
+            },
+        });
+        const dbGetRun = dbHarness.find((tool) => tool.name === "get_run");
+        const missingDb = await dbGetRun.handler(dbGetRun.inputSchema.parse({ runId: "run-1" }));
+        expect(missingDb.isError).toBe(true);
+        expect(missingDb.structuredContent.error.code).toBe("CLI_DB_NOT_FOUND");
+        expect(missingDb.structuredContent.error.message).toContain("project anchor /tmp/no-db");
 
         const harness = makeHarness();
         const noApproval = await harness.call("resolve_approval", {
@@ -617,7 +642,7 @@ describe("semantic tool definitions", () => {
             runId: "missing",
         });
         expect(noApproval.isError).toBe(true);
-        expect(noApproval.structuredContent.error.code).toBe("INTERNAL_ERROR");
+        expect(noApproval.structuredContent.error.code).toBe("INVALID_INPUT");
 
         const wrongIteration = await harness.call("resolve_approval", {
             action: "approve",
@@ -631,6 +656,6 @@ describe("semantic tool definitions", () => {
             workflowName: "demo",
         });
         expect(ambiguous.isError).toBe(true);
-        expect(ambiguous.structuredContent.error.code).toBe("INTERNAL_ERROR");
+        expect(ambiguous.structuredContent.error.code).toBe("INVALID_INPUT");
     });
 });

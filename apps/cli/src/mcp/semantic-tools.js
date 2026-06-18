@@ -823,7 +823,10 @@ function filterPendingApprovals(approvals, filters) {
  */
 async function executeSemanticTool(toolName, handler) {
     try {
-        const data = await runPromise(Effect.tryPromise(() => handler()).pipe(Effect.annotateLogs({
+        const data = await runPromise(Effect.tryPromise({
+            try: () => handler(),
+            catch: (error) => error,
+        }).pipe(Effect.annotateLogs({
             toolName,
             surface: "semantic",
         }), Effect.withLogSpan("mcp:semantic")));
