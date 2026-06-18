@@ -8,7 +8,7 @@ import { Worktree } from "smithers-orchestrator";
 
 type WorktreeProps = {
   key?: string;
-  path: string; // required, non-empty; resolved against baseRootDir or cwd if relative
+  path: string; // required, non-empty; relative paths resolve against the launch root
   id?: string;
   branch?: string; // omit to use current branch
   baseBranch?: string; // default "main"
@@ -69,4 +69,4 @@ Both APIs use the graph resolver, so they match the path Smithers gives worker t
   than re-running `git add`/`git commit`.
 - Innermost `<Worktree>` wins when nested; duplicate ids are rejected.
 - Empty/whitespace `path` is rejected at render time.
-- A relative `path` resolves against the **launch root**, not the workflow file's directory. The launch root is `--root` (if given), else the nearest ancestor of the operator working directory that contains a `.smithers/` package, else the operator working directory. It is never `dirname(workflowFile)`, so a relative `path` like `wt-a` lands beside wherever you ran `bunx smithers-orchestrator up <path>` from, which can differ from where the workflow source lives. Pass an absolute `path` (for example `/tmp/smithers/wt-a`) when you need a deterministic location, and read back the resolved location with `ctx.worktreePath(...)` or `ctx.resolveWorktreePath(...)` rather than reconstructing it.
+- A relative `path` resolves against the **launch root**, not the workflow file's directory. The launch root is `--root` (if given), else the nearest ancestor of the operator working directory that contains a `.smithers/` package, else the operator working directory. It is never `dirname(workflowFile)`; `workflowPath` is threaded through render separately and is not used as the path base. A relative `path` like `wt-a` lands beside wherever you ran `bunx smithers-orchestrator up <path>` from, which can differ from where the workflow source lives. Smithers emits a one-time warning for relative worktree paths showing the base and resolved absolute path. Pass an absolute `path` (for example `/tmp/smithers/wt-a`) when you need a deterministic location, and read back the resolved location with `ctx.worktreePath(...)` or `ctx.resolveWorktreePath(...)` rather than reconstructing it.

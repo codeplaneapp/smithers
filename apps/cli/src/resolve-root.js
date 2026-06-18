@@ -4,6 +4,11 @@ import { findSmithersAnchorDir } from "smithers-orchestrator/findSmithersAnchorD
 /**
  * Resolve the effective tool sandbox root for a local workflow launch.
  *
+ * This launch root is also the base used for relative `<Worktree path>`
+ * resolution. It comes from `--root`, the nearest `.smithers/` anchor, or the
+ * operator cwd, and is never `dirname(workflowPath)`. The workflow path is
+ * threaded through render separately for identity and diagnostics.
+ *
  * Every launch form — `smithers up <path>`, `smithers workflow run <name>`,
  * `smithers graph`, `smithers eval`, and detached/supervised resume — funnels
  * through here so the task root can never drift by launch form (issue #283).

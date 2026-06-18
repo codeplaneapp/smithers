@@ -1,12 +1,45 @@
-import { describe, expect, test } from "bun:test";
-import { resolve } from "node:path";
-import { resolveWorktreePath } from "../src/worktree-path.js";
+import { describe, expect, spyOn, test } from "bun:test";
+import { dirname, resolve } from "node:path";
+import {
+    resetRelativeWorktreePathWarningForTest,
+    resolveWorktreePath,
+} from "../src/worktree-path.js";
 
 describe("resolveWorktreePath", () => {
     test("resolves absolute paths without using the base root", () => {
         expect(resolveWorktreePath("/tmp/smithers-worktree", { baseRootDir: "/ignored" })).toBe(
             resolve("/tmp/smithers-worktree"),
         );
+    });
+
+    test("warns once that relative paths resolve against baseRootDir, not workflowPath dirname", () => {
+        resetRelativeWorktreePathWarningForTest();
+        const warn = spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            const baseRootDir = "/tmp/operator-root";
+            const workflowPath = "/tmp/operator-root/.smithers/workflows/build.tsx";
+
+            expect(resolveWorktreePath("wt-a", { baseRootDir, workflowPath })).toBe(
+                resolve(baseRootDir, "wt-a"),
+            );
+            expect(resolveWorktreePath("wt-b", { baseRootDir, workflowPath })).toBe(
+                resolve(baseRootDir, "wt-b"),
+            );
+
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(warn.mock.calls[0][0]).toContain("relative <Worktree path>");
+            expect(warn.mock.calls[0][1]).toMatchObject({
+                code: "WORKTREE_RELATIVE_PATH_BASE_ROOT",
+                path: "wt-a",
+                base: baseRootDir,
+                resolvedPath: resolve(baseRootDir, "wt-a"),
+                workflowPath,
+                workflowDir: dirname(workflowPath),
+            });
+        }
+        finally {
+            warn.mockRestore();
+        }
     });
 
     test("resolves relative paths against an explicit base root", () => {

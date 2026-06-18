@@ -1,5 +1,5 @@
 /** @jsxImportSource smithers-orchestrator */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { extractFromHost, } from "../src/dom/extract.js";
 import { z } from "zod";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
@@ -24,6 +24,20 @@ function hostEl(tag, rawProps = {}, children = []) {
  */
 function hostText(text) {
     return { kind: "text", text };
+}
+/**
+ * @template T
+ * @param {() => T} fn
+ * @returns {T}
+ */
+function silenceWorktreePathWarning(fn) {
+    const warn = spyOn(console, "warn").mockImplementation(() => { });
+    try {
+        return fn();
+    }
+    finally {
+        warn.mockRestore();
+    }
 }
 describe("extractFromHost", () => {
     test("returns empty result for null root", () => {
@@ -466,7 +480,7 @@ describe("extractFromHost", () => {
                 }),
             ]),
         ]);
-        const result = extractFromHost(root, { baseRootDir: "/tmp/root" });
+        const result = silenceWorktreePathWarning(() => extractFromHost(root, { baseRootDir: "/tmp/root" }));
         const task = result.tasks[0];
         expect(task.nodeId).toBe("sf");
         expect(task.outputRef).toBe(output);

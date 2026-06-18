@@ -206,13 +206,18 @@ declare function extractGraph(root: HostNode$1 | null, opts?: ExtractOptions$1):
 declare function extractFromHost(root: HostNode$1 | null, opts?: ExtractOptions$1): WorkflowGraph$1;
 /**
  * Resolve a <Worktree path> prop exactly the way graph extraction resolves it.
+ * Relative paths are resolved against the launch root (`--root`, the nearest
+ * `.smithers` anchor, or the operator cwd), never `dirname(workflowPath)`.
+ * `workflowPath` is threaded through graph/engine rendering for workflow
+ * identity and diagnostics only; it is not a worktree path resolution base.
  *
  * @param {unknown} path
- * @param {{ baseRootDir?: string }} [opts]
+ * @param {{ baseRootDir?: string; workflowPath?: string | null }} [opts]
  * @returns {string}
  */
 declare function resolveWorktreePath(path: unknown, opts?: {
     baseRootDir?: string;
+    workflowPath?: string | null;
 }): string;
 type ExtractOptions$1 = ExtractOptions$2;
 type HostNode$1 = HostNode$2;

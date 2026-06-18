@@ -265,7 +265,10 @@ export function extractFromHost(root, opts) {
             if (!pathVal) {
                 throw new SmithersError("WORKTREE_EMPTY_PATH", WORKTREE_EMPTY_PATH_ERROR);
             }
-            const normPath = resolveWorktreePath(pathVal, { baseRootDir: opts?.baseRootDir });
+            const normPath = resolveWorktreePath(pathVal, {
+                baseRootDir: opts?.baseRootDir,
+                workflowPath: opts?.workflowPath,
+            });
             const branch = node.rawProps?.branch ? String(node.rawProps.branch) : undefined;
             const baseBranch = node.rawProps?.baseBranch ? String(node.rawProps.baseBranch) : undefined;
             nextWorktreeStack = [...worktreeStack, { id, path: normPath, branch, baseBranch }];

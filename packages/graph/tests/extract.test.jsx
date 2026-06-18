@@ -1,5 +1,5 @@
 /** @jsxImportSource smithers-orchestrator */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 import { extractGraph } from "../src/extract.js";
@@ -22,6 +22,21 @@ function hostEl(tag, rawProps = {}, children = []) {
 /** @param {string} text */
 function hostText(text) {
 	return { kind: "text", text };
+}
+
+/**
+ * @template T
+ * @param {() => T} fn
+ * @returns {T}
+ */
+function silenceWorktreePathWarning(fn) {
+	const warn = spyOn(console, "warn").mockImplementation(() => {});
+	try {
+		return fn();
+	}
+	finally {
+		warn.mockRestore();
+	}
 }
 
 describe("extractGraph", () => {
@@ -425,7 +440,7 @@ describe("extractGraph", () => {
 				{ id: "wt1", path: "workspace", branch: "feature", baseBranch: "main" },
 				[hostEl("smithers:task", { id: "t1", output: "t" })],
 			);
-			const result = extractGraph(root, { baseRootDir: "/tmp/root" });
+			const result = silenceWorktreePathWarning(() => extractGraph(root, { baseRootDir: "/tmp/root" }));
 			expect(result.tasks[0].worktreeId).toBe("wt1");
 			expect(result.tasks[0].worktreePath).toBe("/tmp/root/workspace");
 			expect(result.tasks[0].worktreeBranch).toBe("feature");
@@ -480,7 +495,7 @@ describe("extractGraph", () => {
 					],
 				),
 			]);
-			const task = extractGraph(root, { baseRootDir: "/tmp/root" }).tasks[0];
+			const task = silenceWorktreePathWarning(() => extractGraph(root, { baseRootDir: "/tmp/root" })).tasks[0];
 			expect(task.nodeId).toBe("sf");
 			expect(task.outputRef).toBe(output);
 			expect(task.retries).toBe(2);
