@@ -563,6 +563,11 @@ describe("composite component expansion coverage", () => {
             "ss-propose",
             "ss-report",
         ]);
+        expect(dryRunChildren.map((child) => child.props.output)).toEqual([
+            "super-smithers-read",
+            "super-smithers-propose",
+            "report_out",
+        ]);
 
         const applyRun = SuperSmithers({
             id: "apply",
@@ -576,6 +581,12 @@ describe("composite component expansion coverage", () => {
             "apply-propose",
             "apply-apply",
             "apply-report",
+        ]);
+        expect(applyChildren.map((child) => child.props.output)).toEqual([
+            "super-smithers-read",
+            "super-smithers-propose",
+            "super-smithers-apply",
+            "report_out",
         ]);
         await expect(applyChildren[2].props.__smithersComputeFn()).resolves.toEqual({ applied: true });
 

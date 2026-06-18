@@ -36,7 +36,7 @@ export function SuperSmithers(props) {
     const prefix = idPrefix ?? "super-smithers";
     // Task 1: Read strategy and target files
     const readTaskId = `${prefix}-read`;
-    const readOutput = reportOutput ?? "super-smithers-read";
+    const readOutput = "super-smithers-read";
     const strategyText = typeof strategy === "string" ? strategy : undefined;
     const strategyElement = typeof strategy !== "string" ? strategy : undefined;
     const readPrompt = strategyText
@@ -53,7 +53,7 @@ export function SuperSmithers(props) {
     }, readChildren);
     // Task 2: Propose modifications
     const proposeTaskId = `${prefix}-propose`;
-    const proposeOutput = reportOutput ?? "super-smithers-propose";
+    const proposeOutput = "super-smithers-propose";
     const proposeTask = React.createElement("smithers:task", {
         id: proposeTaskId,
         output: proposeOutput,
@@ -66,7 +66,7 @@ export function SuperSmithers(props) {
         (dryRun ? "This is a DRY RUN — do not apply changes, only report them." : ""));
     // Task 3: Apply modifications (only if not dryRun)
     const applyTaskId = `${prefix}-apply`;
-    const applyOutput = reportOutput ?? "super-smithers-apply";
+    const applyOutput = "super-smithers-apply";
     const applyTask = !dryRun
         ? React.createElement("smithers:task", {
             id: applyTaskId,
