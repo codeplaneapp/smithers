@@ -89,11 +89,23 @@ describe("aggregateScores", () => {
         expect(result).toHaveLength(1);
         expect(result[0].scorerName).toBe("Latency");
     });
-    it("combines filters and escapes single quotes in SQL predicates", async () => {
-        const queries = [];
+    it("combines filters with bound SQL parameters", async () => {
+        const calls = [];
         const mockAdapter = {
-            rawQuery: async (sql) => {
-                queries.push(sql);
+            rawQuery: async (sql, params) => {
+                calls.push({ sql, params });
+                if (calls.length === 1) {
+                    return [
+                        {
+                            scorer_id: "score-'id'",
+                            scorer_name: "Quoted",
+                            cnt: 1,
+                            mean: 0.5,
+                            min_score: 0.5,
+                            max_score: 0.5,
+                        },
+                    ];
+                }
                 return [];
             },
         };
@@ -102,11 +114,19 @@ describe("aggregateScores", () => {
             nodeId: "node-1",
             scorerId: "score-'id'",
         });
-        expect(queries).toHaveLength(1);
-        expect(queries[0]).toContain("run_id = 'run-''quoted'''");
-        expect(queries[0]).toContain("node_id = 'node-1'");
-        expect(queries[0]).toContain("scorer_id = 'score-''id'''");
-        expect(queries[0]).toContain(" AND ");
+        expect(calls).toHaveLength(2);
+        for (const call of calls) {
+            expect(call.sql).toContain("run_id = ?");
+            expect(call.sql).toContain("node_id = ?");
+            expect(call.sql).toContain("scorer_id = ?");
+            expect(call.sql).not.toContain("run-'quoted'");
+            expect(call.sql).not.toContain("score-'id'");
+            expect(call.params).toEqual([
+                "run-'quoted'",
+                "node-1",
+                "score-'id'",
+            ]);
+        }
     });
     it("computes p50 (median) correctly", async () => {
         // Insert 5 scores: 0.1, 0.3, 0.5, 0.7, 0.9

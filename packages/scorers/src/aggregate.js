@@ -18,12 +18,13 @@
  */
 export async function aggregateScores(adapter, opts) {
     const conditions = [];
+    const params = [];
     if (opts?.runId)
-        conditions.push(`run_id = '${escapeSql(opts.runId)}'`);
+        addFilter(conditions, params, "run_id", opts.runId);
     if (opts?.nodeId)
-        conditions.push(`node_id = '${escapeSql(opts.nodeId)}'`);
+        addFilter(conditions, params, "node_id", opts.nodeId);
     if (opts?.scorerId)
-        conditions.push(`scorer_id = '${escapeSql(opts.scorerId)}'`);
+        addFilter(conditions, params, "scorer_id", opts.scorerId);
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     // Step 1: Get aggregate stats via SQL
     const aggQuery = `
@@ -39,7 +40,7 @@ export async function aggregateScores(adapter, opts) {
     GROUP BY scorer_id, scorer_name
     ORDER BY scorer_name
   `;
-    const aggRows = (await adapter.rawQuery(aggQuery));
+    const aggRows = (await adapter.rawQuery(aggQuery, params));
     if (aggRows.length === 0)
         return [];
     // Step 2: Get all scores to compute p50 and stddev per scorer in memory
@@ -49,7 +50,7 @@ export async function aggregateScores(adapter, opts) {
     ${where}
     ORDER BY scorer_id, score
   `;
-    const allScores = (await adapter.rawQuery(scoresQuery));
+    const allScores = (await adapter.rawQuery(scoresQuery, params));
     // Group scores by scorer_id
     const scoresByScorer = new Map();
     for (const row of allScores) {
@@ -100,9 +101,12 @@ function computeStddev(values, mean) {
     return Math.sqrt(variance);
 }
 /**
+ * @param {string[]} conditions
+ * @param {string[]} params
+ * @param {string} column
  * @param {string} value
- * @returns {string}
  */
-function escapeSql(value) {
-    return value.replace(/'/g, "''");
+function addFilter(conditions, params, column, value) {
+    conditions.push(`${column} = ?`);
+    params.push(value);
 }

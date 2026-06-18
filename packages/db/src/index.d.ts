@@ -432,10 +432,11 @@ declare class SmithersDb {
    */
     clearFrameCacheForRun(runId: string): void;
     /**
-   * @param {string} queryString
+     * @param {string} queryString
+     * @param {unknown[]} [params]
    * @returns {RunnableEffect<unknown[], SmithersError>}
    */
-    rawQuery(queryString: string): RunnableEffect<unknown[], SmithersError$1>;
+    rawQuery(queryString: string, params?: unknown[]): RunnableEffect<unknown[], SmithersError$1>;
     /**
    * @param {string} currentFiberThread
    * @returns {boolean}

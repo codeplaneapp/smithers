@@ -573,10 +573,11 @@ export class SmithersDb {
         }
     }
     /**
-   * @param {string} queryString
+     * @param {string} queryString
+     * @param {unknown[]} [params]
    * @returns {RunnableEffect<unknown[], SmithersError>}
    */
-    rawQuery(queryString) {
+    rawQuery(queryString, params = []) {
         const self = this;
         return runnableEffect(Effect.gen(function* () {
             const validatedQuery = yield* Effect.try({
@@ -588,11 +589,11 @@ export class SmithersDb {
             });
             return yield* self.read(`raw query ${validatedQuery.slice(0, 20)}`, () => {
                 if (self.internalStorage.dialect === POSTGRES) {
-                    return self.internalStorage.queryAllRaw(validatedQuery);
+                    return self.internalStorage.queryAllRaw(validatedQuery, params);
                 }
                 const client = self.db.session.client;
                 const stmt = client.query(validatedQuery);
-                return Promise.resolve(stmt.all());
+                return Promise.resolve(stmt.all(...params));
             });
         }));
     }
