@@ -9,7 +9,11 @@ import { mdxPlugin } from "./mdx-plugin.js";
 import { findSmithersDb, openSmithersDb } from "./find-db.js";
 import { parseAgentEvent, parseNodeOutputEvent } from "./chat.js";
 import { handleApprovals, handleHumanRequests } from "./tui-gates.js";
+import { formatStreamText } from "./tui-format.js";
+import { fuzzySelect } from "./fuzzy-select.js";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
+
+export { formatStreamText } from "./tui-format.js";
 
 /**
  * @typedef {object} RunCardStep
@@ -68,7 +72,8 @@ const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled", "waiting-ap
 const STOP_STATES = new Set([...TERMINAL_STATES, "stale", "orphaned"]);
 
 const cols = () => process.stdout.columns || 80;
-const visLen = (s) => s.replace(/\x1B\[[0-9;]*m/g, "").length;
+const ANSI_SGR_RE = /\x1B\[[0-9;]*m/g;
+const visLen = (s) => s.replace(ANSI_SGR_RE, "").length;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Elide `s` to at most `max` visible chars with an ellipsis. */
@@ -147,6 +152,41 @@ export function displayNode(nodeId) {
     return i >= 0 ? id.slice(i + 1) : id;
 }
 
+const OUTPUT_META_KEYS = new Set([
+    "runId", "nodeId", "iteration", "attempt", "run_id", "node_id",
+    "createdAtMs", "updatedAtMs", "created_at_ms", "updated_at_ms",
+]);
+
+/** Strip smithers meta columns from a raw output row and compact to JSON. */
+export function formatOutputRow(row) {
+    if (!row || typeof row !== "object") return "";
+    const data = {};
+    for (const [k, v] of Object.entries(row)) {
+        if (OUTPUT_META_KEYS.has(k) || v == null) continue;
+        data[k] = v;
+    }
+    return Object.keys(data).length > 0 ? JSON.stringify(data) : "";
+}
+
+/**
+ * Load a finished node's output and shape it into an `[output]` stream line so
+ * task results are clearly labeled (not mistaken for agent chatter).
+ * @returns {Promise<{ nodeId: string; text: string } | null>}
+ */
+async function loadOutputLine(adapter, runId, ev, outputTables) {
+    try {
+        const payload = JSON.parse(ev.payloadJson ?? "{}");
+        const nodeId = String(payload.nodeId ?? "");
+        const table = outputTables.get(nodeId);
+        if (!table) return null;
+        const row = await adapter.getRawNodeOutputForIteration(table, runId, nodeId, Number(payload.iteration ?? 0));
+        const text = formatOutputRow(row);
+        return text ? { nodeId, text: `[output] ${text}` } : null;
+    } catch {
+        return null;
+    }
+}
+
 /**
  * Word-wrap `text` to at most `width` visible chars per line, hard-breaking
  * tokens longer than the width.
@@ -161,13 +201,21 @@ export function wrapText(text, width) {
     for (const word of String(text).split(/ +/)) {
         let token = word;
         if (!line) {
-            while (token.length > w) { lines.push(token.slice(0, w)); token = token.slice(w); }
+            while (visLen(token) > w) {
+                const [chunk, rest] = splitVisible(token, w);
+                lines.push(chunk);
+                token = rest;
+            }
             line = token;
-        } else if (line.length + 1 + token.length <= w) {
+        } else if (visLen(line) + 1 + visLen(token) <= w) {
             line += ` ${token}`;
         } else {
             lines.push(line);
-            while (token.length > w) { lines.push(token.slice(0, w)); token = token.slice(w); }
+            while (visLen(token) > w) {
+                const [chunk, rest] = splitVisible(token, w);
+                lines.push(chunk);
+                token = rest;
+            }
             line = token;
         }
     }
@@ -175,12 +223,39 @@ export function wrapText(text, width) {
     return lines.length ? lines : [""];
 }
 
+/**
+ * Split after `width` visible chars without cutting through ANSI color codes.
+ * @param {string} text
+ * @param {number} width
+ * @returns {[string, string]}
+ */
+function splitVisible(text, width) {
+    let index = 0;
+    let visible = 0;
+    let head = "";
+    while (index < text.length && visible < width) {
+        const ansi = text.slice(index).match(/^\x1B\[[0-9;]*m/);
+        if (ansi) {
+            head += ansi[0];
+            index += ansi[0].length;
+            continue;
+        }
+        const codePoint = text.codePointAt(index);
+        if (codePoint == null) break;
+        const char = String.fromCodePoint(codePoint);
+        head += char;
+        index += char.length;
+        visible += 1;
+    }
+    return [head, text.slice(index)];
+}
+
 /** One streamed log entry: colored node tag, dim gutter, body wrapped across lines. */
 function printStreamLine(color, label, text) {
-    const tagWidth = Math.max(1, Math.min(14, cols() - 4));
+    const tagWidth = Math.max(1, Math.min(11, cols() - 4));
     const tag = color(truncate(label, tagWidth).padEnd(tagWidth));
     const cont = " ".repeat(tagWidth);
-    const lines = wrapText(normalizeStreamText(text), Math.max(1, cols() - tagWidth - 4));
+    const lines = wrapText(formatStreamText(text), Math.max(1, cols() - tagWidth - 4));
     for (let i = 0; i < lines.length; i++) {
         process.stdout.write(`${i === 0 ? tag : cont} ${pc.dim("│")} ${lines[i]}\n`);
     }
@@ -465,6 +540,7 @@ export async function streamRun(adapter, runId, name, promptText, opts = {}) {
     const printLine = opts.printLine ?? printStreamLine;
     const colorFor = makeNodeColorer();
     const labels = new Map();
+    const outputTables = new Map();
     const working = createWorkingIndicator();
     let lastSeq = -1;
     let stopped = false;
@@ -492,6 +568,7 @@ export async function streamRun(adapter, runId, name, promptText, opts = {}) {
                 lastState = view.state;
                 for (const node of await adapter.listNodes(runId)) {
                     labels.set(node.nodeId, node.label ?? node.nodeId);
+                    if (node.outputTable) outputTables.set(node.nodeId, node.outputTable);
                     if (node.state === "in-progress" || node.state === "running") {
                         activeNode = node.label ?? displayNode(node.nodeId);
                     }
@@ -503,6 +580,11 @@ export async function streamRun(adapter, runId, name, promptText, opts = {}) {
                 lastSeq = Number(ev.seq);
                 if (ev.type === "FrameCommitted") {
                     await renderCurrentCard();
+                    continue;
+                }
+                if (ev.type === "NodeFinished") {
+                    const out = await loadOutputLine(adapter, runId, ev, outputTables);
+                    if (out) printLine(colorFor(out.nodeId), labels.get(out.nodeId) ?? displayNode(out.nodeId), out.text);
                     continue;
                 }
                 const parsed = parseAgentEvent(ev) ?? parseNodeOutputEvent(ev);
@@ -652,7 +734,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     // wraps, both break clack's in-place redraw (ghost rows, jumpy cursor).
     const rows = process.stdout.rows || 24;
     const width = process.stdout.columns || 80;
-    const choice = await select({
+    const choice = await fuzzySelect({
         message: "Select a workflow to run",
         maxItems: pickerMaxItems(rows),
         options: buildWorkflowPickerOptions(workflows, width),

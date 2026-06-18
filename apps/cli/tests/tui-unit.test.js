@@ -4,6 +4,7 @@ import {
     buildWorkflowPickerOptions,
     childFailurePromise,
     displayNode,
+    formatStreamText,
     normalizeStreamText,
     pickerMaxItems,
     streamRun,
@@ -69,11 +70,32 @@ describe("tui helpers", () => {
         expect(normalizeStreamText("first line\nsecond\tline\n")).toBe("first line \u21b5 second    line");
     });
 
+    test("formats Codex tracing output as compact levelled stream text", () => {
+        const home = process.env.HOME ?? "/Users/williamcory";
+        const raw = [
+            "2026-06-18T23:10:11.531195Z ERROR",
+            `codex_core::session::session: failed to load skill ${home}/.agents/skills/smithers-snapshot-hook/SKILL.md: invalid YAML`,
+        ].join("\n");
+
+        expect(formatStreamText(raw)).toBe("error failed to load skill ~/.agents/skills/smithers-snapshot-hook/SKILL.md: invalid YAML");
+    });
+
+    test("formats shell tool calls without the shell wrapper", () => {
+        expect(formatStreamText("[tool] /bin/zsh -lc 'git diff --stat'")).toBe("$ git diff --stat");
+        expect(formatStreamText("[tool] /bin/zsh -lc 'git diff --stat' \u2192 done")).toBe("✓ git diff --stat");
+    });
+
     test("wraps stream output and compacts qualified node ids", () => {
         expect(displayNode("workflow:task-a")).toBe("task-a");
         expect(displayNode("task-a")).toBe("task-a");
         expect(wrapText("alpha beta gamma", 10)).toEqual(["alpha beta", "gamma"]);
         expect(wrapText("abcdefghij", 4)).toEqual(["abcd", "efgh", "ij"]);
+    });
+
+    test("wraps colored tokens without splitting ANSI escapes", () => {
+        const stripAnsi = (value) => value.replace(/\x1B\[[0-9;]*m/g, "");
+        const wrapped = wrapText("\x1B[32mabcdefgh\x1B[39m", 4);
+        expect(wrapped.map(stripAnsi)).toEqual(["abcd", "efgh"]);
     });
 
     test("renders the final card when a run becomes terminal without a frame event", async () => {
