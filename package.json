@@ -72,7 +72,7 @@
     "generate:init-pack": "bun scripts/generate-workflow-pack.ts",
     "demo:smithers": "pnpm --filter @smithers-orchestrator/smithers-demo dev",
     "demo:smithers:tui": "pnpm --filter @smithers-orchestrator/smithers-tui-demo tui",
-    "test": "node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && pnpm -r test",
+    "test": "node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-smithers-test-script.mjs && pnpm -r test",
     "check:effect": "node scripts/check-single-effect-version.mjs",
     "check:deps": "node scripts/check-dependency-boundaries.mjs",
     "check:docs": "node scripts/check-docs.mjs",
