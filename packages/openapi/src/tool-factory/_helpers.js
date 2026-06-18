@@ -55,7 +55,7 @@ export function buildUrl(baseUrl, path, pathParams, queryParams, options) {
     // Substitute path parameters
     let url = path;
     for (const [key, value] of Object.entries(pathParams)) {
-        url = url.replace(`{${key}}`, encodeURIComponent(value));
+        url = url.replaceAll(`{${key}}`, encodeURIComponent(value));
     }
     // Join the server base path with the operation path so a base URL with a
     // path component (e.g. https://api.example.com/v2) is preserved. Passing an

@@ -81,6 +81,17 @@ describe("buildUrl preserves server base path", () => {
         expect(url).toBe("https://api.example.com/v2/orgs/acme/users/5");
     });
 
+    test("repeated path params are all substituted", () => {
+        const url = buildUrl(
+            "https://api.example.com/v2",
+            "/orgs/{id}/aliases/{id}",
+            { id: "acme/primary" },
+            {},
+            noOptions,
+        );
+        expect(url).toBe("https://api.example.com/v2/orgs/acme%2Fprimary/aliases/acme%2Fprimary");
+    });
+
     test("apiKey-in-query auth still appends to a preserved base path", () => {
         const url = buildUrl(
             "https://api.example.com/v2",
