@@ -168,10 +168,12 @@ export const gatewayCollectionDefs = {
     key: gatewayKeys.prompts(params),
     method: "listPrompts",
     params,
-    // A prompt's `id` is its relative path under `.smithers/prompts/` without the
-    // extension, which is globally unique within the directory — the natural PK
-    // the editor selects/edits by.
-    getKey: (row: GatewayPromptRow) => row.id,
+    // Key by `entryFile` — the workspace-relative source path WITH extension
+    // (e.g. `prompts/refactor.mdx`), which is unique per file. `id` is the
+    // relative path WITHOUT the extension, so `foo.md` and `foo.mdx` both map to
+    // id `foo`; keying by `id` would collide and TanStack DB would silently drop
+    // one valid prompt. `entryFile` is 1:1 with a real file, so both survive.
+    getKey: (row: GatewayPromptRow) => row.entryFile,
     rows: arrayRows<GatewayPromptRow>,
   }),
   scores: (params: ListScoresRequest = { runId: "" }) => ({

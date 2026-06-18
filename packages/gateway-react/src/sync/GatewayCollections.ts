@@ -89,7 +89,7 @@ export type GatewayCollections = {
   crons(params?: CronListRequest): Collection<GatewayCronRow, string>;
   /** Live cross-run memory facts (`listMemoryFacts`); keyed by the composite `${namespace}:${key}` (key is only unique within a namespace). */
   memoryFacts(params?: ListMemoryFactsRequest): Collection<GatewayMemoryFactRow, string>;
-  /** Live registered prompts (`listPrompts`, walked from `.smithers/prompts/`); keyed by `id` (the relative path without extension). */
+  /** Live registered prompts (`listPrompts`, walked from `.smithers/prompts/`); keyed by `entryFile` (the relative source path WITH extension — unique per file; `id` strips the extension and is not unique). */
   prompts(params?: ListPromptsRequest): Collection<GatewayPromptRow, string>;
   /** Live scorer/eval results for one run (`listScores`); keyed by the composite `${runId}:${nodeId}:${iteration}:${scorerId}`. */
   scores(params?: ListScoresRequest): Collection<GatewayScoreRow, string>;

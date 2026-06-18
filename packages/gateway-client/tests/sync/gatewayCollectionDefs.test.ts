@@ -361,14 +361,15 @@ const promptRows: GatewayPromptRow[] = [
 ];
 
 describe("gatewayCollectionDefs.prompts", () => {
-  test("rows mapper passes a listPrompts array through and keys by id", () => {
+  test("rows mapper passes a listPrompts array through and keys by entryFile", () => {
     const def = gatewayCollectionDefs.prompts();
     const rows = Array.from(def.rows(promptRows));
     expect(rows.map((row) => row.id)).toEqual(["refactor", "release-content/changelog"]);
-    // A prompt's `id` (extensionless relative path) is the natural PK the editor
-    // selects by; nested-dir prompts carry a slash in the id and must round-trip.
-    expect(def.getKey(rows[0])).toBe("refactor");
-    expect(def.getKey(rows[1])).toBe("release-content/changelog");
+    // `entryFile` (the relative source path WITH extension) is the PK — it is
+    // 1:1 with a real file, so `foo.md`/`foo.mdx` (same `id`) do not collide.
+    // Nested-dir prompts carry a slash in `entryFile` and must round-trip.
+    expect(def.getKey(rows[0])).toBe("prompts/refactor.mdx");
+    expect(def.getKey(rows[1])).toBe("prompts/release-content/changelog.md");
   });
 
   test("a non-array payload maps to no rows", () => {
@@ -382,9 +383,36 @@ describe("gatewayCollectionDefs.prompts", () => {
 
     await collection.preload();
 
-    expect(Array.from(collection.keys()).sort()).toEqual(["refactor", "release-content/changelog"]);
-    expect(collection.get("refactor")?.entryFile).toBe("prompts/refactor.mdx");
-    expect(collection.get("release-content/changelog")?.source).toContain("Changelog");
+    expect(Array.from(collection.keys()).sort()).toEqual([
+      "prompts/refactor.mdx",
+      "prompts/release-content/changelog.md",
+    ]);
+    expect(collection.get("prompts/refactor.mdx")?.id).toBe("refactor");
+    expect(collection.get("prompts/release-content/changelog.md")?.source).toContain("Changelog");
+  });
+
+  test("same extensionless id with different extensions does NOT collide (both survive)", async () => {
+    // Regression guard for the [P2] collision: `foo.md` and `foo.mdx` both strip
+    // to id `foo`, so keying the collection by `id` dropped one valid prompt.
+    // Keying by `entryFile` (unique per file) keeps BOTH rows.
+    const collidingRows: GatewayPromptRow[] = [
+      { id: "foo", entryFile: "prompts/foo.md", source: "# md foo", createdAtMs: 1, updatedAtMs: 1 },
+      { id: "foo", entryFile: "prompts/foo.mdx", source: "# mdx foo", createdAtMs: 2, updatedAtMs: 2 },
+    ];
+    const def = gatewayCollectionDefs.prompts();
+    // The keys differ even though the ids are identical.
+    expect(def.getKey(collidingRows[0])).toBe("prompts/foo.md");
+    expect(def.getKey(collidingRows[1])).toBe("prompts/foo.mdx");
+
+    const collection = createCollection<GatewayPromptRow, string>(
+      createGatewayCollection({ ...gatewayCollectionDefs.prompts(), client: quietTransport(collidingRows) }),
+    );
+
+    await collection.preload();
+
+    expect(Array.from(collection.keys()).sort()).toEqual(["prompts/foo.md", "prompts/foo.mdx"]);
+    expect(collection.get("prompts/foo.md")?.source).toBe("# md foo");
+    expect(collection.get("prompts/foo.mdx")?.source).toBe("# mdx foo");
   });
 });
 

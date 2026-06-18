@@ -10,6 +10,20 @@ export type GatewayOptions = {
   auth?: GatewayAuthConfig;
   ui?: GatewayUiConfig;
   /**
+   * Absolute path to the workspace root — the directory that holds the
+   * `.smithers/` registry (workflows, prompts, components) and `smithers.db`.
+   *
+   * Disk-backed registry reads (currently the `listPrompts` RPC, which walks
+   * `<workspaceRoot>/.smithers/prompts/`) resolve relative to this root rather
+   * than `process.cwd()`. Set it whenever the gateway runs with its cwd
+   * elsewhere than the workspace — e.g. an app that binds the gateway to an
+   * ABSOLUTE workspace DB path without `chdir`-ing into the workspace (the
+   * studio dev server passes `SMITHERS_STUDIO_WORKSPACE` here). When omitted,
+   * these reads fall back to `process.cwd()`, which is correct for the common
+   * case where the gateway boots from the workspace root.
+   */
+  workspaceRoot?: string;
+  /**
    * Built-in browser console for operators. Set to false to disable it.
    * @default { path: "/console" }
    */

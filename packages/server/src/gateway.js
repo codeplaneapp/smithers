@@ -1291,6 +1291,13 @@ export class Gateway {
     operatorUi;
     uiApp;
     defaults;
+    /**
+     * Absolute workspace root for disk-backed registry reads (e.g. the
+     * `listPrompts` RPC, which walks `<workspaceRoot>/.smithers/prompts/`).
+     * `null` ⇒ fall back to `process.cwd()`. Set from `options.workspaceRoot`.
+     * @type {string | null}
+     */
+    workspaceRoot = null;
     workflows = new Map();
     connections = new Set();
     runRegistry = new Map();
@@ -1374,6 +1381,13 @@ export class Gateway {
             renderAsset: (match) => this.renderUiAsset(match),
         });
         this.defaults = options.defaults;
+        // Resolve the workspace root to an absolute path once at construction so
+        // disk-backed registry reads (e.g. `listPromptsFromDisk`) are independent
+        // of `process.cwd()` at call time. `null` keeps the cwd-relative default
+        // for the common case where the gateway boots from the workspace root.
+        this.workspaceRoot = options.workspaceRoot
+            ? resolve(options.workspaceRoot)
+            : null;
     }
     /**
    * @returns {GatewayUiMount[]}
@@ -3500,11 +3514,17 @@ export class Gateway {
     }
     /**
    * Registered prompts for the `listPrompts` RPC. A prompt is a `.md`/`.mdx`
-   * file under the project's `.smithers/prompts/` directory — the SAME real
+   * file under the workspace's `.smithers/prompts/` directory — the SAME real
    * source smithers-studio walks. Unlike memory/scores/tickets (DB-table backed),
-   * prompts live on disk, so this enumerates the filesystem under
-   * `process.cwd()` (the gateway `chdir`s to the project root at boot, the same
-   * cwd `register`'s UI-entry resolution already assumes). Each file maps to
+   * prompts live on disk, so this enumerates the filesystem under the registered
+   * WORKSPACE ROOT (`this.workspaceRoot`, set from `options.workspaceRoot`). That
+   * root — not `process.cwd()` — is authoritative because some launch modes keep
+   * cwd elsewhere than the workspace (e.g. an app that binds the gateway to an
+   * ABSOLUTE workspace DB path without `chdir`-ing, like the studio server, which
+   * passes `SMITHERS_STUDIO_WORKSPACE`); resolving from cwd there returns the
+   * wrong app's prompts or `[]`. When no workspace root was configured we fall
+   * back to `process.cwd()`, which is correct for the common case where the
+   * gateway boots from the workspace root. Each file maps to
    * `{ id, entryFile, source, createdAtMs, updatedAtMs }` where `id` is the
    * extensionless relative path (POSIX-separated so ids are stable across OSes).
    * Returns `[]` when no `.smithers/prompts/` directory exists (a clean empty
@@ -3512,7 +3532,7 @@ export class Gateway {
    * @returns {Array<Record<string, unknown>>}
    */
     listPromptsFromDisk() {
-        const promptsDir = resolve(process.cwd(), ".smithers", "prompts");
+        const promptsDir = resolve(this.workspaceRoot ?? process.cwd(), ".smithers", "prompts");
         if (!existsSync(promptsDir)) {
             return [];
         }

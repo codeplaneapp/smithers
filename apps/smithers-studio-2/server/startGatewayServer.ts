@@ -83,7 +83,13 @@ if (!existsSync(dbPath)) {
 const { smithers, Workflow } = createSmithers({}, { dbPath });
 const workspaceWorkflow = smithers(() => jsx(Workflow, { name: "workspace" }));
 
-const gateway = new Gateway({ heartbeatMs: 15_000 });
+// `workspaceRoot` makes disk-backed registry reads (the `listPrompts` RPC, which
+// walks `<workspaceRoot>/.smithers/prompts/`) resolve from the REAL workspace —
+// not this app's `process.cwd()`. This server intentionally keeps its cwd in the
+// studio app and binds the adapter to an ABSOLUTE workspace DB path (see the
+// header note above), so without this the gateway would walk the wrong app's
+// prompts (or none). `workspace` is the same root the DB path is derived from.
+const gateway = new Gateway({ heartbeatMs: 15_000, workspaceRoot: workspace });
 gateway.register("workspace", workspaceWorkflow);
 
 await gateway.listen({ port, host });

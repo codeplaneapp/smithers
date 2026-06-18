@@ -3,12 +3,12 @@ import * as node_http from 'node:http';
 import * as _smithers_orchestrator_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
 import * as _smithers_orchestrator_components_SmithersWorkflow from '@smithers-orchestrator/components/SmithersWorkflow';
 import { SmithersWorkflow as SmithersWorkflow$1 } from '@smithers-orchestrator/components/SmithersWorkflow';
+import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
+import { SmithersDb as SmithersDb$4 } from '@smithers-orchestrator/db/adapter';
 import * as hono from 'hono';
 import { Hono } from 'hono';
 import * as hono_types from 'hono/types';
 import { Effect } from 'effect';
-import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
-import { SmithersDb as SmithersDb$4 } from '@smithers-orchestrator/db/adapter';
 import * as effect_Fiber from 'effect/Fiber';
 import * as _smithers_orchestrator_protocol_errors from '@smithers-orchestrator/protocol/errors';
 import * as _smithers_orchestrator_devtools_snapshotSerializer from '@smithers-orchestrator/devtools/snapshotSerializer';
@@ -165,6 +165,20 @@ type GatewayOptions$1 = {
     heartbeatMs?: number;
     auth?: GatewayAuthConfig$1;
     ui?: GatewayUiConfig$1;
+    /**
+     * Absolute path to the workspace root — the directory that holds the
+     * `.smithers/` registry (workflows, prompts, components) and `smithers.db`.
+     *
+     * Disk-backed registry reads (currently the `listPrompts` RPC, which walks
+     * `<workspaceRoot>/.smithers/prompts/`) resolve relative to this root rather
+     * than `process.cwd()`. Set it whenever the gateway runs with its cwd
+     * elsewhere than the workspace — e.g. an app that binds the gateway to an
+     * ABSOLUTE workspace DB path without `chdir`-ing into the workspace (the
+     * studio dev server passes `SMITHERS_STUDIO_WORKSPACE` here). When omitted,
+     * these reads fall back to `process.cwd()`, which is correct for the common
+     * case where the gateway boots from the workspace root.
+     */
+    workspaceRoot?: string;
     /**
      * Built-in browser console for operators. Set to false to disable it.
      * @default { path: "/console" }
@@ -467,6 +481,15 @@ declare const GATEWAY_FRAME_ID_MAX_LENGTH: 128;
 declare const GATEWAY_RPC_INPUT_MAX_BYTES: 1048576;
 declare const GATEWAY_RPC_INPUT_MAX_DEPTH: 32;
 declare class Gateway {
+    /** Map a stored `_smithers_docs` row (camel-cased) onto the wire `GatewayTicketRow`. */
+    static toTicketRow(row: any): {
+        path: any;
+        kind: any;
+        content: any;
+        contentHash: any;
+        status: any;
+        updatedAtMs: any;
+    };
     /**
    * @param {GatewayOptions} [options]
    */
@@ -487,6 +510,13 @@ declare class Gateway {
     operatorUi: ResolvedGatewayUiConfig | null;
     uiApp: hono.Hono<hono_types.BlankEnv, hono_types.BlankSchema, "/">;
     defaults: GatewayDefaults$1 | undefined;
+    /**
+     * Absolute workspace root for disk-backed registry reads (e.g. the
+     * `listPrompts` RPC, which walks `<workspaceRoot>/.smithers/prompts/`).
+     * `null` ⇒ fall back to `process.cwd()`. Set from `options.workspaceRoot`.
+     * @type {string | null}
+     */
+    workspaceRoot: string | null;
     workflows: Map<any, any>;
     connections: Set<any>;
     runRegistry: Map<any, any>;
@@ -816,6 +846,7 @@ declare class Gateway {
         path?: string;
     }): Promise<node_http.Server<typeof node_http.IncomingMessage, typeof node_http.ServerResponse>>;
     close(): Promise<void>;
+    ticketWatchers: Map<any, any> | null | undefined;
     startScheduler(): void;
     startOutOfProcessEventBridge(): void;
     stopOutOfProcessEventBridge(): void;
@@ -975,6 +1006,118 @@ declare class Gateway {
    * @param {string} [status]
    */
     listRunsAcrossWorkflows(limit?: number, status?: string): Promise<any[]>;
+    /**
+   * Cross-run memory facts for the `listMemoryFacts` RPC. Memory is global (keyed
+   * by namespace+key, not per-run), so iterate each DISTINCT workflow DB exactly
+   * once — shared-DB workflows share an adapter — and union the rows, deduping on
+   * `${namespace} ${key}` so a fact stored in a shared DB is returned once.
+   * Mirrors the `listRunsAcrossWorkflows` shape.
+   * @param {string | null} [namespace]
+   */
+    listMemoryFactsAcrossWorkflows(namespace?: string | null): Promise<any[]>;
+    /**
+   * Registered prompts for the `listPrompts` RPC. A prompt is a `.md`/`.mdx`
+   * file under the workspace's `.smithers/prompts/` directory — the SAME real
+   * source smithers-studio walks. Unlike memory/scores/tickets (DB-table backed),
+   * prompts live on disk, so this enumerates the filesystem under the registered
+   * WORKSPACE ROOT (`this.workspaceRoot`, set from `options.workspaceRoot`). That
+   * root — not `process.cwd()` — is authoritative because some launch modes keep
+   * cwd elsewhere than the workspace (e.g. an app that binds the gateway to an
+   * ABSOLUTE workspace DB path without `chdir`-ing, like the studio server, which
+   * passes `SMITHERS_STUDIO_WORKSPACE`); resolving from cwd there returns the
+   * wrong app's prompts or `[]`. When no workspace root was configured we fall
+   * back to `process.cwd()`, which is correct for the common case where the
+   * gateway boots from the workspace root. Each file maps to
+   * `{ id, entryFile, source, createdAtMs, updatedAtMs }` where `id` is the
+   * extensionless relative path (POSIX-separated so ids are stable across OSes).
+   * Returns `[]` when no `.smithers/prompts/` directory exists (a clean empty
+   * state, not an error).
+   * @returns {Array<Record<string, unknown>>}
+   */
+    listPromptsFromDisk(): Array<Record<string, unknown>>;
+    /**
+   * Scorer/eval results for one run for the `listScores` RPC. Scores are
+   * per-run (keyed by runId), so resolve the run's owning adapter exactly like
+   * `getRun` and read the `_smithers_scorers` table via `listScorerResults`
+   * (rows already snake→camel cased). Maps each row to the wire `GatewayScoreRow`
+   * shape — only the fields the surface needs (no meta/input/output JSON blobs).
+   * Returns `null` when the run is unknown so the dispatcher can answer NOT_FOUND.
+   * @param {string} runId
+   * @param {string | null} [nodeId]
+   * @returns {Promise<Array<Record<string, unknown>> | null>}
+   */
+    listScoresForRun(runId: string, nodeId?: string | null): Promise<Array<Record<string, unknown>> | null>;
+    /**
+   * The ONE adapter that backs the ticket WRITE RPCs (create/update/delete) and
+   * the file-watcher. `_smithers_docs` is a SINGLE global table (not per-run,
+   * not per-workflow), so writes must land in one deterministic DB — the first
+   * registered workflow's adapter. `listTickets` still reads across every
+   * distinct adapter (so a doc in any shared DB surfaces), but a write has to
+   * pick one; picking the first registered keeps create→list→update→delete
+   * consistent. Returns `null` only when no workflow is registered yet.
+   * @returns {import("@smithers-orchestrator/db/adapter").SmithersDb | null}
+   */
+    primaryDocsAdapter(): _smithers_orchestrator_db_adapter.SmithersDb | null;
+    /**
+   * Live work docs for the `listTickets` RPC. `_smithers_docs` is global, so
+   * read across every DISTINCT adapter (mirrors `listMemoryFactsAcrossWorkflows`)
+   * and dedupe by `path`; `listDocs` already filters tombstones server-side, so
+   * a soft-deleted doc never surfaces. Newest-updated first.
+   * @param {string | null} [kind]
+   * @returns {Promise<Array<Record<string, unknown>>>}
+   */
+    listTicketsAcrossWorkflows(kind?: string | null): Promise<Array<Record<string, unknown>>>;
+    /**
+   * Create-or-replace a work doc for `createTicket`. The handler hashes content
+   * + stamps `updated_at_ms` through the SAME `sha256Hex`/clock the file-watcher
+   * uses, so an RPC-written `content_hash` and a file-derived one are comparable
+   * (last-write-wins). Writing `deleted_at_ms: null` REVIVES a soft-deleted path
+   * (a deliberate re-create). Returns the persisted row, or `null` when no
+   * workflow is registered.
+   * @param {{ path: string, content: string, kind?: string, status?: string }} input
+   * @returns {Promise<Record<string, unknown> | null>}
+   */
+    createTicketDoc(input: {
+        path: string;
+        content: string;
+        kind?: string;
+        status?: string;
+    }): Promise<Record<string, unknown> | null>;
+    /**
+   * Patch a LIVE work doc's content and/or status for `updateTicket`. Re-hashes
+   * + re-stamps when content changes (a status-only patch keeps the existing
+   * hash/content). Returns `null` for an unknown or already-soft-deleted path so
+   * the dispatcher can answer TicketNotFound; `false` when no workflow exists.
+   * @param {{ path: string, content?: string, status?: string }} input
+   * @returns {Promise<Record<string, unknown> | null | false>}
+   */
+    updateTicketDoc(input: {
+        path: string;
+        content?: string;
+        status?: string;
+    }): Promise<Record<string, unknown> | null | false>;
+    /**
+   * Soft-delete (tombstone) a work doc for `deleteTicket`. Returns `null` for an
+   * unknown/already-deleted path (→ TicketNotFound), `false` when no workflow is
+   * registered. The row survives so `listTickets` hides it without losing
+   * history; the watcher never materializes a tombstone back to disk.
+   * @param {string} path
+   * @returns {Promise<boolean | null | false>}
+   */
+    deleteTicketDoc(path: string): Promise<boolean | null | false>;
+    /**
+   * Wire the `_smithers_docs` file-watcher durability seam against the primary
+   * docs adapter: watch a directory of `*.md` work docs and upsert each into
+   * `_smithers_docs` (file → DB, last-write-wins on hash mismatch). Idempotent —
+   * a second call for the same dir is a no-op. Returns the watcher handle (or
+   * `null` when there is no adapter / no dir). The gateway reads
+   * `SMITHERS_TICKETS_DIR` at `listen()` to start this automatically.
+   * @param {string} dir
+   * @returns {{ close: () => void } | null}
+   */
+    watchTicketsDirectory(dir: string): {
+        close: () => void;
+    } | null;
     listPendingApprovals(): Promise<{
         runId: any;
         workflowKey: string;
