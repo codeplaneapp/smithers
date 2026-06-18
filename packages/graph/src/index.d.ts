@@ -169,6 +169,8 @@ type TaskDescriptor$1 = {
     label?: string;
     meta?: Record<string, unknown>;
     scorers?: ScorersMap$1;
+    groundTruth?: unknown;
+    context?: unknown;
     memoryConfig?: TaskMemoryConfig$1;
     aspects?: TaskAspects$1;
 };

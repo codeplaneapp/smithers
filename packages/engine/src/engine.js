@@ -4206,6 +4206,8 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 attempt: attemptNo,
                 input: desc.prompt ?? desc.staticPayload ?? null,
                 output: payload,
+                groundTruth: desc.groundTruth,
+                context: desc.context,
                 latencyMs: taskElapsedMs,
                 outputSchema: desc.outputSchema,
             }, adapter, eventBus);

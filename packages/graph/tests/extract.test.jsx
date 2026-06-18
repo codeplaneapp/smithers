@@ -273,11 +273,13 @@ describe("extractGraph", () => {
 	});
 
 	describe("approval options", () => {
-		test("extracts rich approval, hijack, memory, scorers, and agent retry metadata", () => {
+		test("extracts rich approval, hijack, memory, scorers, scorer inputs, and agent retry metadata", () => {
 			const outputSchema = z.object({ value: z.string() });
 			const agent = { generate: async () => ({}) };
 			const memory = { namespace: "task" };
 			const scorers = { quality: {} };
+			const groundTruth = { value: "expected" };
+			const context = { document: "source material" };
 			const root = hostEl("smithers:task", {
 				id: "approval",
 				output: "out",
@@ -301,6 +303,8 @@ describe("extractGraph", () => {
 				onHijackExit: "reopen",
 				memory,
 				scorers,
+				groundTruth,
+				context,
 				children: "inspect the diff",
 			});
 			const task = extractGraph(root).tasks[0];
@@ -326,6 +330,8 @@ describe("extractGraph", () => {
 			expect(task.onHijackExit).toBe("reopen");
 			expect(task.memoryConfig).toBe(memory);
 			expect(task.scorers).toBe(scorers);
+			expect(task.groundTruth).toBe(groundTruth);
+			expect(task.context).toBe(context);
 		});
 
 		test("rejects array meta and array scorers", () => {

@@ -112,6 +112,8 @@ export type ScorerContext = {
   attempt: number;
   input: unknown;
   output: unknown;
+  groundTruth?: unknown;
+  context?: unknown;
   latencyMs?: number;
   outputSchema?: ZodObject;
 };

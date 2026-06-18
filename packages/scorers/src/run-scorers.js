@@ -66,6 +66,8 @@ function runSingleScorerEffect(key, binding, ctx, adapter, source, eventBus) {
             try: () => scorer.score({
                 input: ctx.input,
                 output: ctx.output,
+                groundTruth: ctx.groundTruth,
+                context: ctx.context,
                 latencyMs: ctx.latencyMs,
                 outputSchema: ctx.outputSchema,
             }),

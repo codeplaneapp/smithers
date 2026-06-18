@@ -364,4 +364,28 @@ describe("runScorersBatch", () => {
         expect(receivedInput.output).toEqual({ data: "my output" });
         expect(receivedInput.latencyMs).toBe(2500);
     });
+    it("forwards context and groundTruth to scorers", async () => {
+        let receivedInput;
+        const scorers = {
+            capture: {
+                scorer: createScorer({
+                    id: "capture-context",
+                    name: "Capture Context",
+                    description: "d",
+                    score: async (input) => {
+                        receivedInput = input;
+                        return { score: input.context === "source material" ? 1 : 0 };
+                    },
+                }),
+            },
+        };
+        const ctx = makeContext({
+            context: "source material",
+            groundTruth: { expected: "answer" },
+        });
+        const results = await runScorersBatch(scorers, ctx, null);
+        expect(results.capture?.score).toBe(1);
+        expect(receivedInput.context).toBe("source material");
+        expect(receivedInput.groundTruth).toEqual({ expected: "answer" });
+    });
 });

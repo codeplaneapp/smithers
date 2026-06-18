@@ -191,6 +191,8 @@ export type TaskDescriptor = {
   label?: string;
   meta?: Record<string, unknown>;
   scorers?: ScorersMap;
+  groundTruth?: unknown;
+  context?: unknown;
 
   memoryConfig?: TaskMemoryConfig;
   /** Resolved `<Aspects>` budget configuration enforced by the engine at dispatch. */

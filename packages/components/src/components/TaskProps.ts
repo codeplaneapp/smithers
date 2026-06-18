@@ -54,6 +54,10 @@ export type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends
 	cache?: CachePolicy;
 	/** Optional scorers to evaluate this task's output after completion. */
 	scorers?: ScorersMap;
+	/** Expected output supplied to scorers that compare against a reference answer. */
+	groundTruth?: unknown;
+	/** Additional source context supplied to scorers such as faithfulnessScorer. */
+	context?: unknown;
 	/** Optional cross-run memory configuration. */
 	memory?: TaskMemoryConfig;
 	/** Request an immediate hijack handoff as soon as the task starts running. */

@@ -158,6 +158,10 @@ type TaskProps$2<Row, Output extends OutputTarget$1 = OutputTarget$1, D extends 
     cache?: CachePolicy$1;
     /** Optional scorers to evaluate this task's output after completion. */
     scorers?: ScorersMap$1;
+    /** Expected output supplied to scorers that compare against a reference answer. */
+    groundTruth?: unknown;
+    /** Additional source context supplied to scorers such as faithfulnessScorer. */
+    context?: unknown;
     /** Optional cross-run memory configuration. */
     memory?: TaskMemoryConfig;
     /** Request an immediate hijack handoff as soon as the task starts running. */

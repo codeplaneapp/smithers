@@ -672,6 +672,8 @@ export function extractGraph(root, opts) {
                 scorers: raw.scorers && typeof raw.scorers === "object" && !Array.isArray(raw.scorers)
                     ? /** @type {import("./ScorersMap.ts").ScorersMap} */ (raw.scorers)
                     : undefined,
+                groundTruth: raw.groundTruth,
+                context: raw.context,
                 memoryConfig: raw.memory && typeof raw.memory === "object" && !Array.isArray(raw.memory)
                     ? raw.memory
                     : undefined,

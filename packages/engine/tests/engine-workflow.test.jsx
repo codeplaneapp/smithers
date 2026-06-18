@@ -2,6 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { Workflow, Task, Sequence, Parallel, Branch, Loop, MergeQueue, runWorkflow, } from "smithers-orchestrator";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
+import { faithfulnessScorer } from "@smithers-orchestrator/scorers";
 import { z } from "zod";
 import { Effect } from "effect";
 const schemas = {
@@ -23,6 +24,37 @@ describe("runWorkflow end-to-end", () => {
         </Workflow>));
         const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
         expect(result.status).toBe("finished");
+        cleanup();
+    }, END_TO_END_TIMEOUT_MS);
+    test("passes task context to faithfulnessScorer during live execution", async () => {
+        const { smithers, outputs, cleanup } = build();
+        let receivedPrompt = "";
+        let resolveScored;
+        const scored = new Promise((resolve) => {
+            resolveScored = resolve;
+        });
+        const judge = {
+            generate: async ({ prompt }) => {
+                receivedPrompt = prompt;
+                resolveScored();
+                return { text: '{ "score": 1, "reason": "faithful" }' };
+            },
+        };
+        const sourceContext = { document: "The release codename is Juniper." };
+        const wf = smithers((_ctx) => (<Workflow name="faithfulness-context">
+          <Task
+            id="answer"
+            output={outputs.outputA}
+            scorers={{ faithfulness: { scorer: faithfulnessScorer(judge) } }}
+            context={sourceContext}
+          >
+            {{ value: 42 }}
+          </Task>
+        </Workflow>));
+        const result = await Effect.runPromise(runWorkflow(wf, { input: {} }));
+        expect(result.status).toBe("finished");
+        await scored;
+        expect(receivedPrompt).toContain(JSON.stringify(sourceContext));
         cleanup();
     }, END_TO_END_TIMEOUT_MS);
     test("sequence executes tasks in order", async () => {
