@@ -2,20 +2,22 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const DEFAULT_PUBLISH_URL = "https://review.smithers.sh";
-
-function loadPublishConfig(): { url: string; token: string } {
+function loadPublishConfig(homeDir = homedir()): { url: string; token: string } {
   let url = process.env.SMITHERS_REVIEW_PUBLISH_URL?.trim() || "";
   let token = process.env.SMITHERS_REVIEW_PUBLISH_TOKEN?.trim() || "";
   if (!url || !token) {
-    const path = join(homedir(), ".smithers-review.json");
+    const path = join(homeDir, ".smithers-review.json");
     if (existsSync(path)) {
       const raw = JSON.parse(readFileSync(path, "utf8")) as { publishUrl?: string; publishToken?: string };
       url = url || raw.publishUrl?.trim() || "";
       token = token || raw.publishToken?.trim() || "";
     }
   }
-  url = url || DEFAULT_PUBLISH_URL;
+  if (!url) {
+    throw new Error(
+      "no publish URL: set SMITHERS_REVIEW_PUBLISH_URL or write ~/.smithers-review.json with { \"publishUrl\": \"...\" }",
+    );
+  }
   if (!token) {
     throw new Error(
       "no publish token: set SMITHERS_REVIEW_PUBLISH_TOKEN or write ~/.smithers-review.json with { \"publishToken\": \"...\" }",
@@ -25,8 +27,8 @@ function loadPublishConfig(): { url: string; token: string } {
 }
 
 /** Upload a walkthrough HTML file to the publish service; returns the share URL. */
-export async function publishWalkthrough(htmlPath: string): Promise<string> {
-  const { url, token } = loadPublishConfig();
+export async function publishWalkthrough(htmlPath: string, options: { homeDir?: string } = {}): Promise<string> {
+  const { url, token } = loadPublishConfig(options.homeDir);
   const html = readFileSync(htmlPath);
   const response = await fetch(`${url}/api/walkthroughs`, {
     method: "POST",

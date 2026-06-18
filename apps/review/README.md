@@ -144,8 +144,10 @@ bun apps/review/src/cli/main.ts /path/to/repo --no-review --no-narrate
 ```
 
 The repo path defaults to the current directory. Run `--help` for all
-options. `--publish` needs an API key (`srk_…`, operator-issued) in
-`SMITHERS_REVIEW_PUBLISH_TOKEN` or `~/.smithers-review.json`.
+options. `--publish` needs a publish service URL in
+`SMITHERS_REVIEW_PUBLISH_URL` and an API key (`srk_…`, operator-issued) in
+`SMITHERS_REVIEW_PUBLISH_TOKEN`; both can also be set in
+`~/.smithers-review.json`.
 
 ## The service
 

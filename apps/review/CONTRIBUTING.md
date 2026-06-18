@@ -132,10 +132,11 @@ The Pierre reference clone lives at `reference/pierre/` (gitignored).
 
 `--publish` uploads the walkthrough to a Cloudflare Worker (R2-backed,
 deployed with Alchemy from `alchemy.run.ts`) and prints an unlisted share
-URL. Live at `https://review.jjhub.tech`; the target domain
-`review.smithers.sh` is pre-wired but blocked on credentials (see the spec's
-"Publishing" section). Credentials come from `SMITHERS_REVIEW_PUBLISH_URL` /
-`SMITHERS_REVIEW_PUBLISH_TOKEN` or `~/.smithers-review.json`.
+URL. The live endpoint is `https://review.jjhub.tech`; set
+`SMITHERS_REVIEW_PUBLISH_URL` to the publish service endpoint before using
+`--publish` (see the spec's "Publishing" section). Credentials come from
+`SMITHERS_REVIEW_PUBLISH_URL` / `SMITHERS_REVIEW_PUBLISH_TOKEN` or
+`~/.smithers-review.json`.
 
 ```sh
 REVIEW_PUBLISH_TOKEN=... pnpm -C apps/review deploy   # alchemy deploy
