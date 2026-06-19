@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@effect/workflow": "^0.18.0",
+    "@smithers-orchestrator/accounts": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/devtools": "workspace:*",

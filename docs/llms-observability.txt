@@ -409,7 +409,7 @@ Gateway client exports:
 ## RPC methods (TOON)
 
 ```toon
-rpc[25]{method,params,returns,scope,transport}:
+rpc[26]{method,params,returns,scope,transport}:
   launchRun,workflow/input?/options.runId?/options.idempotencyKey?,{runId/workflow},run:write,http+websocket
   resumeRun,runId/options.force?,{runId/status},run:write,http+websocket
   cancelRun,runId,{runId/status:cancelling},run:write,http+websocket
@@ -429,6 +429,7 @@ rpc[25]{method,params,returns,scope,transport}:
   cronCreate,workflow/pattern/cronId?/enabled?,Created cron row,cron:write,http+websocket
   cronDelete,cronId,{cronId/removed},cron:write,http+websocket
   cronRun,cronId? or workflow/input?,{runId/workflow},cron:write,http+websocket
+  listAccounts,,Registered agent accounts (api keys redacted),account:read,http+websocket
   listMemoryFacts,namespace?,Memory facts,memory:read,http+websocket
   listScores,runId/nodeId?,Scorer results,score:read,http+websocket
   listTickets,kind?,Work docs,ticket:read,http+websocket
@@ -442,7 +443,7 @@ rpc[25]{method,params,returns,scope,transport}:
 ### Scopes
 
 ```toon
-scopes[12]{scope,allows}:
+scopes[13]{scope,allows}:
   run:read,Read run state/lists/event streams/node output/node diffs
   run:write,Launch/resume/cancel runs; implies run:read
   run:admin,Hijack or rewind runs; implies run:write and run:read
@@ -450,6 +451,7 @@ scopes[12]{scope,allows}:
   signal:submit,Submit workflow signals
   cron:read,List cron schedules
   cron:write,Create/delete/trigger cron schedules; implies cron:read
+  account:read,List registered agent accounts (api keys redacted)
   memory:read,List cross-run memory facts
   score:read,List scorer/eval results for a run
   ticket:read,List work docs (tickets/plans/specs/proposals)

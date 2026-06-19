@@ -90,6 +90,7 @@ export type GatewayRpcMethod =
   | "cronCreate"
   | "cronDelete"
   | "cronRun"
+  | "listAccounts"
   | "listMemoryFacts"
   | "listPrompts"
   | "listScores"
@@ -273,6 +274,49 @@ export type CronRunRequest = {
   workflow?: string;
   input?: Record<string, unknown>;
 };
+
+/**
+ * One registered Smithers agent account — a row in the user-level
+ * `~/.smithers/accounts.json` registry that the `smithers agents` CLI manages,
+ * surfaced read-only by the `listAccounts` server handler (via the
+ * `@smithers-orchestrator/accounts` package). Each account is either a
+ * subscription provider (a per-account CLI `configDir`) or an API provider (an
+ * `apiKey`); the two are mutually exclusive.
+ *
+ * SECRET REDACTION: the raw `apiKey` is NEVER sent over the wire — it is a
+ * plaintext credential stored mode-600 on disk. Instead `hasApiKey` reports
+ * whether an api-key account carries a non-empty key, and `hasConfigDir`
+ * reports whether a subscription account has a config dir, so a client can
+ * render the account's auth posture without ever receiving the secret.
+ */
+export type GatewayAccount = {
+  /** Unique account label (the registry key, `--label`). */
+  label: string;
+  /** Provider id, one of the fixed `smithers agents` catalog. */
+  provider:
+    | "claude-code"
+    | "antigravity"
+    | "codex"
+    | "gemini"
+    | "kimi"
+    | "anthropic-api"
+    | "openai-api"
+    | "gemini-api";
+  /** Per-account CLI config dir for subscription providers (absent for api-key accounts). */
+  configDir?: string | null;
+  /** True when a subscription account has a non-empty config dir. */
+  hasConfigDir: boolean;
+  /** True when an api-key account carries a non-empty key (the key itself is NEVER returned). */
+  hasApiKey: boolean;
+  /** Optional default model baked into the account. */
+  model?: string | null;
+  /** ISO timestamp of when the account was added, when known. */
+  addedAt?: string | null;
+};
+
+export type ListAccountsRequest = Record<string, never>;
+
+export type ListAccountsResponse = GatewayAccount[];
 
 /** One cross-run memory fact row (the `_smithers_memory_facts` table, snake→camel cased). */
 export type GatewayMemoryFact = {
@@ -821,6 +865,32 @@ export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
     errors: ["InvalidRequest", "InvalidInput", "Unauthorized", "Forbidden", "CronNotFound", "Internal"],
     exampleRequest: { cronId: "cron_01", input: { dryRun: true } },
     exampleResponse: { runId: "run_02", workflow: "deploy" },
+  },
+  {
+    version: SMITHERS_API_VERSION,
+    method: "listAccounts",
+    title: "List Accounts",
+    description: "List the registered Smithers agent accounts — the entries in the user-level `~/.smithers/accounts.json` registry that the `smithers agents` CLI manages. Each account's raw API key is redacted; `hasApiKey`/`hasConfigDir` report its auth posture instead.",
+    maturity: "stable",
+    transport: "http+websocket",
+    requiredScope: "account:read",
+    requestSchema: objectSchema({}),
+    responseSchema: arraySchema(objectSchema({
+      label: stringSchema("Unique account label (the registry key)."),
+      provider: {
+        type: "string",
+        enum: ["claude-code", "antigravity", "codex", "gemini", "kimi", "anthropic-api", "openai-api", "gemini-api"],
+        description: "Provider id, one of the fixed `smithers agents` catalog.",
+      },
+      configDir: { type: ["string", "null"], description: "Per-account CLI config dir for subscription providers (null for api-key accounts)." },
+      hasConfigDir: booleanSchema("True when a subscription account has a non-empty config dir."),
+      hasApiKey: booleanSchema("True when an api-key account carries a non-empty key (the key itself is never returned)."),
+      model: { type: ["string", "null"], description: "Optional default model baked into the account." },
+      addedAt: { type: ["string", "null"], description: "ISO timestamp of when the account was added, when known." },
+    }, ["label", "provider", "hasConfigDir", "hasApiKey"]), "Registered agent accounts."),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "Internal"],
+    exampleRequest: {},
+    exampleResponse: [{ label: "claude-work", provider: "claude-code", configDir: "/Users/me/.claude", hasConfigDir: true, hasApiKey: false, model: "claude-opus-4-8", addedAt: "2026-01-01T00:00:00.000Z" }],
   },
   {
     version: SMITHERS_API_VERSION,

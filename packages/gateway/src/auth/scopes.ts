@@ -8,6 +8,7 @@ export const GATEWAY_SCOPE_VALUES = [
   "signal:submit",
   "cron:read",
   "cron:write",
+  "account:read",
   "memory:read",
   "prompt:read",
   "score:read",
@@ -26,6 +27,7 @@ export const GATEWAY_SCOPE_DESCRIPTIONS: Record<GatewayScope, string> = {
   "signal:submit": "Submit workflow signals.",
   "cron:read": "List cron schedules.",
   "cron:write": "Create, delete, and trigger cron schedules.",
+  "account:read": "List registered agent accounts (API keys redacted).",
   "memory:read": "List cross-run memory facts.",
   "prompt:read": "List registered prompts.",
   "score:read": "List scorer/eval results for a run.",
@@ -65,7 +67,7 @@ function gatewayScopeImplies(granted: GatewayScope, required: GatewayScope): boo
 function legacyAccessImplies(scope: string, required: GatewayScope): boolean {
   switch (scope) {
     case "read":
-      return required === "run:read" || required === "cron:read" || required === "memory:read" || required === "prompt:read" || required === "score:read" || required === "ticket:read" || required === "observability:read";
+      return required === "run:read" || required === "cron:read" || required === "account:read" || required === "memory:read" || required === "prompt:read" || required === "score:read" || required === "ticket:read" || required === "observability:read";
     case "execute":
       return required === "run:read" || required === "run:write" || required === "signal:submit" || required === "cron:read" || required === "cron:write" || required === "ticket:read" || required === "ticket:write";
     case "approve":

@@ -137,6 +137,7 @@ describe("Gateway RPC contract", () => {
       "cronCreate",
       "cronDelete",
       "cronRun",
+      "listAccounts",
       "listMemoryFacts",
       "listPrompts",
       "listScores",

@@ -10,6 +10,8 @@ import type {
   HijackRunResponse,
   LaunchRunRequest,
   LaunchRunResponse,
+  ListAccountsRequest,
+  ListAccountsResponse,
   ListApprovalsRequest,
   ListApprovalsResponse,
   ListMemoryFactsRequest,
@@ -60,6 +62,7 @@ export type GatewayRpcRequestMap = {
   cronCreate: CronCreateRequest;
   cronDelete: CronDeleteRequest;
   cronRun: CronRunRequest;
+  listAccounts: ListAccountsRequest;
   listMemoryFacts: ListMemoryFactsRequest;
   listPrompts: ListPromptsRequest;
   listScores: ListScoresRequest;
@@ -89,6 +92,7 @@ export type GatewayRpcResponseMap = {
   cronCreate: Record<string, unknown>;
   cronDelete: Record<string, unknown>;
   cronRun: LaunchRunResponse;
+  listAccounts: ListAccountsResponse;
   listMemoryFacts: GatewayMemoryFactRow[];
   listPrompts: GatewayPromptRow[];
   listScores: GatewayScoreRow[];

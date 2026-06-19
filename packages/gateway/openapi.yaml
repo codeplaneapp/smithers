@@ -181,6 +181,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -241,6 +242,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -301,6 +303,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -361,6 +364,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -529,6 +533,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -589,6 +594,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -649,6 +655,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -709,6 +716,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -769,6 +777,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -926,6 +935,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -986,6 +996,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -1046,6 +1057,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -1106,6 +1118,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -1166,6 +1179,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -1336,6 +1350,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -1396,6 +1411,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -1456,6 +1472,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -1516,6 +1533,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -1576,6 +1594,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -1743,6 +1762,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -1808,6 +1828,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -1873,6 +1894,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -1938,6 +1960,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -2003,6 +2026,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -2068,6 +2092,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -2133,6 +2158,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -2198,6 +2224,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -2411,6 +2438,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -2473,6 +2501,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -2535,6 +2564,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -2597,6 +2627,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -2659,6 +2690,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -2721,6 +2753,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -2902,6 +2935,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -2962,6 +2996,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -3022,6 +3057,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -3082,6 +3118,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -3142,6 +3179,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -3358,6 +3396,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -3418,6 +3457,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -3478,6 +3518,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -3538,6 +3579,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -3598,6 +3640,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -3777,6 +3820,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -3836,6 +3880,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -3895,6 +3940,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -3954,6 +4000,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -4132,6 +4179,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -4191,6 +4239,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -4250,6 +4299,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -4309,6 +4359,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -4478,6 +4529,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -4537,6 +4589,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -4596,6 +4649,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -4655,6 +4709,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -4829,6 +4884,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -4890,6 +4946,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -4951,6 +5008,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -5012,6 +5070,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -5073,6 +5132,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -5252,6 +5312,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -5314,6 +5375,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -5376,6 +5438,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -5438,6 +5501,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -5500,6 +5564,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -5562,6 +5627,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -5727,6 +5793,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -5791,6 +5858,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -5855,6 +5923,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -5919,6 +5988,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -5983,6 +6053,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -6047,6 +6118,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -6211,6 +6283,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -6275,6 +6348,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -6339,6 +6413,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -6403,6 +6478,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -6467,6 +6543,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -6531,6 +6608,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -6689,6 +6767,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -6748,6 +6827,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -6807,6 +6887,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -6866,6 +6947,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -7027,6 +7109,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -7086,6 +7169,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -7145,6 +7229,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -7204,6 +7289,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -7360,6 +7446,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -7420,6 +7507,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -7480,6 +7568,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -7540,6 +7629,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -7600,6 +7690,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -7767,6 +7858,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -7828,6 +7920,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -7889,6 +7982,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -7950,6 +8044,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -8011,6 +8106,379 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+  /v1/rpc/listAccounts:
+    post:
+      operationId: listAccounts
+      summary: "List Accounts"
+      description: "List the registered Smithers agent accounts — the entries in the user-level `~/.smithers/accounts.json` registry that the `smithers agents` CLI manages. Each account's raw API key is redacted; `hasApiKey`/`hasConfigDir` report its auth posture instead."
+      tags:
+        - "Gateway RPC"
+      security:
+        -
+          bearerAuth:
+            - account:read
+      x-smithers-api-version: v1
+      x-smithers-maturity: stable
+      x-smithers-transport: "http+websocket"
+      x-smithers-required-scope: account:read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - method
+                - params
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  description: "Optional caller request id."
+                method:
+                  const: listAccounts
+                params:
+                  type: object
+                  properties: {}
+                  required: []
+                  additionalProperties: false
+            example:
+              id: listAccounts-1
+              method: listAccounts
+              params: {}
+      responses:
+        200:
+          description: "List Accounts response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - payload
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: true
+                  apiVersion:
+                    const: v1
+                  payload:
+                    type: array
+                    description: "Registered agent accounts."
+                    items:
+                      type: object
+                      properties:
+                        label:
+                          type: string
+                          description: "Unique account label (the registry key)."
+                        provider:
+                          type: string
+                          enum:
+                            - claude-code
+                            - antigravity
+                            - codex
+                            - gemini
+                            - kimi
+                            - anthropic-api
+                            - openai-api
+                            - gemini-api
+                          description: "Provider id, one of the fixed `smithers agents` catalog."
+                        configDir:
+                          type:
+                            - string
+                            - "null"
+                          description: "Per-account CLI config dir for subscription providers (null for api-key accounts)."
+                        hasConfigDir:
+                          type: boolean
+                          description: "True when a subscription account has a non-empty config dir."
+                        hasApiKey:
+                          type: boolean
+                          description: "True when an api-key account carries a non-empty key (the key itself is never returned)."
+                        model:
+                          type:
+                            - string
+                            - "null"
+                          description: "Optional default model baked into the account."
+                        addedAt:
+                          type:
+                            - string
+                            - "null"
+                          description: "ISO timestamp of when the account was added, when known."
+                      required:
+                        - label
+                        - provider
+                        - hasConfigDir
+                        - hasApiKey
+                      additionalProperties: false
+              example:
+                type: res
+                id: listAccounts-1
+                ok: true
+                apiVersion: v1
+                payload:
+                  -
+                    label: claude-work
+                    provider: claude-code
+                    configDir: /Users/me/.claude
+                    hasConfigDir: true
+                    hasApiKey: false
+                    model: claude-opus-4-8
+                    addedAt: 2026-01-01T00:00:00.000Z
+        400:
+          description: "The request shape is invalid."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        401:
+          description: "Authentication failed or the token expired."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        403:
+          description: "The token is missing the required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        500:
+          description: "The Gateway encountered an internal error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -8196,6 +8664,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -8255,6 +8724,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -8314,6 +8784,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -8373,6 +8844,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -8542,6 +9014,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -8601,6 +9074,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -8660,6 +9134,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -8719,6 +9194,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -8936,6 +9412,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -8996,6 +9473,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -9056,6 +9534,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -9116,6 +9595,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -9176,6 +9656,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -9366,6 +9847,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -9425,6 +9907,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -9484,6 +9967,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -9543,6 +10027,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -9744,6 +10229,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -9803,6 +10289,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -9862,6 +10349,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -9921,6 +10409,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -10112,6 +10601,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -10172,6 +10662,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -10232,6 +10723,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -10292,6 +10784,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -10352,6 +10845,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -10509,6 +11003,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -10569,6 +11064,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -10629,6 +11125,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -10689,6 +11186,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -10749,6 +11247,7 @@ paths:
                           - signal:submit
                           - cron:read
                           - cron:write
+                          - account:read
                           - memory:read
                           - prompt:read
                           - score:read
@@ -10775,13 +11274,14 @@ components:
         - signal:submit
         - cron:read
         - cron:write
+        - account:read
         - memory:read
         - prompt:read
         - score:read
         - ticket:read
         - ticket:write
         - observability:read
-      description: "run:read: Read run state, summaries, event streams, node output, and node diffs.\nrun:write: Launch, resume, and cancel runs.\nrun:admin: Perform elevated run control such as hijack and rewind.\napproval:submit: Submit approval decisions.\nsignal:submit: Submit workflow signals.\ncron:read: List cron schedules.\ncron:write: Create, delete, and trigger cron schedules.\nmemory:read: List cross-run memory facts.\nprompt:read: List registered prompts.\nscore:read: List scorer/eval results for a run.\nticket:read: List work docs (tickets/plans/specs/proposals).\nticket:write: Create, update, and soft-delete work docs.\nobservability:read: Read DevTools and other observability streams."
+      description: "run:read: Read run state, summaries, event streams, node output, and node diffs.\nrun:write: Launch, resume, and cancel runs.\nrun:admin: Perform elevated run control such as hijack and rewind.\napproval:submit: Submit approval decisions.\nsignal:submit: Submit workflow signals.\ncron:read: List cron schedules.\ncron:write: Create, delete, and trigger cron schedules.\naccount:read: List registered agent accounts (API keys redacted).\nmemory:read: List cross-run memory facts.\nprompt:read: List registered prompts.\nscore:read: List scorer/eval results for a run.\nticket:read: List work docs (tickets/plans/specs/proposals).\nticket:write: Create, update, and soft-delete work docs.\nobservability:read: Read DevTools and other observability streams."
     GatewayRpcErrorCode:
       type: string
       enum:

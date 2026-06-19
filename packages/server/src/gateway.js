@@ -43,6 +43,7 @@ import { writeRewindAuditRow } from "@smithers-orchestrator/time-travel/writeRew
 import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-travel/recoverInProgressRewindAudits";
 import { GATEWAY_EVENT_WINDOW_DEFAULT, SMITHERS_API_VERSION, getRequiredScopeForGatewayMethod, } from "@smithers-orchestrator/gateway/rpc";
 import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
+import { listAccounts } from "@smithers-orchestrator/accounts/listAccounts";
 import { EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, GatewayExtensions, isExtensionMethod, } from "./GatewayExtensions.js";
 import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
 import { renderDefaultConsoleClient } from "./gatewayUi/defaultConsole.js";
@@ -3513,6 +3514,36 @@ export class Gateway {
         return results;
     }
     /**
+   * Registered agent accounts for the `listAccounts` RPC. Accounts are the rows
+   * in the USER-level `~/.smithers/accounts.json` registry that the
+   * `smithers agents` CLI manages (resolved via `accountsRoot(process.env)`,
+   * honoring `SMITHERS_HOME`/`HOME`) — NOT a per-workspace DB table. So, like
+   * `listPromptsFromDisk` but at the user root, this reads the file directly
+   * through the `@smithers-orchestrator/accounts` package's `listAccounts()` and
+   * maps each entry onto the wire `GatewayAccount` shape.
+   *
+   * SECRET REDACTION: an account may carry a raw `apiKey` (a plaintext
+   * credential stored mode-600 on disk). The key is NEVER returned — instead
+   * `hasApiKey` reports whether a non-empty key is set and `hasConfigDir`
+   * reports whether a subscription account has a config dir, so the client can
+   * render the auth posture without ever receiving the secret. A malformed
+   * registry surfaces as a thrown `SmithersError` (→ the dispatcher's error
+   * envelope); a missing file is a clean empty list (the package's own default).
+   * @returns {Array<Record<string, unknown>>}
+   */
+    listAccountsFromRegistry() {
+        const accounts = listAccounts(process.env);
+        return accounts.map((account) => ({
+            label: account.label,
+            provider: account.provider,
+            configDir: typeof account.configDir === "string" ? account.configDir : null,
+            hasConfigDir: typeof account.configDir === "string" && account.configDir.trim() !== "",
+            hasApiKey: typeof account.apiKey === "string" && account.apiKey.trim() !== "",
+            model: typeof account.model === "string" ? account.model : null,
+            addedAt: typeof account.addedAt === "string" ? account.addedAt : null,
+        }));
+    }
+    /**
    * Registered prompts for the `listPrompts` RPC. A prompt is a `.md`/`.mdx`
    * file under the workspace's `.smithers/prompts/` directory — the SAME real
    * source smithers-studio walks. Unlike memory/scores/tickets (DB-table backed),
@@ -4991,6 +5022,9 @@ export class Gateway {
                     tokenId: connection.tokenId ?? null,
                     subscribeConnection: connection,
                 }, undefined, { resume: false }));
+            }
+            case "listAccounts": {
+                return responseOk(frame.id, this.listAccountsFromRegistry());
             }
             case "listMemoryFacts": {
                 const namespace = asString(params.namespace);
