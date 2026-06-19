@@ -6,12 +6,12 @@ import { useToastStore } from "../toasts/toastStore";
  * §5). Switching it may force a new session and re-warm the prompt cache, which
  * the UI surfaces as an ephemeral notice.
  */
-export type DefaultAgent = "codex" | "claude" | "gemini" | "kimi";
+export type DefaultAgent = "codex" | "claude" | "antigravity" | "kimi";
 
 export const DEFAULT_AGENTS: { id: DefaultAgent; label: string }[] = [
   { id: "codex", label: "Codex" },
   { id: "claude", label: "Claude" },
-  { id: "gemini", label: "Gemini" },
+  { id: "antigravity", label: "Antigravity" },
   { id: "kimi", label: "Kimi" },
 ];
 

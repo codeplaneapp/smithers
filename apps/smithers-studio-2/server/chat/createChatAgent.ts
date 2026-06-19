@@ -1,8 +1,8 @@
 import {
   AmpAgent,
+  AntigravityAgent,
   ClaudeCodeAgent,
   CodexAgent,
-  GeminiAgent,
   KimiAgent,
   OpenCodeAgent,
   PiAgent,
@@ -21,7 +21,7 @@ const AGENT_FACTORIES: Record<string, AgentFactory> = {
   claude: (cwd) => new ClaudeCodeAgent({ cwd, yolo: true }) as unknown as AgentLike,
   codex: (cwd) => new CodexAgent({ cwd, yolo: true }) as unknown as AgentLike,
   opencode: (cwd) => new OpenCodeAgent({ cwd, yolo: true }) as unknown as AgentLike,
-  gemini: (cwd) => new GeminiAgent({ cwd, yolo: true }) as unknown as AgentLike,
+  antigravity: (cwd) => new AntigravityAgent({ cwd, yolo: true }) as unknown as AgentLike,
   pi: (cwd) => new PiAgent({ cwd, yolo: true }) as unknown as AgentLike,
   kimi: (cwd) => new KimiAgent({ cwd, yolo: true }) as unknown as AgentLike,
   amp: (cwd) => new AmpAgent({ cwd, yolo: true }) as unknown as AgentLike,
