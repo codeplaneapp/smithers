@@ -33,13 +33,12 @@ const baseDraft: AccountDraft = {
 };
 
 describe("PROVIDERS catalog", () => {
-  test("exposes the 8 CLI providers with stable ids", () => {
-    expect(PROVIDERS).toHaveLength(8);
+  test("exposes the supported providers with stable ids", () => {
+    expect(PROVIDERS).toHaveLength(7);
     expect(PROVIDERS.map((p) => p.id)).toEqual([
       "claude-code",
       "antigravity",
       "codex",
-      "gemini",
       "kimi",
       "anthropic-api",
       "openai-api",
@@ -47,8 +46,8 @@ describe("PROVIDERS catalog", () => {
     ]);
   });
 
-  test("splits into 5 subscription + 3 api-key providers", () => {
-    expect(PROVIDERS.filter((p) => p.authMode === "subscription")).toHaveLength(5);
+  test("splits into 4 subscription + 3 api-key providers", () => {
+    expect(PROVIDERS.filter((p) => p.authMode === "subscription")).toHaveLength(4);
     expect(PROVIDERS.filter((p) => p.authMode === "api-key")).toHaveLength(3);
   });
 
