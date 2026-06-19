@@ -1,7 +1,7 @@
-import { existsSync } from "node:fs";
+import { constants, accessSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { listAccounts } from "@smithers-orchestrator/accounts";
 /** @typedef {import("./AgentAvailability.ts").AgentAvailability} AgentAvailability */
@@ -255,11 +255,18 @@ function displayNameForProviderId(id) {
  * @param {NodeJS.ProcessEnv} env
  */
 function commandExists(binary, env) {
-    const result = spawnSync("/bin/bash", ["-c", `command -v ${binary}`], {
-        env,
-        encoding: "utf8",
+    const pathEntries = env.PATH?.split(":") ?? [];
+    return pathEntries.some((entry) => {
+        if (!entry)
+            return false;
+        try {
+            accessSync(join(entry, binary), constants.X_OK);
+            return true;
+        }
+        catch {
+            return false;
+        }
     });
-    return result.status === 0;
 }
 /**
  * @param {boolean} hasBinary

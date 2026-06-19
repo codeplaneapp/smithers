@@ -1,5 +1,5 @@
 import { describe, expect, onTestFinished, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createExecutableDir, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeOpenCodeBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
@@ -151,6 +151,10 @@ describe("detectAvailableAgents", () => {
             const binaryCheck = result.checks.find((c) => c.startsWith("binary:"));
             expect(binaryCheck).toBeDefined();
         }
+    });
+    test("binary detection does not hardcode /bin/bash", () => {
+        const source = readFileSync(new URL("../src/agent-detection.js", import.meta.url), "utf8");
+        expect(source).not.toContain("/bin/bash");
     });
     test("checks array includes env checks for agents with api keys", () => {
         const results = detectAvailableAgents({});
