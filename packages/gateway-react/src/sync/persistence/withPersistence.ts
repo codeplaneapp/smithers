@@ -57,23 +57,31 @@ export function withPersistence<TRow extends object, TKey extends string | numbe
 
         // 1) Hydrate from cache synchronously so the first render after a reload
         //    already has data. Skip if the collection somehow already holds rows.
+        //
+        //    Parse EVERY cached row BEFORE opening the sync transaction. If any
+        //    cached row is invalid JSON, the parse throws here — with NO open
+        //    `begin()` — so the catch just drops the corrupt cache and falls
+        //    through to the live path. Opening `begin()` first and parsing inside
+        //    would leave an uncommitted sync transaction attached to the
+        //    collection on a corrupt row, which can corrupt later batching as
+        //    live sync continues writing.
         let hydrated = false;
         try {
           if (collection.size === 0) {
             const cached = store.read(collectionId);
             if (cached.length > 0) {
+              const values = cached.map(({ json }) => JSON.parse(json) as TRow);
+              // Every row parsed cleanly — only now open the transaction.
               begin();
-              for (const { json } of cached) {
-                const value = JSON.parse(json) as TRow;
-                write({ type: "insert", value });
-              }
+              for (const value of values) write({ type: "insert", value });
               commit();
               hydrated = true;
             }
           }
         } catch {
           // A corrupt / schema-mismatched cache must never break the live path:
-          // drop this collection's cache and continue live-only.
+          // drop this collection's cache and continue live-only. The parse above
+          // throws before `begin()`, so no sync transaction is ever left open.
           store.clearCollection(collectionId);
         }
 

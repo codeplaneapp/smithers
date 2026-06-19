@@ -73,9 +73,26 @@ function backendFromDb(db: Oo1Db): PersistenceBackend {
  * Open a {@link PersistenceBackend} for the *browser*, backed by an OPFS SAHPool
  * VFS so writes survive a page reload **without** cross-origin isolation
  * (SharedArrayBuffer): the SAHPool VFS uses synchronous OPFS access handles, so
- * no COOP/COEP headers are required. Returns `null` when OPFS is unavailable
- * (no `navigator.storage.getDirectory`, e.g. SSR or a locked-down context) so the
- * caller can run live-only rather than throw.
+ * no COOP/COEP headers are required.
+ *
+ * **Contract: this NEVER rejects for "OPFS/SAHPool not usable here".** It resolves
+ * `null` whenever a usable OPFS-backed VFS cannot be obtained, so the caller can
+ * run live-only rather than have app startup fail. That covers more than plain
+ * feature absence:
+ *
+ *   - no `navigator.storage.getDirectory` (SSR / locked-down context);
+ *   - the build lacks `installOpfsSAHPoolVfs`;
+ *   - `createSyncAccessHandle` is missing on `FileSystemFileHandle` (the SAHPool
+ *     VFS requires it and `installOpfsSAHPoolVfs()` would otherwise reject);
+ *   - the install **rejects** — a permission failure, or an OPFS pool already
+ *     **locked** by another tab/worker (SAHPool takes an exclusive lock, so a
+ *     second context's install rejects);
+ *   - opening the `OpfsSAHPoolDb` over the installed VFS throws.
+ *
+ * Any of these resolves `null`. We do not feature-probe `createSyncAccessHandle`
+ * separately *instead of* the try/catch — a probe can pass yet the install still
+ * reject (locked pool, quota) — so the try/catch is the real guarantee and the
+ * probe is just an early, allocation-free bail.
  */
 export async function openOpfsSahPoolBackend(
   sqlite3: SqliteWasmModule,
@@ -85,14 +102,37 @@ export async function openOpfsSahPoolBackend(
     typeof navigator !== "undefined" &&
     !!navigator.storage &&
     typeof navigator.storage.getDirectory === "function";
-  if (!hasOpfs || typeof sqlite3.installOpfsSAHPoolVfs !== "function") {
+  // The SAHPool VFS needs `FileSystemFileHandle.prototype.createSyncAccessHandle`;
+  // it is not in the TS DOM lib, so probe it dynamically off the prototype. Absent
+  // it, `installOpfsSAHPoolVfs()` would reject — bail to `null` first instead.
+  const fileHandleCtor = (globalThis as { FileSystemFileHandle?: { prototype?: unknown } })
+    .FileSystemFileHandle;
+  const hasSyncAccessHandle =
+    typeof (fileHandleCtor?.prototype as { createSyncAccessHandle?: unknown } | undefined)
+      ?.createSyncAccessHandle === "function";
+  if (
+    !hasOpfs ||
+    !hasSyncAccessHandle ||
+    typeof sqlite3.installOpfsSAHPoolVfs !== "function"
+  ) {
     return null;
   }
   const directory = options.directory ?? "smithers-gateway-cache";
   const dbName = options.dbName ?? "gateway-collections.sqlite3";
-  const pool = await sqlite3.installOpfsSAHPoolVfs({ name: directory, directory: `/${directory}` });
-  const db = new pool.OpfsSAHPoolDb(`/${dbName}`);
-  return backendFromDb(db);
+  try {
+    // `installOpfsSAHPoolVfs()` rejects when the pool is locked by another tab,
+    // on a permission failure, or when SAHPool requirements are not met; opening
+    // the DB over the VFS can also throw. ALL of these mean "no durable storage
+    // here" — resolve `null` so the live gateway path continues.
+    const pool = await sqlite3.installOpfsSAHPoolVfs({
+      name: directory,
+      directory: `/${directory}`,
+    });
+    const db = new pool.OpfsSAHPoolDb(`/${dbName}`);
+    return backendFromDb(db);
+  } catch {
+    return null;
+  }
 }
 
 /**

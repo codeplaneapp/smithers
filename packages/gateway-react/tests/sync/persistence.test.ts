@@ -21,7 +21,12 @@ import {
   type SyncTransport,
 } from "@smithers-orchestrator/gateway-client";
 import { PersistentCollectionStore } from "../../src/sync/persistence/PersistentCollectionStore.ts";
-import { openDbBackend, type SqliteWasmModule } from "../../src/sync/persistence/createSqliteWasmBackend.ts";
+import {
+  openDbBackend,
+  openOpfsSahPoolBackend,
+  type SqliteWasmModule,
+} from "../../src/sync/persistence/createSqliteWasmBackend.ts";
+import { createGatewayPersistence } from "../../src/sync/persistence/createGatewayPersistence.ts";
 import { withPersistence } from "../../src/sync/persistence/withPersistence.ts";
 
 async function realStore(schemaVersion = "v1") {
@@ -182,5 +187,175 @@ describe("withPersistence (real collection + real SQLite-WASM)", () => {
     const r1 = collection.get("r1") as { status: string } | undefined;
     expect(r1?.status).toBe("running");
     void collection.cleanup();
+  });
+
+  // FINDING 2 (P2): a corrupt cached row must clear the cache and leave NO open
+  // sync transaction. The bug was: `begin()` then `JSON.parse()` per row — a bad
+  // row threw AFTER `begin()`, so the catch cleared the cache while an
+  // uncommitted transaction stayed attached to the collection, which can corrupt
+  // later live-sync batching. The fix parses every row BEFORE `begin()`.
+  test("a corrupt cached row clears the cache and leaves NO open transaction (live sync still works)", async () => {
+    const { store } = await realStore();
+    const def = gatewayCollectionDefs.runs({});
+    const collectionId = syncKeyFingerprint(def.key);
+    // Seed one valid row and one INVALID-JSON row directly into the cache.
+    store.put(collectionId, "r1", JSON.stringify({ id: "r1", status: "running" }));
+    store.put(collectionId, "rX", "{ this is not valid json");
+    expect(store.read(collectionId)).toHaveLength(2);
+
+    // Live transport delivers a fresh snapshot so we can prove sync still batches
+    // correctly after the corrupt-cache hydrate path ran.
+    const transport = makeTransport([{ id: "r2", status: "queued" }]);
+    const config = createGatewayCollection({
+      key: def.key,
+      client: transport,
+      getKey: (row: { id: string }) => row.id,
+      method: "listRuns",
+      startSync: false,
+    });
+    const collection = createCollection(withPersistence(config, store));
+    collection.subscribeChanges(() => {});
+    await settle(20);
+
+    // THE core invariant: NO uncommitted sync transaction is left attached to the
+    // collection. With the bug (begin() before the per-row parse), the corrupt
+    // row threw AFTER begin(), so a `{ committed: false }` entry stayed on
+    // `pendingSyncedTransactions` forever — and the live `commit()` (which reads
+    // the LAST pending entry) then operated on the wrong transaction. TanStack
+    // keeps uncommitted pending transactions on the stack across live commits, so
+    // a leftover here is directly observable. The fix parses before begin(), so
+    // the corrupt path opens no transaction → this stays empty/all-committed.
+    const pending =
+      (collection as unknown as {
+        _state?: { pendingSyncedTransactions?: Array<{ committed: boolean }> };
+      })._state?.pendingSyncedTransactions ?? [];
+    const uncommitted = pending.filter((t) => !t.committed);
+    expect(uncommitted).toHaveLength(0);
+
+    // The corrupt cache was dropped on hydrate: the bad row `rX` AND the
+    // valid-but-not-yet-hydrated `r1` are both gone, replaced only by what live
+    // sync wrote through. The pre-existing cache keys did not survive.
+    expect(store.read(collectionId).map((r) => r.key)).not.toContain("rX");
+    expect(store.read(collectionId).map((r) => r.key)).not.toContain("r1");
+    // No hydrated rows leaked into the collection; only the live snapshot is
+    // present — proving live sync committed onto a CLEAN transaction stack.
+    expect([...collection.keys()]).toEqual(["r2"]);
+    const r2 = collection.get("r2") as { status: string } | undefined;
+    expect(r2?.status).toBe("queued");
+    // And the live snapshot was written through to the now-clean cache.
+    expect(store.read(collectionId).map((r) => r.key)).toEqual(["r2"]);
+
+    void collection.cleanup();
+  });
+});
+
+describe("openOpfsSahPoolBackend (Finding 1: null-on-unavailable contract)", () => {
+  // Helper: install/remove OPFS feature stubs so we reach the SAHPool install
+  // path even under happy-dom (which ships no `navigator.storage` / OPFS).
+  function withOpfsFeatures(run: () => Promise<void>): Promise<void> {
+    const nav = globalThis.navigator as unknown as { storage?: unknown };
+    const hadStorage = Object.prototype.hasOwnProperty.call(nav, "storage");
+    const priorStorage = (nav as { storage?: unknown }).storage;
+    const priorFfh = (globalThis as { FileSystemFileHandle?: unknown }).FileSystemFileHandle;
+    Object.defineProperty(nav, "storage", {
+      value: { getDirectory: () => Promise.resolve({}) },
+      configurable: true,
+    });
+    function FakeFileHandle() {}
+    (FakeFileHandle as unknown as { prototype: Record<string, unknown> }).prototype.createSyncAccessHandle =
+      function () {};
+    (globalThis as { FileSystemFileHandle?: unknown }).FileSystemFileHandle = FakeFileHandle;
+    const restore = () => {
+      if (hadStorage) {
+        Object.defineProperty(nav, "storage", { value: priorStorage, configurable: true });
+      } else {
+        delete (nav as { storage?: unknown }).storage;
+      }
+      (globalThis as { FileSystemFileHandle?: unknown }).FileSystemFileHandle = priorFfh;
+    };
+    return run().finally(restore);
+  }
+
+  async function realModule(): Promise<SqliteWasmModule> {
+    return (await sqlite3InitModule()) as unknown as SqliteWasmModule;
+  }
+
+  test("resolves null (does NOT reject) when installOpfsSAHPoolVfs REJECTS (locked pool / permission)", async () => {
+    const real = await realModule();
+    // A module whose feature flags pass but whose SAHPool install rejects — the
+    // exact "OPFS present but pool locked by another tab / permission denied"
+    // case. The contract: resolve null, never reject.
+    const rejecting: SqliteWasmModule = {
+      oo1: real.oo1,
+      installOpfsSAHPoolVfs: () =>
+        Promise.reject(new Error("OpfsSAHPool: pool is locked by another tab")),
+    };
+    await withOpfsFeatures(async () => {
+      const backend = await openOpfsSahPoolBackend(rejecting);
+      expect(backend).toBeNull();
+    });
+  });
+
+  test("resolves null when opening the OpfsSAHPoolDb THROWS after a successful install", async () => {
+    const real = await realModule();
+    const throwingDb: SqliteWasmModule = {
+      oo1: real.oo1,
+      installOpfsSAHPoolVfs: () =>
+        Promise.resolve({
+          OpfsSAHPoolDb: class {
+            constructor() {
+              throw new Error("cannot open db over SAHPool VFS");
+            }
+          } as unknown as SqliteWasmModule["oo1"]["DB"],
+        }),
+    };
+    await withOpfsFeatures(async () => {
+      const backend = await openOpfsSahPoolBackend(throwingDb);
+      expect(backend).toBeNull();
+    });
+  });
+
+  test("resolves null when createSyncAccessHandle is absent (SAHPool requirement unmet)", async () => {
+    const real = await realModule();
+    // installOpfsSAHPoolVfs is present, but we DON'T install the FileSystemFileHandle
+    // feature → the pre-flight feature probe must bail to null before any install.
+    let installCalled = false;
+    const moduleWithInstall: SqliteWasmModule = {
+      oo1: real.oo1,
+      installOpfsSAHPoolVfs: () => {
+        installCalled = true;
+        return Promise.reject(new Error("should not be called"));
+      },
+    };
+    const nav = globalThis.navigator as unknown as { storage?: unknown };
+    Object.defineProperty(nav, "storage", {
+      value: { getDirectory: () => Promise.resolve({}) },
+      configurable: true,
+    });
+    try {
+      const backend = await openOpfsSahPoolBackend(moduleWithInstall);
+      expect(backend).toBeNull();
+      expect(installCalled).toBe(false);
+    } finally {
+      delete (nav as { storage?: unknown }).storage;
+    }
+  });
+
+  test("createGatewayPersistence resolves null when the SAHPool backend is unavailable (live path continues)", async () => {
+    const real = await realModule();
+    const rejecting: SqliteWasmModule = {
+      oo1: real.oo1,
+      installOpfsSAHPoolVfs: () => Promise.reject(new Error("OPFS denied")),
+    };
+    await withOpfsFeatures(async () => {
+      // No forcePlainDbFile → goes through the OPFS SAHPool path, which rejects.
+      // createGatewayPersistence must therefore resolve null, not reject — so a
+      // caller that opted into persistence still boots (live-only).
+      const persistence = await createGatewayPersistence({
+        sqlite3: rejecting,
+        schemaVersion: "v1",
+      });
+      expect(persistence).toBeNull();
+    });
   });
 });
