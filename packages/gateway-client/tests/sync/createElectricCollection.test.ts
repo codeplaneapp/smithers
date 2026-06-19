@@ -239,12 +239,42 @@ describe("createElectricCollection", () => {
     await waitFor(() => collection.get("global:live/a")?.valueJson === '"second"');
     expect(collection.get("global:live/a")?.updatedAtMs).toBe(1781851164999);
 
-    // Live delete.
+    // Live delete. REGRESSION: a real Electric `delete` carries ONLY the PK
+    // columns (`namespace` + `key`), never `value_json`. `mapRow` rejects such a
+    // partial value, so the delete MUST be keyed via `getKeyFromRaw` — otherwise
+    // it is silently dropped and the row is stranded in the collection forever.
     activeControl!.push([
-      { value: rawRow({ key: "live/a" }), headers: { operation: "delete" } },
+      { value: { namespace: "global", key: "live/a" }, headers: { operation: "delete" } },
       { headers: { control: "up-to-date" } },
     ]);
     await waitFor(() => collection.size === 0);
+  });
+
+  // The live-delete bug in isolation, on the exact wire shape the cloud-electric
+  // stack emits (REPLICA IDENTITY FULL still yields a PK-only delete `value`, no
+  // `old_value`): seed a row via the snapshot, then a live PK-only delete must
+  // remove it. Before `getKeyFromRaw` this delete fell through `mapRow` →
+  // `undefined` → dropped, so the row never disappeared.
+  test("applies a PK-only live delete (the real Electric wire shape)", async () => {
+    const collection = createCollection<GatewayMemoryFactRow, string>(
+      createElectricCollection(memoryDef(), { shapeUrl: "http://localhost:3000/v1/shape" }),
+    );
+    const preload = collection.preload();
+    await waitFor(() => activeControl !== null);
+    activeControl!.push([
+      { value: rawRow({ key: "del/me" }), headers: { operation: "insert" } },
+      { headers: { control: "snapshot-end" } },
+    ]);
+    await preload;
+    expect(collection.has("global:del/me")).toBe(true);
+
+    // Live PK-only delete (no value_json, no old_value) terminated by up-to-date.
+    activeControl!.push([
+      { value: { namespace: "global", key: "del/me" }, headers: { operation: "delete" } },
+      { headers: { control: "up-to-date" } },
+    ]);
+    await waitFor(() => collection.size === 0);
+    expect(collection.has("global:del/me")).toBe(false);
   });
 
   // REGRESSION (P5 reconcile-phase fix): mirrors the EXACT wire protocol the

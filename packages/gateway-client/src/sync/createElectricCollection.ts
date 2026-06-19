@@ -56,6 +56,19 @@ export type ElectricCollectionDef<TRow extends object, TKey extends string | num
    * single place the Electric wire format is decoded.
    */
   mapRow: (raw: ElectricRawRow) => TRow | undefined;
+  /**
+   * Extract the collection key from a raw Electric DELETE message's value.
+   *
+   * CRITICAL: an Electric `delete` change carries ONLY the primary-key columns
+   * (e.g. `{ namespace, key }`) — NOT the full row. So `mapRow`, which (rightly)
+   * requires the non-PK columns and returns `undefined` for a partial value,
+   * cannot decode a delete: routing a delete through `mapRow` silently DROPS it,
+   * leaving the row in the collection forever. `getKeyFromRaw` therefore derives
+   * the key directly from the PK columns present on the delete value, so the
+   * delete is applied. Optional: when omitted, a delete falls back to
+   * `getKey(mapRow(raw))` (correct only when `mapRow` succeeds on PK-only input).
+   */
+  getKeyFromRaw?: (raw: ElectricRawRow) => TKey | undefined;
 };
 
 export type ElectricCollectionConfig = {
@@ -230,15 +243,26 @@ export function createElectricCollection<TRow extends object, TKey extends strin
           const seen = new Set<TKey>();
           for (const message of batch) {
             const operation = message.headers.operation;
-            const raw = operation === "delete" ? (message.old_value ?? message.value) : message.value;
-            const mapped = def.mapRow(raw);
-            if (mapped === undefined) continue;
-            const key = def.getKey(mapped);
             if (operation === "delete") {
+              // A delete carries ONLY the PK columns — `mapRow` (which needs the
+              // full row) returns `undefined` for it, so derive the key directly
+              // from the PK via `getKeyFromRaw`. Falling through to `mapRow` here
+              // would silently drop the delete and strand the row forever.
+              const raw = message.old_value ?? message.value;
+              const key = def.getKeyFromRaw
+                ? def.getKeyFromRaw(raw)
+                : (() => {
+                    const m = def.mapRow(raw);
+                    return m === undefined ? undefined : def.getKey(m);
+                  })();
+              if (key === undefined) continue;
               seen.delete(key);
               if (collection.has(key)) resolved.push({ type: "delete", key });
               continue;
             }
+            const mapped = def.mapRow(message.value);
+            if (mapped === undefined) continue;
+            const key = def.getKey(mapped);
             seen.add(key);
             const exists = collection.has(key);
             if (!exists) {

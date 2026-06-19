@@ -78,6 +78,14 @@ export const electricCollectionDefs = {
     // Same composite PK as `gatewayCollectionDefs.memoryFacts` — `(namespace,
     // key)`; `key` alone is not unique across namespaces.
     getKey: (row: GatewayMemoryFactRow) => `${row.namespace}:${row.key}`,
+    // An Electric DELETE message carries ONLY the PK columns (`namespace`,
+    // `key`) — never `value_json` — so `mapRow` would reject it and the delete
+    // would never apply. Derive the composite key straight from those PK columns
+    // (identical between snake_case wire and camelCase row for this table).
+    getKeyFromRaw: (raw: ElectricRawRow) =>
+      typeof raw.namespace === "string" && typeof raw.key === "string"
+        ? `${raw.namespace}:${raw.key}`
+        : undefined,
     table: "_smithers_memory_facts",
     // Scope the shape server-side when a namespace filter is set, mirroring the
     // gateway RPC's `namespace` param. PARAMETERIZED, never interpolated: the
