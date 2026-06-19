@@ -15,8 +15,16 @@ import type { ElectricCollectionDef, ElectricRawRow } from "./createElectricColl
  * Electric whenever the cloud source is selected.
  */
 
-/** Coerce an Electric int8 column (delivered as a decimal string) to a number. */
+/**
+ * Coerce an Electric int8 column to a number. CRITICAL: `@electric-sql/client`'s
+ * `ShapeStream` runs its default parser BEFORE our subscriber, and that parser
+ * maps Postgres `int8` → **bigint** (`defaultParser.int8 = (v) => BigInt(v)`),
+ * NOT the decimal STRING the raw HTTP shape returns. (`int2`/`int4`/`float*` →
+ * number.) So we must accept bigint | number | string. Missing this is why the
+ * `*_ms` columns silently fell through to `0` (epoch-1970) in the UI.
+ */
 function asMs(value: unknown): number {
+  if (typeof value === "bigint") return Number(value);
   if (typeof value === "number") return value;
   if (typeof value === "string" && value.trim() !== "") {
     const parsed = Number(value);
@@ -38,10 +46,11 @@ function asStringOrNull(value: unknown): string | null {
 /**
  * Map one raw `_smithers_memory_facts` Electric row onto the gateway's
  * `GatewayMemoryFactRow`. The column names are snake_case on the wire and the
- * gateway Row is camelCase; `*_ms` int8 columns arrive as strings (→ numbers);
- * `value_json` is the stored JSON STRING and is preserved verbatim (the surface
- * parses it itself, exactly as it does for the gateway RPC row). Drops a row
- * missing either PK part — it could never be keyed.
+ * gateway Row is camelCase; `*_ms` int8 columns arrive as **bigint** (the
+ * Electric parser's `int8` handler; → numbers via `asMs`); `value_json` is a
+ * `text` column so it survives the parser as the stored JSON STRING and is
+ * preserved verbatim (the surface parses it itself, exactly as it does for the
+ * gateway RPC row). Drops a row missing either PK part — it could never be keyed.
  */
 export function mapMemoryFactRow(raw: ElectricRawRow): GatewayMemoryFactRow | undefined {
   const namespace = raw.namespace;
@@ -71,9 +80,14 @@ export const electricCollectionDefs = {
     getKey: (row: GatewayMemoryFactRow) => `${row.namespace}:${row.key}`,
     table: "_smithers_memory_facts",
     // Scope the shape server-side when a namespace filter is set, mirroring the
-    // gateway RPC's `namespace` param. Single-quote per Postgres; the namespace
-    // is a smithers identifier (no quotes), so this is safe for the e2e path.
-    ...(params.namespace ? { where: `namespace = '${params.namespace}'` } : {}),
+    // gateway RPC's `namespace` param. PARAMETERIZED, never interpolated: the
+    // namespace is caller input and a value containing a single quote would
+    // break the SQL or alter the predicate. `@electric-sql/client` substitutes
+    // `$1` from positional `whereParams` server-side, so the value is treated
+    // strictly as data (no quoting/escaping on our side).
+    ...(params.namespace
+      ? { where: "namespace = $1", whereParams: { "1": params.namespace } }
+      : {}),
     mapRow: mapMemoryFactRow,
   }),
 } as const;

@@ -12,11 +12,14 @@ import { syncKeyFingerprint } from "./SyncKey.ts";
  * consumes whichever the registry selected with zero changes.
  *
  * Wire-format handling lives in the per-collection `mapRow`: Electric delivers
- * each row as `{ value: { <snake_case columns> } }` where int8 columns arrive as
- * decimal STRINGS and JSON columns as JSON strings. `mapRow` turns one raw
- * Electric `value` into the typed, camelCased Row the gateway path also emits
- * (e.g. `value_json` string → kept as-is, `created_at_ms` string → number), so
- * downstream code never branches on the source.
+ * each row as `{ value: { <snake_case columns> } }`. The `@electric-sql/client`
+ * default parser runs BEFORE our subscriber, so Postgres `int8` columns arrive
+ * as **bigint** (NOT the decimal string the raw HTTP shape returns) and `text`
+ * columns (incl. our JSON-as-text `value_json`) pass through as strings.
+ * `mapRow` turns one raw Electric `value` into the typed, camelCased Row the
+ * gateway path also emits (e.g. `value_json` string → kept as-is,
+ * `created_at_ms` bigint → number), so downstream code never branches on the
+ * source.
  *
  * The `@electric-sql/client` `ShapeStream` runtime is loaded with a DYNAMIC
  * import so the cloud-Electric code path is tree-shaken out of bundles that only
@@ -33,8 +36,19 @@ export type ElectricCollectionDef<TRow extends object, TKey extends string | num
   getKey: (row: TRow) => TKey;
   /** Postgres table the shape is served from, e.g. `_smithers_memory_facts`. */
   table: string;
-  /** Optional SQL `where` for the shape (server-side row filter). */
+  /**
+   * Optional SQL `where` for the shape (server-side row filter). MUST use
+   * positional `$1`/`$2`… placeholders for any caller-supplied value and pass
+   * the values via `whereParams` — never interpolate caller input into the
+   * predicate string (a value with a single quote would break/alter the SQL).
+   */
   where?: string;
+  /**
+   * Positional substitutions for `$i` placeholders in `where`, e.g.
+   * `{ "1": namespace }` for `where: "namespace = $1"`. Electric substitutes
+   * these server-side, so the value is bound strictly as data.
+   */
+  whereParams?: Record<`${number}`, string>;
   /**
    * Map one raw Electric row `value` (snake_case columns, int8→string,
    * json→string) into the typed Row the collection stores. Returning
@@ -92,6 +106,10 @@ function isChange(message: ElectricMessage): message is ElectricChangeMessage {
 
 function isUpToDate(message: ElectricMessage): message is ElectricControlMessage {
   return (message as ElectricControlMessage).headers?.control === "up-to-date";
+}
+
+function isMustRefetch(message: ElectricMessage): message is ElectricControlMessage {
+  return (message as ElectricControlMessage).headers?.control === "must-refetch";
 }
 
 /**
@@ -155,6 +173,18 @@ export function createElectricCollection<TRow extends object, TKey extends strin
         // (snapshot first, then each live batch).
         let pending: ElectricChangeMessage[] = [];
         let ready = false;
+        // The INITIAL `up-to-date` closes a full snapshot that carries every
+        // current row but NO delete messages for rows that vanished while we
+        // were offline. Because Electric collections are wrapped in
+        // `withPersistence`, the collection is hydrated from the SQLite cache
+        // BEFORE sync — so a snapshot that merely upserts present rows would
+        // leave a since-deleted (but cached) key stale forever. On a reconcile
+        // boundary we therefore also DELETE any collection key absent from the
+        // snapshot (a full reconcile, mirroring `createGatewayCollection`'s
+        // `replaceRows`). `must-refetch` (server cleared the shape) re-arms it.
+        // Live incremental batches after the snapshot do NOT reconcile — they
+        // carry explicit delete messages, which are applied normally.
+        let reconcileNext = true;
 
         const handleError = (cause: unknown) => {
           if (signal.aborted) return;
@@ -164,6 +194,8 @@ export function createElectricCollection<TRow extends object, TKey extends strin
         const flush = () => {
           const batch = pending;
           pending = [];
+          const reconcile = reconcileNext;
+          reconcileNext = false;
           // Resolve each change to the typed row + the collection's key, then
           // collapse inserts/updates the same way the gateway path does (no-op
           // writes are skipped; an insert onto an existing key becomes an update).
@@ -171,6 +203,9 @@ export function createElectricCollection<TRow extends object, TKey extends strin
             | { type: "insert" | "update"; key: TKey; value: TRow }
             | { type: "delete"; key: TKey };
           const resolved: Resolved[] = [];
+          // Keys present in THIS snapshot/batch — used to reconcile deletions on
+          // a snapshot boundary (any live key not in this set is now stale).
+          const seen = new Set<TKey>();
           for (const message of batch) {
             const operation = message.headers.operation;
             const raw = operation === "delete" ? (message.old_value ?? message.value) : message.value;
@@ -178,9 +213,11 @@ export function createElectricCollection<TRow extends object, TKey extends strin
             if (mapped === undefined) continue;
             const key = def.getKey(mapped);
             if (operation === "delete") {
+              seen.delete(key);
               if (collection.has(key)) resolved.push({ type: "delete", key });
               continue;
             }
+            seen.add(key);
             const exists = collection.has(key);
             if (!exists) {
               resolved.push({ type: "insert", key, value: mapped });
@@ -189,6 +226,20 @@ export function createElectricCollection<TRow extends object, TKey extends strin
             const current = collection.get(key);
             if (current && deepEquals(withoutVirtualFields(current), mapped)) continue;
             resolved.push({ type: "update", key, value: mapped });
+          }
+          if (reconcile) {
+            // Delete every collection key the snapshot did NOT carry. These rows
+            // exist in the collection only because the persisted cache hydrated
+            // them — Postgres no longer has them, so drop them.
+            const alreadyDeleted = new Set<TKey>();
+            for (const item of resolved) {
+              if (item.type === "delete") alreadyDeleted.add(item.key);
+            }
+            for (const key of collection.keys()) {
+              if (!seen.has(key) && !alreadyDeleted.has(key)) {
+                resolved.push({ type: "delete", key });
+              }
+            }
           }
           if (resolved.length > 0) {
             begin();
@@ -216,6 +267,9 @@ export function createElectricCollection<TRow extends object, TKey extends strin
               params: {
                 table: def.table,
                 ...(def.where ? { where: def.where } : {}),
+                // Positional where-clause values. Electric nests these under
+                // `params.params` and substitutes them server-side for `$i`.
+                ...(def.whereParams ? { params: def.whereParams } : {}),
               },
               ...(config.headers ? { headers: config.headers } : {}),
               signal,
@@ -224,6 +278,12 @@ export function createElectricCollection<TRow extends object, TKey extends strin
               for (const message of messages) {
                 if (isChange(message)) {
                   pending.push(message);
+                } else if (isMustRefetch(message)) {
+                  // Server rotated/cleared the shape: drop any buffered changes
+                  // and treat the fresh snapshot that follows as a full reconcile
+                  // (the post-`must-refetch` `up-to-date` carries the new truth).
+                  pending = [];
+                  reconcileNext = true;
                 } else if (isUpToDate(message)) {
                   flush();
                 }
