@@ -11,6 +11,7 @@ import { parseAgentEvent, parseNodeOutputEvent } from "./chat.js";
 import { handleApprovals, handleHumanRequests } from "./tui-gates.js";
 import { formatStreamText } from "./tui-format.js";
 import { fuzzySelect } from "./fuzzy-select.js";
+import { renderRunOutputs } from "./pretty.js";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
 
 export { formatStreamText } from "./tui-format.js";
@@ -838,6 +839,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
 
     try {
         let result = await streamRun(db.adapter, runId, name, promptText, { childFailure });
+        let finalState = result.state;
         // The detached `up` process exits whenever the run pauses for a gate
         // (approval or human input). Resolve the gate via clack, resume the run
         // as a fresh process, and keep streaming. Repeat until the run finishes.
@@ -863,12 +865,18 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
             const view = runRow
                 ? await computeRunStateFromRow(db.adapter, runRow).catch(() => ({ state: runRow.status }))
                 : { state: undefined };
+            finalState = view.state ?? finalState;
             if (["succeeded", "failed", "cancelled"].includes(view.state)) break;
 
             const resumeChild = spawnUpProcess({ indexPath, entryFile: workflow.entryFile, runId, inputs, resume: true });
             const resumeFailure = childFailurePromise(resumeChild);
             resumeChild.unref();
             result = await streamRun(db.adapter, runId, name, promptText, { childFailure: resumeFailure });
+            finalState = result.state ?? finalState;
+        }
+        if (["succeeded", "failed", "cancelled"].includes(String(finalState))) {
+            log.message(pc.bold("Outputs"));
+            await renderRunOutputs(db.adapter, runId);
         }
     } finally {
         db.cleanup();
