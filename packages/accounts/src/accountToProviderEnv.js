@@ -25,11 +25,6 @@ export function accountToProviderEnv(account) {
                 throw new SmithersError("ACCOUNT_INVALID", `codex account "${account.label}" missing configDir`);
             }
             return { CODEX_HOME: account.configDir };
-        case "gemini":
-            if (!account.configDir) {
-                throw new SmithersError("ACCOUNT_INVALID", `gemini account "${account.label}" missing configDir`);
-            }
-            return { GEMINI_DIR: account.configDir };
         case "kimi":
             if (!account.configDir) {
                 throw new SmithersError("ACCOUNT_INVALID", `kimi account "${account.label}" missing configDir`);

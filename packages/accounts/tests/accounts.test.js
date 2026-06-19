@@ -272,8 +272,6 @@ describe("accountToProviderEnv", () => {
             .toEqual({ GEMINI_DIR: "/c" });
         expect(accountToProviderEnv({ label: "x", provider: "codex", configDir: "/c" }))
             .toEqual({ CODEX_HOME: "/c" });
-        expect(accountToProviderEnv({ label: "x", provider: "gemini", configDir: "/c" }))
-            .toEqual({ GEMINI_DIR: "/c" });
         expect(accountToProviderEnv({ label: "x", provider: "kimi", configDir: "/c" }))
             .toEqual({ KIMI_SHARE_DIR: "/c" });
     });
@@ -291,8 +289,6 @@ describe("accountToProviderEnv", () => {
         expect(() => accountToProviderEnv({ label: "x", provider: "antigravity" }))
             .toThrow(/missing configDir/);
         expect(() => accountToProviderEnv({ label: "x", provider: "codex" }))
-            .toThrow(/missing configDir/);
-        expect(() => accountToProviderEnv({ label: "x", provider: "gemini" }))
             .toThrow(/missing configDir/);
         expect(() => accountToProviderEnv({ label: "x", provider: "kimi" }))
             .toThrow(/missing configDir/);

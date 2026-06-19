@@ -3,7 +3,7 @@
  * authenticated by a CLI config directory; API providers are authenticated by
  * an API key.
  */
-type AccountProvider = "claude-code" | "antigravity" | "codex" | "gemini" | "kimi" | "anthropic-api" | "openai-api" | "gemini-api";
+type AccountProvider = "claude-code" | "antigravity" | "codex" | "kimi" | "anthropic-api" | "openai-api" | "gemini-api";
 
 /**
  * A single registered account. Either `configDir` (subscription providers) or
@@ -17,7 +17,7 @@ type Account$1 = {
     provider: AccountProvider;
     /**
      * Absolute path to the per-account CLI config directory. Set for
-     * subscription providers (claude-code, antigravity, codex, gemini, kimi).
+     * subscription providers (claude-code, antigravity, codex, kimi).
      */
     configDir?: string;
     /**

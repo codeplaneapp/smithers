@@ -4,7 +4,6 @@ const VALID_PROVIDERS = new Set([
     "claude-code",
     "antigravity",
     "codex",
-    "gemini",
     "kimi",
     "anthropic-api",
     "openai-api",
@@ -15,7 +14,6 @@ const SUBSCRIPTION_PROVIDERS = new Set([
     "claude-code",
     "antigravity",
     "codex",
-    "gemini",
     "kimi",
 ]);
 

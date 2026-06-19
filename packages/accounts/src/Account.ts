@@ -12,7 +12,7 @@ export type Account = {
   provider: AccountProvider;
   /**
    * Absolute path to the per-account CLI config directory. Set for
-   * subscription providers (claude-code, antigravity, codex, gemini, kimi).
+   * subscription providers (claude-code, antigravity, codex, kimi).
    */
   configDir?: string;
   /**
