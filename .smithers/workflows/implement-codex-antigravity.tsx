@@ -1,5 +1,5 @@
 // smithers-source: user
-// smithers-display-name: Implement Codex Gemini
+// smithers-display-name: Implement Codex Antigravity
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
@@ -18,7 +18,7 @@ const { Workflow, smithers } = createSmithers({
   review: reviewOutputSchema,
 });
 
-const codexGeminiOnly = [providers.codex, providers.codex1, providers.gemini1];
+const codexAntigravityOnly = [providers.codex, providers.codex1, providers.antigravity1];
 
 export default smithers((ctx) => {
   const validate = ctx.outputMaybe("validate", { nodeId: "impl:validate" });
@@ -46,13 +46,13 @@ export default smithers((ctx) => {
   const feedback = feedbackParts.length > 0 ? feedbackParts.join("\n\n") : null;
 
   return (
-    <Workflow name="implement-codex-gemini">
+    <Workflow name="implement-codex-antigravity">
       <ValidationLoop
         idPrefix="impl"
         prompt={ctx.input.prompt}
-        implementAgents={codexGeminiOnly}
-        validateAgents={codexGeminiOnly}
-        reviewAgents={codexGeminiOnly}
+        implementAgents={codexAntigravityOnly}
+        validateAgents={codexAntigravityOnly}
+        reviewAgents={codexAntigravityOnly}
         feedback={feedback}
         done={done}
         maxIterations={3}

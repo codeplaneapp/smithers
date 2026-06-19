@@ -1,5 +1,5 @@
 // smithers-source: user
-// smithers-display-name: Review Codex Gemini
+// smithers-display-name: Review Codex Antigravity
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
@@ -15,14 +15,14 @@ const { Workflow, smithers } = createSmithers({
   review: reviewOutputSchema,
 });
 
-const codexGeminiReviewers = [providers.codex, providers.codex1, providers.gemini1];
+const codexAntigravityReviewers = [providers.codex, providers.codex1, providers.antigravity1];
 
 export default smithers((ctx) => (
-  <Workflow name="review-codex-gemini">
+  <Workflow name="review-codex-antigravity">
     <Review
       idPrefix="review"
       prompt={ctx.input.prompt}
-      agents={codexGeminiReviewers}
+      agents={codexAntigravityReviewers}
     />
   </Workflow>
 ));

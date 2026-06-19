@@ -4,7 +4,6 @@ import {
   AntigravityAgent,
   ClaudeCodeAgent,
   CodexAgent,
-  GeminiAgent,
   KimiAgent,
   MergeQueue,
   Parallel,
@@ -162,10 +161,6 @@ const claude = new ClaudeCodeAgent({
   permissionMode: "bypassPermissions",
   dangerouslySkipPermissions: true,
 });
-const gemini = new GeminiAgent({
-  model: process.env.SMITHERS_STUDIO_GEMINI_MODEL ?? "gemini-3.1-pro-preview",
-  yolo: true,
-});
 const antigravity = new AntigravityAgent({
   model: process.env.SMITHERS_STUDIO_ANTIGRAVITY_MODEL ?? "gemini-3.1-pro-preview",
   yolo: true,
@@ -187,7 +182,6 @@ const availableAgents = {
   antigravity: commandExists("agy"),
   claude: commandExists("claude"),
   codex: commandExists("codex"),
-  gemini: process.env.SMITHERS_STUDIO_ENABLE_GEMINI === "1" && commandExists("gemini"),
   kimi: process.env.SMITHERS_STUDIO_ENABLE_KIMI === "1" && commandExists("kimi"),
 };
 
@@ -200,8 +194,7 @@ function availableChain(entries: Array<[keyof typeof availableAgents, AgentLike]
 
 const codexChain: AgentLike[] = availableChain([["codex", codex], ["claude", claude], ["kimi", kimi]]);
 const claudeChain: AgentLike[] = availableChain([["claude", claude], ["codex", codex], ["kimi", kimi]]);
-const geminiChain: AgentLike[] = availableChain([["gemini", gemini], ["claude", claude], ["codex", codex], ["kimi", kimi]]);
-const antigravityChain: AgentLike[] = availableChain([["antigravity", antigravity], ["gemini", gemini], ["claude", claude], ["codex", codex], ["kimi", kimi]]);
+const antigravityChain: AgentLike[] = availableChain([["antigravity", antigravity], ["claude", claude], ["codex", codex], ["kimi", kimi]]);
 const reviewChain: AgentLike[] = availableChain([["codex", codex], ["claude", claude], ["kimi", kimi]]);
 const discoveryChain: AgentLike[] = availableChain([["codex", codex], ["claude", claude], ["kimi", kimi]]);
 const agentTaskRetries = 3;

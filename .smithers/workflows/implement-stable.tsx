@@ -18,9 +18,9 @@ const { Workflow, smithers } = createSmithers({
   review: reviewOutputSchema,
 });
 
-const implementAgents = [providers.claude, providers.gemini1];
-const validateAgents = [providers.claudeSonnet, providers.gemini1];
-const reviewAgents = [providers.claude, providers.gemini1];
+const implementAgents = [providers.claude, providers.antigravity1];
+const validateAgents = [providers.claudeSonnet, providers.antigravity1];
+const reviewAgents = [providers.claude, providers.antigravity1];
 
 export default smithers((ctx) => {
   const validate = ctx.outputMaybe("validate", { nodeId: "impl:validate" });

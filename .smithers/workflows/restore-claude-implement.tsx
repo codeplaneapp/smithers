@@ -21,11 +21,11 @@ export default smithers(() => (
         const fs = await import("node:fs/promises");
         const path = await import("node:path");
 
-        const workflowPath = path.resolve(process.cwd(), ".smithers/workflows/implement-codex-gemini.tsx");
+        const workflowPath = path.resolve(process.cwd(), ".smithers/workflows/implement-codex-antigravity.tsx");
         const source = await fs.readFile(workflowPath, "utf8");
-        const codexGemini = "const codexGeminiOnly = [providers.codex, providers.codex1, providers.gemini1];";
+        const codexAntigravity = "const codexAntigravityOnly = [providers.codex, providers.codex1, providers.antigravity1];";
         const withClaude =
-          "const codexGeminiOnly = [providers.codex, providers.codex1, providers.gemini1, providers.claude, providers.claudeSonnet];";
+          "const codexAntigravityOnly = [providers.codex, providers.codex1, providers.antigravity1, providers.claude, providers.claudeSonnet];";
 
         if (source.includes(withClaude)) {
           return {
@@ -35,15 +35,15 @@ export default smithers(() => (
           };
         }
 
-        if (!source.includes(codexGemini)) {
-          throw new Error("Expected Codex/Gemini provider list was not found.");
+        if (!source.includes(codexAntigravity)) {
+          throw new Error("Expected Codex/Antigravity provider list was not found.");
         }
 
-        await fs.writeFile(workflowPath, source.replace(codexGemini, withClaude));
+        await fs.writeFile(workflowPath, source.replace(codexAntigravity, withClaude));
         return {
           filePath: workflowPath,
           restored: true,
-          message: "Added Claude providers back to implement-codex-gemini.",
+          message: "Added Claude providers back to implement-codex-antigravity.",
         };
       }}
     </Task>

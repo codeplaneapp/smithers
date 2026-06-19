@@ -19,7 +19,7 @@ const workingReviewers = [
   providers.claude,
   providers.codex,
   providers.codex1,
-  providers.gemini1,
+  providers.antigravity1,
 ];
 
 export default smithers((ctx) => (
