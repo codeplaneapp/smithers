@@ -218,7 +218,7 @@ describe("parser and formatter branches", () => {
         const out = formatUsageReports([
             {
                 accountLabel: "estimate",
-                provider: "gemini",
+                provider: "gemini-api",
                 authMode: "subscription",
                 source: "estimate",
                 stale: false,

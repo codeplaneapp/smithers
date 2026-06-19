@@ -38,7 +38,6 @@ async function probeFor(account) {
             return anthropicHeaderUsage(account);
         case "openai-api":
             return openaiHeaderUsage(account);
-        case "gemini":
         case "antigravity":
         case "gemini-api":
             return googleUsage(account);
