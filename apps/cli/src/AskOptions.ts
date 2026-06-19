@@ -1,6 +1,6 @@
 import type { SmithersToolSurface } from "@smithers-orchestrator/agents/agent-contract";
 
-export type AskAgentId = "claude" | "codex" | "kimi" | "antigravity" | "gemini" | "pi";
+export type AskAgentId = "claude" | "codex" | "kimi" | "antigravity" | "pi";
 
 export type AskOptions = {
     agent?: AskAgentId;

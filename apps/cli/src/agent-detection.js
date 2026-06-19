@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { listAccounts } from "@smithers-orchestrator/accounts";
@@ -52,27 +52,6 @@ const DETECTORS = [
         },
         apiKeys: [],
         setupHint: "Install the Antigravity CLI, run `agy`, and complete Google Sign-In.",
-    },
-    {
-        id: "gemini",
-        displayName: "Gemini",
-        binary: "gemini",
-        deprecated: true,
-        deprecationReason: "Gemini CLI is deprecated for individual/free users; use Antigravity CLI (`agy`) instead.",
-        authSignals: (homeDir, env) => {
-            const configDir = env.GEMINI_DIR ? resolve(env.GEMINI_DIR) : join(homeDir, ".gemini");
-            return [
-                join(configDir, "oauth_creds.json"),
-                join(configDir, "google_accounts.json"),
-            ];
-        },
-        apiKeys: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
-        projectTrust: (homeDir, env, cwd) => {
-            const configDir = env.GEMINI_DIR ? resolve(env.GEMINI_DIR) : join(homeDir, ".gemini");
-            const trustFile = join(configDir, "trustedFolders.json");
-            return readGeminiProjectTrust(trustFile, cwd);
-        },
-        setupHint: "Gemini CLI is deprecated. Install Antigravity CLI and run `agy`, or continue using Gemini only for legacy/enterprise setups.",
     },
     {
         id: "pi",
@@ -158,16 +137,13 @@ const SCAFFOLDED_PROVIDER_FILES = {
     opencode: "opencode",
     antigravity: "antigravity",
 };
-const LEGACY_SCAFFOLDED_PROVIDERS = {
-    gemini: "GeminiAgent",
-};
+const LEGACY_SCAFFOLDED_PROVIDERS = {};
 const LOCAL_SCAFFOLDED_PROVIDERS = {
     ...SCAFFOLDED_PROVIDERS,
     ...LEGACY_SCAFFOLDED_PROVIDERS,
 };
 const LOCAL_SCAFFOLDED_PROVIDER_FILES = {
     ...SCAFFOLDED_PROVIDER_FILES,
-    gemini: "gemini",
 };
 const TIER_PREFERENCES = {
     cheapFast: { order: ["claudeSonnet", "kimi", "vibe", "antigravity", "pi"], maxSize: 2 },
@@ -191,10 +167,6 @@ const CONSTRUCTORS = {
     antigravity: {
         importName: "AntigravityAgent",
         expr: "new SmithersAntigravityAgent({ cwd: process.cwd() })",
-    },
-    gemini: {
-        importName: "GeminiAgent",
-        expr: 'new SmithersGeminiAgent({ model: "gemini-3.1-pro-preview", cwd: process.cwd() })',
     },
     pi: {
         importName: "PiAgent",
@@ -278,53 +250,6 @@ function displayNameForProviderId(id) {
     return variantForId(id)?.displayName ?? detectorForId(id)?.displayName ?? id;
 }
 
-/**
- * @param {unknown} value
- * @returns {string[]}
- */
-function extractTrustedFolderPaths(value) {
-    if (Array.isArray(value)) {
-        return value.filter((entry) => typeof entry === "string");
-    }
-    if (!value || typeof value !== "object") {
-        return [];
-    }
-    return Object.entries(/** @type {Record<string, unknown>} */ (value))
-        .filter(([, trustValue]) => trustValue === true || trustValue === "TRUST_FOLDER")
-        .map(([path]) => path);
-}
-
-/**
- * @param {string} trustedPath
- * @param {string} cwd
- */
-function trustedPathMatchesCwd(trustedPath, cwd) {
-    const trusted = resolve(trustedPath);
-    const current = resolve(cwd);
-    return current === trusted || current.startsWith(trusted.endsWith(sep) ? trusted : `${trusted}${sep}`);
-}
-
-/**
- * @param {string} trustFile
- * @param {string} cwd
- * @returns {{ trusted: boolean; checks: string[] }}
- */
-function readGeminiProjectTrust(trustFile, cwd) {
-    let trusted = false;
-    if (existsSync(trustFile)) {
-        try {
-            const parsed = JSON.parse(readFileSync(trustFile, "utf8"));
-            trusted = extractTrustedFolderPaths(parsed).some((path) => trustedPathMatchesCwd(path, cwd));
-        }
-        catch {
-            trusted = false;
-        }
-    }
-    return {
-        trusted,
-        checks: [`project-trust:${trustFile}:${resolve(cwd)}:${trusted ? "yes" : "no"}`],
-    };
-}
 /**
  * @param {string} binary
  * @param {NodeJS.ProcessEnv} env
@@ -504,11 +429,10 @@ const ACCOUNT_PROVIDER_CLASSES = {
     "claude-code": "ClaudeCodeAgent",
     "antigravity": "AntigravityAgent",
     "codex": "CodexAgent",
-    "gemini": "GeminiAgent",
     "kimi": "KimiAgent",
     "anthropic-api": "ClaudeCodeAgent",
     "openai-api": "CodexAgent",
-    "gemini-api": "GeminiAgent",
+    "gemini-api": "OpenAIAgent",
 };
 
 /**
@@ -522,7 +446,6 @@ const ACCOUNT_PROVIDER_POOL = {
     "antigravity": "antigravity",
     "codex": "codex",
     "openai-api": "codex",
-    "gemini": "gemini",
     "gemini-api": "gemini",
     "kimi": "kimi",
 };
@@ -537,7 +460,6 @@ const ACCOUNT_PROVIDER_DEFAULT_MODEL = {
     "antigravity": undefined,
     "codex": "gpt-5.5",
     "openai-api": "gpt-5.5",
-    "gemini": "gemini-3.1-pro-preview",
     "gemini-api": "gemini-3.1-pro-preview",
     "kimi": "kimi-k2.6",
 };
@@ -629,7 +551,7 @@ function generateAccountsAgentsTs(accounts, env) {
     };
     poolLines.push(`  smart: [${membersForFamilies("claude", "codex").map((m) => `providers.${m}`).join(", ")}],`);
     poolLines.push(`  smartTool: [${membersForFamilies("claude", "codex").map((m) => `providers.${m}`).join(", ")}],`);
-    poolLines.push(`  cheapFast: [${membersForFamilies("kimi", "gemini", "codex", "claude").slice(0, 2).map((m) => `providers.${m}`).join(", ")}],`);
+    poolLines.push(`  cheapFast: [${membersForFamilies("kimi", "antigravity", "codex", "claude").slice(0, 2).map((m) => `providers.${m}`).join(", ")}],`);
     return [
         "// smithers-source: generated",
         "// Source of truth: ~/.smithers/accounts.json (managed via `smithers agent add|list|remove`)",
@@ -667,6 +589,9 @@ function renderAccountProviderLine(account, homeDir) {
     else if (account.apiKey) opts.push(`apiKey: ${JSON.stringify(account.apiKey)}`);
     if (account.provider === "codex" || account.provider === "openai-api") {
         opts.push("skipGitRepoCheck: true");
+    }
+    if (account.provider === "gemini-api") {
+        opts.push('baseURL: "https://generativelanguage.googleapis.com/v1beta/openai"');
     }
     opts.push("cwd: process.cwd()");
     return `  ${camel}: new Smithers${cls}({ ${opts.join(", ")} }),`;

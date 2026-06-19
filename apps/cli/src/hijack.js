@@ -30,7 +30,6 @@ function asNativeHijackEngine(value) {
     return value === "claude-code" ||
         value === "antigravity" ||
         value === "codex" ||
-        value === "gemini" ||
         value === "pi" ||
         value === "kimi" ||
         value === "forge" ||
@@ -149,14 +148,6 @@ export function buildHijackLaunchSpec(candidate) {
             env.CLAUDECODE = "";
         return {
             command: "claude",
-            args: ["--resume", candidate.resume],
-            cwd: candidate.cwd,
-            env,
-        };
-    }
-    if (candidate.engine === "gemini") {
-        return {
-            command: "gemini",
             args: ["--resume", candidate.resume],
             cwd: candidate.cwd,
             env,

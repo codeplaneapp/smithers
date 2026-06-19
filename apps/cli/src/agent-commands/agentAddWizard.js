@@ -8,7 +8,6 @@ const PROVIDER_CHOICES = [
     { value: "claude-code", label: "Claude Code (subscription)", hint: "Pro / Max plan via `claude` CLI" },
     { value: "antigravity", label: "Antigravity (subscription)", hint: "Google account via `agy` CLI" },
     { value: "codex", label: "Codex (subscription)", hint: "ChatGPT Plus/Pro via `codex` CLI" },
-    { value: "gemini", label: "Gemini (deprecated subscription)", hint: "Legacy/enterprise Google account via `gemini` CLI" },
     { value: "kimi", label: "Kimi (subscription)", hint: "OAuth via `kimi` CLI" },
     { value: "anthropic-api", label: "Anthropic API key", hint: "Pay-per-token via api.anthropic.com" },
     { value: "openai-api", label: "OpenAI API key", hint: "Pay-per-token via api.openai.com (used by Codex)" },
@@ -19,7 +18,6 @@ const SUBSCRIPTION_LOGIN_BIN = {
     "claude-code": "claude",
     "antigravity": "agy",
     "codex": "codex",
-    "gemini": "gemini",
     "kimi": "kimi",
 };
 
@@ -27,7 +25,6 @@ const SUBSCRIPTION_DIR_ENV_VAR = {
     "claude-code": "CLAUDE_CONFIG_DIR",
     "antigravity": "GEMINI_DIR",
     "codex": "CODEX_HOME",
-    "gemini": "GEMINI_DIR",
     "kimi": "KIMI_SHARE_DIR",
 };
 
@@ -42,7 +39,6 @@ const SUBSCRIPTION_LOGIN_RECIPE = {
     "claude-code": { args: [], postInstructions: "Inside Claude Code, type /login and follow the browser flow." },
     "antigravity": { args: (configDir) => ["--gemini_dir", configDir], postInstructions: "Antigravity will open Google Sign-In or print a browser authorization URL." },
     "codex": { args: ["login"] },
-    "gemini": { args: [], postInstructions: "Inside Gemini, type /auth (or follow the prompt) to sign in." },
     "kimi": { args: ["login"] },
 };
 

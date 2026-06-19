@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeGeminiBinary, writeFakeOpenCodeBinary, } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeOpenCodeBinary, } from "../../../packages/smithers/tests/e2e-helpers.js";
 /**
  * @param {string} homeDir
  * @param {string} binDir
@@ -81,7 +81,6 @@ test("smithers init orders role chains correctly when multiple local agent CLIs 
     writeFakeCodexBinary(binDir);
     writeFakeOpenCodeBinary(binDir);
     writeFakeAntigravityBinary(binDir);
-    writeFakeGeminiBinary(binDir);
     repo.write(".claude/.credentials.json", "{}\n");
     repo.write(".codex/auth.json", "{}\n");
     repo.write(".local/share/opencode/auth.json", "{}\n");
@@ -116,7 +115,7 @@ test("smithers init exits with a typed error when no usable agents are detected"
     expect(JSON.stringify(result.json)).toContain("codex");
     expect(JSON.stringify(result.json)).toContain("opencode");
     expect(JSON.stringify(result.json)).toContain("antigravity");
-    expect(JSON.stringify(result.json)).toContain("gemini");
+    expect(JSON.stringify(result.json)).not.toContain("Gemini");
     expect(JSON.stringify(result.json)).toContain("codex login");
 });
 
@@ -155,10 +154,9 @@ test("smithers init rejects OpenCode CLI when it is present but not authenticate
     expect(JSON.stringify(result.json)).toContain("opencode/auth.json");
 });
 
-test("smithers init does not auto-select deprecated Gemini", () => {
+test("smithers init ignores old Gemini CLI credentials", () => {
     const repo = createTempRepo();
     const binDir = createExecutableDir();
-    writeFakeGeminiBinary(binDir);
     repo.write(".gemini/oauth_creds.json", "{}\n");
     const untrusted = runSmithers(["init"], {
         cwd: repo.dir,
@@ -173,6 +171,6 @@ test("smithers init does not auto-select deprecated Gemini", () => {
         env: buildEnv(repo.dir, binDir),
     });
     expect(trusted.exitCode).toBe(4);
-    expect(JSON.stringify(trusted.json)).toContain("deprecated");
     expect(JSON.stringify(trusted.json)).toContain("Antigravity");
+    expect(JSON.stringify(trusted.json)).not.toContain("Gemini");
 });

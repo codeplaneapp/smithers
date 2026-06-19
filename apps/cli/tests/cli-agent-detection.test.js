@@ -2,7 +2,7 @@ import { describe, expect, onTestFinished, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createExecutableDir, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeGeminiBinary, writeFakeOpenCodeBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { createExecutableDir, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeOpenCodeBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
 import { ask } from "../src/ask.js";
 // We test the exported pure-logic functions by importing the module.
 // detectAvailableAgents calls spawnSync so we test the scoring/status logic
@@ -38,12 +38,11 @@ describe("detectAvailableAgents", () => {
         expect(ids).toContain("codex");
         expect(ids).toContain("opencode");
         expect(ids).toContain("antigravity");
-        expect(ids).toContain("gemini");
         expect(ids).toContain("pi");
         expect(ids).toContain("kimi");
         expect(ids).toContain("amp");
         expect(ids).toContain("vibe");
-        expect(results.length).toBe(9);
+        expect(results.length).toBe(8);
     });
     test("each result has required fields", () => {
         const results = detectAvailableAgents({});
@@ -120,22 +119,6 @@ describe("detectAvailableAgents", () => {
             cwd: home,
         })).toThrow("required default pools");
     });
-    test("google api key detected for gemini", () => {
-        const results = detectAvailableAgents({
-            HOME: "/nonexistent-path-xyz",
-            GOOGLE_API_KEY: "test-key",
-        });
-        const gemini = results.find((r) => r.id === "gemini");
-        expect(gemini.hasApiKeySignal).toBe(true);
-    });
-    test("GEMINI_API_KEY also detected for gemini", () => {
-        const results = detectAvailableAgents({
-            HOME: "/nonexistent-path-xyz",
-            GEMINI_API_KEY: "test-key",
-        });
-        const gemini = results.find((r) => r.id === "gemini");
-        expect(gemini.hasApiKeySignal).toBe(true);
-    });
     test("Antigravity detects agy plus antigravity-cli config", () => {
         const home = tempHome();
         const binDir = createExecutableDir();
@@ -161,19 +144,6 @@ describe("detectAvailableAgents", () => {
         expect(source).toContain("AntigravityAgent as SmithersAntigravityAgent");
         expect(source).toContain("antigravity: new SmithersAntigravityAgent");
         expect(source).not.toContain("./agents/antigravity");
-    });
-    test("generated agents.ts preserves an existing legacy Gemini scaffold", () => {
-        const source = generateAgentsTs({
-            HOME: "/nonexistent-path-xyz",
-            PATH: "/usr/bin:/bin",
-        }, {
-            preserveProviderIds: ["gemini"],
-            scaffoldProviderIds: ["gemini"],
-        });
-        expect(source).toContain('import { GeminiAgent } from "./agents/gemini";');
-        expect(source).toContain('export { GeminiAgent } from "./agents/gemini";');
-        expect(source).toContain("gemini: GeminiAgent");
-        expect(source).not.toContain("gemini: new SmithersGeminiAgent");
     });
     test("checks array includes binary check", () => {
         const results = detectAvailableAgents({});
@@ -214,31 +184,10 @@ describe("detectAvailableAgents", () => {
         expect(codex.usable).toBe(false);
         expect(codex.unusableReasons.join(" ")).toContain("missing credentials");
     });
-    test("Gemini requires the current project to be trusted", () => {
-        const home = tempHome();
-        const binDir = createExecutableDir();
-        writeFakeGeminiBinary(binDir);
-        mkdirSync(join(home, ".gemini"), { recursive: true });
-        writeFileSync(join(home, ".gemini", "oauth_creds.json"), "{}\n");
-        const cwd = join(home, "repo");
-        mkdirSync(cwd, { recursive: true });
-        const untrusted = detectAvailableAgents(envWithPath(home, binDir), { cwd });
-        const untrustedGemini = untrusted.find((r) => r.id === "gemini");
-        expect(untrustedGemini.hasBinary).toBe(true);
-        expect(untrustedGemini.hasAuthSignal).toBe(true);
-        expect(untrustedGemini.hasProjectTrustSignal).toBe(false);
-        expect(untrustedGemini.usable).toBe(false);
-        writeFileSync(join(home, ".gemini", "trustedFolders.json"), JSON.stringify({ [cwd]: "TRUST_FOLDER" }));
-        const trusted = detectAvailableAgents(envWithPath(home, binDir), { cwd });
-        const trustedGemini = trusted.find((r) => r.id === "gemini");
-        expect(trustedGemini.hasProjectTrustSignal).toBe(true);
-        expect(trustedGemini.usable).toBe(true);
-    });
-    test("smithers ask does not auto-select deprecated Gemini", async () => {
+    test("smithers ask does not list Gemini CLI even if old gemini files exist", async () => {
         const home = tempHome();
         const binDir = createExecutableDir();
         writeFakeAntigravityBinary(binDir);
-        writeFakeGeminiBinary(binDir);
         const cwd = join(home, "repo");
         mkdirSync(cwd, { recursive: true });
         mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });

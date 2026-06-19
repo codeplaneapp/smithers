@@ -7,7 +7,6 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { AntigravityAgent } from "@smithers-orchestrator/agents/AntigravityAgent";
 import { ClaudeCodeAgent } from "@smithers-orchestrator/agents/ClaudeCodeAgent";
 import { CodexAgent } from "@smithers-orchestrator/agents/CodexAgent";
-import { GeminiAgent } from "@smithers-orchestrator/agents/GeminiAgent";
 import { KimiAgent } from "@smithers-orchestrator/agents/KimiAgent";
 import { PiAgent } from "@smithers-orchestrator/agents/PiAgent";
 import { SmithersError } from "@smithers-orchestrator/errors";
@@ -21,7 +20,7 @@ import { describeUnavailableAgent, detectAvailableAgents, formatNoUsableAgentsMe
  */
 /** @typedef {import("@smithers-orchestrator/agents/agent-contract").SmithersToolSurface} SmithersToolSurface */
 
-const ASK_AGENT_IDS = ["claude", "codex", "kimi", "antigravity", "gemini", "pi"];
+const ASK_AGENT_IDS = ["claude", "codex", "kimi", "antigravity", "pi"];
 const DEFAULT_SERVER_NAME = "smithers";
 /**
  * @param {AgentAvailability["id"]} value
@@ -51,8 +50,6 @@ function resolveBootstrapMode(agentId, noMcp = false) {
             return "mcp-config-file";
         case "codex":
             return "mcp-config-inline";
-        case "gemini":
-            return "mcp-allow-list";
         case "antigravity":
         case "pi":
             return "prompt-only";
@@ -358,19 +355,6 @@ function buildAgent(selection, bootstrap, systemPrompt, cwd) {
                 },
             };
         }
-        case "gemini":
-            return {
-                agent: new GeminiAgent({
-                    cwd,
-                    model: "gemini-3.1-pro-preview",
-                    allowedMcpServerNames: bootstrap.mode === "mcp-allow-list"
-                        ? bootstrap.allowedMcpServerNames
-                        : undefined,
-                    systemPrompt,
-                    approvalMode: "yolo",
-                }),
-                cleanup() { },
-            };
         case "antigravity":
             return {
                 agent: new AntigravityAgent({

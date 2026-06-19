@@ -1372,7 +1372,7 @@ const chatOptions = z.object({
     stderr: z.boolean().default(true).describe("Include agent stderr output"),
 });
 const chatCreateOptions = z.object({
-    agent: z.enum(["claude-code", "codex", "antigravity", "gemini"]).describe("CLI agent engine to launch"),
+    agent: z.enum(["claude-code", "codex", "antigravity"]).describe("CLI agent engine to launch"),
     cwd: z.string().optional().describe("Working directory for the chat session (default: current directory)"),
 });
 const inspectArgs = z.object({
@@ -2433,7 +2433,7 @@ const agentsCli = Cli.create({
     description: "Register a Smithers agent account (interactive wizard, or non-interactive via flags).",
     options: z.object({
         provider: z.enum([
-            "claude-code", "antigravity", "codex", "gemini", "kimi",
+            "claude-code", "antigravity", "codex", "kimi",
             "anthropic-api", "openai-api", "gemini-api",
         ]).optional().describe("Provider id; omit to launch the interactive wizard"),
         label: z.string().optional().describe("Unique label, e.g. 'claude-work'"),
@@ -5461,7 +5461,7 @@ const cli = Cli.create({
         question: z.string().optional().describe("The question to ask"),
     }),
     options: z.object({
-        agent: z.enum(["claude", "codex", "antigravity", "gemini", "kimi", "pi"]).optional().describe("Explicitly select which agent CLI to use"),
+        agent: z.enum(["claude", "codex", "antigravity", "kimi", "pi"]).optional().describe("Explicitly select which agent CLI to use"),
         listAgents: z.boolean().default(false).describe("List detected agents plus their bootstrap mode and exit"),
         dumpPrompt: z.boolean().default(false).describe("Print the generated system prompt and exit"),
         toolSurface: z.enum(["semantic", "raw"]).default("semantic").describe("Choose which Smithers MCP tool surface to expose"),
@@ -6356,7 +6356,7 @@ const CHAT_CREATE_PROMPT = [
     'When you are completely finished and want to hand control back to Smithers, return ONLY this raw JSON object with no prose, markdown, or code fence: {}.',
 ].join("\n\n");
 /**
- * @param {"claude-code" | "codex" | "antigravity" | "gemini"} agentId
+ * @param {"claude-code" | "codex" | "antigravity"} agentId
  * @param {string} cwd
  */
 async function createChatAgent(agentId, cwd) {
@@ -6382,17 +6382,10 @@ async function createChatAgent(agentId, cwd) {
                 cwd,
             });
         }
-        case "gemini": {
-            const { GeminiAgent } = await import("@smithers-orchestrator/agents/GeminiAgent");
-            return new GeminiAgent({
-                cwd,
-                model: "gemini-3.1-pro-preview",
-            });
-        }
     }
 }
 /**
- * @param {"claude-code" | "codex" | "antigravity" | "gemini"} agentId
+ * @param {"claude-code" | "codex" | "antigravity"} agentId
  * @param {string} cwd
  * @returns {Promise<import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>>}
  */

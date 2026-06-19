@@ -14,7 +14,6 @@ const SUBSCRIPTION_LOGIN_BIN = {
     "claude-code": "claude",
     "antigravity": "agy",
     "codex": "codex",
-    "gemini": "gemini",
     "kimi": "kimi",
     "anthropic-api": null,
     "openai-api": null,
@@ -31,7 +30,6 @@ const SUBSCRIPTION_LOGIN_ARGS = {
     "claude-code": [],
     "antigravity": (configDir) => ["--gemini_dir", configDir],
     "codex": ["login"],
-    "gemini": [],
     "kimi": ["login"],
 };
 
@@ -43,7 +41,6 @@ const SUBSCRIPTION_DIR_ENV_VAR = {
     "claude-code": "CLAUDE_CONFIG_DIR",
     "antigravity": "GEMINI_DIR",
     "codex": "CODEX_HOME",
-    "gemini": "GEMINI_DIR",
     "kimi": "KIMI_SHARE_DIR",
     "anthropic-api": null,
     "openai-api": null,
