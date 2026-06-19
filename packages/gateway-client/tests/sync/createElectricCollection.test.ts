@@ -22,7 +22,7 @@ import type { GatewayMemoryFactRow } from "../../src/sync/GatewayMemoryFactRow.t
 
 type FakeMessage =
   | { value: Record<string, unknown>; old_value?: Record<string, unknown>; headers: { operation: "insert" | "update" | "delete" } }
-  | { headers: { control: "up-to-date" | "must-refetch" } };
+  | { headers: { control: "up-to-date" | "must-refetch" | "snapshot-end" } };
 
 /** A controllable stand-in for the Electric ShapeStream the code lazy-imports. */
 type FakeStreamControl = {
@@ -247,27 +247,46 @@ describe("createElectricCollection", () => {
     await waitFor(() => collection.size === 0);
   });
 
-  // REGRESSION (codex P2 finding 1): the INITIAL snapshot must DELETE keys the
-  // collection holds but the snapshot omits. Live (non-snapshot) batches must NOT
-  // reconcile — they delete only via explicit delete messages.
-  test("initial snapshot reconciles — drops a key the snapshot omits, then live batches do not", async () => {
+  // REGRESSION (P5 reconcile-phase fix): mirrors the EXACT wire protocol the
+  // cloud-electric stack emits — the initial `offset=-1` snapshot response ends
+  // with a `snapshot-end` control (NOT `up-to-date`); the FIRST `up-to-date`
+  // only arrives on the subsequent live/catch-up response. So `snapshot-end` is
+  // the genuine reconcile boundary, and every live `up-to-date` after it must
+  // apply its batch verbatim WITHOUT reconciling.
+  //
+  // The original fix reconciled on the first `up-to-date` and broke the live
+  // tail: with the snapshot actually terminated by `snapshot-end`, the snapshot
+  // rows stayed buffered until the live `up-to-date`, and reconciling there made
+  // the boundary fragile. This pins the boundary to `snapshot-end`.
+  test("snapshot-end reconciles — drops a key the snapshot omits; live up-to-dates do NOT", async () => {
     const collection = createCollection<GatewayMemoryFactRow, string>(
       createElectricCollection(memoryDef(), { shapeUrl: "http://localhost:3000/v1/shape" }),
     );
     const preload = collection.preload();
     await waitFor(() => activeControl !== null);
 
-    // First snapshot establishes two rows (simulating two cached/hydrated rows).
+    // Pre-seed two rows the way a persisted cache hydrates BEFORE sync (here via
+    // a first snapshot), so the second snapshot can prove the reconcile evicts a
+    // stale one. Initial snapshot ends with `snapshot-end`, the real wire format.
     activeControl!.push([
       { value: rawRow({ key: "stale/gone" }), headers: { operation: "insert" } },
       { value: rawRow({ key: "kept/here" }), headers: { operation: "insert" } },
-      { headers: { control: "up-to-date" } },
+      { headers: { control: "snapshot-end" } },
     ]);
     await preload;
     expect(collection.size).toBe(2);
 
-    // A LIVE batch (after the initial snapshot) inserts one row WITHOUT carrying
-    // the other current keys — it must NOT reconcile them away.
+    // The live/catch-up response that follows the snapshot ends with `up-to-date`
+    // and (here) carries no new rows. It must NOT reconcile the snapshot's rows
+    // away.
+    activeControl!.push([{ headers: { control: "up-to-date" } }]);
+    await waitFor(() => collection.size === 2);
+    expect(collection.has("global:stale/gone")).toBe(true);
+    expect(collection.has("global:kept/here")).toBe(true);
+
+    // A LIVE batch (a real shape-tail insert) terminated by `up-to-date` adds one
+    // row WITHOUT carrying the other current keys. If the code reconciled on this
+    // `up-to-date` it would delete `stale/gone` + `kept/here`. It must not.
     activeControl!.push([
       { value: rawRow({ key: "live/added" }), headers: { operation: "insert" } },
       { headers: { control: "up-to-date" } },
@@ -278,38 +297,139 @@ describe("createElectricCollection", () => {
     expect(collection.has("global:live/added")).toBe(true);
   });
 
-  // The persistence scenario from finding 1: a row deleted in Postgres while the
-  // app was closed is hydrated from the SQLite cache, then a `must-refetch` (or
-  // re-subscribe) snapshot that omits it must reconcile it OUT — not leave it
-  // stale forever. `must-refetch` re-arms the same reconcile the initial snapshot
-  // uses, so we drive the persisted-stale-key removal through it.
-  test("must-refetch snapshot reconciles a cache-hydrated key absent from Postgres", async () => {
+  // The live-tail regression in miniature: a NON-empty initial snapshot, then a
+  // string of live `up-to-date` batches. Every live up-to-date that omits the
+  // existing rows must leave them intact (reconcile fires ONCE, at snapshot-end).
+  test("a stream of live up-to-dates never reconciles existing rows away", async () => {
     const collection = createCollection<GatewayMemoryFactRow, string>(
       createElectricCollection(memoryDef(), { shapeUrl: "http://localhost:3000/v1/shape" }),
     );
     const preload = collection.preload();
     await waitFor(() => activeControl !== null);
 
-    // Initial snapshot has two rows; one of them ("deleted-while-offline") will
-    // be gone from Postgres by the time the shape re-snapshots.
+    activeControl!.push([
+      { value: rawRow({ key: "seed/1" }), headers: { operation: "insert" } },
+      { value: rawRow({ key: "seed/2" }), headers: { operation: "insert" } },
+      { value: rawRow({ key: "seed/3" }), headers: { operation: "insert" } },
+      { headers: { control: "snapshot-end" } },
+    ]);
+    await preload;
+    expect(collection.size).toBe(3);
+
+    // Three live up-to-dates: one empty heartbeat, then a live insert, then an
+    // unrelated live update. None of them mention the original seed rows; all
+    // three seeds must survive every one.
+    activeControl!.push([{ headers: { control: "up-to-date" } }]);
+    activeControl!.push([
+      { value: rawRow({ key: "live/new" }), headers: { operation: "insert" } },
+      { headers: { control: "up-to-date" } },
+    ]);
+    activeControl!.push([
+      { value: rawRow({ key: "live/new", value_json: '"changed"' }), headers: { operation: "update" } },
+      { headers: { control: "up-to-date" } },
+    ]);
+    await waitFor(() => collection.size === 4);
+    expect(collection.has("global:seed/1")).toBe(true);
+    expect(collection.has("global:seed/2")).toBe(true);
+    expect(collection.has("global:seed/3")).toBe(true);
+    expect(collection.get("global:live/new")?.valueJson).toBe('"changed"');
+  });
+
+  // Fallback boundary: a server/version that folds the snapshot terminator into
+  // the first `up-to-date` (no `snapshot-end`) must still reconcile on that first
+  // up-to-date — but only that first one. This covers the empty-shape case too.
+  test("first up-to-date reconciles when no snapshot-end is emitted; later ones do not", async () => {
+    const collection = createCollection<GatewayMemoryFactRow, string>(
+      createElectricCollection(memoryDef(), { shapeUrl: "http://localhost:3000/v1/shape" }),
+    );
+    const preload = collection.preload();
+    await waitFor(() => activeControl !== null);
+
+    // Snapshot terminated by `up-to-date` (no snapshot-end). Establishes 2 rows.
+    activeControl!.push([
+      { value: rawRow({ key: "a" }), headers: { operation: "insert" } },
+      { value: rawRow({ key: "b" }), headers: { operation: "insert" } },
+      { headers: { control: "up-to-date" } },
+    ]);
+    await preload;
+    expect(collection.size).toBe(2);
+
+    // A later live `up-to-date` that omits both rows must NOT reconcile them out.
+    activeControl!.push([
+      { value: rawRow({ key: "c" }), headers: { operation: "insert" } },
+      { headers: { control: "up-to-date" } },
+    ]);
+    await waitFor(() => collection.size === 3);
+    expect(collection.has("global:a")).toBe(true);
+    expect(collection.has("global:b")).toBe(true);
+    expect(collection.has("global:c")).toBe(true);
+  });
+
+  // The persistence scenario from finding 1, via `must-refetch`: a row deleted in
+  // Postgres while the app was closed is hydrated from the SQLite cache, then a
+  // `must-refetch` re-enters the snapshot phase and the fresh snapshot that omits
+  // it reconciles it OUT — not leaving it stale forever.
+  test("must-refetch re-enters snapshot phase and reconciles a cache-hydrated key absent from Postgres", async () => {
+    const collection = createCollection<GatewayMemoryFactRow, string>(
+      createElectricCollection(memoryDef(), { shapeUrl: "http://localhost:3000/v1/shape" }),
+    );
+    const preload = collection.preload();
+    await waitFor(() => activeControl !== null);
+
+    // Initial snapshot has two rows; one ("deleted-while-offline") will be gone
+    // from Postgres by the time the shape re-snapshots.
     activeControl!.push([
       { value: rawRow({ key: "survives" }), headers: { operation: "insert" } },
       { value: rawRow({ key: "deleted-while-offline" }), headers: { operation: "insert" } },
-      { headers: { control: "up-to-date" } },
+      { headers: { control: "snapshot-end" } },
     ]);
     await preload;
     expect(collection.size).toBe(2);
     expect(collection.has("global:deleted-while-offline")).toBe(true);
 
-    // Shape rotation: must-refetch, then a fresh snapshot that no longer carries
-    // the deleted row (Postgres truth). Reconcile must remove it.
+    // Shape rotation: must-refetch (re-enters snapshot phase), then a fresh
+    // snapshot that no longer carries the deleted row, closed by `snapshot-end`.
+    // Reconcile must remove it.
     activeControl!.push([
       { headers: { control: "must-refetch" } },
       { value: rawRow({ key: "survives" }), headers: { operation: "insert" } },
-      { headers: { control: "up-to-date" } },
+      { headers: { control: "snapshot-end" } },
     ]);
     await waitFor(() => collection.size === 1);
     expect(collection.has("global:survives")).toBe(true);
     expect(collection.has("global:deleted-while-offline")).toBe(false);
+  });
+
+  // Boundary across separate callbacks: the snapshot inserts and their
+  // `snapshot-end` arrive in ONE `subscribe` callback, the live `up-to-date`
+  // arrives in a LATER one — exactly as `@electric-sql/client` publishes the
+  // `offset=-1` response and the catch-up response separately. Reconcile must
+  // fire on the snapshot-end callback (so `markReady`/preload resolves there),
+  // and the later live callback must apply incrementally.
+  test("reconciles on the snapshot-end callback even when up-to-date arrives in a later callback", async () => {
+    const collection = createCollection<GatewayMemoryFactRow, string>(
+      createElectricCollection(memoryDef(), { shapeUrl: "http://localhost:3000/v1/shape" }),
+    );
+    const preload = collection.preload();
+    await waitFor(() => activeControl !== null);
+
+    // Callback #1: the snapshot response (inserts + snapshot-end). preload must
+    // resolve off THIS callback — the catch-up `up-to-date` has not arrived yet.
+    activeControl!.push([
+      { value: rawRow({ key: "only/row" }), headers: { operation: "insert" } },
+      { headers: { control: "snapshot-end" } },
+    ]);
+    await preload;
+    expect(collection.status).toBe("ready");
+    expect(collection.size).toBe(1);
+
+    // Callback #2: the catch-up/live response carrying a live insert + up-to-date.
+    activeControl!.push([
+      { value: rawRow({ key: "live/later" }), headers: { operation: "insert" } },
+      { headers: { control: "up-to-date" } },
+    ]);
+    await waitFor(() => collection.size === 2);
+    expect(collection.has("global:only/row")).toBe(true);
+    expect(collection.has("global:live/later")).toBe(true);
   });
 });

@@ -108,6 +108,10 @@ function isUpToDate(message: ElectricMessage): message is ElectricControlMessage
   return (message as ElectricControlMessage).headers?.control === "up-to-date";
 }
 
+function isSnapshotEnd(message: ElectricMessage): message is ElectricControlMessage {
+  return (message as ElectricControlMessage).headers?.control === "snapshot-end";
+}
+
 function isMustRefetch(message: ElectricMessage): message is ElectricControlMessage {
   return (message as ElectricControlMessage).headers?.control === "must-refetch";
 }
@@ -167,35 +171,53 @@ export function createElectricCollection<TRow extends object, TKey extends strin
       sync: ({ begin, write, commit, markReady, collection }) => {
         const controller = new AbortController();
         const signal = controller.signal;
-        // Electric delivers a snapshot as a burst of change messages followed by
-        // an `up-to-date` control. We buffer one transaction's worth of changes
-        // and flush on each `up-to-date`, so the collection commits atomically
-        // (snapshot first, then each live batch).
+        // Electric drives this collection in two phases — exactly the split
+        // `createGatewayCollection` makes between its initial RPC load and its
+        // live WS stream:
+        //
+        //   1. SNAPSHOT phase. The first response (`offset=-1`) carries every
+        //      current row as a burst of `insert` change messages terminated by
+        //      a `snapshot-end` control. It carries NO delete messages for rows
+        //      that vanished while we were offline. Because Electric collections
+        //      are wrapped in `withPersistence`, the collection is hydrated from
+        //      the SQLite cache BEFORE sync runs — so a snapshot that merely
+        //      upserts present rows would leave a since-deleted (but cached) key
+        //      stale forever. At the snapshot boundary we therefore RECONCILE:
+        //      also DELETE any collection key the snapshot did not carry (a full
+        //      reconcile, mirroring `createGatewayCollection`'s `replaceRows`).
+        //
+        //   2. LIVE phase. After the snapshot, the long-poll tail delivers
+        //      incremental batches each terminated by an `up-to-date` control.
+        //      They carry explicit insert/update/delete messages, so they are
+        //      applied verbatim and MUST NOT reconcile — Electric emits an
+        //      `up-to-date` after EVERY live batch, so reconciling on those
+        //      would wrongly delete every row a batch happened not to mention
+        //      (a freshly live-streamed insert, or the entire existing set).
+        //
+        // The true snapshot boundary is `snapshot-end`. As a fallback, while we
+        // are still in the snapshot phase the FIRST `up-to-date` also closes it
+        // (covers an empty shape, or a server/version that folds the terminator
+        // into `up-to-date` instead of emitting `snapshot-end`). A `must-refetch`
+        // (server rotated/cleared the shape) drops the live phase and RE-ENTERS
+        // the snapshot phase, so the fresh snapshot that follows is reconciled
+        // against the (now stale) cache again.
         let pending: ElectricChangeMessage[] = [];
         let ready = false;
-        // The INITIAL `up-to-date` closes a full snapshot that carries every
-        // current row but NO delete messages for rows that vanished while we
-        // were offline. Because Electric collections are wrapped in
-        // `withPersistence`, the collection is hydrated from the SQLite cache
-        // BEFORE sync — so a snapshot that merely upserts present rows would
-        // leave a since-deleted (but cached) key stale forever. On a reconcile
-        // boundary we therefore also DELETE any collection key absent from the
-        // snapshot (a full reconcile, mirroring `createGatewayCollection`'s
-        // `replaceRows`). `must-refetch` (server cleared the shape) re-arms it.
-        // Live incremental batches after the snapshot do NOT reconcile — they
-        // carry explicit delete messages, which are applied normally.
-        let reconcileNext = true;
+        // `true` while consuming the initial (or post-`must-refetch`) snapshot;
+        // the snapshot-closing flush reconciles, then flips this to `false`.
+        let inSnapshotPhase = true;
 
         const handleError = (cause: unknown) => {
           if (signal.aborted) return;
           config.onError?.(asError(cause));
         };
 
-        const flush = () => {
+        // Commit one buffered batch. `reconcile` is true only for the flush that
+        // closes the snapshot phase: it additionally drops collection keys the
+        // snapshot omitted. Live flushes pass `false` and apply changes verbatim.
+        const flush = (reconcile: boolean) => {
           const batch = pending;
           pending = [];
-          const reconcile = reconcileNext;
-          reconcileNext = false;
           // Resolve each change to the typed row + the collection's key, then
           // collapse inserts/updates the same way the gateway path does (no-op
           // writes are skipped; an insert onto an existing key becomes an update).
@@ -280,12 +302,22 @@ export function createElectricCollection<TRow extends object, TKey extends strin
                   pending.push(message);
                 } else if (isMustRefetch(message)) {
                   // Server rotated/cleared the shape: drop any buffered changes
-                  // and treat the fresh snapshot that follows as a full reconcile
-                  // (the post-`must-refetch` `up-to-date` carries the new truth).
+                  // and re-enter the snapshot phase. The fresh snapshot that
+                  // follows is reconciled against the cache as a new initial load.
                   pending = [];
-                  reconcileNext = true;
+                  inSnapshotPhase = true;
+                } else if (isSnapshotEnd(message)) {
+                  // Genuine end of the initial (or post-`must-refetch`) snapshot:
+                  // flush WITH a full reconcile, then switch to incremental live.
+                  flush(true);
+                  inSnapshotPhase = false;
                 } else if (isUpToDate(message)) {
-                  flush();
+                  // In the snapshot phase (no `snapshot-end` seen) the first
+                  // `up-to-date` closes the snapshot → reconcile once. Every
+                  // later (live) `up-to-date` applies its batch verbatim.
+                  const reconcile = inSnapshotPhase;
+                  inSnapshotPhase = false;
+                  flush(reconcile);
                 }
               }
             }, handleError);
