@@ -86,6 +86,39 @@ const RUN_WORKFLOW_INPUT_MAX_DEPTH = 32;
 const RUN_WORKFLOW_INPUT_MAX_ARRAY_LENGTH = 512;
 const RUN_WORKFLOW_INPUT_MAX_STRING_LENGTH = 64 * 1024;
 /**
+ * @param {unknown} agent
+ * @returns {agent is { preflight: (options?: Record<string, unknown>) => Promise<unknown> }}
+ */
+function isPreflightCapableAgent(agent) {
+    return Boolean(agent &&
+        typeof agent === "object" &&
+        typeof agent.preflight === "function");
+}
+/**
+ * @param {{ preflight: (options?: Record<string, unknown>) => Promise<unknown> }} agent
+ * @param {Record<string, unknown>} options
+ * @param {WeakMap<object, Promise<void>> | undefined} cache
+ * @returns {Promise<{ cached: boolean }>}
+ */
+async function runAgentPreflightOnce(agent, options, cache) {
+    const agentObject = /** @type {object} */ (agent);
+    if (!cache) {
+        await agent.preflight(options);
+        return { cached: false };
+    }
+    const existing = cache.get(agentObject);
+    if (existing) {
+        await existing;
+        return { cached: true };
+    }
+    const promise = Promise.resolve()
+        .then(() => agent.preflight(options))
+        .then(() => undefined);
+    cache.set(agentObject, promise);
+    await promise;
+    return { cached: false };
+}
+/**
  * @param {AgentCliActionKind} kind
  * @returns {boolean}
  */
@@ -2583,7 +2616,7 @@ async function cancelStaleAttempts(adapter, runId) {
  * @param {Map<string, TaskDescriptor>} descriptorMap
  * @param {SQLiteTable} inputTable
  * @param {EventBus} eventBus
- * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number; }} toolConfig
+ * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number; agentPreflightCache?: WeakMap<object, Promise<void>>; }} toolConfig
  * @param {string} workflowName
  * @param {boolean} cacheEnabled
  * @param {AbortSignal} [signal]
@@ -3206,6 +3239,62 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 await Effect.runPromise(adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
                     metaJson: JSON.stringify(attemptMeta),
                 }));
+                if (isPreflightCapableAgent(effectiveAgent)) {
+                    attemptMeta.agentPreflight = {
+                        checked: true,
+                        status: "pending",
+                    };
+                    try {
+                        const preflight = await runAgentPreflightOnce(effectiveAgent, {
+                            rootDir: taskRoot,
+                            maxOutputBytes: toolConfig.maxOutputBytes,
+                            timeout: desc.timeoutMs
+                                ? { totalMs: desc.timeoutMs }
+                                : undefined,
+                            taskContext: {
+                                runId,
+                                nodeId: desc.nodeId,
+                                iteration: desc.iteration,
+                                attempt: attemptNo,
+                            },
+                        }, toolConfig.agentPreflightCache);
+                        attemptMeta.agentPreflight = {
+                            checked: true,
+                            status: "passed",
+                            cached: preflight.cached,
+                        };
+                    }
+                    catch (error) {
+                        attemptMeta.agentPreflight = {
+                            checked: true,
+                            status: "failed",
+                        };
+                        if (error instanceof SmithersError &&
+                            error.details?.failureRetryable === false) {
+                            throw error;
+                        }
+                        const agentLabel = attemptMeta.agentId ??
+                            attemptMeta.agentEngine ??
+                            "unknown";
+                        if (error instanceof SmithersError) {
+                            throw new SmithersError(error.code ?? "AGENT_CONFIG_INVALID", error.summary ?? error.message, {
+                                ...error.details,
+                                failureRetryable: false,
+                                preflight: true,
+                                agentId: attemptMeta.agentId ?? error.details?.agentId,
+                                agentEngine: attemptMeta.agentEngine ?? error.details?.agentEngine,
+                                agentModel: attemptMeta.agentModel ?? error.details?.agentModel,
+                            }, { cause: error });
+                        }
+                        throw new SmithersError("AGENT_CONFIG_INVALID", `Agent "${agentLabel}" failed preflight: ${error instanceof Error ? error.message : String(error)}`, {
+                            failureRetryable: false,
+                            preflight: true,
+                            agentId: attemptMeta.agentId ?? undefined,
+                            agentEngine: attemptMeta.agentEngine ?? undefined,
+                            agentModel: attemptMeta.agentModel ?? undefined,
+                        }, { cause: error });
+                    }
+                }
                 const activeCliActions = new Set();
                 let conversationMessages = guidedResumeMessages ? [...guidedResumeMessages] : null;
                 /**
@@ -4735,6 +4824,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         allowNetwork,
         maxOutputBytes,
         toolTimeoutMs,
+        agentPreflightCache: new WeakMap(),
         traceContext: {
             workflowPath: resolvedWorkflowPath ?? opts.workflowPath ?? null,
             workflowHash: runMetadata.workflowHash ?? null,
@@ -6141,6 +6231,7 @@ async function runWorkflowBodyLegacy(workflow, opts) {
             allowNetwork,
             maxOutputBytes,
             toolTimeoutMs,
+            agentPreflightCache: new WeakMap(),
             traceContext: {
                 workflowPath: resolvedWorkflowPath ?? opts.workflowPath ?? null,
                 workflowHash: runMetadata.workflowHash ?? null,

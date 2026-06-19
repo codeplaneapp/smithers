@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { Parallel, Task, Workflow, runWorkflow } from "smithers-orchestrator";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";
@@ -14,6 +14,104 @@ import { Effect } from "effect";
  * surface immediately.
  */
 describe("failureRetryable=false short-circuits engine retries", () => {
+    test("agent preflight failure stops before generate and skips retries", async () => {
+        const { smithers, outputs, cleanup, db } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        try {
+            let preflightCalls = 0;
+            let generateCalls = 0;
+            const agent = {
+                id: "preflight-invalid",
+                model: "bad-model",
+                cliEngine: "fake-cli",
+                tools: {},
+                async preflight() {
+                    preflightCalls += 1;
+                    throw new SmithersError("AGENT_CONFIG_INVALID", "fake-cli is not authenticated", {
+                        failureRetryable: false,
+                        preflight: true,
+                    });
+                },
+                async generate() {
+                    generateCalls += 1;
+                    return { output: { value: 1 } };
+                },
+            };
+            const workflow = smithers(() => (
+                <Workflow name="preflight-fails-fast">
+                    <Task
+                        id="preflight-bad"
+                        output={outputs.outputA}
+                        agent={agent}
+                        retries={5}
+                    >
+                        This should never reach generate.
+                    </Task>
+                </Workflow>
+            ));
+            const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+            expect(result.status).toBe("failed");
+            expect(preflightCalls).toBe(1);
+            expect(generateCalls).toBe(0);
+            const attempts = await adapter.listAttempts(result.runId, "preflight-bad", 0);
+            expect(attempts).toHaveLength(1);
+            const error = JSON.parse(attempts[0].errorJson ?? "{}");
+            expect(error.code).toBe("AGENT_CONFIG_INVALID");
+            const meta = JSON.parse(attempts[0].metaJson ?? "{}");
+            expect(meta.failureRetryable).toBe(false);
+            expect(meta.agentPreflight).toMatchObject({
+                checked: true,
+                status: "failed",
+            });
+        } finally {
+            cleanup();
+        }
+    }, 15_000);
+
+    test("agent preflight is shared once per workflow agent", async () => {
+        const { smithers, outputs, cleanup } = createTestSmithers(outputSchemas);
+        try {
+            let preflightCalls = 0;
+            let generateCalls = 0;
+            const agent = {
+                id: "shared-preflight",
+                model: "ok-model",
+                cliEngine: "fake-cli",
+                tools: {},
+                supportsNativeStructuredOutput: true,
+                async preflight() {
+                    preflightCalls += 1;
+                    await Bun.sleep(20);
+                },
+                async generate() {
+                    generateCalls += 1;
+                    return { output: { value: generateCalls } };
+                },
+            };
+            const workflow = smithers(() => (
+                <Workflow name="preflight-cached-once">
+                    <Parallel>
+                        <Task id="left" output={outputs.outputA} agent={agent}>
+                            left
+                        </Task>
+                        <Task id="right" output={outputs.outputB} agent={agent}>
+                            right
+                        </Task>
+                    </Parallel>
+                </Workflow>
+            ));
+            const result = await Effect.runPromise(runWorkflow(workflow, {
+                input: {},
+                maxConcurrency: 2,
+            }));
+            expect(result.status).toBe("finished");
+            expect(preflightCalls).toBe(1);
+            expect(generateCalls).toBe(2);
+        } finally {
+            cleanup();
+        }
+    }, 15_000);
+
     test("Kimi-style AGENT_CONFIG_INVALID stops after a single attempt", async () => {
         const { smithers, outputs, cleanup, db } = createTestSmithers(outputSchemas);
         const adapter = new SmithersDb(db);
