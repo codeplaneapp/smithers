@@ -4,7 +4,6 @@ export type CliAgentCapabilityAdapterId =
   | "antigravity"
   | "codex"
   | "forge"
-  | "gemini"
   | "kimi"
   | "opencode"
   | "pi"

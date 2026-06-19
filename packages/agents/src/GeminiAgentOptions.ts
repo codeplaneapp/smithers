@@ -1,9 +1,8 @@
 import type { BaseCliAgentOptions } from "./BaseCliAgent/BaseCliAgentOptions";
 
 /**
- * @deprecated Use AntigravityAgentOptions with the Antigravity CLI (`agy`) for
- * new Google CLI integrations. GeminiAgentOptions remains for legacy and
- * enterprise Gemini CLI setups.
+ * @deprecated Gemini CLI support has been sunset. Use AntigravityAgentOptions
+ * with the Antigravity CLI (`agy`) for Google CLI integrations.
  */
 export type GeminiAgentOptions = BaseCliAgentOptions & {
   debug?: boolean;
@@ -23,15 +22,11 @@ export type GeminiAgentOptions = BaseCliAgentOptions & {
   screenReader?: boolean;
   outputFormat?: "text" | "json" | "stream-json";
   /**
-   * Path to an isolated Gemini CLI config directory. Sets `GEMINI_DIR` on the
-   * spawned process so this invocation uses the credentials stored at
-   * `<configDir>/oauth_creds.json` (instead of the user's default
-   * `~/.gemini/`). Use this to run multiple Gemini accounts side-by-side.
+   * Legacy option retained only so old constructor calls type-check.
    */
   configDir?: string;
   /**
-   * Gemini API key. Sets `GEMINI_API_KEY` on the spawned process for
-   * API-billed invocations.
+   * Legacy option retained only so old constructor calls type-check.
    */
   apiKey?: string;
 };

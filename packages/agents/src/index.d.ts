@@ -78,7 +78,7 @@ type ImageGenerationProvider$1 = {
     generateImage(request: ImageGenerationRequest$1): Promise<ImageGenerationResult$1> | ImageGenerationResult$1;
 };
 
-type CliAgentCapabilityAdapterId$1 = "claude" | "amp" | "antigravity" | "codex" | "forge" | "gemini" | "kimi" | "opencode" | "pi" | "vibe";
+type CliAgentCapabilityAdapterId$1 = "claude" | "amp" | "antigravity" | "codex" | "forge" | "kimi" | "opencode" | "pi" | "vibe";
 
 type CliAgentSurfaceOptionMapping$1 = {
     option: string;
@@ -349,6 +349,11 @@ declare class BaseCliAgent {
     runGenerateEffect(options: AgentGenerateOptions$3 | undefined, operation: AgentInvocationOperation): Effect.Effect<GenerateTextResult$3<Record<string, never>, unknown>, SmithersError>;
     /**
    * @param {AgentGenerateOptions} [options]
+   * @returns {Promise<void>}
+   */
+    preflight(options?: AgentGenerateOptions$3): Promise<void>;
+    /**
+   * @param {AgentGenerateOptions} [options]
    * @returns {Promise<GenerateTextResult<Record<string, never>, unknown>>}
    */
     generate(options?: AgentGenerateOptions$3): Promise<GenerateTextResult$3<Record<string, never>, unknown>>;
@@ -526,6 +531,11 @@ type AgentLike$1 = {
     capabilities?: AgentCapabilityRegistry$5;
     /** True when the agent consumes outputSchema through a native structured-output API. */
     supportsNativeStructuredOutput?: boolean;
+    /**
+     * Performs deterministic startup checks before the first generation call in a
+     * workflow run. A rejected promise fails the task without retrying.
+     */
+    preflight?: (args?: AgentGenerateOptions$4) => Promise<void>;
     /**
      * Generates a response or action based on the provided arguments.
      *
@@ -803,9 +813,8 @@ type CliOutputInterpreter$7 = CliOutputInterpreter$b;
 type CodexAgentOptions = CodexAgentOptions$1;
 
 /**
- * @deprecated Use AntigravityAgentOptions with the Antigravity CLI (`agy`) for
- * new Google CLI integrations. GeminiAgentOptions remains for legacy and
- * enterprise Gemini CLI setups.
+ * @deprecated Gemini CLI support has been sunset. Use AntigravityAgentOptions
+ * with the Antigravity CLI (`agy`) for Google CLI integrations.
  */
 type GeminiAgentOptions$1 = BaseCliAgentOptions$3 & {
     debug?: boolean;
@@ -825,22 +834,18 @@ type GeminiAgentOptions$1 = BaseCliAgentOptions$3 & {
     screenReader?: boolean;
     outputFormat?: "text" | "json" | "stream-json";
     /**
-     * Path to an isolated Gemini CLI config directory. Sets `GEMINI_DIR` on the
-     * spawned process so this invocation uses the credentials stored at
-     * `<configDir>/oauth_creds.json` (instead of the user's default
-     * `~/.gemini/`). Use this to run multiple Gemini accounts side-by-side.
+     * Legacy option retained only so old constructor calls type-check.
      */
     configDir?: string;
     /**
-     * Gemini API key. Sets `GEMINI_API_KEY` on the spawned process for
-     * API-billed invocations.
+     * Legacy option retained only so old constructor calls type-check.
      */
     apiKey?: string;
 };
 
 /**
- * @deprecated Use AntigravityAgent for new Google CLI integrations. GeminiAgent
- * remains for legacy and enterprise Gemini CLI setups.
+ * @deprecated Gemini CLI support has been sunset. Use AntigravityAgent with
+ * Google's `agy` CLI instead.
  */
 declare class GeminiAgent extends BaseCliAgent {
     /**
@@ -854,23 +859,8 @@ declare class GeminiAgent extends BaseCliAgent {
    * @returns {CliOutputInterpreter}
    */
     createOutputInterpreter(): CliOutputInterpreter$6;
-    /**
-   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
-   */
-    buildCommand(params: {
-        prompt: string;
-        systemPrompt?: string;
-        cwd: string;
-        options: any;
-    }): Promise<{
-        command: string;
-        args: string[];
-        outputFormat: "stream-json" | "text" | "json";
-        env: {
-            GEMINI_DIR: string;
-            GEMINI_API_KEY: string;
-        } | undefined;
-    }>;
+    generate(): Promise<never>;
+    buildCommand(): Promise<never>;
 }
 type CliOutputInterpreter$6 = CliOutputInterpreter$b;
 type GeminiAgentOptions = GeminiAgentOptions$1;

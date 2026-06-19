@@ -6,7 +6,6 @@ import { Workflow, Task, runWorkflow } from "smithers-orchestrator";
 import { AntigravityAgent } from "../src/AntigravityAgent.js";
 import { ClaudeCodeAgent } from "../src/ClaudeCodeAgent.js";
 import { CodexAgent } from "../src/CodexAgent.js";
-import { GeminiAgent } from "../src/GeminiAgent.js";
 import { KimiAgent } from "../src/KimiAgent.js";
 import { PiAgent } from "../src/PiAgent.js";
 import { hashCapabilityRegistry, } from "../src/capability-registry/index.js";
@@ -84,7 +83,6 @@ describe("CLI adapter capability registries", () => {
         const claude = withMutedWarn(() => new ClaudeCodeAgent());
         const codex = new CodexAgent();
         const antigravity = new AntigravityAgent();
-        const gemini = new GeminiAgent();
         const kimi = new KimiAgent();
         const pi = new PiAgent();
         expect(claude.capabilities).toMatchObject({
@@ -120,13 +118,6 @@ describe("CLI adapter capability registries", () => {
             skills: {
                 supportsSkills: true,
                 installMode: "plugin",
-            },
-        });
-        expect(gemini.capabilities).toMatchObject({
-            version: 1,
-            engine: "gemini",
-            mcp: {
-                bootstrap: "allow-list",
             },
         });
         expect(kimi.capabilities).toMatchObject({
@@ -254,7 +245,6 @@ describe("smithers agents capabilities", () => {
             "claude",
             "codex",
             "antigravity",
-            "gemini",
             "forge",
             "kimi",
             "opencode",

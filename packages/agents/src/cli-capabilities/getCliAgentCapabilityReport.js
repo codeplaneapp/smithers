@@ -4,7 +4,6 @@ import { createAntigravityCapabilityRegistry } from "../AntigravityAgent.js";
 import { createClaudeCodeCapabilityRegistry } from "../ClaudeCodeAgent.js";
 import { createCodexCapabilityRegistry } from "../CodexAgent.js";
 import { createForgeCapabilityRegistry } from "../ForgeAgent.js";
-import { createGeminiCapabilityRegistry } from "../GeminiAgent.js";
 import { createKimiCapabilityRegistry } from "../KimiAgent.js";
 import { createOpenCodeCapabilityRegistry } from "../OpenCodeAgent.js";
 import { createPiCapabilityRegistry } from "../PiAgent.js";
@@ -32,11 +31,6 @@ const CLI_AGENT_CAPABILITY_ADAPTERS = [
         id: "antigravity",
         binary: "agy",
         buildRegistry: () => createAntigravityCapabilityRegistry(),
-    },
-    {
-        id: "gemini",
-        binary: "gemini",
-        buildRegistry: () => createGeminiCapabilityRegistry(),
     },
     {
         id: "forge",

@@ -432,15 +432,6 @@ const googleRateLimitCheck = {
         }
     },
 };
-const geminiStrategy = {
-    agentId: "gemini",
-    command: "gemini",
-    checks: [
-        checkCliInstalled("gemini", "Gemini CLI"),
-        googleAuthCheck,
-        googleRateLimitCheck,
-    ],
-};
 const antigravityAuthSkip = {
     id: "api_key_valid",
     run: async () => {
@@ -586,7 +577,6 @@ const strategies = {
     codex: codexStrategy,
     antigravity: antigravityStrategy,
     agy: antigravityStrategy,
-    gemini: geminiStrategy,
     amp: ampStrategy,
 };
 /**

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { AntigravityAgent, ClaudeCodeAgent, CodexAgent, GeminiAgent } from "../src/index.js";
+import { AntigravityAgent, ClaudeCodeAgent, CodexAgent } from "../src/index.js";
 
 const originalPath = process.env.PATH ?? "";
 const originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
@@ -142,35 +142,6 @@ describe("CodexAgent configDir/apiKey", () => {
             const dumped = await readEnvDump(dumpFile);
             expect(dumped.CODEX_HOME).toBe("/tmp/smithers-test-codex-work");
             expect(dumped.OPENAI_API_KEY).toBe("sk-openai-test");
-        }
-        finally {
-            await rm(fake.dir, { recursive: true, force: true });
-            await rm(dumpDir, { recursive: true, force: true });
-        }
-    });
-});
-
-describe("GeminiAgent configDir/apiKey", () => {
-    test("configDir → GEMINI_DIR, apiKey → GEMINI_API_KEY", async () => {
-        const dumpDir = await mkdtemp(join(tmpdir(), "smithers-env-dump-"));
-        const dumpFile = join(dumpDir, "env.json");
-        const fake = await makeFakeCliWithEnvDump(
-            "gemini",
-            'process.stdout.write(JSON.stringify({ text: "```json\\n{\\"summary\\":\\"ok\\"}\\n```\\n" }) + "\\n");',
-        );
-        try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
-            process.env.SMITHERS_ENV_DUMP_FILE = dumpFile;
-            const agent = new GeminiAgent({
-                model: "gemini-3.1-pro-preview",
-                configDir: "/tmp/smithers-test-gemini-work",
-                apiKey: "gemini-test-key",
-                env: { PATH: process.env.PATH, SMITHERS_ENV_DUMP_FILE: dumpFile },
-            });
-            await agent.generate({ messages: [{ role: "user", content: "ping" }] });
-            const dumped = await readEnvDump(dumpFile);
-            expect(dumped.GEMINI_DIR).toBe("/tmp/smithers-test-gemini-work");
-            expect(dumped.GEMINI_API_KEY).toBe("gemini-test-key");
         }
         finally {
             await rm(fake.dir, { recursive: true, force: true });

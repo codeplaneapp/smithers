@@ -22,10 +22,8 @@ describe("getDiagnosticStrategy", () => {
         expect(strategy.agentId).toBe("antigravity");
         expect(strategy.command).toBe("agy");
     });
-    test("returns gemini strategy for 'gemini'", () => {
-        const strategy = getDiagnosticStrategy("gemini");
-        expect(strategy).not.toBeNull();
-        expect(strategy.agentId).toBe("gemini");
+    test("does not expose a Gemini CLI diagnostics strategy", () => {
+        expect(getDiagnosticStrategy("gemini")).toBeNull();
     });
     test("returns pi strategy for 'pi'", () => {
         const strategy = getDiagnosticStrategy("pi");
