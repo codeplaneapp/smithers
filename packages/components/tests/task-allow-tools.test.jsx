@@ -6,7 +6,6 @@ import { renderFrame } from "@smithers-orchestrator/engine";
 import { SmithersCtx } from "@smithers-orchestrator/react-reconciler/context";
 import { AntigravityAgent } from "@smithers-orchestrator/agents/AntigravityAgent";
 import { ClaudeCodeAgent } from "@smithers-orchestrator/agents/ClaudeCodeAgent";
-import { GeminiAgent } from "@smithers-orchestrator/agents/GeminiAgent";
 import { PiAgent } from "@smithers-orchestrator/agents/PiAgent";
 import { Effect } from "effect";
 describe("Task allowTools", () => {
@@ -63,12 +62,12 @@ describe("Task allowTools", () => {
         expect(args).toContain("--no-tools");
         expect(args).not.toContain("--tools");
     });
-    test("disables GeminiAgent tools when allowTools is empty", async () => {
+    test("disables AntigravityAgent tools when allowTools is empty", async () => {
         const api = createSmithers({
             output: z.object({ ok: z.boolean() }),
         }, { dbPath: ":memory:" });
-        const workflow = api.smithers(() => (<api.Workflow name="gemini-allow-tools">
-        <api.Task id="agent" output={api.outputs.output} agent={new GeminiAgent({ model: "gemini-test" })} allowTools={[]}>
+        const workflow = api.smithers(() => (<api.Workflow name="antigravity-no-tools">
+        <api.Task id="agent" output={api.outputs.output} agent={new AntigravityAgent({ model: "gemini-test" })} allowTools={[]}>
           prompt
         </api.Task>
       </api.Workflow>));

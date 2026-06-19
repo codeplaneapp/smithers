@@ -7,8 +7,8 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { buildHumanRequestId } from "@smithers-orchestrator/db/buildHumanRequestId";
 import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { AntigravityAgent } from "@smithers-orchestrator/agents/AntigravityAgent";
 import { ClaudeCodeAgent } from "@smithers-orchestrator/agents/ClaudeCodeAgent";
-import { GeminiAgent } from "@smithers-orchestrator/agents/GeminiAgent";
 import { PiAgent } from "@smithers-orchestrator/agents/PiAgent";
 import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler/dom/renderer";
 import {
@@ -341,13 +341,13 @@ describe("remaining component branch coverage", () => {
         expect(piTools.tasks[0].agent.opts.tools).toEqual(["Read"]);
         expect(piTools.tasks[0].agent.opts.noTools).toBe(false);
 
-        const gemini = new GeminiAgent();
-        const geminiTools = await render(
-            <Task id="gemini" output="out" agent={gemini} allowTools={["Read"]}>
+        const antigravity = new AntigravityAgent();
+        const antigravityTools = await render(
+            <Task id="antigravity" output="out" agent={antigravity} allowTools={["Read"]}>
                 prompt
             </Task>,
         );
-        expect(geminiTools.tasks[0].agent.opts.allowedTools).toEqual(["Read"]);
+        expect(antigravityTools.tasks[0].agent.opts.allowedTools).toEqual(["Read"]);
     });
 
     test("direct primitives cover remaining declarative branches", async () => {
