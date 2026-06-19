@@ -15,6 +15,11 @@ export type AgentLike = {
   /** True when the agent consumes outputSchema through a native structured-output API. */
   supportsNativeStructuredOutput?: boolean;
   /**
+   * Performs deterministic startup checks before the first generation call in a
+   * workflow run. A rejected promise fails the task without retrying.
+   */
+  preflight?: (args?: AgentGenerateOptions) => Promise<void>;
+  /**
    * Generates a response or action based on the provided arguments.
    *
    * @param args - The arguments for generation

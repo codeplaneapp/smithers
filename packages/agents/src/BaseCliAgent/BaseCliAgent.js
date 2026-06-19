@@ -1071,6 +1071,128 @@ export class BaseCliAgent {
     }
     /**
    * @param {AgentGenerateOptions} [options]
+   * @returns {Promise<void>}
+   */
+    async preflight(options) {
+        const cwd = this.cwd ?? options?.rootDir ?? process.cwd();
+        const env = {
+            ...process.env,
+            ...this.env,
+            ...taskContextEnv(options?.taskContext),
+        };
+        const { systemFromMessages } = extractPrompt(options);
+        const combinedSystem = combineNonEmpty([
+            this.systemPrompt,
+            systemFromMessages,
+        ]);
+        const agentId = this.id ?? "<anonymous>";
+        const agentModel = this.model ?? "<unset>";
+        let cleanup;
+        let command = resolveAgentEngineTag(this);
+        try {
+            const commandSpec = await this.buildCommand({
+                prompt: "",
+                systemPrompt: combinedSystem,
+                cwd,
+                options,
+            });
+            cleanup = commandSpec.cleanup;
+            command = commandSpec.command;
+            const commandEnv = commandSpec.env
+                ? { ...env, ...commandSpec.env }
+                : env;
+            const report = await launchDiagnostics(commandSpec.command, commandEnv, cwd, this.diagnosticHints?.());
+            if (!report) {
+                logDebug("agent preflight skipped; no diagnostics strategy", {
+                    agentId,
+                    agentEngine: commandSpec.command,
+                    agentModel,
+                    cwd,
+                }, "agent.preflight");
+                return;
+            }
+            const failed = report.checks.filter((check) => check.status === "fail");
+            const errored = report.checks.filter((check) => check.status === "error");
+            if (failed.length > 0) {
+                const summary = formatDiagnosticSummary(report);
+                logWarning(summary, {
+                    agentId,
+                    agentEngine: commandSpec.command,
+                    agentModel,
+                    cwd,
+                }, "agent.preflight");
+                throw new SmithersError("AGENT_CONFIG_INVALID", `Agent "${agentId}" (${commandSpec.command}, model=${agentModel}) failed preflight: ${summary}`, {
+                    failureRetryable: false,
+                    preflight: true,
+                    agentId,
+                    agentEngine: commandSpec.command,
+                    agentModel,
+                    command: commandSpec.command,
+                    diagnostics: report,
+                });
+            }
+            if (errored.length > 0) {
+                logWarning(`Agent preflight diagnostics had non-blocking errors: ${formatDiagnosticSummary(report)}`, {
+                    agentId,
+                    agentEngine: commandSpec.command,
+                    agentModel,
+                    cwd,
+                }, "agent.preflight");
+            }
+            else {
+                logDebug("agent preflight passed", {
+                    agentId,
+                    agentEngine: commandSpec.command,
+                    agentModel,
+                    cwd,
+                    durationMs: Math.round(report.durationMs),
+                }, "agent.preflight");
+            }
+        }
+        catch (cause) {
+            if (cause instanceof SmithersError && cause.details?.preflight === true) {
+                throw cause;
+            }
+            const normalized = cause instanceof SmithersError
+                ? cause
+                : toSmithersError(cause, "build agent preflight command", {
+                    code: "AGENT_CONFIG_INVALID",
+                    details: {
+                        failureRetryable: false,
+                        preflight: true,
+                        agentId,
+                        agentEngine: command,
+                        agentModel,
+                        command,
+                    },
+                });
+            throw new SmithersError(normalized.code ?? "AGENT_CONFIG_INVALID", `Agent "${agentId}" (${command}, model=${agentModel}) failed preflight: ${normalized.summary ?? normalized.message}`, {
+                ...normalized.details,
+                failureRetryable: false,
+                preflight: true,
+                agentId,
+                agentEngine: normalized.details?.agentEngine ?? command,
+                agentModel,
+                command: normalized.details?.command ?? command,
+            }, { cause: normalized });
+        }
+        finally {
+            if (cleanup) {
+                try {
+                    await cleanup();
+                }
+                catch (error) {
+                    logWarning("agent preflight cleanup failed", {
+                        agentId,
+                        agentEngine: command,
+                        error: error instanceof Error ? error.message : String(error),
+                    }, "agent.preflight");
+                }
+            }
+        }
+    }
+    /**
+   * @param {AgentGenerateOptions} [options]
    * @returns {Promise<GenerateTextResult<Record<string, never>, unknown>>}
    */
     async generate(options) {
