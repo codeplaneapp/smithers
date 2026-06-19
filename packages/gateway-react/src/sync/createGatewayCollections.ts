@@ -1,9 +1,12 @@
 import { createCollection, type Collection } from "@tanstack/react-db";
 import {
+  createElectricCollection,
   createGatewayCollection,
+  electricCollectionDefs,
   gatewayCollectionDefs,
   syncKeyFingerprint,
   syncKeyMatches,
+  type ElectricCollectionConfig,
   type GatewayApprovalRow,
   type GatewayCollectionConfig,
   type GatewayCronRow,
@@ -68,6 +71,24 @@ export type CreateGatewayCollectionsOptions = {
    * gateway path is never gated on persistence.
    */
   persistence?: { store: GatewayCollectionStore };
+  /**
+   * Which sync source backs the pollable collections. The DEFAULT is `gateway`
+   * (the RPC + WebSocket transport above) — local builds and the existing
+   * `pnpm e2e:real` path are unchanged. Set `electric` (cloud mode) to feed the
+   * collections that have an Electric twin (today: `memoryFacts`) from an
+   * ElectricSQL shape instead; an `electric` config must accompany it. Any
+   * collection without an Electric twin transparently stays on the gateway, so
+   * the switch is incremental — extend it one `electricCollectionDefs` entry at
+   * a time.
+   */
+  syncSource?: "gateway" | "electric";
+  /**
+   * Electric shape transport config (required when `syncSource: "electric"`).
+   * `shapeUrl` is the absolute Electric shape endpoint (e.g. a same-origin
+   * `/v1/shape` proxy resolved to an absolute URL). Ignored when the source is
+   * `gateway`.
+   */
+  electric?: ElectricCollectionConfig;
 };
 
 /** Pseudo stream scope the registry uses to drive `invalidate()` re-pulls. */
@@ -180,6 +201,13 @@ export function createGatewayCollections(
   const pulser = createPulser();
   const base = options.client;
   const persistenceStore = options.persistence?.store;
+  // Cloud mode: feed the Electric-backed collections from a shape instead of the
+  // gateway transport. Only engages when both the source is `electric` AND an
+  // `electric` config is present — a missing config silently falls back to the
+  // gateway so a misconfigured cloud build degrades to the working local path
+  // rather than failing to render.
+  const electricConfig =
+    options.syncSource === "electric" && options.electric ? options.electric : null;
 
   // Instrument the transport so connection status and the top-level auth bailout
   // are derived from real traffic, and so the `INVALIDATE_SCOPE` pseudo-stream is
@@ -310,6 +338,32 @@ export function createGatewayCollections(
     return collection;
   }
 
+  /**
+   * Build (once) an Electric-backed collection from its `electricCollectionDefs`
+   * twin. Same id/getKey as the gateway collection, so the registry caches it
+   * under the same fingerprint and consumers (`useGatewayMemoryFacts`) read it
+   * unchanged. Persisted like the gateway lists when a store is present. No
+   * `INVALIDATE_SCOPE` pulse is wired: the Electric shape streams live, so
+   * `invalidate()` is a no-op for these (the data is already pushed).
+   */
+  function electricCollection<TRow extends object, TKey extends string | number>(
+    def: Parameters<typeof createElectricCollection<TRow, TKey>>[0],
+    gcTime: number,
+  ): Collection<TRow, TKey> {
+    const id = syncKeyFingerprint(def.key);
+    const existing = collections.get(id);
+    if (existing) return existing as unknown as Collection<TRow, TKey>;
+    const config = createElectricCollection<TRow, TKey>(def, {
+      ...electricConfig!,
+      gcTime,
+      startSync: false,
+    });
+    const persistedConfig = persistenceStore ? withPersistence(config, persistenceStore) : config;
+    const collection = createCollection<TRow, TKey>(persistedConfig);
+    collections.set(id, collection as unknown as Collection<object, string | number>);
+    return collection;
+  }
+
   function queryHandle<T>(key: SyncKey, fetcher: () => Promise<T>): GatewayQueryHandle<T> {
     const id = syncKeyFingerprint(key);
     const existing = queries.get(id) as QueryHandleInternal<T> | undefined;
@@ -433,7 +487,15 @@ export function createGatewayCollections(
     crons: (params: CronListRequest = {}) =>
       knownCollection<GatewayCronRow, string>(gatewayCollectionDefs.crons(params), listGcTime),
     memoryFacts: (params: ListMemoryFactsRequest = {}) =>
-      knownCollection<GatewayMemoryFactRow, string>(gatewayCollectionDefs.memoryFacts(params), listGcTime),
+      electricConfig
+        ? electricCollection<GatewayMemoryFactRow, string>(
+            electricCollectionDefs.memoryFacts(params),
+            listGcTime,
+          )
+        : knownCollection<GatewayMemoryFactRow, string>(
+            gatewayCollectionDefs.memoryFacts(params),
+            listGcTime,
+          ),
     prompts: (params: ListPromptsRequest = {}) =>
       knownCollection<GatewayPromptRow, string>(gatewayCollectionDefs.prompts(params), listGcTime),
     scores: (params: ListScoresRequest = { runId: "" }) =>

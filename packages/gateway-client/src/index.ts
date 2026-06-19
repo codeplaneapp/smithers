@@ -31,6 +31,16 @@ export type {
 // RPC + WebSocket transport. React bindings live in
 // `@smithers-orchestrator/gateway-react` so the core stays framework-free.
 export { createGatewayCollection, type GatewayCollectionConfig } from "./sync/createGatewayCollection.ts";
+// Cloud-Electric source: the sibling of `createGatewayCollection` that feeds the
+// same `CollectionConfig` from an ElectricSQL shape instead of the gateway RPC +
+// WS transport. Selected by the registry when the `electric` sync source is set.
+export {
+  createElectricCollection,
+  type ElectricCollectionConfig,
+  type ElectricCollectionDef,
+  type ElectricRawRow,
+} from "./sync/createElectricCollection.ts";
+export { electricCollectionDefs, mapMemoryFactRow } from "./sync/electricCollectionDefs.ts";
 export { flattenGatewayRunNode } from "./sync/flattenGatewayRunNode.ts";
 export { snapshotToGatewayRunNode } from "./sync/snapshotToGatewayRunNode.ts";
 export type { DevToolsSnapshot, DevToolsSnapshotNode } from "./sync/snapshotToGatewayRunNode.ts";

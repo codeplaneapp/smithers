@@ -28,7 +28,11 @@
     "@smithers-orchestrator/gateway": "workspace:*",
     "@tanstack/db": "^0.6.8"
   },
+  "optionalDependencies": {
+    "@electric-sql/client": "^1.5.15"
+  },
   "devDependencies": {
+    "@electric-sql/client": "^1.5.15",
     "@types/bun": "latest",
     "typescript": "~5.9.3"
   }

@@ -959,6 +959,10 @@ importers:
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
+    optionalDependencies:
+      '@electric-sql/client':
+        specifier: ^1.5.15
+        version: 1.5.21
 
   packages/gateway-react:
     dependencies:
@@ -2035,6 +2039,10 @@ packages:
       '@effect/rpc': ^0.75.0
       effect: 3.21.1
 
+  '@electric-sql/client@1.5.21':
+    resolution: {integrity: sha512-Aize0Aa2ZyTZySQMfMSTDPP/EJWcR1HfH7qE1DgMhI5f6dDxm1B74CN4o1fnIQeW/ZLg9TdbTgFYo1tsUg7mXg==}
+    hasBin: true
+
   '@electric-sql/pglite-age@0.0.2':
     resolution: {integrity: sha512-0Q+QnbSSZjJt3aF/wycuXpC1HxyemkAumYSodKlIkjobx/Cu/U9a9lazuwlAzB1GOZuCuB6JUiYjGcJMnvN7zA==}
     peerDependencies:
@@ -3007,6 +3015,9 @@ packages:
 
   '@mermaid-js/parser@1.1.1':
     resolution: {integrity: sha512-VuHdsYMK1bT6X2JbcAaWAhugTRvRBRyuZgd+c22swUeI9g/ntaxF7CY7dYarhZovofCbUNO0G7JesfmNtjYOCw==}
+
+  '@microsoft/fetch-event-source@2.0.1':
+    resolution: {integrity: sha512-W6CLUJ2eBMw3Rec70qrsEW0jOm/3twwJv21mrmj2yORiaVmVYGS4sSS5yUwvQc1ZlDLYGPnClVWmUUMagKNsfA==}
 
   '@mistralai/mistralai@2.2.1':
     resolution: {integrity: sha512-uKU8CZmL2RzYKmplsU01hii4p3pe4HqJefpWNRWXm1Tcm0Sm4xXfwSLIy4k7ZCPlbETCGcp69E7hZs+WOJ5itQ==}
@@ -8138,6 +8149,13 @@ snapshots:
       '@effect/rpc': 0.75.0(@effect/platform@0.96.0(effect@3.21.1))(effect@3.21.1)
       effect: 3.21.1
 
+  '@electric-sql/client@1.5.21':
+    dependencies:
+      '@microsoft/fetch-event-source': 2.0.1
+    optionalDependencies:
+      '@rollup/rollup-darwin-arm64': 4.60.2
+    optional: true
+
   '@electric-sql/pglite-age@0.0.2(@electric-sql/pglite@0.5.1)':
     dependencies:
       '@electric-sql/pglite': 0.5.1
@@ -8853,6 +8871,9 @@ snapshots:
   '@mermaid-js/parser@1.1.1':
     dependencies:
       '@chevrotain/types': 11.1.2
+
+  '@microsoft/fetch-event-source@2.0.1':
+    optional: true
 
   '@mistralai/mistralai@2.2.1':
     dependencies:
