@@ -29,6 +29,26 @@ export { SyncContext } from "./sync/SyncContext.ts";
 export { SyncProvider } from "./sync/SyncProvider.ts";
 export { useSyncClient } from "./sync/useSyncClient.ts";
 export { createGatewayCollections, type CreateGatewayCollectionsOptions } from "./sync/createGatewayCollections.ts";
+// Client-side persistence (SQLite-WASM / OPFS) so the live collections survive a
+// reload with no re-seed / fetch flash. Opt-in via `createGatewayCollections`'
+// `persistence` option; the app builds the store with `createGatewayPersistence`
+// over a SQLite-WASM module it initializes (`@sqlite.org/sqlite-wasm`).
+export {
+  createGatewayPersistence,
+  type CreateGatewayPersistenceOptions,
+  type GatewayPersistence,
+} from "./sync/persistence/createGatewayPersistence.ts";
+export {
+  PersistentCollectionStore,
+  type GatewayCollectionStore,
+  type PersistedRow,
+} from "./sync/persistence/PersistentCollectionStore.ts";
+export {
+  openDbBackend,
+  openOpfsSahPoolBackend,
+  type SqliteWasmModule,
+} from "./sync/persistence/createSqliteWasmBackend.ts";
+export type { PersistenceBackend } from "./sync/persistence/PersistenceBackend.ts";
 export type {
   GatewayCollections,
   GatewayQueryHandle,

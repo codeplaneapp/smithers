@@ -35,6 +35,7 @@
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.9.0",
+    "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "@types/bun": "latest",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

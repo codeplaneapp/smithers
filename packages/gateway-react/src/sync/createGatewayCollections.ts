@@ -39,6 +39,8 @@ import type {
   GatewayStreamHandle,
   GatewayStreamRow,
 } from "./GatewayCollections.ts";
+import type { GatewayCollectionStore } from "./persistence/PersistentCollectionStore.ts";
+import { withPersistence } from "./persistence/withPersistence.ts";
 
 export type CreateGatewayCollectionsOptions = {
   /**
@@ -52,6 +54,20 @@ export type CreateGatewayCollectionsOptions = {
   onAuthError?: (error: Error) => void;
   /** gcTime for the pollable list/query collections. Default 5 min. */
   listGcTime?: number;
+  /**
+   * Opt-in client-side persistence. When supplied (the app builds it with
+   * `createGatewayPersistence` over a SQLite-WASM/OPFS store), the *pollable list*
+   * collections (runs/approvals/crons/memory/scores/tickets/prompts/workflows)
+   * hydrate from the cache on the first render after a reload — no re-seed, no
+   * fetch flash — and write through every live change for the next reload.
+   *
+   * Per-run streamed collections (run/nodes/runEvents, `gcTime: 0`) are
+   * deliberately NOT persisted: they are ephemeral and re-stream on demand.
+   *
+   * Omit it and the registry behaves exactly as before (live-only). The live
+   * gateway path is never gated on persistence.
+   */
+  persistence?: { store: GatewayCollectionStore };
 };
 
 /** Pseudo stream scope the registry uses to drive `invalidate()` re-pulls. */
@@ -163,6 +179,7 @@ export function createGatewayCollections(
   const connection = createConnectionObserver();
   const pulser = createPulser();
   const base = options.client;
+  const persistenceStore = options.persistence?.store;
 
   // Instrument the transport so connection status and the top-level auth bailout
   // are derived from real traffic, and so the `INVALIDATE_SCOPE` pseudo-stream is
@@ -258,29 +275,34 @@ export function createGatewayCollections(
     const existing = collections.get(id);
     if (existing) return existing as unknown as Collection<TRow, TKey>;
     const pollable = def.stream === undefined;
-    const collection = createCollection<TRow, TKey>(
-      createGatewayCollection<TRow, TKey>({
-        key: def.key,
-        client: transport,
-        getKey: def.getKey,
-        gcTime,
-        startSync: false,
-        ...(def.method ? { method: def.method } : {}),
-        ...(def.params === undefined ? {} : { params: def.params }),
-        ...(def.rows ? { rows: def.rows } : {}),
-        ...(def.stream
-          ? { stream: def.stream }
-          : {
-              stream: {
-                scope: INVALIDATE_SCOPE,
-                params: { fingerprint: id },
-                refetchOnFrame: true,
-                refetchMode: "replace" as const,
-                reconnectOnGracefulEnd: false,
-              },
-            }),
-      }),
-    );
+    const config = createGatewayCollection<TRow, TKey>({
+      key: def.key,
+      client: transport,
+      getKey: def.getKey,
+      gcTime,
+      startSync: false,
+      ...(def.method ? { method: def.method } : {}),
+      ...(def.params === undefined ? {} : { params: def.params }),
+      ...(def.rows ? { rows: def.rows } : {}),
+      ...(def.stream
+        ? { stream: def.stream }
+        : {
+            stream: {
+              scope: INVALIDATE_SCOPE,
+              params: { fingerprint: id },
+              refetchOnFrame: true,
+              refetchMode: "replace" as const,
+              reconnectOnGracefulEnd: false,
+            },
+          }),
+    });
+    // Persist ONLY the pollable list collections (runs/approvals/crons/memory/
+    // scores/tickets/prompts/workflows). Per-run streamed collections are
+    // ephemeral (`gcTime: 0`) and re-stream on demand, so caching them would just
+    // surface stale per-run state on reload.
+    const persistedConfig =
+      persistenceStore && pollable ? withPersistence(config, persistenceStore) : config;
+    const collection = createCollection<TRow, TKey>(persistedConfig);
     collections.set(id, collection as unknown as Collection<object, string | number>);
     if (pollable) {
       registerInvalidator(id, def.key, () => pulser.pulse(id));
@@ -453,6 +475,9 @@ export function createGatewayCollections(
       queries.clear();
       streams.clear();
       invalidators.clear();
+      // Drop the persisted cache too: a sign-out / remote-mode swap must not let
+      // the next session hydrate the prior account's rows from disk.
+      persistenceStore?.clearAll();
       connection.reset();
     },
   };
