@@ -200,6 +200,23 @@ bunx smithers-orchestrator scores RUN_ID
 bunx smithers-orchestrator why RUN_ID
 ```
 
+If `ps` or `inspect` fail with `SMITHERS_MIGRATION_REQUIRED` and
+`resolvedBackend=pglite`, the repo has a legacy SQLite store but the CLI now
+defaults to PGlite. The read commands refuse on purpose until you migrate, yet
+`up` still launches and runs in SQLite, so a launched run can be invisible to
+`inspect` until you fix the backend. Pin the backend before you try to observe a
+run on such a repo:
+
+```ts
+// .smithers/smithers.config.ts
+export default { repoCommands, backend: "sqlite" as const };
+```
+
+Then `ps`, `inspect`, `output`, and `approve` all use SQLite and see the run.
+The alternative is `smithers migrate` to move history to PGlite. Do this as part
+of step 5 (validate the workflow shape) so you are never blind once the run is
+live.
+
 Use serve mode when you need HTTP status, SSE events, remote approvals, or
 Prometheus metrics:
 

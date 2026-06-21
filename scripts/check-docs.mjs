@@ -2215,6 +2215,8 @@ function checkTypesReferenceIncludesCompositeComponentProps() {
     ["OptimizerProps", join(root, "packages/components/src/components/OptimizerProps.ts")],
     ["PanelistConfig", join(root, "packages/components/src/components/PanelistConfig.ts")],
     ["PanelProps", join(root, "packages/components/src/components/PanelProps.ts")],
+    ["SidecarProps", join(root, "packages/components/src/components/SidecarProps.ts")],
+    ["SidecarDelta", join(root, "packages/components/src/components/SidecarDelta.ts")],
     ["ReviewLoopProps", join(root, "packages/components/src/components/ReviewLoopProps.ts")],
     ["RunbookStep", join(root, "packages/components/src/components/RunbookStep.ts")],
     ["RunbookProps", join(root, "packages/components/src/components/RunbookProps.ts")],

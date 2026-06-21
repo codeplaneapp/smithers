@@ -74,6 +74,7 @@ const CORE_PAGES = [
   "components/review-loop.mdx",
   "components/optimizer.mdx",
   "components/content-pipeline.mdx",
+  "components/sidecar.mdx",
   "components/drift-detector.mdx",
   "components/scan-fix-verify.mdx",
   "components/poller.mdx",

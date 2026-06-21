@@ -59,6 +59,8 @@
 /** @typedef {import("./ScanFixVerifyProps.ts").ScanFixVerifyProps} ScanFixVerifyProps */
 /** @typedef {import("@smithers-orchestrator/graph/types").ScorersMap} ScorersMap */
 /** @typedef {import("./SequenceProps.ts").SequenceProps} SequenceProps */
+/** @typedef {import("./SidecarDelta.ts").SidecarDelta} SidecarDelta */
+/** @typedef {import("./SidecarProps.ts").SidecarProps} SidecarProps */
 /**
  * @template Schema
  * @typedef {import("./SignalProps.ts").SignalProps<Schema>} SignalProps
@@ -108,6 +110,8 @@ export { ScanFixVerify } from "./ScanFixVerify.js";
 export { Poller } from "./Poller.js";
 export { Supervisor } from "./Supervisor.js";
 export { Runbook } from "./Runbook.js";
+export { Sidecar } from "./Sidecar.js";
+export { computeSidecarDelta } from "./computeSidecarDelta.ts";
 // --- Engine-Backed Primitives ---
 export { Subflow } from "./Subflow.js";
 export { Sandbox } from "./Sandbox.js";

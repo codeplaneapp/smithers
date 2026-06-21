@@ -1606,5 +1606,42 @@ type WorkflowSession = _smithers_driver_workflow_types.WorkflowSession;
 type XmlElement = _smithers_graph.XmlElement;
 type XmlNode = _smithers_graph.XmlNode;
 type XmlText = _smithers_graph.XmlText;
+type SidecarProps = {
+    id?: string;
+    agent: AgentLike;
+    sidecar: AgentLike;
+    output: OutputTarget$1;
+    sidecarOutput?: OutputTarget$1;
+    scorers?: ScorersMap$1;
+    prompt?: string | React.ReactNode;
+    input?: string | React.ReactNode;
+    maxConcurrency?: number;
+    groundTruth?: unknown;
+    context?: unknown;
+    primaryLabel?: string;
+    sidecarLabel?: string;
+    skipIf?: boolean;
+    children?: string | React.ReactNode;
+};
+type SidecarDelta = {
+    primaryScore: number | null;
+    sidecarScore: number | null;
+    delta: number | null;
+    cheaperWins: boolean;
+};
+declare function Sidecar(props: SidecarProps): React.FunctionComponentElement<ParallelProps$2> | null;
+declare function computeSidecarDelta(rows: Array<{
+    nodeId?: string;
+    node_id?: string;
+    scorerId?: string;
+    scorer_id?: string;
+    score?: number;
+    scoredAtMs?: number;
+    scored_at_ms?: number;
+} & Record<string, unknown>>, opts: {
+    primaryNodeId: string;
+    sidecarNodeId: string;
+    scorerId?: string;
+}): SidecarDelta;
 
-export { Approval, type ApprovalAutoApprove, type ApprovalDecision, ApprovalGate, type ApprovalGateProps, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, Aspects, type AspectsProps, Branch, type BranchProps, type CachePolicy, type CategoryConfig, type CheckConfig, CheckSuite, type CheckSuiteProps, ClassifyAndRoute, type ClassifyAndRouteProps, type ColumnDef, ContentPipeline, type ContentPipelineProps, type ContentPipelineStage, ContinueAsNew, type ContinueAsNewProps, Debate, type DebateProps, type DecisionRule, DecisionTable, type DecisionTableProps, type DepsSpec, DriftDetector, type DriftDetectorProps, type EngineDecision, EscalationChain, type EscalationChainProps, type EscalationLevel, type ExtractOptions, GatherAndSynthesize, type GatherAndSynthesizeProps, type HostElement, type HostNode, type HostText, HumanTask, type HumanTaskProps, type InferDeps, type InferOutputEntry, type InferRow, Kanban, type KanbanProps, Loop, type LoopProps, MergeQueue, type MergeQueueProps, Optimizer, type OptimizerProps, type OutputAccessor, type OutputKey, type OutputTarget, Panel, type PanelProps, type PanelistConfig, Parallel, type ParallelProps, Poller, type PollerProps, Ralph, type RalphProps, type RenderContext, type RetryPolicy, ReviewLoop, type ReviewLoopProps, type RunAuthContext, type RunOptions, type RunResult, Runbook, type RunbookProps, type RunbookStep, Saga, type SagaProps, type SagaStepDef, type SagaStepProps, Sandbox, type SandboxEgressConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, ScanFixVerify, type ScanFixVerifyProps, type SchemaRegistryEntry, type ScorersMap, Sequence, type SequenceProps, Signal, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersErrorCode, type SmithersWorkflow, type SmithersWorkflowDriverOptions, type SmithersWorkflowOptions, type SourceDef, Subflow, type SubflowProps, SuperSmithers, type SuperSmithersProps, Supervisor, type SupervisorProps, Task, type TaskDescriptor, type TaskProps, Timer, type TimerProps, TryCatchFinally, type TryCatchFinallyProps, WaitForEvent, type WaitForEventProps, type WaitReason, Workflow, type WorkflowGraph, type WorkflowProps, type WorkflowRuntime, type WorkflowSession, Worktree, type WorktreeProps, type XmlElement, type XmlNode, type XmlText, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, continueAsNew, markdownComponents, renderMdx, zodSchemaToJsonExample };
+export { Approval, type ApprovalAutoApprove, type ApprovalDecision, ApprovalGate, type ApprovalGateProps, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, Aspects, type AspectsProps, Branch, type BranchProps, type CachePolicy, type CategoryConfig, type CheckConfig, CheckSuite, type CheckSuiteProps, ClassifyAndRoute, type ClassifyAndRouteProps, type ColumnDef, ContentPipeline, type ContentPipelineProps, type ContentPipelineStage, ContinueAsNew, type ContinueAsNewProps, Debate, type DebateProps, type DecisionRule, DecisionTable, type DecisionTableProps, type DepsSpec, DriftDetector, type DriftDetectorProps, type EngineDecision, EscalationChain, type EscalationChainProps, type EscalationLevel, type ExtractOptions, GatherAndSynthesize, type GatherAndSynthesizeProps, type HostElement, type HostNode, type HostText, HumanTask, type HumanTaskProps, type InferDeps, type InferOutputEntry, type InferRow, Kanban, type KanbanProps, Loop, type LoopProps, MergeQueue, type MergeQueueProps, Optimizer, type OptimizerProps, type OutputAccessor, type OutputKey, type OutputTarget, Panel, type PanelProps, type PanelistConfig, Parallel, type ParallelProps, Poller, type PollerProps, Ralph, type RalphProps, type RenderContext, type RetryPolicy, ReviewLoop, type ReviewLoopProps, type RunAuthContext, type RunOptions, type RunResult, Runbook, type RunbookProps, type RunbookStep, Saga, type SagaProps, type SagaStepDef, type SagaStepProps, Sandbox, type SandboxEgressConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, ScanFixVerify, type ScanFixVerifyProps, type SchemaRegistryEntry, type ScorersMap, Sequence, type SequenceProps, Sidecar, type SidecarDelta, type SidecarProps, Signal, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersErrorCode, type SmithersWorkflow, type SmithersWorkflowDriverOptions, type SmithersWorkflowOptions, type SourceDef, Subflow, type SubflowProps, SuperSmithers, type SuperSmithersProps, Supervisor, type SupervisorProps, Task, type TaskDescriptor, type TaskProps, Timer, type TimerProps, TryCatchFinally, type TryCatchFinallyProps, WaitForEvent, type WaitForEventProps, type WaitReason, Workflow, type WorkflowGraph, type WorkflowProps, type WorkflowRuntime, type WorkflowSession, Worktree, type WorktreeProps, type XmlElement, type XmlNode, type XmlText, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, computeSidecarDelta, continueAsNew, markdownComponents, renderMdx, zodSchemaToJsonExample };

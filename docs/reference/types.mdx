@@ -856,6 +856,30 @@ type PanelProps = {
   children: string | React.ReactNode;
 };
 
+type SidecarProps = {
+  id?: string;
+  agent: AgentLike;
+  sidecar: AgentLike;
+  output: OutputTarget;
+  sidecarOutput?: OutputTarget;
+  scorers?: ScorersMap;
+  prompt?: string | React.ReactNode;
+  input?: string | React.ReactNode;
+  maxConcurrency?: number;
+  groundTruth?: unknown;
+  context?: unknown;
+  primaryLabel?: string;
+  sidecarLabel?: string;
+  skipIf?: boolean;
+  children?: string | React.ReactNode;
+};
+type SidecarDelta = {
+  primaryScore: number | null;
+  sidecarScore: number | null;
+  delta: number | null;
+  cheaperWins: boolean;
+};
+
 type ReviewLoopProps = {
   id?: string;
   producer: AgentLike;

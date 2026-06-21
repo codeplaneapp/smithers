@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smithers on SWE-EVO — multi-agent panel results</title>
+<style>
+  :root{
+    --bg:#0a0c10; --panel:#12161d; --panel2:#171c25; --line:#222a36;
+    --ink:#e8edf4; --muted:#8a96a8; --accent:#5eead4; --accent2:#7c9cff;
+    --ok:#34d399; --miss:#f87171; --excl:#fbbf24; --pend:#3b4757;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  code,pre{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  .wrap{max-width:980px;margin:0 auto;padding:0 24px}
+  a{color:var(--accent2)}
+  header.hero{padding:72px 0 40px;border-bottom:1px solid var(--line);
+    background:radial-gradient(1200px 400px at 50% -120px,rgba(94,234,212,.10),transparent)}
+  .kicker{letter-spacing:.18em;text-transform:uppercase;color:var(--accent);font-size:12px;font-weight:600}
+  h1{font-size:42px;line-height:1.1;margin:14px 0 10px;font-weight:700;letter-spacing:-.02em}
+  h1 .grad{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--muted);font-size:18px;max-width:680px}
+  .stats{display:flex;gap:16px;flex-wrap:wrap;margin:36px 0 8px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 22px;min-width:150px;flex:1}
+  .stat .big{font-size:34px;font-weight:700;letter-spacing:-.02em}
+  .stat .big.accent{color:var(--accent)}
+  .stat .lbl{color:var(--muted);font-size:13px;margin-top:2px}
+  section{padding:48px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:26px;margin:0 0 6px;letter-spacing:-.01em}
+  h2 .n{color:var(--muted);font-weight:500;font-size:16px;margin-left:8px}
+  .lead{color:var(--muted);margin:0 0 22px;max-width:720px}
+  table{width:100%;border-collapse:collapse;margin:8px 0;font-size:14px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  tbody tr:hover{background:var(--panel)}
+  code{background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:13px}
+  .muted{color:var(--muted)}
+  /* coverage */
+  .cov-track{display:flex;height:16px;border-radius:8px;overflow:hidden;background:var(--panel2);border:1px solid var(--line)}
+  .cov-seg{height:100%}
+  .cov-scored{background:linear-gradient(90deg,var(--ok),#10b981)}
+  .cov-excl{background:var(--excl)}.cov-pend{background:var(--pend)}
+  .cov-legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;font-size:13px;color:var(--ink)}
+  .cov-legend .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+  .dot.scored{background:var(--ok)}.dot.excl{background:var(--excl)}.dot.pend{background:var(--pend)}
+  /* instance grid */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:8px;margin-top:18px}
+  .inst{background:var(--panel);border:1px solid var(--line);border-left-width:3px;border-radius:8px;padding:9px 11px;display:flex;flex-direction:column;gap:3px;overflow:hidden}
+  .inst .inst-id{font:12px/1.3 "SF Mono",monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .inst .inst-tag{font-size:11px;color:var(--muted)}
+  .inst.ok{border-left-color:var(--ok)} .inst.ok .inst-tag{color:var(--ok)}
+  .inst.miss{border-left-color:var(--miss)} .inst.miss .inst-tag{color:var(--miss)}
+  .inst.excl{border-left-color:var(--excl)} .inst.excl .inst-tag{color:var(--excl)}
+  .inst.pend{border-left-color:var(--pend);opacity:.7}
+  /* bars */
+  .bars{margin-top:14px}
+  .bar-row{display:grid;grid-template-columns:260px 1fr 56px;gap:12px;align-items:center;padding:5px 0}
+  .bar-label{font-size:13px;display:flex;flex-direction:column;line-height:1.2}
+  .bar-prov{color:var(--muted);font-size:11px}
+  .bar-track{background:var(--panel2);border-radius:6px;height:18px;overflow:hidden}
+  .bar-fill{height:100%;background:linear-gradient(90deg,#3b4757,#566275);border-radius:6px}
+  .bar-row.ours .bar-fill{background:linear-gradient(90deg,var(--accent),var(--accent2))}
+  .bar-row.ours .bar-label{color:var(--accent);font-weight:700}
+  .bar-val{text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
+  /* code */
+  pre{background:#0d1117;border:1px solid var(--line);border-radius:10px;padding:16px 18px;overflow:auto;font-size:13px;line-height:1.5}
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:6px 0 22px;color:var(--muted);font-size:13px}
+  .flow .node{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 12px;color:var(--ink)}
+  .flow .node b{color:var(--accent)}
+  .flow .arr{color:var(--accent2)}
+  .callout{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent2);border-radius:8px;padding:14px 16px;margin:18px 0;color:var(--ink);font-size:14px}
+  footer{padding:40px 0 80px;color:var(--muted);font-size:13px}
+  .pill{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;margin-right:6px}
+</style>
+</head>
+<body>
+<header class="hero"><div class="wrap">
+  <div class="kicker">Smithers · durable multi-agent orchestration</div>
+  <h1>Smithers orchestration on <span class="grad">SWE-EVO</span></h1>
+  <p class="sub">Two frontier models argue out a plan, one writes the code, the other reviews it until it passes — wired as a durable Smithers workflow and scored on the real SWE-EVO hermetic test harness.</p>
+  <div class="stats">
+    <div class="stat"><div class="big accent">66.7%</div><div class="lbl">Resolved Rate (14/21 scored)</div></div>
+    <div class="stat"><div class="big">69.0%</div><div class="lbl">Fix Rate (FAIL→PASS, soft)</div></div>
+    <div class="stat"><div class="big">25%</div><div class="lbl">Official full-48 ceiling (gpt-5.4 (OpenHands and SWE-agent))</div></div>
+    
+  </div>
+  <p class="muted" style="margin-top:18px">Models in play: <span class="pill">Opus 4.8 — plan · moderate · review</span><span class="pill">GPT-5.5 (Codex) — co-plan · implement</span></p>
+</div></header>
+
+<section><div class="wrap">
+  <h2>Coverage <span class="n">what has actually run</span></h2>
+  <p class="lead">The full SWE-EVO benchmark is 48 instances across 7 Python repos. Scoring runs each repo's real Docker image; instances whose <em>gold</em> patch does not even reproduce in the current Docker environment are excluded from the denominator (scoring them would be meaningless), not silently counted as failures.</p>
+  
+      <div class="cov-track" title="21 scored · 0 env-excluded · 27 pending">
+        <div class="cov-seg cov-scored" style="width:43.75%"></div>
+        <div class="cov-seg cov-excl" style="width:0%"></div>
+        <div class="cov-seg cov-pend" style="width:56.25%"></div>
+      </div>
+      <div class="cov-legend">
+        <span><i class="dot scored"></i>21 scored</span>
+        <span><i class="dot excl"></i>0 env-excluded</span>
+        <span><i class="dot pend"></i>27 pending</span>
+        <span class="muted">of 48 official instances</span>
+      </div>
+  <table style="margin-top:24px">
+    <thead><tr><th>Repo</th><th>Scored</th><th>Resolved</th><th>Resolved Rate</th><th>Fix Rate</th><th></th></tr></thead>
+    <tbody><tr>
+        <td><code>iterative/dvc</code></td>
+        <td>21/26</td>
+        <td>14/21</td>
+        <td><strong>66.7%</strong></td>
+        <td>69.0%</td>
+        <td><span class="muted">5 pending</span></td>
+      </tr>
+<tr>
+        <td><code>dask/dask</code></td>
+        <td>0/8</td>
+        <td>0/0</td>
+        <td><span class='muted'>—</span></td>
+        <td><span class='muted'>—</span></td>
+        <td><span class="muted">8 pending</span></td>
+      </tr>
+<tr>
+        <td><code>psf/requests</code></td>
+        <td>0/4</td>
+        <td>0/0</td>
+        <td><span class='muted'>—</span></td>
+        <td><span class='muted'>—</span></td>
+        <td><span class="muted">4 pending</span></td>
+      </tr>
+<tr>
+        <td><code>pydantic/pydantic</code></td>
+        <td>0/3</td>
+        <td>0/0</td>
+        <td><span class='muted'>—</span></td>
+        <td><span class='muted'>—</span></td>
+        <td><span class="muted">3 pending</span></td>
+      </tr>
+<tr>
+        <td><code>modin-project/modin</code></td>
+        <td>0/3</td>
+        <td>0/0</td>
+        <td><span class='muted'>—</span></td>
+        <td><span class='muted'>—</span></td>
+        <td><span class="muted">3 pending</span></td>
+      </tr>
+<tr>
+        <td><code>scikit-learn/scikit-learn</code></td>
+        <td>0/2</td>
+        <td>0/0</td>
+        <td><span class='muted'>—</span></td>
+        <td><span class='muted'>—</span></td>
+        <td><span class="muted">2 pending</span></td>
+      </tr>
+<tr>
+        <td><code>conan-io/conan</code></td>
+        <td>0/2</td>
+        <td>0/0</td>
+        <td><span class='muted'>—</span></td>
+        <td><span class='muted'>—</span></td>
+        <td><span class="muted">2 pending</span></td>
+      </tr></tbody>
+  </table>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Every instance <span class="n">21 scored · 0 excluded · 27 pending</span></h2>
+  <p class="lead">Each card is one official SWE-EVO instance. Green resolved (all FAIL_TO_PASS and PASS_TO_PASS tests pass), red ran but did not resolve, amber excluded as environment-incompatible, grey not yet run.</p>
+  <div class="grid"><div class="inst pend" title="conan-io__conan_2.0.14_2.0.15 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">conan_2.0.14_2.0.15</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="conan-io__conan_2.0.2_2.0.3 — pending">
+        <span class="inst-id">conan_2.0.2_2.0.3</span>
+        <span class="inst-tag">pending</span>
+      </div>
+<div class="inst pend" title="dask__dask_2022.9.2_2022.10.0 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">dask_2022.9.2_2022.10.0</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="dask__dask_2023.3.2_2023.4.0 — pending">
+        <span class="inst-id">dask_2023.3.2_2023.4.0</span>
+        <span class="inst-tag">pending</span>
+      </div>
+<div class="inst pend" title="dask__dask_2023.6.0_2023.6.1 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">dask_2023.6.0_2023.6.1</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="dask__dask_2023.6.1_2023.7.0 — pending">
+        <span class="inst-id">dask_2023.6.1_2023.7.0</span>
+        <span class="inst-tag">pending</span>
+      </div>
+<div class="inst pend" title="dask__dask_2023.8.0_2023.8.1 — pending">
+        <span class="inst-id">dask_2023.8.0_2023.8.1</span>
+        <span class="inst-tag">pending</span>
+      </div>
+<div class="inst pend" title="dask__dask_2023.9.2_2023.9.3 — pending">
+        <span class="inst-id">dask_2023.9.2_2023.9.3</span>
+        <span class="inst-tag">pending</span>
+      </div>
+<div class="inst pend" title="dask__dask_2024.1.0_2024.1.1 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">dask_2024.1.0_2024.1.1</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="dask__dask_2024.3.1_2024.4.0 — pending">
+        <span class="inst-id">dask_2024.3.1_2024.4.0</span>
+        <span class="inst-tag">pending</span>
+      </div>
+<div class="inst miss" title="iterative__dvc_0.30.0_0.30.1 — not resolved · F2P 0/1 · P2P 11/12">
+        <span class="inst-id">dvc_0.30.0_0.30.1</span>
+        <span class="inst-tag">not resolved</span>
+      </div>
+<div class="inst miss" title="iterative__dvc_0.33.1_0.34.0 — not resolved · F2P 0/1 · P2P 0/77">
+        <span class="inst-id">dvc_0.33.1_0.34.0</span>
+        <span class="inst-tag">not resolved</span>
+      </div>
+<div class="inst miss" title="iterative__dvc_0.35.3_0.35.4 — not resolved · F2P 1/2 · P2P 26/26">
+        <span class="inst-id">dvc_0.35.3_0.35.4</span>
+        <span class="inst-tag">not resolved</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_0.52.1_0.53.1 — resolved · F2P 132/132 · P2P 0/0">
+        <span class="inst-id">dvc_0.52.1_0.53.1</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_0.89.0_0.90.0 — resolved · F2P 27/27 · P2P 282/282">
+        <span class="inst-id">dvc_0.89.0_0.90.0</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_0.91.2_0.91.3 — resolved · F2P 2/2 · P2P 17/17">
+        <span class="inst-id">dvc_0.91.2_0.91.3</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_0.92.0_0.92.1 — resolved · F2P 4/4 · P2P 6/6">
+        <span class="inst-id">dvc_0.92.0_0.92.1</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst miss" title="iterative__dvc_1.0.0a1_1.0.0a2 — not resolved · F2P 0/68 · P2P 0/242">
+        <span class="inst-id">dvc_1.0.0a1_1.0.0a2</span>
+        <span class="inst-tag">not resolved</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_1.0.0b6_1.0.0 — resolved · F2P 2/2 · P2P 2/2">
+        <span class="inst-id">dvc_1.0.0b6_1.0.0</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst miss" title="iterative__dvc_1.0.1_1.0.2 — not resolved · F2P 1/2 · P2P 17/19">
+        <span class="inst-id">dvc_1.0.1_1.0.2</span>
+        <span class="inst-tag">not resolved</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_1.1.0_1.1.1 — resolved · F2P 6/6 · P2P 28/28">
+        <span class="inst-id">dvc_1.1.0_1.1.1</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst miss" title="iterative__dvc_1.1.7_1.1.8 — not resolved · F2P 0/8 · P2P 39/82">
+        <span class="inst-id">dvc_1.1.7_1.1.8</span>
+        <span class="inst-tag">not resolved</span>
+      </div>
+<div class="inst pend" title="iterative__dvc_1.10.2_1.11.0 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">dvc_1.10.2_1.11.0</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_1.11.12_1.11.13 — resolved · F2P 2/2 · P2P 4/4">
+        <span class="inst-id">dvc_1.11.12_1.11.13</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_1.6.3_1.6.4 — resolved · F2P 9/9 · P2P 2/2">
+        <span class="inst-id">dvc_1.6.3_1.6.4</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_2.19.0_2.20.0 — resolved · F2P 14/14 · P2P 66/66">
+        <span class="inst-id">dvc_2.19.0_2.20.0</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_2.21.1_2.21.2 — resolved · F2P 1/1 · P2P 8/8">
+        <span class="inst-id">dvc_2.21.1_2.21.2</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_2.5.0_2.5.1 — resolved · F2P 5/5 · P2P 24/24">
+        <span class="inst-id">dvc_2.5.0_2.5.1</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_2.58.1_2.58.2 — resolved · F2P 2/2 · P2P 20/20">
+        <span class="inst-id">dvc_2.58.1_2.58.2</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_2.7.2_2.7.3 — resolved · F2P 4/4 · P2P 34/34">
+        <span class="inst-id">dvc_2.7.2_2.7.3</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst pend" title="iterative__dvc_2.8.1_2.8.2 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">dvc_2.8.1_2.8.2</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst ok" title="iterative__dvc_3.12.0_3.13.0 — resolved · F2P 33/33 · P2P 44/44">
+        <span class="inst-id">dvc_3.12.0_3.13.0</span>
+        <span class="inst-tag">resolved</span>
+      </div>
+<div class="inst miss" title="iterative__dvc_3.13.3_3.14.0 — not resolved · F2P 0/13 · P2P 36/36">
+        <span class="inst-id">dvc_3.13.3_3.14.0</span>
+        <span class="inst-tag">not resolved</span>
+      </div>
+<div class="inst pend" title="iterative__dvc_3.15.0_3.15.1 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">dvc_3.15.0_3.15.1</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="iterative__dvc_3.4.0_3.5.0 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">dvc_3.4.0_3.5.0</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="iterative__dvc_3.43.1_3.44.0 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">dvc_3.43.1_3.44.0</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="modin-project__modin_0.24.0_0.24.1 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">modin_0.24.0_0.24.1</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="modin-project__modin_0.25.0_0.25.1 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">modin_0.25.0_0.25.1</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="modin-project__modin_0.27.0_0.27.1 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">modin_0.27.0_0.27.1</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="psf__requests_v2.12.2_v2.12.3 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">requests_v2.12.2_v2.12.3</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="psf__requests_v2.27.0_v2.27.1 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">requests_v2.27.0_v2.27.1</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="psf__requests_v2.4.0_v2.4.1 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">requests_v2.4.0_v2.4.1</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="psf__requests_v2.9.0_v2.9.1 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">requests_v2.9.0_v2.9.1</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="pydantic__pydantic_v2.6.0b1_v2.6.0 — pending">
+        <span class="inst-id">pydantic_v2.6.0b1_v2.6.0</span>
+        <span class="inst-tag">pending</span>
+      </div>
+<div class="inst pend" title="pydantic__pydantic_v2.7.0_v2.7.1 — pending">
+        <span class="inst-id">pydantic_v2.7.0_v2.7.1</span>
+        <span class="inst-tag">pending</span>
+      </div>
+<div class="inst pend" title="pydantic__pydantic_v2.7.1_v2.7.2 — pending">
+        <span class="inst-id">pydantic_v2.7.1_v2.7.2</span>
+        <span class="inst-tag">pending</span>
+      </div>
+<div class="inst pend" title="scikit-learn__scikit-learn_0.20.1_0.20.2 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">scikit-learn_0.20.1_0.20.2</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div>
+<div class="inst pend" title="scikit-learn__scikit-learn_0.21.1_0.21.2 — pending (x86) · candidate generated on Mac; awaiting native-x86 score">
+        <span class="inst-id">scikit-learn_0.21.1_0.21.2</span>
+        <span class="inst-tag">pending (x86)</span>
+      </div></div>
+</div></section>
+
+<section><div class="wrap">
+  <h2>How the Smithers script is built</h2>
+  <p class="lead">SWE-EVO gives a repo at release N and the release notes for N+1; the workflow must evolve the code to satisfy N+1's hidden test suite. The whole thing is one Smithers workflow built from two standard-library components — no bespoke agent glue.</p>
+  <div class="flow">
+    <span class="node">prepare<br><b>checkout @ base</b></span><span class="arr">→</span>
+    <span class="node"><b>Panel</b><br>Opus + GPT-5.5 plan</span><span class="arr">→</span>
+    <span class="node">Opus<br><b>moderates</b></span><span class="arr">→</span>
+    <span class="node"><b>ReviewLoop</b><br>GPT-5.5 ⇄ Opus</span><span class="arr">→</span>
+    <span class="node">diff</span><span class="arr">→</span>
+    <span class="node"><b>score</b><br>real Docker tests</span>
+  </div>
+  <p class="lead"><strong>1. Panel — independent plans, then synthesis.</strong> Each planner explores the repo read-only and proposes an approach; an Opus moderator reconciles them into one consolidated plan. The panel is the standard-library <code>&lt;Panel strategy="synthesize"&gt;</code>.</p>
+  <pre>&lt;Panel
+  id="plan"
+  panelists={[opusPlanner, codexPlanner /*, geminiPlanner */]}
+  moderator={opusModerator}
+  strategy="synthesize"
+&gt;
+  {planPrompt(instance)}
+&lt;/Panel&gt;</pre>
+  <p class="lead"><strong>2. ReviewLoop — produce, review, repeat.</strong> GPT-5.5 implements against the consolidated plan; Opus reviews the working tree against the spec and either approves or returns blocking feedback, which is threaded back into the next implementation attempt. Loops up to 3 times.</p>
+  <pre>&lt;ReviewLoop
+  id="impl"
+  producer={codexImplementer}      // GPT-5.5 writes the code
+  reviewer={[opusReviewer]}        // Opus judges against the spec
+  maxIterations={3}
+  onMaxReached="return-last"
+&gt;
+  {producerPrompt /* synthesized plan + last review feedback */}
+&lt;/ReviewLoop&gt;</pre>
+  <div class="callout"><strong>Fairness is enforced by construction.</strong> Every agent sees only the release spec and the repo — never the hidden tests or the gold patch. The gold patch and hidden tests are stripped from the run input entirely (they live on disk and are loaded only by the deterministic score node), so they cannot leak into a prompt or the run database.</div>
+  <p class="lead">Because it is a Smithers workflow, the whole run is durable: every node's output is checkpointed, a crashed or rate-limited run resumes from the last completed step, and the supervisor pauses on a real usage-limit and restarts when capacity returns. The point of this build is to <em>benchmark Smithers orchestration</em>: how much a Panel + ReviewLoop lifts a pair of models over a flat single pass.</p>
+</div></section>
+
+<section><div class="wrap">
+  <h2>vs the public SWE-EVO leaderboard</h2>
+  <p class="lead">Official numbers are full-48 Resolved Rate from the SWE-EVO paper (best of OpenHands / SWE-agent scaffolds), internet blocked. Our bar is Smithers orchestration on the instances scored so far.</p>
+  <div class="bars"><div class="bar-row ours">
+        <div class="bar-label">Smithers orchestration — Opus 4.8 + GPT-5.5<span class="bar-prov">Anthropic + OpenAI</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:100%"></div></div>
+        <div class="bar-val">66.7%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">glm-4p7<span class="bar-prov">Zhipu</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:59.37%"></div></div>
+        <div class="bar-val">39.6%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">glm-5<span class="bar-prov">Zhipu</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:56.24999999999999%"></div></div>
+        <div class="bar-val">37.5%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">gpt-5.4<span class="bar-prov">OpenAI</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:37.5%"></div></div>
+        <div class="bar-val">25.0%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">kimi-k2p5<span class="bar-prov">Moonshot</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:37.5%"></div></div>
+        <div class="bar-val">25.0%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">deepseek-v3p2<span class="bar-prov">DeepSeek</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:35.099999999999994%"></div></div>
+        <div class="bar-val">23.4%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">gpt-5.2<span class="bar-prov">OpenAI</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:34.379999999999995%"></div></div>
+        <div class="bar-val">22.9%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">gpt-5-08-07<span class="bar-prov">OpenAI</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:31.244999999999997%"></div></div>
+        <div class="bar-val">20.8%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">kimi-k2-instruct<span class="bar-prov">Moonshot</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:28.124999999999996%"></div></div>
+        <div class="bar-val">18.8%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">deepseek-v3p1<span class="bar-prov">DeepSeek</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:25.005000000000003%"></div></div>
+        <div class="bar-val">16.7%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">glm-4p5<span class="bar-prov">Zhipu</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:25.005000000000003%"></div></div>
+        <div class="bar-val">16.7%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">qwen3-coder-480b-a35b<span class="bar-prov">Qwen</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:21.869999999999997%"></div></div>
+        <div class="bar-val">14.6%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">gpt-5-mini-08-07<span class="bar-prov">OpenAI</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:15.629999999999999%"></div></div>
+        <div class="bar-val">10.4%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">deepseek-r1-0528<span class="bar-prov">DeepSeek</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:15.629999999999999%"></div></div>
+        <div class="bar-val">10.4%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">gpt-4.1-2025-04-14<span class="bar-prov">OpenAI</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:15.629999999999999%"></div></div>
+        <div class="bar-val">10.4%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">gpt-4o-2024-11-20<span class="bar-prov">OpenAI</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:9.375%"></div></div>
+        <div class="bar-val">6.3%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">o3-2025-04-16<span class="bar-prov">OpenAI</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:9.375%"></div></div>
+        <div class="bar-val">6.3%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">gpt-oss-120b<span class="bar-prov">OpenAI</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:9.375%"></div></div>
+        <div class="bar-val">6.3%</div>
+      </div>
+<div class="bar-row ">
+        <div class="bar-label">gpt-5-nano-08-07<span class="bar-prov">OpenAI</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:6.255%"></div></div>
+        <div class="bar-val">4.2%</div>
+      </div></div>
+  <div class="callout" style="border-left-color:var(--accent)">
+    <strong>First SWE-EVO numbers for this pairing.</strong> Opus 4.8 (88.6% on SWE-bench Verified) and GPT-5.5 (88.7%) sit at the very top of the easier SWE-bench Verified leaderboard, but neither model appears in the SWE-EVO paper, which predates them and tops out at gpt-5.4 (25%). SWE-EVO is a much harder long-horizon evolution benchmark, so a ~88% SWE-bench Verified score does not carry over. These runs are, as far as we can tell, the first SWE-EVO measurements for Opus 4.8 and GPT-5.5.
+  </div>
+  <div class="callout">
+    <strong>Read this honestly.</strong> These are full-48 numbers. The dvc subset run here is the gold-verified, deterministic, filesystem-test slice (the easier instances that reproduce on x86-emulated Docker). Subset Resolved Rate is NOT directly comparable to full-48 official RR. The load-bearing comparison is the internal A/B (orchestration vs flat baseline on identical instances); the official board is the directional reference for what frontier full-48 performance looks like (~25% ceiling). The denominator and the model lineup differ from the paper, so treat cross-rows as directional, not a matched ranking. Wilson 95% CIs over 48 instances are wide: 25.00% -&gt; [14.9, 38.8], 18.75% -&gt; [10.2, 31.9], 10.42% -&gt; [4.5, 22.2], 2.08% -&gt; [0.4, 10.9]. Treat small gaps as noise.
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  Source: <code>examples/swe-evo</code> in the Smithers repo · dataset <a href="https://arxiv.org/abs/2512.18470">Fsoft-AIC/SWE-EVO (arXiv:2512.18470)</a> · workflow <code>workflow/swe-evo-panel.tsx</code> · regenerate with <code>bun make-showcase.ts</code>.
+</div></footer>
+</body>
+</html>

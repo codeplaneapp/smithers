@@ -68,6 +68,42 @@ const placeOrder = defineTool({
 
 The five built-in tools (`read`, `write`, `edit`, `grep`, `bash`) are sandboxed to `rootDir`. Symlinks, network, and long-running calls are denied by default; `--allow-network` opens bash to the network. Grant least privilege per task: a reviewer gets `read` and `grep`, an implementer gets `write`, `edit`, and `bash`, and an agent with no `tools` cannot touch the filesystem at all. See [How It Works](/how-it-works).
 
+## Autonomous and detached runs
+
+### Agents need permission-bypass flags or a detached run hangs
+
+A `ClaudeCodeAgent` or `CodexAgent` constructed with just a `model` will prompt
+for permission before it edits files. In an interactive session you click
+through; in a detached run (`up -d`) there is no one to click, so the task stalls
+until its heartbeat timeout. For autonomous runs construct agents with the bypass
+flags:
+
+```tsx
+const opus = new ClaudeCodeAgent({
+  model: "claude-opus-4-8",
+  permissionMode: "bypassPermissions",
+  dangerouslySkipPermissions: true,
+});
+const codex = new CodexAgent({
+  model: "gpt-5.5",
+  sandbox: "danger-full-access",
+  dangerouslyBypassApprovalsAndSandbox: true,
+  skipGitRepoCheck: true,
+});
+```
+
+The named pools in `.smithers/agents.ts` are intentionally bypass-free for
+interactive use, so do not reach for them in a detached workflow without adding
+the flags.
+
+### Never pin `cwd` on an agent you use inside `<Worktree>`
+
+A pinned `cwd` takes precedence over the per-task root, so the agent reads and
+writes the launch directory and commits to the base branch instead of its
+worktree. Leave `cwd` unset and let `<Worktree>` (or the launch root) control the
+directory. The engine logs a "pinned cwd overrides Worktree" warning when you get
+this wrong.
+
 ## Time travel and VCS
 
 ### Revert and VCS-restoring replay change your working tree
@@ -94,6 +130,22 @@ Reading a downstream output before its task has completed returns `undefined`, n
 ```tsx
 const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
 return analysis ? <Task id="report" output={outputs.report} agent={writer}>...</Task> : null;
+```
+
+### An output schema is a shared pool; do not write stray rows into one you filter
+
+`ctx.outputs.<schema>` is every row written for that schema by every node and
+every loop iteration. When you fan out and later read "the latest row for item X"
+by filtering on a discriminator field, any other task that writes a row to the
+same schema lands in that pool too. A setup or sentinel task that reuses a
+filtered schema (for example writing a placeholder `validation` row from a
+`prepare` step) can be picked up as if it were real per-item state. Give
+unrelated streams their own schema, and always match on a discriminator you set
+on every row.
+
+```tsx
+// prepare gets its OWN schema, not the validation schema the loop filters by deliverable
+<Task id="prepare" output={outputs.prepare}>{() => ({ specFound: true })}</Task>
 ```
 
 ## Read next

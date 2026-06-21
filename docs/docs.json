@@ -198,6 +198,7 @@
               "components/review-loop",
               "components/optimizer",
               "components/content-pipeline",
+              "components/sidecar",
               "components/approval-gate",
               "components/escalation-chain",
               "components/decision-table",
