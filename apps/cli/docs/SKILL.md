@@ -154,6 +154,31 @@ nothing while it waits.
 </Ralph>
 ```
 
+## Context engineering: the levers you pull
+
+For a fixed model, output quality is a function of the context window you hand it.
+Authoring a good script is context engineering. The doctrine you operate by, with
+the full treatment in [Context engineering](/guides/context-engineering):
+
+- **Three levers, and they trade off.** Quality (`<Panel>` + `<ReviewLoop>`: more
+  attempts, model diversity, verification), cost (`<Sidecar>`: a cheap shadow model
+  scored against the primary so you know when to promote it), and speed
+  (`<Parallel>`). Pushing one usually costs another, so name which you are spending.
+- **Stay in the smart zone.** Agents perform best under ~200k tokens of context,
+  ideally under ~100k. Do research and planning up front so the implementer spends
+  its window on the work. Watch it with `smithers.tokens.context_window_per_call`
+  (histogram, buckets `[50k,100k,200k,500k,1M]`), the `TokenUsageReported` event
+  (🧮), and `bunx smithers-orchestrator node`. Cap it with `<Aspects tokenBudget>`;
+  for a long loop, catch `ASPECT_BUDGET_EXCEEDED` and `<ContinueAsNew>` to a fresh
+  context (durable `/clear`).
+- **Plan the validation, not the feature.** Review is cheapest on a plan, miserable
+  on a diff. Review the plan, test the output, skip the diff. A vetted plan with
+  teeth (named tests, machine-checkable "done") plus real backpressure takes a
+  complex feature from ~40% to ~98% one-shot. Never call it done without an e2e test.
+- **Sandwich delegation.** Smart, expensive models plan and review at the ends;
+  cheaper models implement the middle. Recurse as the work grows. Do not spend your
+  most expensive model on work a cheaper one can do.
+
 ## Reading outputs, and fanning out over worktrees
 
 Two data-access facts the API examples above don't make obvious, and that you
@@ -227,7 +252,7 @@ live in `examples/` (listed below).
 The same substrate carries the concerns you'd otherwise bolt on later:
 
 - **Isolation**: `<Worktree>` (per-agent git worktrees), `<Sandbox>` (freestyle / docker / process), `<Subflow>` & `<SuperSmithers>` (nest a workflow as a node).
-- **Budgets**: `<Aspects>` propagates token / latency / cost budget metadata to a subtree, but runtime enforcement is not implemented yet.
+- **Budgets**: `<Aspects tokenBudget={{ max, onExceeded }}>` propagates token / latency budgets to a subtree, enforced at task dispatch: before each descendant task the engine checks the run's accumulated tokens against `max` and applies `onExceeded` (`fail` raises `ASPECT_BUDGET_EXCEEDED`, `warn` logs, `skip-remaining` skips the task). The per-task limit (`perTask`) is not enforced yet. Catch `ASPECT_BUDGET_EXCEEDED` in a `<TryCatchFinally>` whose catch renders `<ContinueAsNew>` to do a durable `/clear` (see [Context engineering](/guides/context-engineering)).
 - **Scorers / evals**: attach `faithfulness`, `relevancy`, `schemaAdherence`, or `llmJudge(...)` to any `<Task>`; inspect with `smithers scores <run>`.
 - **Memory**: cross-run facts + history per namespace; `memory={{ recall, save }}` auto-injects the top-K relevant facts; query with `smithers memory`.
 - **Hot mode**: `--hot true` re-renders against persisted state when you edit the workflow or an `.mdx` prompt mid-run; finished tasks stay put.

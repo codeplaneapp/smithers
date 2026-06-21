@@ -1,0 +1,47 @@
+---
+title: "Context Engineering, Done for You"
+icon: "layer-group"
+description: "Smithers bakes context engineering into the agent, so you describe outcomes and it handles the craft of feeding the model the right context at each step."
+---
+
+There is a craft to getting great results out of a coding agent: feed the model the
+right context at each step, keep its working set small, plan before you build, and
+prove the work with tests. It has a name, context engineering, and it is most of the
+difference between an agent that one-shots a feature and one that flails.
+
+You do not have to learn it. Smithers bakes context engineering into the agent that
+drives it. You say what "done" looks like, and the agent assembles the context, the
+plan, the gates, and the loops on your behalf.
+
+## Ask your agent for the rundown
+
+The fastest way to understand what is happening under the hood is to ask the agent
+that runs Smithers for you. Try:
+
+> **"Give me a rundown of how you do context engineering with Smithers, and what you
+> do when you write a Smithers script."**
+
+It will walk you through its own playbook in plain language and tie it back to your
+project.
+
+## What the agent does when it writes a script
+
+When you hand off a real piece of work, the agent is doing this for you:
+
+- **Plans, then validates.** It writes a plan with teeth (named tests and a clear
+  definition of done), and puts the gates in before the code, so the result is
+  checked instead of hoped for.
+- **Stays in the smart zone.** It keeps each step's context small and focused, with
+  research and planning done up front, so the model spends its attention on the work.
+- **Tests end to end.** It does not call a feature finished until a real test proves
+  it, and it builds one slice all the way through before starting the next.
+- **Delegates the ends and the middle.** Strong models plan and review at the two
+  ends; cheaper models handle the routine work in the middle. You get the quality
+  where it matters without paying top rates for everything.
+
+## Read next
+
+- [How to talk to your agent](/guide/talk-to-your-agent): phrase requests so the
+  agent drives Smithers well.
+- [The few concepts you need](/guide/concepts): the vocabulary behind durable runs,
+  gates, and loops.

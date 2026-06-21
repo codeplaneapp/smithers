@@ -71,8 +71,11 @@ jobs:
 
       # The examples/ tree (porting rules + worked ports) is otherwise only
       # typechecked; run its bun tests so structural porting rules are gated.
+      # The context-handoff render test is the no-mocks anti-rot proof for the
+      # Aspects + TryCatchFinally + ContinueAsNew handoff embedded in the
+      # context-engineering guide (graph render only, no agent CLIs needed).
       - name: Run examples bun tests
-        run: bun test examples/bun-port-smithers/components/porting-rules.test.ts
+        run: bun test examples/bun-port-smithers/components/porting-rules.test.ts examples/context-handoff/workflow.test.ts
 
       # Real-PTY TUI e2e (picker / input / approval) driven through zmux. These
       # probes need no agent CLI, so they are safe on the clean CI box. The
