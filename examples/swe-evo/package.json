@@ -1,0 +1,8 @@
+{
+  "name": "swe-evo-benchmark",
+  "private": true,
+  "description": "SWE-EVO benchmark harness for Smithers orchestration (not a pnpm workspace; run with bun)",
+  "dependencies": {
+    "freestyle": "^0.1.63"
+  }
+}
