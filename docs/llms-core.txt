@@ -4213,6 +4213,71 @@ export default smithers(() => (
 
 ---
 
+## <Sidecar>
+
+> Run a cheap shadow agent beside a primary task and compare their scorer results.
+
+```ts
+// Props
+import { Sidecar, computeSidecarDelta } from "smithers-orchestrator";
+
+type SidecarProps = {
+  id?: string;                         // default: "sidecar"
+  agent: AgentLike;                    // primary agent
+  sidecar: AgentLike;                  // cheap shadow agent
+  output: OutputTarget;                // primary output target
+  sidecarOutput?: OutputTarget;        // default: output
+  scorers?: ScorersMap;                // attached to both tasks
+  prompt?: string | ReactNode;
+  input?: string | ReactNode;
+  maxConcurrency?: number;
+  groundTruth?: unknown;
+  context?: unknown;
+  primaryLabel?: string;
+  sidecarLabel?: string;
+  skipIf?: boolean;
+  children?: string | ReactNode;
+};
+
+type SidecarDelta = {
+  primaryScore: number | null;
+  sidecarScore: number | null;
+  delta: number | null;
+  cheaperWins: boolean;
+};
+```
+
+```tsx
+<Workflow name="cheap-model-shadow">
+  <Sidecar
+    id="answer"
+    agent={primaryAgent}
+    sidecar={cheapAgent}
+    output={outputs.answer}
+    scorers={scorers}
+  >
+    Answer the customer question with the most accurate response.
+  </Sidecar>
+</Workflow>
+```
+
+## Behavior
+
+`<Sidecar>` renders a `<Parallel>` with two `<Task>` children. The primary task uses the component `id`, writes to `output`, and is the node downstream workflow code should consume. The sidecar task uses `${id}-sidecar`, receives the same prompt, gets `continueOnFail: true`, and writes to `sidecarOutput` when supplied or to `output` by default.
+
+Both tasks receive the same `scorers` prop. Smithers records live scorer results in `_smithers_scorers` once per task node id, so `bunx smithers-orchestrator scores RUN_ID` can show the primary row and the sidecar row separately.
+
+Use `computeSidecarDelta(rows, { primaryNodeId, sidecarNodeId, scorerId })` after reading persisted scorer rows. It derives `primaryScore`, `sidecarScore`, `delta`, and `cheaperWins` from those rows only.
+
+## Notes
+
+- The sidecar can fail without failing the workflow.
+- The sidecar result does not replace the primary result.
+- `delta` is `primaryScore - sidecarScore`.
+- `cheaperWins` is true when the sidecar score is greater than or equal to the primary score.
+
+---
+
 ## <DriftDetector>
 
 > Capture state, compare against a baseline, and alert on meaningful drift.
@@ -6150,6 +6215,30 @@ type PanelProps = {
   maxConcurrency?: number;
   skipIf?: boolean;
   children: string | React.ReactNode;
+};
+
+type SidecarProps = {
+  id?: string;
+  agent: AgentLike;
+  sidecar: AgentLike;
+  output: OutputTarget;
+  sidecarOutput?: OutputTarget;
+  scorers?: ScorersMap;
+  prompt?: string | React.ReactNode;
+  input?: string | React.ReactNode;
+  maxConcurrency?: number;
+  groundTruth?: unknown;
+  context?: unknown;
+  primaryLabel?: string;
+  sidecarLabel?: string;
+  skipIf?: boolean;
+  children?: string | React.ReactNode;
+};
+type SidecarDelta = {
+  primaryScore: number | null;
+  sidecarScore: number | null;
+  delta: number | null;
+  cheaperWins: boolean;
 };
 
 type ReviewLoopProps = {
