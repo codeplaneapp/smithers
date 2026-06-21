@@ -62,20 +62,32 @@ function parseArgs(argv: string[]): Args {
 }
 
 /**
- * Strip the gold answer + hidden tests from the engine run input.
+ * Strip the gold answer + hidden-test metadata from the engine run input.
  *
- * `patch` (the reference solution) and `test_patch` (the hidden tests) must never
- * reach the agents, and they routinely exceed the engine's 64KB-per-string input
- * cap (e.g. iterative__dvc_1.0.0a1_1.0.0a2: patch=227KB, test_patch=194KB), which
- * fails the whole run with INVALID_INPUT before any agent starts. The only
- * consumer is the deterministic `score` node, which reloads the full row from disk
- * via harness.loadInstance(). Keeping them out of the input also stops the gold
- * solution from being persisted into the run DB.
+ * Four fields must never reach the agents and routinely violate the engine's input
+ * bounds, failing the whole run with INVALID_INPUT before any agent starts:
+ *   - `patch`      (reference solution) and `test_patch` (hidden tests): single
+ *     strings that exceed the 64KB-per-string cap (e.g. dvc 1.0.0a1: 227KB/194KB).
+ *   - `FAIL_TO_PASS` / `PASS_TO_PASS`: test-name arrays that exceed the 512-item
+ *     array cap (e.g. dask 2023.3.2: 6246 PASS_TO_PASS entries).
+ *
+ * The only consumer of all four is the deterministic `score` node, which reloads
+ * the full row from disk via harness.loadInstance() — so none of them need to ride
+ * the run input. Keeping them out also stops the gold data from being persisted
+ * into the run DB.
  */
 function toRunInput(instance: Instance): Instance {
-  const { patch: _patch, test_patch: _testPatch, ...rest } = instance as Instance & {
+  const {
+    patch: _patch,
+    test_patch: _testPatch,
+    FAIL_TO_PASS: _f2p,
+    PASS_TO_PASS: _p2p,
+    ...rest
+  } = instance as Instance & {
     patch?: string;
     test_patch?: string;
+    FAIL_TO_PASS?: unknown;
+    PASS_TO_PASS?: unknown;
   };
   return rest as Instance;
 }

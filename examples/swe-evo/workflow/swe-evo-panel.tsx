@@ -358,18 +358,47 @@ export function createSweEvoPanel(opts: { dbPath?: string } = {}) {
             {() => captureDiff(instance)}
           </Task>
           <Task id="score" output={outputs.score}>
-            {() =>
+            {() => {
               // The run input carries no gold fields (see run.ts:toRunInput), so
               // reload the full instance (gold patch + hidden tests) from disk for
               // the authoritative score. captureDiff only needs the workdir.
-              toScoreRow(
-                scoreCandidate(
-                  loadInstance(instance.instance_id),
-                  captureDiff(instance).patch,
-                  SCORE_TIMEOUT_S,
-                ),
-              )
-            }
+              const inst = loadInstance(instance.instance_id);
+              const patch = captureDiff(instance).patch;
+              try {
+                return toScoreRow(scoreCandidate(inst, patch, SCORE_TIMEOUT_S));
+              } catch (e) {
+                // Scoring can fail when the instance's Docker image is not
+                // reproducible under emulation on this host (arch / host-network
+                // dependence). The candidate diff is already captured by the diff
+                // node, so don't crash the run: record a zero sentinel and re-score
+                // this instance on native x86 (see score-x86.ts). The showcase
+                // treats x86 scores as authoritative for the x86 set.
+                process.stderr.write(
+                  `[score] ${inst.instance_id} not scoreable on this host (${String((e as Error)?.message ?? e).slice(0, 120)}); diff captured for x86 re-score\n`,
+                );
+                return toScoreRow({
+                  instance_id: inst.instance_id,
+                  repo: (inst as any).repo ?? "",
+                  image: (inst as any).image ?? "",
+                  log_parser: (inst as any).log_parser ?? "",
+                  test_cmds: (inst as any).test_cmds ?? "",
+                  resolved: 0,
+                  fix_rate: 0,
+                  f2p_total: 0,
+                  f2p_passed: 0,
+                  p2p_total: 0,
+                  p2p_passed: 0,
+                  all_p2p_pass: false,
+                  candidate_applied: false,
+                  testpatch_applied: false,
+                  timed_out: false,
+                  duration_s: 0,
+                  parsed_test_count: 0,
+                  f2p_status: {},
+                  p2p_failures: {},
+                } as import("./harness").ScoreResult);
+              }
+            }}
           </Task>
         </Sequence>
       </Workflow>
