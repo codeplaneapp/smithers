@@ -427,6 +427,7 @@ export class WorkflowDriver {
             defaultIteration: iteration,
             baseRootDir,
             workflowPath,
+            trigger: context.trigger,
         });
         // Capture tasks that deferred on unresolved deps this render so the run
         // loop can fail loudly if any survive to a Finished decision instead of

@@ -66,6 +66,7 @@ import { enforceDispatchBudget } from "./aspects/enforceDispatchBudget.js";
 /** @typedef {import("@smithers-orchestrator/driver/RunResult").RunResult} RunResult */
 /** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
 /** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} TaskDescriptor */
+/** @typedef {import("@smithers-orchestrator/scheduler").RenderContext} RenderContext */
 /** @typedef {import("@smithers-orchestrator/scheduler").TaskStateMap} TaskStateMap */
 /** @typedef {import("@smithers-orchestrator/db/adapter/ApprovalRow").ApprovalRow} ApprovalRow */
 /** @typedef {import("@smithers-orchestrator/db/adapter/RunRow").RunRow} RunRow */
@@ -5239,8 +5240,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
     });
     /**
    * @param {WorkflowGraph} graph
+   * @param {RenderContext["trigger"]} [trigger]
    */
-    const persistDriverFrame = async (graph) => {
+    const persistDriverFrame = async (graph, trigger) => {
         const xmlJson = canonicalizeXml(graph.xml);
         const xmlHash = sha256Hex(xmlJson);
         frameNo += 1;
@@ -5293,6 +5295,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 runId,
                 frameNo,
                 xmlHash,
+                ...(trigger ? { trigger } : {}),
                 timestampMs: frameCommittedAtMs,
             }));
             await Effect.runPromise(eventBus.emitEventWithPersist({
@@ -5700,7 +5703,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             runId,
             nowMs,
             requireStableFinish: true,
-            requireRerenderOnOutputChange: true,
+            requireRerenderOnOutputChange: opts.requireRerenderOnOutputChange ?? true,
             initialRalphState: ralphState,
             evaluateAspectBudget: (descriptor) => budgetTracker
                 ? evaluateAspectBudget(descriptor.aspects, budgetTracker.snapshot(nowMs()))
@@ -5787,7 +5790,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                     defaultIteration = 0;
                 }
                 await persistDriverGraphTaskStates(lastGraph);
-                await persistDriverFrame(lastGraph);
+                await persistDriverFrame(lastGraph, renderOpts?.trigger);
                 return lastGraph;
             },
         };

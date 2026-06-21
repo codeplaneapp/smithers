@@ -229,6 +229,11 @@ export type SmithersEvent =
       runId: string;
       frameNo: number;
       xmlHash: string;
+      trigger?: {
+        reason: string;
+        nodeId?: string;
+        iteration?: number;
+      };
       timestampMs: number;
     }
   | {

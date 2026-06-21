@@ -1,13 +1,13 @@
-import * as _smithers_graph_types from '@smithers-orchestrator/graph/types';
-import { WorkflowGraph as WorkflowGraph$1, TaskDescriptor as TaskDescriptor$1 } from '@smithers-orchestrator/graph/types';
+import * as _smithers_orchestrator_graph_types from '@smithers-orchestrator/graph/types';
+import { WorkflowGraph, TaskDescriptor as TaskDescriptor$1 } from '@smithers-orchestrator/graph/types';
 import { SmithersEvent } from '@smithers-orchestrator/observability/SmithersEvent';
-import * as _smithers_scheduler from '@smithers-orchestrator/scheduler';
+import * as _smithers_orchestrator_scheduler from '@smithers-orchestrator/scheduler';
 import { WaitReason as WaitReason$1, EngineDecision as EngineDecision$1 } from '@smithers-orchestrator/scheduler';
 import { z } from 'zod';
 import { SmithersWorkflowOptions } from '@smithers-orchestrator/scheduler/SmithersWorkflowOptions';
 import { SchemaRegistryEntry } from '@smithers-orchestrator/db/SchemaRegistryEntry';
-import * as _smithers_graph from '@smithers-orchestrator/graph';
-import { ExtractOptions, WorkflowGraph } from '@smithers-orchestrator/graph';
+import * as _smithers_orchestrator_graph from '@smithers-orchestrator/graph';
+import { ExtractOptions, WorkflowGraph as WorkflowGraph$1 } from '@smithers-orchestrator/graph';
 
 type TaskCompletedEvent = {
     nodeId: string;
@@ -22,7 +22,7 @@ type TaskFailedEvent = {
 };
 
 type WorkflowSession$2 = {
-    submitGraph(graph: WorkflowGraph$1): unknown;
+    submitGraph(graph: WorkflowGraph): unknown;
     taskCompleted(event: TaskCompletedEvent): unknown;
     taskFailed(event: TaskFailedEvent): unknown;
     getNextDecision?(): unknown;
@@ -38,6 +38,10 @@ type RunAuthContext$2 = {
     scopes: string[];
     role: string;
     createdAt: string;
+};
+
+type OutputSnapshot$2<TFallback = unknown> = {
+    [tableName: string]: Array<TFallback>;
 };
 
 type HotReloadOptions$1 = {
@@ -57,6 +61,7 @@ type RunOptions$2 = {
     parentRunId?: string | null;
     input: Record<string, unknown>;
     maxConcurrency?: number;
+    requireRerenderOnOutputChange?: boolean;
     onProgress?: (e: SmithersEvent) => void;
     signal?: AbortSignal;
     resume?: boolean;
@@ -83,7 +88,7 @@ type RunOptions$2 = {
     };
 };
 
-type RunStatus$1 = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "finished" | "continued" | "failed" | "cancelled";
+type RunStatus$1 = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "finished" | "continued" | "failed" | "cancelled";
 
 type RunResult$2 = {
     readonly runId: string;
@@ -139,20 +144,12 @@ type OutputAccessor$2<Schema, TRow = unknown> = {
 } & {
     [K in keyof Schema & string]: Array<InferOutputEntry$1<Schema[K]>>;
 };
-type OutputSchemaKey<Schema> = Exclude<keyof Schema & string, "input">;
-type OutputSchemaValue<Schema> = Schema[OutputSchemaKey<Schema>];
-type StrictTableRef<Schema> = [OutputSchemaKey<Schema>] extends [never] ? TableRef : OutputSchemaKey<Schema> | OutputSchemaValue<Schema>;
-type OutputForTable<Schema, Table> = Table extends OutputSchemaKey<Schema> ? InferOutputEntry$1<Schema[Table]> : Table extends OutputSchemaValue<Schema> ? InferOutputEntry$1<Table> : OutputRow;
 
 type SmithersRuntimeConfig$1 = {
     cliAgentToolsDefault?: "all" | "explicit-only";
     baseRootDir?: string;
     workflowPath?: string | null;
     worktreePaths?: Record<string, string>;
-};
-
-type OutputSnapshot$2<TFallback = unknown> = {
-    [tableName: string]: Array<TFallback>;
 };
 
 type SmithersCtxOptions$2 = {
@@ -214,6 +211,19 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
     /** @type {Set<string>} */
     _currentScopes: Set<string>;
     /**
+     * Tasks that declared `deps` but could not resolve them this render, so
+     * they deferred (returned null) instead of mounting. The engine reads this
+     * after each render: a deferral is normal while an upstream is still
+     * producing, but one that survives to quiescence means the dependency can
+     * never resolve (e.g. a deps/needs key that maps to a node id no task
+     * produces) and the run would otherwise finish silently without it.
+     * @type {{ nodeId: string; waitingOn: string[] }[]}
+     */
+    _deferredDeps: {
+        nodeId: string;
+        waitingOn: string[];
+    }[];
+    /**
      * Return the resolved absolute path for a rendered worktree or task id.
      * The lookup is populated from task descriptors, so task node ids and
      * explicit <Worktree id> values both work once the worktree has rendered.
@@ -235,19 +245,19 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
      * @param {OutputKey} key
      * @returns {OutputRow}
      */
-    output<Table extends StrictTableRef<Schema>>(table: Table, key: OutputKey$1): OutputForTable<Schema, Table>;
+    output(table: TableRef, key: OutputKey$1): OutputRow;
     /**
      * @param {TableRef} table
      * @param {OutputKey} key
      * @returns {OutputRow | undefined}
      */
-    outputMaybe<Table extends StrictTableRef<Schema>>(table: Table, key: OutputKey$1): OutputForTable<Schema, Table> | undefined;
+    outputMaybe(table: TableRef, key: OutputKey$1): OutputRow | undefined;
     /**
      * @param {TableRef} table
      * @param {string} nodeId
      * @returns {OutputRow | undefined}
      */
-    latest<Table extends StrictTableRef<Schema>>(table: Table, nodeId: string): OutputForTable<Schema, Table> | undefined;
+    latest(table: TableRef, nodeId: string): OutputRow | undefined;
     /**
      * @param {unknown} value
      * @param {SafeParser} schema
@@ -266,6 +276,17 @@ declare class SmithersCtx<Schema extends unknown = unknown> {
      */
     resolveTableName(table: TableRef): string;
     /**
+     * Record that a task with `deps` deferred this render because its
+     * dependencies were not resolvable. Called by the Task component before it
+     * returns null. The engine inspects these at quiescence to turn a permanent
+     * deferral (a never-satisfiable dependency) into a loud error instead of a
+     * silent skip.
+     * @param {string} nodeId
+     * @param {string[]} waitingOn
+     * @returns {void}
+     */
+    recordDeferredDep(nodeId: string, waitingOn: string[]): void;
+    /**
      * @param {TableRef} table
      * @param {OutputKey} key
      * @returns {OutputRow | undefined}
@@ -278,7 +299,9 @@ type SmithersCtxOptions$1 = SmithersCtxOptions$2;
 type RunAuthContext$1 = RunAuthContext$2;
 type SmithersRuntimeConfig = SmithersRuntimeConfig$1;
 type TableRef = unknown;
-/** User-visible output row — harness metadata fields (runId, nodeId, iteration) are stripped. */
+/**
+ * User-visible output row — harness metadata fields (runId, nodeId, iteration) are stripped.
+ */
 type OutputRow = Record<string, unknown>;
 type OutputAccessor$1<Schema> = OutputAccessor$2<Schema>;
 
@@ -300,7 +323,7 @@ type WorkflowDefinition$1<Schema = unknown> = {
 };
 
 type WorkflowGraphRenderer$1 = {
-    render(element: WorkflowElement, opts?: ExtractOptions): Promise<WorkflowGraph> | WorkflowGraph;
+    render(element: WorkflowElement, opts?: ExtractOptions): Promise<WorkflowGraph$1> | WorkflowGraph$1;
 };
 
 type WorkflowDriverOptions$1<Schema = unknown> = {
@@ -358,11 +381,36 @@ declare class WorkflowDriver<Schema extends unknown = unknown> {
     /** @type {RunOptions | undefined} */
     activeOptions: RunOptions$1 | undefined;
     /** @type {import("@smithers-orchestrator/graph").WorkflowGraph | undefined} */
-    lastGraph: _smithers_graph.WorkflowGraph | undefined;
+    lastGraph: _smithers_orchestrator_graph.WorkflowGraph | undefined;
+    /** @type {{ nodeId: string; waitingOn: string[] }[]} Tasks that deferred on unresolved deps in the latest render. */
+    lastDeferredDeps: {
+        nodeId: string;
+        waitingOn: string[];
+    }[];
+    /** @type {Record<string, string>} */
+    worktreePathsById: Record<string, string>;
     /** @type {Map<string, string>} */
     outputTablesByNodeId: Map<string, string>;
     /** @type {OutputSnapshot} */
     baseOutputs: OutputSnapshot$1;
+    /** @type {Map<string, Promise<{ key: string; task: TaskDescriptor; kind: "completed" | "failed" | "cancelled"; output?: unknown; error?: unknown }>>} */
+    inflightTasks: Map<string, Promise<{
+        key: string;
+        task: TaskDescriptor;
+        kind: "completed" | "failed" | "cancelled";
+        output?: unknown;
+        error?: unknown;
+    }>>;
+    /** @type {Map<string, TaskDescriptor>} */
+    inflightTaskDescriptors: Map<string, TaskDescriptor>;
+    /** @type {Array<{ key: string; task: TaskDescriptor; kind: "completed" | "failed" | "cancelled"; output?: unknown; error?: unknown }>} */
+    settledTasks: Array<{
+        key: string;
+        task: TaskDescriptor;
+        kind: "completed" | "failed" | "cancelled";
+        output?: unknown;
+        error?: unknown;
+    }>;
     /**
    * @param {RunOptions} options
    * @returns {Promise<RunResult>}
@@ -384,6 +432,38 @@ declare class WorkflowDriver<Schema extends unknown = unknown> {
    * @returns {Promise<EngineDecision | RunResult>}
    */
     executeTasks(tasks: readonly TaskDescriptor[]): Promise<EngineDecision | RunResult$1>;
+    /**
+   * Start a task without blocking the driver loop on its completion. Settled
+   * tasks queue in `settledTasks` and are reported to the session one at a
+   * time from `nextCompletionDecision`, so each decision is computed against
+   * fresh session state and a slow task never blocks scheduling work that
+   * became ready elsewhere in the graph (#267).
+   * @param {TaskDescriptor} task
+   * @param {{ runId: string; options: RunOptions; signal?: AbortSignal }} context
+   */
+    startInflightTask(task: TaskDescriptor, context: {
+        runId: string;
+        options: RunOptions$1;
+        signal?: AbortSignal;
+    }): void;
+    /**
+   * Wait for the next settled task (or an optional deadline) and report it to
+   * the session for a fresh decision. Completions that landed while a previous
+   * one was being processed drain from `settledTasks` first.
+   * @param {number | null} [deadlineMs]
+   * @returns {Promise<EngineDecision | RunResult>}
+   */
+    nextCompletionDecision(deadlineMs?: number | null): Promise<EngineDecision | RunResult$1>;
+    /**
+   * Await every in-flight task without reporting further decisions. Used
+   * before run-level exits (failure, continue-as-new) so task executors are
+   * not abandoned mid-write. This matches the pre-#267 barrier semantics:
+   * failure reporting waits for in-flight siblings (bounded by their
+   * timeouts), trading latency for the invariant that no executor writes
+   * after the run is terminal. Fail-fast would need a per-run abort threaded
+   * through executors.
+   */
+    drainInflight(): Promise<void>;
     /**
    * @param {WaitReason} reason
    * @returns {Promise<EngineDecision | RunResult>}
@@ -415,11 +495,11 @@ type SchedulerWaitHandler = SchedulerWaitHandler$1;
 type WaitHandler = WaitHandler$1;
 type ContinueAsNewHandler = ContinueAsNewHandler$1;
 type RunOptions$1 = RunOptions$2;
-type RunResult$1 = _smithers_scheduler.RunResult;
-type EngineDecision = _smithers_scheduler.EngineDecision;
-type RenderContext = _smithers_scheduler.RenderContext;
-type WaitReason = _smithers_scheduler.WaitReason;
-type TaskDescriptor = _smithers_graph_types.TaskDescriptor;
+type RunResult$1 = _smithers_orchestrator_scheduler.RunResult;
+type EngineDecision = _smithers_orchestrator_scheduler.EngineDecision;
+type RenderContext = _smithers_orchestrator_scheduler.RenderContext;
+type WaitReason = _smithers_orchestrator_scheduler.WaitReason;
+type TaskDescriptor = _smithers_orchestrator_graph_types.TaskDescriptor;
 
 type HotReloadOptions = HotReloadOptions$1;
 type OutputAccessor<Schema = any> = OutputAccessor$2<Schema>;

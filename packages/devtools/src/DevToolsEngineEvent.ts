@@ -42,6 +42,11 @@ export type RunCancelledEvent = RunEventBase & { type: "RunCancelled" };
 export type FrameCommittedEvent = RunEventBase & {
   type: "FrameCommitted";
   frameNo: number;
+  trigger?: {
+    reason: string;
+    nodeId?: string;
+    iteration?: number;
+  };
 };
 
 export type NodePendingEvent = NodeEventBase & { type: "NodePending" };

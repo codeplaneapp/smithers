@@ -1,6 +1,21 @@
 import type { WorkflowGraph } from "@smithers-orchestrator/graph";
 import type { TaskOutput } from "./TaskOutput.ts";
 
+export type RenderTriggerReason =
+  | "task-finished"
+  | "timer-fired"
+  | "cache-resolved"
+  | "loop-advanced"
+  | "deadlock-check"
+  | "stability-check"
+  | (string & {});
+
+export type RenderTrigger = {
+  readonly reason: RenderTriggerReason;
+  readonly nodeId?: string;
+  readonly iteration?: number;
+};
+
 export type RenderContext = {
   readonly runId: string;
   readonly graph?: WorkflowGraph | null;
@@ -11,4 +26,5 @@ export type RenderContext = {
   readonly auth?: unknown;
   readonly taskStates?: unknown;
   readonly ralphIterations?: ReadonlyMap<string, number>;
+  readonly trigger?: RenderTrigger;
 };

@@ -65,9 +65,10 @@ function mountedSignature(graph) {
 /**
  * @param {SessionState} state
  * @param {number} [iterationOverride]
+ * @param {RenderContext["trigger"]} [trigger]
  * @returns {RenderContext}
  */
-function renderContext(state, iterationOverride) {
+function renderContext(state, iterationOverride, trigger) {
     const ralphIterations = [...state.ralphState.values()].map((value) => value.iteration);
     return {
         runId: state.runId,
@@ -77,6 +78,7 @@ function renderContext(state, iterationOverride) {
         taskStates: cloneTaskStateMap(state.states),
         outputs: new Map(state.outputs),
         ralphIterations: new Map([...state.ralphState.entries()].map(([id, value]) => [id, value.iteration])),
+        ...(trigger ? { trigger } : {}),
     };
 }
 /**
@@ -431,11 +433,12 @@ export function makeWorkflowSession(options = {}) {
     }
     /**
    * @param {number} [iteration]
+   * @param {RenderContext["trigger"]} [trigger]
    * @returns {EngineDecision}
    */
-    function decideAfterOutputChange(iteration) {
+    function decideAfterOutputChange(iteration, trigger) {
         if (options.requireRerenderOnOutputChange) {
-            return { _tag: "ReRender", context: renderContext(state, iteration) };
+            return { _tag: "ReRender", context: renderContext(state, iteration, trigger) };
         }
         return decide();
     }
@@ -533,7 +536,11 @@ export function makeWorkflowSession(options = {}) {
         state.states.set(key, "failed");
         state.failures.set(key, error);
         state.failureDescriptors.set(key, descriptor);
-        return decide();
+        return decideAfterOutputChange(descriptor.iteration, {
+            reason: "task-finished",
+            nodeId: descriptor.nodeId,
+            iteration: descriptor.iteration,
+        });
     }
     /**
    * @returns {EngineDecision | null}
@@ -735,7 +742,7 @@ export function makeWorkflowSession(options = {}) {
                 advanced = true;
             }
             if (advanced) {
-                return { _tag: "ReRender", context: renderContext(state) };
+                return { _tag: "ReRender", context: renderContext(state, undefined, { reason: "loop-advanced" }) };
             }
         }
         if (schedule.pendingExists) {
@@ -761,7 +768,7 @@ export function makeWorkflowSession(options = {}) {
                     const signature = mountedSignature(state.graph);
                     if (state.lastDeadlockSignature !== signature) {
                         state.lastDeadlockSignature = signature;
-                        return { _tag: "ReRender", context: renderContext(state) };
+                        return { _tag: "ReRender", context: renderContext(state, undefined, { reason: "deadlock-check" }) };
                     }
                 }
                 return {
@@ -782,7 +789,7 @@ export function makeWorkflowSession(options = {}) {
             const signature = mountedSignature(state.graph);
             if (state.lastMountedSignature !== signature) {
                 state.lastMountedSignature = signature;
-                return { _tag: "ReRender", context: renderContext(state) };
+                return { _tag: "ReRender", context: renderContext(state, undefined, { reason: "stability-check" }) };
             }
         }
         return finishedResult();
@@ -805,7 +812,11 @@ export function makeWorkflowSession(options = {}) {
             // re-mounts) and let the current graph drive the next decision. Failing here
             // would discard every other in-flight task in the run.
             markTaskFinished(output);
-            return decideAfterOutputChange(output.iteration);
+            return decideAfterOutputChange(output.iteration, {
+                reason: "task-finished",
+                nodeId: output.nodeId,
+                iteration: output.iteration,
+            });
         }),
         taskFailed: (failure) => Effect.sync(() => {
             const descriptor = findDescriptor(state, failure.nodeId, failure.iteration);
@@ -865,7 +876,11 @@ export function makeWorkflowSession(options = {}) {
                 iteration: descriptor.iteration,
                 output: { firedAtMs },
             });
-            return decideAfterOutputChange(descriptor.iteration);
+            return decideAfterOutputChange(descriptor.iteration, {
+                reason: "timer-fired",
+                nodeId: descriptor.nodeId,
+                iteration: descriptor.iteration,
+            });
         }),
         hotReloaded: (graph) => Effect.sync(() => {
             try {
@@ -899,7 +914,11 @@ export function makeWorkflowSession(options = {}) {
                 usage: output.usage ?? null,
                 output: output.output,
             });
-            return decideAfterOutputChange(output.iteration);
+            return decideAfterOutputChange(output.iteration, {
+                reason: "cache-resolved",
+                nodeId: output.nodeId,
+                iteration: output.iteration,
+            });
         }),
         cacheMissed: (nodeId, iteration) => Effect.sync(() => {
             const descriptor = findDescriptor(state, nodeId, iteration);

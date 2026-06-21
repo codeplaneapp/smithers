@@ -155,6 +155,62 @@ describe("WorkflowSessionService direct methods", () => {
     expect(afterResolved.result.output).toEqual({ from: "cache" });
   });
 
+  test("rerender decisions carry trigger reasons for task and cache completions", () => {
+    const task = descriptor("fast");
+    const cachedTask = descriptor("cached");
+    const session = makeWorkflowSession({
+      nowMs: () => 1_000,
+      requireRerenderOnOutputChange: true,
+    });
+
+    expect(run(session.submitGraph(graph([task, cachedTask])))._tag).toBe("Execute");
+
+    const completed = run(session.taskCompleted({
+      nodeId: "fast",
+      iteration: 0,
+      output: { ok: true },
+    }));
+    expect(completed).toMatchObject({
+      _tag: "ReRender",
+      context: {
+        trigger: { reason: "task-finished", nodeId: "fast", iteration: 0 },
+      },
+    });
+
+    run(session.submitGraph(graph([cachedTask])));
+    const cached = run(session.cacheResolved({
+      nodeId: "cached",
+      iteration: 0,
+      output: { ok: "cached" },
+    }, true));
+    expect(cached).toMatchObject({
+      _tag: "ReRender",
+      context: {
+        trigger: { reason: "cache-resolved", nodeId: "cached", iteration: 0 },
+      },
+    });
+  });
+
+  test("rerender decisions carry timer-fired trigger reasons", () => {
+    const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "5s" } });
+    const session = makeWorkflowSession({
+      nowMs: () => 1_000,
+      requireRerenderOnOutputChange: true,
+    });
+
+    expect(run(session.submitGraph(graph([task], workflow([
+      el("smithers:timer", { id: "timer" }),
+    ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
+
+    const decision = run(session.timerFired("timer", 7_000));
+    expect(decision).toMatchObject({
+      _tag: "ReRender",
+      context: {
+        trigger: { reason: "timer-fired", nodeId: "timer", iteration: 0 },
+      },
+    });
+  });
+
   test("recoverOrphanedTasks requeues in-progress work and cancelRequested cancels active work", () => {
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
     const tasks = [

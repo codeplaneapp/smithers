@@ -1,7 +1,8 @@
 import * as effect from 'effect';
-import { Context, Layer, Effect, Schedule } from 'effect';
-import * as _smithers_graph from '@smithers-orchestrator/graph';
+import { Effect, Context, Layer, Schedule as Schedule$1 } from 'effect';
+import * as _smithers_orchestrator_graph from '@smithers-orchestrator/graph';
 import { TaskDescriptor as TaskDescriptor$3, WorkflowGraph } from '@smithers-orchestrator/graph';
+import { TaskDescriptor as TaskDescriptor$4 } from '@smithers-orchestrator/graph/TaskDescriptor';
 
 type TaskState$2 = "pending" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "in-progress" | "finished" | "failed" | "cancelled" | "skipped";
 
@@ -112,6 +113,12 @@ type TaskOutput$1 = {
     readonly usage?: TokenUsage$1 | null;
 };
 
+type RenderTriggerReason = "task-finished" | "timer-fired" | "cache-resolved" | "loop-advanced" | "deadlock-check" | "stability-check" | (string & {});
+type RenderTrigger = {
+    readonly reason: RenderTriggerReason;
+    readonly nodeId?: string;
+    readonly iteration?: number;
+};
 type RenderContext$1 = {
     readonly runId: string;
     readonly graph?: WorkflowGraph | null;
@@ -122,6 +129,7 @@ type RenderContext$1 = {
     readonly auth?: unknown;
     readonly taskStates?: unknown;
     readonly ralphIterations?: ReadonlyMap<string, number>;
+    readonly trigger?: RenderTrigger;
 };
 
 type RunResult$1 = {
@@ -203,7 +211,8 @@ type WorkflowSessionService$2 = {
     readonly getCurrentGraph: () => Effect.Effect<WorkflowGraph | null>;
 };
 
-type AspectBudgetBreach$1 = {
+/** A breached Aspects budget for a task that is about to be dispatched. */
+type AspectBudgetBreach = {
     readonly kind: "tokens" | "latency";
     readonly limit: number;
     readonly current: number;
@@ -218,9 +227,16 @@ type WorkflowSessionOptions$2 = {
         readonly iteration: number;
         readonly done: boolean;
     }>;
-    readonly evaluateAspectBudget?: (descriptor: TaskDescriptor$3) => AspectBudgetBreach$1 | null | undefined;
-    readonly onAspectBudgetSkip?: (descriptor: TaskDescriptor$3, breach: AspectBudgetBreach$1) => void;
-    readonly onAspectBudgetWarn?: (descriptor: TaskDescriptor$3, breach: AspectBudgetBreach$1) => void;
+    /**
+     * Evaluate a runnable task's Aspects budgets against the run's accumulated
+     * usage. Return the first breach, or `null`/`undefined` when within budget.
+     * Only invoked for tasks that would otherwise execute.
+     */
+    readonly evaluateAspectBudget?: (descriptor: TaskDescriptor$4) => AspectBudgetBreach | null | undefined;
+    /** Called when a task is skipped because its budget was exceeded (`skip-remaining`). */
+    readonly onAspectBudgetSkip?: (descriptor: TaskDescriptor$4, breach: AspectBudgetBreach) => void;
+    /** Called when a task continues despite an exceeded budget (`warn`). */
+    readonly onAspectBudgetWarn?: (descriptor: TaskDescriptor$4, breach: AspectBudgetBreach) => void;
 };
 
 type TaskRecord$1 = {
@@ -231,10 +247,10 @@ type TaskRecord$1 = {
     readonly updatedAtMs: number;
 };
 
-type SmithersAlertSeverity = "info" | "warning" | "critical";
-type SmithersAlertLabels = Record<string, string>;
-type SmithersAlertReactionKind = "emit-only" | "pause" | "cancel" | "open-approval" | "deliver";
-type SmithersAlertReaction = {
+type SmithersAlertSeverity$1 = "info" | "warning" | "critical";
+type SmithersAlertLabels$1 = Record<string, string>;
+type SmithersAlertReactionKind$1 = "emit-only" | "pause" | "cancel" | "open-approval" | "deliver";
+type SmithersAlertReaction$1 = {
     kind: "emit-only";
 } | {
     kind: "pause";
@@ -246,24 +262,24 @@ type SmithersAlertReaction = {
     kind: "deliver";
     destination: string;
 };
-type SmithersAlertReactionRef = string | SmithersAlertReaction;
-type SmithersAlertPolicyDefaults = {
+type SmithersAlertReactionRef$1 = string | SmithersAlertReaction$1;
+type SmithersAlertPolicyDefaults$1 = {
     owner?: string;
-    severity?: SmithersAlertSeverity;
+    severity?: SmithersAlertSeverity$1;
     runbook?: string;
-    labels?: SmithersAlertLabels;
+    labels?: SmithersAlertLabels$1;
 };
-type SmithersAlertPolicyRule = SmithersAlertPolicyDefaults & {
+type SmithersAlertPolicyRule$1 = SmithersAlertPolicyDefaults$1 & {
     afterMs?: number;
-    reaction?: SmithersAlertReactionRef;
+    reaction?: SmithersAlertReactionRef$1;
 };
-type SmithersAlertPolicy = {
-    defaults?: SmithersAlertPolicyDefaults;
-    rules?: Record<string, SmithersAlertPolicyRule>;
-    reactions?: Record<string, SmithersAlertReaction>;
+type SmithersAlertPolicy$1 = {
+    defaults?: SmithersAlertPolicyDefaults$1;
+    rules?: Record<string, SmithersAlertPolicyRule$1>;
+    reactions?: Record<string, SmithersAlertReaction$1>;
 };
 type SmithersWorkflowOptions$1 = {
-    alertPolicy?: SmithersAlertPolicy;
+    alertPolicy?: SmithersAlertPolicy$1;
     cache?: boolean;
     workflowHash?: string;
 };
@@ -285,7 +301,7 @@ type RalphState$1 = {
 
 type RalphStateMap$4 = Map<string, RalphState$1>;
 
-type CachePolicy$1<Ctx = any> = {
+type CachePolicy$1<Ctx = unknown> = {
     by?: (ctx: Ctx) => unknown;
     version?: string;
     key?: string;
@@ -328,12 +344,12 @@ type TaskStateMap$3 = TaskStateMap$4;
  * @returns {boolean}
  */
 declare function isTerminalState(state: TaskState$1, descriptor?: Pick<TaskDescriptor$2, "continueOnFail">): boolean;
-type TaskDescriptor$2 = _smithers_graph.TaskDescriptor;
+type TaskDescriptor$2 = _smithers_orchestrator_graph.TaskDescriptor;
 type TaskState$1 = TaskState$2;
 
 declare class Scheduler extends Context.TagClassShape<"Scheduler", SchedulerService> {
 }
-type TaskDescriptor$1 = _smithers_graph.TaskDescriptor;
+type TaskDescriptor$1 = _smithers_orchestrator_graph.TaskDescriptor;
 type TaskStateMap$2 = TaskStateMap$4;
 type PlanNode$3 = PlanNode$4;
 type RalphStateMap$3 = RalphStateMap$4;
@@ -358,7 +374,7 @@ declare function buildPlanTree(xml: XmlNode | null, ralphState?: RalphStateMap$2
 type PlanNode$2 = PlanNode$4;
 type RalphMeta$1 = RalphMeta$2;
 type RalphStateMap$2 = RalphStateMap$4;
-type XmlNode = _smithers_graph.XmlNode;
+type XmlNode = _smithers_orchestrator_graph.XmlNode;
 
 /**
  * @param {PlanNode | null} plan
@@ -374,7 +390,7 @@ type PlanNode$1 = PlanNode$4;
 type RalphStateMap$1 = RalphStateMap$4;
 type RetryWaitMap$1 = RetryWaitMap$3;
 type ScheduleResult$1 = ScheduleResult$3;
-type TaskDescriptor = _smithers_graph.TaskDescriptor;
+type TaskDescriptor = _smithers_orchestrator_graph.TaskDescriptor;
 type TaskStateMap$1 = TaskStateMap$4;
 
 declare class WorkflowSession extends Context.TagClassShape<"WorkflowSession", WorkflowSessionService$2> {
@@ -388,7 +404,18 @@ declare function makeWorkflowSession(options?: WorkflowSessionOptions$1): Workfl
 type WorkflowSessionOptions$1 = WorkflowSessionOptions$2;
 type WorkflowSessionService$1 = WorkflowSessionService$2;
 
-/** @type {Layer.Layer<WorkflowSession, never, never>} */
+/**
+ * WARNING — do not consume this layer as-is. `Layer.sync` builds **one** shared
+ * `makeWorkflowSession()` instance for the whole layer scope, but a workflow
+ * session carries per-run state, so sharing it across runs is a correctness bug.
+ * The engine intentionally bypasses this Tag and constructs a fresh session per
+ * run via `makeWorkflowSession()` directly — which is why nothing yields
+ * `WorkflowSession` today. Before any consumer reads the Tag, rework this into a
+ * per-run/scoped provider (e.g. `Layer.scoped` or a factory service) so each run
+ * gets its own session.
+ *
+ * @type {Layer.Layer<WorkflowSession, never, never>}
+ */
 declare const WorkflowSessionLive: Layer.Layer<WorkflowSession, never, never>;
 
 /**
@@ -402,7 +429,7 @@ declare function nowMs(): number;
  * @param {RetryPolicy} policy
  * @returns {Schedule.Schedule<unknown>}
  */
-declare function retryPolicyToSchedule(policy: RetryPolicy$2): Schedule.Schedule<unknown>;
+declare function retryPolicyToSchedule(policy: RetryPolicy$2): Schedule$1.Schedule<unknown>;
 type RetryPolicy$2 = RetryPolicy$3;
 
 /**
@@ -438,6 +465,14 @@ type RetryWaitMap = RetryWaitMap$3;
 type RunResult = RunResult$1;
 type ScheduleResult = ScheduleResult$3;
 type ScheduleSnapshot = ScheduleSnapshot$1;
+type SmithersAlertLabels = SmithersAlertLabels$1;
+type SmithersAlertPolicy = SmithersAlertPolicy$1;
+type SmithersAlertPolicyDefaults = SmithersAlertPolicyDefaults$1;
+type SmithersAlertPolicyRule = SmithersAlertPolicyRule$1;
+type SmithersAlertReaction = SmithersAlertReaction$1;
+type SmithersAlertReactionKind = SmithersAlertReactionKind$1;
+type SmithersAlertReactionRef = SmithersAlertReactionRef$1;
+type SmithersAlertSeverity = SmithersAlertSeverity$1;
 type SmithersWorkflowOptions = SmithersWorkflowOptions$1;
 type TaskFailure = TaskFailure$1;
 type TaskOutput = TaskOutput$1;

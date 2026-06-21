@@ -118,6 +118,31 @@ describe("normalizeInputRow", () => {
     expect(normalizeInputRow({ payload: "{nope" })).toBe("{nope");
   });
 
+  test("renderAndSubmit forwards render trigger metadata to the renderer", async () => {
+    let seenRenderOpts;
+    const trigger = { reason: "task-finished", nodeId: "fast", iteration: 0 };
+    const driver = makeDriver({
+      renderer: {
+        render: async (_element, opts) => {
+          seenRenderOpts = opts;
+          return { xml: null, tasks: [], mountedTaskIds: [] };
+        },
+      },
+      session: makeSession({
+        submitGraph: () => ({ _tag: "Finished", result: { runId: "run-1", status: "finished" } }),
+      }),
+    });
+
+    await driver.renderAndSubmit({
+      runId: "run-1",
+      iteration: 0,
+      outputs: {},
+      trigger,
+    });
+
+    expect(seenRenderOpts.trigger).toEqual(trigger);
+  });
+
   test("non-string payload is returned directly", () => {
     const payload = { nested: true };
     expect(normalizeInputRow({ runId: "r1", payload })).toBe(payload);

@@ -20,6 +20,7 @@ export type RunOptions = {
   parentRunId?: string | null;
   input: Record<string, unknown>;
   maxConcurrency?: number;
+  requireRerenderOnOutputChange?: boolean;
   onProgress?: (e: SmithersEvent) => void;
   signal?: AbortSignal;
   resume?: boolean;

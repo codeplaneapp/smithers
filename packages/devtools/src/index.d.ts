@@ -117,6 +117,11 @@ type RunCancelledEvent = RunEventBase & {
 type FrameCommittedEvent = RunEventBase & {
     type: "FrameCommitted";
     frameNo: number;
+    trigger?: {
+        reason: string;
+        nodeId?: string;
+        iteration?: number;
+    };
 };
 type NodePendingEvent = NodeEventBase & {
     type: "NodePending";

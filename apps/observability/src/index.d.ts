@@ -1,4 +1,4 @@
-import { Layer, Context, Effect, LogLevel, Metric, FiberRef } from 'effect';
+import { LogLevel, Effect, Context, Layer, Metric, FiberRef } from 'effect';
 import * as Tracer$1 from 'effect/Tracer';
 import * as effect_Metric from 'effect/Metric';
 import * as BunContext from '@effect/platform-bun/BunContext';
@@ -47,6 +47,89 @@ type SmithersMetricDefinition$2 = {
     readonly labels?: readonly string[];
     readonly defaultLabels?: readonly MetricLabels$1[];
     readonly boundaries?: readonly number[];
+};
+
+type AgentFamily = "pi" | "codex" | "claude-code" | "antigravity" | "gemini" | "kimi" | "openai" | "anthropic" | "amp" | "forge" | "unknown";
+type AgentCaptureMode = "sdk-events" | "rpc-events" | "cli-json-stream" | "cli-json" | "cli-text" | "artifact-import";
+type TraceCompleteness = "full-observed" | "partial-observed" | "final-only" | "capture-failed";
+type CanonicalAgentTraceEventKind = "session.start" | "session.end" | "turn.start" | "turn.end" | "message.start" | "message.update" | "message.end" | "assistant.text.delta" | "assistant.thinking.delta" | "assistant.message.final" | "tool.execution.start" | "tool.execution.update" | "tool.execution.end" | "tool.result" | "retry.start" | "retry.end" | "compaction.start" | "compaction.end" | "stderr" | "stdout" | "usage" | "capture.warning" | "capture.error" | "artifact.created";
+type CanonicalAgentTraceEventPhase = "agent" | "turn" | "message" | "tool" | "session" | "capture" | "artifact";
+type CanonicalAgentTraceEvent = {
+    traceVersion: "1";
+    runId: string;
+    workflowPath?: string;
+    workflowHash?: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    timestampMs: number;
+    event: {
+        sequence: number;
+        kind: CanonicalAgentTraceEventKind;
+        phase: CanonicalAgentTraceEventPhase;
+    };
+    source: {
+        agentFamily: AgentFamily;
+        captureMode: AgentCaptureMode;
+        rawType?: string;
+        rawEventId?: string;
+        observed: boolean;
+    };
+    traceCompleteness: TraceCompleteness;
+    payload: Record<string, unknown> | null;
+    raw: unknown;
+    redaction: {
+        applied: boolean;
+        ruleIds: string[];
+    };
+    annotations: Record<string, string | number | boolean>;
+};
+type AgentTraceSummary = {
+    traceVersion: "1";
+    runId: string;
+    workflowPath?: string;
+    workflowHash?: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    traceStartedAtMs: number;
+    traceFinishedAtMs: number;
+    agentFamily: AgentFamily;
+    agentId?: string;
+    model?: string;
+    captureMode: AgentCaptureMode;
+    traceCompleteness: TraceCompleteness;
+    unsupportedEventKinds: CanonicalAgentTraceEventKind[];
+    missingExpectedEventKinds: CanonicalAgentTraceEventKind[];
+    rawArtifactRefs: string[];
+};
+type AgentSessionTranscriptEvent = {
+    transcriptVersion: "1";
+    runId: string;
+    workflowPath?: string;
+    workflowHash?: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    timestampMs: number;
+    event: {
+        sequence: number;
+        rowType: string;
+    };
+    source: {
+        agentFamily: AgentFamily;
+        captureMode: AgentCaptureMode;
+        ingestSource: "live" | "artifact";
+        observedLive: boolean;
+        providerSessionId?: string;
+        providerThreadId?: string;
+    };
+    raw: unknown;
+    redaction: {
+        applied: boolean;
+        ruleIds: string[];
+    };
+    annotations: Record<string, string | number | boolean>;
 };
 
 type RunStatus = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "finished" | "continued" | "failed" | "cancelled";
@@ -232,6 +315,11 @@ type SmithersEvent$2 = {
     runId: string;
     frameNo: number;
     xmlHash: string;
+    trigger?: {
+        reason: string;
+        nodeId?: string;
+        iteration?: number;
+    };
     timestampMs: number;
 } | {
     type: "NodePending";
@@ -566,6 +654,30 @@ type SmithersEvent$2 = {
     type: "TimerCancelled";
     runId: string;
     timerId: string;
+    timestampMs: number;
+} | {
+    type: "AgentTraceEvent";
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    trace: CanonicalAgentTraceEvent;
+    timestampMs: number;
+} | {
+    type: "AgentTraceSummary";
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    summary: AgentTraceSummary;
+    timestampMs: number;
+} | {
+    type: "AgentSessionEvent";
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    transcript: AgentSessionTranscriptEvent;
     timestampMs: number;
 };
 
@@ -997,11 +1109,40 @@ declare function correlationContextToLogAnnotations(context?: CorrelationContext
 type CorrelationContext$1 = CorrelationContext$5;
 
 /**
+ * Temporary compatibility shim for legacy, non-Effect callers.
+ *
+ * Unlike the FiberRef-based core implementation
+ * ({@link import("./_coreCorrelation/updateCurrentCorrelationContext.js").updateCurrentCorrelationContext}),
+ * which returns an Effect and sets a fresh merged context on the
+ * `correlationContextFiberRef`, this shim runs synchronously and applies the
+ * patch by **mutating the current context object in place** via
+ * `Object.assign(current, next)`. Any references already holding the current
+ * context object will observe the mutation. This in-place semantics is
+ * intentional and exists only to preserve behavior for callers that captured a
+ * context reference before the Effect-based API existed.
+ *
+ * If there is no current context, the patch is a no-op (nothing is created).
+ *
+ * @deprecated Prefer the Effect-returning
+ * `updateCurrentCorrelationContext` from
+ * `@smithers-orchestrator/observability` (the `_coreCorrelation` version),
+ * which does not mutate shared state. This shim will be removed once legacy
+ * callers migrate.
+ *
  * @param {CorrelationPatch} patch
+ * @returns {void}
  */
 declare function updateCurrentCorrelationContext(patch: CorrelationPatch$1): void;
 type CorrelationPatch$1 = CorrelationPatch$5;
 
+/**
+ * Install the Effect runtime used by fire-and-forget observability logs.
+ * Returns a restore function so tests and embedded hosts can scope overrides.
+ *
+ * @param {SmithersLogRunner | null} runner
+ * @returns {() => void}
+ */
+declare function setSmithersLogRunner(runner: SmithersLogRunner | null): () => void;
 /**
  * @param {string} message
  * @param {LogAnnotations} [annotations]
@@ -1026,12 +1167,11 @@ declare function logWarning(message: string, annotations?: LogAnnotations, span?
  * @param {string} [span]
  */
 declare function logError(message: string, annotations?: LogAnnotations, span?: string): void;
-type LogAnnotations = Record<string, unknown> | undefined;
 type SmithersLogRunner = {
     runFork: (effect: Effect.Effect<void, never, never>) => unknown;
     runPromise: (effect: Effect.Effect<void, never, never>) => Promise<void>;
 };
-declare function setSmithersLogRunner(runner: SmithersLogRunner | null): () => void;
+type LogAnnotations = Record<string, unknown> | undefined;
 
 type CorrelationContext = CorrelationContext$5;
 type CorrelationPatch = CorrelationPatch$5;
