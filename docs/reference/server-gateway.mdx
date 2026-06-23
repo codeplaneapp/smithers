@@ -278,6 +278,12 @@ expose `ctx.auth = { triggeredBy, role, scopes, createdAt }`.
       </ParamField>
     </Expandable>
   </ParamField>
+  <ParamField path="allowedOrigins" type="string[]" default="[]">
+    Origin allowlist (defense-in-depth). `[]` enforces no check. When non-empty,
+    a request or WebSocket upgrade whose browser `Origin` header is not on the
+    list is rejected; requests with no `Origin` (server-to-server / CLI) are
+    allowed.
+  </ParamField>
 </Expandable>
 
 <Expandable title='mode: "jwt"'>
@@ -310,6 +316,12 @@ expose `ctx.auth = { triggeredBy, role, scopes, createdAt }`.
   <ParamField path="clockSkewSeconds" type="number" default="60">
     Allowed `exp`/`nbf` skew. Negative values clamp to 0.
   </ParamField>
+  <ParamField path="allowedOrigins" type="string[]" default="[]">
+    Origin allowlist (defense-in-depth). `[]` enforces no check. When non-empty,
+    a request or WebSocket upgrade whose browser `Origin` header is not on the
+    list is rejected; requests with no `Origin` (server-to-server / CLI) are
+    allowed.
+  </ParamField>
 </Expandable>
 
 <Expandable title='mode: "trusted-proxy"'>
@@ -321,7 +333,10 @@ expose `ctx.auth = { triggeredBy, role, scopes, createdAt }`.
     Headers read as `[user, scopes, role]`.
   </ParamField>
   <ParamField path="allowedOrigins" type="string[]" default="[]">
-    Origin allowlist. `[]` means no Origin check is enforced.
+    Origin allowlist (defense-in-depth), enforced the same way across all auth
+    modes. `[]` enforces no check. When non-empty, a request or WebSocket upgrade
+    whose browser `Origin` header is not on the list is rejected; requests with
+    no `Origin` (server-to-server / CLI) are allowed.
   </ParamField>
   <ParamField path="defaultRole" type="string" default='"operator"'>
     Role used when the role header is absent.

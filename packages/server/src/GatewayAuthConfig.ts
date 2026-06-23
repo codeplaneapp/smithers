@@ -4,6 +4,13 @@ export type GatewayAuthConfig =
   | {
       mode: "token";
       tokens: Record<string, GatewayTokenGrant>;
+      /**
+       * Optional Origin allow-list (defense-in-depth). When non-empty, a request
+       * or WS upgrade carrying a browser `Origin` header not on the list is
+       * rejected; requests with no `Origin` (server-to-server / CLI) are allowed.
+       * Unset/empty preserves the prior allow-all behavior.
+       */
+      allowedOrigins?: string[];
     }
   | {
       mode: "jwt";
@@ -16,6 +23,13 @@ export type GatewayAuthConfig =
       defaultRole?: string;
       defaultScopes?: string[];
       clockSkewSeconds?: number;
+      /**
+       * Optional Origin allow-list (defense-in-depth). When non-empty, a request
+       * or WS upgrade carrying a browser `Origin` header not on the list is
+       * rejected; requests with no `Origin` (server-to-server / CLI) are allowed.
+       * Unset/empty preserves the prior allow-all behavior.
+       */
+      allowedOrigins?: string[];
     }
   | {
       mode: "trusted-proxy";

@@ -420,6 +420,7 @@ type GatewayAuthConfig =
   | {
       mode: "token";
       tokens: Record<string, GatewayTokenGrant>;
+      allowedOrigins?: string[];     // default [] (no Origin allowlist)
     }
   | {
       mode: "jwt";
@@ -432,6 +433,7 @@ type GatewayAuthConfig =
       defaultRole?: string;          // default "operator"
       defaultScopes?: string[];      // default [] when scope claim is absent
       clockSkewSeconds?: number;     // default 60; negative values clamp to 0
+      allowedOrigins?: string[];     // default [] (no Origin allowlist)
     }
   | {
       mode: "trusted-proxy";
@@ -442,7 +444,9 @@ type GatewayAuthConfig =
     };
 ```
 
-JWT auth reads scopes from `scope`, role from `role`, and user id from `sub` unless the `*Claim` options override those claim names. Missing JWT role falls back to `defaultRole` and then `operator`; missing JWT scopes fall back to `defaultScopes` and then `[]`. Trusted-proxy auth reads `trustedHeaders` as `[user, scopes, role]`; missing role falls back to `defaultRole` and then `operator`, and missing scopes fall back to `defaultScopes` and then `["*"]`. `allowedOrigins` defaults to `[]`, which means no Origin allowlist is enforced.
+JWT auth reads scopes from `scope`, role from `role`, and user id from `sub` unless the `*Claim` options override those claim names. Missing JWT role falls back to `defaultRole` and then `operator`; missing JWT scopes fall back to `defaultScopes` and then `[]`. Trusted-proxy auth reads `trustedHeaders` as `[user, scopes, role]`; missing role falls back to `defaultRole` and then `operator`, and missing scopes fall back to `defaultScopes` and then `["*"]`.
+
+`allowedOrigins` is available in every mode (token, jwt, trusted-proxy) as defense-in-depth. It defaults to `[]`, which enforces no Origin allowlist. When non-empty, the gateway rejects any HTTP RPC or WebSocket upgrade whose browser `Origin` header is not on the list; requests with no `Origin` header (server-to-server / CLI callers) are always allowed. Set it to your operator-UI origin(s) when exposing a token/jwt gateway to a browser.
 
 Runs started through the gateway expose `ctx.auth = { triggeredBy, role, scopes, createdAt }`. `<Approval>` may further restrict decisions with `allowedScopes` and `allowedUsers`, which the gateway enforces before accepting `submitApproval`.
 

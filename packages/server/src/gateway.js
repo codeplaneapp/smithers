@@ -2459,6 +2459,33 @@ export class Gateway {
                 socket.destroy();
                 return;
             }
+            // Reject a disallowed browser Origin at the upgrade itself, before
+            // `handleUpgrade` opens the socket — otherwise a drive-by page could
+            // open and hold connections (consuming maxConnections) by never
+            // sending the `connect` RPC. (#446)
+            if (!this.isOriginAllowed(req)) {
+                emitGatewayEffect(incrementMetric(gatewayErrorsTotal, {
+                    kind: "auth",
+                    transport: "ws",
+                }));
+                emitGatewayLog("warning", "Gateway WS upgrade rejected: origin not allowed", {
+                    transport: "ws",
+                    remoteAddress: req.socket.remoteAddress ?? null,
+                    origin: asString(req.headers.origin) ?? null,
+                }, "gateway:connect");
+                const body = "Origin is not allowed\n";
+                // end() (not write()+destroy()) so the response is flushed to the
+                // peer before the socket closes — a bare destroy can RST away the
+                // unsent bytes, leaving the client with no status.
+                socket.end("HTTP/1.1 403 Forbidden\r\n"
+                    + "Connection: close\r\n"
+                    + "Content-Type: text/plain; charset=utf-8\r\n"
+                    + `X-Smithers-API-Version: ${SMITHERS_API_VERSION}\r\n`
+                    + `Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n`
+                    + "\r\n"
+                    + body);
+                return;
+            }
             wsServer.handleUpgrade(req, socket, head, (ws) => {
                 this.handleSocket(ws, req);
             });
@@ -3214,6 +3241,23 @@ export class Gateway {
         return this.authenticateRequest(req, typeof tokenFromRequest === "string" ? tokenFromRequest : null);
     }
     /**
+   * Whether `req`'s browser `Origin` is permitted by the configured auth-mode
+   * Origin allow-list. No auth, an empty/unset `allowedOrigins`, or a missing
+   * `Origin` header (server-to-server / CLI) are always allowed; a present
+   * `Origin` must be on the list. Enforced for both the HTTP RPC path (via
+   * `authenticateRequest`) and the WS `upgrade` handler (#446).
+   * @param {IncomingMessage} req
+   * @returns {boolean}
+   */
+    isOriginAllowed(req) {
+        const allowedOrigins = this.auth?.allowedOrigins ?? [];
+        if (allowedOrigins.length === 0) {
+            return true;
+        }
+        const origin = asString(req.headers.origin);
+        return !origin || allowedOrigins.includes(origin);
+    }
+    /**
    * @param {IncomingMessage} req
    * @param {string | null} token
    * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string } | { ok: false; code: string; message: string } >}
@@ -3224,6 +3268,17 @@ export class Gateway {
                 ok: true,
                 role: "operator",
                 scopes: ["*"],
+            };
+        }
+        // Defense-in-depth Origin allow-list, uniform across every auth mode
+        // (token / jwt / trusted-proxy). WS upgrades are rejected earlier in the
+        // `upgrade` handler so a disallowed browser can't even open a socket; this
+        // gate covers the HTTP RPC path and backstops the WS `connect` RPC (#446).
+        if (!this.isOriginAllowed(req)) {
+            return {
+                ok: false,
+                code: "UNAUTHORIZED",
+                message: "Origin is not allowed",
             };
         }
         if (this.auth.mode === "token") {
@@ -3303,15 +3358,7 @@ export class Gateway {
             };
         }
         if (this.auth.mode === "trusted-proxy") {
-            const allowedOrigins = this.auth.allowedOrigins ?? [];
-            const origin = asString(req.headers.origin);
-            if (allowedOrigins.length > 0 && (!origin || !allowedOrigins.includes(origin))) {
-                return {
-                    ok: false,
-                    code: "UNAUTHORIZED",
-                    message: "Origin is not allowed",
-                };
-            }
+            // Origin allow-list is enforced uniformly above (#446).
             const [userHeader = "x-user-id", scopesHeader = "x-user-scopes", roleHeader = "x-user-role"] = (this.auth.trustedHeaders ?? []).map((value) => value.toLowerCase());
             const userId = asString(req.headers[userHeader]);
             const scopesValue = asString(req.headers[scopesHeader]);

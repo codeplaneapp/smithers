@@ -7094,6 +7094,7 @@ type GatewayAuthConfig =
   | {
       mode: "token";
       tokens: Record<string, GatewayTokenGrant>;
+      allowedOrigins?: string[];     // default [] (no Origin allowlist)
     }
   | {
       mode: "jwt";
@@ -7106,6 +7107,7 @@ type GatewayAuthConfig =
       defaultRole?: string;          // default "operator"
       defaultScopes?: string[];      // default [] when scope claim is absent
       clockSkewSeconds?: number;     // default 60; negative values clamp to 0
+      allowedOrigins?: string[];     // default [] (no Origin allowlist)
     }
   | {
       mode: "trusted-proxy";

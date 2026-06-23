@@ -250,6 +250,40 @@ async function connectGatewayRaw(port, options = {}) {
     return { client, hello };
 }
 /**
+ * Attempt a bare WebSocket upgrade (no connect handshake) and report whether the
+ * socket actually opened. A gateway that rejects the Origin at the upgrade ends
+ * the socket with `403`, which the client surfaces as a failed connection rather
+ * than `open`. (We assert non-open rather than the 403 status line because bun's
+ * client does not deliver the raw upgrade-rejection body.) (#446)
+ * @param {number} port
+ * @param {Record<string, string>} [headers]
+ * @returns {Promise<boolean>}
+ */
+function wsConnectionOpens(port, headers) {
+    return new Promise((resolve) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers });
+        // Swallow late errors so a post-resolution `error` can't crash the suite.
+        ws.on("error", () => {});
+        let settled = false;
+        const finish = (opened) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            try {
+                ws.close();
+            }
+            catch {
+                /* already closing */
+            }
+            resolve(opened);
+        };
+        ws.once("open", () => finish(true));
+        ws.once("error", () => finish(false));
+        ws.once("close", () => finish(false));
+    });
+}
+/**
  * @param {GatewayClient} client
  * @param {string} runId
  * @param {string[]} statuses
@@ -513,17 +547,14 @@ describe("Gateway", () => {
         server = await gateway.listen({ port: 0, host: "127.0.0.1" });
         const port = getPort(server);
 
-        const rejected = await connectGatewayRaw(port, {
-            headers: {
-                Origin: "https://evil.example.com",
-                "x-user-id": "user:proxy",
-                "x-user-scopes": "run:read",
-            },
+        // Disallowed Origin is rejected at the WS upgrade itself — the socket
+        // never opens (#446).
+        const evilOpens = await wsConnectionOpens(port, {
+            Origin: "https://evil.example.com",
+            "x-user-id": "user:proxy",
+            "x-user-scopes": "run:read",
         });
-        expect(rejected.hello.ok).toBe(false);
-        expect(rejected.hello.error.code).toBe("UNAUTHORIZED");
-        expect(rejected.hello.error.message).toContain("Origin");
-        await rejected.client.close();
+        expect(evilOpens).toBe(false);
 
         const accepted = await connectGatewayRaw(port, {
             headers: {
@@ -551,6 +582,149 @@ describe("Gateway", () => {
         expect(defaulted.hello.payload.auth.role).toBe("viewer");
         expect(defaulted.hello.payload.auth.scopes).toEqual(["run:read"]);
         await defaulted.client.close();
+    });
+    test("token mode enforces allowedOrigins on the WS upgrade path (#446)", async () => {
+        const dbPath = makeDbPath("token-origin-ws");
+        dbPaths.push(dbPath);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["runs"],
+            heartbeatMs: 100,
+            auth: {
+                mode: "token",
+                allowedOrigins: ["https://app.example.com"],
+                tokens: {
+                    "op-token": { role: "operator", scopes: ["*"], userId: "user:op" },
+                },
+            },
+        });
+        gateway.register("basic", createValueWorkflow(dbPath));
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port = getPort(server);
+
+        // Disallowed Origin → rejected at the WS upgrade; the socket never opens,
+        // even with a valid token.
+        const evilOpens = await wsConnectionOpens(port, { Origin: "https://evil.example.com" });
+        expect(evilOpens).toBe(false);
+
+        // Allowed Origin → accepted.
+        const accepted = await connectGatewayRaw(port, {
+            token: "op-token",
+            headers: { Origin: "https://app.example.com" },
+        });
+        expect(accepted.hello.ok).toBe(true);
+        await accepted.client.close();
+
+        // No Origin header (server-to-server / CLI) → allowed.
+        const noOrigin = await connectGatewayRaw(port, { token: "op-token" });
+        expect(noOrigin.hello.ok).toBe(true);
+        await noOrigin.client.close();
+    });
+    test("token mode enforces allowedOrigins on the HTTP /rpc path (#446)", async () => {
+        const dbPath = makeDbPath("token-origin-http");
+        dbPaths.push(dbPath);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["runs"],
+            heartbeatMs: 100,
+            auth: {
+                mode: "token",
+                allowedOrigins: ["https://app.example.com"],
+                tokens: {
+                    "op-token": { role: "operator", scopes: ["*"], userId: "user:op" },
+                },
+            },
+        });
+        gateway.register("basic", createValueWorkflow(dbPath));
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port = getPort(server);
+
+        const rpc = (origin) => fetch(`http://127.0.0.1:${port}/rpc`, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                authorization: "Bearer op-token",
+                ...(origin ? { origin } : {}),
+            },
+            body: JSON.stringify({ method: "runs.list", params: {} }),
+        });
+
+        const rejected = await rpc("https://evil.example.com");
+        expect(rejected.status).toBe(401);
+        const rejectedBody = await rejected.json();
+        expect(rejectedBody.ok).toBe(false);
+        expect(rejectedBody.error.code).toBe("UNAUTHORIZED");
+        expect(rejectedBody.error.message).toContain("Origin");
+
+        const accepted = await rpc("https://app.example.com");
+        expect(accepted.status).toBe(200);
+        expect((await accepted.json()).ok).toBe(true);
+
+        // No Origin header → allowed.
+        const noOrigin = await rpc(undefined);
+        expect(noOrigin.status).toBe(200);
+        expect((await noOrigin.json()).ok).toBe(true);
+    });
+    test("jwt mode enforces allowedOrigins, and unset allows any Origin (#446)", async () => {
+        const secret = "super-secret-origin";
+        const payload = {
+            iss: "https://auth.example.com",
+            aud: "smithers",
+            sub: "user:jwt",
+            scope: "runs.list",
+            exp: Math.floor(Date.now() / 1_000) + 300,
+        };
+        const token = createJwtToken(payload, secret);
+        const jwtAuth = (allowedOrigins) => ({
+            mode: "jwt",
+            issuer: "https://auth.example.com",
+            audience: "smithers",
+            secret,
+            ...(allowedOrigins ? { allowedOrigins } : {}),
+        });
+
+        // (a) allow-list configured → non-matching Origin rejected, matching accepted.
+        const dbPath = makeDbPath("jwt-origin");
+        dbPaths.push(dbPath);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["runs"],
+            heartbeatMs: 100,
+            auth: jwtAuth(["https://app.example.com"]),
+        });
+        gateway.register("basic", createValueWorkflow(dbPath));
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        let port = getPort(server);
+
+        const evilOpens = await wsConnectionOpens(port, { Origin: "https://evil.example.com" });
+        expect(evilOpens).toBe(false);
+
+        const accepted = await connectGatewayRaw(port, {
+            token,
+            headers: { Origin: "https://app.example.com" },
+        });
+        expect(accepted.hello.ok).toBe(true);
+        await accepted.client.close();
+        await gateway.close();
+
+        // (b) no allow-list → any Origin accepted (unchanged behavior).
+        const dbPath2 = makeDbPath("jwt-origin-unset");
+        dbPaths.push(dbPath2);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["runs"],
+            heartbeatMs: 100,
+            auth: jwtAuth(undefined),
+        });
+        gateway.register("basic", createValueWorkflow(dbPath2));
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        port = getPort(server);
+        const anyOrigin = await connectGatewayRaw(port, {
+            token,
+            headers: { Origin: "https://anywhere.example.com" },
+        });
+        expect(anyOrigin.hello.ok).toBe(true);
+        await anyOrigin.client.close();
     });
     test("supports HTTP /rpc fallback for stateless callers", async () => {
         const dbPath = makeDbPath("http-rpc");

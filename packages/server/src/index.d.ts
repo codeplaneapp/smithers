@@ -96,6 +96,13 @@ type GatewayTokenGrant$1 = {
 type GatewayAuthConfig$1 = {
     mode: "token";
     tokens: Record<string, GatewayTokenGrant$1>;
+    /**
+     * Optional Origin allow-list (defense-in-depth). When non-empty, a request
+     * or WS upgrade carrying a browser `Origin` header not on the list is
+     * rejected; requests with no `Origin` (server-to-server / CLI) are allowed.
+     * Unset/empty preserves the prior allow-all behavior.
+     */
+    allowedOrigins?: string[];
 } | {
     mode: "jwt";
     issuer: string;
@@ -107,6 +114,13 @@ type GatewayAuthConfig$1 = {
     defaultRole?: string;
     defaultScopes?: string[];
     clockSkewSeconds?: number;
+    /**
+     * Optional Origin allow-list (defense-in-depth). When non-empty, a request
+     * or WS upgrade carrying a browser `Origin` header not on the list is
+     * rejected; requests with no `Origin` (server-to-server / CLI) are allowed.
+     * Unset/empty preserves the prior allow-all behavior.
+     */
+    allowedOrigins?: string[];
 } | {
     mode: "trusted-proxy";
     trustedHeaders?: string[];
@@ -939,6 +953,16 @@ declare class Gateway {
         code: string;
         message: string;
     }>;
+    /**
+   * Whether `req`'s browser `Origin` is permitted by the configured auth-mode
+   * Origin allow-list. No auth, an empty/unset `allowedOrigins`, or a missing
+   * `Origin` header (server-to-server / CLI) are always allowed; a present
+   * `Origin` must be on the list. Enforced for both the HTTP RPC path (via
+   * `authenticateRequest`) and the WS `upgrade` handler (#446).
+   * @param {IncomingMessage} req
+   * @returns {boolean}
+   */
+    isOriginAllowed(req: IncomingMessage): boolean;
     /**
    * @param {IncomingMessage} req
    * @param {string | null} token
