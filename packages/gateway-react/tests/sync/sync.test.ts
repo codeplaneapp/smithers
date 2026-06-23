@@ -334,15 +334,15 @@ describe("useSyncMutation success path", () => {
       client: makeTransport(() => Promise.resolve("done")).transport,
     });
 
-    const calls: Array<{ data: string; vars: number; context: string }> = [];
+    const calls: Array<{ data: string; vars: number; context: string; registry: GatewayCollections }> = [];
     let mutation: ReturnType<typeof useSyncMutation<number, string, string>> | undefined;
     function Probe() {
       mutation = useSyncMutation<number, string, string>(
         () => registry.rpc("run", {}),
         {
           onMutate: (vars) => `ctx-${vars}`,
-          onSuccess: (data, vars, context) => {
-            calls.push({ data, vars, context });
+          onSuccess: (data, vars, context, successRegistry) => {
+            calls.push({ data, vars, context, registry: successRegistry });
           },
         },
       );
@@ -358,7 +358,7 @@ describe("useSyncMutation success path", () => {
     await settle();
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toEqual({ data: "done", vars: 7, context: "ctx-7" });
+    expect(calls[0]).toEqual({ data: "done", vars: 7, context: "ctx-7", registry });
 
     await harness.unmount();
   });
