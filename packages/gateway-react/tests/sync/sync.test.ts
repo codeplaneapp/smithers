@@ -301,6 +301,162 @@ describe("useSyncMutation optimistic + rollback", () => {
   });
 });
 
+describe("useSyncMutation success path", () => {
+  test("sets status to success and returns data after the runner resolves", async () => {
+    const registry = createGatewayCollections({
+      client: makeTransport(() => Promise.resolve({ value: 42 })).transport,
+    });
+
+    let mutation: ReturnType<typeof useSyncMutation<void, { value: number }>> | undefined;
+    function Probe() {
+      mutation = useSyncMutation<void, { value: number }>(() => registry.rpc("get", {}));
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+
+    await act(async () => {
+      await mutation?.mutate(undefined as unknown as void);
+    });
+    await settle();
+
+    expect(mutation?.status).toBe("success");
+    expect(mutation?.data).toEqual({ value: 42 });
+    expect(mutation?.error).toBeUndefined();
+    expect(mutation?.isLoading).toBe(false);
+
+    await harness.unmount();
+  });
+
+  test("calls onSuccess with data, vars, context, and registry after the runner resolves", async () => {
+    const registry = createGatewayCollections({
+      client: makeTransport(() => Promise.resolve("done")).transport,
+    });
+
+    const calls: Array<{ data: string; vars: number; context: string }> = [];
+    let mutation: ReturnType<typeof useSyncMutation<number, string, string>> | undefined;
+    function Probe() {
+      mutation = useSyncMutation<number, string, string>(
+        () => registry.rpc("run", {}),
+        {
+          onMutate: (vars) => `ctx-${vars}`,
+          onSuccess: (data, vars, context) => {
+            calls.push({ data, vars, context });
+          },
+        },
+      );
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+
+    await act(async () => {
+      await mutation?.mutate(7);
+    });
+    await settle();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({ data: "done", vars: 7, context: "ctx-7" });
+
+    await harness.unmount();
+  });
+
+  test("invalidates the specified keys after a successful mutation", async () => {
+    let fetchCount = 0;
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "readCounter") return Promise.resolve(++fetchCount);
+        return Promise.resolve("ok");
+      }).transport,
+    });
+
+    const seen: number[] = [];
+    let mutation: ReturnType<typeof useSyncMutation<void, string>> | undefined;
+    function Probe() {
+      const q = useSyncQuery<number>(["counter"], () => registry.rpc<number>("readCounter", {}));
+      mutation = useSyncMutation<void, string>(
+        () => registry.rpc("bump", {}),
+        { invalidate: [["counter"]] },
+      );
+      if (typeof q.data === "number") seen.push(q.data);
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => seen[seen.length - 1] === 1);
+
+    await act(async () => {
+      await mutation?.mutate(undefined as unknown as void);
+    });
+    await waitFor(() => seen[seen.length - 1] === 2);
+
+    expect(fetchCount).toBeGreaterThanOrEqual(2);
+
+    await harness.unmount();
+  });
+
+  test("reset() returns status to idle and clears data", async () => {
+    const registry = createGatewayCollections({
+      client: makeTransport(() => Promise.resolve("result")).transport,
+    });
+
+    let mutation: ReturnType<typeof useSyncMutation<void, string>> | undefined;
+    function Probe() {
+      mutation = useSyncMutation<void, string>(() => registry.rpc("run", {}));
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+
+    await act(async () => {
+      await mutation?.mutate(undefined as unknown as void);
+    });
+    await settle();
+    expect(mutation?.status).toBe("success");
+    expect(mutation?.data).toBe("result");
+
+    await act(async () => {
+      mutation?.reset();
+    });
+    await settle();
+    expect(mutation?.status).toBe("idle");
+    expect(mutation?.data).toBeUndefined();
+    expect(mutation?.error).toBeUndefined();
+
+    await harness.unmount();
+  });
+
+  test("mutateSafe returns data on success and does not throw", async () => {
+    const registry = createGatewayCollections({
+      client: makeTransport(() => Promise.resolve({ ok: true })).transport,
+    });
+
+    let mutation: ReturnType<typeof useSyncMutation<void, { ok: boolean }>> | undefined;
+    function Probe() {
+      mutation = useSyncMutation<void, { ok: boolean }>(() => registry.rpc("run", {}));
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+
+    let result: { ok: boolean } | undefined;
+    await act(async () => {
+      result = await mutation?.mutateSafe(undefined as unknown as void);
+    });
+    await settle();
+
+    expect(result).toEqual({ ok: true });
+    expect(mutation?.status).toBe("success");
+
+    await harness.unmount();
+  });
+});
+
 describe("useGatewayMutation", () => {
   test("runs the named gateway RPC and exposes success state", async () => {
     const calls: Array<{ method: string; params: unknown }> = [];
