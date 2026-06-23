@@ -253,14 +253,13 @@ export function executeToolEffect(operation, args, baseUrl, options) {
     const started = nowMs();
     return Effect.gen(function* () {
         yield* Metric.increment(openApiToolCallsTotal);
-        const result = yield* Effect.tryPromise({
+        return yield* Effect.tryPromise({
             try: () => executeRequest(operation, args, baseUrl, options),
             catch: (err) => err,
         });
-        const durationMs = nowMs() - started;
-        yield* Metric.update(openApiToolDuration, durationMs);
-        return result;
-    }).pipe(Effect.tapError(() => Metric.increment(openApiToolCallErrorsTotal)), Effect.annotateLogs({
+    }).pipe(
+        Effect.ensuring(Effect.suspend(() => Metric.update(openApiToolDuration, nowMs() - started))),
+        Effect.tapError(() => Metric.increment(openApiToolCallErrorsTotal)), Effect.annotateLogs({
         toolName: `openapi:${operation.operationId}`,
         method: operation.method,
         path: operation.path,
