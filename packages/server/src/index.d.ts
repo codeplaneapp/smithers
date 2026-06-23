@@ -1131,6 +1131,11 @@ declare class Gateway {
     /**
    * @param {IncomingMessage} req
    * @param {ServerResponse} res
+   */
+    handleElectricWrite(req: IncomingMessage, res: ServerResponse$1): Promise<void>;
+    /**
+   * @param {IncomingMessage} req
+   * @param {ServerResponse} res
    * @param {string} [forcedMethod]
    */
     handleHttpRpc(req: IncomingMessage, res: ServerResponse$1, forcedMethod?: string): Promise<void>;
