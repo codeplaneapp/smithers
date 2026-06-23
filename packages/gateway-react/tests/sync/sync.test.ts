@@ -1248,4 +1248,124 @@ describe("useGatewayConnectionStatus", () => {
 
     await harness.unmount();
   });
+
+  test("treats HTTP 401 status on an error object as an auth error", async () => {
+    let authFired = false;
+    const err = Object.assign(new Error("Unauthorized"), { status: 401 });
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") return Promise.resolve([]);
+        return Promise.reject(err);
+      }).transport,
+      onAuthError: () => { authFired = true; },
+    });
+
+    let status: ReturnType<typeof useGatewayConnectionStatus> | undefined;
+    function Probe() {
+      useGatewayRuns();
+      status = useGatewayConnectionStatus();
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => status?.status === "online");
+
+    await act(async () => {
+      await registry.rpc("getRun", { runId: "x" }).catch(() => undefined);
+    });
+    await waitFor(() => status?.status === "unauthorized");
+    expect(authFired).toBe(true);
+    await harness.unmount();
+  });
+
+  test("treats HTTP 403 status on an error object as an auth error", async () => {
+    let authFired = false;
+    const err = Object.assign(new Error("Forbidden"), { status: 403 });
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") return Promise.resolve([]);
+        return Promise.reject(err);
+      }).transport,
+      onAuthError: () => { authFired = true; },
+    });
+
+    let status: ReturnType<typeof useGatewayConnectionStatus> | undefined;
+    function Probe() {
+      useGatewayRuns();
+      status = useGatewayConnectionStatus();
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => status?.status === "online");
+
+    await act(async () => {
+      await registry.rpc("getRun", { runId: "x" }).catch(() => undefined);
+    });
+    await waitFor(() => status?.status === "unauthorized");
+    expect(authFired).toBe(true);
+    await harness.unmount();
+  });
+
+  test("treats UNAUTHORIZED code on an error object as an auth error", async () => {
+    let authFired = false;
+    const err = Object.assign(new Error("some rpc error"), { code: "Unauthorized" });
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") return Promise.resolve([]);
+        return Promise.reject(err);
+      }).transport,
+      onAuthError: () => { authFired = true; },
+    });
+
+    let status: ReturnType<typeof useGatewayConnectionStatus> | undefined;
+    function Probe() {
+      useGatewayRuns();
+      status = useGatewayConnectionStatus();
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => status?.status === "online");
+
+    await act(async () => {
+      await registry.rpc("getRun", { runId: "x" }).catch(() => undefined);
+    });
+    await waitFor(() => status?.status === "unauthorized");
+    expect(authFired).toBe(true);
+    await harness.unmount();
+  });
+
+  test("treats FORBIDDEN code on an error object as an auth error", async () => {
+    let authFired = false;
+    const err = Object.assign(new Error("some rpc error"), { code: "Forbidden" });
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") return Promise.resolve([]);
+        return Promise.reject(err);
+      }).transport,
+      onAuthError: () => { authFired = true; },
+    });
+
+    let status: ReturnType<typeof useGatewayConnectionStatus> | undefined;
+    function Probe() {
+      useGatewayRuns();
+      status = useGatewayConnectionStatus();
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => status?.status === "online");
+
+    await act(async () => {
+      await registry.rpc("getRun", { runId: "x" }).catch(() => undefined);
+    });
+    await waitFor(() => status?.status === "unauthorized");
+    expect(authFired).toBe(true);
+    await harness.unmount();
+  });
 });
