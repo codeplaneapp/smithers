@@ -13,8 +13,9 @@ if (typeof globalThis.document === "undefined") {
 }
 
 import { describe, expect, test } from "bun:test";
-import { act, createElement, Component, useContext, type ReactElement } from "react";
+import { act, createElement, useContext, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import {
   gatewayKeys,
   type SyncStreamFrame,
@@ -1373,54 +1374,18 @@ describe("useGatewayConnectionStatus", () => {
 });
 
 describe("useSyncClient and SyncContext", () => {
-  class ErrorBoundary extends Component<{ children: ReactElement }, { error: Error | null }> {
-    constructor(props: { children: ReactElement }) {
-      super(props);
-      this.state = { error: null };
-    }
-    static getDerivedStateFromError(error: Error) {
-      return { error };
-    }
-    render() {
-      if (this.state.error) return null;
-      return this.props.children;
-    }
-  }
-
-  test("useSyncClient throws with a descriptive message when used outside SyncProvider", async () => {
-    let caughtError: Error | null = null;
-
+  test("useSyncClient throws with a descriptive message when used outside SyncProvider", () => {
     function Probe() {
       useSyncClient();
       return null;
     }
 
-    const harness = await mountHarness();
-    await act(async () => {
-      harness.render(
-        createElement(
-          ErrorBoundary,
-          {
-            ref: (eb: ErrorBoundary | null) => {
-              if (eb?.state.error) caughtError = eb.state.error;
-            },
-          },
-          createElement(Probe),
-        ),
-      );
-    });
-    await waitFor(() => caughtError !== null);
-
-    expect(caughtError?.message).toContain("useSyncClient");
-    expect(caughtError?.message).toContain("SyncProvider");
-
-    await harness.unmount();
+    expect(() => renderToString(createElement(Probe))).toThrow(
+      "useSyncClient: missing <SyncProvider>. Wrap your tree in a SyncProvider.",
+    );
   });
 
   test("SyncContext default value is null (no-provider baseline)", () => {
-    // createContext<GatewayCollections | null>(null) — verify the sentinel is null.
-    // We read the context directly without a Provider using useContext.
-    // This must run inside a render; we use a captured variable + throwaway render.
     let captured: unknown = "not-set";
 
     function Probe() {
@@ -1428,19 +1393,8 @@ describe("useSyncClient and SyncContext", () => {
       return null;
     }
 
-    // Render without any provider — reading from the raw context default.
-    const registry = createGatewayCollections({
-      client: makeTransport(() => Promise.resolve(null)).transport,
-    });
+    renderToString(createElement(Probe));
 
-    // We still need a DOM render; reuse the harness but render WITHOUT SyncProvider.
-    return (async () => {
-      const harness = await mountHarness();
-      // Render Probe directly (no SyncProvider wrapper).
-      await harness.render(createElement(Probe));
-      await settle();
-      expect(captured).toBeNull();
-      await harness.unmount();
-    })();
+    expect(captured).toBeNull();
   });
 });
