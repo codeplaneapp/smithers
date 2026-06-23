@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -14,6 +14,7 @@ import {
 } from "../src/external/create-external-smithers.js";
 
 let tempDirs = [];
+const CWD_BEFORE = process.cwd();
 
 function makeDbPath(prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -32,6 +33,7 @@ function closeApi(api) {
 
 afterEach(() => {
   delete process.env.SMITHERS_HOT;
+  process.chdir(CWD_BEFORE);
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -226,6 +228,58 @@ describe("createSmithers", () => {
     } finally {
       closeApi(api);
     }
+  });
+
+  test("uses anchor-based default dbPath when no dbPath is provided", () => {
+    const origHome = process.env.HOME;
+    // Use realpathSync so HOME and process.cwd() agree on macOS (where /tmp → /private/tmp)
+    const fakeHome = realpathSync(mkdtempSync(join(tmpdir(), "smithers-anchor-home-")));
+    tempDirs.push(fakeHome);
+    process.env.HOME = fakeHome;
+    const innerProject = join(fakeHome, "project");
+    mkdirSync(join(innerProject, ".smithers"), { recursive: true });
+    process.chdir(innerProject);
+    try {
+      const api = createSmithers({ result: z.object({ value: z.string() }) });
+      try {
+        const dbPath = api.db.$client.filename;
+        expect(dbPath).toBe(join(innerProject, "smithers.db"));
+      } finally {
+        closeApi(api);
+      }
+    } finally {
+      process.env.HOME = origHome;
+    }
+  });
+
+  test("respects the journalMode option", () => {
+    const dbPath = makeDbPath("smithers-journalmode-");
+    const api = createSmithers(
+      { result: z.object({ value: z.string() }) },
+      { dbPath, journalMode: "DELETE" },
+    );
+    try {
+      const [row] = api.db.$client.query("PRAGMA journal_mode").all();
+      expect(row.journal_mode).toBe("delete");
+    } finally {
+      closeApi(api);
+    }
+  });
+
+  test("catches ALTER TABLE errors when adding payload column to existing input table", () => {
+    const dbPath = makeDbPath("smithers-alter-catch-");
+    // Create a read-only view named "input" to force the ALTER to throw
+    const setup = new Database(dbPath);
+    setup.exec(`CREATE TABLE _input_real (run_id TEXT PRIMARY KEY)`);
+    setup.exec(`CREATE VIEW "input" AS SELECT run_id FROM _input_real`);
+    setup.close();
+
+    // Should not throw even though ALTER TABLE on a view will throw
+    let api;
+    expect(() => {
+      api = createSmithers({ result: z.object({ value: z.string() }) }, { dbPath });
+    }).not.toThrow();
+    if (api) closeApi(api);
   });
 
   test("registered database exit close hook is idempotent and catches close failures", () => {
