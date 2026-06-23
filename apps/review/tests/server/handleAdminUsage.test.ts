@@ -14,7 +14,15 @@ function makeWorker() {
 
 async function insertUsageEvent(
   db: Awaited<ReturnType<typeof buildTestEnv>>["DB"],
-  opts: { id: string; repo: string; model: string; inputTokens: number; outputTokens: number; costUsd: number; createdAt: number },
+  opts: {
+    id: string;
+    repo: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+    createdAt: number;
+  },
 ) {
   await db
     .prepare(
@@ -67,7 +75,6 @@ describe("/api/admin/usage", () => {
     const env = await buildTestEnv();
     const worker = makeWorker();
 
-    // Two events on the same day for the same repo+model
     const day1 = new Date("2025-06-01T12:00:00Z").getTime();
     await insertUsageEvent(env.DB, {
       id: "evt-1",
@@ -88,7 +95,6 @@ describe("/api/admin/usage", () => {
       createdAt: day1,
     });
 
-    // One event on a different day and different repo
     const day2 = new Date("2025-06-02T08:00:00Z").getTime();
     await insertUsageEvent(env.DB, {
       id: "evt-3",
@@ -119,7 +125,6 @@ describe("/api/admin/usage", () => {
       }>;
     };
 
-    // Ordered by day DESC, repo, model — most recent day first
     expect(body.days).toHaveLength(2);
     expect(body.days[0]).toMatchObject({
       day: "2025-06-02",
