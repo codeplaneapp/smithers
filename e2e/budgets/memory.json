@@ -6,5 +6,9 @@
   "subscriberFanoutN5": {
     "rssBytesMax": 524288000,
     "comment": "500 MB for case 16"
+  },
+  "longLivedRuns500": {
+    "rssBytesMax": 314572800,
+    "comment": "300 MB ceiling for case 30 (500 sequential run records)"
   }
 }
