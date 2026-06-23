@@ -250,15 +250,19 @@ function toYaml(value: unknown, indent = 0): string {
   return `${pad}${scalarToYaml(value)}`;
 }
 
-const rendered = `${toYaml(buildOpenApiDocument())}\n`;
+export { buildOpenApiDocument, toYaml, scalarToYaml, rpcPath, buildPath, errorSchema, successSchema, requestFrameSchema };
 
-if (process.argv.includes("--check")) {
-  const current = readFileSync(outPath, "utf8");
-  if (current !== rendered) {
-    console.error("packages/gateway/openapi.yaml is out of date. Run `pnpm --filter @smithers-orchestrator/gateway generate:openapi`.");
-    process.exit(1);
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const rendered = `${toYaml(buildOpenApiDocument())}\n`;
+
+  if (process.argv.includes("--check")) {
+    const current = readFileSync(outPath, "utf8");
+    if (current !== rendered) {
+      console.error("packages/gateway/openapi.yaml is out of date. Run `pnpm --filter @smithers-orchestrator/gateway generate:openapi`.");
+      process.exit(1);
+    }
+    process.exit(0);
   }
-  process.exit(0);
-}
 
-writeFileSync(outPath, rendered);
+  writeFileSync(outPath, rendered);
+}
