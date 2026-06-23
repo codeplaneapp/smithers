@@ -1082,6 +1082,51 @@ describe("useGatewayRunTree reconcile", () => {
   });
 });
 
+describe("invalidate() re-pull of pollable list collections via the pulser", () => {
+  test("invalidate() triggers a fresh RPC fetch and re-renders with updated data", async () => {
+    let callCount = 0;
+    const responses: Array<Array<{ runId: string; status: string }>> = [
+      [{ runId: "run-1", status: "running" }],
+      [{ runId: "run-1", status: "completed" }, { runId: "run-2", status: "running" }],
+    ];
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") {
+          const batch = responses[callCount] ?? responses[responses.length - 1];
+          callCount += 1;
+          return Promise.resolve(batch);
+        }
+        return Promise.resolve([]);
+      }).transport,
+    });
+
+    let snapshot: ReturnType<typeof useGatewayRuns> | undefined;
+    function Probe() {
+      snapshot = useGatewayRuns();
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => (snapshot?.data?.length ?? 0) === 1);
+    expect((snapshot?.data?.[0] as { runId?: string }).runId).toBe("run-1");
+    expect((snapshot?.data?.[0] as { status?: string }).status).toBe("running");
+
+    // Invalidate should pulse the collection's fingerprint through the pulser,
+    // causing the INVALIDATE_SCOPE pseudo-stream to yield a frame, which triggers
+    // refetchOnFrame and fires a fresh listRuns RPC.
+    await act(async () => {
+      await registry.invalidate(gatewayKeys.runs({}));
+    });
+
+    await waitFor(() => (snapshot?.data?.length ?? 0) === 2);
+    const statuses = snapshot?.data?.map((r) => (r as { status?: string }).status).sort();
+    expect(statuses).toEqual(["completed", "running"]);
+
+    await harness.unmount();
+  });
+});
+
 describe("useGatewayConnectionStatus", () => {
   test("goes online on a successful load and unauthorized on an auth error", async () => {
     let authMessage = "";
