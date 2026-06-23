@@ -13,7 +13,6 @@ const allowedSkips = new Map([
   ["e2e/faults/case07-continue-as-new-lineage.test.ts", 1],
   ["e2e/faults/case10-ghost-state-on-unmount.test.ts", 1],
   ["e2e/faults/case13-collapsed-ancestor-failure-marker.test.ts", 1],
-  ["e2e/faults/case15-ws-drop-reconnect.test.ts", 1],
   ["e2e/faults/case18-cron-manual-overlap.test.ts", 1],
   ["e2e/faults/case19-auth-persistence-suspend-resume.test.ts", 1],
   ["e2e/faults/case20-browser-automation-reference-runtime.test.ts", 1],
