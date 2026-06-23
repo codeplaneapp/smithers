@@ -232,7 +232,7 @@ describe("createSmithers", () => {
 
   test("uses anchor-based default dbPath when no dbPath is provided", () => {
     const origHome = process.env.HOME;
-    // Use realpathSync so HOME and process.cwd() agree on macOS (where /tmp → /private/tmp)
+    // Use realpathSync so HOME and process.cwd() agree on macOS (where /tmp -> /private/tmp)
     const fakeHome = realpathSync(mkdtempSync(join(tmpdir(), "smithers-anchor-home-")));
     tempDirs.push(fakeHome);
     process.env.HOME = fakeHome;
