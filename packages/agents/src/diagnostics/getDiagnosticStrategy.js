@@ -475,12 +475,11 @@ const antigravityStrategy = {
     ],
 };
 // ---------------------------------------------------------------------------
-// Pi strategy
+// Pi strategy helpers — dispatch checks based on which provider pi is using
 // ---------------------------------------------------------------------------
 /**
  * Resolve the effective pi provider family from an explicit `--provider`, a
- * `provider/model` prefix, or a bare model id's well-known prefix. Returns ""
- * when undeterminable so callers fall back to pi's default (google) (#284).
+ * `provider/model` prefix, or a bare model id's well-known prefix.
  * @param {DiagnosticHints | undefined} hints
  * @returns {string}
  */
@@ -521,7 +520,21 @@ function piProviderChecks(hints) {
     if (raw === "anthropic" || raw === "claude") {
         return [claudeApiKeyCheck, claudeRateLimitCheck];
     }
-    return [googleAuthCheck, googleRateLimitCheck];
+    if (raw === "google" || raw === "gemini") {
+        return [googleAuthCheck, googleRateLimitCheck];
+    }
+    // Unknown provider — skip preflight, pi handles its own auth
+    return [
+        {
+            id: "api_key_valid",
+            run: async () => ({
+                id: "api_key_valid",
+                status: "skip",
+                message: `Pi provider "${raw || "unset"}" — passing auth to pi`,
+                durationMs: 0,
+            }),
+        },
+    ];
 }
 /**
  * pi accepts credentials via the `--api-key` option instead of an environment
@@ -544,7 +557,10 @@ export function diagnosticApiKeyEnv(command, hints) {
     if (raw === "anthropic" || raw === "claude") {
         return { ANTHROPIC_API_KEY: hints.apiKey };
     }
-    return { GOOGLE_API_KEY: hints.apiKey };
+    if (raw === "google" || raw === "gemini") {
+        return { GOOGLE_API_KEY: hints.apiKey };
+    }
+    return undefined;
 }
 // ---------------------------------------------------------------------------
 // Amp strategy

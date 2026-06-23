@@ -510,6 +510,10 @@ export class PiAgent extends BaseCliAgent {
                 options: params.options,
                 mode,
             }),
+            hints: {
+                provider: this.opts.provider,
+                model: this.opts.model ?? this.model,
+            },
             outputFormat: mode,
         };
     }
