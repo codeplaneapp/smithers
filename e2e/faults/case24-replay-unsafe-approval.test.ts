@@ -1,5 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { getDefinedToolMetadata } from "@smithers-orchestrator/engine/getDefinedToolMetadata";
 
 type ApprovalRow = {
@@ -59,61 +61,9 @@ const PRIOR_ATTEMPT = 1;
 const REPLAY_ATTEMPT = 2;
 
 function buildDb(): Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE _smithers_runs (
-      run_id TEXT PRIMARY KEY,
-      workflow_name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      started_at_ms INTEGER,
-      heartbeat_at_ms INTEGER,
-      runtime_owner_id TEXT
-    );
-    CREATE TABLE _smithers_nodes (
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL DEFAULT 0,
-      state TEXT NOT NULL,
-      updated_at_ms INTEGER NOT NULL,
-      output_table TEXT NOT NULL,
-      PRIMARY KEY (run_id, node_id, iteration)
-    );
-    CREATE TABLE _smithers_attempts (
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL DEFAULT 0,
-      attempt INTEGER NOT NULL,
-      state TEXT NOT NULL,
-      started_at_ms INTEGER NOT NULL,
-      finished_at_ms INTEGER,
-      meta_json TEXT,
-      PRIMARY KEY (run_id, node_id, iteration, attempt)
-    );
-    CREATE TABLE _smithers_approvals (
-      run_id TEXT NOT NULL,
-      node_id TEXT NOT NULL,
-      iteration INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL,
-      requested_at_ms INTEGER,
-      decided_at_ms INTEGER,
-      note TEXT,
-      decided_by TEXT,
-      request_json TEXT,
-      decision_json TEXT,
-      auto_approved INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (run_id, node_id, iteration)
-    );
-    CREATE TABLE _smithers_events (
-      run_id TEXT NOT NULL,
-      seq INTEGER NOT NULL,
-      timestamp_ms INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      PRIMARY KEY (run_id, seq)
-    );
-  `);
-  return db;
+  const sqlite = new Database(":memory:");
+  ensureSmithersTables(drizzle(sqlite));
+  return sqlite;
 }
 
 function makeStubTool(meta: ToolMetadata): Record<string | symbol, unknown> {

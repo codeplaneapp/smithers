@@ -1,5 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { deriveRunState } from "@smithers-orchestrator/db/runState/deriveRunState";
 import type { RunRow } from "@smithers-orchestrator/db/adapter/RunRow";
 import type { RunState } from "@smithers-orchestrator/db/runState/RunState";
@@ -57,20 +59,9 @@ function baseRow(now: number, overrides: Partial<RunRow> = {}): RunRow {
 }
 
 function buildDb(): Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE _smithers_runs (
-      run_id TEXT PRIMARY KEY,
-      workflow_name TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at_ms INTEGER NOT NULL,
-      started_at_ms INTEGER,
-      finished_at_ms INTEGER,
-      heartbeat_at_ms INTEGER,
-      runtime_owner_id TEXT
-    );
-  `);
-  return db;
+  const sqlite = new Database(":memory:");
+  ensureSmithersTables(drizzle(sqlite));
+  return sqlite;
 }
 
 function persistAndRead(db: Database, row: RunRow): RunRow {
