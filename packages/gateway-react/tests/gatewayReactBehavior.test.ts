@@ -16,8 +16,11 @@ import { SmithersGatewayClient as RealSmithersGatewayClient } from "@smithers-or
 import {
   SmithersGatewayContext,
   SmithersGatewayProvider,
+  SyncContext,
+  createGatewayReactRoot,
   useGatewayRpc,
 } from "../src/index.ts";
+import type { GatewayCollections } from "../src/index.ts";
 
 // React's act() requires this flag so updates are flushed synchronously and
 // warnings are suppressed in the bun + happy-dom test environment.
@@ -347,5 +350,46 @@ describe("useGatewayRpc", () => {
     ]);
 
     await harness.unmount();
+  });
+});
+
+describe("createGatewayReactRoot", () => {
+  test("mounts the element under both SmithersGatewayProvider and SyncProvider", async () => {
+    const container = document.createElement("div");
+    container.id = "cov-31-test-root";
+    document.body.appendChild(container);
+
+    let gatewayCtxValue: SmithersGatewayClient | null = null;
+    let syncCtxValue: GatewayCollections | null = null;
+
+    function Probe() {
+      return createElement(SmithersGatewayContext.Consumer, {
+        children: (gw: SmithersGatewayClient | null) => {
+          gatewayCtxValue = gw;
+          return createElement(SyncContext.Consumer, {
+            children: (sync: GatewayCollections | null) => {
+              syncCtxValue = sync;
+              return null;
+            },
+          });
+        },
+      });
+    }
+
+    let returnedClient: SmithersGatewayClient | undefined;
+    await act(async () => {
+      returnedClient = createGatewayReactRoot(createElement(Probe), {
+        rootId: "cov-31-test-root",
+        baseUrl: "http://gateway.test",
+      });
+    });
+
+    expect(returnedClient).toBeInstanceOf(RealSmithersGatewayClient);
+    // SmithersGatewayProvider wired: context value matches the returned client
+    expect(gatewayCtxValue).toBe(returnedClient);
+    // SyncProvider wired: sync context is non-null (GatewayCollections registry)
+    expect(syncCtxValue).not.toBeNull();
+
+    container.remove();
   });
 });
