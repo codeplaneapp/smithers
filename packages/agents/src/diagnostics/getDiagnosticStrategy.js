@@ -1,4 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 /** @typedef {import("./DiagnosticCheck.ts").DiagnosticCheck} DiagnosticCheck */
 /** @typedef {import("./DiagnosticCheckId.ts").DiagnosticCheckId} DiagnosticCheckId */
 /** @typedef {import("./DiagnosticContext.ts").DiagnosticContext} DiagnosticContext */
@@ -201,24 +204,110 @@ function openaiModelsUrl(env) {
     const base = (env.OPENAI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/+$/, "");
     return `${base}/models`;
 }
-// Combined API key validation + rate limit check via GET /v1/models (free, no tokens)
-const codexApiKeyAndRateLimitCheck = [
-    {
+/**
+ * Resolve the Codex CLI config directory the same way the `codex` binary does:
+ * an explicit `CODEX_HOME` wins, otherwise `~/.codex` (honoring `$HOME`).
+ * @param {Record<string, string | undefined>} env
+ * @returns {string}
+ */
+function resolveCodexHome(env) {
+    const explicit = env.CODEX_HOME?.trim();
+    if (explicit) {
+        return explicit;
+    }
+    return join(env.HOME?.trim() || homedir(), ".codex");
+}
+/**
+ * @typedef {{ apiKey: string; keySource: string } | { subscription: true } | { missing: true }} OpenAiCredentials
+ */
+/**
+ * Read OpenAI credentials from `<CODEX_HOME>/auth.json`, the file `codex login`
+ * writes. Mirrors the codex binary's own auth resolution: a stored API key, or
+ * ChatGPT subscription tokens. Returns null when no usable credentials are
+ * present (file missing, unreadable, malformed, or empty).
+ * @param {Record<string, string | undefined>} env
+ * @returns {{ kind: "apiKey"; apiKey: string } | { kind: "subscription" } | null}
+ */
+function readCodexCliAuth(env) {
+    try {
+        const raw = readFileSync(join(resolveCodexHome(env), "auth.json"), "utf8");
+        const parsed = JSON.parse(raw);
+        if (typeof parsed?.OPENAI_API_KEY === "string" && parsed.OPENAI_API_KEY.trim()) {
+            return { kind: "apiKey", apiKey: parsed.OPENAI_API_KEY.trim() };
+        }
+        if (typeof parsed?.tokens?.access_token === "string" && parsed.tokens.access_token.trim()) {
+            return { kind: "subscription" };
+        }
+        return null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Resolve the OpenAI credentials a codex/pi invocation will actually use. An env
+ * `OPENAI_API_KEY` always wins. When it is absent and `codexCliAuth` is set, fall
+ * back to `<CODEX_HOME>/auth.json` (subscription tokens or a stored API key) the
+ * same way the codex binary does (#448). pi leaves `codexCliAuth` off — it reads
+ * the env var (or `--api-key`), not codex's auth.json.
+ * @param {Record<string, string | undefined>} env
+ * @param {boolean} codexCliAuth
+ * @returns {OpenAiCredentials}
+ */
+function resolveOpenAiCredentials(env, codexCliAuth) {
+    const envKey = env.OPENAI_API_KEY;
+    if (envKey) {
+        return { apiKey: envKey, keySource: "OPENAI_API_KEY" };
+    }
+    if (codexCliAuth) {
+        const auth = readCodexCliAuth(env);
+        if (auth?.kind === "apiKey") {
+            return { apiKey: auth.apiKey, keySource: "Codex CLI auth.json API key" };
+        }
+        if (auth?.kind === "subscription") {
+            return { subscription: true };
+        }
+    }
+    return { missing: true };
+}
+/**
+ * OpenAI API-key validity check via GET /v1/models (free, no tokens).
+ *
+ * Validates whatever concrete key the invocation will use — env `OPENAI_API_KEY`
+ * or, when `codexCliAuth` is set, a key stored in `<CODEX_HOME>/auth.json`. A
+ * stored key can be invalid/exhausted just like an env key, so it is probed, not
+ * trusted on presence. ChatGPT subscription tokens can't be probed cheaply, so
+ * (like the Claude subscription check) their presence passes (#448).
+ * @param {{ codexCliAuth: boolean }} options
+ * @returns {DiagnosticCheckDef}
+ */
+function openaiApiKeyCheck({ codexCliAuth }) {
+    return {
         id: "api_key_valid",
         run: async (ctx) => {
             const start = performance.now();
-            const apiKey = ctx.env.OPENAI_API_KEY;
-            if (!apiKey) {
+            const creds = resolveOpenAiCredentials(ctx.env, codexCliAuth);
+            if ("subscription" in creds) {
+                return {
+                    id: "api_key_valid",
+                    status: "pass",
+                    message: "No OPENAI_API_KEY set — using Codex CLI subscription auth (CODEX_HOME/auth.json)",
+                    durationMs: performance.now() - start,
+                };
+            }
+            if ("missing" in creds) {
                 return {
                     id: "api_key_valid",
                     status: "fail",
-                    message: "OPENAI_API_KEY not set",
+                    message: codexCliAuth
+                        ? "OPENAI_API_KEY not set and no Codex CLI auth found — run `codex login` or set OPENAI_API_KEY"
+                        : "OPENAI_API_KEY not set",
                     durationMs: performance.now() - start,
                 };
             }
             try {
                 const res = await fetch(openaiModelsUrl(ctx.env), {
-                    headers: { Authorization: `Bearer ${apiKey}` },
+                    headers: { Authorization: `Bearer ${creds.apiKey}` },
                     signal: AbortSignal.timeout(4_000),
                 });
                 const elapsed = performance.now() - start;
@@ -226,7 +315,7 @@ const codexApiKeyAndRateLimitCheck = [
                     return {
                         id: "api_key_valid",
                         status: "fail",
-                        message: "OPENAI_API_KEY is invalid (401 Unauthorized)",
+                        message: `${creds.keySource} is invalid (401 Unauthorized)`,
                         durationMs: elapsed,
                     };
                 }
@@ -234,14 +323,14 @@ const codexApiKeyAndRateLimitCheck = [
                     return {
                         id: "api_key_valid",
                         status: "fail",
-                        message: "OPENAI_API_KEY lacks permission (403 Forbidden)",
+                        message: `${creds.keySource} lacks permission (403 Forbidden)`,
                         durationMs: elapsed,
                     };
                 }
                 return {
                     id: "api_key_valid",
                     status: "pass",
-                    message: "OPENAI_API_KEY is valid",
+                    message: `${creds.keySource} is valid`,
                     durationMs: elapsed,
                 };
             }
@@ -254,23 +343,34 @@ const codexApiKeyAndRateLimitCheck = [
                 };
             }
         },
-    },
-    {
+    };
+}
+/**
+ * Rate-limit probe via GET /v1/models (free, no tokens). Probes the same key the
+ * api-key check resolves (env or Codex CLI auth.json), so a stored key's quota is
+ * checked too; subscription/no-key resolve to a non-blocking skip.
+ * @param {{ codexCliAuth: boolean }} options
+ * @returns {DiagnosticCheckDef}
+ */
+function openaiRateLimitCheck({ codexCliAuth }) {
+    return {
         id: "rate_limit_status",
         run: async (ctx) => {
             const start = performance.now();
-            const apiKey = ctx.env.OPENAI_API_KEY;
-            if (!apiKey) {
+            const creds = resolveOpenAiCredentials(ctx.env, codexCliAuth);
+            if (!("apiKey" in creds)) {
                 return {
                     id: "rate_limit_status",
                     status: "skip",
-                    message: "No API key — cannot check rate limits",
+                    message: "subscription" in creds
+                        ? "Subscription mode — cannot probe rate limits via API"
+                        : "No API key — cannot check rate limits",
                     durationMs: 0,
                 };
             }
             try {
                 const res = await fetch(openaiModelsUrl(ctx.env), {
-                    headers: { Authorization: `Bearer ${apiKey}` },
+                    headers: { Authorization: `Bearer ${creds.apiKey}` },
                     signal: AbortSignal.timeout(4_000),
                 });
                 const elapsed = performance.now() - start;
@@ -324,7 +424,13 @@ const codexApiKeyAndRateLimitCheck = [
                 };
             }
         },
-    },
+    };
+}
+// Codex resolves auth from `<CODEX_HOME>/auth.json` (subscription tokens or a
+// stored API key) when OPENAI_API_KEY is absent, so its checks honor that.
+const codexApiKeyAndRateLimitCheck = [
+    openaiApiKeyCheck({ codexCliAuth: true }),
+    openaiRateLimitCheck({ codexCliAuth: true }),
 ];
 const codexStrategy = {
     agentId: "codex",
@@ -515,7 +621,12 @@ function resolvePiProvider(hints) {
 function piProviderChecks(hints) {
     const raw = resolvePiProvider(hints);
     if (raw === "openai" || raw === "openai-codex" || raw === "azure" || raw === "azure-openai") {
-        return [...codexApiKeyAndRateLimitCheck];
+        // pi reads OPENAI_API_KEY from the env (or --api-key), not codex's
+        // auth.json, so it still requires the key — no Codex CLI auth fallback.
+        return [
+            openaiApiKeyCheck({ codexCliAuth: false }),
+            openaiRateLimitCheck({ codexCliAuth: false }),
+        ];
     }
     if (raw === "anthropic" || raw === "claude") {
         return [claudeApiKeyCheck, claudeRateLimitCheck];

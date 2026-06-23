@@ -1,7 +1,27 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runDiagnostics, getDiagnosticStrategy, enrichReportWithErrorAnalysis, formatDiagnosticSummary, launchDiagnostics, } from "../src/diagnostics/index.js";
 import { BaseCliAgent } from "../src/BaseCliAgent/index.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+
+/**
+ * Create an isolated CODEX_HOME directory, optionally seeding an auth.json. The
+ * directory is registered for cleanup via the returned dispose() callback.
+ * @param {Record<string, unknown> | undefined} authJson
+ * @returns {{ codexHome: string; dispose: () => void }}
+ */
+function makeCodexHome(authJson) {
+    const codexHome = mkdtempSync(join(tmpdir(), "smithers-codex-home-"));
+    if (authJson !== undefined) {
+        writeFileSync(join(codexHome, "auth.json"), JSON.stringify(authJson), "utf8");
+    }
+    return {
+        codexHome,
+        dispose: () => rmSync(codexHome, { recursive: true, force: true }),
+    };
+}
 // ---------------------------------------------------------------------------
 // runDiagnostics
 // ---------------------------------------------------------------------------
@@ -295,15 +315,96 @@ describe("claude strategy checks", () => {
     });
 });
 describe("codex strategy checks", () => {
-    test("api_key_valid fails when OPENAI_API_KEY not set", async () => {
-        const strategy = getDiagnosticStrategy("codex");
-        const report = await runDiagnostics(strategy, {
-            env: {},
-            cwd: "/tmp",
+    test("api_key_valid fails when no OPENAI_API_KEY and no Codex CLI auth", async () => {
+        // Empty CODEX_HOME → no auth.json, so neither env nor file auth is present.
+        const { codexHome, dispose } = makeCodexHome(undefined);
+        try {
+            const strategy = getDiagnosticStrategy("codex");
+            const report = await runDiagnostics(strategy, {
+                env: { CODEX_HOME: codexHome },
+                cwd: "/tmp",
+            });
+            const apiKeyCheck = report.checks.find((c) => c.id === "api_key_valid");
+            expect(apiKeyCheck.status).toBe("fail");
+            expect(apiKeyCheck.message).toContain("not set");
+        }
+        finally {
+            dispose();
+        }
+    });
+    test("api_key_valid passes with ChatGPT subscription auth (CODEX_HOME/auth.json tokens) — #448", async () => {
+        const { codexHome, dispose } = makeCodexHome({
+            auth_mode: "chatgpt",
+            OPENAI_API_KEY: null,
+            tokens: { access_token: "fake-access-token", account_id: "acct_123" },
         });
-        const apiKeyCheck = report.checks.find((c) => c.id === "api_key_valid");
-        expect(apiKeyCheck.status).toBe("fail");
-        expect(apiKeyCheck.message).toContain("not set");
+        try {
+            const strategy = getDiagnosticStrategy("codex");
+            const report = await runDiagnostics(strategy, {
+                env: { CODEX_HOME: codexHome },
+                cwd: "/tmp",
+            });
+            const apiKeyCheck = report.checks.find((c) => c.id === "api_key_valid");
+            expect(apiKeyCheck.status).toBe("pass");
+            expect(apiKeyCheck.message).toContain("subscription");
+        }
+        finally {
+            dispose();
+        }
+    });
+    test("api_key_valid probes (does not blindly trust) an API key stored in CODEX_HOME/auth.json", async () => {
+        // A stored key can be invalid/exhausted; it must be validated against the
+        // API, not passed on presence. A fake key → 401 (fail) or network error.
+        const { codexHome, dispose } = makeCodexHome({
+            auth_mode: "apikey",
+            OPENAI_API_KEY: "sk-test-fake-from-auth-json",
+        });
+        try {
+            const strategy = getDiagnosticStrategy("codex");
+            const report = await runDiagnostics(strategy, {
+                env: { CODEX_HOME: codexHome },
+                cwd: "/tmp",
+            });
+            const apiKeyCheck = report.checks.find((c) => c.id === "api_key_valid");
+            expect(["fail", "error"]).toContain(apiKeyCheck.status);
+        }
+        finally {
+            dispose();
+        }
+    });
+    test("api_key_valid fails when CODEX_HOME/auth.json has neither key nor tokens", async () => {
+        const { codexHome, dispose } = makeCodexHome({ auth_mode: "chatgpt", OPENAI_API_KEY: null });
+        try {
+            const strategy = getDiagnosticStrategy("codex");
+            const report = await runDiagnostics(strategy, {
+                env: { CODEX_HOME: codexHome },
+                cwd: "/tmp",
+            });
+            const apiKeyCheck = report.checks.find((c) => c.id === "api_key_valid");
+            expect(apiKeyCheck.status).toBe("fail");
+        }
+        finally {
+            dispose();
+        }
+    });
+    test("api_key_valid env OPENAI_API_KEY takes precedence over CODEX_HOME auth (still probed)", async () => {
+        // A real env key is still validated against the API, even with auth.json present.
+        const { codexHome, dispose } = makeCodexHome({
+            tokens: { access_token: "fake-access-token" },
+        });
+        try {
+            const strategy = getDiagnosticStrategy("codex");
+            const report = await runDiagnostics(strategy, {
+                env: { CODEX_HOME: codexHome, OPENAI_API_KEY: "sk-test-fake-key-12345" },
+                cwd: "/tmp",
+            });
+            const apiKeyCheck = report.checks.find((c) => c.id === "api_key_valid");
+            // Fake key gets 401 (fail) or a network error (error) — never a subscription pass.
+            expect(["fail", "error"]).toContain(apiKeyCheck.status);
+        }
+        finally {
+            dispose();
+        }
     });
     test("api_key_valid probes OpenAI API with key (fake key → fail or error)", async () => {
         const strategy = getDiagnosticStrategy("codex");
@@ -325,13 +426,38 @@ describe("codex strategy checks", () => {
         // With a fake key, expect fail (401) or error (network) — not skip
         expect(rlCheck.status).not.toBe("skip");
     });
-    test("rate_limit_status skips when no OPENAI_API_KEY", async () => {
-        const strategy = getDiagnosticStrategy("codex");
-        const report = await runDiagnostics(strategy, {
-            env: {},
-            cwd: "/tmp",
+    test("rate_limit_status skips when no OPENAI_API_KEY and no Codex CLI auth", async () => {
+        // Empty CODEX_HOME so the skip isn't influenced by a developer's real ~/.codex.
+        const { codexHome, dispose } = makeCodexHome(undefined);
+        try {
+            const strategy = getDiagnosticStrategy("codex");
+            const report = await runDiagnostics(strategy, {
+                env: { CODEX_HOME: codexHome },
+                cwd: "/tmp",
+            });
+            const rlCheck = report.checks.find((c) => c.id === "rate_limit_status");
+            expect(rlCheck.status).toBe("skip");
+        }
+        finally {
+            dispose();
+        }
+    });
+    test("rate_limit_status skips in subscription mode (CODEX_HOME tokens, no env key)", async () => {
+        const { codexHome, dispose } = makeCodexHome({
+            tokens: { access_token: "fake-access-token" },
         });
-        const rlCheck = report.checks.find((c) => c.id === "rate_limit_status");
-        expect(rlCheck.status).toBe("skip");
+        try {
+            const strategy = getDiagnosticStrategy("codex");
+            const report = await runDiagnostics(strategy, {
+                env: { CODEX_HOME: codexHome },
+                cwd: "/tmp",
+            });
+            const rlCheck = report.checks.find((c) => c.id === "rate_limit_status");
+            expect(rlCheck.status).toBe("skip");
+            expect(rlCheck.message).toContain("Subscription");
+        }
+        finally {
+            dispose();
+        }
     });
 });
