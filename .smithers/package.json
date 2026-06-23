@@ -21,8 +21,14 @@
   },
   "dependencies": {
     "@smithers-orchestrator/scorers": "workspace:*",
+    "effect": "^3.21.1",
+    "react": "^19.2.5",
     "smithers-orchestrator": "workspace:*",
+    "twitter-api-v2": "^1.29.0",
     "zod": "4.3.6"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.60.0"
   },
   "devDependencies": {
     "@types/mdx": "2.0.13",

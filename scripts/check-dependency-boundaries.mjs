@@ -11,7 +11,7 @@ import ts from "typescript";
 
 const repoRoot = process.cwd();
 const workspaceRoots = ["packages", "apps"];
-const directWorkspaceDirs = ["e2e"];
+const directWorkspaceDirs = ["e2e", ".smithers"];
 const sourceExtensions = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
 const ignoredDirs = new Set([
   ".git",
@@ -119,6 +119,7 @@ function packageNameForSpecifier(specifier) {
     specifier.startsWith(".") ||
     specifier.startsWith("/") ||
     specifier.startsWith("#") ||
+    specifier.startsWith("~/") ||
     specifier.startsWith("node:") ||
     specifier.startsWith("bun:")
   ) {
