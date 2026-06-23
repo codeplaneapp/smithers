@@ -1134,4 +1134,73 @@ describe("useGatewayConnectionStatus", () => {
     registry.reset();
     expect(registry.connection().status).toBe("idle");
   });
+
+  test("markConnecting transitions idle→connecting, then online on success", async () => {
+    let resolve!: (v: unknown[]) => void;
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") return new Promise((r) => { resolve = r; });
+        return Promise.resolve([]);
+      }).transport,
+    });
+
+    expect(registry.connection().status).toBe("idle");
+
+    // Kick off a live RPC — the transport wraps rpc with markConnecting() before awaiting.
+    const pending = registry.rpc("listRuns", {});
+    // Give the microtask queue a tick so markConnecting() has fired.
+    await Promise.resolve();
+    expect(registry.connection().status).toBe("connecting");
+
+    resolve([]);
+    await pending;
+    expect(registry.connection().status).toBe("online");
+  });
+
+  test("markOffline sets status and preserves reconnectingSince across repeated failures", async () => {
+    let callCount = 0;
+    const registry = createGatewayCollections({
+      client: makeTransport(() => {
+        callCount += 1;
+        return Promise.reject(new Error("network error"));
+      }).transport,
+    });
+
+    // First failure: status goes offline and reconnectingSince is stamped.
+    await registry.rpc("listRuns", {}).catch(() => undefined);
+    const state1 = registry.connection();
+    expect(state1.status).toBe("offline");
+    expect(typeof state1.reconnectingSince).toBe("number");
+    const since = state1.reconnectingSince!;
+
+    // Second failure: reconnectingSince must be preserved (not re-stamped).
+    await registry.rpc("listRuns", {}).catch(() => undefined);
+    const state2 = registry.connection();
+    expect(state2.status).toBe("offline");
+    expect(state2.reconnectingSince).toBe(since);
+  });
+
+  test("useGatewayConnectionStatus reflects offline state and reconnectingSince reactively", async () => {
+    const registry = createGatewayCollections({
+      client: makeTransport((method) => {
+        if (method === "listRuns") return Promise.reject(new Error("network error"));
+        return Promise.resolve([]);
+      }).transport,
+    });
+
+    let status: ReturnType<typeof useGatewayConnectionStatus> | undefined;
+    function Probe() {
+      useGatewayRuns();
+      status = useGatewayConnectionStatus();
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(provider(registry, createElement(Probe)));
+    await waitFor(() => status?.status === "offline");
+    expect(status?.isOnline).toBe(false);
+    expect(typeof status?.reconnectingSince).toBe("number");
+
+    await harness.unmount();
+  });
 });
