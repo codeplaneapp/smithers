@@ -421,26 +421,59 @@ describe("auth header edge cases (gateway HTTP)", () => {
 });
 
 describe("connection-limit WS upgrade rejection (503 path)", () => {
-    test("WS upgrade is rejected when maxConnections is 0 — connection never opens", async () => {
-        // maxConnections: 0 means the connections.size >= maxConnections guard
-        // fires immediately for any upgrade attempt (gateway.js:2441-2460).
-        const g = new Gateway({ heartbeatMs: 100, maxConnections: 0 });
+    test("WS upgrade returns HTTP 503 when connection limit is reached", async () => {
+        // Start gateway with limit of 1 so we can saturate it with one real
+        // connection then attempt a second upgrade to exercise the 503 branch
+        // at gateway.js:2441-2460.
+        const g = new Gateway({ heartbeatMs: 100, maxConnections: 1 });
         const srv = await g.listen({ port: 0, host: "127.0.0.1" });
         const p = getPort(srv);
         try {
-            const opened = await new Promise((resolve) => {
-                const ws = new WebSocket(`ws://127.0.0.1:${p}`);
-                // Persistent handler prevents unhandled-error crash from any
-                // late error after the promise resolves.
-                ws.on("error", () => {});
-                ws.once("open", () => {
-                    ws.close();
-                    resolve(true);
-                });
-                ws.once("error", () => resolve(false));
-                ws.once("close", () => resolve(false));
+            // Open a real WS connection to occupy the single slot.
+            const ws1 = new WebSocket(`ws://127.0.0.1:${p}`);
+            ws1.on("error", () => {});
+            await new Promise((resolve, reject) => {
+                ws1.once("open", resolve);
+                ws1.once("error", reject);
             });
-            expect(opened).toBe(false);
+
+            // Now send a raw HTTP upgrade request — the connection limit is
+            // already hit so the gateway must write HTTP 503 and destroy the
+            // socket.  We use a raw TCP socket so we can read the exact
+            // response status line and headers that the branch writes.
+            const raw = await new Promise((resolve, reject) => {
+                const sock = connect({ host: "127.0.0.1", port: p }, () => {
+                    sock.write(
+                        "GET / HTTP/1.1\r\n"
+                        + `Host: 127.0.0.1:${p}\r\n`
+                        + "Upgrade: websocket\r\n"
+                        + "Connection: Upgrade\r\n"
+                        + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                        + "Sec-WebSocket-Version: 13\r\n"
+                        + "\r\n"
+                    );
+                });
+                const chunks = [];
+                sock.on("data", (c) => chunks.push(c));
+                sock.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+                sock.on("close", () => resolve(Buffer.concat(chunks).toString("utf8")));
+                sock.on("error", reject);
+                sock.setTimeout(4_000, () => {
+                    sock.destroy(new Error("upgrade socket timeout"));
+                });
+            });
+
+            // The branch at gateway.js:2452 writes "HTTP/1.1 503 Service Unavailable".
+            const statusLine = raw.split("\r\n")[0];
+            expect(statusLine).toBe("HTTP/1.1 503 Service Unavailable");
+
+            // The X-Smithers-API-Version header must be present.
+            expect(raw).toMatch(/x-smithers-api-version:/i);
+
+            // The body must contain the connection-limit message.
+            expect(raw).toContain("Gateway connection limit reached");
+
+            ws1.close();
         } finally {
             await g.close();
         }
