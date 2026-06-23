@@ -12,7 +12,7 @@ import {
   successSchema,
   requestFrameSchema,
 } from "../scripts/generate-openapi.ts";
-import { GATEWAY_RPC_DEFINITIONS, SMITHERS_API_VERSION } from "../src/rpc/index.ts";
+import { GATEWAY_RPC_DEFINITIONS, GATEWAY_RPC_ERRORS, SMITHERS_API_VERSION } from "../src/rpc/index.ts";
 import { GATEWAY_SCOPE_VALUES } from "../src/auth/scopes.ts";
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -68,9 +68,14 @@ describe("generate-openapi helpers", () => {
       expect((path.post.security as Array<{ bearerAuth: string[] }>)[0].bearerAuth).toEqual([def.requiredScope]);
       const responses = path.post.responses as Record<string, unknown>;
       expect(responses["200"]).toBeDefined();
-      // each error code maps to the right HTTP status
-      for (const _code of def.errors) {
-        expect(Object.keys(responses).length).toBeGreaterThan(0);
+      for (const code of def.errors) {
+        const error = GATEWAY_RPC_ERRORS[code];
+        const response = responses[String(error.httpStatus)] as
+          | { description?: string; content?: { "application/json"?: { schema?: unknown } } }
+          | undefined;
+        expect(response, `${def.method} ${code}`).toBeDefined();
+        expect(response?.description).toBeDefined();
+        expect(response?.content?.["application/json"]?.schema).toEqual(errorSchema(def));
       }
     }
   });
