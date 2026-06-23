@@ -1,5 +1,6 @@
 /** @jsxImportSource smithers-orchestrator */
 import { afterEach, describe, expect, test } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -48,11 +49,35 @@ async function postRpc(port, method, body = {}) {
   });
 }
 
+async function waitFor(assertion, { timeoutMs = 5000, intervalMs = 25 } = {}) {
+  const started = Date.now();
+  let lastError;
+  while (Date.now() - started < timeoutMs) {
+    try {
+      return await assertion();
+    } catch (error) {
+      lastError = error;
+      await sleep(intervalMs);
+    }
+  }
+  throw lastError;
+}
+
 describe("Gateway UI", () => {
   let gateway;
   let tempDir;
+  let domRegistered = false;
+  let cleanupDomRuntime = null;
 
   afterEach(async () => {
+    if (cleanupDomRuntime) {
+      cleanupDomRuntime();
+      cleanupDomRuntime = null;
+    }
+    if (domRegistered) {
+      await GlobalRegistrator.unregister();
+      domRegistered = false;
+    }
     if (gateway) {
       await gateway.close();
     }
@@ -180,7 +205,7 @@ describe("Gateway UI", () => {
     expect(await asset.text()).toContain("Smithers Console");
   });
 
-  test("operator console RPC endpoints return real data (behavioral)", async () => {
+  test("built-in operator console loads and launches a real run in the browser", async () => {
     tempDir = mkdtempSync(join(process.cwd(), ".smithers-op-console-behavioral-"));
     const dbPath = join(tempDir, "op.db");
     const { smithers, Workflow, Task, outputs } = createSmithers(
@@ -198,54 +223,91 @@ describe("Gateway UI", () => {
     const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
     const port = getPort(server);
 
-    const listWorkflowsRes = await postRpc(port, "listWorkflows");
-    expect(listWorkflowsRes.status).toBe(200);
-    const listWorkflowsBody = await listWorkflowsRes.json();
-    expect(listWorkflowsBody.ok).toBe(true);
-    const workflows = listWorkflowsBody.payload;
-    expect(Array.isArray(workflows)).toBe(true);
-    const wf = workflows.find((w) => w.key === "op-console-workflow");
-    expect(wf).toBeDefined();
-    expect(wf.key).toBe("op-console-workflow");
+    const htmlResponse = await fetch(`http://127.0.0.1:${port}/console`);
+    expect(htmlResponse.status).toBe(200);
+    const html = await htmlResponse.text();
+    const bootJson = html.match(/__SMITHERS_GATEWAY_UI__=(.*?);<\/script>/)?.[1];
+    expect(bootJson).toBeDefined();
 
-    const launchRes = await postRpc(port, "launchRun", {
-      workflow: "op-console-workflow",
-      input: {},
-    });
-    expect(launchRes.status).toBe(200);
-    const launchBody = await launchRes.json();
-    expect(launchBody.ok).toBe(true);
-    const { runId } = launchBody.payload;
-    expect(typeof runId).toBe("string");
+    const assetResponse = await fetch(`http://127.0.0.1:${port}/console/__smithers_ui/client.js`);
+    expect(assetResponse.status).toBe(200);
+    const asset = await assetResponse.text();
 
-    let run;
-    for (let attempt = 0; attempt < 50; attempt++) {
-      const res = await postRpc(port, "getRun", { runId });
-      const body = await res.json();
-      if (body.ok && (body.payload.status === "finished" || body.payload.status === "failed")) {
-        run = body.payload;
-        break;
+    GlobalRegistrator.register({ url: `http://127.0.0.1:${port}/console` });
+    domRegistered = true;
+    const intervals = new Set();
+    const sockets = new Set();
+    const nativeSetInterval = globalThis.setInterval;
+    const nativeClearInterval = globalThis.clearInterval;
+    const NativeWebSocket = globalThis.WebSocket;
+    globalThis.setInterval = (...args) => {
+      const id = nativeSetInterval(...args);
+      intervals.add(id);
+      return id;
+    };
+    globalThis.clearInterval = (id) => {
+      intervals.delete(id);
+      return nativeClearInterval(id);
+    };
+    globalThis.WebSocket = class TrackedWebSocket extends NativeWebSocket {
+      constructor(...args) {
+        super(...args);
+        sockets.add(this);
+        this.addEventListener("close", () => sockets.delete(this));
       }
-      await sleep(25);
-    }
-    expect(run).toBeDefined();
-    expect(run.status).toBe("finished");
-    expect(run.workflowKey).toBe("op-console-workflow");
+    };
+    cleanupDomRuntime = () => {
+      for (const interval of intervals) {
+        nativeClearInterval(interval);
+      }
+      intervals.clear();
+      for (const socket of sockets) {
+        socket.close();
+      }
+      sockets.clear();
+      globalThis.setInterval = nativeSetInterval;
+      globalThis.clearInterval = nativeClearInterval;
+      globalThis.WebSocket = NativeWebSocket;
+    };
+    document.body.innerHTML = '<div id="root"></div>';
+    globalThis.__SMITHERS_GATEWAY_UI__ = JSON.parse(bootJson);
+    new Function(asset)();
 
-    const listRunsRes = await postRpc(port, "listRuns");
-    expect(listRunsRes.status).toBe(200);
-    const listRunsBody = await listRunsRes.json();
-    expect(listRunsBody.ok).toBe(true);
-    expect(Array.isArray(listRunsBody.payload)).toBe(true);
-    const listedRun = listRunsBody.payload.find((r) => r.runId === runId);
-    expect(listedRun).toBeDefined();
+    await waitFor(() => {
+      expect(document.querySelector(".brand")?.textContent).toBe("Smithers Console");
+      expect(document.querySelector("#workflow")?.value).toBe("op-console-workflow");
+      expect(document.body.textContent).toContain("1 workflows");
+      expect(document.body.textContent).toContain("0 approvals");
+      expect(document.body.textContent).toContain("No runs found.");
+    });
 
-    const listApprovalsRes = await postRpc(port, "listApprovals");
-    expect(listApprovalsRes.status).toBe(200);
-    const listApprovalsBody = await listApprovalsRes.json();
-    expect(listApprovalsBody.ok).toBe(true);
-    expect(Array.isArray(listApprovalsBody.payload)).toBe(true);
-  });
+    document.querySelector("#launch").dispatchEvent(new Event("submit", {
+      bubbles: true,
+      cancelable: true,
+    }));
+
+    const runId = await waitFor(async () => {
+      const listRunsResponse = await postRpc(port, "listRuns");
+      expect(listRunsResponse.status).toBe(200);
+      const listRunsBody = await listRunsResponse.json();
+      expect(listRunsBody.ok).toBe(true);
+      const run = listRunsBody.payload.find((entry) => entry.workflowKey === "op-console-workflow");
+      expect(run).not.toBeUndefined();
+      return run.runId;
+    });
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Run Chronicle");
+      expect(document.body.textContent).toContain(runId);
+      expect(document.body.textContent).toContain("op-console-workflow");
+    });
+
+    const getRunResponse = await postRpc(port, "getRun", { runId });
+    expect(getRunResponse.status).toBe(200);
+    const getRunBody = await getRunResponse.json();
+    expect(getRunBody.ok).toBe(true);
+    expect(getRunBody.payload.workflowKey).toBe("op-console-workflow");
+  }, 15000);
 
   test("allows the built-in operator console to be disabled", async () => {
     gateway = new Gateway({ operatorUi: false });

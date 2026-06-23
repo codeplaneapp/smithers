@@ -1207,6 +1207,9 @@ importers:
         specifier: ^8.20.0
         version: 8.20.0
     devDependencies:
+      '@happy-dom/global-registrator':
+        specifier: ^20.9.0
+        version: 20.9.0
       '@smithers-orchestrator/graph':
         specifier: workspace:*
         version: link:../graph
