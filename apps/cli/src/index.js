@@ -1,13 +1,12 @@
 #!/usr/bin/env bun
 import { setJsonMode } from "./util/logger.ts";
-import { extractBackendFlag, findFirstPositionalIndex, parseMcpSurfaceArgv, rewriteBareResumeFlagArgv } from "./argv-utils.js";
+import { extractBackendFlag, findFirstPositionalIndex, rewriteBareResumeFlagArgv } from "./argv-utils.js";
 import { CLI_JSON_ARGUMENT_MAX_BYTES, parseJsonArgument, parseJsonInput } from "./json-args.js";
 import { resolve, dirname, basename, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readFileSync, existsSync, mkdirSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Effect, Fiber } from "effect";
-import { Cli, Mcp as IncurMcp, z } from "incur";
+import { Cli, z } from "incur";
 import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
 import { mdxPlugin } from "./mdx-plugin.js";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
@@ -72,7 +71,7 @@ import { resolveLaunchRootDir, parsePersistedRootDir } from "./resolve-root.js";
 import { formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, } from "@smithers-orchestrator/agents/cli-capabilities";
 import { parseDurationMs, supervisorLoopEffect, } from "./supervisor.js";
 import { WATCH_MIN_INTERVAL_MS, runWatchLoop, watchIntervalSecondsToMs, } from "./watch.js";
-import { createSemanticMcpServer } from "./mcp/semantic-server.js";
+import { runMcpModeIfRequested } from "./mcp/mcp-mode.js";
 import { issueSmithersBrokerToken, parseTokenScopes, readSmithersTokenStore, resolveSmithersActionTokenFromStore, revokeSmithersToken, smithersTokenStorePath, writeSmithersTokenStore, } from "./token-store.js";
 import { resolveSmithersDocsSource } from "./docs-command.js";
 import { reportReplayResult } from "./reportReplayResult.js";
@@ -6371,30 +6370,6 @@ const WORKFLOW_UTILITY_COMMANDS = new Set([
     "doctor",
 ]);
 /**
- * @param {ReturnType<typeof createSemanticMcpServer>} server
- */
-function registerRawToolsOnMcpServer(server) {
-    const commands = Cli.toCommands?.get(cli);
-    if (!(commands instanceof Map)) {
-        throw new Error("Could not resolve Smithers CLI commands for raw MCP surface.");
-    }
-    for (const tool of IncurMcp.collectTools(commands, [])) {
-        const mergedShape = {
-            ...tool.command.args?.shape,
-            ...tool.command.options?.shape,
-        };
-        const hasInput = Object.keys(mergedShape).length > 0;
-        server.registerTool(tool.name, {
-            ...(tool.description ? { description: tool.description } : undefined),
-            ...(hasInput ? { inputSchema: mergedShape } : undefined),
-        }, async (...callArgs) => {
-            const params = hasInput ? callArgs[0] : {};
-            const extra = hasInput ? callArgs[1] : callArgs[0];
-            return IncurMcp.callTool(tool, params, extra);
-        });
-    }
-}
-/**
  * @param {string[]} argv
  */
 function hasHelpFlag(argv, startIndex = 0) {
@@ -6842,31 +6817,7 @@ async function main() {
         }
     }
     argv = rewriteBareResumeFlagArgv(argv);
-    // --mcp mode: the MCP server needs to stay alive listening on stdin.
-    if (argv.includes("--mcp")) {
-        try {
-            const mcpArgs = parseMcpSurfaceArgv(argv);
-            if (mcpArgs.surface === "raw") {
-                await cli.serve(mcpArgs.argv);
-            }
-            else {
-                const server = createSemanticMcpServer({
-                    name: "smithers",
-                    version: readPackageVersion(),
-                    allowedTools: mcpArgs.allowedTools,
-                    readOnly: mcpArgs.readOnly,
-                });
-                if (mcpArgs.surface === "both") {
-                    registerRawToolsOnMcpServer(server);
-                }
-                const transport = new StdioServerTransport(process.stdin, process.stdout);
-                await server.connect(transport);
-            }
-        }
-        catch (err) {
-            console.error(err?.message ?? String(err));
-            process.exit(1);
-        }
+    if (await runMcpModeIfRequested(argv, { cli, version: readPackageVersion() })) {
         return;
     }
     let exitCodeFromServe;
