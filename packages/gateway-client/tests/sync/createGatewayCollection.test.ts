@@ -257,6 +257,95 @@ describe("createGatewayCollection", () => {
     ]);
   });
 
+  test("routes non-auth stream errors to onError and does not call onAuthError", async () => {
+    const errors: Error[] = [];
+    const stream = controllableStreamTransport(() => Promise.resolve([]));
+    const collection = createCollection<RunRow, string>(
+      createGatewayCollection({
+        key: gatewayKeys.runs({}),
+        client: stream.transport,
+        method: "listRuns",
+        params: {},
+        getKey: (row) => row.runId,
+        stream: {
+          scope: "streamRunEvents",
+          params: {},
+          reconnectOnGracefulEnd: false,
+        },
+        onError(error) {
+          errors.push(error);
+        },
+        onAuthError() {
+          throw new Error("onAuthError must not be called for non-auth errors");
+        },
+      }),
+    );
+
+    await collection.preload();
+    await waitFor(() => stream.opens.length === 1);
+
+    stream.fail(new Error("network timeout"));
+
+    await waitFor(() => errors.length > 0);
+    expect(errors[0]?.message).toMatch(/network timeout/);
+  });
+
+  test("reconnects after a stream error and resumes receiving frames", async () => {
+    let connectCount = 0;
+    const frames: SyncStreamFrame[][] = [
+      // first attempt: fail immediately
+      [],
+      // second attempt (after reconnect): deliver a frame
+      [{ key: gatewayKeys.runEvents("run-1"), seq: 1, event: "run.event", payload: { status: "running" } }],
+    ];
+    const failures = [new Error("transient error")];
+
+    const transport: SyncTransport = {
+      rpc: () => Promise.resolve([{ runId: "run-1", status: "queued" }]),
+      stream() {
+        const attempt = connectCount++;
+        return {
+          async *[Symbol.asyncIterator]() {
+            if (failures[attempt]) {
+              throw failures[attempt];
+            }
+            for (const frame of (frames[attempt] ?? [])) {
+              yield frame;
+            }
+          },
+        };
+      },
+    };
+
+    const collection = createCollection<RunRow, string>(
+      createGatewayCollection({
+        key: gatewayKeys.runs({}),
+        client: transport,
+        method: "listRuns",
+        params: {},
+        getKey: (row) => row.runId,
+        stream: {
+          scope: "streamRunEvents",
+          params: {},
+          reconnectOnGracefulEnd: false,
+          frameToRows: (frame) => [{ runId: "run-1", status: String((frame.payload as { status: string }).status) }],
+          backoff: { baseMs: 0, maxMs: 0 },
+        },
+      }),
+    );
+
+    await collection.preload();
+
+    // wait for the reconnect to happen and the second stream to deliver the frame
+    // uses real setTimeout ticks since sleep(0) schedules via setTimeout
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      if (connectCount >= 2 && collection.get("run-1")?.status === "running") break;
+      await new Promise<void>((r) => setTimeout(r, 10));
+    }
+    expect(collection.get("run-1")?.status).toBe("running");
+  });
+
   test("sheds the oldest buffered frames past maxBufferedFrames under backpressure", async () => {
     let releaseStream: () => void = () => {};
     const streamGate = new Promise<void>((resolve) => {
