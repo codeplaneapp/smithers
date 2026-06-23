@@ -7,6 +7,7 @@
  *   suite explicitly configures token mode.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { WebSocket } from "ws";
 import { connect } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -416,5 +417,32 @@ describe("auth header edge cases (gateway HTTP)", () => {
                 body: "{}",
             });
         }).toThrow(/invalid value|invalid header/i);
+    });
+});
+
+describe("connection-limit WS upgrade rejection (503 path)", () => {
+    test("WS upgrade is rejected when maxConnections is 0 — connection never opens", async () => {
+        // maxConnections: 0 means the connections.size >= maxConnections guard
+        // fires immediately for any upgrade attempt (gateway.js:2441-2460).
+        const g = new Gateway({ heartbeatMs: 100, maxConnections: 0 });
+        const srv = await g.listen({ port: 0, host: "127.0.0.1" });
+        const p = getPort(srv);
+        try {
+            const opened = await new Promise((resolve) => {
+                const ws = new WebSocket(`ws://127.0.0.1:${p}`);
+                // Persistent handler prevents unhandled-error crash from any
+                // late error after the promise resolves.
+                ws.on("error", () => {});
+                ws.once("open", () => {
+                    ws.close();
+                    resolve(true);
+                });
+                ws.once("error", () => resolve(false));
+                ws.once("close", () => resolve(false));
+            });
+            expect(opened).toBe(false);
+        } finally {
+            await g.close();
+        }
     });
 });
