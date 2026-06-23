@@ -68,6 +68,9 @@ deno.lock
 # Smithers runtime artifacts
 **/.smithers/sandboxes/
 **/.smithers/executions/
+# PGlite/Postgres durable store (default backend's data dir) + migration marker
+**/.smithers/pg/
+**/.smithers/migrated.json
 .tui-test/
 .worktrees/
 worktrees/

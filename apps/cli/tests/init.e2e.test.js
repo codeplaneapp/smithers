@@ -162,6 +162,10 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
     });
     expect(result.exitCode).toBe(0);
     expect(repo.exists(".smithers/.gitignore")).toBe(true);
+    // The default backend (pglite) writes its durable store to .smithers/pg and a
+    // migrated.json marker — both are local runtime state and must never be committed.
+    expect(repo.read(".smithers/.gitignore")).toContain("pg/");
+    expect(repo.read(".smithers/.gitignore")).toContain("migrated.json");
     expect(repo.exists(".smithers/workflows/.gitignore")).toBe(true);
     expect(repo.exists(".smithers/package.json")).toBe(true);
     expect(repo.exists(".smithers/tsconfig.json")).toBe(true);

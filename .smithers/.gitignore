@@ -7,5 +7,7 @@ state/
 tmp/
 *.db
 *.sqlite
+pg/
+migrated.json
 dist/
 .DS_Store
