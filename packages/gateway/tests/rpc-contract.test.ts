@@ -11,6 +11,41 @@ import {
   isGatewayRpcMethod,
   listGatewayRpcMethods,
   type JsonSchema,
+  type LaunchRunRequest,
+  type LaunchRunResponse,
+  type ResumeRunRequest,
+  type ResumeRunResponse,
+  type CancelRunRequest,
+  type CancelRunResponse,
+  type HijackRunRequest,
+  type HijackRunResponse,
+  type RewindRunRequest,
+  type SubmitApprovalRequest,
+  type SubmitApprovalResponse,
+  type SubmitSignalRequest,
+  type GetRunRequest,
+  type ListRunsRequest,
+  type GetSchemaSignatureRequest,
+  type GetSchemaSignatureResponse,
+  type ListWorkflowsRequest,
+  type ListApprovalsRequest,
+  type ListDocsRequest,
+  type StreamRunEventsRequest,
+  type StreamRunEventsResponse,
+  type StreamDevToolsRequest,
+  type NodeRequest,
+  type CronListRequest,
+  type CronCreateRequest,
+  type CronDeleteRequest,
+  type CronRunRequest,
+  type ListAccountsRequest,
+  type ListMemoryFactsRequest,
+  type ListPromptsRequest,
+  type ListScoresRequest,
+  type ListTicketsRequest,
+  type CreateTicketRequest,
+  type UpdateTicketRequest,
+  type DeleteTicketRequest,
 } from "../src/rpc/index.ts";
 import { GATEWAY_SCOPE_VALUES, hasGatewayScope, type GatewayScope } from "../src/auth/scopes.ts";
 
@@ -398,5 +433,183 @@ describe("Gateway RPC contract", () => {
     // The coarse legacy "admin" grant, by contrast, implies everything for back-compat.
     expect(hasGatewayScope(["admin"], "observability:read", "streamDevTools")).toBe(true);
     expect(hasGatewayScope(["admin"], "approval:submit", "submitApproval")).toBe(true);
+  });
+
+  test("TS *Request/*Response types agree with JsonSchema definitions", () => {
+    // Each typed object uses `satisfies` so tsc catches type/schema drift at compile
+    // time. The runtime half validates the same objects against the JsonSchema — if the
+    // TS type is narrower than the schema (a required TS field missing from schema
+    // required[], wrong type, etc.) the schema validation will fail.
+
+    type TypedCase = { method: string; request: unknown; response?: unknown };
+
+    const cases: TypedCase[] = [
+      {
+        method: "launchRun",
+        request: { workflow: "deploy", input: { sha: "abc" }, options: { runId: "r1", idempotencyKey: "k1" } } satisfies LaunchRunRequest,
+        response: { runId: "r1", workflow: "deploy" } satisfies LaunchRunResponse,
+      },
+      {
+        method: "resumeRun",
+        request: { runId: "r1", options: { force: false } } satisfies ResumeRunRequest,
+        response: { runId: "r1", status: "resume_requested" } satisfies ResumeRunResponse,
+      },
+      {
+        method: "cancelRun",
+        request: { runId: "r1" } satisfies CancelRunRequest,
+        response: { runId: "r1", status: "cancelling" } satisfies CancelRunResponse,
+      },
+      {
+        method: "hijackRun",
+        request: { runId: "r1", options: { reason: "test" } } satisfies HijackRunRequest,
+        response: { runId: "r1", status: "hijack-ready", sessionId: "s1" } satisfies HijackRunResponse,
+      },
+      {
+        method: "rewindRun",
+        request: { runId: "r1", frameNo: 2, confirm: true } satisfies RewindRunRequest,
+        response: { ok: true },
+      },
+      {
+        method: "submitApproval",
+        request: { runId: "r1", nodeId: "n1", decision: { approved: true, note: "ok" } } satisfies SubmitApprovalRequest,
+        response: { runId: "r1", nodeId: "n1", iteration: 0, approved: true } satisfies SubmitApprovalResponse,
+      },
+      {
+        method: "submitSignal",
+        request: { runId: "r1", correlationKey: "ck", signalName: "sig", payload: null } satisfies SubmitSignalRequest,
+        response: { runId: "r1", seq: 1 },
+      },
+      {
+        method: "getRun",
+        request: { runId: "r1" } satisfies GetRunRequest,
+        response: { runId: "r1" },
+      },
+      {
+        method: "listRuns",
+        request: { filter: { status: "finished", limit: 10 } } satisfies ListRunsRequest,
+        response: [],
+      },
+      {
+        method: "getSchemaSignature",
+        request: {} satisfies GetSchemaSignatureRequest,
+        response: { schemaVersion: "0016", signature: "sha256" } satisfies GetSchemaSignatureResponse,
+      },
+      {
+        method: "listWorkflows",
+        request: { filter: { hasUi: true } } satisfies ListWorkflowsRequest,
+        response: [],
+      },
+      {
+        method: "listApprovals",
+        request: { filter: { runId: "r1", limit: 5 } } satisfies ListApprovalsRequest,
+        response: [],
+      },
+      {
+        method: "listDocs",
+        request: { filter: { kind: "ticket", limit: 20 } } satisfies ListDocsRequest,
+        response: [],
+      },
+      {
+        method: "streamRunEvents",
+        request: { runId: "r1", afterSeq: 0 } satisfies StreamRunEventsRequest,
+        response: { streamId: "s1", runId: "r1", afterSeq: null, currentSeq: 0 } satisfies StreamRunEventsResponse,
+      },
+      {
+        method: "streamDevTools",
+        request: { runId: "r1", afterSeq: 0 } satisfies StreamDevToolsRequest,
+        response: { streamId: "s1", runId: "r1", fromSeq: null, afterSeq: null },
+      },
+      {
+        method: "getNodeOutput",
+        request: { runId: "r1", nodeId: "n1", iteration: 0 } satisfies NodeRequest,
+        response: { runId: "r1", nodeId: "n1", iteration: 0 },
+      },
+      {
+        method: "getNodeDiff",
+        request: { runId: "r1", nodeId: "n1", iteration: 0 } satisfies NodeRequest,
+        response: { runId: "r1", nodeId: "n1", iteration: 0 },
+      },
+      {
+        method: "cronList",
+        request: { filter: { workflow: "deploy" } } satisfies CronListRequest,
+        response: [],
+      },
+      {
+        method: "cronCreate",
+        request: { workflow: "deploy", pattern: "0 * * * *", cronId: "c1", enabled: true } satisfies CronCreateRequest,
+        response: { cronId: "c1" },
+      },
+      {
+        method: "cronDelete",
+        request: { cronId: "c1" } satisfies CronDeleteRequest,
+        response: { cronId: "c1", removed: true },
+      },
+      {
+        method: "cronRun",
+        request: { cronId: "c1", workflow: "deploy", input: {} } satisfies CronRunRequest,
+        response: { runId: "r1", workflow: "deploy" },
+      },
+      {
+        method: "listAccounts",
+        request: {} satisfies ListAccountsRequest,
+        response: [],
+      },
+      {
+        method: "listMemoryFacts",
+        request: { namespace: "ns1" } satisfies ListMemoryFactsRequest,
+        response: [],
+      },
+      {
+        method: "listPrompts",
+        request: {} satisfies ListPromptsRequest,
+        response: [],
+      },
+      {
+        method: "listScores",
+        request: { runId: "r1", nodeId: "n1" } satisfies ListScoresRequest,
+        response: [],
+      },
+      {
+        method: "listTickets",
+        request: { kind: "ticket" } satisfies ListTicketsRequest,
+        response: [],
+      },
+      {
+        method: "createTicket",
+        request: { path: "feat-1", content: "# title", kind: "ticket", status: "open" } satisfies CreateTicketRequest,
+        response: { path: "feat-1", kind: "ticket", content: "# title", contentHash: "abc123", status: "open", updatedAtMs: 1710000000000 },
+      },
+      {
+        method: "updateTicket",
+        request: { path: "feat-1", content: "# updated", status: "done" } satisfies UpdateTicketRequest,
+        response: { path: "feat-1", kind: "ticket", content: "# updated", contentHash: "abc123", status: "done", updatedAtMs: 1710000000000 },
+      },
+      {
+        method: "deleteTicket",
+        request: { path: "feat-1" } satisfies DeleteTicketRequest,
+        response: { path: "feat-1", deleted: true },
+      },
+    ];
+
+    // Every method in GATEWAY_RPC_DEFINITIONS must be covered.
+    const coveredMethods = new Set(cases.map((c) => c.method));
+    for (const def of GATEWAY_RPC_DEFINITIONS) {
+      expect(coveredMethods.has(def.method), `${def.method} is missing a TS-typed test case`).toBe(true);
+    }
+
+    // Each typed request object validates against the method's requestSchema.
+    for (const { method, request, response } of cases) {
+      const def = getGatewayRpcDefinition(method);
+      expect(def, `no definition found for ${method}`).toBeDefined();
+      if (!def) continue;
+
+      const reqErrors = validateAgainstSchema(request, def.requestSchema);
+      expect(reqErrors, `${method} TS-typed request failed schema validation: ${reqErrors.join("; ")}`).toEqual([]);
+
+      if (response !== undefined) {
+        const resErrors = validateAgainstSchema(response, def.responseSchema);
+        expect(resErrors, `${method} TS-typed response failed schema validation: ${resErrors.join("; ")}`).toEqual([]);
+      }
+    }
   });
 });
