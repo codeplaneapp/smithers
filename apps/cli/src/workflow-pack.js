@@ -1676,6 +1676,20 @@ const UI_WORKFLOWS = [
     { key: "mission", title: "Mission" },
     { key: "workflow-skill", title: "Workflow Skill" },
     { key: "vcs", title: "VCS" },
+    { key: "monitor", title: "Monitor" },
+    { key: "hello", title: "Hello" },
+    { key: "create-workflow", title: "Create Workflow" },
+    { key: "context-engineer", title: "Context Engineer" },
+    { key: "route-task", title: "Route Task" },
+    { key: "create-skill", title: "Create Skill" },
+    { key: "extract-skill", title: "Extract Skill" },
+    { key: "monitor-smithers", title: "Monitor Smithers" },
+    { key: "triage-run", title: "Triage Run" },
+    { key: "context-doctor", title: "Context Doctor" },
+    { key: "backpressure-plan", title: "Backpressure Plan" },
+    { key: "eval-author", title: "Eval Author" },
+    { key: "report-slideshow", title: "Report Slideshow" },
+    { key: "smithering", title: "Smithering" },
 ];
 
 /**
