@@ -1,6 +1,3 @@
-import { extractTextFromJsonValue } from "@smithers-orchestrator/agents/BaseCliAgent";
-import { normalizeTokenUsage } from "@smithers-orchestrator/agents/BaseCliAgent";
-
 /**
  * @typedef {import('./agentTrace.ts').AgentFamily} AgentFamily
  * @typedef {import('./agentTrace.ts').CanonicalAgentTraceEventKind} CanonicalAgentTraceEventKind
@@ -26,6 +23,77 @@ import { normalizeTokenUsage } from "@smithers-orchestrator/agents/BaseCliAgent"
  *   expectedKinds?: CanonicalAgentTraceEventKind[];
  * }} NormalizedTraceBatch
  */
+
+/**
+ * @param {unknown} value
+ * @returns {string | undefined}
+ */
+function extractTextFromJsonValue(value) {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+        const text = value.map((item) => extractTextFromJsonValue(item) ?? "").join("");
+        return text || undefined;
+    }
+    if (!value || typeof value !== "object") return undefined;
+    const record = /** @type {Record<string, unknown>} */ (value);
+    if (typeof record.text === "string") return record.text;
+    if (typeof record.content === "string") return record.content;
+    if (typeof record.output_text === "string") return record.output_text;
+    if (Array.isArray(record.content)) {
+        const text = record.content.map((part) => extractTextFromJsonValue(part) ?? "").join("");
+        if (text) return text;
+    }
+    if (record.type === "text" && record.part) return extractTextFromJsonValue(record.part);
+    for (const field of ["response", "message", "result", "output", "data", "item"]) {
+        const text = extractTextFromJsonValue(record[field]);
+        if (text) return text;
+    }
+    return undefined;
+}
+
+/** @type {Record<string, ReadonlyArray<ReadonlyArray<string>>>} */
+const _usageFieldAliases = {
+    inputTokens: [["inputTokens"], ["promptTokens"], ["prompt_tokens"], ["input_tokens"], ["input"], ["models", "gemini", "tokens", "input"]],
+    outputTokens: [["outputTokens"], ["completionTokens"], ["completion_tokens"], ["output_tokens"], ["output"], ["models", "gemini", "tokens", "output"]],
+    cacheReadTokens: [["cacheReadTokens"], ["cache_read_input_tokens"], ["cached_input_tokens"], ["cache_read_tokens"], ["inputTokenDetails", "cacheReadTokens"]],
+    cacheWriteTokens: [["cacheWriteTokens"], ["cache_write_input_tokens"], ["cache_creation_input_tokens"], ["cache_write_tokens"], ["inputTokenDetails", "cacheWriteTokens"]],
+    reasoningTokens: [["reasoningTokens"], ["reasoning_tokens"], ["outputTokenDetails", "reasoningTokens"]],
+    totalTokens: [["totalTokens"], ["total_tokens"]],
+};
+
+/**
+ * @param {unknown} value
+ * @param {ReadonlyArray<string>} path
+ * @returns {unknown}
+ */
+function _readUsagePath(value, path) {
+    let current = value;
+    for (const segment of path) {
+        if (!current || typeof current !== "object") return undefined;
+        current = /** @type {Record<string, unknown>} */ (current)[segment];
+    }
+    return current;
+}
+
+/**
+ * @param {unknown} usage
+ * @returns {Record<string, number> | null}
+ */
+function normalizeTokenUsage(usage) {
+    if (!usage || typeof usage !== "object") return null;
+    /** @type {Record<string, number>} */
+    const normalized = {};
+    for (const [field, aliases] of Object.entries(_usageFieldAliases)) {
+        for (const path of aliases) {
+            const value = _readUsagePath(usage, path);
+            if (typeof value === "number") {
+                normalized[field] = value;
+                break;
+            }
+        }
+    }
+    return Object.values(normalized).some((v) => Number.isFinite(v) && v > 0) ? normalized : null;
+}
 
 /** @type {Record<string, MappedStructuredEvent>} */
 const piSimpleEventMap = {
