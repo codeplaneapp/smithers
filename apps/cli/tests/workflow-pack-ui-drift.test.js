@@ -10,25 +10,22 @@ import { expect, onTestFinished, test } from "bun:test";
 import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { initWorkflowPack } from "../src/workflow-pack.js";
 
-const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
-
 /**
- * Parse `await mountWorkflow("key", ...)` calls from the generated gateway.ts
- * and return the ordered list of keys.
+ * Parse `await mountWorkflow("key", "Title")` calls from the generated
+ * gateway.ts and return the mounted workflow descriptors.
  * @param {string} gatewaySource
- * @returns {string[]}
+ * @returns {Array<{ key: string; title: string }>}
  */
-function parseMountedKeys(gatewaySource) {
-    const re = /await mountWorkflow\("([^"]+)"/g;
-    const keys = [];
+function parseMountedWorkflows(gatewaySource) {
+    const re = /await mountWorkflow\("([^"]+)", "([^"]+)"\);/g;
+    const workflows = [];
     let m;
     while ((m = re.exec(gatewaySource)) !== null) {
-        keys.push(m[1]);
+        workflows.push({ key: m[1], title: m[2] });
     }
-    return keys;
+    return workflows;
 }
 
 test("UI_WORKFLOWS gateway-mounts / ui-files / e2e-descriptors are in sync", () => {
@@ -37,14 +34,15 @@ test("UI_WORKFLOWS gateway-mounts / ui-files / e2e-descriptors are in sync", () 
 
     // Run a real init so we get the actual generated artefacts.
     // rootDir is the project root; initWorkflowPack appends ".smithers" to it.
-    const result = initWorkflowPack({ rootDir: tmpDir, installSkill: false });
+    const result = initWorkflowPack({ rootDir: tmpDir, installSkill: false, skipInstall: true });
     expect(result.writtenFiles.length).toBeGreaterThan(0);
 
     const smithersDir = join(tmpDir, ".smithers");
 
     // 1. Keys mounted in the generated gateway.ts
     const gatewaySource = readFileSync(join(smithersDir, "gateway.ts"), "utf8");
-    const gatewayKeys = new Set(parseMountedKeys(gatewaySource));
+    const gatewayWorkflows = parseMountedWorkflows(gatewaySource);
+    const gatewayKeys = new Set(gatewayWorkflows.map((w) => w.key));
     expect(gatewayKeys.size).toBeGreaterThan(0);
 
     // 2. Keys with a corresponding .smithers/ui/<key>.tsx file
@@ -57,7 +55,10 @@ test("UI_WORKFLOWS gateway-mounts / ui-files / e2e-descriptors are in sync", () 
     const descriptors = JSON.parse(
         readFileSync(resolve(import.meta.dir, "workflow-ui-descriptors.json"), "utf8"),
     );
-    const descriptorKeys = new Set(descriptors.map((/** @type {{key:string}} */ d) => d.key));
+    const descriptorByKey = new Map(
+        descriptors.map((/** @type {{key:string; title:string}} */ d) => [d.key, d]),
+    );
+    const descriptorKeys = new Set(descriptorByKey.keys());
 
     // Every gateway mount must have a ui file and vice versa.
     for (const key of gatewayKeys) {
@@ -80,6 +81,13 @@ test("UI_WORKFLOWS gateway-mounts / ui-files / e2e-descriptors are in sync", () 
             descriptorKeys.has(key),
             `"${key}" is mounted in gateway.ts but missing from workflow-ui-descriptors.json`,
         ).toBe(true);
+    }
+    for (const workflow of gatewayWorkflows) {
+        if (workflow.key === "kanban") continue;
+        expect(
+            descriptorByKey.get(workflow.key)?.title,
+            `"${workflow.key}" title drifted between gateway mount and workflow-ui-descriptors.json`,
+        ).toBe(workflow.title);
     }
 
     // Every e2e descriptor must correspond to a gateway mount.

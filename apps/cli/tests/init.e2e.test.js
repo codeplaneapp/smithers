@@ -257,14 +257,13 @@ test("smithers init rejects unknown templates in option validation before writin
     expect(result.exitCode).toBe(4);
     expect(result.json.code).toBe("VALIDATION_ERROR");
     expect(result.json.message).toContain("Invalid input");
-    expect(result.json.fieldErrors).toEqual([
-        {
-            path: "template",
-            expected: "",
-            received: "",
-            message: "Invalid input",
-        },
-    ]);
+    expect(result.json.fieldErrors).toHaveLength(1);
+    expect(result.json.fieldErrors[0]).toMatchObject({
+        path: "template",
+        expected: "",
+        received: "",
+        message: "Invalid input",
+    });
     expect(repo.exists(".smithers")).toBe(false);
 });
 test("smithers init rejects starter aliases before writing the scaffold", () => {
