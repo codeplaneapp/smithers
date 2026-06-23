@@ -248,6 +248,23 @@ describe("Gateway RPC contract", () => {
     }
   });
 
+  test("exampleRequest/exampleResponse survive a JSON serialize→deserialize round-trip without data loss", () => {
+    // Guards against examples with non-JSON-serializable values (undefined fields,
+    // class instances, Date objects, etc.) that appear to validate but would be
+    // silently dropped or mutated when sent over the wire.
+    for (const definition of GATEWAY_RPC_DEFINITIONS) {
+      const reqRoundTripped = JSON.parse(JSON.stringify(definition.exampleRequest));
+      expect(reqRoundTripped, `${definition.method} exampleRequest round-trip`).toEqual(definition.exampleRequest);
+      const reqRTErrors = validateAgainstSchema(reqRoundTripped, definition.requestSchema);
+      expect(reqRTErrors, `${definition.method} exampleRequest round-trip schema: ${reqRTErrors.join("; ")}`).toEqual([]);
+
+      const resRoundTripped = JSON.parse(JSON.stringify(definition.exampleResponse));
+      expect(resRoundTripped, `${definition.method} exampleResponse round-trip`).toEqual(definition.exampleResponse);
+      const resRTErrors = validateAgainstSchema(resRoundTripped, definition.responseSchema);
+      expect(resRTErrors, `${definition.method} exampleResponse round-trip schema: ${resRTErrors.join("; ")}`).toEqual([]);
+    }
+  });
+
   test("the schema validator actually rejects additionalProperties violations", () => {
     // Guards the guard: a closed-object schema (additionalProperties:false) must
     // flag an example carrying an unexpected/misnamed field, otherwise the test
