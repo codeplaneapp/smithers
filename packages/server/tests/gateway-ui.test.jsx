@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { createSmithers } from "smithers-orchestrator";
 import { Gateway } from "../src/gateway.js";
+import { sleep } from "../../smithers/tests/helpers.js";
 
 function getPort(server) {
   const addr = server.address();
@@ -177,6 +178,73 @@ describe("Gateway UI", () => {
     });
     expect(asset.status).toBe(200);
     expect(await asset.text()).toContain("Smithers Console");
+  });
+
+  test("operator console RPC endpoints return real data (behavioral)", async () => {
+    tempDir = mkdtempSync(join(process.cwd(), ".smithers-op-console-behavioral-"));
+    const dbPath = join(tempDir, "op.db");
+    const { smithers, Workflow, Task, outputs } = createSmithers(
+      { result: z.object({ ok: z.boolean() }) },
+      { dbPath },
+    );
+    const workflow = smithers(() => (
+      <Workflow name="op-console-workflow">
+        <Task id="step1" output={outputs.result}>{{ ok: true }}</Task>
+      </Workflow>
+    ));
+
+    gateway = new Gateway();
+    gateway.register("op-console-workflow", workflow);
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+
+    const listWorkflowsRes = await postRpc(port, "listWorkflows");
+    expect(listWorkflowsRes.status).toBe(200);
+    const listWorkflowsBody = await listWorkflowsRes.json();
+    expect(listWorkflowsBody.ok).toBe(true);
+    const workflows = listWorkflowsBody.payload;
+    expect(Array.isArray(workflows)).toBe(true);
+    const wf = workflows.find((w) => w.key === "op-console-workflow");
+    expect(wf).toBeDefined();
+    expect(wf.key).toBe("op-console-workflow");
+
+    const launchRes = await postRpc(port, "launchRun", {
+      workflow: "op-console-workflow",
+      input: {},
+    });
+    expect(launchRes.status).toBe(200);
+    const launchBody = await launchRes.json();
+    expect(launchBody.ok).toBe(true);
+    const { runId } = launchBody.payload;
+    expect(typeof runId).toBe("string");
+
+    let run;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const res = await postRpc(port, "getRun", { runId });
+      const body = await res.json();
+      if (body.ok && (body.payload.status === "finished" || body.payload.status === "failed")) {
+        run = body.payload;
+        break;
+      }
+      await sleep(25);
+    }
+    expect(run).toBeDefined();
+    expect(run.status).toBe("finished");
+    expect(run.workflowKey).toBe("op-console-workflow");
+
+    const listRunsRes = await postRpc(port, "listRuns");
+    expect(listRunsRes.status).toBe(200);
+    const listRunsBody = await listRunsRes.json();
+    expect(listRunsBody.ok).toBe(true);
+    expect(Array.isArray(listRunsBody.payload)).toBe(true);
+    const listedRun = listRunsBody.payload.find((r) => r.runId === runId);
+    expect(listedRun).toBeDefined();
+
+    const listApprovalsRes = await postRpc(port, "listApprovals");
+    expect(listApprovalsRes.status).toBe(200);
+    const listApprovalsBody = await listApprovalsRes.json();
+    expect(listApprovalsBody.ok).toBe(true);
+    expect(Array.isArray(listApprovalsBody.payload)).toBe(true);
   });
 
   test("allows the built-in operator console to be disabled", async () => {
