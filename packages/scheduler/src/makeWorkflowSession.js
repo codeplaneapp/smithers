@@ -353,14 +353,37 @@ export function makeWorkflowSession(options = {}) {
    * @returns {EngineDecision}
    */
     function finishedResult(status = "finished") {
-        return {
-            _tag: "Finished",
-            result: {
-                runId: state.runId,
-                status,
-                output: [...state.outputs.values()].at(-1)?.output,
-            },
+        /** @type {RunResult} */
+        const result = {
+            runId: state.runId,
+            status,
+            output: [...state.outputs.values()].at(-1)?.output,
         };
+        if (status === "finished") {
+            // At a `finished` terminal, any task still in `failed` state is a
+            // *tolerated* failure — an unhandled one would have produced a `Failed`
+            // decision via unhandledFailureDecision() and never reached here. Those
+            // are exactly the masked children (continueOnFail tasks, transient agent
+            // failures) the binary run status cannot express. Surface them so callers
+            // can detect a run that "succeeded" while children failed. See issue #295
+            // and docs/runtime/run-state.mdx.
+            //
+            // Keys are the canonical task state keys (`nodeId::iteration`), not bare
+            // node ids: a looped/Ralph workflow can fail the same nodeId across
+            // iterations, and the iteration is what disambiguates which child to
+            // inspect.
+            const failedChildKeys = [];
+            for (const [key, taskState] of state.states) {
+                if (taskState === "failed") {
+                    failedChildKeys.push(key);
+                }
+            }
+            if (failedChildKeys.length > 0) {
+                result.failedChildren = failedChildKeys.length;
+                result.failedChildKeys = failedChildKeys;
+            }
+        }
+        return { _tag: "Finished", result };
     }
     /**
    * @returns {ScheduleResult}

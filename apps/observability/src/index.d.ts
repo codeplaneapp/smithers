@@ -213,6 +213,14 @@ type SmithersEvent$2 = {
     type: "RunFinished";
     runId: string;
     timestampMs: number;
+    /**
+     * Tasks that ended `failed` but were tolerated (continueOnFail / transient
+     * agent failures) so the run still finished. Present only when `> 0` — the
+     * run "succeeded" while these children failed. See `docs/runtime/run-state.mdx`.
+     */
+    failedChildren?: number;
+    /** Task state keys (`nodeId::iteration`) counted by `failedChildren`. */
+    failedChildKeys?: readonly string[];
 } | {
     type: "RunFailed";
     runId: string;

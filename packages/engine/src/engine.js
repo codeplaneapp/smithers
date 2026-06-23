@@ -5475,22 +5475,35 @@ async function runWorkflowBodyDriver(workflow, opts) {
             hijackRequestedAtMs: null,
             hijackTarget: null,
         }));
+        // A `finished` run can still have tolerated child failures (continueOnFail
+        // tasks, transient agent failures) that the binary status cannot express.
+        // Carry the count onto the result and the RunFinished event row so callers
+        // and surfaces can flag the degraded outcome without re-deriving it. (#295)
+        const failedChildren = typeof result.failedChildren === "number" ? result.failedChildren : 0;
+        const failedChildKeys = Array.isArray(result.failedChildKeys) ? result.failedChildKeys : [];
         await Effect.runPromise(eventBus.emitEventWithPersist({
             type: "RunFinished",
             runId,
             timestampMs: nowMs(),
+            ...(failedChildren > 0 ? { failedChildren, failedChildKeys } : {}),
         }));
         void Effect.runPromise(Metric.update(runDuration, performance.now() - runStartPerformanceMs));
         logInfo("workflow run finished", {
             runId,
+            ...(failedChildren > 0 ? { failedChildren } : {}),
         }, "engine:run");
-        await annotateRunSpan({ status: "finished" });
+        await annotateRunSpan({ status: "finished", ...(failedChildren > 0 ? { failedChildren } : {}) });
         const outputTable = schema.output;
         let output = undefined;
         if (outputTable) {
             output = await Effect.runPromise(loadRunOutputRowsEffect(db, outputTable, runId));
         }
-        return { runId, status: "finished", output };
+        return {
+            runId,
+            status: "finished",
+            output,
+            ...(failedChildren > 0 ? { failedChildren, failedChildKeys } : {}),
+        };
     };
     try {
         const existingRun = await Effect.runPromise(adapter.getRun(runId));

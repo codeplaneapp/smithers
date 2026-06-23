@@ -176,7 +176,9 @@ export function formatEventLine(event, baseMs, options) {
         case "RunStatusChanged":
             return `${prefix}↺ Run status: ${payload?.status ?? "unknown"}`;
         case "RunFinished":
-            return `${prefix}✓ Run finished`;
+            return payload?.failedChildren > 0
+                ? `${prefix}✓ Run finished (${payload.failedChildren} failed ${payload.failedChildren === 1 ? "child" : "children"})`
+                : `${prefix}✓ Run finished`;
         case "RunFailed":
             return `${prefix}✗ Run failed: ${truncateText(formatErrorPayload(payload?.error ?? "unknown"), truncatePayloadAt)}`;
         case "RunCancelled":

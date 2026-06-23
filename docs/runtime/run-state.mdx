@@ -78,6 +78,24 @@ bunx smithers-orchestrator events --run RUN_ID  # the full event history, includ
 bunx smithers-orchestrator scores RUN_ID     # scorer results when you gate on judged output
 ```
 
+You don't have to re-derive the count by eye. When a `finished` run tolerated at
+least one failed child, the masking is surfaced as a first-class **`failedChildren`**
+signal in three places:
+
+- **`inspect`** adds `failedChildren` (a count) and `failedChildKeys` (the failed
+  task state keys, `nodeId::iteration`) to its JSON next to `runState`, plus a
+  `node …` call-to-action. They are absent when nothing failed, so
+  `failedChildren > 0` is the degraded-run gate.
+- The **`RunResult`** returned by a programmatic run carries the same
+  `failedChildren` / `failedChildKeys` fields (omitted when zero).
+- The **`RunFinished`** event row records `failedChildren` / `failedChildKeys`, so the
+  CLI, Gateway, and DevTools can flag the degraded outcome from the event stream
+  without re-reading every node row.
+
+The run-row `status` stays `finished` (and `RunState` stays `succeeded`) so existing
+`finished === success` callers and `continueOnFail` semantics are unchanged. The
+count is the signal, not a new terminal status.
+
 To avoid the rate-limit failures in the first place, bound fan-out concurrency with [`<Parallel maxConcurrency={N}>`](/components/parallel) so you don't burst past the provider's limit.
 </Warning>
 

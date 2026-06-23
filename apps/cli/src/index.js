@@ -16,6 +16,8 @@ import { loadInput, loadOutputs } from "@smithers-orchestrator/db/snapshot";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
+import { buildStateKey } from "@smithers-orchestrator/scheduler/buildStateKey";
+import { parseStateKey } from "@smithers-orchestrator/scheduler/parseStateKey";
 import { SmithersCtx } from "@smithers-orchestrator/driver";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { runFork, runPromise } from "./smithersRuntime.js";
@@ -1206,6 +1208,17 @@ async function buildInspectSnapshot(adapter, runId) {
         attempt: n.lastAttempt ?? 0,
         label: n.label ?? n.nodeId,
     }));
+    // On a finished/continued (succeeded) run, any task still in `failed` state is
+    // a "masked" child — a continueOnFail task or transient agent failure that was
+    // tolerated, so the binary run status reads as a clean success. Surface the
+    // count so callers don't have to eyeball every node row. A genuinely `failed`
+    // run already reports its error, so don't double-count there. Keys are the
+    // canonical state keys (`nodeId::iteration`) so a node failing across loop
+    // iterations stays distinct. (#295)
+    const isSuccessTerminal = r.status === "finished" || r.status === "continued";
+    const failedChildKeys = isSuccessTerminal
+        ? nodes.filter((n) => n.state === "failed").map((n) => buildStateKey(n.nodeId, n.iteration))
+        : [];
     const pendingApprovals = approvals.map((a) => ({
         nodeId: a.nodeId,
         status: a.status,
@@ -1246,6 +1259,9 @@ async function buildInspectSnapshot(adapter, runId) {
             ...(error ? { error } : {}),
         },
         ...(runState ? { runState } : {}),
+        ...(failedChildKeys.length > 0
+            ? { failedChildren: failedChildKeys.length, failedChildKeys }
+            : {}),
         steps,
     };
     if (continuedFromVisible.length > 0) {
@@ -1289,6 +1305,13 @@ async function buildInspectSnapshot(adapter, runId) {
     }
     if (waitingTimers.length > 0) {
         ctaCommands.push({ command: `why ${runId}`, description: "Explain timer wait" });
+    }
+    if (failedChildKeys.length > 0) {
+        const first = parseStateKey(failedChildKeys[0]);
+        ctaCommands.push({
+            command: `node ${first.nodeId} -r ${runId}${first.iteration > 0 ? ` -i ${first.iteration}` : ""}`,
+            description: `Run finished with ${failedChildKeys.length} failed ${failedChildKeys.length === 1 ? "child" : "children"}; inspect`,
+        });
     }
     return {
         result,
