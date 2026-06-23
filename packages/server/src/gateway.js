@@ -2449,14 +2449,13 @@ export class Gateway {
                     maxConnections: this.maxConnections,
                 }, "gateway:connect");
                 const body = "Gateway connection limit reached\n";
-                socket.write("HTTP/1.1 503 Service Unavailable\r\n"
+                socket.end("HTTP/1.1 503 Service Unavailable\r\n"
                     + "Connection: close\r\n"
                     + "Content-Type: text/plain; charset=utf-8\r\n"
                     + `X-Smithers-API-Version: ${SMITHERS_API_VERSION}\r\n`
                     + `Content-Length: ${Buffer.byteLength(body, "utf8")}\r\n`
                     + "\r\n"
                     + body);
-                socket.destroy();
                 return;
             }
             // Reject a disallowed browser Origin at the upgrade itself, before
