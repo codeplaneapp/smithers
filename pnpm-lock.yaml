@@ -415,6 +415,9 @@ importers:
       '@smithers-orchestrator/gateway':
         specifier: workspace:*
         version: link:../packages/gateway
+      '@smithers-orchestrator/gateway-client':
+        specifier: workspace:*
+        version: link:../packages/gateway-client
       '@smithers-orchestrator/observability':
         specifier: workspace:*
         version: link:../apps/observability

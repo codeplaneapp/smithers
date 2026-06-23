@@ -1,420 +1,202 @@
-import { Database } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
-import type { AddressInfo } from "node:net";
-import { WebSocket, WebSocketServer } from "ws";
-import { dropWebSocket } from "../harness/dropWebSocket.ts";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import React from "react";
+import { z } from "zod";
+import { createSmithers } from "smithers-orchestrator";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
+import { Gateway, type SmithersWorkflow } from "@smithers-orchestrator/server/gateway";
 
-type EventRow = {
-  run_id: string;
-  seq: number;
-  timestamp_ms: number;
-  type: string;
-  payload_json: string;
+const WORKFLOW_KEY = "case15-workflow";
+
+type RunEventPayload = {
+  seq?: number;
 };
 
-type ConnectRequest = {
-  type: "connect";
-  auth: { token: string };
+type GatewayWithConnections = {
+  connections: Set<{ ws?: { terminate?(): void; readyState?: number } }>;
 };
 
-type StreamRunEventsRequest = {
-  type: "streamRunEvents";
-  runId: string;
-  afterSeq?: number;
-};
-
-type ClientFrame = ConnectRequest | StreamRunEventsRequest;
-
-type ConnectAckFrame = {
-  type: "connect.ack";
-  auth: { userId: string; role: string };
-};
-
-type ConnectErrorFrame = {
-  type: "connect.error";
-  code: "UNAUTHORIZED";
-  message: string;
-};
-
-type StreamOpenFrame = {
-  type: "stream.open";
-  streamId: string;
-  runId: string;
-  afterSeq: number | null;
-  currentSeq: number;
-};
-
-type EventFrame = {
-  type: "event";
-  streamId: string;
-  runId: string;
-  seq: number;
-  timestampMs: number;
-  eventType: string;
-  payloadJson: string;
-};
-
-type EndFrame = {
-  type: "end";
-  streamId: string;
-  runId: string;
-  lastSeq: number;
-};
-
-type ServerFrame = ConnectAckFrame | ConnectErrorFrame | StreamOpenFrame | EventFrame | EndFrame;
-
-type AuthRecord = { userId: string; role: string; scopes: string[] };
-
-const TOKENS: Record<string, AuthRecord> = {
-  "op-token": { userId: "user:will", role: "operator", scopes: ["*"] },
-};
-
-function buildDb(): Database {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE _smithers_events (
-      run_id TEXT NOT NULL,
-      seq INTEGER NOT NULL,
-      timestamp_ms INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      PRIMARY KEY (run_id, seq)
-    )
-  `);
-  return db;
+function makeDbPath(): string {
+  return join(
+    tmpdir(),
+    `smithers-case15-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+  );
 }
 
-function insertEvents(db: Database, runId: string, count: number, startSeq = 0): void {
-  const insert = db.query(
-    "INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json) VALUES (?, ?, ?, ?, ?)",
+function createStreamingWorkflow(dbPath: string) {
+  const { smithers, Workflow, Task, outputs, db } = createSmithers(
+    { done: z.object({ ok: z.boolean() }) },
+    { dbPath },
   );
-  const baseTs = Date.now();
-  for (let i = 0; i < count; i += 1) {
-    const seq = startSeq + i;
-    insert.run(runId, seq, baseTs + seq, "node.event", JSON.stringify({ runId, seq }));
+  const workflow = smithers(() =>
+    React.createElement(
+      Workflow,
+      { name: WORKFLOW_KEY },
+      React.createElement(Task, { id: "t1", output: outputs.done, children: { ok: true } }),
+    ),
+  );
+  return { workflow, db };
+}
+
+function getPort(server: { address(): unknown }): number {
+  const address = server.address();
+  if (
+    !address ||
+    typeof address === "string" ||
+    typeof (address as { port?: unknown }).port !== "number"
+  ) {
+    throw new Error("Gateway server did not expose a port");
+  }
+  return (address as { port: number }).port;
+}
+
+function terminateAllConnections(gw: Gateway): void {
+  for (const conn of (gw as unknown as GatewayWithConnections).connections) {
+    try {
+      conn.ws?.terminate?.();
+    } catch {
+      // ignore failures on already-closed sockets
+    }
   }
 }
 
-function readEventsAfter(db: Database, runId: string, afterSeq: number): EventRow[] {
-  return db
-    .query(
-      "SELECT run_id, seq, timestamp_ms, type, payload_json FROM _smithers_events WHERE run_id = ? AND seq > ? ORDER BY seq ASC",
-    )
-    .all(runId, afterSeq) as EventRow[];
-}
-
-function currentSeqFor(db: Database, runId: string): number {
-  const row = db
-    .query("SELECT MAX(seq) AS maxSeq FROM _smithers_events WHERE run_id = ?")
-    .get(runId) as { maxSeq: number | null } | undefined;
-  return row && typeof row.maxSeq === "number" ? row.maxSeq : -1;
-}
-
-type GatewayObservations = {
-  serverCloseCodes: number[];
-};
-
-type GatewayServer = {
-  port: number;
-  observations: GatewayObservations;
-  close: () => Promise<void>;
-};
-
-function startStreamingGateway(db: Database): Promise<GatewayServer> {
-  return new Promise((resolve, reject) => {
-    const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
-    const observations: GatewayObservations = { serverCloseCodes: [] };
-    let nextStreamId = 1;
-    wss.once("error", reject);
-    wss.once("listening", () => {
-      wss.on("connection", (ws) => {
-        let auth: AuthRecord | null = null;
-        ws.on("close", (code) => {
-          observations.serverCloseCodes.push(code);
-        });
-        ws.on("message", (raw) => {
-          let frame: ClientFrame;
-          try {
-            frame = JSON.parse(String(raw)) as ClientFrame;
-          } catch {
-            return;
-          }
-          if (frame.type === "connect") {
-            const record = TOKENS[frame.auth?.token ?? ""];
-            if (!record) {
-              const err: ConnectErrorFrame = {
-                type: "connect.error",
-                code: "UNAUTHORIZED",
-                message: "invalid bearer token",
-              };
-              ws.send(JSON.stringify(err));
-              ws.close(4401);
-              return;
-            }
-            auth = record;
-            const ack: ConnectAckFrame = {
-              type: "connect.ack",
-              auth: { userId: record.userId, role: record.role },
-            };
-            ws.send(JSON.stringify(ack));
-            return;
-          }
-          if (frame.type === "streamRunEvents") {
-            if (!auth) {
-              const err: ConnectErrorFrame = {
-                type: "connect.error",
-                code: "UNAUTHORIZED",
-                message: "must connect first",
-              };
-              ws.send(JSON.stringify(err));
-              ws.close(4401);
-              return;
-            }
-            const afterSeq = typeof frame.afterSeq === "number" ? frame.afterSeq : -1;
-            const streamId = `stream_${nextStreamId++}`;
-            const open: StreamOpenFrame = {
-              type: "stream.open",
-              streamId,
-              runId: frame.runId,
-              afterSeq: typeof frame.afterSeq === "number" ? frame.afterSeq : null,
-              currentSeq: currentSeqFor(db, frame.runId),
-            };
-            ws.send(JSON.stringify(open));
-            const rows = readEventsAfter(db, frame.runId, afterSeq);
-            let lastSeq = afterSeq;
-            for (const row of rows) {
-              if (ws.readyState !== ws.OPEN) return;
-              const ev: EventFrame = {
-                type: "event",
-                streamId,
-                runId: row.run_id,
-                seq: Number(row.seq),
-                timestampMs: Number(row.timestamp_ms),
-                eventType: row.type,
-                payloadJson: row.payload_json,
-              };
-              ws.send(JSON.stringify(ev));
-              lastSeq = ev.seq;
-            }
-            if (ws.readyState === ws.OPEN) {
-              const end: EndFrame = { type: "end", streamId, runId: frame.runId, lastSeq };
-              ws.send(JSON.stringify(end));
-            }
-          }
-        });
-      });
-      const address = wss.address() as AddressInfo;
-      resolve({
-        port: address.port,
-        observations,
-        close: () =>
-          new Promise<void>((res) => {
-            for (const client of wss.clients) {
-              try {
-                client.terminate();
-              } catch {
-                // ignore
-              }
-            }
-            wss.close();
-            res();
-          }),
-      });
-    });
-  });
-}
-
-type StreamCollector = {
-  ws: WebSocket;
-  frames: ServerFrame[];
-  ended: Promise<void>;
-};
-
-async function connectAuthedAndStream(
-  port: number,
-  token: string,
-  runId: string,
-  afterSeq: number | undefined,
-  stopAfter: number | null,
-): Promise<StreamCollector> {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
-  await new Promise<void>((resolve, reject) => {
-    ws.once("open", () => resolve());
-    ws.once("error", reject);
-  });
-  const frames: ServerFrame[] = [];
-  let resolveStop!: () => void;
-  const ended = new Promise<void>((res) => {
-    resolveStop = res;
-  });
-  let connected = false;
-  ws.on("message", (raw) => {
-    let frame: ServerFrame;
-    try {
-      frame = JSON.parse(String(raw)) as ServerFrame;
-    } catch {
-      return;
-    }
-    frames.push(frame);
-    if (frame.type === "connect.ack" && !connected) {
-      connected = true;
-      const sub: StreamRunEventsRequest = { type: "streamRunEvents", runId };
-      if (typeof afterSeq === "number") sub.afterSeq = afterSeq;
-      ws.send(JSON.stringify(sub));
-      return;
-    }
-    if (frame.type === "connect.error") {
-      resolveStop();
-      return;
-    }
-    if (frame.type === "end") {
-      resolveStop();
-      return;
-    }
-    if (stopAfter !== null && frame.type === "event" && frame.seq >= stopAfter) {
-      resolveStop();
-    }
-  });
-  ws.on("close", () => resolveStop());
-  const connect: ConnectRequest = { type: "connect", auth: { token } };
-  ws.send(JSON.stringify(connect));
-  return { ws, frames, ended };
-}
-
 describe("case 15: drop authenticated streamRunEvents mid-stream, reconnect with afterSeq", () => {
+  let gateway: Gateway | undefined;
+  let server: { address(): unknown } | undefined;
+  let workflow: SmithersWorkflow | undefined;
+  const dbPaths: string[] = [];
+
+  beforeEach(async () => {
+    const dbPath = makeDbPath();
+    dbPaths.push(dbPath);
+    const result = createStreamingWorkflow(dbPath);
+    ensureSmithersTables(result.db);
+    workflow = result.workflow as SmithersWorkflow;
+
+    gateway = new Gateway({
+      auth: {
+        mode: "token",
+        tokens: {
+          "op-token": { role: "operator", scopes: ["*"], userId: "user:will" },
+        },
+      },
+    });
+    gateway.register(WORKFLOW_KEY, workflow);
+    server = (await gateway.listen({ port: 0, host: "127.0.0.1" })) as { address(): unknown };
+  });
+
+  afterEach(async () => {
+    if (gateway) {
+      await gateway.close();
+      gateway = undefined;
+      server = undefined;
+    }
+    for (const dbPath of dbPaths) {
+      rmSync(dbPath, { force: true });
+      rmSync(`${dbPath}-shm`, { force: true });
+      rmSync(`${dbPath}-wal`, { force: true });
+    }
+    dbPaths.length = 0;
+  });
+
   test("abrupt drop mid-stream then reconnect with afterSeq replays without gap or dup over 100+ events", async () => {
-    const db = buildDb();
-    let server: GatewayServer | undefined;
-    let firstWs: WebSocket | undefined;
-    let secondWs: WebSocket | undefined;
-    const runId = "case15-run";
-    const initialCount = 60;
-    const interruptAfterSeq = 30;
-    const tailCount = 70;
-    try {
-      insertEvents(db, runId, initialCount);
-      server = await startStreamingGateway(db);
+    const gw = gateway!;
+    const port = getPort(server!);
+    const runId = "case15-run-1";
+    const initialCount = 30;
+    const interruptAfterCount = 30;
+    const tailCount = 100;
 
-      const first = await connectAuthedAndStream(
-        server.port,
-        "op-token",
-        runId,
-        undefined,
-        interruptAfterSeq,
-      );
-      firstWs = first.ws;
-      await first.ended;
+    const adapter = gw.adapterForWorkflow(workflow!);
+    await adapter.insertRun({
+      runId,
+      workflowName: WORKFLOW_KEY,
+      status: "running",
+      createdAtMs: Date.now(),
+    });
 
-      const ack = first.frames.find((f) => f.type === "connect.ack") as
-        | ConnectAckFrame
-        | undefined;
-      expect(ack).toBeDefined();
-      expect(ack!.auth.userId).toBe("user:will");
-
-      const open = first.frames.find((f) => f.type === "stream.open") as
-        | StreamOpenFrame
-        | undefined;
-      expect(open).toBeDefined();
-      expect(open!.runId).toBe(runId);
-      expect(open!.currentSeq).toBe(initialCount - 1);
-
-      const firstSeqs = first.frames
-        .filter((f): f is EventFrame => f.type === "event")
-        .map((f) => f.seq);
-      expect(firstSeqs.length).toBeGreaterThan(0);
-      expect(firstSeqs[0]).toBe(0);
-      const firstLastSeq = firstSeqs[firstSeqs.length - 1]!;
-      expect(firstLastSeq).toBeGreaterThanOrEqual(interruptAfterSeq);
-      for (let i = 1; i < firstSeqs.length; i += 1) {
-        expect(firstSeqs[i]).toBe(firstSeqs[i - 1]! + 1);
-      }
-
-      await dropWebSocket(firstWs, "abrupt");
-      expect(firstWs.readyState).toBe(firstWs.CLOSED);
-
-      await new Promise<void>((res) => setTimeout(res, 10));
-      expect(server.observations.serverCloseCodes.length).toBeGreaterThan(0);
-      expect(server.observations.serverCloseCodes[0]).toBe(1006);
-
-      insertEvents(db, runId, tailCount, initialCount);
-
-      const second = await connectAuthedAndStream(
-        server.port,
-        "op-token",
-        runId,
-        firstLastSeq,
-        null,
-      );
-      secondWs = second.ws;
-      await second.ended;
-
-      const secondSeqs = second.frames
-        .filter((f): f is EventFrame => f.type === "event")
-        .map((f) => f.seq);
-      expect(secondSeqs.length).toBe(initialCount + tailCount - 1 - firstLastSeq);
-      expect(secondSeqs[0]).toBe(firstLastSeq + 1);
-      for (let i = 1; i < secondSeqs.length; i += 1) {
-        expect(secondSeqs[i]).toBe(secondSeqs[i - 1]! + 1);
-      }
-
-      const merged = [...firstSeqs, ...secondSeqs];
-      const expectedTotal = initialCount + tailCount;
-      expect(merged.length).toBeGreaterThanOrEqual(100);
-      expect(merged.length).toBe(expectedTotal);
-      expect(new Set(merged).size).toBe(expectedTotal);
-      for (let i = 0; i < expectedTotal; i += 1) {
-        expect(merged[i]).toBe(i);
-      }
-
-      const endFrame = second.frames.find((f) => f.type === "end") as EndFrame | undefined;
-      expect(endFrame).toBeDefined();
-      expect(endFrame!.lastSeq).toBe(expectedTotal - 1);
-    } finally {
-      if (firstWs && firstWs.readyState !== firstWs.CLOSED) firstWs.terminate();
-      if (secondWs && secondWs.readyState !== secondWs.CLOSED) secondWs.terminate();
-      if (server) await server.close();
-      db.close();
+    for (let i = 0; i < initialCount; i++) {
+      gw.broadcastEvent("node.started", { runId, nodeId: `n${i}`, state: "started", iteration: 0 });
     }
-  });
 
-  test("rejects streamRunEvents without authenticated connect", async () => {
-    const db = buildDb();
-    let server: GatewayServer | undefined;
-    let ws: WebSocket | undefined;
-    try {
-      insertEvents(db, "case15-auth", 3);
-      server = await startStreamingGateway(db);
+    const client = new SmithersGatewayClient({
+      baseUrl: `http://127.0.0.1:${port}`,
+      token: "op-token",
+    });
 
-      ws = new WebSocket(`ws://127.0.0.1:${server.port}`);
-      await new Promise<void>((resolve, reject) => {
-        ws!.once("open", () => resolve());
-        ws!.once("error", reject);
-      });
-      const errPromise = new Promise<ConnectErrorFrame>((resolve) => {
-        ws!.on("message", (raw) => {
-          let frame: ServerFrame;
-          try {
-            frame = JSON.parse(String(raw)) as ServerFrame;
-          } catch {
-            return;
+    const seenSeqs: number[] = [];
+    const reconnectAfterSeqs: number[] = [];
+    let droppedConnections = false;
+    const totalExpected = initialCount + tailCount;
+    const ctrl = new AbortController();
+
+    await (async () => {
+      for await (const frame of client.streamRunEventsResilient(
+        { runId, afterSeq: 0 },
+        {
+          signal: ctrl.signal,
+          backoff: { baseMs: 5, maxMs: 50, random: () => 0.5 },
+          onReconnect: (event) => {
+            if (typeof event.afterSeq === "number") reconnectAfterSeqs.push(event.afterSeq);
+          },
+        },
+      )) {
+        if (frame.event !== "run.event") continue;
+        const seq = (frame.payload as RunEventPayload).seq;
+        if (typeof seq !== "number") continue;
+        seenSeqs.push(seq);
+
+        if (!droppedConnections && seenSeqs.length >= interruptAfterCount) {
+          droppedConnections = true;
+          terminateAllConnections(gw);
+          for (let i = 0; i < tailCount; i++) {
+            gw.broadcastEvent("node.started", {
+              runId,
+              nodeId: `n${initialCount + i}`,
+              state: "started",
+              iteration: 0,
+            });
           }
-          if (frame.type === "connect.error") resolve(frame);
-        });
-      });
-      const bad: ConnectRequest = { type: "connect", auth: { token: "nope" } };
-      ws.send(JSON.stringify(bad));
-      const err = await errPromise;
-      expect(err.code).toBe("UNAUTHORIZED");
-    } finally {
-      if (ws && ws.readyState !== ws.CLOSED) ws.terminate();
-      if (server) await server.close();
-      db.close();
+        }
+
+        if (seenSeqs.length >= totalExpected) break;
+      }
+    })();
+
+    expect(seenSeqs.length).toBeGreaterThanOrEqual(100);
+    expect(seenSeqs.length).toBe(totalExpected);
+    expect(new Set(seenSeqs).size).toBe(totalExpected);
+    for (let i = 0; i < totalExpected; i++) {
+      expect(seenSeqs[i]).toBe(i + 1);
     }
+    expect(droppedConnections).toBe(true);
+    expect(reconnectAfterSeqs).toContain(interruptAfterCount);
   });
 
-  test.skip("real JWT validation against gateway streamRunEvents (see ticket 0022 §C row 14)", () => {
-    // case 14 boots the real Gateway with mode:'jwt' and calls streamRunEvents.
-    // Once that lands, this case can layer on top by importing its boot helper
-    // instead of the bearer-token model used here.
+  test("rejects streamRunEvents with an invalid bearer token", async () => {
+    const port = getPort(server!);
+    const runId = "case15-run-2";
+
+    const adapter = gateway!.adapterForWorkflow(workflow!);
+    await adapter.insertRun({
+      runId,
+      workflowName: WORKFLOW_KEY,
+      status: "running",
+      createdAtMs: Date.now(),
+    });
+
+    const client = new SmithersGatewayClient({
+      baseUrl: `http://127.0.0.1:${port}`,
+      token: "wrong-token",
+    });
+
+    await expect(
+      client.streamRunEvents({ runId }).next(),
+    ).rejects.toMatchObject({
+      name: "GatewayRpcError",
+    });
   });
 });

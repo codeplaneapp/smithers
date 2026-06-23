@@ -15,6 +15,7 @@
     "@smithers-orchestrator/driver": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
     "@smithers-orchestrator/gateway": "workspace:*",
+    "@smithers-orchestrator/gateway-client": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/sandbox": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
