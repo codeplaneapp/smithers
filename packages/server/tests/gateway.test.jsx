@@ -726,6 +726,194 @@ describe("Gateway", () => {
         expect(anyOrigin.hello.ok).toBe(true);
         await anyOrigin.client.close();
     });
+    test("token mode enforces allowedOrigins over both HTTP and WS", async () => {
+        const dbPath = makeDbPath("token-origin");
+        dbPaths.push(dbPath);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["runs"],
+            heartbeatMs: 100,
+            auth: {
+                mode: "token",
+                tokens: {
+                    "op-token": {
+                        role: "operator",
+                        scopes: ["*"],
+                        userId: "user:op",
+                    },
+                },
+                allowedOrigins: ["https://app.example.com"],
+            },
+        });
+        gateway.register("basic", createValueWorkflow(dbPath));
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port = getPort(server);
+
+        // WS: wrong origin rejected at the upgrade itself (socket never opens).
+        expect(await wsConnectionOpens(port, { Origin: "https://evil.example.com" })).toBe(false);
+
+        // WS: correct origin accepted
+        const wsAccepted = await connectGatewayRaw(port, {
+            token: "op-token",
+            headers: { Origin: "https://app.example.com" },
+        });
+        expect(wsAccepted.hello.ok).toBe(true);
+        await wsAccepted.client.close();
+
+        // WS: no Origin header accepted (server-to-server / CLI)
+        const wsNoOrigin = await connectGatewayRaw(port, { token: "op-token" });
+        expect(wsNoOrigin.hello.ok).toBe(true);
+        await wsNoOrigin.client.close();
+
+        // HTTP RPC: wrong origin rejected
+        const httpRejected = await fetch(`http://127.0.0.1:${port}/rpc`, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                authorization: "Bearer op-token",
+                Origin: "https://evil.example.com",
+            },
+            body: JSON.stringify({ method: "runs.list", params: {} }),
+        });
+        expect(httpRejected.status).toBe(401);
+        const rejBody = await httpRejected.json();
+        expect(rejBody.ok).toBe(false);
+        expect(rejBody.error.code).toBe("UNAUTHORIZED");
+
+        // HTTP RPC: correct origin accepted
+        const httpAccepted = await fetch(`http://127.0.0.1:${port}/rpc`, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                authorization: "Bearer op-token",
+                Origin: "https://app.example.com",
+            },
+            body: JSON.stringify({ method: "runs.list", params: {} }),
+        });
+        expect(httpAccepted.status).toBe(200);
+
+        // HTTP RPC: no Origin header accepted (CLI / server-to-server)
+        const httpNoOrigin = await fetch(`http://127.0.0.1:${port}/rpc`, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                authorization: "Bearer op-token",
+            },
+            body: JSON.stringify({ method: "runs.list", params: {} }),
+        });
+        expect(httpNoOrigin.status).toBe(200);
+
+        // Token mode without allowedOrigins: any origin allowed
+        await gateway.close();
+        const dbPath2 = makeDbPath("token-any-origin");
+        dbPaths.push(dbPath2);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["runs"],
+            heartbeatMs: 100,
+            auth: {
+                mode: "token",
+                tokens: {
+                    "op-token": {
+                        role: "operator",
+                        scopes: ["*"],
+                        userId: "user:op",
+                    },
+                },
+            },
+        });
+        gateway.register("basic", createValueWorkflow(dbPath2));
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port2 = getPort(server);
+        const wsAny = await connectGatewayRaw(port2, {
+            token: "op-token",
+            headers: { Origin: "https://any.example.com" },
+        });
+        expect(wsAny.hello.ok).toBe(true);
+        await wsAny.client.close();
+    });
+    test("jwt mode enforces allowedOrigins over both HTTP and WS", async () => {
+        const dbPath = makeDbPath("jwt-origin");
+        dbPaths.push(dbPath);
+        const jwtSecret = "test-origin-secret";
+        const validToken = createJwtToken({
+            iss: "https://auth.example.com",
+            aud: "smithers",
+            sub: "user:jwt",
+            role: "operator",
+            scope: "*",
+            exp: Math.floor(Date.now() / 1_000) + 300,
+        }, jwtSecret);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["runs"],
+            heartbeatMs: 100,
+            auth: {
+                mode: "jwt",
+                issuer: "https://auth.example.com",
+                audience: "smithers",
+                secret: jwtSecret,
+                allowedOrigins: ["https://app.example.com"],
+            },
+        });
+        gateway.register("basic", createValueWorkflow(dbPath));
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port = getPort(server);
+
+        // WS: wrong origin rejected at the upgrade itself (socket never opens).
+        expect(await wsConnectionOpens(port, { Origin: "https://evil.example.com" })).toBe(false);
+
+        // WS: correct origin accepted
+        const wsAccepted = await connectGatewayRaw(port, {
+            token: validToken,
+            headers: { Origin: "https://app.example.com" },
+        });
+        expect(wsAccepted.hello.ok).toBe(true);
+        await wsAccepted.client.close();
+
+        // WS: no Origin header accepted (server-to-server / CLI)
+        const wsNoOrigin = await connectGatewayRaw(port, { token: validToken });
+        expect(wsNoOrigin.hello.ok).toBe(true);
+        await wsNoOrigin.client.close();
+
+        // HTTP RPC: wrong origin rejected
+        const httpRejected = await fetch(`http://127.0.0.1:${port}/rpc`, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                authorization: `Bearer ${validToken}`,
+                Origin: "https://evil.example.com",
+            },
+            body: JSON.stringify({ method: "runs.list", params: {} }),
+        });
+        expect(httpRejected.status).toBe(401);
+        const rejBody = await httpRejected.json();
+        expect(rejBody.ok).toBe(false);
+        expect(rejBody.error.code).toBe("UNAUTHORIZED");
+
+        // HTTP RPC: correct origin accepted
+        const httpAccepted = await fetch(`http://127.0.0.1:${port}/rpc`, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                authorization: `Bearer ${validToken}`,
+                Origin: "https://app.example.com",
+            },
+            body: JSON.stringify({ method: "runs.list", params: {} }),
+        });
+        expect(httpAccepted.status).toBe(200);
+
+        // HTTP RPC: no Origin header accepted (CLI / server-to-server)
+        const httpNoOrigin = await fetch(`http://127.0.0.1:${port}/rpc`, {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                authorization: `Bearer ${validToken}`,
+            },
+            body: JSON.stringify({ method: "runs.list", params: {} }),
+        });
+        expect(httpNoOrigin.status).toBe(200);
+    });
     test("supports HTTP /rpc fallback for stateless callers", async () => {
         const dbPath = makeDbPath("http-rpc");
         dbPaths.push(dbPath);
