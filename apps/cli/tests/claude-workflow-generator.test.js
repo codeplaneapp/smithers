@@ -158,4 +158,36 @@ export default smithers(() => (
         expect(value.mirrored).toContain("late");
         expect(watcherLabels).toContain("late");
     });
+
+    test("collapse-phases watchers re-derive membership so late nodes are summarized", () => {
+        const repo = createTempRepo();
+        repo.write("workflow.tsx", `
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, Task, Workflow, Sequence } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { smithers, outputs } = createSmithers({ result: z.object({ text: z.string() }) });
+const agentImpl = { id: "fake", generate: async () => ({ text: "ok" }) };
+
+export default smithers(() => (
+  <Workflow name="collapse">
+    <Sequence label="Work">
+      <Task id="only" output={outputs.result} agent={agentImpl}>Do</Task>
+    </Sequence>
+  </Workflow>
+));
+`);
+        const out = ".claude/workflows/collapse.mjs";
+        const result = runSmithersBin(["graph", "workflow.tsx", "--emit-claude-workflow", "--collapse-phases", "--out", out, "--format", "json"], {
+            cwd: repo.dir,
+        });
+        expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+        const script = readFileSync(join(repo.dir, out), "utf8");
+        // The phase watcher must apply the @@ membership rule each poll, not freeze
+        // a node-id list captured at spawn time (which would drop later fan-out).
+        expect(script.includes("Re-evaluate membership on EVERY poll")).toBe(true);
+        expect(script.includes("PHASE_MAP[logical]")).toBe(true);
+        expect(script.includes("Summarize exactly these Smithers node ids")).toBe(false);
+        new AsyncFunction(script.replace(/export const meta = \{[\s\S]*?\n\};\n/, ""));
+    });
 });
