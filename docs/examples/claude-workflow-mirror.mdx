@@ -7,6 +7,8 @@ description: Generate a Claude Code dynamic workflow script that mirrors a detac
 
 `bunx smithers-orchestrator graph` can emit a Claude Code dynamic workflow script that mirrors an existing detached Smithers run into Claude Code's `/workflows` progress tree.
 
+<img src="/images/claude-workflow-mirror.gif" alt="A Claude Code /workflows tree mirroring a detached Smithers run: a planning node finishes, then a data-dependent fan-out of review nodes and a final report node light up as the run progresses" />
+
 The generated script does not run the Smithers work. Smithers remains the source of truth for durability, dependencies, retries, worktrees, and time travel. Claude Code runs a small sandboxed script that discovers Smithers nodes with the `smithers` CLI and creates watcher agents for the nodes it sees.
 
 ## Generate the script
