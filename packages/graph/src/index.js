@@ -31,4 +31,5 @@
 // @smithers-type-exports-end
 
 export * from "./extract.js";
+export * from "./deriveClaudeWorkflowPhases.js";
 export * from "./worktree-path.js";
