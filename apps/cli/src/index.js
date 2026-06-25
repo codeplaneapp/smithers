@@ -2404,13 +2404,19 @@ const workflowCli = Cli.create({
                 const loaded = await loadWorkflow(workflow.entryFile);
                 inputSchemas.set(workflow.id, summarizeWorkflowInputSchema(workflowInputJsonSchema(loaded.inputSchema)));
             }
-            return c.ok(writeWorkflowSkillFiles(process.cwd(), {
+            const result = writeWorkflowSkillFiles(process.cwd(), {
                 workflowId,
                 output: c.options.output,
                 force: c.options.force,
                 global: c.options.global,
                 inputSchemas,
-            }));
+            });
+            return c.ok(result, {
+                cta: {
+                    description: result.nextSteps,
+                    commands: [],
+                },
+            });
         }
         catch (err) {
             if (err instanceof SmithersError) {

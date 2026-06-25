@@ -535,6 +535,12 @@ export function writeWorkflowSkillFiles(root, options = {}) {
         writeFileSync(target, renderWorkflowSkill(workflow, { root, inputSchema: options.inputSchemas?.get(workflow.id) }));
         writtenFiles.push(target);
     }
+    const nextSteps = [
+        "Generated workflow skills are Smithers-owned generated output under `.smithers/skills`.",
+        "Claude Code and Codex do not auto-scan `.smithers/skills`; make these skills discoverable by bridging them into the harness skill directory.",
+        "Claude Code: link or copy the generated skill files into `.agents/skills` for this project.",
+        "Codex: link or copy the generated skill files into `.agents/skills` for this project, or use your Codex skill-dir wiring to point at that bridge.",
+    ].join("\n");
     return {
         rootDir: root,
         workflowId,
@@ -543,5 +549,6 @@ export function writeWorkflowSkillFiles(root, options = {}) {
         workflows,
         writtenFiles,
         skippedFiles,
+        nextSteps,
     };
 }

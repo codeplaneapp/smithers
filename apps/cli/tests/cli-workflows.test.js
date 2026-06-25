@@ -227,6 +227,21 @@ describe("workflow skill docs", () => {
         expect(readFileSync(result.writtenFiles[0], "utf8")).toContain("smithers workflow run implement");
     });
 
+    test("returns next steps explaining workflow skill discoverability", () => {
+        const root = makeTempDir();
+        dirs.push(root);
+        const wfDir = join(root, ".smithers", "workflows");
+        mkdirSync(wfDir, { recursive: true });
+        writeFileSync(join(wfDir, "implement.tsx"), "// smithers-display-name: Implement\nexport default {};");
+
+        const result = writeWorkflowSkillFiles(root);
+
+        expect(result.nextSteps).toBeTruthy();
+        expect(result.nextSteps).toContain("`.smithers/skills`");
+        expect(result.nextSteps).toContain("Smithers-owned generated output");
+        expect(result.nextSteps).toContain("Claude Code and Codex do not auto-scan `.smithers/skills`");
+    });
+
     test("preserves existing skill files unless forced", () => {
         const root = makeTempDir();
         dirs.push(root);

@@ -127,7 +127,7 @@ Smithers treats having your agent author new workflows as a first-class path. On
 
 > "Write skill docs for all the Smithers workflows in this repo so any agent can find and run them."
 
-Your agent runs [`workflow-skill`](/workflows/workflow-skill): it reads every local workflow's metadata and source, then writes concise agent-facing skill docs under `.smithers/skills/`. After that, any coding agent on the project can discover and operate your workflows without reading the source first.
+Your agent runs [`workflow-skill`](/workflows/workflow-skill): it reads every local workflow's metadata and source, then writes concise agent-facing skill docs under `.smithers/skills/`. That directory is Smithers-owned generated output; common coding harnesses such as Claude Code and Codex do not auto-scan it without per-harness wiring. After generation, follow the printed next steps to bridge the generated docs into the harness-discoverable skill location, typically `.agents/skills`.
 
 <Frame caption="workflow-skill turns your local workflows into agent-facing skill docs, so the next agent on the repo can drive them by name without reading the source.">
   <img src="/images/workflow-ui/workflow-skill.png" alt="Smithers workflow UI showing workflow-skill reading local workflows and emitting skill documentation" />

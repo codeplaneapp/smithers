@@ -34,7 +34,7 @@ bunx smithers-orchestrator workflow run workflow-skill --input '{"workflow":"mis
 ## Output Rules
 
 - `workflow: "all"` scans every local workflow except `workflow-skill`.
-- If `output` is omitted, skills are written under `.smithers/skills/`.
+- If `output` is omitted, skills are written under `.smithers/skills/`. This is Smithers-owned generated output; Claude Code, Codex, and other coding harnesses do not auto-discover it unless your project bridges it into the harness skill directory, typically `.agents/skills`.
 - If `workflow` is one workflow ID and `output` is provided, the agent writes exactly that file path.
 - If `workflow` is `"all"` and `output` is provided, the agent treats it as a directory and writes one skill per workflow.
 
@@ -54,4 +54,4 @@ bunx smithers-orchestrator workflow run workflow-skill \
   --input '{"workflow":"all","output":".smithers/skills"}'
 ```
 
-Use this when you want coding agents to discover and operate project-specific Smithers workflows without reading each workflow source file first.
+Use this when you want Smithers to generate reusable workflow skill docs. To make those docs discoverable to a specific coding agent, bridge `.smithers/skills` into that harness's skill directory, typically `.agents/skills`.
