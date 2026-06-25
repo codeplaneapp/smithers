@@ -1,10 +1,10 @@
 import { Database } from "bun:sqlite";
 import { Effect } from "effect";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { ensureSmithersTables } from "../../db/src/ensure.js";
-import { POSTGRES, quoteIdentifier, translateDdl } from "../../db/src/dialect.js";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { POSTGRES, quoteIdentifier, translateDdl } from "@smithers-orchestrator/db/dialect";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { createSmithersPostgres } from "./create.js";
 import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
@@ -895,8 +895,10 @@ async function postgresRunCountAt(opts) {
 async function migratePgToSqlite(opts, context) {
     const { cwd, workspaceRoot, dbPath, target, sourceBackend, startedAt, batchSize } = context;
     const dataDir = resolve(cwd, opts.pgliteDataDir ?? join(workspaceRoot, ".smithers", "pg"));
+    const tempDbPath = `${dbPath}.migrating`;
     let sourceApi;
     let sqlite;
+    let published = false;
     try {
         sourceApi = await createSmithersPostgres({}, sourceBackend === "postgres"
             ? { provider: "postgres", connectionString: opts.url ?? context.env.SMITHERS_POSTGRES_URL ?? context.env.DATABASE_URL }
@@ -911,7 +913,18 @@ async function migratePgToSqlite(opts, context) {
             const priority = tablePriority(a) - tablePriority(b);
             return priority === 0 ? a.localeCompare(b) : priority;
         });
-        sqlite = new Database(dbPath);
+        // Refuse to overwrite a populated SQLite target: the atomic publish
+        // below would replace it, so guard the FINAL dbPath (not the temp).
+        if (sqliteRunCountAt(dbPath) > 0) {
+            throw new SmithersError("DB_WRITE_FAILED", `Target SQLite store at ${dbPath} already has run history; refusing to merge a one-shot Smithers migration into a non-empty target.`, {
+                dbPath,
+            });
+        }
+        // Build the SQLite target in a temp file, never the live smithers.db.
+        for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+            try { rmSync(`${tempDbPath}${suffix}`, { force: true }); } catch { /* no stale temp */ }
+        }
+        sqlite = new Database(tempDbPath);
         ensureSmithersTables(drizzle(sqlite));
         await prepareSqliteTarget(sqlite, pgConn, tables);
         const tableResults = [];
@@ -928,6 +941,13 @@ async function migratePgToSqlite(opts, context) {
             }
         }
         assertSqliteTargetValid(sqlite);
+        // Fully built + verified in the temp file: publish atomically so a
+        // mid-copy failure can never leave a partial smithers.db that a later
+        // default read would treat as authoritative (hiding the real source).
+        try { sqlite.close(); } catch { /* about to rename */ }
+        sqlite = undefined;
+        renameSync(tempDbPath, dbPath);
+        published = true;
         const durationMs = Date.now() - startedAt;
         const result = {
             backend: target,
@@ -956,6 +976,12 @@ async function migratePgToSqlite(opts, context) {
     }
     finally {
         try { sqlite?.close(); } catch {}
+        if (!published) {
+            // Never leave a partial target behind on failure.
+            for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+                try { rmSync(`${tempDbPath}${suffix}`, { force: true }); } catch { /* best-effort */ }
+            }
+        }
         await sourceApi?.close?.();
     }
 }

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { SmithersDb } from "../../db/src/adapter.js";
-import { ensureSmithersTables } from "../../db/src/ensure.js";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { openSmithersBackend } from "./openSmithersBackend.js";
 import { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js";
@@ -28,6 +28,32 @@ async function openSqliteStore(dbPath) {
             }
         },
     };
+}
+
+async function sqliteHasRunsTable(dbPath) {
+    if (!existsSync(dbPath)) {
+        return false;
+    }
+    const { Database } = await import("bun:sqlite");
+    let sqlite;
+    try {
+        sqlite = new Database(dbPath, { readonly: true });
+        const row = sqlite
+            .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_runs'")
+            .get();
+        return Boolean(row);
+    }
+    catch {
+        return false;
+    }
+    finally {
+        try {
+            sqlite?.close();
+        }
+        catch {
+            // best-effort read-only probe cleanup
+        }
+    }
 }
 
 function assertReadStoreExists(choice, opts) {
@@ -155,6 +181,14 @@ export async function openSmithersStore(opts = {}) {
             assertReadStoreExists(choice, opts);
         }
         if (choice.backend === "sqlite") {
+            // Reads must never provision: require the Smithers run table to
+            // already exist. An existing legacy store (table present, older
+            // schema) is still opened and upgraded on the write/upgrade path,
+            // but an empty or unrelated SQLite file is reported not-found
+            // instead of having `_smithers_*` tables created during e.g. `ps`.
+            if (mode === "read" && !(await sqliteHasRunsTable(choice.dbPath))) {
+                throw new SmithersError("CLI_DB_NOT_FOUND", `No Smithers run history found at ${choice.dbPath}. Run 'smithers up <workflow>' to start a run first.`);
+            }
             const opened = await openSqliteStore(choice.dbPath);
             return {
                 choice,
