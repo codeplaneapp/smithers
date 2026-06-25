@@ -525,6 +525,14 @@ function buildMigrations(context) {
             return config.columns.every(([column]) => columns.has(column));
         },
         up: (sqlite) => {
+            // A column migration only adds columns to an existing table; the base
+            // 0001 migration owns table creation. If the table is absent (a store
+            // whose ledger recorded 0001 but predates this table), skip rather than
+            // throw "no such table" — mirrors how the index migrations skip indexes
+            // whose table is absent and let the create-table migration own it.
+            if (!tableExists(sqlite, config.table)) {
+                return { table: config.table, addedColumns: [], skipped: "missing_table" };
+            }
             const addedColumns = [];
             for (const [column, definition] of config.columns) {
                 if (addColumnIfMissing(sqlite, config.table, column, definition)) {
@@ -534,6 +542,9 @@ function buildMigrations(context) {
             return { table: config.table, addedColumns };
         },
         upPostgres: async (pgConn) => {
+            if (!(await tableExistsPostgres(pgConn, config.table))) {
+                return { table: config.table, addedColumns: [], skipped: "missing_table" };
+            }
             const addedColumns = [];
             for (const [column, definition] of config.columns) {
                 if (await addColumnIfMissingPostgres(pgConn, config.table, column, definition)) {
