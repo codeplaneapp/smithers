@@ -4,12 +4,12 @@ import { and, desc, eq } from "drizzle-orm";
 import { Context, Duration, Effect, Exit, Layer, Schedule, Schema, } from "effect";
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import React from "react";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SmithersDb } from "../../../db/src/adapter.js";
 import { runWorkflow } from "../engine.js";
 import { ignoreSyncError } from "@smithers-orchestrator/driver/interop";
 import { requireTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
 import { Branch, Loop, Parallel, Sequence, Task, Worktree, Workflow, } from "@smithers-orchestrator/components/components/index";
-import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
+import { camelToSnake } from "../../../db/src/utils/camelToSnake.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 /**
  * @typedef {import("effect").Schema.Schema<unknown, unknown, never>} AnySchema

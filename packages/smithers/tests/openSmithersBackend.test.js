@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openSmithersBackend } from "../src/openSmithersBackend.js";
+import { openSmithersStore } from "../src/openSmithersStore.js";
 
 setDefaultTimeout(120_000);
 
@@ -53,6 +54,26 @@ describe("openSmithersBackend", () => {
       expect(rows.rows.map((row) => row.id)).toContain("0016_add_workspace_checkpoints");
     } finally {
       await closeApi(api);
+    }
+  });
+
+  test("read mode does not provision Smithers schema in an initialized empty PGlite store", async () => {
+    const cwd = makeWorkspace("smithers-open-pglite-read-no-provision");
+    const dataDir = join(cwd, ".smithers", "pg");
+    const { PGlite } = await import("@electric-sql/pglite");
+    const pglite = await PGlite.create(dataDir);
+    await pglite.close();
+
+    await expect(openSmithersStore({ cwd, backend: "pglite", mode: "read", env: {}, wait: { timeoutMs: 0 } })).rejects.toMatchObject({
+      code: "CLI_DB_NOT_FOUND",
+    });
+
+    const check = await PGlite.create(dataDir);
+    try {
+      const tables = await check.query("SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name LIKE '_smithers_%'");
+      expect(tables.rows).toEqual([]);
+    } finally {
+      await check.close();
     }
   });
 

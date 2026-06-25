@@ -1,5 +1,23 @@
 [
   {
+    "key": "hello",
+    "title": "Hello",
+    "runnable": true,
+    "launchArgs": [
+      "hello",
+      "--prompt",
+      "hello"
+    ],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [
+      "hello",
+      "Start",
+      "No runs yet."
+    ],
+    "verifyOutput": false
+  },
+  {
     "key": "plan",
     "title": "Plan",
     "runnable": true,
@@ -225,6 +243,17 @@
     "verifyOutput": false
   },
   {
+    "key": "monitor",
+    "title": "Monitor",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "monitor-empty",
+    "expectedText": [],
+    "mountOnlyReason": "monitor UI mounts in the generated gateway but does not settle deterministically in the all-UI browser sweep",
+    "verifyOutput": false
+  },
+  {
     "key": "workflow-skill",
     "title": "Workflow Skill",
     "runnable": false,
@@ -246,5 +275,137 @@
       "Not a git repository"
     ],
     "verifyOutput": true
+  },
+  {
+    "key": "create-workflow",
+    "title": "Create Workflow",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
+    "verifyOutput": false
+  },
+  {
+    "key": "context-engineer",
+    "title": "Context Engineer",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
+    "verifyOutput": false
+  },
+  {
+    "key": "route-task",
+    "title": "Route Task",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
+    "verifyOutput": false
+  },
+  {
+    "key": "create-skill",
+    "title": "Create Skill",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
+    "verifyOutput": false
+  },
+  {
+    "key": "extract-skill",
+    "title": "Extract Skill",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
+    "verifyOutput": false
+  },
+  {
+    "key": "monitor-smithers",
+    "title": "Monitor Smithers",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
+    "verifyOutput": false
+  },
+  {
+    "key": "triage-run",
+    "title": "Triage Run",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
+    "verifyOutput": false
+  },
+  {
+    "key": "context-doctor",
+    "title": "Context Doctor",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
+    "verifyOutput": false
+  },
+  {
+    "key": "backpressure-plan",
+    "title": "Backpressure Plan",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
+    "verifyOutput": false
+  },
+  {
+    "key": "eval-author",
+    "title": "Eval Author",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
+    "verifyOutput": false
+  },
+  {
+    "key": "report-slideshow",
+    "title": "Report Slideshow",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
+    "verifyOutput": false
+  },
+  {
+    "key": "smithering",
+    "title": "Smithering",
+    "runnable": false,
+    "launchArgs": [],
+    "primaryTestId": "",
+    "populatedTestId": "",
+    "expectedText": [],
+    "mountOnlyReason": "mounted by the generated gateway; descriptor keeps UI drift checks in sync",
+    "verifyOutput": false
   }
 ]

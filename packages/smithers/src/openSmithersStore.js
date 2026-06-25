@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "../../db/src/adapter.js";
+import { ensureSmithersTables } from "../../db/src/ensure.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { openSmithersBackend } from "./openSmithersBackend.js";
 import { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js";
@@ -46,17 +46,77 @@ function assertReadStoreExists(choice, opts) {
     }
 }
 
-async function assertRunsTableExists(db) {
-    const descriptor = db;
-    if (descriptor?.dialect === "postgres" && descriptor.connection) {
-        const result = await descriptor.connection.query({
-            text: "SELECT to_regclass($1) AS table_name",
-            values: ["public._smithers_runs"],
-        });
-        if (!result.rows?.[0]?.table_name) {
-            throw new SmithersError("CLI_DB_NOT_FOUND", "No Smithers run table found in the resolved backend. Run 'smithers up <workflow>' to start a run first.");
-        }
+function assertRunsTableExists(choice) {
+    if (choice.backend === "pglite" && !choice.pglite?.hasRunsTable) {
+        throw new SmithersError("CLI_DB_NOT_FOUND", "No Smithers run table found in the resolved backend. Run 'smithers up <workflow>' to start a run first.");
     }
+    if (choice.backend === "postgres" && !choice.postgres?.hasRunsTable) {
+        throw new SmithersError("CLI_DB_NOT_FOUND", "No Smithers run table found in the resolved backend. Run 'smithers up <workflow>' to start a run first.");
+    }
+}
+
+async function openPostgresStore(choice, opts) {
+    const env = opts.env ?? process.env;
+    const pgModule = await import("pg");
+    const pg = pgModule.default ?? pgModule;
+    pg.types.setTypeParser(20, (value) => (value === null ? null : Number(value)));
+    /** @type {Array<() => Promise<void>>} */
+    const teardown = [];
+    let connectionString = opts.connectionString ?? env.SMITHERS_POSTGRES_URL ?? env.DATABASE_URL;
+    if (choice.backend === "pglite") {
+        const cwd = resolve(opts.cwd ?? process.cwd());
+        const dataDir = resolve(cwd, opts.pgliteDataDir ?? join(choice.workspaceRoot, ".smithers", "pg"));
+        const { PGlite } = await import("@electric-sql/pglite");
+        const { PGLiteSocketServer } = await import("@electric-sql/pglite-socket");
+        const pglite = await PGlite.create(dataDir);
+        const port = await findFreePgPort();
+        const server = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port, maxConnections: 5 });
+        await server.start();
+        teardown.push(async () => {
+            await server.stop().catch(() => {});
+            await pglite.close().catch(() => {});
+        });
+        connectionString = `postgres://postgres@127.0.0.1:${port}/postgres`;
+    }
+    const client = new pg.Client(connectionString ? { connectionString } : opts.connection);
+    try {
+        await client.connect();
+        teardown.push(async () => {
+            await client.end().catch(() => {});
+        });
+        const descriptor = { dialect: "postgres", connection: client, schema: {} };
+        return {
+            adapter: new SmithersDb(descriptor),
+            db: descriptor,
+            cleanup: async () => {
+                for (const fn of teardown.reverse()) {
+                    await fn();
+                }
+            },
+        };
+    }
+    catch (error) {
+        for (const fn of teardown.reverse()) {
+            await fn().catch(() => {});
+        }
+        throw error;
+    }
+}
+
+async function findFreePgPort() {
+    const net = await import("node:net");
+    return new Promise((resolveFn, reject) => {
+        const srv = net.createServer();
+        srv.unref();
+        srv.on("error", reject);
+        srv.listen(0, "127.0.0.1", () => {
+            const address = srv.address();
+            srv.close(() => {
+                if (address && typeof address === "object") resolveFn(address.port);
+                else reject(new Error("Could not allocate a local PGlite socket port"));
+            });
+        });
+    });
 }
 
 async function retryNotFound(fn, wait = {}) {
@@ -104,11 +164,18 @@ export async function openSmithersStore(opts = {}) {
                 cleanup: opened.cleanup,
             };
         }
+        if (mode === "read") {
+            assertRunsTableExists(choice);
+            const opened = await openPostgresStore(choice, opts);
+            return {
+                choice,
+                adapter: opened.adapter,
+                db: opened.db,
+                cleanup: opened.cleanup,
+            };
+        }
         const api = await openSmithersBackend({}, opts);
         try {
-            if (mode === "read") {
-                await assertRunsTableExists(api.db);
-            }
             return {
                 choice,
                 adapter: new SmithersDb(api.db),

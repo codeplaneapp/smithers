@@ -300,6 +300,25 @@ function setupSqliteCleanup(workflow) {
     // happens and the run is left stuck "running" until its heartbeat goes stale.
     process.on("exit", closeSqlite);
 }
+
+async function closeWorkflowBackend(workflow) {
+    const close = workflow?.close ?? workflow?.db?.close;
+    if (typeof close === "function") {
+        await close.call(workflow?.close ? workflow : workflow.db);
+    }
+}
+
+function redactConnectionStringForCli(value) {
+    if (!value) return value;
+    try {
+        const url = new URL(String(value));
+        const auth = url.username || url.password ? "<redacted>:<redacted>@" : "";
+        return `${url.protocol}//${auth}${url.host}${url.pathname}${url.search}${url.hash}`;
+    }
+    catch {
+        return "<redacted>";
+    }
+}
 function buildProgressReporter() {
     const startTime = Date.now();
     const formatElapsed = () => {
@@ -2215,12 +2234,14 @@ async function runGatewayCommand(options) {
     const workspaceWorkflow = workspaceApi.smithers(() => React.createElement(workspaceApi.Workflow, { name: "workspace" }));
     ensureSmithersTables(workspaceWorkflow.db);
     setupSqliteCleanup(workspaceWorkflow);
+    const backendCleanups = [() => workspaceApi.close?.()];
     const workflows = [];
     for (const discovered of discoverWorkflows(workspace)) {
         try {
             const workflow = await loadWorkflow(discovered.entryFile);
             ensureSmithersTables(workflow.db);
             setupSqliteCleanup(workflow);
+            backendCleanups.push(() => closeWorkflowBackend(workflow));
             // Auto-mount a custom UI when the workspace provides
             // .smithers/ui/<id>.tsx, so `smithers gateway` serves workflow UIs
             // without requiring a hand-written .smithers/gateway.ts.
@@ -2269,7 +2290,11 @@ async function runGatewayCommand(options) {
                 .catch((error) => {
                 process.stderr.write(`[smithers] Gateway shutdown error: ${error?.message ?? String(error)}\n`);
             })
-                .then(() => workspaceApi.close?.())
+                .then(async () => {
+                for (const cleanup of backendCleanups.reverse()) {
+                    await cleanup?.();
+                }
+            })
                 .catch((error) => {
                 process.stderr.write(`[smithers] Backend shutdown error: ${error?.message ?? String(error)}\n`);
             })
@@ -3449,9 +3474,10 @@ const cli = Cli.create({
                 });
             }
             if (c.options.agent) {
+                const redactedUrl = redactConnectionStringForCli(c.options.url);
                 return fail({
                     code: "MIGRATION_AGENT_REQUIRED",
-                    message: `Deterministic migration repair guidance is available from smithers migrate errors. Agent-assisted migration repair is tracked as a follow-up and is not available in this build; no migrate-repair workflow is installed. Run deterministic migration with:\n  smithers migrate --from ${c.options.from ?? "<source>"} --to ${c.options.to}${c.options.url ? ` --url ${c.options.url}` : ""}`,
+                    message: `Deterministic migration repair guidance is available from smithers migrate errors. Agent-assisted migration repair is tracked as a follow-up and is not available in this build; no migrate-repair workflow is installed. Run deterministic migration with:\n  smithers migrate --from ${c.options.from ?? "<source>"} --to ${c.options.to}${redactedUrl ? ` --url ${redactedUrl}` : ""}`,
                     exitCode: 4,
                 });
             }

@@ -75,6 +75,9 @@ const LEGACY_COLUMN_MIGRATIONS = [
         name: "Add legacy run operational columns",
         table: "_smithers_runs",
         columns: [
+            ["workflow_path", "workflow_path TEXT"],
+            ["started_at_ms", "started_at_ms INTEGER"],
+            ["finished_at_ms", "finished_at_ms INTEGER"],
             ["workflow_hash", "workflow_hash TEXT"],
             ["heartbeat_at_ms", "heartbeat_at_ms INTEGER"],
             ["runtime_owner_id", "runtime_owner_id TEXT"],
@@ -125,6 +128,12 @@ const LEGACY_COLUMN_MIGRATIONS = [
         name: "Add frame encoding column",
         table: "_smithers_frames",
         columns: [["encoding", "encoding TEXT NOT NULL DEFAULT 'full'"]],
+    },
+    {
+        id: "0007_event_timestamp_column",
+        name: "Add event timestamp column",
+        table: "_smithers_events",
+        columns: [["timestamp_ms", "timestamp_ms INTEGER NOT NULL DEFAULT 0"]],
     },
 ];
 
@@ -810,7 +819,8 @@ export async function runSmithersSchemaMigrationsPostgres(pgConn, context) {
     await pgConn.query({ text: translateDdl(POSTGRES, MIGRATION_TABLE_SQL) });
     const applied = await loadAppliedMigrationIdsPostgres(pgConn);
     for (const migration of buildMigrations(context)) {
-        if (applied.has(migration.id)) {
+        const alreadyAppliedInLedger = applied.has(migration.id);
+        if (alreadyAppliedInLedger && migration.isAppliedPostgres && await migration.isAppliedPostgres(pgConn)) {
             continue;
         }
         const details = await runPostgresMigrationSpan(migration, async () => {

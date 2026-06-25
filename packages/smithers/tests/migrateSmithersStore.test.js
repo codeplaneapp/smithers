@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
+import { SmithersDb } from "../../db/src/adapter.js";
+import { ensureSmithersTables } from "../../db/src/ensure.js";
 import { forkRun, getBranchInfo, listBranches } from "@smithers-orchestrator/time-travel/fork";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import pg from "pg";
 import { createSmithers } from "../src/create.js";
 import { migrateSmithersStore } from "../src/migrateSmithersStore.js";
 import { openSmithersBackend } from "../src/openSmithersBackend.js";
+import { createSmithersPostgres } from "../src/create.js";
+import { openSmithersStore } from "../src/openSmithersStore.js";
 import { resolveSmithersBackendChoice } from "../src/resolveSmithersBackendChoice.js";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,6 +20,7 @@ setDefaultTimeout(120_000);
 
 /** @type {string[]} */
 const tempDirs = [];
+const PG_URL = process.env.SMITHERS_TEST_PG_URL;
 
 function makeWorkspace(name) {
   const dir = join(tmpdir(), `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -36,8 +40,7 @@ afterEach(() => {
   }
 });
 
-function seedSqliteStore(cwd) {
-  const dbPath = join(cwd, "smithers.db");
+function seedSqliteStore(cwd, dbPath = join(cwd, "smithers.db")) {
   const api = createSmithers({
     input: z.object({ prompt: z.string().nullable() }),
     result: z.object({
@@ -71,6 +74,42 @@ function seedSqliteStore(cwd) {
   return dbPath;
 }
 
+function seedOlderSqliteStore(cwd) {
+  const dbPath = join(cwd, "smithers.db");
+  const sqlite = new Database(dbPath);
+  sqlite.exec(`
+    CREATE TABLE _smithers_runs (
+      run_id TEXT PRIMARY KEY,
+      workflow_name TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL
+    );
+    CREATE TABLE _smithers_frames (
+      run_id TEXT NOT NULL,
+      frame_no INTEGER NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      xml_json TEXT NOT NULL,
+      xml_hash TEXT NOT NULL,
+      PRIMARY KEY (run_id, frame_no)
+    );
+    CREATE TABLE _smithers_events (
+      run_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      PRIMARY KEY (run_id, seq)
+    );
+    INSERT INTO _smithers_runs (run_id, workflow_name, status, created_at_ms)
+      VALUES ('run-old-1', 'old-workflow', 'finished', 100);
+    INSERT INTO _smithers_frames (run_id, frame_no, created_at_ms, xml_json, xml_hash)
+      VALUES ('run-old-1', 0, 101, '{"kind":"element"}', 'hash-old');
+    INSERT INTO _smithers_events (run_id, seq, type, payload_json)
+      VALUES ('run-old-1', 1, 'RunStarted', '{"runId":"run-old-1"}');
+  `);
+  sqlite.close();
+  return dbPath;
+}
+
 async function tableCount(pgConn, table) {
   const rows = await pgConn.query({ text: `SELECT COUNT(*) AS count FROM "${table.replaceAll('"', '""')}"` });
   return Number(rows.rows[0].count);
@@ -78,6 +117,38 @@ async function tableCount(pgConn, table) {
 
 function quoteId(identifier) {
   return `"${String(identifier).replaceAll('"', '""')}"`;
+}
+
+function tempPgDatabaseName(prefix) {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+}
+
+function pgUrlForDatabase(baseUrl, database) {
+  const url = new URL(baseUrl);
+  url.pathname = `/${database}`;
+  return url.toString();
+}
+
+async function withTempPostgresDatabase(prefix, fn) {
+  const database = tempPgDatabaseName(prefix);
+  const admin = new pg.Client({ connectionString: PG_URL });
+  await admin.connect();
+  await admin.query(`CREATE DATABASE ${quoteId(database)}`);
+  await admin.end();
+
+  const url = pgUrlForDatabase(PG_URL, database);
+  try {
+    return await fn(url);
+  } finally {
+    const cleanup = new pg.Client({ connectionString: PG_URL });
+    await cleanup.connect();
+    await cleanup.query(
+      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
+      [database],
+    ).catch(() => {});
+    await cleanup.query(`DROP DATABASE IF EXISTS ${quoteId(database)}`).catch(() => {});
+    await cleanup.end().catch(() => {});
+  }
 }
 
 function listSourceTables(sqlite) {
@@ -158,6 +229,26 @@ function sqliteRunIds(dbPath) {
   }
 }
 
+function assertSqlitePrimaryKeyAndDuplicateRejection(dbPath) {
+  const sqlite = new Database(dbPath);
+  try {
+    const primaryKeyColumns = sqlite
+      .query("PRAGMA table_info(_smithers_runs)")
+      .all()
+      .filter((row) => Number(row.pk) > 0)
+      .map((row) => row.name);
+    expect(primaryKeyColumns).toEqual(["run_id"]);
+    expect(sqlite.query("PRAGMA index_list(_smithers_runs)").all().length).toBeGreaterThan(0);
+    expect(() => {
+      sqlite
+        .query("INSERT INTO _smithers_runs (run_id, workflow_name, workflow_path, status, created_at_ms) VALUES (?, ?, ?, ?, ?)")
+        .run("run-migrate-1", "dup", "dup.tsx", "finished", 99);
+    }).toThrow();
+  } finally {
+    sqlite.close();
+  }
+}
+
 describe("migrateSmithersStore", () => {
   test("copies a SQLite Smithers store to PGlite row-for-row and writes migrated.json", async () => {
     const cwd = makeWorkspace("smithers-migrate-pglite");
@@ -208,6 +299,35 @@ describe("migrateSmithersStore", () => {
       const vector = await pgConn.query({ text: "SELECT dimensions, embedding FROM _smithers_vectors" });
       expect(vector.rows[0].dimensions).toBe(4);
       expect(Buffer.from(vector.rows[0].embedding).toString("hex")).toBe("01020304");
+    } finally {
+      await closeApi(api);
+    }
+  });
+
+  test("infers nested .smithers/smithers.db as the SQLite source when it has runs", async () => {
+    const cwd = makeWorkspace("smithers-migrate-nested-sqlite");
+    const nestedDbPath = seedSqliteStore(cwd, join(cwd, ".smithers", "smithers.db"));
+
+    const result = await migrateSmithersStore({ cwd, to: "pglite" });
+
+    expect(result.backend).toBe("pglite");
+    expect(result.dbPath).toBe(nestedDbPath);
+    expect(result.runCount).toBe(1);
+
+    const api = await openSmithersBackend({}, { cwd, backend: "pglite", env: {} });
+    try {
+      const pgConn = api.db.connection;
+      expect(await tableCount(pgConn, "_smithers_runs")).toBe(1);
+      const output = await pgConn.query({ text: 'SELECT run_id, node_id, iteration, value, ok FROM "result"' });
+      expect(output.rows).toEqual([
+        {
+          run_id: "run-migrate-1",
+          node_id: "write-result",
+          iteration: 0,
+          value: 42,
+          ok: 1,
+        },
+      ]);
     } finally {
       await closeApi(api);
     }
@@ -551,5 +671,138 @@ describe("migrateSmithersStore", () => {
     });
     expect(choice.sqlite.runCount).toBe(1);
     expect(choice.pglite.runCount).toBe(1);
+  });
+
+  test("upgrades an older SQLite source before read and migration to PGlite", async () => {
+    const cwd = makeWorkspace("smithers-migrate-older-sqlite");
+    const dbPath = seedOlderSqliteStore(cwd);
+
+    const readStore = await openSmithersStore({ cwd, mode: "read", backend: "sqlite", env: {} });
+    await readStore.cleanup?.();
+
+    let sqlite = new Database(dbPath, { readonly: true });
+    try {
+      const runColumns = sqlite.query("PRAGMA table_info(_smithers_runs)").all().map((row) => row.name);
+      const eventColumns = sqlite.query("PRAGMA table_info(_smithers_events)").all().map((row) => row.name);
+      expect(runColumns).toEqual(expect.arrayContaining(["workflow_path", "started_at_ms", "finished_at_ms"]));
+      expect(eventColumns).toContain("timestamp_ms");
+      expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_runs").get().count).toBe(1);
+    } finally {
+      sqlite.close();
+    }
+
+    const result = await migrateSmithersStore({ cwd, from: "sqlite", to: "pglite" });
+    expect(result.schemaVersion).toBe("0018");
+
+    const api = await openSmithersBackend({}, { cwd, backend: "pglite", env: {} });
+    try {
+      const pgConn = api.db.connection;
+      const run = await pgConn.query({
+        text: "SELECT run_id, workflow_path, started_at_ms, finished_at_ms FROM _smithers_runs WHERE run_id = $1",
+        values: ["run-old-1"],
+      });
+      expect(run.rows).toEqual([
+        {
+          run_id: "run-old-1",
+          workflow_path: null,
+          started_at_ms: null,
+          finished_at_ms: null,
+        },
+      ]);
+      const event = await pgConn.query({
+        text: "SELECT run_id, seq, timestamp_ms FROM _smithers_events WHERE run_id = $1 AND seq = $2",
+        values: ["run-old-1", 1],
+      });
+      expect(event.rows).toEqual([{ run_id: "run-old-1", seq: 1, timestamp_ms: 0 }]);
+    } finally {
+      await closeApi(api);
+    }
+
+    sqlite = new Database(dbPath, { readonly: true });
+    try {
+      expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_runs").get().count).toBe(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+const postgresTest = PG_URL ? test : test.skip;
+
+describe("migrateSmithersStore real postgres", () => {
+  postgresTest("copies a SQLite Smithers store to real Postgres row-for-row", async () => {
+    await withTempPostgresDatabase("smithers_migrate_sqlite_pg", async (url) => {
+      const cwd = makeWorkspace("smithers-migrate-sqlite-postgres");
+      const dbPath = seedSqliteStore(cwd);
+
+      const result = await migrateSmithersStore({ cwd, from: "sqlite", to: "postgres", url, env: {} });
+
+      expect(result.backend).toBe("postgres");
+      expect(result.source.backend).toBe("sqlite");
+      expect(result.target).toMatchObject({ backend: "postgres", url: "set" });
+      expect(result.runCount).toBe(1);
+      expect(result.schemaVersion).toBe("0018");
+      expect(existsSync(result.markerPath)).toBe(true);
+
+      const api = await openSmithersBackend({}, { cwd, backend: "postgres", connectionString: url, env: {} });
+      try {
+        await assertRowForRowEquality(dbPath, api.db.connection);
+        expect(await tableCount(api.db.connection, "_smithers_runs")).toBe(1);
+      } finally {
+        await closeApi(api);
+      }
+    });
+  });
+
+  postgresTest("copies a real Postgres Smithers store back to SQLite with keys and indexes", async () => {
+    await withTempPostgresDatabase("smithers_migrate_pg_sqlite", async (url) => {
+      const cwd = makeWorkspace("smithers-migrate-postgres-sqlite");
+      seedSqliteStore(cwd);
+      await migrateSmithersStore({ cwd, from: "sqlite", to: "postgres", url, env: {} });
+      rmSync(join(cwd, "smithers.db"), { force: true });
+      rmSync(join(cwd, ".smithers", "migrated.json"), { force: true });
+      rmSync(join(cwd, ".smithers", "backend.json"), { force: true });
+
+      const result = await migrateSmithersStore({ cwd, from: "postgres", to: "sqlite", url, env: {} });
+
+      expect(result.backend).toBe("sqlite");
+      expect(result.source).toMatchObject({ backend: "postgres", url: "set" });
+      expect(result.runCount).toBe(1);
+      expect(sqliteRunIds(join(cwd, "smithers.db"))).toEqual(["run-migrate-1"]);
+      assertSqlitePrimaryKeyAndDuplicateRejection(join(cwd, "smithers.db"));
+    });
+  });
+
+  postgresTest("copies a PGlite Smithers store to real Postgres row-for-row", async () => {
+    await withTempPostgresDatabase("smithers_migrate_pglite_pg", async (url) => {
+      const cwd = makeWorkspace("smithers-migrate-pglite-postgres");
+      const sqliteSourcePath = await seedPgliteStore(cwd);
+
+      const result = await migrateSmithersStore({ cwd, from: "sqlite", to: "postgres", url, dbPath: sqliteSourcePath, env: {} });
+
+      expect(result.backend).toBe("postgres");
+      expect(result.source.backend).toBe("sqlite");
+
+      // Open both comparison stores directly (not via the resolver): this
+      // workspace deliberately keeps an unmarked SQLite store beside the PGlite
+      // one, so resolveSmithersBackendChoice correctly refuses to disambiguate.
+      // The migrate path itself opens stores this way (createSmithersPostgres).
+      const sourceApi = await createSmithersPostgres({}, { provider: "pglite", dataDir: join(cwd, ".smithers", "pg") });
+      const targetApi = await createSmithersPostgres({}, { provider: "postgres", connectionString: url });
+      try {
+        const tables = await sourceApi.db.connection.query({
+          text: "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' ORDER BY table_name",
+        });
+        for (const row of tables.rows) {
+          const table = row.table_name;
+          const sourceCount = await tableCount(sourceApi.db.connection, table);
+          const targetCount = await tableCount(targetApi.db.connection, table);
+          expect({ table, targetCount }).toEqual({ table, targetCount: sourceCount });
+        }
+      } finally {
+        await closeApi(targetApi);
+        await closeApi(sourceApi);
+      }
+    });
   });
 });

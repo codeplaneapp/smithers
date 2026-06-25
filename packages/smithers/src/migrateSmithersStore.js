@@ -3,8 +3,8 @@ import { Effect } from "effect";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { POSTGRES, quoteIdentifier, translateDdl } from "@smithers-orchestrator/db/dialect";
+import { ensureSmithersTables } from "../../db/src/ensure.js";
+import { POSTGRES, quoteIdentifier, translateDdl } from "../../db/src/dialect.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { createSmithersPostgres } from "./create.js";
 import { findSmithersAnchorDir } from "./findSmithersAnchorDir.js";
@@ -539,6 +539,41 @@ function isUnopenableSqliteError(error) {
 }
 
 /**
+ * Bring an older SQLite source up to the current Smithers schema before the
+ * deterministic copy opens its read-only transaction. This preserves the
+ * rollback-friendly copy path while avoiding a stale schema on the target.
+ *
+ * @param {string} dbPath
+ */
+function upgradeSqliteSourceStore(dbPath) {
+    /** @type {Database | undefined} */
+    let sqlite;
+    try {
+        sqlite = new Database(dbPath);
+        ensureSmithersTables(drizzle(sqlite));
+    }
+    catch (error) {
+        if (isCorruptSqliteError(error)) {
+            const original = error instanceof Error ? error.message : String(error);
+            throw new SmithersError("DB_QUERY_FAILED", `The legacy SQLite store at ${dbPath} appears to be corrupted (${original}). Smithers cannot migrate a corrupt store. Verify with: sqlite3 ${dbPath} 'PRAGMA integrity_check'. If it reports corruption, restore from a backup or start fresh; the original file was left untouched.`, { dbPath }, { cause: error });
+        }
+        if (isUnopenableSqliteError(error)) {
+            const original = error instanceof Error ? error.message : String(error);
+            throw new SmithersError("DB_QUERY_FAILED", `Could not open the legacy SQLite store at ${dbPath} (${original}). It may be locked by another process, have unreadable permissions, or be missing its -wal/-shm sidecar files (copy smithers.db together with smithers.db-wal and smithers.db-shm). The original file was left untouched.`, { dbPath }, { cause: error });
+        }
+        throw error;
+    }
+    finally {
+        try {
+            sqlite?.close();
+        }
+        catch {
+            // Best-effort source cleanup before the read-only copy opens.
+        }
+    }
+}
+
+/**
  * Open the legacy SQLite source and read its schema-level metadata. A corrupt,
  * encrypted, or non-SQLite file fails here (open, BEGIN, or the first query);
  * we wrap that into an actionable SmithersError so the CLI maps it to a clean
@@ -614,6 +649,41 @@ async function pgColumns(pgConn, table) {
     })).filter((column) => typeof column.name === "string");
 }
 
+async function pgPrimaryKeyColumns(pgConn, table) {
+    const result = await pgConn.query({
+        text: `
+          SELECT a.attname AS column_name
+          FROM pg_index i
+          JOIN pg_class c ON c.oid = i.indrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey)
+          WHERE n.nspname = current_schema()
+            AND c.relname = $1
+            AND i.indisprimary
+          ORDER BY array_position(i.indkey, a.attnum)
+        `,
+        values: [table],
+    });
+    return (result.rows ?? []).map((row) => row.column_name).filter((name) => typeof name === "string");
+}
+
+async function pgIndexes(pgConn, table) {
+    const result = await pgConn.query({
+        text: `
+          SELECT indexname, indexdef
+          FROM pg_indexes
+          WHERE schemaname = current_schema()
+            AND tablename = $1
+            AND indexname NOT LIKE '%_pkey'
+          ORDER BY indexname
+        `,
+        values: [table],
+    });
+    return (result.rows ?? [])
+        .map((row) => ({ name: row.indexname, sql: row.indexdef }))
+        .filter((row) => typeof row.name === "string" && typeof row.sql === "string");
+}
+
 function sqliteTypeForPg(dataType) {
     const type = String(dataType ?? "").toLowerCase();
     if (type.includes("int") || type === "boolean") return "INTEGER";
@@ -656,11 +726,27 @@ async function prepareSqliteTarget(sqlite, pgConn, tables) {
             }
             continue;
         }
+        const primaryKeyColumns = await pgPrimaryKeyColumns(pgConn, table);
         const columnSql = columns
             .map((column) => `${sqliteQuote(column.name)} ${sqliteTypeForPg(column.dataType)}${column.nullable ? "" : " NOT NULL"}`)
             .join(", ");
-        sqlite.exec(`CREATE TABLE IF NOT EXISTS ${sqliteQuote(table)} (${columnSql})`);
+        const pkSql = primaryKeyColumns.length > 0
+            ? `, PRIMARY KEY (${primaryKeyColumns.map(sqliteQuote).join(", ")})`
+            : "";
+        sqlite.exec(`CREATE TABLE IF NOT EXISTS ${sqliteQuote(table)} (${columnSql}${pkSql})`);
+        for (const index of await pgIndexes(pgConn, table)) {
+            const indexSql = index.sql
+                .replace(/\bCREATE\s+(UNIQUE\s+)?INDEX\s+/i, (_match, unique = "") => `CREATE ${unique}INDEX IF NOT EXISTS `)
+                .replace(/\s+USING\s+btree\b/gi, "");
+            sqlite.exec(indexSql);
+        }
     }
+}
+
+async function stablePgOrderClause(pgConn, table, names) {
+    const pk = await pgPrimaryKeyColumns(pgConn, table);
+    const orderColumns = pk.length > 0 ? pk : names;
+    return orderColumns.length > 0 ? ` ORDER BY ${orderColumns.map(quoteIdentifier).join(", ")}` : "";
 }
 
 async function copyPgTableToSqlite(pgConn, sqlite, table, batchSize, opts) {
@@ -673,16 +759,17 @@ async function copyPgTableToSqlite(pgConn, sqlite, table, batchSize, opts) {
     }
     const names = columns.map((column) => column.name);
     const insert = sqlite.query(`INSERT INTO ${sqliteQuote(table)} (${names.map(sqliteQuote).join(", ")}) VALUES (${names.map(() => "?").join(", ")})`);
-    let offset = 0;
     let copiedRows = 0;
+    const orderClause = await stablePgOrderClause(pgConn, table, names);
     sqlite.exec("BEGIN");
     try {
         if (table === "_smithers_schema_migrations") {
             sqlite.exec(`DELETE FROM ${sqliteQuote(table)}`);
         }
+        let offset = 0;
         while (true) {
             const result = await pgConn.query({
-                text: `SELECT ${names.map(quoteIdentifier).join(", ")} FROM ${quoteIdentifier(table)} LIMIT $1 OFFSET $2`,
+                text: `SELECT ${names.map(quoteIdentifier).join(", ")} FROM ${quoteIdentifier(table)}${orderClause} LIMIT $1 OFFSET $2`,
                 values: [batchSize, offset],
             });
             const rows = result.rows ?? [];
@@ -708,6 +795,23 @@ async function copyPgTableToSqlite(pgConn, sqlite, table, batchSize, opts) {
     return { table, sourceRows, targetRows, durationMs };
 }
 
+function assertSqliteTargetValid(sqlite) {
+    const integrity = sqlite.query("PRAGMA integrity_check").all();
+    if (integrity.length !== 1 || integrity[0]?.integrity_check !== "ok") {
+        throw new SmithersError("DB_WRITE_FAILED", `SQLite integrity_check failed after migration: ${JSON.stringify(integrity)}`);
+    }
+    const fk = sqlite.query("PRAGMA foreign_key_check").all();
+    if (fk.length > 0) {
+        throw new SmithersError("DB_WRITE_FAILED", `SQLite foreign_key_check failed after migration: ${JSON.stringify(fk)}`);
+    }
+    for (const table of ["_smithers_runs"]) {
+        const pk = sqlite.query(`PRAGMA table_info(${sqliteQuote(table)})`).all().filter((row) => Number(row.pk) > 0).map((row) => row.name);
+        if (pk.length === 0) {
+            throw new SmithersError("DB_WRITE_FAILED", `Migrated SQLite table ${table} is missing a primary key.`);
+        }
+    }
+}
+
 function sqliteRunCountAt(dbPath) {
     if (!existsSync(dbPath)) return 0;
     try {
@@ -722,6 +826,18 @@ function sqliteRunCountAt(dbPath) {
     catch {
         return 0;
     }
+}
+
+function inferSqliteSourceDbPath(primaryDbPath, workspaceRoot, hasExplicitDbPath) {
+    const candidates = hasExplicitDbPath
+        ? [primaryDbPath]
+        : [primaryDbPath, join(workspaceRoot, ".smithers", "smithers.db")];
+    for (const candidate of [...new Set(candidates)]) {
+        if (sqliteRunCountAt(candidate) > 0) {
+            return candidate;
+        }
+    }
+    return primaryDbPath;
 }
 
 async function pgliteRunCountAt(cwd, workspaceRoot, opts) {
@@ -744,8 +860,9 @@ async function pgliteRunCountAt(cwd, workspaceRoot, opts) {
 async function inferSourceBackend(opts, cwd, workspaceRoot, dbPath, target) {
     if (opts.from) return normalizeBackend(opts.from);
     const counts = [
-        { backend: "sqlite", runCount: sqliteRunCountAt(dbPath) },
+        { backend: "sqlite", runCount: sqliteRunCountAt(inferSqliteSourceDbPath(dbPath, workspaceRoot, Boolean(opts.dbPath))) },
         { backend: "pglite", runCount: await pgliteRunCountAt(cwd, workspaceRoot, opts) },
+        { backend: "postgres", runCount: await postgresRunCountAt(opts) },
     ].filter((entry) => entry.runCount > 0);
     if (counts.length === 1) return counts[0].backend;
     if (counts.length > 1) {
@@ -754,6 +871,25 @@ async function inferSourceBackend(opts, cwd, workspaceRoot, dbPath, target) {
         });
     }
     return "sqlite";
+}
+
+async function postgresRunCountAt(opts) {
+    const env = opts.env ?? process.env;
+    const connectionString = opts.url ?? env.SMITHERS_POSTGRES_URL ?? env.DATABASE_URL;
+    if (!connectionString) return 0;
+    let client;
+    try {
+        const pg = await import("pg");
+        client = new pg.Client({ connectionString });
+        await client.connect();
+        return (await pgTableExists(client, "_smithers_runs")) ? await countPgRows(client, "_smithers_runs") : 0;
+    }
+    catch {
+        return 0;
+    }
+    finally {
+        await client?.end?.().catch(() => {});
+    }
 }
 
 async function migratePgToSqlite(opts, context) {
@@ -791,6 +927,7 @@ async function migratePgToSqlite(opts, context) {
                 });
             }
         }
+        assertSqliteTargetValid(sqlite);
         const durationMs = Date.now() - startedAt;
         const result = {
             backend: target,
@@ -834,9 +971,12 @@ export async function migrateSmithersStore(opts = {}) {
     const cwd = resolve(opts.cwd ?? process.cwd());
     const env = opts.env ?? process.env;
     const workspaceRoot = findSmithersAnchorDir(cwd) ?? cwd;
-    const dbPath = resolve(cwd, opts.dbPath ?? join(workspaceRoot, "smithers.db"));
+    const requestedDbPath = resolve(cwd, opts.dbPath ?? join(workspaceRoot, "smithers.db"));
     const target = normalizeBackend(opts.to, "sqlite");
-    const sourceBackend = await inferSourceBackend(opts, cwd, workspaceRoot, dbPath, target);
+    const sourceBackend = await inferSourceBackend(opts, cwd, workspaceRoot, requestedDbPath, target);
+    const dbPath = sourceBackend === "sqlite"
+        ? inferSqliteSourceDbPath(requestedDbPath, workspaceRoot, Boolean(opts.dbPath))
+        : requestedDbPath;
     if (sourceBackend === target) {
         throw new SmithersError("INVALID_INPUT", `Migration source and target are both ${target}. Choose different --from and --to backends.`, {
             sourceBackend,
@@ -881,6 +1021,7 @@ export async function migrateSmithersStore(opts = {}) {
     /** @type {(import("./CreateSmithersApi.ts").CreateSmithersApi<Record<string, import("zod").ZodObject<any>>> & { close?: () => Promise<void> }) | undefined} */
     let targetApi;
     try {
+        upgradeSqliteSourceStore(dbPath);
         const source = openSourceStore(dbPath);
         sqlite = source.sqlite;
         const { runCount, schemaVersion, tables, indexes } = source;

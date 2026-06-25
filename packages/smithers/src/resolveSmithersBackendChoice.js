@@ -123,13 +123,6 @@ async function loadConfigBackend(configPath) {
 
 /**
  * @param {string} workspaceRoot
- */
-function hasMigratedMarker(workspaceRoot) {
-    return existsSync(join(workspaceRoot, ".smithers", "migrated.json"));
-}
-
-/**
- * @param {string} workspaceRoot
  * @returns {"sqlite" | "pglite" | "postgres" | undefined}
  */
 function readBackendMarker(workspaceRoot) {
@@ -143,6 +136,27 @@ function readBackendMarker(workspaceRoot) {
     }
     catch {
         return undefined;
+    }
+}
+
+/**
+ * @param {string} workspaceRoot
+ * @returns {{ exists: boolean; backend?: "sqlite" | "pglite" | "postgres" }}
+ */
+function readMigratedMarker(workspaceRoot) {
+    const markerPath = join(workspaceRoot, ".smithers", "migrated.json");
+    if (!existsSync(markerPath)) {
+        return { exists: false };
+    }
+    try {
+        const parsed = JSON.parse(readFileSync(markerPath, "utf8"));
+        return {
+            exists: true,
+            backend: normalizeBackend(parsed?.target?.backend ?? parsed?.target ?? parsed?.backend, markerPath),
+        };
+    }
+    catch {
+        return { exists: true };
     }
 }
 
@@ -175,7 +189,7 @@ async function inspectPgliteStore(details) {
         const schemaVersion = typeof headId === "string"
             ? (headId.match(/^\d+/)?.[0] ?? headId)
             : DEFAULT_PG_SCHEMA_VERSION;
-        return { dataDir, exists: true, initialized: true, runCount, schemaVersion };
+        return { dataDir, exists: true, initialized: true, hasRunsTable: hasRuns, runCount, schemaVersion };
     }
     catch (error) {
         return {
@@ -229,7 +243,7 @@ async function inspectPostgresStore(details) {
         const schemaVersion = typeof headId === "string"
             ? (headId.match(/^\d+/)?.[0] ?? headId)
             : DEFAULT_PG_SCHEMA_VERSION;
-        return { exists: true, initialized: true, runCount, schemaVersion, connectionString: details.connectionString ? "set" : undefined };
+        return { exists: true, initialized: true, hasRunsTable: hasRuns, runCount, schemaVersion, connectionString: details.connectionString ? "set" : undefined };
     }
     catch (error) {
         return {
@@ -293,6 +307,21 @@ function backendConflictError(details) {
 }
 
 /**
+ * @param {{ targetBackend: "pglite" | "postgres"; sqlite: { dbPath: string; runCount: number; schemaVersion: string }; targetLocation: string }} details
+ */
+function missingMigratedTargetError(details) {
+    const targetLabel = backendLabel(details.targetBackend);
+    return new SmithersError("SMITHERS_MIGRATION_REQUIRED", `Found a migration receipt for ${targetLabel}, but the migrated ${targetLabel} store at ${details.targetLocation} has no run history while the legacy SQLite store at ${details.sqlite.dbPath} still contains ${details.sqlite.runCount} runs. Refusing to use stale SQLite data.\n\n  Restore or point Smithers at the migrated ${targetLabel} store.\n  Or rerun migration: smithers migrate --from sqlite --to ${details.targetBackend}`, {
+        sourceBackend: "sqlite",
+        targetBackend: details.targetBackend,
+        dbPath: details.sqlite.dbPath,
+        runCount: details.sqlite.runCount,
+        schemaVersion: details.sqlite.schemaVersion,
+        targetLocation: details.targetLocation,
+    });
+}
+
+/**
  * @param {ReturnType<typeof migrationRequiredError>} error
  */
 async function emitMigrationRequired(error) {
@@ -326,7 +355,8 @@ export async function resolveSmithersBackendChoice(opts = {}) {
     const explicitBackend = normalizeBackend(opts.backend, "options.backend");
     const envBackend = normalizeBackend(env.SMITHERS_BACKEND, "SMITHERS_BACKEND");
     const configBackend = explicitBackend || envBackend ? undefined : await loadConfigBackend(configPath);
-    const markerBackend = explicitBackend || envBackend || configBackend ? undefined : readBackendMarker(workspaceRoot);
+    const migratedMarker = readMigratedMarker(workspaceRoot);
+    const markerBackend = explicitBackend || envBackend || configBackend ? undefined : (readBackendMarker(workspaceRoot) ?? migratedMarker.backend);
     const backend = explicitBackend ?? envBackend ?? configBackend ?? markerBackend ?? "sqlite";
     const source = explicitBackend ? "options" : envBackend ? "env" : configBackend ? "config" : markerBackend ? "marker" : "default";
     const sqliteStore = inspectLegacySqliteStore(dbPath, workspaceRoot, Boolean(opts.dbPath));
@@ -340,7 +370,7 @@ export async function resolveSmithersBackendChoice(opts = {}) {
             connection: opts.connection,
         })
         : { exists: false, initialized: false, runCount: 0, schemaVersion: DEFAULT_PG_SCHEMA_VERSION };
-    const marker = hasMigratedMarker(workspaceRoot);
+    const marker = migratedMarker.exists;
     const populated = [
         ...(sqliteStore.runCount > 0 ? [{ backend: /** @type {"sqlite"} */ ("sqlite"), location: sqliteStore.dbPath, runCount: sqliteStore.runCount, schemaVersion: sqliteStore.schemaVersion }] : []),
         ...(pgliteStore.runCount > 0 ? [{ backend: /** @type {"pglite"} */ ("pglite"), location: pgliteStore.dataDir, runCount: pgliteStore.runCount, schemaVersion: pgliteStore.schemaVersion }] : []),
@@ -348,6 +378,30 @@ export async function resolveSmithersBackendChoice(opts = {}) {
     ];
     if (!marker && populated.length > 1) {
         throw backendConflictError({ populated });
+    }
+    const migratedTargetBackend = marker && (migratedMarker.backend ?? markerBackend) !== "sqlite"
+        ? /** @type {"pglite" | "postgres" | undefined} */ (migratedMarker.backend ?? markerBackend)
+        : undefined;
+    if (migratedTargetBackend) {
+        const unexpectedPopulated = populated.filter((store) => store.backend !== migratedTargetBackend && store.backend !== "sqlite");
+        if (unexpectedPopulated.length > 0) {
+            throw backendConflictError({ populated });
+        }
+        if (sqliteStore.runCount > 0) {
+            const targetStore = migratedTargetBackend === "pglite" ? pgliteStore : postgresStore;
+            const targetRunCount = Number(targetStore.runCount ?? 0);
+            if (targetRunCount <= 0) {
+                const error = missingMigratedTargetError({
+                    targetBackend: migratedTargetBackend,
+                    sqlite: sqliteStore,
+                    targetLocation: migratedTargetBackend === "pglite"
+                        ? pgliteStore.dataDir
+                        : postgresStore.connectionString === "set" ? "postgres connection" : "postgres",
+                });
+                await emitMigrationRequired(error);
+                throw error;
+            }
+        }
     }
     if ((backend === "pglite" || backend === "postgres") && sqliteStore.exists && sqliteStore.error && !marker) {
         throw new SmithersError("DB_QUERY_FAILED", `Could not read existing SQLite store at ${sqliteStore.dbPath}; refusing to switch to ${backend} because that could hide run history. Original error: ${sqliteStore.error}`, {

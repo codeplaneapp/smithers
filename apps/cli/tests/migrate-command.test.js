@@ -128,6 +128,29 @@ test("smithers migrate --agent reports tracked follow-up and creates no PGlite s
   expect(repo.exists(".smithers/pg")).toBe(false);
 });
 
+test("smithers migrate redacts passwords from url guidance", () => {
+  const repo = createTempRepo();
+  seedLegacyStore(repo);
+
+  const result = runSmithers([
+    "migrate",
+    "--to",
+    "postgres",
+    "--url",
+    "postgres://user:super-secret-pw@127.0.0.1:5432/smithers",
+    "--agent",
+  ], {
+    cwd: repo.dir,
+    format: "json",
+    timeoutMs: 30_000,
+  });
+
+  expect(result.exitCode).toBe(4);
+  const combined = `${result.stdout}\n${result.stderr}`;
+  expect(combined).not.toContain("super-secret-pw");
+  expect(combined).toContain("postgres://<redacted>:<redacted>@127.0.0.1:5432/smithers");
+});
+
 test("smithers gateway fails loud for a legacy sqlite store before migration", async () => {
   const repo = createTempRepo();
   const { schemaVersion } = seedLegacyStore(repo);

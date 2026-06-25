@@ -218,18 +218,43 @@ describe("resolveSmithersBackendChoice", () => {
     });
   });
 
-  test("migrated.json suppresses divergence and conflict guards", async () => {
+  test("migrated.json target selects migrated backend when backend.json is absent and sqlite was kept", async () => {
     const cwd = makeWorkspace("resolver-migrated-marker");
     seedSqliteRuns(cwd);
     await seedPgliteRuns(cwd);
-    writeFileSync(join(cwd, ".smithers", "migrated.json"), JSON.stringify({ migratedAt: 1 }));
+    writeFileSync(join(cwd, ".smithers", "migrated.json"), JSON.stringify({ migratedAt: 1, target: { backend: "pglite" } }));
 
-    const api = await openSmithersBackend({}, { cwd, backend: "pglite", env: {} });
+    const choice = await resolveSmithersBackendChoice({ cwd, env: {} });
+    expect(choice).toMatchObject({
+      backend: "pglite",
+      source: "marker",
+      migratedMarker: true,
+      sqlite: { runCount: 1 },
+      pglite: { runCount: 1 },
+    });
+
+    const api = await openSmithersBackend({}, { cwd, env: {} });
     try {
       expect(api.db.dialect).toBe("postgres");
     } finally {
       await closeApi(api);
     }
+  });
+
+  test("migrated.json target fails loud when migrated target is missing but kept sqlite has runs", async () => {
+    const cwd = makeWorkspace("resolver-migrated-marker-missing-target");
+    seedSqliteRuns(cwd);
+    writeFileSync(join(cwd, ".smithers", "migrated.json"), JSON.stringify({ migratedAt: 1, target: { backend: "pglite" } }));
+
+    await expect(resolveSmithersBackendChoice({ cwd, env: {} })).rejects.toMatchObject({
+      code: "SMITHERS_MIGRATION_REQUIRED",
+      details: {
+        sourceBackend: "sqlite",
+        targetBackend: "pglite",
+        dbPath: join(cwd, "smithers.db"),
+        runCount: 1,
+      },
+    });
   });
 
   test("backend.json selects backend but does not suppress migration or conflict guards", async () => {
@@ -250,8 +275,10 @@ describe("resolveSmithersBackendChoice", () => {
     });
 
     writeFileSync(join(sqliteOnly, ".smithers", "migrated.json"), JSON.stringify({ migratedAt: 1 }));
-    const resolved = await resolveSmithersBackendChoice({ cwd: sqliteOnly, env: {} });
-    expect({ backend: resolved.backend, source: resolved.source }).toEqual({ backend: "pglite", source: "marker" });
+    await expect(resolveSmithersBackendChoice({ cwd: sqliteOnly, env: {} })).rejects.toMatchObject({
+      code: "SMITHERS_MIGRATION_REQUIRED",
+      details: { sourceBackend: "sqlite", targetBackend: "pglite" },
+    });
   });
 
   test("source precedence is explicit over env over config over backend marker over default", async () => {

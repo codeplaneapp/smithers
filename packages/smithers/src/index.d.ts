@@ -227,6 +227,7 @@ type SmithersBackendChoice$1 = {
         dataDir: string;
         exists: boolean;
         initialized: boolean;
+        hasRunsTable?: boolean;
         runCount: number;
         schemaVersion: string;
         error?: string;
@@ -234,6 +235,7 @@ type SmithersBackendChoice$1 = {
     postgres: {
         exists: boolean;
         initialized: boolean;
+        hasRunsTable?: boolean;
         runCount: number;
         schemaVersion: string;
         connectionString?: "set";
