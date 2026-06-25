@@ -1,0 +1,103 @@
+---
+title: Claude Workflow Mirror
+description: Generate a Claude Code dynamic workflow script that mirrors a detached Smithers run.
+---
+
+# Claude Workflow Mirror
+
+`bunx smithers-orchestrator graph` can emit a Claude Code dynamic workflow script that mirrors an existing detached Smithers run into Claude Code's `/workflows` progress tree.
+
+The generated script does not run the Smithers work. Smithers remains the source of truth for durability, dependencies, retries, worktrees, and time travel. Claude Code runs a small sandboxed script that discovers Smithers nodes with the `smithers` CLI and creates watcher agents for the nodes it sees.
+
+## Generate the script
+
+```bash
+bunx smithers-orchestrator graph ./workflow.tsx --emit-claude-workflow --format json
+```
+
+By default the script is written to:
+
+```text
+.claude/workflows/WORKFLOW_NAME-mirror.mjs
+```
+
+Use `--out` to choose a path:
+
+```bash
+bunx smithers-orchestrator graph ./workflow.tsx \
+  --emit-claude-workflow \
+  --out .claude/workflows/review-mirror.mjs \
+  --format json
+```
+
+The generated script expects a detached run id when Claude Code starts it:
+
+```json
+{ "runId": "run-123" }
+```
+
+Start a detached run first:
+
+```bash
+bunx smithers-orchestrator up ./workflow.tsx --detach --run-id run-123 --format json
+```
+
+## Mirror model
+
+Claude Code workflow scripts run in a sandbox. They cannot import Node modules, read files, open sockets, or push rows from an external process. The only way to populate Claude Code's `/workflows` tree is to call `phase()` and `agent()` from inside the running Claude Code session.
+
+For that reason, Smithers generates a script that observes Smithers through the CLI:
+
+- Discovery agents run `bunx smithers-orchestrator inspect RUN_ID --format json`.
+- Frame wait agents run `bunx smithers-orchestrator events RUN_ID --type frame --json --watch`.
+- Node watcher agents run `bunx smithers-orchestrator node NODE_ID --run-id RUN_ID --format json`.
+
+Each Smithers node becomes a watcher row in Claude Code. The watcher only observes state and output. It does not redo the node's work.
+
+## Dynamic nodes and phases
+
+Smithers workflows can change shape across frames. A loop or data-dependent fan-out can add node ids after earlier nodes complete. The mirror discovers the current node set after each committed frame and appends watcher rows for newly materialized nodes.
+
+Loop and fan-out runtime node ids use the form:
+
+```text
+logicalId@@loopId=2
+```
+
+The generated script bakes a phase map for logical ids. At runtime it assigns a discovered node to a phase by splitting on `@@` and looking up the logical id. This keeps loop iterations grouped under the same phase without guessing.
+
+The mirror uses `bunx smithers-orchestrator inspect RUN_ID --format json` as its primary node set. If that surface reports collapsed logical ids for a run, those ids are mirrored directly. The same logical-id phase map still applies, and node events can be used to audit the materialized ids seen during the run.
+
+## Append-only behavior
+
+Claude Code's workflow tree is append-only. A row that has been created cannot be removed. If a Smithers node is skipped or disappears from a later frame, the mirror watcher resolves as a completed `[skipped]` row.
+
+This means the mirror shows what was observed, not a retractable live graph. Smithers remains the authoritative run state.
+
+## Scaling flags
+
+By default the generator mirrors agent-backed Smithers nodes. Use `--mirror-all-nodes` to also mirror compute, static, wait, timer, approval, subflow, and sandbox nodes:
+
+```bash
+bunx smithers-orchestrator graph ./workflow.tsx \
+  --emit-claude-workflow \
+  --mirror-all-nodes \
+  --format json
+```
+
+Claude Code has a 1000-agent lifetime cap per workflow and a 4096-item cap for a single `parallel()` or `pipeline()` call. The generated mirror keeps a conservative watcher budget and logs when it stops adding watcher rows.
+
+For large runs, use `--collapse-phases`:
+
+```bash
+bunx smithers-orchestrator graph ./workflow.tsx \
+  --emit-claude-workflow \
+  --collapse-phases \
+  --format json
+```
+
+Collapse mode emits one watcher per phase. Each phase watcher summarizes node state for that phase until the run is terminal.
+
+## Continue-as-new
+
+If a Smithers run continues as new, the mirror logs that limitation and stops at the current run id. It does not follow the replacement run id automatically.

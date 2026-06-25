@@ -274,6 +274,7 @@
           "examples/tools-agent",
           "examples/multi-agent-review",
           "examples/dynamic-plan",
+          "examples/claude-workflow-mirror",
           "examples/loop",
           {
             "group": "Workflow Samples",
