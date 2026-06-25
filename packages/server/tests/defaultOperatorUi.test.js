@@ -112,7 +112,7 @@ describe("defaultOperatorUi", () => {
         });
 
         test("paths outside /console are not served by the UI handler", async () => {
-            const res = await fetch(`http://127.0.0.1:${port}/`);
+            const res = await fetch(`http://127.0.0.1:${port}/`, { redirect: "manual" });
             // The root is handled by the gateway WS/health path, not the UI app
             expect(res.status).not.toBe(200);
         });

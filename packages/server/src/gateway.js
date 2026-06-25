@@ -357,6 +357,18 @@ function sendJson(res, status, payload) {
 }
 /**
  * @param {ServerResponse} res
+ * @param {string} location
+ */
+function sendRedirect(res, location) {
+    res.statusCode = 302;
+    res.setHeader("Location", location);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Smithers-API-Version", SMITHERS_API_VERSION);
+    res.end();
+}
+/**
+ * @param {ServerResponse} res
  * @param {number} status
  * @param {string} payload
  */
@@ -1549,6 +1561,51 @@ export class Gateway {
         return true;
     }
     /**
+   * @param {IncomingMessage} req
+   * @param {ServerResponse} res
+   */
+    handleRootRequest(req, res) {
+        const mounts = this.getUiMounts();
+        const operatorMount = mounts.find((mount) => mount.kind === "operator");
+        if (operatorMount) {
+            return sendRedirect(res, operatorMount.config.path);
+        }
+        const uiMounts = mounts.filter((mount) => mount.config.path !== "/");
+        const links = [
+            { href: "/health", label: "Health" },
+            { href: "/metrics", label: "Metrics" },
+            { href: "/workflows", label: "Workflows" },
+            ...uiMounts.map((mount) => ({
+                href: mount.config.path,
+                label: mount.config.title ?? `${mount.kind} UI`,
+            })),
+        ];
+        const uiMessage = uiMounts.length > 0
+            ? "Workflow UIs are mounted below."
+            : "No UI mounted at this gateway root.";
+        const body = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Smithers Gateway</title>
+  </head>
+  <body>
+    <main>
+      <h1>Smithers Gateway</h1>
+      <p>${escapeHtml(uiMessage)}</p>
+      <nav aria-label="Gateway links">
+        <ul>
+          ${links.map((link) => `<li><a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a></li>`).join("\n          ")}
+        </ul>
+      </nav>
+    </main>
+  </body>
+</html>
+`;
+        return sendText(res, 200, body, "text/html; charset=utf-8");
+    }
+    /**
    * @param {string} key
    * @param {RegisteredWorkflow} entry
    */
@@ -2432,6 +2489,9 @@ export class Gateway {
             }
             if (await this.handleUiHttp(req, res)) {
                 return;
+            }
+            if ((req.method ?? "GET") === "GET" && url.pathname === "/") {
+                return this.handleRootRequest(req, res);
             }
             return sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Route not found" } });
         });
