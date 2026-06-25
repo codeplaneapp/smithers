@@ -36,6 +36,9 @@ export async function openSmithersBackend(schemas = /** @type {Schemas} */ ({}),
         dbPath: opts.dbPath,
         configPath: opts.configPath,
         env,
+        connectionString: opts.connectionString,
+        connection: opts.connection,
+        pgliteDataDir: opts.pgliteDataDir,
     });
     const { backend, source, dbPath } = choice;
     if (backend === "sqlite") {

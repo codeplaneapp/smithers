@@ -1419,9 +1419,11 @@ const gatewayOptions = z.object({
     insecure: z.boolean().default(false).describe("Allow binding a non-loopback --host with NO auth (exposes a full-control, unauthenticated control plane — dangerous)"),
 });
 const migrateOptions = z.object({
-    to: z.enum(["pglite", "postgres"]).default("pglite").describe("Target backend"),
+    from: z.enum(["sqlite", "pglite", "postgres"]).optional().describe("Source backend; inferred when exactly one store has runs"),
+    to: z.enum(["sqlite", "pglite", "postgres"]).optional().describe("Target backend; required (pglite, postgres, or sqlite)"),
     url: z.string().optional().describe("Postgres connection URL when --to postgres"),
     keepSqlite: z.boolean().default(true).describe("Keep the legacy SQLite database after a successful copy"),
+    agent: z.boolean().default(false).describe("Run the durable migrate-repair workflow instead of deterministic migration"),
 });
 const monitorArgs = z.object({
     runId: z.string().optional().describe("Run ID to monitor (default: the most recent active run)"),
@@ -3439,8 +3441,23 @@ const cli = Cli.create({
         };
         try {
             const { migrateSmithersStore } = await import("smithers-orchestrator/migrateSmithersStore");
+            if (!c.options.to) {
+                return fail({
+                    code: "INVALID_INPUT",
+                    message: "smithers migrate requires --to. Choose one of: pglite, postgres, sqlite.",
+                    exitCode: 4,
+                });
+            }
+            if (c.options.agent) {
+                return fail({
+                    code: "MIGRATION_AGENT_REQUIRED",
+                    message: `Deterministic migration repair guidance is available from smithers migrate errors. Agent-assisted migration repair is tracked as a follow-up and is not available in this build; no migrate-repair workflow is installed. Run deterministic migration with:\n  smithers migrate --from ${c.options.from ?? "<source>"} --to ${c.options.to}${c.options.url ? ` --url ${c.options.url}` : ""}`,
+                    exitCode: 4,
+                });
+            }
             const result = await migrateSmithersStore({
                 cwd: process.cwd(),
+                from: c.options.from,
                 to: c.options.to,
                 url: c.options.url,
                 keepSqlite: c.options.keepSqlite,

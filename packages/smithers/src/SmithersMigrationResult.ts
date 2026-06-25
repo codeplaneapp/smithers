@@ -1,9 +1,16 @@
 export type SmithersMigrationResult = {
-	backend: "pglite" | "postgres";
+	backend: "sqlite" | "pglite" | "postgres";
+	source: {
+		backend: "sqlite" | "pglite" | "postgres";
+		dbPath?: string;
+		dataDir?: string;
+		url?: string;
+	};
 	dbPath: string;
 	markerPath: string;
 	target: {
-		backend: "pglite" | "postgres";
+		backend: "sqlite" | "pglite" | "postgres";
+		dbPath?: string;
 		dataDir?: string;
 		url?: string;
 	};

@@ -7063,7 +7063,7 @@ type KnownSmithersErrorCode =
   | "TOOL_GIT_REMOTE_DISABLED" | "TOOL_COMMAND_FAILED" | "TOOL_GREP_FAILED"
   | "AGENT_CLI_ERROR" | "AGENT_QUOTA_EXCEEDED" | "AGENT_CONFIG_INVALID" | "AGENT_RPC_FILE_ARGS" | "AGENT_BUILD_COMMAND" | "AGENT_DIAGNOSTIC_TIMEOUT"
   | "DB_MISSING_COLUMNS" | "DB_REQUIRES_BUN_SQLITE" | "DB_QUERY_FAILED" | "DB_WRITE_FAILED"
-  | "SMITHERS_MIGRATION_REQUIRED"
+  | "SMITHERS_BACKEND_CONFLICT" | "SMITHERS_MIGRATION_REQUIRED"
   | "STORAGE_ERROR" | "INTERNAL_ERROR" | "PROCESS_ABORTED" | "PROCESS_TIMEOUT"
   | "PROCESS_IDLE_TIMEOUT" | "PROCESS_SPAWN_FAILED" | "TASK_RUNTIME_UNAVAILABLE"
   | "SCHEMA_CHANGE_HOT" | "HOT_OVERLAY_FAILED" | "HOT_RELOAD_INVALID_MODULE"
@@ -7749,7 +7749,8 @@ try {
 | `DB_REQUIRES_BUN_SQLITE` | The database adapter is not backed by a Bun SQLite client with `exec()`. | -- |
 | `DB_QUERY_FAILED` | A database read query throws or rejects while running inside an Effect. | -- |
 | `DB_WRITE_FAILED` | A database write or migration fails, including after SQLite retry exhaustion. | -- |
-| `SMITHERS_MIGRATION_REQUIRED` | A legacy bun:sqlite store has run data but the resolved backend is PGlite/Postgres, so the history would be invisible until you run `smithers migrate`. | `{ dbPath, runCount, schemaVersion, resolvedBackend }` |
+| `SMITHERS_BACKEND_CONFLICT` | Multiple Smithers backend stores contain run history and no `migrated.json` receipt explains the divergence. | `{ populatedBackends, stores }` |
+| `SMITHERS_MIGRATION_REQUIRED` | A physical Smithers store has run data but the resolved backend points at another store, so the history would be invisible until you migrate or pin the existing backend. | `{ sourceBackend, targetBackend, dbPath?, location?, runCount, schemaVersion, resolvedBackend? }` |
 | `STORAGE_ERROR` | A storage service operation fails before surfacing a more specific database code. | -- |
 
 ### Migration errors
