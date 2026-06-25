@@ -9,6 +9,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { Effect, Fiber } from "effect";
 import { Cli, Mcp as IncurMcp, z } from "incur";
 import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
+import { deriveClaudeWorkflowPhases } from "@smithers-orchestrator/graph";
 import { mdxPlugin } from "./mdx-plugin.js";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
 import { signalRun } from "@smithers-orchestrator/engine/signals";
@@ -76,6 +77,8 @@ import { createSemanticMcpServer } from "./mcp/semantic-server.js";
 import { issueSmithersBrokerToken, parseTokenScopes, readSmithersTokenStore, resolveSmithersActionTokenFromStore, revokeSmithersToken, smithersTokenStorePath, writeSmithersTokenStore, } from "./token-store.js";
 import { resolveSmithersDocsSource } from "./docs-command.js";
 import { reportReplayResult } from "./reportReplayResult.js";
+import { emitClaudeWorkflowMirror } from "./claude-workflow/emitClaudeWorkflowMirror.js";
+import { resolveClaudeWorkflowOutputPath } from "./claude-workflow/resolveClaudeWorkflowOutputPath.js";
 import pc from "picocolors";
 import crypto from "node:crypto";
 import React from "react";
@@ -1549,6 +1552,10 @@ const graphOptions = z.object({
     input: z.string().optional().describe("Input data as JSON"),
     root: z.string().optional().describe("Tool sandbox root directory (same semantics as `up`)"),
     compact: z.boolean().default(false).describe("Omit task prompt/text bodies (structure only) — validate that a workflow compiles without flooding output with every prompt"),
+    emitClaudeWorkflow: z.boolean().default(false).describe("Emit a Claude Code dynamic workflow mirror script"),
+    out: z.string().optional().describe("Output path for --emit-claude-workflow"),
+    mirrorAllNodes: z.boolean().default(false).describe("Mirror compute/static/wait nodes as well as agent nodes"),
+    collapsePhases: z.boolean().default(false).describe("Emit one watcher per phase instead of one watcher per node"),
 });
 const revertOptions = z.object({
     runId: z.string().describe("Run ID to revert"),
@@ -5393,7 +5400,12 @@ const cli = Cli.create({
     description: "Render the workflow graph without executing it.",
     args: workflowArgs,
     options: graphOptions,
-    alias: { runId: "r" },
+    alias: {
+        runId: "r",
+        emitClaudeWorkflow: "emit-claude-workflow",
+        mirrorAllNodes: "mirror-all-nodes",
+        collapsePhases: "collapse-phases",
+    },
     async run(c) {
         const fail = (opts) => {
             commandExitOverride = opts.exitCode ?? 1;
@@ -5422,6 +5434,30 @@ const cli = Cli.create({
                 baseRootDir,
                 workflowPath: resolvedWorkflowPath,
             }));
+            if (c.options.emitClaudeWorkflow === true) {
+                const phasePlan = deriveClaudeWorkflowPhases(snap, {
+                    collapsePhases: c.options.collapsePhases === true,
+                });
+                const outputPath = resolveClaudeWorkflowOutputPath(resolvedWorkflowPath, c.options.out);
+                const script = emitClaudeWorkflowMirror({
+                    workflowPath: c.args.workflow,
+                    outputPath,
+                    workflowName: basename(c.args.workflow).replace(/\.[^.]+$/, ""),
+                    phasePlan,
+                    mirrorAllNodes: c.options.mirrorAllNodes === true,
+                    collapsePhases: c.options.collapsePhases === true,
+                    commandName: "smithers graph",
+                });
+                mkdirSync(dirname(outputPath), { recursive: true });
+                writeFileSync(outputPath, script, "utf8");
+                return c.ok({
+                    workflow: c.args.workflow,
+                    outputPath,
+                    phases: phasePlan.phases,
+                    phaseNodes: phasePlan.nodes,
+                    nodes: phasePlan.nodes.length,
+                });
+            }
             const seen = new WeakSet();
             const stripPrompts = c.options.compact === true;
             return c.ok(JSON.parse(JSON.stringify(snap, (key, value) => {

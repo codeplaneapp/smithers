@@ -252,6 +252,9 @@ importers:
       '@smithers-orchestrator/errors':
         specifier: workspace:*
         version: link:../../packages/errors
+      '@smithers-orchestrator/graph':
+        specifier: workspace:*
+        version: link:../../packages/graph
       '@smithers-orchestrator/memory':
         specifier: workspace:*
         version: link:../../packages/memory
