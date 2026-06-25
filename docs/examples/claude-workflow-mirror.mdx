@@ -76,7 +76,7 @@ This means the mirror shows what was observed, not a retractable live graph. Smi
 
 ## Scaling flags
 
-By default the generator mirrors agent-backed Smithers nodes. Use `--mirror-all-nodes` to also mirror compute, static, wait, timer, approval, subflow, and sandbox nodes:
+By default the mirror shows agent-backed Smithers nodes plus any node discovered at runtime that was not present in the static frame-0 graph, such as data-dependent fan-out tasks and loop iterations. Those runtime nodes are the reason the mirror exists, so they are surfaced even though their kind cannot be known ahead of time. Known compute, static, wait, timer, approval, subflow, and sandbox nodes stay hidden unless you pass `--mirror-all-nodes`:
 
 ```bash
 bunx smithers-orchestrator graph ./workflow.tsx \

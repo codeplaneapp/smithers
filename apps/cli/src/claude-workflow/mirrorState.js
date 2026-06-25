@@ -43,6 +43,13 @@ export function isTerminalNodeState(state) {
  * @param {{ nodes: readonly { nodeId: string; phase: string; kind: string }[] }} phasePlan
  * @param {{ mirrorAllNodes?: boolean }} [options]
  * @returns {{ runStatus: string; nodes: Array<{ nodeId: string; label: string; state: string; phase: string; kind: string }> }}
+ *
+ * By default this mirrors agent nodes plus runtime-discovered nodes that are
+ * absent from the baked phase plan (kind "unknown"). Those unknown nodes are the
+ * dynamic fan-out / data-dependent tasks the mirror exists to surface, since the
+ * static frame-0 graph cannot predict them. Known compute/static/wait nodes stay
+ * filtered out unless `mirrorAllNodes` is set. Loop iterations are unaffected:
+ * their `@@`-stripped logical id matches the baked map, so they keep their kind.
  */
 export function nodesFromInspect(inspect, phasePlan, options = {}) {
     const parsed = parseInspectJson(inspect);
@@ -60,7 +67,7 @@ export function nodesFromInspect(inspect, phasePlan, options = {}) {
                 kind,
             };
         })
-        .filter((node) => options.mirrorAllNodes === true || node.kind === "agent");
+        .filter((node) => options.mirrorAllNodes === true || node.kind === "agent" || node.kind === "unknown");
     return { runStatus: parsed.runStatus, nodes };
 }
 

@@ -117,6 +117,23 @@ export default smithers((ctx) => {
         expect(laterIds.some((nodeId) => nodeId.includes("@@"))).toBe(false);
         expect(new Set(diff.added)).toEqual(new Set(["audit-alpha", "audit-beta", "audit-gamma"]));
 
+        // Real usage generates the mirror at frame 0 (before running), when only
+        // `seed` is materialized. The runtime fan-out tasks are absent from that
+        // static plan, so they classify as kind "unknown" and must still be
+        // mirrored WITHOUT --mirror-all-nodes. This is the core dynamic-mirror
+        // promise: discover and surface nodes the static graph could not predict.
+        const frameZero = runSmithers(["graph", "workflow.tsx", "--emit-claude-workflow", "--out", ".claude/workflows/frame0.mjs", "--format", "json"], {
+            cwd: repo.dir,
+        });
+        expect(frameZero.exitCode, `${frameZero.stdout}\n${frameZero.stderr}`).toBe(0);
+        const frameZeroPlan = { phases: frameZero.json.phases, nodes: frameZero.json.phaseNodes };
+        expect(frameZeroPlan.nodes.map((node) => node.nodeId)).toEqual(["seed"]);
+        const defaultMirror = nodesFromInspect(finalInspect, frameZeroPlan, { mirrorAllNodes: false });
+        const defaultIds = defaultMirror.nodes.map((node) => node.nodeId);
+        expect(defaultIds).toContain("audit-alpha");
+        expect(defaultIds).toContain("audit-beta");
+        expect(defaultIds).toContain("audit-gamma");
+
         const frameSignals = events(repo, runId, "frame").map((event) => eventSignalsFrame(event, -1)).filter(Boolean);
         const nodeEventIds = events(repo, runId, "node").map((event) => event.payload?.nodeId).filter(Boolean);
         expect(frameSignals.some((signal) => signal.kind === "frame")).toBe(true);

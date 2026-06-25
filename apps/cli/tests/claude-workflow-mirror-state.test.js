@@ -50,6 +50,33 @@ describe("claude workflow mirror state", () => {
         });
     });
 
+    test("mirrors runtime-discovered unknown nodes by default but not known non-agent nodes", () => {
+        const result = nodesFromInspect({
+            run: { status: "running" },
+            steps: [
+                { id: "auditItem", state: "finished", label: "Audit" },
+                { id: "prepare", state: "finished", label: "Prepare" },
+                { id: "review-api", state: "running", label: "Review api" },
+                { id: "review-ui", state: "pending", label: "Review ui" },
+            ],
+        }, phasePlan);
+
+        // auditItem (baked agent) and the runtime fan-out review-* (unknown,
+        // absent from the baked map) are mirrored; prepare (baked static) is not.
+        expect(result.nodes.map((node) => node.nodeId)).toEqual([
+            "auditItem",
+            "review-api",
+            "review-ui",
+        ]);
+        expect(result.nodes.find((node) => node.nodeId === "review-api")).toEqual({
+            nodeId: "review-api",
+            label: "Review api",
+            state: "running",
+            phase: "main",
+            kind: "unknown",
+        });
+    });
+
     test("can include non-agent nodes when requested", () => {
         expect(nodesFromInspect({
             run: { status: "finished" },
