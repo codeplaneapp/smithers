@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { createTempRepo, pinSqliteBackend } from "../../../packages/smithers/tests/e2e-helpers.js";
-import { eventSignalsFrame, isTerminalRunStatus, nodesFromInspect } from "../src/claude-workflow/mirrorState.js";
+import { diffMirrorNodes, eventSignalsFrame, isTerminalRunStatus, nodesFromInspect } from "../src/claude-workflow/mirrorState.js";
 
 const SMITHERS_BIN = resolve(import.meta.dir, "../../../node_modules/.bin/smithers");
 
@@ -48,7 +48,7 @@ describe("claude workflow mirror real run", () => {
         pinSqliteBackend(repo.dir);
         repo.write("workflow.tsx", `
 /** @jsxImportSource smithers-orchestrator */
-import { createSmithers, Task, Workflow, Sequence, Ralph } from "smithers-orchestrator";
+import { createSmithers, Parallel, Task, Workflow, Sequence } from "smithers-orchestrator";
 import { z } from "zod";
 
 const { smithers, outputs } = createSmithers({
@@ -62,14 +62,16 @@ export default smithers((ctx) => {
     <Workflow name="mirror-real">
       <Sequence label="Plan">
         <Task id="seed" output={outputs.items}>
-          {{ items: ["alpha", "beta"] }}
+          {{ items: ["alpha", "beta", "gamma"] }}
         </Task>
         {seed ? (
-          <Ralph id="fanout" maxIterations={1}>
-            <Task id="auditItem" output={outputs.result}>
-              {{ value: seed.items.join(",") }}
-            </Task>
-          </Ralph>
+          <Parallel label="Audit">
+            {seed.items.map((it) => (
+              <Task id={\`audit-\${it}\`} output={outputs.result}>
+                {{ value: it }}
+              </Task>
+            ))}
+          </Parallel>
         ) : null}
       </Sequence>
     </Workflow>
@@ -84,6 +86,8 @@ export default smithers((ctx) => {
         });
         expect(up.exitCode, `${up.stdout}\n${up.stderr}`).toBe(0);
 
+        const earlyInspect = inspectRun(repo, runId);
+
         let finalInspect = inspectRun(repo, runId);
         for (let index = 0; index < 80 && !isTerminalRunStatus(finalInspect?.run?.status); index += 1) {
             Bun.sleepSync(100);
@@ -97,18 +101,28 @@ export default smithers((ctx) => {
         });
         expect(graph.exitCode, `${graph.stdout}\n${graph.stderr}`).toBe(0);
         const phasePlan = { phases: graph.json.phases, nodes: graph.json.phaseNodes };
-        const discovered = nodesFromInspect(finalInspect, phasePlan, { mirrorAllNodes: true });
-        const nodeIds = discovered.nodes.map((node) => node.nodeId);
+        const later = nodesFromInspect(finalInspect, phasePlan, { mirrorAllNodes: true });
+        const laterIds = later.nodes.map((node) => node.nodeId);
+        const early = earlyInspect ? nodesFromInspect(earlyInspect, phasePlan, { mirrorAllNodes: true }) : { nodes: [] };
+        const earlyIds = early.nodes.map((node) => node.nodeId);
+        const baselineIds = earlyIds.length === 0 || earlyIds.includes("audit-alpha") || earlyIds.includes("audit-beta") || earlyIds.includes("audit-gamma")
+            ? new Set(["seed"])
+            : new Set(earlyIds);
+        const diff = diffMirrorNodes(baselineIds, later.nodes);
 
-        expect(nodeIds).toContain("seed");
-        expect(nodeIds).toContain("auditItem");
-        expect(nodeIds.some((nodeId) => nodeId.includes("@@"))).toBe(false);
-        expect(discovered.nodes.find((node) => node.nodeId === "auditItem")?.phase).toBe("fanout");
+        expect(laterIds).toContain("seed");
+        expect(laterIds).toContain("audit-alpha");
+        expect(laterIds).toContain("audit-beta");
+        expect(laterIds).toContain("audit-gamma");
+        expect(laterIds.some((nodeId) => nodeId.includes("@@"))).toBe(false);
+        expect(new Set(diff.added)).toEqual(new Set(["audit-alpha", "audit-beta", "audit-gamma"]));
 
         const frameSignals = events(repo, runId, "frame").map((event) => eventSignalsFrame(event, -1)).filter(Boolean);
         const nodeEventIds = events(repo, runId, "node").map((event) => event.payload?.nodeId).filter(Boolean);
         expect(frameSignals.some((signal) => signal.kind === "frame")).toBe(true);
-        expect(nodeEventIds).toContain("auditItem");
-        expect(discovered.runStatus).toBe("finished");
+        expect(nodeEventIds).toContain("audit-alpha");
+        expect(nodeEventIds).toContain("audit-beta");
+        expect(nodeEventIds).toContain("audit-gamma");
+        expect(later.runStatus).toBe("finished");
     });
 });

@@ -5446,7 +5446,6 @@ const cli = Cli.create({
                     phasePlan,
                     mirrorAllNodes: c.options.mirrorAllNodes === true,
                     collapsePhases: c.options.collapsePhases === true,
-                    commandName: "smithers graph",
                 });
                 mkdirSync(dirname(outputPath), { recursive: true });
                 writeFileSync(outputPath, script, "utf8");

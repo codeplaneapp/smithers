@@ -8,5 +8,4 @@ export type ClaudeWorkflowGeneratorOptions = {
   };
   mirrorAllNodes: boolean;
   collapsePhases: boolean;
-  commandName?: string;
 };

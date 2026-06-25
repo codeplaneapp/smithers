@@ -79,4 +79,11 @@ describe("claude workflow mirror state", () => {
         expect(eventSignalsFrame({ type: "RunFinished", payload: {} }, 1)).toEqual({ kind: "terminal", status: "finished" });
         expect(eventSignalsFrame({ type: "RunContinuedAsNew", payload: { newRunId: "next" } }, 1)).toEqual({ kind: "continued", runId: "next" });
     });
+
+    test("signals the same frame event only once when the cursor advances", () => {
+        const event = { type: "FrameCommitted", payload: { frameNo: 3 } };
+        const first = eventSignalsFrame(event, 2);
+        expect(first).toEqual({ kind: "frame", frameNo: 3 });
+        expect(eventSignalsFrame(event, first?.kind === "frame" ? first.frameNo : 2)).toBeNull();
+    });
 });
