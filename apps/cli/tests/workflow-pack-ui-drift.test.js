@@ -10,7 +10,25 @@ import { expect, onTestFinished, test } from "bun:test";
 import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { createExecutableDir, writeFakeCodexBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
 import { initWorkflowPack } from "../src/workflow-pack.js";
+
+// CI has no agent CLIs/credentials, so agent detection throws NO_USABLE_AGENTS.
+// Seed a fake codex binary on PATH plus an OpenAI key so init has one usable
+// agent — the same pattern init.e2e.test.js uses. The detected agent set does
+// not affect gateway mounts / ui files / descriptors, so this stays deterministic.
+function seededAgentEnv() {
+    const binDir = createExecutableDir();
+    writeFakeCodexBinary(binDir);
+    return {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        OPENAI_API_KEY: "test-openai-key",
+        ANTHROPIC_API_KEY: "",
+        GEMINI_API_KEY: "",
+        GOOGLE_API_KEY: "",
+    };
+}
 
 /**
  * Parse `await mountWorkflow("key", "Title")` calls from the generated
@@ -34,7 +52,7 @@ test("UI_WORKFLOWS gateway-mounts / ui-files / e2e-descriptors are in sync", () 
 
     // Run a real init so we get the actual generated artefacts.
     // rootDir is the project root; initWorkflowPack appends ".smithers" to it.
-    const result = initWorkflowPack({ rootDir: tmpDir, installSkill: false, skipInstall: true });
+    const result = initWorkflowPack({ rootDir: tmpDir, installSkill: false, skipInstall: true, env: seededAgentEnv() });
     expect(result.writtenFiles.length).toBeGreaterThan(0);
 
     const smithersDir = join(tmpDir, ".smithers");

@@ -15,7 +15,7 @@ import { GENERATED_SEEDED_FILES } from "./seeded-workflow-pack.generated.js";
  * @typedef {{ onSkip?: (relPath: string) => void; scaffolded?: (counts: { writtenCount: number; skippedCount: number; preservedCount: number }) => void; skillInstalled?: (result: import("./installCuratedSkill.js").CuratedSkillResult) => void; agentDocsNoted?: (result: import("./noteWorkflowPreferenceInAgentDocs.js").AgentDocsNoteSummary) => void; installStart?: () => void; installDone?: (result: InitInstallResult, captured?: { stdout: string; stderr: string }) => void; }} InitReporter
  */
 /**
- * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; agentsOnly?: boolean; global?: boolean; installSkill?: boolean; skillOptions?: Parameters<typeof installCuratedSkill>[0]; reporter?: InitReporter; }} InitOptions
+ * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; agentsOnly?: boolean; global?: boolean; installSkill?: boolean; skillOptions?: Parameters<typeof installCuratedSkill>[0]; reporter?: InitReporter; env?: NodeJS.ProcessEnv; }} InitOptions
  */
 /**
  * @typedef {{ status: "ok" | "skipped" | "failed"; reason?: string; }} InitInstallResult
@@ -4296,7 +4296,10 @@ function renderTemplateFiles(versions, env, projectRoot) {
  */
 export function initWorkflowPack(options = {}) {
     const projectRoot = options.rootDir ?? process.cwd();
-    const env = process.env;
+    // Tests inject a seeded env (fake agent on PATH + provider key) so in-process
+    // init works on CI, which has no agent CLIs/credentials. Defaults to the real
+    // process env for normal use.
+    const env = options.env ?? process.env;
     // Local packs live at `<repo>/.smithers`; the global pack IS the canonical
     // `~/.smithers` (honoring SMITHERS_HOME) — no nested `.smithers` segment. The
     // template paths below are all `.smithers/…`-prefixed, so we strip that prefix
