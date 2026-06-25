@@ -533,7 +533,9 @@ describe("migrateSmithersStore", () => {
       writableSqlite.close();
     }
 
-    const sourceApi = await openSmithersBackend({}, { cwd, backend: "pglite", env: {} });
+    // Open the PGlite source directly: the migrated SQLite store now sits
+    // beside it, so the resolver correctly refuses to disambiguate.
+    const sourceApi = await createSmithersPostgres({}, { provider: "pglite", dataDir: join(cwd, ".smithers", "pg") });
     try {
       const sqlite = new Database(join(cwd, "smithers.db"), { readonly: true });
       try {

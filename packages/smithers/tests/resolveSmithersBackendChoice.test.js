@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openSmithersBackend } from "../src/openSmithersBackend.js";
+import { createSmithersPostgres } from "../src/create.js";
 import { resolveSmithersBackendChoice } from "../src/resolveSmithersBackendChoice.js";
 
 setDefaultTimeout(120_000);
@@ -50,17 +51,11 @@ function seedEmptySqlite(cwd, dbPath = join(cwd, "smithers.db")) {
 }
 
 async function seedPgliteRuns(cwd) {
-  const markerPath = join(cwd, ".smithers", "backend.json");
-  const migratedPath = join(cwd, ".smithers", "migrated.json");
-  const hadMarker = existsSync(markerPath);
-  const hadMigrated = existsSync(migratedPath);
-  if (!hadMarker) {
-    writeFileSync(markerPath, JSON.stringify({ backend: "pglite" }));
-  }
-  if (!hadMigrated) {
-    writeFileSync(migratedPath, JSON.stringify({ migratedAt: 1 }));
-  }
-  const api = await openSmithersBackend({}, { cwd, backend: "pglite", env: {} });
+  // Open the PGlite store directly (not via the resolver), so seeding a PGlite
+  // store beside a populated SQLite store doesn't trip the conflict/migration
+  // guards — and leaves NO markers behind for the resolver tests to inspect.
+  const dataDir = join(cwd, ".smithers", "pg");
+  const api = await createSmithersPostgres({}, { provider: "pglite", dataDir });
   try {
     await api.db.connection.query({
       text: `
@@ -70,12 +65,6 @@ async function seedPgliteRuns(cwd) {
     });
   } finally {
     await api.close?.();
-    if (!hadMarker) {
-      rmSync(markerPath, { force: true });
-    }
-    if (!hadMigrated) {
-      rmSync(migratedPath, { force: true });
-    }
   }
 }
 

@@ -192,7 +192,7 @@ describe("openSmithersBackend", () => {
     }
   });
 
-  test("a present .smithers/migrated.json marker suppresses the migration-required guard", async () => {
+  test("a bare .smithers/migrated.json marker (no target backend) does NOT suppress the migration-required guard", async () => {
     const cwd = makeWorkspace("smithers-open-stale-marker");
     const dbPath = join(cwd, "smithers.db");
     const sqlite = new Database(dbPath);
@@ -207,13 +207,12 @@ describe("openSmithersBackend", () => {
         VALUES ('legacy-run', 'wf', 'finished', 1);
     `);
     sqlite.close();
+    // A receipt with no parseable target backend must not silently hide the
+    // SQLite run history behind an empty PGlite store.
     writeFileSync(join(cwd, ".smithers", "migrated.json"), JSON.stringify({ migratedAt: 1 }));
 
-    const api = await openSmithersBackend({}, { cwd, env: { SMITHERS_BACKEND: "pglite" } });
-    try {
-      expect(api.db.dialect).toBe("postgres");
-    } finally {
-      await closeApi(api);
-    }
+    await expect(openSmithersBackend({}, { cwd, env: { SMITHERS_BACKEND: "pglite" } })).rejects.toMatchObject({
+      code: "SMITHERS_MIGRATION_REQUIRED",
+    });
   });
 });

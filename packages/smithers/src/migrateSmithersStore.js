@@ -828,6 +828,24 @@ function sqliteRunCountAt(dbPath) {
     }
 }
 
+// Whether an existing file is a recognizable Smithers store (has the runs
+// table). Used to refuse overwriting an unrelated/corrupt SQLite file at the
+// target path during the atomic publish.
+function sqliteHasRunsTableAt(dbPath) {
+    if (!existsSync(dbPath)) return false;
+    let sqlite;
+    try {
+        sqlite = new Database(dbPath, { readonly: true });
+        return sqliteTableExists(sqlite, "_smithers_runs");
+    }
+    catch {
+        return false;
+    }
+    finally {
+        try { sqlite?.close(); } catch { /* best-effort */ }
+    }
+}
+
 function inferSqliteSourceDbPath(primaryDbPath, workspaceRoot, hasExplicitDbPath) {
     const candidates = hasExplicitDbPath
         ? [primaryDbPath]
@@ -946,6 +964,15 @@ async function migratePgToSqlite(opts, context) {
         // default read would treat as authoritative (hiding the real source).
         try { sqlite.close(); } catch { /* about to rename */ }
         sqlite = undefined;
+        // Never clobber an unrelated/corrupt file at the target path. A populated
+        // Smithers store was already refused above; here only a recognizable
+        // empty Smithers store (or a non-existent path) may be replaced.
+        if (existsSync(dbPath) && !sqliteHasRunsTableAt(dbPath)) {
+            throw new SmithersError("DB_WRITE_FAILED", `Target path ${dbPath} already exists and is not a recognizable Smithers store; refusing to overwrite it.`, { dbPath });
+        }
+        for (const suffix of ["-wal", "-shm", "-journal"]) {
+            try { rmSync(`${dbPath}${suffix}`, { force: true }); } catch { /* stale sidecars */ }
+        }
         renameSync(tempDbPath, dbPath);
         published = true;
         const durationMs = Date.now() - startedAt;

@@ -370,7 +370,12 @@ export async function resolveSmithersBackendChoice(opts = {}) {
             connection: opts.connection,
         })
         : { exists: false, initialized: false, runCount: 0, schemaVersion: DEFAULT_PG_SCHEMA_VERSION };
-    const marker = migratedMarker.exists;
+    // A migration receipt only suppresses the guards when it actually names a
+    // valid non-sqlite target backend. A bare/malformed `migrated.json` (e.g.
+    // `{ migratedAt: 1 }` with no parseable target) must NOT silently suppress —
+    // otherwise an explicit pglite/postgres open beside a populated SQLite store
+    // would hide the SQLite history.
+    const marker = migratedMarker.exists && (migratedMarker.backend === "pglite" || migratedMarker.backend === "postgres");
     const populated = [
         ...(sqliteStore.runCount > 0 ? [{ backend: /** @type {"sqlite"} */ ("sqlite"), location: sqliteStore.dbPath, runCount: sqliteStore.runCount, schemaVersion: sqliteStore.schemaVersion }] : []),
         ...(pgliteStore.runCount > 0 ? [{ backend: /** @type {"pglite"} */ ("pglite"), location: pgliteStore.dataDir, runCount: pgliteStore.runCount, schemaVersion: pgliteStore.schemaVersion }] : []),
