@@ -273,7 +273,7 @@ function backendLabel(backend) {
  * @param {{ dbPath: string; runCount: number; schemaVersion: string; backend: "pglite" | "postgres" }} details
  */
 function migrationRequiredError(details) {
-    const summary = `Found an existing SQLite store at ${details.dbPath} (${details.runCount} runs, schema v${details.schemaVersion}) but this version uses a ${backendLabel(details.backend)} backend. Your run history will not be visible until you migrate.\n\n  Migrate it:        smithers migrate\n  Or keep SQLite:    smithers <cmd> --backend sqlite   (or backend:"sqlite" in smithers.config.ts)`;
+    const summary = `Found an existing SQLite store at ${details.dbPath} (${details.runCount} runs, schema v${details.schemaVersion}) but this version uses a ${backendLabel(details.backend)} backend. Your run history will not be visible until you migrate.\n\n  Migrate it:        smithers migrate --to ${details.backend}\n  Or keep SQLite:    smithers <cmd> --backend sqlite   (or backend:"sqlite" in smithers.config.ts)`;
     return new SmithersError("SMITHERS_MIGRATION_REQUIRED", summary, {
         dbPath: details.dbPath,
         runCount: details.runCount,
