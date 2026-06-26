@@ -188,6 +188,7 @@ export { runJj, getJjPointer, revertToJjPointer, isJjRepo, workspaceAdd, workspa
 // Core API
 export { createSmithers, createSmithersPostgres } from "./create.js";
 export { openSmithersBackend } from "./openSmithersBackend.js";
+export { openSmithersStore } from "./openSmithersStore.js";
 export { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js";
 export { migrateSmithersStore } from "./migrateSmithersStore.js";
 export {

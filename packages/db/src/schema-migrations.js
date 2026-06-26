@@ -75,6 +75,9 @@ const LEGACY_COLUMN_MIGRATIONS = [
         name: "Add legacy run operational columns",
         table: "_smithers_runs",
         columns: [
+            ["workflow_path", "workflow_path TEXT"],
+            ["started_at_ms", "started_at_ms INTEGER"],
+            ["finished_at_ms", "finished_at_ms INTEGER"],
             ["workflow_hash", "workflow_hash TEXT"],
             ["heartbeat_at_ms", "heartbeat_at_ms INTEGER"],
             ["runtime_owner_id", "runtime_owner_id TEXT"],
@@ -125,6 +128,12 @@ const LEGACY_COLUMN_MIGRATIONS = [
         name: "Add frame encoding column",
         table: "_smithers_frames",
         columns: [["encoding", "encoding TEXT NOT NULL DEFAULT 'full'"]],
+    },
+    {
+        id: "0007_event_timestamp_column",
+        name: "Add event timestamp column",
+        table: "_smithers_events",
+        columns: [["timestamp_ms", "timestamp_ms INTEGER NOT NULL DEFAULT 0"]],
     },
 ];
 
@@ -516,6 +525,14 @@ function buildMigrations(context) {
             return config.columns.every(([column]) => columns.has(column));
         },
         up: (sqlite) => {
+            // A column migration only adds columns to an existing table; the base
+            // 0001 migration owns table creation. If the table is absent (a store
+            // whose ledger recorded 0001 but predates this table), skip rather than
+            // throw "no such table" — mirrors how the index migrations skip indexes
+            // whose table is absent and let the create-table migration own it.
+            if (!tableExists(sqlite, config.table)) {
+                return { table: config.table, addedColumns: [], skipped: "missing_table" };
+            }
             const addedColumns = [];
             for (const [column, definition] of config.columns) {
                 if (addColumnIfMissing(sqlite, config.table, column, definition)) {
@@ -525,6 +542,9 @@ function buildMigrations(context) {
             return { table: config.table, addedColumns };
         },
         upPostgres: async (pgConn) => {
+            if (!(await tableExistsPostgres(pgConn, config.table))) {
+                return { table: config.table, addedColumns: [], skipped: "missing_table" };
+            }
             const addedColumns = [];
             for (const [column, definition] of config.columns) {
                 if (await addColumnIfMissingPostgres(pgConn, config.table, column, definition)) {
@@ -810,7 +830,8 @@ export async function runSmithersSchemaMigrationsPostgres(pgConn, context) {
     await pgConn.query({ text: translateDdl(POSTGRES, MIGRATION_TABLE_SQL) });
     const applied = await loadAppliedMigrationIdsPostgres(pgConn);
     for (const migration of buildMigrations(context)) {
-        if (applied.has(migration.id)) {
+        const alreadyAppliedInLedger = applied.has(migration.id);
+        if (alreadyAppliedInLedger && migration.isAppliedPostgres && await migration.isAppliedPostgres(pgConn)) {
             continue;
         }
         const details = await runPostgresMigrationSpan(migration, async () => {

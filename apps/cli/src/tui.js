@@ -6,7 +6,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { discoverWorkflows, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
 import { mdxPlugin } from "./mdx-plugin.js";
-import { findSmithersDb, openSmithersDb } from "./find-db.js";
+import { openSmithersStore } from "smithers-orchestrator/openSmithersStore";
 import { parseAgentEvent, parseNodeOutputEvent } from "./chat.js";
 import { handleApprovals, handleHumanRequests } from "./tui-gates.js";
 import { formatStreamText } from "./tui-format.js";
@@ -446,7 +446,7 @@ export function childFailurePromise(child) {
  * @param {string} from
  * @param {{ timeoutMs?: number; intervalMs?: number }} opts
  * @param {Promise<Error>} childFailure
- * @returns {Promise<{ db?: Awaited<ReturnType<typeof openSmithersDb>> & { dbPath: string }; error?: Error }>}
+ * @returns {Promise<{ db?: Awaited<ReturnType<typeof openSmithersStore>>; error?: Error }>}
  */
 async function waitForOpenDbOrChild(from, opts, childFailure) {
     const timeoutMs = Math.max(0, opts.timeoutMs ?? 0);
@@ -456,9 +456,8 @@ async function waitForOpenDbOrChild(from, opts, childFailure) {
 
     while (true) {
         try {
-            const dbPath = findSmithersDb(from);
-            const db = await openSmithersDb(dbPath);
-            return { db: { ...db, dbPath } };
+            const db = await openSmithersStore({ cwd: from, mode: "read", wait: { timeoutMs: 0, intervalMs } });
+            return { db };
         } catch (err) {
             if (err?.code !== "CLI_DB_NOT_FOUND") {
                 return { error: err instanceof Error ? err : new Error(String(err)) };
@@ -473,9 +472,8 @@ async function waitForOpenDbOrChild(from, opts, childFailure) {
         const waited = await sleepOrChildFailure(Math.min(intervalMs, timeoutMs - elapsedMs), childFailure);
         if (waited?.error) {
             try {
-                const dbPath = findSmithersDb(from);
-                const db = await openSmithersDb(dbPath);
-                return { db: { ...db, dbPath } };
+                const db = await openSmithersStore({ cwd: from, mode: "read", wait: { timeoutMs: 0, intervalMs } });
+                return { db };
             } catch { }
             return waited;
         }
