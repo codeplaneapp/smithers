@@ -61,7 +61,7 @@ function buildTypicalWorkflowGuidance(contract: SmithersAgentContract) {
 
 export function buildSmithersPiSystemPrompt(
   baseSystemPrompt: string,
-  docs: string,
+  docs: string | undefined,
   contract: SmithersAgentContract,
   activeRun?: SmithersPiRunContext,
 ) {
@@ -80,6 +80,7 @@ export function buildSmithersPiSystemPrompt(
     "- `/smithers-runs` - Lists tracked runs and makes the selected run active.",
     "- `/smithers-approve` - Interactive approval flow for nodes waiting on approval.",
     "- `/smithers-cancel [runId]` - Cancels a running workflow with confirmation.",
+    "- `/smithers-docs [prompt]` - Includes the full Smithers docs bundle in the next prompt, or runs the provided prompt with full docs included.",
     "",
     "### UI Features (always active)",
     "- **Header**: Shows run state, the active run ID, engine and sandbox/viewer heartbeat indicators, and reconnect status.",
@@ -95,9 +96,13 @@ export function buildSmithersPiSystemPrompt(
     "### Typical Workflows",
     ...buildTypicalWorkflowGuidance(contract),
     "",
-    "---\n",
-    docs,
+    "### Full Documentation",
+    "Full Smithers docs are not included by default to keep ordinary repo work focused. When the user explicitly invokes `/smithers-docs`, that turn includes the complete Smithers docs bundle.",
   ];
+
+  if (docs) {
+    sections.push("", "---", "", "## Full Smithers Docs (explicitly requested)", "", docs);
+  }
 
   if (activeRun) {
     sections.push("\n## Active Run Context");

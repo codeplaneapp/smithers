@@ -41,6 +41,22 @@ describe("buildSmithersPiSystemPrompt", () => {
     expect(prompt).toContain("`smithers_get_run`");
     expect(prompt).toContain("`smithers_resolve_approval`");
     expect(prompt).not.toContain("`smithers_run_workflow`");
+    expect(prompt).toContain("Docs body");
+  });
+
+  test("full docs are omitted unless explicitly provided", () => {
+    const contract = createSmithersAgentContract({
+      serverName: "smithers",
+      toolSurface: "semantic",
+      tools: [],
+    });
+
+    const prompt = buildSmithersPiSystemPrompt("Base system prompt\n", undefined, contract);
+
+    expect(prompt).toContain("Base system prompt");
+    expect(prompt).toContain("Full Smithers docs are not included by default");
+    expect(prompt).toContain("/smithers-docs");
+    expect(prompt).not.toContain("# Smithers — full documentation");
   });
 
   test("stale Smithers PI aliases are absent", () => {

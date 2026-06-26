@@ -25,6 +25,7 @@ type ExtensionAPI = PiExtensionAPI & {
   registerTool: (tool: Record<string, unknown>) => void;
   registerCommand: (name: string, command: Record<string, unknown>) => void;
   registerMessageRenderer: (name: string, renderer: (...args: any[]) => unknown) => void;
+  sendUserMessage: (content: string, options?: Record<string, unknown>) => void | Promise<void>;
 };
 
 type ExtensionContext = {
@@ -58,6 +59,7 @@ let mcpToolsRegistered = false;
 let mcpToolsRegistration: Promise<void> | undefined;
 let pollInterval: ReturnType<typeof setInterval> | undefined;
 let activeRunId: string | undefined;
+let includeSmithersDocsNextTurn = false;
 
 const runs = new Map<string, TrackedRun>();
 
@@ -418,7 +420,8 @@ export function extension(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event: { systemPrompt: string }) => {
-    const docs = loadSmithersDocs();
+    const docs = includeSmithersDocsNextTurn ? loadSmithersDocs() : undefined;
+    includeSmithersDocsNextTurn = false;
     const contract = await ensureSmithersToolContract();
     const active = activeRunId ? runs.get(activeRunId) : undefined;
     return {
@@ -452,6 +455,19 @@ export function extension(pi: ExtensionAPI) {
         run = trackRun(runId);
       }
       await openInspector(ctx, run);
+    },
+  });
+
+  pi.registerCommand("smithers-docs", {
+    description: "Include the full Smithers docs in the next prompt, or pass a prompt to run now",
+    handler: async (args: string, ctx: ExtensionContext) => {
+      includeSmithersDocsNextTurn = true;
+      const prompt = args.trim();
+      if (prompt) {
+        await pi.sendUserMessage(prompt);
+        return;
+      }
+      ctx.ui.notify("Full Smithers docs will be included with your next prompt.", "info");
     },
   });
 
