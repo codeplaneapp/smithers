@@ -10,12 +10,17 @@ export function claudeWorkflowTemplate(options) {
     };
     const phaseMap = Object.fromEntries(options.phasePlan.nodes.map((node) => [logicalNodeId(node.nodeId), node.phase]));
     const kindMap = Object.fromEntries(options.phasePlan.nodes.map((node) => [logicalNodeId(node.nodeId), node.kind]));
+    // The phase that runtime-discovered nodes (absent from PHASE_MAP) fall back to.
+    // In collapse mode the whole run is one phase, so unknown nodes must land there
+    // too, not in a separate "main" group.
+    const fallbackPhase = options.collapsePhases ? (options.phasePlan.phases[0]?.title ?? "main") : "main";
     const lines = [
         `export const meta = ${literal(meta)};`,
         "",
         `const PHASE_MAP = ${literal(phaseMap)};`,
         `const KIND_MAP = ${literal(kindMap)};`,
         `const PHASE_TITLES = ${literal(meta.phases.map((entry) => entry.title))};`,
+        `const FALLBACK_PHASE = ${literal(fallbackPhase)};`,
         `const MIRROR_ALL_NODES = ${options.mirrorAllNodes ? "true" : "false"};`,
         `const COLLAPSE_PHASES = ${options.collapsePhases ? "true" : "false"};`,
         "const WATCHER_BUDGET = 950;",
@@ -56,7 +61,7 @@ export function claudeWorkflowTemplate(options) {
         "}",
         "",
         "function phaseFor(nodeId) {",
-        "  return PHASE_MAP[logicalId(nodeId)] || 'main';",
+        "  return PHASE_MAP[logicalId(nodeId)] || FALLBACK_PHASE;",
         "}",
         "",
         "function kindFor(nodeId) {",
@@ -174,7 +179,7 @@ export function claudeWorkflowTemplate(options) {
         "    // The watcher re-derives phase membership from the baked maps on every",
         "    // poll, so fan-out/loop nodes that materialize in later frames are",
         "    // summarized too (collapse mode cannot spawn a new row per late node).",
-        "    return agent(`Watch and summarize the Smithers nodes that belong to phase ${shellQuote(title)} until the run is terminal. Repeatedly run: ${cwdPrefix}smithers inspect ${shellQuote(runId)} --format json\\nFor each step, let logical = its id split on '@@' (take the part before '@@'). A node belongs to this phase when PHASE_MAP[logical] === ${JSON.stringify(title)}, or when logical is absent from PHASE_MAP and ${JSON.stringify(title)} === 'main'. ${includeRule} Re-evaluate membership on EVERY poll so nodes that first appear in later frames are included. PHASE_MAP=${JSON.stringify(PHASE_MAP)} KIND_MAP=${JSON.stringify(KIND_MAP)}. Return a concise final summary of those nodes and their final states when run.status is finished, failed, or cancelled. If run.status is continued, report that continue-as-new is not followed.`, { label: `Phase ${title}`, phase: title, effort: 'low', model: 'haiku' });",
+        "    return agent(`Watch and summarize the Smithers nodes that belong to phase ${shellQuote(title)} until the run is terminal. Repeatedly run: ${cwdPrefix}smithers inspect ${shellQuote(runId)} --format json\\nFor each step, let logical = its id split on '@@' (take the part before '@@'). A node belongs to this phase when PHASE_MAP[logical] === ${JSON.stringify(title)}, or when logical is absent from PHASE_MAP and ${JSON.stringify(title)} === ${JSON.stringify(FALLBACK_PHASE)}. ${includeRule} Re-evaluate membership on EVERY poll so nodes that first appear in later frames are included. PHASE_MAP=${JSON.stringify(PHASE_MAP)} KIND_MAP=${JSON.stringify(KIND_MAP)}. Return a concise final summary of those nodes and their final states when run.status is finished, failed, or cancelled. If run.status is continued, report that continue-as-new is not followed.`, { label: `Phase ${title}`, phase: title, effort: 'low', model: 'haiku' });",
         "  }));",
         "}",
         "",

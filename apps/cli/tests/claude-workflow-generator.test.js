@@ -159,7 +159,7 @@ export default smithers(() => (
         expect(watcherLabels).toContain("late");
     });
 
-    test("collapse-phases watchers re-derive membership so late nodes are summarized", () => {
+    test("collapse-phases watchers re-derive membership so late nodes are summarized", async () => {
         const repo = createTempRepo();
         repo.write("workflow.tsx", `
 /** @jsxImportSource smithers-orchestrator */
@@ -188,6 +188,29 @@ export default smithers(() => (
         expect(script.includes("Re-evaluate membership on EVERY poll")).toBe(true);
         expect(script.includes("PHASE_MAP[logical]")).toBe(true);
         expect(script.includes("Summarize exactly these Smithers node ids")).toBe(false);
-        new AsyncFunction(script.replace(/export const meta = \{[\s\S]*?\n\};\n/, ""));
+        // Unknown dynamic nodes fall back to the single collapse phase, not "main".
+        expect(script.includes('const FALLBACK_PHASE = "Smithers run"')).toBe(true);
+
+        // Semantic check: a discovery that mixes a known node and an unknown
+        // (dynamic) node must produce exactly ONE phase watcher grouped under the
+        // single collapse phase, not splinter the unknown node into its own group.
+        const body = script.replace(/export const meta = \{[\s\S]*?\n\};\n/, "");
+        const phaseWatcherLabels = [];
+        const agentStub = async (_prompt, opts = {}) => {
+            if (opts.label === "Discover Smithers nodes") {
+                return { runStatus: "finished", nodes: [
+                    { nodeId: "only", label: "only", state: "finished" },
+                    { nodeId: "late-dynamic", label: "late-dynamic", state: "finished" },
+                ] };
+            }
+            if (opts.label === "Await Smithers frame") return { next: "done" };
+            phaseWatcherLabels.push(opts.label);
+            return "summary";
+        };
+        const parallelStub = async (thunks) => Promise.all(thunks.map((t) => t()));
+        const noop = () => {};
+        const fn = new AsyncFunction("agent", "parallel", "phase", "log", "args", body);
+        await fn(agentStub, parallelStub, noop, noop, JSON.stringify({ runId: "c" }));
+        expect(phaseWatcherLabels).toEqual(["Phase Smithers run"]);
     });
 });
