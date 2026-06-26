@@ -185,10 +185,25 @@ beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${server.port}`;
 });
 
-afterAll(() => {
-  server.stop(true);
+afterAll(async () => {
+  // Gracefully close every server-side socket BEFORE tearing the server down.
+  // A forced stop(true) abruptly RSTs sockets that are still open, which makes
+  // the underlying `ws` EventEmitter emit an 'error' with no listener attached —
+  // Node turns that into an uncaught exception. Because bun runs every test file
+  // in one process, that exception lands on whichever test file runs next (a
+  // cross-file teardown flake seen only on Linux/happy-dom CI, where the DOM
+  // WebSocket is backed by the `ws` package). A clean server-initiated close
+  // sends a close frame the client handles as a normal "close" instead.
+  for (const { ws } of wsConnections) {
+    try {
+      ws.close(1000);
+    } catch {}
+  }
+  // Let the close frames flush to the clients before the server goes away.
+  await Bun.sleep(50);
   streamSubs.clear();
   wsConnections.length = 0;
+  server.stop(true);
 });
 
 // ---------------------------------------------------------------------------

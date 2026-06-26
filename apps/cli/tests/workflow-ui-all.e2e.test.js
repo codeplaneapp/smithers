@@ -86,7 +86,21 @@ async function checkUi(page, base, descriptor, runId) {
   const url = `${base}/workflows/${descriptor.key}${runId ? `?runId=${runId}` : ""}`;
   await page.goto(url, { waitUntil: "networkidle" });
   // Real bundle built + app mounted to its root element.
-  await page.waitForSelector(`[data-testid="${descriptor.primaryTestId}"]`, { timeout: 20_000 });
+  if (descriptor.primaryTestId) {
+    await page.waitForSelector(`[data-testid="${descriptor.primaryTestId}"]`, { timeout: 20_000 });
+  } else {
+    await page.waitForFunction(() => (document.body.textContent ?? "").trim().length > 0, { timeout: 20_000 });
+    if (!descriptor.verifyOutput && descriptor.expectedText?.length) {
+      await page.waitForFunction(
+        (expected) => {
+          const text = document.body.textContent ?? "";
+          return expected.every((t) => text.includes(t));
+        },
+        descriptor.expectedText,
+        { timeout: 20_000 },
+      );
+    }
+  }
   if (!(descriptor.verifyOutput && runId)) return null;
   // The run-output region appears once node output binds, then the run's real
   // (stub-produced) output text must be present in the rendered DOM.
