@@ -1,7 +1,9 @@
 import { Database } from "bun:sqlite";
 import { Effect } from "effect";
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { POSTGRES, quoteIdentifier, translateDdl } from "@smithers-orchestrator/db/dialect";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { createSmithersPostgres } from "./create.js";
@@ -11,11 +13,12 @@ const DEFAULT_BATCH_SIZE = 250;
 const MIGRATION_MARKER_NAME = "migrated.json";
 
 /**
- * @typedef {"pglite" | "postgres"} MigrateSmithersTarget
+ * @typedef {"sqlite" | "pglite" | "postgres"} MigrateSmithersBackend
  * @typedef {{
  *   cwd?: string;
  *   dbPath?: string;
- *   to?: MigrateSmithersTarget;
+ *   from?: MigrateSmithersBackend;
+ *   to?: MigrateSmithersBackend;
  *   url?: string;
  *   env?: Record<string, string | undefined>;
  *   pgliteDataDir?: string;
@@ -39,10 +42,11 @@ const MIGRATION_MARKER_NAME = "migrated.json";
  *   durationMs: number;
  * }} MigrationTableResult
  * @typedef {{
- *   backend: MigrateSmithersTarget;
+ *   backend: MigrateSmithersBackend;
+ *   source: { backend: MigrateSmithersBackend; dbPath?: string; dataDir?: string; url?: string };
  *   dbPath: string;
  *   markerPath: string;
- *   target: { backend: MigrateSmithersTarget; dataDir?: string; url?: string };
+ *   target: { backend: MigrateSmithersBackend; dbPath?: string; dataDir?: string; url?: string };
  *   runCount: number;
  *   schemaVersion: string;
  *   durationMs: number;
@@ -53,17 +57,17 @@ const MIGRATION_MARKER_NAME = "migrated.json";
 
 /**
  * @param {unknown} value
- * @returns {MigrateSmithersTarget}
+ * @returns {MigrateSmithersBackend}
  */
-function normalizeTarget(value) {
+function normalizeBackend(value, fallback = "sqlite") {
     if (value === undefined || value === null || value === "") {
-        return "pglite";
+        return fallback;
     }
     const target = String(value).toLowerCase();
-    if (target === "pglite" || target === "postgres") {
+    if (target === "sqlite" || target === "pglite" || target === "postgres") {
         return target;
     }
-    throw new SmithersError("INVALID_INPUT", `Invalid migration target: ${String(value)}. Expected pglite or postgres.`, {
+    throw new SmithersError("INVALID_INPUT", `Invalid migration backend: ${String(value)}. Expected sqlite, pglite, or postgres.`, {
         target: value,
     });
 }
@@ -455,7 +459,7 @@ function writeMigrationMarker(result, sourceStats) {
     const marker = {
         migratedAt: new Date().toISOString(),
         source: {
-            dbPath: result.dbPath,
+            ...result.source,
             sizeBytes: sourceStats.sizeBytes,
             mtimeMs: sourceStats.mtimeMs,
             runCount: result.runCount,
@@ -469,6 +473,45 @@ function writeMigrationMarker(result, sourceStats) {
         })),
     };
     writeFileSync(result.markerPath, `${JSON.stringify(marker, null, 2)}\n`, "utf8");
+}
+
+/**
+ * @param {MigrateSmithersStoreResult} result
+ */
+function writeBackendMarker(result) {
+    const markerPath = join(dirname(result.markerPath), "backend.json");
+    writeFileSync(markerPath, `${JSON.stringify({
+        backend: result.backend,
+        migratedAt: new Date().toISOString(),
+        source: result.source,
+        target: result.target,
+    }, null, 2)}\n`, "utf8");
+}
+
+/**
+ * @param {MigrateSmithersBackend} from
+ * @param {MigrateSmithersBackend} to
+ * @returns {string}
+ */
+function agentFallbackText(from, to) {
+    return `\n\nRetry deterministic migration:\n  smithers migrate --from ${from} --to ${to}\n\nIf deterministic migration still fails, inspect the source and target stores for schema/data violations. Agent-assisted repair is tracked as a follow-up and is not available in this build.`;
+}
+
+/**
+ * @param {unknown} error
+ * @param {MigrateSmithersBackend} from
+ * @param {MigrateSmithersBackend} to
+ * @returns {unknown}
+ */
+function withAgentFallback(error, from, to) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("Agent-assisted repair is tracked as a follow-up")) {
+        return error;
+    }
+    if (error instanceof SmithersError) {
+        return new SmithersError(error.code, `${message}${agentFallbackText(from, to)}`, error.details, { cause: error });
+    }
+    return new SmithersError("DB_WRITE_FAILED", `${message}${agentFallbackText(from, to)}`, {}, { cause: error });
 }
 
 // bun:sqlite surfaces a corrupt, encrypted, or non-SQLite source file with one
@@ -493,6 +536,41 @@ function isCorruptSqliteError(error) {
 function isUnopenableSqliteError(error) {
     const message = (error instanceof Error ? error.message : String(error ?? "")).toLowerCase();
     return UNOPENABLE_SQLITE_MARKERS.some((marker) => message.includes(marker));
+}
+
+/**
+ * Bring an older SQLite source up to the current Smithers schema before the
+ * deterministic copy opens its read-only transaction. This preserves the
+ * rollback-friendly copy path while avoiding a stale schema on the target.
+ *
+ * @param {string} dbPath
+ */
+function upgradeSqliteSourceStore(dbPath) {
+    /** @type {Database | undefined} */
+    let sqlite;
+    try {
+        sqlite = new Database(dbPath);
+        ensureSmithersTables(drizzle(sqlite));
+    }
+    catch (error) {
+        if (isCorruptSqliteError(error)) {
+            const original = error instanceof Error ? error.message : String(error);
+            throw new SmithersError("DB_QUERY_FAILED", `The legacy SQLite store at ${dbPath} appears to be corrupted (${original}). Smithers cannot migrate a corrupt store. Verify with: sqlite3 ${dbPath} 'PRAGMA integrity_check'. If it reports corruption, restore from a backup or start fresh; the original file was left untouched.`, { dbPath }, { cause: error });
+        }
+        if (isUnopenableSqliteError(error)) {
+            const original = error instanceof Error ? error.message : String(error);
+            throw new SmithersError("DB_QUERY_FAILED", `Could not open the legacy SQLite store at ${dbPath} (${original}). It may be locked by another process, have unreadable permissions, or be missing its -wal/-shm sidecar files (copy smithers.db together with smithers.db-wal and smithers.db-shm). The original file was left untouched.`, { dbPath }, { cause: error });
+        }
+        throw error;
+    }
+    finally {
+        try {
+            sqlite?.close();
+        }
+        catch {
+            // Best-effort source cleanup before the read-only copy opens.
+        }
+    }
 }
 
 /**
@@ -552,6 +630,389 @@ function removeSqliteFiles(dbPath) {
     }
 }
 
+async function pgTables(pgConn) {
+    const result = await pgConn.query({
+        text: "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' ORDER BY table_name",
+    });
+    return result.rows.map((row) => row.table_name).filter((name) => typeof name === "string");
+}
+
+async function pgColumns(pgConn, table) {
+    const result = await pgConn.query({
+        text: "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position",
+        values: [table],
+    });
+    return result.rows.map((row) => ({
+        name: row.column_name,
+        dataType: row.data_type,
+        nullable: row.is_nullable !== "NO",
+    })).filter((column) => typeof column.name === "string");
+}
+
+async function pgPrimaryKeyColumns(pgConn, table) {
+    const result = await pgConn.query({
+        text: `
+          SELECT a.attname AS column_name
+          FROM pg_index i
+          JOIN pg_class c ON c.oid = i.indrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey)
+          WHERE n.nspname = current_schema()
+            AND c.relname = $1
+            AND i.indisprimary
+          ORDER BY array_position(i.indkey, a.attnum)
+        `,
+        values: [table],
+    });
+    return (result.rows ?? []).map((row) => row.column_name).filter((name) => typeof name === "string");
+}
+
+async function pgIndexes(pgConn, table) {
+    const result = await pgConn.query({
+        text: `
+          SELECT indexname, indexdef
+          FROM pg_indexes
+          WHERE schemaname = current_schema()
+            AND tablename = $1
+            AND indexname NOT LIKE '%_pkey'
+          ORDER BY indexname
+        `,
+        values: [table],
+    });
+    return (result.rows ?? [])
+        .map((row) => ({ name: row.indexname, sql: row.indexdef }))
+        .filter((row) => typeof row.name === "string" && typeof row.sql === "string");
+}
+
+function sqliteTypeForPg(dataType) {
+    const type = String(dataType ?? "").toLowerCase();
+    if (type.includes("int") || type === "boolean") return "INTEGER";
+    if (type.includes("double") || type.includes("numeric") || type.includes("real")) return "REAL";
+    if (type.includes("bytea")) return "BLOB";
+    return "TEXT";
+}
+
+async function pgSchemaVersion(pgConn) {
+    if (!(await pgTableExists(pgConn, "_smithers_schema_migrations"))) return "0000";
+    const result = await pgConn.query({
+        text: "SELECT id FROM _smithers_schema_migrations ORDER BY id DESC LIMIT 1",
+    });
+    const id = typeof result.rows?.[0]?.id === "string" ? result.rows[0].id : "0000";
+    return id.match(/^\d+/)?.[0] ?? id;
+}
+
+function decodePgValueForSqlite(value) {
+    if (value === undefined) return null;
+    if (typeof value === "boolean") return value ? 1 : 0;
+    if (Buffer.isBuffer(value)) return value;
+    if (value instanceof Uint8Array) return Buffer.from(value);
+    return value;
+}
+
+async function prepareSqliteTarget(sqlite, pgConn, tables) {
+    for (const table of tables) {
+        const columns = await pgColumns(pgConn, table);
+        if (columns.length === 0) continue;
+        if (sqliteTableExists(sqlite, table)) {
+            if (table === "_smithers_schema_migrations") {
+                continue;
+            }
+            const rowCount = countSqliteRows(sqlite, table);
+            if (rowCount > 0) {
+                throw new SmithersError("DB_WRITE_FAILED", `Target table ${table} already has ${rowCount} rows; refusing to merge a one-shot Smithers migration into a non-empty target.`, {
+                    table,
+                    rowCount,
+                });
+            }
+            continue;
+        }
+        const primaryKeyColumns = await pgPrimaryKeyColumns(pgConn, table);
+        const columnSql = columns
+            .map((column) => `${sqliteQuote(column.name)} ${sqliteTypeForPg(column.dataType)}${column.nullable ? "" : " NOT NULL"}`)
+            .join(", ");
+        const pkSql = primaryKeyColumns.length > 0
+            ? `, PRIMARY KEY (${primaryKeyColumns.map(sqliteQuote).join(", ")})`
+            : "";
+        sqlite.exec(`CREATE TABLE IF NOT EXISTS ${sqliteQuote(table)} (${columnSql}${pkSql})`);
+        for (const index of await pgIndexes(pgConn, table)) {
+            const indexSql = index.sql
+                .replace(/\bCREATE\s+(UNIQUE\s+)?INDEX\s+/i, (_match, unique = "") => `CREATE ${unique}INDEX IF NOT EXISTS `)
+                .replace(/\s+USING\s+btree\b/gi, "");
+            sqlite.exec(indexSql);
+        }
+    }
+}
+
+async function stablePgOrderClause(pgConn, table, names) {
+    const pk = await pgPrimaryKeyColumns(pgConn, table);
+    const orderColumns = pk.length > 0 ? pk : names;
+    return orderColumns.length > 0 ? ` ORDER BY ${orderColumns.map(quoteIdentifier).join(", ")}` : "";
+}
+
+async function copyPgTableToSqlite(pgConn, sqlite, table, batchSize, opts) {
+    const startedAt = Date.now();
+    const columns = await pgColumns(pgConn, table);
+    const sourceRows = await countPgRows(pgConn, table);
+    await emitProgress({ type: "table-start", table, sourceRows }, opts);
+    if (columns.length === 0) {
+        return { table, sourceRows, targetRows: countSqliteRows(sqlite, table), durationMs: Date.now() - startedAt };
+    }
+    const names = columns.map((column) => column.name);
+    const insert = sqlite.query(`INSERT INTO ${sqliteQuote(table)} (${names.map(sqliteQuote).join(", ")}) VALUES (${names.map(() => "?").join(", ")})`);
+    let copiedRows = 0;
+    const orderClause = await stablePgOrderClause(pgConn, table, names);
+    sqlite.exec("BEGIN");
+    try {
+        if (table === "_smithers_schema_migrations") {
+            sqlite.exec(`DELETE FROM ${sqliteQuote(table)}`);
+        }
+        let offset = 0;
+        while (true) {
+            const result = await pgConn.query({
+                text: `SELECT ${names.map(quoteIdentifier).join(", ")} FROM ${quoteIdentifier(table)}${orderClause} LIMIT $1 OFFSET $2`,
+                values: [batchSize, offset],
+            });
+            const rows = result.rows ?? [];
+            if (rows.length === 0) break;
+            for (const row of rows) {
+                insert.run(...names.map((column) => decodePgValueForSqlite(row[column])));
+            }
+            copiedRows += rows.length;
+            offset += rows.length;
+        }
+        sqlite.exec("COMMIT");
+    }
+    catch (error) {
+        try {
+            sqlite.exec("ROLLBACK");
+        }
+        catch {}
+        throw error;
+    }
+    const targetRows = countSqliteRows(sqlite, table);
+    const durationMs = Date.now() - startedAt;
+    await emitProgress({ type: "table-copied", table, copiedRows, sourceRows, targetRows, durationMs }, opts);
+    return { table, sourceRows, targetRows, durationMs };
+}
+
+function assertSqliteTargetValid(sqlite) {
+    const integrity = sqlite.query("PRAGMA integrity_check").all();
+    if (integrity.length !== 1 || integrity[0]?.integrity_check !== "ok") {
+        throw new SmithersError("DB_WRITE_FAILED", `SQLite integrity_check failed after migration: ${JSON.stringify(integrity)}`);
+    }
+    const fk = sqlite.query("PRAGMA foreign_key_check").all();
+    if (fk.length > 0) {
+        throw new SmithersError("DB_WRITE_FAILED", `SQLite foreign_key_check failed after migration: ${JSON.stringify(fk)}`);
+    }
+    for (const table of ["_smithers_runs"]) {
+        const pk = sqlite.query(`PRAGMA table_info(${sqliteQuote(table)})`).all().filter((row) => Number(row.pk) > 0).map((row) => row.name);
+        if (pk.length === 0) {
+            throw new SmithersError("DB_WRITE_FAILED", `Migrated SQLite table ${table} is missing a primary key.`);
+        }
+    }
+}
+
+function sqliteRunCountAt(dbPath) {
+    if (!existsSync(dbPath)) return 0;
+    try {
+        const sqlite = new Database(dbPath, { readonly: true });
+        try {
+            return sqliteTableExists(sqlite, "_smithers_runs") ? countSqliteRows(sqlite, "_smithers_runs") : 0;
+        }
+        finally {
+            sqlite.close();
+        }
+    }
+    catch {
+        return 0;
+    }
+}
+
+// Whether an existing file is a recognizable Smithers store (has the runs
+// table). Used to refuse overwriting an unrelated/corrupt SQLite file at the
+// target path during the atomic publish.
+function sqliteHasRunsTableAt(dbPath) {
+    if (!existsSync(dbPath)) return false;
+    let sqlite;
+    try {
+        sqlite = new Database(dbPath, { readonly: true });
+        return sqliteTableExists(sqlite, "_smithers_runs");
+    }
+    catch {
+        return false;
+    }
+    finally {
+        try { sqlite?.close(); } catch { /* best-effort */ }
+    }
+}
+
+function inferSqliteSourceDbPath(primaryDbPath, workspaceRoot, hasExplicitDbPath) {
+    const candidates = hasExplicitDbPath
+        ? [primaryDbPath]
+        : [primaryDbPath, join(workspaceRoot, ".smithers", "smithers.db")];
+    for (const candidate of [...new Set(candidates)]) {
+        if (sqliteRunCountAt(candidate) > 0) {
+            return candidate;
+        }
+    }
+    return primaryDbPath;
+}
+
+async function pgliteRunCountAt(cwd, workspaceRoot, opts) {
+    const dataDir = resolve(cwd, opts.pgliteDataDir ?? join(workspaceRoot, ".smithers", "pg"));
+    if (!existsSync(dataDir)) return 0;
+    let api;
+    try {
+        api = await createSmithersPostgres({}, { provider: "pglite", dataDir });
+        const pgConn = api.db.connection;
+        return (await pgTableExists(pgConn, "_smithers_runs")) ? await countPgRows(pgConn, "_smithers_runs") : 0;
+    }
+    catch {
+        return 0;
+    }
+    finally {
+        await api?.close?.();
+    }
+}
+
+async function inferSourceBackend(opts, cwd, workspaceRoot, dbPath, target) {
+    if (opts.from) return normalizeBackend(opts.from);
+    const counts = [
+        { backend: "sqlite", runCount: sqliteRunCountAt(inferSqliteSourceDbPath(dbPath, workspaceRoot, Boolean(opts.dbPath))) },
+        { backend: "pglite", runCount: await pgliteRunCountAt(cwd, workspaceRoot, opts) },
+        { backend: "postgres", runCount: await postgresRunCountAt(opts) },
+    ].filter((entry) => entry.runCount > 0);
+    if (counts.length === 1) return counts[0].backend;
+    if (counts.length > 1) {
+        throw new SmithersError("SMITHERS_BACKEND_CONFLICT", "Multiple Smithers backend stores contain run history; pass --from explicitly before migrating.", {
+            populatedBackends: counts.map((entry) => entry.backend),
+        });
+    }
+    return "sqlite";
+}
+
+async function postgresRunCountAt(opts) {
+    const env = opts.env ?? process.env;
+    const connectionString = opts.url ?? env.SMITHERS_POSTGRES_URL ?? env.DATABASE_URL;
+    if (!connectionString) return 0;
+    let client;
+    try {
+        const pg = await import("pg");
+        client = new pg.Client({ connectionString });
+        await client.connect();
+        return (await pgTableExists(client, "_smithers_runs")) ? await countPgRows(client, "_smithers_runs") : 0;
+    }
+    catch {
+        return 0;
+    }
+    finally {
+        await client?.end?.().catch(() => {});
+    }
+}
+
+async function migratePgToSqlite(opts, context) {
+    const { cwd, workspaceRoot, dbPath, target, sourceBackend, startedAt, batchSize } = context;
+    const dataDir = resolve(cwd, opts.pgliteDataDir ?? join(workspaceRoot, ".smithers", "pg"));
+    const tempDbPath = `${dbPath}.migrating`;
+    let sourceApi;
+    let sqlite;
+    let published = false;
+    try {
+        sourceApi = await createSmithersPostgres({}, sourceBackend === "postgres"
+            ? { provider: "postgres", connectionString: opts.url ?? context.env.SMITHERS_POSTGRES_URL ?? context.env.DATABASE_URL }
+            : { provider: "pglite", dataDir });
+        const pgConn = sourceApi.db.connection;
+        if (!(await pgTableExists(pgConn, "_smithers_runs"))) {
+            throw new SmithersError("CLI_DB_NOT_FOUND", `No ${sourceBackend} Smithers run store found.`, { sourceBackend });
+        }
+        const runCount = await countPgRows(pgConn, "_smithers_runs");
+        const schemaVersion = await pgSchemaVersion(pgConn);
+        const tables = (await pgTables(pgConn)).sort((a, b) => {
+            const priority = tablePriority(a) - tablePriority(b);
+            return priority === 0 ? a.localeCompare(b) : priority;
+        });
+        // Refuse to overwrite a populated SQLite target: the atomic publish
+        // below would replace it, so guard the FINAL dbPath (not the temp).
+        if (sqliteRunCountAt(dbPath) > 0) {
+            throw new SmithersError("DB_WRITE_FAILED", `Target SQLite store at ${dbPath} already has run history; refusing to merge a one-shot Smithers migration into a non-empty target.`, {
+                dbPath,
+            });
+        }
+        // Build the SQLite target in a temp file, never the live smithers.db.
+        for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+            try { rmSync(`${tempDbPath}${suffix}`, { force: true }); } catch { /* no stale temp */ }
+        }
+        sqlite = new Database(tempDbPath);
+        ensureSmithersTables(drizzle(sqlite));
+        await prepareSqliteTarget(sqlite, pgConn, tables);
+        const tableResults = [];
+        for (const table of tables) {
+            tableResults.push(await copyPgTableToSqlite(pgConn, sqlite, table, batchSize, opts));
+        }
+        for (const table of tableResults) {
+            if (table.sourceRows !== table.targetRows) {
+                throw new SmithersError("DB_WRITE_FAILED", `Smithers migration count mismatch for ${table.table}: source=${table.sourceRows}, target=${table.targetRows}.`, {
+                    table: table.table,
+                    sourceRows: table.sourceRows,
+                    targetRows: table.targetRows,
+                });
+            }
+        }
+        assertSqliteTargetValid(sqlite);
+        // Fully built + verified in the temp file: publish atomically so a
+        // mid-copy failure can never leave a partial smithers.db that a later
+        // default read would treat as authoritative (hiding the real source).
+        try { sqlite.close(); } catch { /* about to rename */ }
+        sqlite = undefined;
+        // Never clobber an unrelated/corrupt file at the target path. A populated
+        // Smithers store was already refused above; here only a recognizable
+        // empty Smithers store (or a non-existent path) may be replaced.
+        if (existsSync(dbPath) && !sqliteHasRunsTableAt(dbPath)) {
+            throw new SmithersError("DB_WRITE_FAILED", `Target path ${dbPath} already exists and is not a recognizable Smithers store; refusing to overwrite it.`, { dbPath });
+        }
+        for (const suffix of ["-wal", "-shm", "-journal"]) {
+            try { rmSync(`${dbPath}${suffix}`, { force: true }); } catch { /* stale sidecars */ }
+        }
+        renameSync(tempDbPath, dbPath);
+        published = true;
+        const durationMs = Date.now() - startedAt;
+        const result = {
+            backend: target,
+            source: sourceBackend === "postgres" ? { backend: sourceBackend, url: "set" } : { backend: sourceBackend, dataDir },
+            dbPath,
+            markerPath: markerPathFor(dbPath, workspaceRoot),
+            target: { backend: "sqlite", dbPath },
+            runCount,
+            schemaVersion,
+            durationMs,
+            tables: tableResults,
+            sqliteRemoved: false,
+        };
+        writeMigrationMarker(result, { sizeBytes: null, mtimeMs: null });
+        writeBackendMarker(result);
+        await emitProgress({
+            type: "done",
+            tableCount: tableResults.length,
+            copiedRows: tableResults.reduce((sum, table) => sum + table.sourceRows, 0),
+            durationMs,
+        }, opts);
+        return result;
+    }
+    catch (error) {
+        throw withAgentFallback(error, sourceBackend, target);
+    }
+    finally {
+        try { sqlite?.close(); } catch {}
+        if (!published) {
+            // Never leave a partial target behind on failure.
+            for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+                try { rmSync(`${tempDbPath}${suffix}`, { force: true }); } catch { /* best-effort */ }
+            }
+        }
+        await sourceApi?.close?.();
+    }
+}
+
 /**
  * One-shot copy from the legacy bun:sqlite Smithers store to PGlite/Postgres.
  *
@@ -563,13 +1024,23 @@ export async function migrateSmithersStore(opts = {}) {
     const cwd = resolve(opts.cwd ?? process.cwd());
     const env = opts.env ?? process.env;
     const workspaceRoot = findSmithersAnchorDir(cwd) ?? cwd;
-    const dbPath = resolve(cwd, opts.dbPath ?? join(workspaceRoot, "smithers.db"));
-    if (!existsSync(dbPath)) {
+    const requestedDbPath = resolve(cwd, opts.dbPath ?? join(workspaceRoot, "smithers.db"));
+    const target = normalizeBackend(opts.to, "sqlite");
+    const sourceBackend = await inferSourceBackend(opts, cwd, workspaceRoot, requestedDbPath, target);
+    const dbPath = sourceBackend === "sqlite"
+        ? inferSqliteSourceDbPath(requestedDbPath, workspaceRoot, Boolean(opts.dbPath))
+        : requestedDbPath;
+    if (sourceBackend === target) {
+        throw new SmithersError("INVALID_INPUT", `Migration source and target are both ${target}. Choose different --from and --to backends.`, {
+            sourceBackend,
+            target,
+        });
+    }
+    if (sourceBackend === "sqlite" && !existsSync(dbPath)) {
         throw new SmithersError("CLI_DB_NOT_FOUND", `No legacy SQLite store found at ${dbPath}.`, {
             dbPath,
         });
     }
-    const target = normalizeTarget(opts.to);
     // Validate the Postgres connection target BEFORE opening the source store, so
     // `migrate --to postgres` with no url fails fast with a clear INVALID_INPUT
     // instead of being masked by an unrelated source-open error (e.g. an
@@ -577,6 +1048,20 @@ export async function migrateSmithersStore(opts = {}) {
     const postgresUrl = target === "postgres" ? (opts.url ?? env.SMITHERS_POSTGRES_URL ?? env.DATABASE_URL) : undefined;
     if (target === "postgres" && !postgresUrl) {
         throw new SmithersError("INVALID_INPUT", "smithers migrate --to postgres requires --url, SMITHERS_POSTGRES_URL, or DATABASE_URL.", {
+            target,
+        });
+    }
+    if (sourceBackend === "postgres" && !(opts.url ?? env.SMITHERS_POSTGRES_URL ?? env.DATABASE_URL)) {
+        throw new SmithersError("INVALID_INPUT", "smithers migrate --from postgres requires --url, SMITHERS_POSTGRES_URL, or DATABASE_URL.", {
+            sourceBackend,
+        });
+    }
+    if (target === "sqlite" && sourceBackend !== "sqlite") {
+        return migratePgToSqlite(opts, { cwd, env, workspaceRoot, dbPath, target, sourceBackend, startedAt, batchSize: Math.max(1, Math.floor(opts.batchSize ?? DEFAULT_BATCH_SIZE)) });
+    }
+    if (sourceBackend !== "sqlite") {
+        throw new SmithersError("INVALID_INPUT", `Migration from ${sourceBackend} to ${target} is not implemented yet.`, {
+            sourceBackend,
             target,
         });
     }
@@ -589,6 +1074,7 @@ export async function migrateSmithersStore(opts = {}) {
     /** @type {(import("./CreateSmithersApi.ts").CreateSmithersApi<Record<string, import("zod").ZodObject<any>>> & { close?: () => Promise<void> }) | undefined} */
     let targetApi;
     try {
+        upgradeSqliteSourceStore(dbPath);
         const source = openSourceStore(dbPath);
         sqlite = source.sqlite;
         const { runCount, schemaVersion, tables, indexes } = source;
@@ -633,6 +1119,7 @@ export async function migrateSmithersStore(opts = {}) {
         const durationMs = Date.now() - startedAt;
         const result = {
             backend: target,
+            source: { backend: "sqlite", dbPath },
             dbPath,
             markerPath,
             target: target === "postgres"
@@ -645,6 +1132,7 @@ export async function migrateSmithersStore(opts = {}) {
             sqliteRemoved: false,
         };
         writeMigrationMarker(result, sourceStats);
+        writeBackendMarker(result);
         if (!keepSqlite) {
             sqlite.close();
             sqlite = undefined;
@@ -675,7 +1163,7 @@ export async function migrateSmithersStore(opts = {}) {
             durationMs: Date.now() - startedAt,
             error: error?.message ?? String(error),
         }, "smithers:migrate");
-        throw error;
+        throw withAgentFallback(error, sourceBackend, target);
     }
     finally {
         try {

@@ -345,8 +345,13 @@ export const smithersErrorDefinitions = {
     },
     SMITHERS_MIGRATION_REQUIRED: {
         category: "cli",
-        when: "A legacy SQLite store holds run data but the resolved backend is pglite/postgres with no migrated.json, or the store schema version is unsatisfiable in place.",
-        details: "{ dbPath, runCount, schemaVersion, resolvedBackend }",
+        when: "A physical Smithers store holds run data but the resolved backend points at another store with no migrated.json receipt, or the store schema version is unsatisfiable in place.",
+        details: "{ sourceBackend, targetBackend, dbPath?, location?, runCount, schemaVersion, resolvedBackend? }",
+    },
+    SMITHERS_BACKEND_CONFLICT: {
+        category: "cli",
+        when: "Multiple Smithers backend stores contain run history and no migrated.json receipt explains the divergence.",
+        details: "{ populatedBackends, stores }",
     },
     STORAGE_ERROR: {
         category: "database",

@@ -1,7 +1,8 @@
 export type MigrateSmithersStoreOptions = {
 	cwd?: string;
 	dbPath?: string;
-	to?: "pglite" | "postgres";
+	from?: "sqlite" | "pglite" | "postgres";
+	to?: "sqlite" | "pglite" | "postgres";
 	url?: string;
 	env?: Record<string, string | undefined>;
 	pgliteDataDir?: string;

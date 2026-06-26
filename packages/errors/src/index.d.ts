@@ -679,6 +679,14 @@ declare namespace smithersErrorDefinitions {
         let details_mig: string;
         export { details_mig as details };
     }
+    namespace SMITHERS_BACKEND_CONFLICT {
+        let category_backend_conflict: string;
+        export { category_backend_conflict as category };
+        let when_backend_conflict: string;
+        export { when_backend_conflict as when };
+        let details_backend_conflict: string;
+        export { details_backend_conflict as details };
+    }
     namespace STORAGE_ERROR {
         let category_70: string;
         export { category_70 as category };
