@@ -141,5 +141,7 @@ export default smithers((ctx) => {
         expect(nodeEventIds).toContain("audit-beta");
         expect(nodeEventIds).toContain("audit-gamma");
         expect(later.runStatus).toBe("finished");
-    });
+        // Seeds a real detached run and polls the CLI, so it needs more than Bun's
+        // default 5s per-test budget. CI runs plain `bun test` with no --timeout.
+    }, 30_000);
 });
