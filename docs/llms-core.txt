@@ -138,32 +138,35 @@ runs, watching them, and clearing approvals. The `smithers` skill makes your age
 fluent in that without making it read the whole docs site first, so you reach the
 aha moment faster.
 
-`init` auto-installs the skill into every coding agent it detects (no `mkdir`, no
-`curl`). To install or re-install at any time:
+`init` auto-installs the curated onboarding skill into detected agents whose
+skill directory Smithers can write directly today: Claude Code and Pi (no
+`mkdir`, no `curl`). For other agents, use the MCP server plus standing
+instructions, or point the agent at `docs-full` below.
+
+To sync the generated Smithers CLI command skill set at any time:
 
 ```bash
 bunx smithers-orchestrator skills add
 ```
 
-That copies the curated `smithers` skill (SKILL.md + the full docs bundle) into
-every detected agent on your machine. Target a single agent with `--agent`:
+That writes generated command-level skill files to supported skill locations,
+including the canonical `~/.agents/skills` directory. It supports `--no-global`
+for project-scoped installs; unlike `mcp add`, it has no supported `--agent`
+target filter.
 
-```bash
-bunx smithers-orchestrator skills add --agent claude-code
-```
-
-The skill ships the full docs bundle (`llms-full.txt`) next to its `SKILL.md`, so
-the agent can read the exact API on demand. Once installed, just ask for the
-outcome, *"orchestrate an agent to add rate limiting and keep iterating until the
-tests pass"*, and the agent reaches for Smithers itself.
+The curated onboarding skill installed by `init` ships the full docs bundle
+(`llms-full.txt`) next to its `SKILL.md`, so supported agents can read the exact
+API on demand. Once Smithers is wired into your agent, just ask for the outcome,
+*"orchestrate an agent to add rate limiting and keep iterating until the tests
+pass"*, and the agent reaches for Smithers itself.
 
 For agents without a skills directory, point them at
 `bunx smithers-orchestrator docs-full` (prints the same bundle) or
 `bunx smithers-orchestrator ask "<question>"`.
 
-To install the skill **and** register the MCP server into every coding agent on
-your machine at once, see [Agent Support](/agents/overview). It covers Claude
-Code, Codex, Cursor, Copilot, Pi, Hermes, OpenClaw, and ~20 more.
+To install skills where supported **and** register the MCP server into coding
+agents on your machine, see [Agent Support](/agents/overview). It covers Claude
+Code, Codex, Cursor, Copilot, Pi, Hermes, OpenClaw, and more.
 
 ## When to Use Manual Installation
 

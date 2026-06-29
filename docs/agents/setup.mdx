@@ -11,14 +11,15 @@ and let your agent wire everything, or run three commands yourself.
 ## Fastest path: let your agent do it
 
 Paste this into your harness of choice (Claude Code, Codex, Cursor, Copilot, or
-any agent with shell access). It installs the workflow pack, the skill, and the
-MCP server, then reports which starter fits your next task.
+any agent with shell access). It installs the workflow pack, syncs Smithers'
+generated CLI skill files where supported, registers the MCP server, then reports
+which starter fits your next task.
 
 ```text Setup prompt
 Set up Smithers (a durable AI workflow orchestrator) in this repo for me.
 
 1. Run `bunx smithers-orchestrator init` to scaffold `.smithers/`.
-2. Install the Smithers skill and register its MCP server for the agent you are:
+2. Sync Smithers skill files where supported and register its MCP server:
    `bunx smithers-orchestrator skills add`
    `bunx smithers-orchestrator mcp add`
 3. Read `bunx smithers-orchestrator docs` so you know the CLI verbs and components.
@@ -30,9 +31,10 @@ use Smithers to orchestrate it instead of doing it inline.
 ```
 
 `init` prints what it scaffolds, which coding agents it detected on your machine,
-and the next commands to try. `skills add` and `mcp add` reach every agent they
-detect, so a single run wires up Claude Code, Codex, Cursor, Copilot, Gemini,
-OpenCode, Amp, Windsurf, and ~20 more at once.
+and the next commands to try. `skills add` syncs the generated CLI skill set to
+supported skill locations; `mcp add` registers Smithers as an MCP server for
+detected MCP-capable agents such as Claude Code, Codex, Cursor, Gemini, OpenCode,
+Amp, Windsurf, and more.
 
 ## Or wire it by hand
 
@@ -40,15 +42,16 @@ OpenCode, Amp, Windsurf, and ~20 more at once.
 # 1. Scaffold the workflow pack into .smithers/
 bunx smithers-orchestrator init
 
-# 2. Teach every detected agent the Smithers skill set
+# 2. Sync the generated Smithers CLI skill set where supported
 bunx smithers-orchestrator skills add
 
 # 3. Register Smithers as an MCP server in every detected agent
 bunx smithers-orchestrator mcp add
 ```
 
-Scope either install with `--agent <name>` for one harness, or `--no-global` to
-write into the current repo instead of your home directory:
+Scope the MCP install with `--agent <name>` for one harness, or use
+`--no-global` with skills to write into the current repo instead of your home
+directory:
 
 ```bash
 bunx smithers-orchestrator mcp add --agent cursor

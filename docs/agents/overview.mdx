@@ -1,6 +1,6 @@
 ---
 title: Agent Support
-description: Connect Smithers to the coding agent you already use (Claude Code, Codex, Cursor, Copilot, Pi, Hermes, OpenClaw, and ~20 more) so the agent can run, watch, and steer workflows for you.
+description: Connect Smithers to the coding agent you already use (Claude Code, Codex, Cursor, Copilot, Pi, Hermes, OpenClaw, and more) so the agent can run, watch, and steer workflows for you.
 ---
 
 Smithers is **driven by an agent, not clicked by a human**. You ask your coding
@@ -20,26 +20,25 @@ one that matches how the agent is extended.
 
 | Surface | What it gives the agent | Ship it with |
 |---|---|---|
-| **Skill** | Fluency in Smithers (when to use it, the CLI verbs, the component catalog) loaded on demand | `skills add` |
+| **Skill** | Agent-facing Smithers context, either curated onboarding where directly supported or generated CLI command skills | `init` / `skills add` |
 | **MCP server** | Structured tools to list, run, watch, inspect, and control runs without shell-parsing | `mcp add` or native MCP config |
 | **Instructions** | A standing note in `AGENTS.md` / `CLAUDE.md` so the agent knows Smithers is available | a few lines in the repo |
 
-## Two commands cover most agents
+## Two commands cover most setup
 
-The Smithers CLI installs both the skill and the MCP server into every coding
-agent it detects on your machine, no per-agent config by hand.
+The Smithers CLI can sync Smithers skill files where supported and register the
+MCP server into detected coding agents, no per-agent config by hand.
 
 ```bash
-# Install the Smithers skill set into every detected agent
-# (Claude Code, Codex, Cursor, Copilot, Gemini, OpenCode, Amp, Windsurf, …)
+# Sync the Smithers skill set into supported skill locations
 bunx smithers-orchestrator skills add
 
 # Register Smithers as an MCP server in every detected agent
 bunx smithers-orchestrator mcp add
 ```
 
-Target a single agent with `--agent`, or scope to the current project with
-`--no-global`:
+Target a single MCP agent with `--agent`, or scope skill installs to the current
+project with `--no-global`:
 
 ```bash
 bunx smithers-orchestrator mcp add --agent cursor
@@ -48,9 +47,8 @@ bunx smithers-orchestrator skills add --no-global   # writes .agents/skills in t
 
 <Note>
 `skills add` generates a skill per CLI command group (`bunx smithers-orchestrator up`, `bunx smithers-orchestrator ps`,
-`bunx smithers-orchestrator approve`, …) and installs them to the canonical `~/.agents/skills`
-directory, symlinking into each agent that uses its own path (Claude Code →
-`~/.claude/skills`, Windsurf → `~/.codeium/windsurf/skills`, …). `mcp add`
+`bunx smithers-orchestrator approve`, …) and syncs them into supported skill
+locations, including the canonical `~/.agents/skills` directory. `mcp add`
 registers `bunx smithers-orchestrator --mcp` in each agent's MCP config. Override
 the launch command with `--command` if Smithers is a project dependency.
 </Note>
@@ -78,39 +76,42 @@ goes further. It teaches the agent the *mental model* (Smithers as durable plan
 mode, the `.smithers/` layout, which component to reach for) and ships the full
 docs bundle next to it so the agent can read the exact API on demand.
 
-`init` installs the skill automatically for every detected agent. To install or
-re-install at any time:
+`init` installs the curated onboarding skill automatically for detected agents
+whose skill directory Smithers can write directly today: Claude Code and Pi. To
+sync the generated Smithers CLI skill set at any time:
 
 ```bash
 bunx smithers-orchestrator skills add
 ```
 
-Target a single agent with `--agent` (e.g. `--agent codex`, `--agent cursor`).
-See each agent's page for the exact path where the skill lands.
+`skills add` supports `--no-global` for project-scoped installs; unlike
+`mcp add`, it has no supported `--agent` target filter. See each agent's page for
+the exact supported setup.
 
 ## Support matrix
 
 | Agent | Skill | MCP server | Notes |
 |---|---|---|---|
 | [Claude Code](/agents/claude-code) | `skills add` | `mcp add` → `~/.claude.json` | Also a Claude Code **plugin** (skill + MCP bundled) |
-| [Codex](/agents/codex) | `skills add` → `~/.codex/skills` | `mcp add` / `config.toml` (TOML) | `AGENTS.md` for standing instructions |
-| [Cursor](/agents/cursor) | `skills add` → `~/.cursor/skills` | `mcp add` / `.cursor/mcp.json` | Rules in `.cursor/rules/*.mdc`; `cursor-agent` CLI |
-| [GitHub Copilot](/agents/copilot) | `skills add` → `~/.copilot/skills` | `.vscode/mcp.json` (editor) / repo settings (cloud agent) | Two distinct MCP schemas |
+| [Codex](/agents/codex) | Use `docs-full` / `ask`; no automatic skill install | `mcp add` / `config.toml` (TOML) | `AGENTS.md` for standing instructions |
+| [Cursor](/agents/cursor) | Optional `skills add` → `~/.agents/skills` if bridged | `mcp add` / `.cursor/mcp.json` | Rules in `.cursor/rules/*.mdc`; `cursor-agent` CLI |
+| [GitHub Copilot](/agents/copilot) | Custom instructions / prompt files | `.vscode/mcp.json` (editor) / repo settings (cloud agent) | Two distinct MCP schemas |
 | [Pi](/agents/pi) | `skills add` → `~/.pi/agent/skills` | no native MCP | First-party `pi-plugin` with a live run inspector; see [Pi integration](/integrations/pi-integration) |
 | [Hermes](/agents/hermes) | `skills add` | `mcp add` → `~/.hermes/config.yaml` (YAML) | Reads `AGENTS.md` |
 | [OpenClaw](/agents/openclaw) | `skills add` → `~/.agents/skills` | `mcp add` → `~/.openclaw/openclaw.json` | Skills via ClawHub |
 
-`skills add` and `mcp add` also reach **Gemini CLI, OpenCode, Amp, Windsurf,
-Cline, Continue, Roo, Kilo, Goose, Augment, Trae, Junie, Crush, Kiro, Qwen Code,
-OpenHands**. Run them once and any detected agent is wired up.
+`mcp add` also reaches **Gemini CLI, OpenCode, Amp, Windsurf, Cline, Continue,
+Roo, Kilo, Goose, Augment, Trae, Junie, Crush, Kiro, Qwen Code, OpenHands**.
+Run it once and any detected MCP-capable agent is wired up.
 
 <Note>
 Pi, Hermes, and OpenClaw aren't in the underlying skill/MCP framework's built-in
 registry, so Smithers wires them as a supplementary step: `mcp add` writes the
 Smithers server into Hermes's `config.yaml` and OpenClaw's `openclaw.json`
 directly, and `skills add` copies the canonical skill set into Pi's
-`~/.pi/agent/skills`. Each respects `--no-global`, `--agent`, and `--command`,
-preserves existing config, and silently skips an agent that isn't installed.
+`~/.pi/agent/skills`. MCP wiring respects `--agent` and `--command`; skill
+wiring respects `--no-global`. Each preserves existing config and silently skips
+an agent that isn't installed.
 </Note>
 
 ## The other direction: Smithers runs the agent

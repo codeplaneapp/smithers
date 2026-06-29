@@ -1,31 +1,30 @@
 ---
 title: Codex
-description: Run Smithers from OpenAI's Codex CLI. Install the skill, register the MCP server in config.toml, and point Codex at it with AGENTS.md.
+description: Run Smithers from OpenAI's Codex CLI. Register the MCP server in config.toml and point Codex at it with AGENTS.md.
 ---
 
-[OpenAI Codex](https://developers.openai.com/codex) extends through **skills**,
-**MCP servers** declared in `~/.codex/config.toml`, and **`AGENTS.md`**
-instructions. Wire up all three in one step:
+[OpenAI Codex](https://developers.openai.com/codex) extends through **MCP
+servers** declared in `~/.codex/config.toml` and **`AGENTS.md`** instructions.
+Wire up the MCP server with Smithers:
 
 ```bash
-bunx smithers-orchestrator skills add --agent codex
 bunx smithers-orchestrator mcp add --agent codex
 ```
 
-That installs the Smithers skill set into `~/.codex/skills/` and registers the
-MCP server in Codex's config. Restart Codex and it can drive workflows.
+That registers the MCP server in Codex's config. Restart Codex and it can drive
+workflows.
 
-## Install the skill
+## Smithers docs in Codex
 
-Codex reads skills from `~/.codex/skills/` (global) and `.agents/skills/`
-(project). The command at the top of this page installs the skill for you:
+Smithers does not currently auto-install a Codex skill, and
+`bunx smithers-orchestrator skills add` has no supported `--agent codex` target
+filter. For Codex, keep the repo-level `AGENTS.md` guidance below and use the
+packaged docs commands when Codex needs the full API:
 
 ```bash
-bunx smithers-orchestrator skills add --agent codex
+bunx smithers-orchestrator docs-full
+bunx smithers-orchestrator ask "How do I run and watch a workflow?"
 ```
-
-Codex auto-selects a skill by its `description`, or you invoke it explicitly with
-`/skills`.
 
 ## Register the MCP server
 

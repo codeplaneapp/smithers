@@ -1,19 +1,19 @@
 ---
 title: Cursor
-description: Run Smithers from Cursor. Register the MCP server, install the skill, add a project rule, and drive it headless with cursor-agent.
+description: Run Smithers from Cursor. Register the MCP server, add a project rule, and drive it headless with cursor-agent.
 ---
 
-[Cursor](https://cursor.com/docs) extends through **MCP servers**, **skills**,
-**rules**, and the headless **`cursor-agent`** CLI. Smithers plugs into all of
-them.
+[Cursor](https://cursor.com/docs) extends through **MCP servers**, **rules**, and
+the headless **`cursor-agent`** CLI. Smithers plugs into those surfaces; generated
+CLI skill files can also be synced to `~/.agents/skills` for harnesses that read
+that directory.
 
 ```bash
-bunx smithers-orchestrator skills add --agent cursor
 bunx smithers-orchestrator mcp add --agent cursor
 ```
 
-That installs the skill set under `~/.cursor/skills/` and registers the MCP
-server. Reopen Cursor and the Smithers tools are available in the Agent.
+That registers the MCP server. Reopen Cursor and the Smithers tools are
+available in the Agent.
 
 ## Register the MCP server
 
@@ -36,13 +36,14 @@ The server exposes the semantic tools (`list_workflows`, `run_workflow`,
 `watch_run`, `resolve_approval`, and the rest). See the
 [MCP Server reference](/integrations/mcp-server).
 
-## Install the skill
+## Optional generated skill files
 
-Cursor reads skills from `~/.cursor/skills/`. The command at the top of this page
-installs the skill for you:
+`skills add` syncs generated Smithers CLI skill files into `~/.agents/skills`
+globally, or `.agents/skills` with `--no-global`. Use this if your Cursor setup
+bridges that directory into its skill context:
 
 ```bash
-bunx smithers-orchestrator skills add --agent cursor
+bunx smithers-orchestrator skills add
 ```
 
 ## Add a project rule
@@ -66,7 +67,8 @@ the same file Codex and Copilot use.
 ## Headless: cursor-agent
 
 `cursor-agent` runs Cursor's agent in the terminal and honors the same
-`.cursor/` config, so the MCP server, skill, and rule above all apply in CI:
+`.cursor/` config, so the MCP server and rule above apply in CI. Any bridged
+generated skill files can travel with the same setup:
 
 ```bash
 cursor-agent chat "use Smithers to run the implement workflow on this ticket"
