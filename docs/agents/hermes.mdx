@@ -1,6 +1,6 @@
 ---
 title: Hermes
-description: Run Smithers from Nous Research's Hermes agent. Register the MCP server in config.yaml, install the skill, and point Hermes at it with AGENTS.md.
+description: Run Smithers from Nous Research's Hermes agent. Register the MCP server in config.yaml and point Hermes at it with AGENTS.md.
 ---
 
 [Hermes](https://github.com/NousResearch/hermes-agent) (Nous Research) is a
@@ -38,17 +38,18 @@ Smithers' tools surface as `mcp_smithers_<tool>`: `mcp_smithers_run_workflow`,
 `mcp_smithers_watch_run`, `mcp_smithers_resolve_approval`, and the rest. Full
 reference: [MCP Server](/integrations/mcp-server).
 
-## Install the skill
+## Optional generated skill files
 
-Hermes supports the `SKILL.md` (agentskills.io) format. `skills add` installs the
-curated `smithers` skill into `~/.agents/skills/`, which Hermes can be pointed at:
+Hermes supports the `SKILL.md` (agentskills.io) format. `skills add` syncs the
+generated Smithers CLI skill set into `~/.agents/skills/`, which Hermes can be
+pointed at if you want command-level skill context:
 
 ```bash
-bunx smithers-orchestrator skills add --agent hermes
+bunx smithers-orchestrator skills add
 ```
 
 Because Hermes is a native MCP client, the MCP server above is the primary
-integration; the skill is a complement, not a requirement.
+integration; generated skill files are a complement, not a requirement.
 
 ## Standing instructions
 

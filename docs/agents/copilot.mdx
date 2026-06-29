@@ -1,18 +1,12 @@
 ---
 title: GitHub Copilot
-description: Run Smithers from GitHub Copilot. Register the MCP server in VS Code and in the Copilot coding agent, install the skill, and add custom instructions.
+description: Run Smithers from GitHub Copilot. Register the MCP server in VS Code and in the Copilot coding agent, then add custom instructions.
 ---
 
 [GitHub Copilot](https://docs.github.com/copilot) extends through **MCP
-servers**, **skills**, **custom instructions**, and **prompt files**. Copilot has
-two surfaces with *different* MCP schemas, the in-editor agent (VS Code) and the
+servers**, **custom instructions**, and **prompt files**. Copilot has two
+surfaces with *different* MCP schemas, the in-editor agent (VS Code) and the
 autonomous coding agent (cloud), so they're covered separately below.
-
-```bash
-bunx smithers-orchestrator skills add --agent copilot
-```
-
-That installs the Smithers skill set under `~/.copilot/skills/`.
 
 ## MCP in VS Code
 

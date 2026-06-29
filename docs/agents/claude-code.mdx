@@ -1,37 +1,44 @@
 ---
 title: Claude Code
-description: Run Smithers from Anthropic's Claude Code. Install the skill, register the MCP server, or drop in the Claude Code plugin that bundles both.
+description: Run Smithers from Anthropic's Claude Code. Sync generated skill files, register the MCP server, or drop in the Claude Code plugin that bundles both.
 ---
 
 [Claude Code](https://code.claude.com/docs) extends through **skills**, **MCP
 servers**, and **plugins**. Smithers ships into all three. The fastest path is:
 
 ```bash
-bunx smithers-orchestrator skills add --agent claude-code
+bunx smithers-orchestrator skills add
 bunx smithers-orchestrator mcp add --agent claude-code
 ```
 
-That installs the Smithers skill set under `~/.claude/skills/` and registers the
-MCP server in `~/.claude.json`. Restart Claude Code (or run `/mcp`) and it can
-list, run, watch, and approve workflows.
+That syncs generated Smithers CLI skill files to Claude's supported skill
+location and registers the MCP server in `~/.claude.json`. Restart Claude Code
+(or run `/mcp`) and it can list, run, watch, and approve workflows.
 
-## Install the skill
+## Curated onboarding skill
 
 The onboarding skill teaches Claude the Smithers mental model and ships the full
-docs bundle next to it:
+docs bundle next to it. `init` installs it automatically when Claude Code is
+detected:
 
 ```bash
-bunx smithers-orchestrator skills add --agent claude-code
+bunx smithers-orchestrator init
 ```
-
-`init` runs this automatically; you only need it explicitly to re-install or
-update the skill. For project-scoped skills, pass `--no-global` to write to
-`.claude/skills/` in the repo instead.
 
 Claude loads a skill when its `description` matches the request, so once it's
 installed you just ask for the outcome, *"orchestrate an agent to add rate
 limiting and keep iterating until the tests pass"*, and Claude reaches for
 Smithers itself.
+
+## Generated CLI skills
+
+`skills add` syncs generated skill files for Smithers CLI command groups:
+
+```bash
+bunx smithers-orchestrator skills add
+```
+
+For project-scoped generated skill files, pass `--no-global`.
 
 ## Register the MCP server
 
