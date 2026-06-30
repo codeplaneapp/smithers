@@ -1,4 +1,5 @@
 import { buildGenerateResult } from "./BaseCliAgent/buildGenerateResult.js";
+import { extractPrompt } from "./BaseCliAgent/extractPrompt.js";
 
 /** @typedef {import("./ElizaAgentOptions.ts").ElizaAgentOptions} ElizaAgentOptions */
 /** @typedef {import("./ElizaAgentOptions.ts").ElizaPlugin} ElizaPlugin */
@@ -204,13 +205,16 @@ export class ElizaAgent {
      * @returns {Promise<GenerateTextResult<Record<string, never>, unknown>>}
      */
     async generate(args = {}) {
-        const { prompt, abortSignal, outputSchema, onStdout } = args;
+        const { abortSignal, outputSchema, onStdout } = args;
 
-        const promptText = typeof prompt === "string"
-            ? prompt
-            : prompt != null
-                ? String(prompt)
-                : "";
+        // Route through the shared extractor so `messages` (AI-SDK chat history)
+        // and array/object prompts are flattened to text instead of being
+        // dropped or stringified to "[object Object]". System messages are
+        // prepended so the runtime still sees them.
+        const { prompt: extractedPrompt, systemFromMessages } = extractPrompt(args);
+        const promptText = systemFromMessages
+            ? `${systemFromMessages}\n\n${extractedPrompt}`
+            : extractedPrompt;
 
         if (abortSignal?.aborted) {
             throw new Error("ElizaAgent: generation aborted");
