@@ -18,19 +18,27 @@ This creates `.smithers/` and seeds **`.smithers/prompts/hello.mdx`** - your edi
 
 </Step>
 
-<Step title="Run your hello-world workflow">
+<Step title="Ask your agent to run your hello-world workflow">
 
-```bash
-bunx smithers-orchestrator workflow run hello
-```
+You don't run Smithers yourself - your coding agent does. Ask it, in plain language:
 
-A durable run completes and you see the output. Edit `.smithers/prompts/hello.mdx`, run it again, watch the output change.
+> **"Run the hello workflow with Smithers and show me the output."**
 
-In a real terminal, add `--interactive` for a live status card with inline approvals; the plain command above works everywhere (scripts, CI, devcontainers, and agent-driven runs).
+Your agent runs `bunx smithers-orchestrator workflow run hello`, a durable run completes, and it reports the output back to you. Edit `.smithers/prompts/hello.mdx`, ask it to run again, watch the output change.
 
 <Note>
-This runs the coding agent `init` detected (Claude Code, Codex, ...), so have one installed and signed in. Normally your agent runs workflows for you; this command lets you watch one end to end the first time.
+This runs the coding agent `init` detected (Claude Code, Codex, ...), so have one installed and signed in. From here on, your agent drives Smithers for you - you describe outcomes, it picks and runs the workflow.
 </Note>
+
+</Step>
+
+<Step title="Ask your agent to open the run UI">
+
+To watch a run live in your browser, ask your agent:
+
+> **"Open the Smithers UI for that run."**
+
+Your agent runs `bunx smithers-orchestrator ui <RUN_ID>`, which opens the run's live status card - stages, output, and any approval gates - in your browser. Keep it open while you hand off more work.
 
 </Step>
 
@@ -38,7 +46,7 @@ This runs the coding agent `init` detected (Claude Code, Codex, ...), so have on
 
 ## Read next
 
-You ran a workflow. From here, pick by what you need next.
+Your agent ran a workflow. From here, pick by what you need next.
 
 <CardGroup cols={2}>
   <Card title="Talk to your agent" icon="comments" href="/guide/talk-to-your-agent">
