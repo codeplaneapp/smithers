@@ -1,9 +1,9 @@
-import { buildGenerateResult } from "./BaseCliAgent/buildGenerateResult.js";
-import { extractPrompt } from "./BaseCliAgent/extractPrompt.js";
+import { buildGenerateResult } from "@smithers-orchestrator/agents/BaseCliAgent";
+import { extractPrompt } from "@smithers-orchestrator/agents/BaseCliAgent";
 
 /** @typedef {import("./ElizaAgentOptions.ts").ElizaAgentOptions} ElizaAgentOptions */
 /** @typedef {import("./ElizaAgentOptions.ts").ElizaPlugin} ElizaPlugin */
-/** @typedef {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
+/** @typedef {import("@smithers-orchestrator/agents").AgentGenerateOptions} AgentGenerateOptions */
 /** @typedef {import("ai").GenerateTextResult} GenerateTextResult */
 
 /**

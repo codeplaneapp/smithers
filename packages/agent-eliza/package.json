@@ -1,0 +1,37 @@
+{
+  "name": "@smithers-orchestrator/agent-eliza",
+  "version": "0.26.1",
+  "description": "elizaOS agent harness for Smithers (opt-in, installs @elizaos/core)",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./*": {
+      "types": "./src/index.d.ts",
+      "import": "./src/*.js",
+      "default": "./src/*.js"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsup --dts-only"
+  },
+  "dependencies": {
+    "@elizaos/core": "~1.7.2",
+    "@smithers-orchestrator/agents": "workspace:*",
+    "ai": "^6.0.168",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "~5.9.3"
+  }
+}
