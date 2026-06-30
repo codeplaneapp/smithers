@@ -57,6 +57,27 @@ describe("snapshotToGatewayRunNode", () => {
     expect(gate).toMatchObject({ id: "approve", name: "approve", kind: "approval", status: "waiting" });
   });
 
+  test("gives each node a unique structural key while exposing the logical id", () => {
+    // A loop whose body renders the same logical task (`plan`) at two distinct
+    // structural positions (ids 3 and 4), differing only by iteration. The
+    // structural id becomes the unique `key`; the logical `task.nodeId` stays on
+    // `id` for the RPCs. Without distinct keys these two attempts would collapse.
+    const tree = snapshotToGatewayRunNode({
+      root: {
+        id: 1,
+        name: "Loop",
+        type: "Loop",
+        children: [
+          { id: 3, name: "Plan", type: "Task", task: { nodeId: "plan", iteration: 0 }, children: [] },
+          { id: 4, name: "Plan", type: "Task", task: { nodeId: "plan", iteration: 1 }, children: [] },
+        ],
+      },
+    });
+    const [a, b] = tree?.children ?? [];
+    expect(a).toMatchObject({ key: "3", id: "plan", iteration: 0 });
+    expect(b).toMatchObject({ key: "4", id: "plan", iteration: 1 });
+  });
+
   test("returns null for the gateway empty-root placeholder", () => {
     expect(snapshotToGatewayRunNode({ root: { id: 0, name: "(empty)", children: [] } })).toBeNull();
     expect(snapshotToGatewayRunNode(null)).toBeNull();

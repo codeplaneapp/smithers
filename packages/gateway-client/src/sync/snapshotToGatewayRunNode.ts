@@ -125,6 +125,11 @@ function mapNode(
 ): GatewayRunNode {
   const iteration = node.task?.iteration;
   return {
+    // The snapshot's structural `node.id` is assigned uniquely per position in
+    // the tree (`assignId` in getDevToolsSnapshot), so it is the stable, unique
+    // row key. The logical `id` (task.nodeId) can repeat across loop/retry
+    // attempts, so it cannot be the row key — but it IS what the RPCs speak.
+    key: String(node.id),
     id: nodeId(node),
     name: nodeName(node),
     kind: nodeKind(node),

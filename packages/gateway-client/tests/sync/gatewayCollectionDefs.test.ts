@@ -89,11 +89,14 @@ function quietTransport(payload: unknown): SyncTransport {
 describe("gatewayCollectionDefs.nodes", () => {
   test("rows mapper flattens a real { root } snapshot into node rows", () => {
     const rows = Array.from(gatewayCollectionDefs.nodes("run-1").rows(snapshot));
+    // `id` stays logical (what the RPCs speak); `key` is the unique structural id.
     expect(rows.map((row) => row.id)).toEqual(["1", "2", "plan", "approve"]);
-    expect(rows.find((row) => row.id === "1")?.childIds).toEqual(["2"]);
-    expect(rows.find((row) => row.id === "2")?.childIds).toEqual(["plan", "approve"]);
-    expect(rows.find((row) => row.id === "plan")).toMatchObject({ kind: "agent", parentId: "2", childIds: [] });
-    expect(rows.find((row) => row.id === "approve")).toMatchObject({ kind: "approval", status: "waiting" });
+    expect(rows.map((row) => row.key)).toEqual(["1", "2", "3", "4"]);
+    // Tree links use the unique `key`, not the logical `id`.
+    expect(rows.find((row) => row.key === "1")?.childIds).toEqual(["2"]);
+    expect(rows.find((row) => row.key === "2")?.childIds).toEqual(["3", "4"]);
+    expect(rows.find((row) => row.id === "plan")).toMatchObject({ key: "3", kind: "agent", parentId: "2", childIds: [] });
+    expect(rows.find((row) => row.id === "approve")).toMatchObject({ key: "4", kind: "approval", status: "waiting" });
   });
 
   test("honors a caller-supplied rows mapper", () => {
@@ -108,9 +111,11 @@ describe("gatewayCollectionDefs.nodes", () => {
 
     await collection.preload();
 
-    expect(Array.from(collection.keys()).sort()).toEqual(["1", "2", "approve", "plan"]);
-    expect(collection.get("approve")?.status).toBe("waiting");
-    expect(collection.get("plan")?.parentId).toBe("2");
+    // Keyed by the unique structural `key` so loop/retry attempts don't collide.
+    expect(Array.from(collection.keys()).sort()).toEqual(["1", "2", "3", "4"]);
+    expect(collection.get("4")?.status).toBe("waiting");
+    expect(collection.get("4")?.id).toBe("approve");
+    expect(collection.get("3")?.parentId).toBe("2");
   });
 
   test("stays empty for the gateway empty-root placeholder", async () => {

@@ -9,7 +9,7 @@ import type { GatewayPromptRow } from "./GatewayPromptRow.ts";
 import type { GatewayScoreRow } from "./GatewayScoreRow.ts";
 import type { GatewayTicketRow } from "./GatewayTicketRow.ts";
 import type { GatewayRunEventRow } from "./GatewayRunEventRow.ts";
-import type { GatewayRunNode } from "./GatewayRunNode.ts";
+import { runNodeKey, type GatewayRunNode } from "./GatewayRunNode.ts";
 import type { GatewayRunRow } from "./GatewayRunRow.ts";
 import type { GatewayRunSummaryRow } from "./GatewayRunSummaryRow.ts";
 import type { GatewayWorkflowRow } from "./GatewayWorkflowRow.ts";
@@ -108,7 +108,10 @@ export const gatewayCollectionDefs = {
     key: gatewayKeys.devtoolsSnapshot(runId),
     method: "getDevToolsSnapshot",
     params: { runId },
-    getKey: (row: GatewayRunNode) => row.id,
+    // Key by the unique row `key` (not the logical `id`): loop/retry attempts
+    // share an `id`, so id-keying would silently drop every attempt but the
+    // first. `runNodeKey` falls back to `id` for rows without a `key`.
+    getKey: (row: GatewayRunNode) => runNodeKey(row),
     rows,
     // DevTools frames carry deltas, not full trees, so the honest mapping into a
     // node-keyed collection is to re-pull `getDevToolsSnapshot` and reconcile.
