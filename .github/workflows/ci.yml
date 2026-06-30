@@ -53,7 +53,9 @@ jobs:
     # Coverage (a second, instrumented pass of the whole suite) runs in its own
     # `coverage` job so the two full passes run in PARALLEL instead of serially —
     # serially they overflowed this job's wall-clock budget.
-    timeout-minutes: 25
+    # Windows runners are appreciably slower than Linux and the matrix shares this
+    # budget, so it is sized for the slower leg.
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v6.0.2
