@@ -35,7 +35,7 @@ and it's unreachable, it errors out instead of starting a local one.)
 
 | Key | Mode     | What you see |
 |-----|----------|--------------|
-| `1` | **Tree** | Node tree for the run with per-node output, logs, tool calls, diffs, and props; inline approval banner when a node is waiting |
+| `1` | **Tree** | Node tree for the run; the right pane inspects the selected node across four tabs — Output, Logs, Diff, Props — with an inline approval banner when a node is waiting |
 | `2` / `g` | **Graph** | Directed graph of node dependencies; arrow-key navigation, press Enter to jump to that node in Tree |
 | `3` / `l` | **Logs**  | Filtered event stream (up to 2 000 events); per-attempt filter with `[` / `]`; `f` toggles follow mode |
 | `4` / `t` | **Timeline** | Horizontal event tick strip with snapshot table; arrow keys scrub through frames |
@@ -45,8 +45,8 @@ and it's unreachable, it errors out instead of starting a local one.)
 ### Switching modes
 
 The number keys `1`-`5` switch modes globally **except in Tree mode**, where
-`1`-`5` are taken over by the node inspector's tabs (output / logs / tools /
-diff / props). The letter aliases `g` (Graph), `l` (Logs), `t` (Timeline), and
+`1`-`4` are taken over by the node inspector's tabs (output / logs / diff /
+props). The letter aliases `g` (Graph), `l` (Logs), `t` (Timeline), and
 `h` (Hijack) are *always* available — including inside Tree — so use them to
 leave Tree. Press `1` from any other mode to return to Tree (`g` toggles
 between Graph and Tree). `?` opens a mode-aware help overlay.
@@ -63,7 +63,7 @@ packages/tui/src/
   cliEntry.ts        Resolves the real smithers CLI entry (gateway autostart / hijack)
   data.ts            Gateway-react hooks (useRun, useRunTree, useRunEvents, …)
   modes/
-    TreeMode.tsx      Node tree + tab panels (output/logs/tools/diff/props)
+    TreeMode.tsx      Node tree + tab panels (output/logs/diff/props)
     GraphMode.tsx     DAG layout renderer
     LogMode.tsx       Event stream with attempt filter
     TimelineMode.tsx  Tick strip + snapshot table

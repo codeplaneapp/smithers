@@ -7,6 +7,7 @@ import {
   extractNodeSnapshots,
   nodeStatusGlyph,
   nodeStatusColor,
+  snapshotKey,
 } from "../src/modes/timelineUtils.ts";
 
 function frame(seq: number, event: string, payload?: unknown): GatewayEventFrame {
@@ -182,6 +183,30 @@ describe("extractNodeSnapshots", () => {
     const events = [frame(1, "run.event", { nodeId: "n-1", text: "hi" })];
     const snap = extractNodeSnapshots(events, 999);
     expect(snap[0]!.status).toBe("running");
+  });
+
+  it("keeps loop/retry attempts of one nodeId as DISTINCT rows", () => {
+    // Same logical nodeId, two iterations — must NOT collapse into one row.
+    const events = [
+      frame(1, "node.start", { nodeId: "n-1", iteration: 0, status: "running" }),
+      frame(2, "node.fail", { nodeId: "n-1", iteration: 0, status: "failed" }),
+      frame(3, "node.start", { nodeId: "n-1", iteration: 1, status: "running" }),
+      frame(4, "node.end", { nodeId: "n-1", iteration: 1, status: "done" }),
+    ];
+    const snap = extractNodeSnapshots(events, 999);
+    expect(snap).toHaveLength(2);
+    const iter0 = snap.find((s) => s.iteration === 0)!;
+    const iter1 = snap.find((s) => s.iteration === 1)!;
+    expect(iter0.status).toBe("failed");
+    expect(iter1.status).toBe("done");
+    // Distinct, stable render keys per attempt.
+    expect(snapshotKey(iter0.id, iter0.iteration)).not.toBe(snapshotKey(iter1.id, iter1.iteration));
+  });
+
+  it("leaves iteration undefined for container nodes with no attempt id", () => {
+    const events = [frame(1, "node.start", { nodeId: "container", status: "running" })];
+    const snap = extractNodeSnapshots(events, 999);
+    expect(snap[0]!.iteration).toBeUndefined();
   });
 });
 

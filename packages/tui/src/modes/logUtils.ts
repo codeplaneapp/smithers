@@ -53,15 +53,26 @@ export function extractAttemptKeys(events: GatewayEventFrame[]): AttemptKey[] {
   return seen;
 }
 
+/**
+ * Split an AttemptKey back into its nodeId + iteration. The key is
+ * `${nodeId}:${iteration}` and the iteration is always numeric, so split on the
+ * LAST colon — node ids are commonly namespaced (e.g. `mode:tree:1`) and contain
+ * colons, which an `indexOf` split would truncate.
+ */
+export function splitAttemptKey(key: AttemptKey): { nodeId: string; iteration: number } {
+  const colonIdx = key.lastIndexOf(":");
+  const nodeId = colonIdx >= 0 ? key.slice(0, colonIdx) : key;
+  const iterStr = colonIdx >= 0 ? key.slice(colonIdx + 1) : "0";
+  const parsed = parseInt(iterStr, 10);
+  return { nodeId, iteration: Number.isNaN(parsed) ? 0 : parsed };
+}
+
 /** Filter events to a single attempt identified by its AttemptKey. */
 export function filterEventsByAttempt(
   events: GatewayEventFrame[],
   key: AttemptKey,
 ): GatewayEventFrame[] {
-  const colonIdx = key.indexOf(":");
-  const nodeId = colonIdx >= 0 ? key.slice(0, colonIdx) : key;
-  const iterStr = colonIdx >= 0 ? key.slice(colonIdx + 1) : "0";
-  const iteration = parseInt(iterStr, 10);
+  const { nodeId, iteration } = splitAttemptKey(key);
 
   return events.filter((e) => {
     const norm = normalizeFrame(e);

@@ -4,6 +4,7 @@ import {
   approvalOptionsOf,
   modeHasOptions,
   buildApprovalDecision,
+  runApprovalSubmit,
 } from "../src/modes/approvalUtils.ts";
 
 describe("approvalModeOf", () => {
@@ -88,5 +89,54 @@ describe("buildApprovalDecision", () => {
 
   it("rank approve with no options returns null", () => {
     expect(buildApprovalDecision("rank", true, [], null)).toBeNull();
+  });
+});
+
+describe("runApprovalSubmit", () => {
+  it("refetches approvals ONLY on a successful submit, then settles", async () => {
+    const order: string[] = [];
+    await runApprovalSubmit({
+      submit: async () => {
+        order.push("submit");
+      },
+      onSuccess: () => order.push("success-refetch"),
+      onError: () => order.push("error"),
+      onSettled: () => order.push("settled"),
+    });
+    // refetch runs after submit resolves; no error; settle is last.
+    expect(order).toEqual(["submit", "success-refetch", "settled"]);
+  });
+
+  it("routes a failed submit to onError (no refetch) and still settles", async () => {
+    const order: string[] = [];
+    let seenErr: unknown;
+    await runApprovalSubmit({
+      submit: async () => {
+        throw new Error("gateway boom");
+      },
+      onSuccess: () => order.push("success-refetch"),
+      onError: (err) => {
+        seenErr = err;
+        order.push("error");
+      },
+      onSettled: () => order.push("settled"),
+    });
+    expect(order).toEqual(["error", "settled"]);
+    expect(seenErr).toBeInstanceOf(Error);
+  });
+
+  it("isolates a refetch failure so it is not reported as a submit error", async () => {
+    const order: string[] = [];
+    await runApprovalSubmit({
+      submit: async () => order.push("submit"),
+      onSuccess: () => {
+        order.push("success-refetch");
+        throw new Error("refetch failed");
+      },
+      onError: () => order.push("error"),
+      onSettled: () => order.push("settled"),
+    });
+    // The thrown refetch error does NOT reach onError.
+    expect(order).toEqual(["submit", "success-refetch", "settled"]);
   });
 });

@@ -21,6 +21,7 @@ import {
   approvalOptionsOf,
   modeHasOptions,
   buildApprovalDecision,
+  runApprovalSubmit,
   type ApprovalMode,
   type ApprovalOption,
   type ApprovalDecision,
@@ -263,6 +264,11 @@ function NodeInspector({
   const propsText = JSON.stringify(
     {
       id: node.id,
+      // `key` + `iteration` distinguish repeated logical nodes (loop/retry
+      // attempts share `id` but get unique rows); essential when inspecting a
+      // specific attempt.
+      key: runNodeKey(node),
+      iteration: node.iteration,
       name: node.name,
       kind: node.kind,
       status: node.status,
@@ -353,7 +359,7 @@ export function TreeMode({
   initialSelectedNodeId?: string | null;
 }) {
   const { root, nodes, isLoading, error } = useRunTree(runId);
-  const { data: approvalsData } = useApprovals(runId);
+  const { data: approvalsData, refetch: refetchApprovals } = useApprovals(runId);
   const actions = useGatewayActions();
   const { width } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
@@ -459,22 +465,31 @@ export function TreeMode({
       }
       setPendingDecision(key);
       setApprovalError(null);
-      Promise.resolve(
-        actions.submitApproval({
-          runId,
-          nodeId: nodeApproval.nodeId,
-          iteration: nodeApproval.iteration,
-          decision,
-        }),
-      )
-        .catch((err: unknown) => {
+      void runApprovalSubmit({
+        submit: () =>
+          Promise.resolve(
+            actions.submitApproval({
+              runId,
+              nodeId: nodeApproval.nodeId,
+              iteration: nodeApproval.iteration,
+              decision,
+            }),
+          ),
+        // On success, re-pull the approvals list so the resolved gate's banner
+        // clears (the row leaves the pending set) — otherwise it stays stale and
+        // a second [a]/[d] could resubmit against an already-decided request.
+        onSuccess: () => {
+          if (mountedRef.current) void refetchApprovals().catch(() => {});
+        },
+        onError: (err) => {
           if (mountedRef.current) setApprovalError(err instanceof Error ? err.message : String(err));
-        })
-        .finally(() => {
+        },
+        onSettled: () => {
           if (mountedRef.current) setPendingDecision((cur) => (cur === key ? null : cur));
-        });
+        },
+      });
     },
-    [nodeApproval, pendingDecision, runId, actions, approvalMode, approvalOptions, selectedOptionKey],
+    [nodeApproval, pendingDecision, runId, actions, approvalMode, approvalOptions, selectedOptionKey, refetchApprovals],
   );
 
   const handleApprove = useCallback(() => submitDecision(true), [submitDecision]);

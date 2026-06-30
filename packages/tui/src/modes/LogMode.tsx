@@ -6,6 +6,7 @@ import {
   extractEventText,
   extractAttemptKeys,
   filterEventsByAttempt,
+  splitAttemptKey,
 } from "./logUtils.ts";
 import { normalizeFrame } from "./eventFrame.ts";
 
@@ -79,10 +80,10 @@ export function LogView({
     if (attemptIdx < 0 || attempts.length === 0) return null;
     const key = attempts[attemptIdx];
     if (!key) return null;
-    const idx = key.indexOf(":");
-    const nodeId = idx >= 0 ? key.slice(0, idx) : key;
-    const iter = idx >= 0 ? key.slice(idx + 1) : "0";
-    return `${nodeId.slice(0, tagMaxLen)}:${iter}`;
+    // Split on the LAST colon so namespaced node ids (which contain colons)
+    // aren't truncated to their first segment.
+    const { nodeId, iteration } = splitAttemptKey(key);
+    return `${nodeId.slice(0, tagMaxLen)}:${iteration}`;
   })();
 
   const followColor = follow ? "#00d787" : "#ffaf00";

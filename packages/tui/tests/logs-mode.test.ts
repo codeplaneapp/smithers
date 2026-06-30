@@ -7,6 +7,7 @@ import {
   makeAttemptKey,
   extractAttemptKeys,
   filterEventsByAttempt,
+  splitAttemptKey,
 } from "../src/modes/logUtils.ts";
 
 function frame(
@@ -166,5 +167,47 @@ describe("filterEventsByAttempt", () => {
   it("returns empty when no match", () => {
     const result = filterEventsByAttempt(events, "n-3:0");
     expect(result).toHaveLength(0);
+  });
+
+  it("handles node ids that themselves contain colons (namespaced ids)", () => {
+    // Real node ids are commonly namespaced (e.g. `mode:tree`) and contain
+    // colons; splitting on the FIRST colon would mis-parse the nodeId/iteration.
+    const colonEvents = [
+      frame(1, "run.event", { nodeId: "mode:tree", iteration: 0 }),
+      frame(2, "run.event", { nodeId: "mode:tree", iteration: 1 }),
+      frame(3, "run.event", { nodeId: "mode:graph", iteration: 0 }),
+    ];
+    expect(extractAttemptKeys(colonEvents)).toEqual([
+      "mode:tree:0",
+      "mode:tree:1",
+      "mode:graph:0",
+    ]);
+    expect(splitAttemptKey("mode:tree:1")).toEqual({ nodeId: "mode:tree", iteration: 1 });
+    expect(filterEventsByAttempt(colonEvents, "mode:tree:1").map((e) => e.seq)).toEqual([2]);
+    expect(filterEventsByAttempt(colonEvents, "mode:tree:0").map((e) => e.seq)).toEqual([1]);
+    expect(filterEventsByAttempt(colonEvents, "mode:graph:0").map((e) => e.seq)).toEqual([3]);
+  });
+});
+
+// ─── splitAttemptKey ─────────────────────────────────────────────────────────
+
+describe("splitAttemptKey", () => {
+  it("splits a simple key", () => {
+    expect(splitAttemptKey("n-1:2")).toEqual({ nodeId: "n-1", iteration: 2 });
+  });
+
+  it("splits on the LAST colon so namespaced ids survive", () => {
+    expect(splitAttemptKey("a:b:c:5")).toEqual({ nodeId: "a:b:c", iteration: 5 });
+  });
+
+  it("defaults iteration to 0 when the suffix is non-numeric", () => {
+    expect(splitAttemptKey("n-1:x")).toEqual({ nodeId: "n-1", iteration: 0 });
+  });
+
+  it("round-trips with makeAttemptKey for colon-containing node ids", () => {
+    expect(splitAttemptKey(makeAttemptKey("ns:n-1", 3))).toEqual({
+      nodeId: "ns:n-1",
+      iteration: 3,
+    });
   });
 });

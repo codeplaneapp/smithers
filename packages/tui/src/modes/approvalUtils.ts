@@ -80,3 +80,32 @@ export function buildApprovalDecision(
   }
   return { approved: true };
 }
+
+/**
+ * Drive one approval submission's side effects in a fixed order, pure of React:
+ * await `submit()`, and ONLY on success run `onSuccess` (the approvals refetch
+ * that clears the resolved gate's banner so a second [a]/[d] can't resubmit a
+ * decided request); a rejection routes to `onError` instead. `onSettled` always
+ * runs last (clears the in-flight guard). `onSuccess`/`onError` are isolated so a
+ * refetch failure can't surface as a submit error. Extracted so the
+ * submit→refetch ordering is unit-testable without a live gateway.
+ */
+export async function runApprovalSubmit(args: {
+  submit: () => Promise<unknown>;
+  onSuccess: () => void;
+  onError: (err: unknown) => void;
+  onSettled: () => void;
+}): Promise<void> {
+  try {
+    await args.submit();
+    try {
+      args.onSuccess();
+    } catch {
+      // a refetch failure must not be reported as a submit failure
+    }
+  } catch (err) {
+    args.onError(err);
+  } finally {
+    args.onSettled();
+  }
+}

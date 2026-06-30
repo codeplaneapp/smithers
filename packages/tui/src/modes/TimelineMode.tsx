@@ -9,6 +9,7 @@ import {
   extractNodeSnapshots,
   nodeStatusGlyph,
   nodeStatusColor,
+  snapshotKey,
 } from "./timelineUtils.ts";
 
 const COMPACT_WIDTH = 100;
@@ -99,9 +100,10 @@ function SnapshotPanel({
         <text fg="#444444">{"  (no node activity at this frame)"}</text>
       ) : (
         snapshots.map((node) => (
-          <box key={node.id} width="100%" height={1} flexDirection="row">
+          <box key={snapshotKey(node.id, node.iteration)} width="100%" height={1} flexDirection="row">
             <text fg={nodeStatusColor(node.status)}>{`  ${nodeStatusGlyph(node.status)} `}</text>
             <text fg="#cccccc">{node.name ?? node.id}</text>
+            {node.iteration !== undefined ? <text fg="#666666">{`  #${node.iteration}`}</text> : null}
             <text fg="#555555">{`  [${node.status}]`}</text>
           </box>
         ))
