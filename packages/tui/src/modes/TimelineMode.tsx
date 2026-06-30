@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useRunEvents } from "../data.ts";
+import { useRunEvents, TUI_EVENT_CAP } from "../data.ts";
 import type { GatewayEventFrame } from "../data.ts";
 import {
   classifyFrame,
@@ -121,7 +121,7 @@ function SnapshotPanel({
  * can't drift from production.
  */
 export function TimelineMode({ runId }: { runId: string }) {
-  const { events, streaming } = useRunEvents(runId, { maxEvents: 2000 });
+  const { events, streaming } = useRunEvents(runId, { maxEvents: TUI_EVENT_CAP });
   return <TimelineView events={events} streaming={streaming} />;
 }
 

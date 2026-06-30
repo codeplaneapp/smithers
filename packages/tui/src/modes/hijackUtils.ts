@@ -1,4 +1,4 @@
-import type { GatewayRunNode, GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey, type GatewayRunNode, type GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
 import type { SelectOption } from "@opentui/core";
 import { unwrapEvent } from "./eventFrame.ts";
 
@@ -90,10 +90,18 @@ export function hijackCandidates(
 }
 
 export function nodeSelectOption(node: GatewayRunNode): SelectOption {
+  // The select `value` is the UNIQUE row key (runNodeKey), NOT the logical id:
+  // loop/retry attempts share a logical `id`, so keying the option on `id` would
+  // make every attempt collapse onto the first row and the user could never
+  // distinctly pick a later attempt. The caller resolves the chosen node back by
+  // this same key. The hijack CLI itself can only target a node id (it picks the
+  // latest attempt), so the iteration is surfaced in the description to make that
+  // ambiguity explicit when more than one attempt exists.
+  const iterationNote = typeof node.iteration === "number" ? `  attempt: #${node.iteration}` : "";
   return {
     name: node.name ?? node.id,
-    description: `id: ${node.id}  kind: ${node.kind ?? "task"}  status: ${node.status ?? "unknown"}`,
-    value: node.id,
+    description: `id: ${node.id}  kind: ${node.kind ?? "task"}  status: ${node.status ?? "unknown"}${iterationNote}`,
+    value: runNodeKey(node),
   };
 }
 

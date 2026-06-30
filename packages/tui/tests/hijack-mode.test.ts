@@ -59,9 +59,27 @@ describe("nodeSelectOption", () => {
     expect(opt.name).toBe("n1");
   });
 
-  it("sets value to node id", () => {
+  it("sets value to the unique row key (id when no key)", () => {
     const opt = nodeSelectOption(node("abc-123"));
     expect(opt.value).toBe("abc-123");
+  });
+
+  it("uses runNodeKey (not the logical id) so duplicate-id attempts are distinctly selectable", () => {
+    // Two attempts of one logical node share `id` but get distinct row `key`s.
+    const attempt0 = node("loop-body", { key: "k-7", iteration: 0 });
+    const attempt1 = node("loop-body", { key: "k-9", iteration: 1 });
+    expect(nodeSelectOption(attempt0).value).toBe("k-7");
+    expect(nodeSelectOption(attempt1).value).toBe("k-9");
+    // Resolving by value picks the EXACT attempt, not the first id match.
+    const nodes = [attempt0, attempt1];
+    const picked = nodes.find((n) => (n.key ?? n.id) === nodeSelectOption(attempt1).value);
+    expect(picked).toBe(attempt1);
+    expect(picked!.iteration).toBe(1);
+  });
+
+  it("surfaces the attempt number in the description when present (CLI targets latest by id)", () => {
+    const opt = nodeSelectOption(node("loop-body", { key: "k-9", iteration: 2 }));
+    expect(opt.description).toContain("#2");
   });
 
   it("includes node id, kind, and status in description", () => {

@@ -25,13 +25,33 @@ export function useApprovals(runId: string): GatewayAsyncState<GatewayApprovalRo
   return useGatewayApprovals({ filter: { runId } }) as GatewayAsyncState<GatewayApprovalRow[]>;
 }
 
+/**
+ * Single source of truth for how much run-event history the TUI retains.
+ *
+ * The gateway caches one `runEvents` collection per run and the FIRST caller's
+ * `maxRows` sizes its ring (see gatewayCollectionDefs / createGatewayCollections
+ * — the collection key omits `maxRows`). Tree is the initial mode, so if it
+ * requested the small default while Logs/Timeline/Hijack asked for more, the
+ * ring would be pinned to the default and later history silently dropped. Every
+ * TUI consumer therefore requests THIS one cap, so the ring is created at the
+ * right size regardless of which mode mounts first.
+ */
+export const TUI_EVENT_CAP = 2000;
+
+/** Resolve a consumer's requested cap, defaulting to the shared {@link TUI_EVENT_CAP}. */
+export function tuiEventCap(maxEvents?: number): number {
+  return maxEvents ?? TUI_EVENT_CAP;
+}
+
 export function useRunEvents(runId: string, options?: { afterSeq?: number; maxEvents?: number }): {
   events: GatewayEventFrame[];
   lastHeartbeat: GatewayEventFrame | undefined;
   error: Error | undefined;
   streaming: boolean;
 } {
-  return useGatewayRunEvents(runId, options);
+  // Default every consumer to the shared cap so the per-run ring is sized for
+  // the largest window any mode needs, no matter the mount order.
+  return useGatewayRunEvents(runId, { ...options, maxEvents: tuiEventCap(options?.maxEvents) });
 }
 
 export function useNodeOutput(params: {

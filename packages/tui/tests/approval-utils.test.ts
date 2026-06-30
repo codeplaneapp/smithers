@@ -5,6 +5,9 @@ import {
   modeHasOptions,
   buildApprovalDecision,
   runApprovalSubmit,
+  claimInFlight,
+  releaseInFlight,
+  type InFlightRef,
 } from "../src/modes/approvalUtils.ts";
 
 describe("approvalModeOf", () => {
@@ -138,5 +141,60 @@ describe("runApprovalSubmit", () => {
     });
     // The thrown refetch error does NOT reach onError.
     expect(order).toEqual(["submit", "success-refetch", "settled"]);
+  });
+});
+
+describe("in-flight dup-submit guard (claimInFlight / releaseInFlight)", () => {
+  it("claims a free slot and rejects a second synchronous claim for the same key", () => {
+    const ref: InFlightRef = { current: null };
+    expect(claimInFlight(ref, "node-a:0")).toBe(true);
+    // Same-tick second press for the SAME pending request is dropped.
+    expect(claimInFlight(ref, "node-a:0")).toBe(false);
+  });
+
+  it("only blocks the SAME key; a different request may take the slot", () => {
+    // The TUI only ever has one focused/pending approval, so the guard is a
+    // single slot: it rejects a duplicate of the in-flight key but lets a
+    // genuinely different request (the user moved on) claim.
+    const ref: InFlightRef = { current: null };
+    expect(claimInFlight(ref, "node-a:0")).toBe(true);
+    expect(claimInFlight(ref, "node-a:0")).toBe(false); // dup of in-flight key
+    expect(claimInFlight(ref, "node-b:0")).toBe(true); // different request
+  });
+
+  it("re-allows the key only after it is released", () => {
+    const ref: InFlightRef = { current: null };
+    expect(claimInFlight(ref, "node-a:0")).toBe(true);
+    releaseInFlight(ref, "node-a:0");
+    expect(claimInFlight(ref, "node-a:0")).toBe(true);
+  });
+
+  it("release is a no-op when a different key holds the slot", () => {
+    const ref: InFlightRef = { current: "node-a:0" };
+    releaseInFlight(ref, "node-b:0");
+    expect(ref.current).toBe("node-a:0");
+  });
+
+  it("two synchronous submits for one request fire exactly one RPC", async () => {
+    // Mirror TreeMode.submitDecision's guard usage: claim BEFORE the promise,
+    // release in onSettled. Two presses in the same tick → one submitApproval.
+    const ref: InFlightRef = { current: null };
+    let rpcCount = 0;
+    const submitOnce = (key: string) => {
+      if (!claimInFlight(ref, key)) return;
+      void runApprovalSubmit({
+        submit: async () => {
+          rpcCount += 1;
+        },
+        onSuccess: () => {},
+        onError: () => {},
+        onSettled: () => releaseInFlight(ref, key),
+      });
+    };
+    // Both calls happen synchronously, before any promise settles.
+    submitOnce("node-a:0");
+    submitOnce("node-a:0");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(rpcCount).toBe(1);
   });
 });

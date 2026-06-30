@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useKeyboard } from "@opentui/react";
 import { spawn } from "node:child_process";
-import { useRunTree, useRunEvents } from "../data.ts";
+import { useRunTree, useRunEvents, TUI_EVENT_CAP } from "../data.ts";
 import { useRenderer } from "../RendererContext.tsx";
 import { resolveCliEntry } from "../cliEntry.ts";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import {
   hijackCandidates,
   nodeSelectOption,
@@ -63,7 +63,10 @@ function Selecting({
         selectedTextColor="#ffffff"
         onSelect={(_, opt) => {
           if (!opt) return;
-          const node = nodes.find((n) => n.id === opt.value);
+          // Resolve by the unique row key the option carries (see
+          // nodeSelectOption), so the exact attempt the user highlighted is the
+          // one handed off — not the first row that shares its logical id.
+          const node = nodes.find((n) => runNodeKey(n) === opt.value);
           if (node) onSelect(node);
         }}
       />
@@ -165,7 +168,7 @@ export function HijackMode({
   onBack?: () => void;
 }) {
   const { nodes } = useRunTree(runId);
-  const { events } = useRunEvents(runId, { maxEvents: 2000 });
+  const { events } = useRunEvents(runId, { maxEvents: TUI_EVENT_CAP });
   // Tree status flattens non-root nodes to queued, so combine it with the
   // event-derived live-session signal to find every hijackable node.
   const candidates = hijackCandidates(nodes, events);

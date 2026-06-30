@@ -82,6 +82,31 @@ export function buildApprovalDecision(
 }
 
 /**
+ * A mutable single-slot in-flight guard (the shape a React `useRef<string | null>`
+ * gives you). Used as a SYNCHRONOUS duplicate-submit guard: React state updates
+ * are async, so two key events processed in the same tick both read the same
+ * stale `busy` state and would each fire a `submitApproval`. A ref flips
+ * immediately, so the second claim in the same tick is rejected.
+ */
+export type InFlightRef = { current: string | null };
+
+/**
+ * Synchronously claim the in-flight slot for `key`. Returns true when the caller
+ * may proceed (slot was free) and false when a submission for the SAME key is
+ * already running. Must be called BEFORE starting the submit promise.
+ */
+export function claimInFlight(ref: InFlightRef, key: string): boolean {
+  if (ref.current === key) return false;
+  ref.current = key;
+  return true;
+}
+
+/** Release the in-flight slot for `key` (no-op if a different key holds it). */
+export function releaseInFlight(ref: InFlightRef, key: string): void {
+  if (ref.current === key) ref.current = null;
+}
+
+/**
  * Drive one approval submission's side effects in a fixed order, pure of React:
  * await `submit()`, and ONLY on success run `onSuccess` (the approvals refetch
  * that clears the resolved gate's banner so a second [a]/[d] can't resubmit a

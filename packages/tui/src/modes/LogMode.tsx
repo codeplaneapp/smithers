@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useRunEvents } from "../data.ts";
+import { useRunEvents, TUI_EVENT_CAP } from "../data.ts";
 import type { GatewayEventFrame } from "../data.ts";
 import {
   extractEventText,
@@ -19,7 +19,7 @@ const COMPACT_WIDTH = 100;
  * so the tests can't pass against a divergent clone of this UI.
  */
 export function LogMode({ runId }: { runId: string }) {
-  const { events, streaming } = useRunEvents(runId, { maxEvents: 2000 });
+  const { events, streaming } = useRunEvents(runId, { maxEvents: TUI_EVENT_CAP });
   return <LogView events={events} streaming={streaming} />;
 }
 

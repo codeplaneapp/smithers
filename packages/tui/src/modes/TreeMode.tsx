@@ -22,10 +22,13 @@ import {
   modeHasOptions,
   buildApprovalDecision,
   runApprovalSubmit,
+  claimInFlight,
+  releaseInFlight,
   type ApprovalMode,
   type ApprovalOption,
   type ApprovalDecision,
 } from "./approvalUtils.ts";
+import { isHumanTaskNode, buildHumanRequestUi, type HumanRequestUiState } from "./humanUtils.ts";
 import { toNodeDiffView, type NodeDiffView } from "./diffUtils.ts";
 
 /**
@@ -113,6 +116,39 @@ function ApprovalBanner({ approval }: { approval: ApprovalUiState }) {
   );
 }
 
+// ─── Human Request Banner ─────────────────────────────────────────────────────
+
+/**
+ * Banner for a pending durable HumanTask. The gateway has no RPC to submit the
+ * typed answer the task reads (only `smithers human` does), so instead of an
+ * approve/deny control that would strand the run we tell the operator the exact
+ * CLI to answer with. Presentational: all data arrives as a prop.
+ */
+function HumanRequestBanner({ human }: { human: HumanRequestUiState }) {
+  const { title, prompt, runId } = human;
+  // border(2) + title(1) + prompt(1) + guidance(1)
+  return (
+    <box
+      width="100%"
+      height={5}
+      flexDirection="column"
+      border={true}
+      borderStyle="single"
+      borderColor="#ffaf00"
+      paddingLeft={1}
+      paddingRight={1}
+    >
+      <text fg="#ffaf00">{`⏸  ${title}  [human input]`}</text>
+      {prompt ? (
+        <text fg="#888888">{`   ${prompt.slice(0, 80)}`}</text>
+      ) : (
+        <text fg="#555555">{"   this step is waiting on a typed answer"}</text>
+      )}
+      <text fg="#00d7ff">{`   answer via CLI:  smithers human inbox   (run ${runId})`}</text>
+    </box>
+  );
+}
+
 // ─── Tab Bar ─────────────────────────────────────────────────────────────────
 
 function TabBar({ activeTab }: { activeTab: TabId }) {
@@ -155,6 +191,7 @@ export function NodeInspectorView({
   diff,
   diffLoading,
   approval,
+  humanRequest,
 }: {
   node: GatewayRunNode | null;
   activeTab: TabId;
@@ -164,6 +201,7 @@ export function NodeInspectorView({
   diff: NodeDiffView;
   diffLoading: boolean;
   approval: ApprovalUiState | null;
+  humanRequest?: HumanRequestUiState | null;
 }) {
   if (!node) {
     return (
@@ -177,7 +215,11 @@ export function NodeInspectorView({
 
   return (
     <box width="100%" height="100%" flexDirection="column">
-      {approval ? <ApprovalBanner approval={approval} /> : null}
+      {humanRequest ? (
+        <HumanRequestBanner human={humanRequest} />
+      ) : approval ? (
+        <ApprovalBanner approval={approval} />
+      ) : null}
       <TabBar activeTab={activeTab} />
       <box width="100%" flexGrow={1}>
         {activeTab === "output" && (
@@ -236,11 +278,13 @@ function NodeInspector({
   runId,
   node,
   approval,
+  humanRequest,
   activeTab,
 }: {
   runId: string;
   node: GatewayRunNode | null;
   approval: ApprovalUiState | null;
+  humanRequest: HumanRequestUiState | null;
   activeTab: TabId;
 }) {
   const { events } = useRunEvents(runId);
@@ -291,6 +335,7 @@ function NodeInspector({
       diff={toNodeDiffView(diffData)}
       diffLoading={activeTab === "diff" && diffLoading}
       approval={approval}
+      humanRequest={humanRequest}
     />
   );
 }
@@ -446,11 +491,16 @@ export function TreeMode({
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const approvalBusy = pendingDecision !== null && pendingDecision === approvalKey;
 
+  // SYNCHRONOUS dup-submit guard. `pendingDecision`/`approvalBusy` are React
+  // state, so two key events handled in the same tick both see the stale "not
+  // busy" value and would each fire a `submitApproval`. The ref flips
+  // immediately, so the second claim in the same tick is rejected — one RPC.
+  const inFlightRef = useRef<string | null>(null);
+
   const submitDecision = useCallback(
     (approved: boolean) => {
       if (!nodeApproval) return;
       const key = `${nodeApproval.nodeId}:${nodeApproval.iteration}`;
-      if (pendingDecision === key) return; // dup-submit guard
       const decision: ApprovalDecision | null = buildApprovalDecision(
         approvalMode,
         approved,
@@ -463,6 +513,9 @@ export function TreeMode({
         setApprovalError("select an option before approving");
         return;
       }
+      // Claim the in-flight slot BEFORE starting the promise; a second
+      // synchronous press for the same request is dropped here.
+      if (!claimInFlight(inFlightRef, key)) return;
       setPendingDecision(key);
       setApprovalError(null);
       void runApprovalSubmit({
@@ -485,11 +538,14 @@ export function TreeMode({
           if (mountedRef.current) setApprovalError(err instanceof Error ? err.message : String(err));
         },
         onSettled: () => {
+          // Release the synchronous guard first (always), then clear the React
+          // busy state if still mounted.
+          releaseInFlight(inFlightRef, key);
           if (mountedRef.current) setPendingDecision((cur) => (cur === key ? null : cur));
         },
       });
     },
-    [nodeApproval, pendingDecision, runId, actions, approvalMode, approvalOptions, selectedOptionKey, refetchApprovals],
+    [nodeApproval, runId, actions, approvalMode, approvalOptions, selectedOptionKey, refetchApprovals],
   );
 
   const handleApprove = useCallback(() => submitDecision(true), [submitDecision]);
@@ -509,7 +565,15 @@ export function TreeMode({
     [approvalMode, approvalOptions],
   );
 
-  const approvalUi: ApprovalUiState | null = nodeApproval
+  // A focused HumanTask with a pending request cannot be resolved from the
+  // monitor: the gateway exposes no RPC to submit the typed answer the task
+  // reads, and approving the gate alone leaves the run `waiting-approval` (see
+  // humanUtils / the resume bridge). Surface CLI guidance and suppress the
+  // approve/deny banner + keys so we never strand the run with a no-op decision.
+  const humanRequestUi: HumanRequestUiState | null = buildHumanRequestUi(focusedNode, nodeApproval, runId);
+  const isHumanRequest = humanRequestUi !== null;
+
+  const approvalUi: ApprovalUiState | null = nodeApproval && !isHumanRequest
     ? {
         title: nodeApproval.requestTitle ?? "Approval required",
         summary: nodeApproval.requestSummary,
@@ -574,11 +638,11 @@ export function TreeMode({
         }
       } else if (key === "return") {
         if (flat.length > 0) setFocusPane("inspector");
-      } else if ((key === "[" || key === "]") && nodeApproval && approvalMode === "select") {
+      } else if ((key === "[" || key === "]") && nodeApproval && !isHumanRequest && approvalMode === "select") {
         cycleOption(key === "]" ? 1 : -1);
-      } else if (key === "a" && nodeApproval && !approvalBusy) {
+      } else if (key === "a" && nodeApproval && !isHumanRequest && !approvalBusy) {
         handleApprove();
-      } else if (key === "d" && nodeApproval && !approvalBusy) {
+      } else if (key === "d" && nodeApproval && !isHumanRequest && !approvalBusy) {
         handleDeny();
       }
     }
@@ -613,6 +677,7 @@ export function TreeMode({
             runId={runId}
             node={focusedNode}
             approval={approvalUi}
+            humanRequest={humanRequestUi}
             activeTab={activeTab}
           />
         </box>
@@ -630,6 +695,7 @@ export function TreeMode({
           runId={runId}
           node={focusedNode}
           approval={approvalUi}
+          humanRequest={humanRequestUi}
           activeTab={activeTab}
         />
       </box>

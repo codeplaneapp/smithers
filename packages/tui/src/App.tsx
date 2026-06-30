@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useRun } from "./data.ts";
 import { useKeymap } from "./Keybindings.tsx";
+import { Header } from "./Header.tsx";
 import { TreeMode } from "./modes/TreeMode.tsx";
 import { GraphMode } from "./modes/GraphMode.tsx";
 import { LogMode } from "./modes/LogMode.tsx";
@@ -11,17 +11,6 @@ import { HijackMode } from "./modes/HijackMode.tsx";
 type Mode = 1 | 2 | 3 | 4 | 5;
 
 const COMPACT_WIDTH = 100;
-
-function Header({ runId, compact }: { runId: string; compact: boolean }) {
-  const { data, loading } = useRun(runId);
-  const status = loading ? "connecting…" : (data?.status ?? "unknown");
-  const label = compact ? `${runId} [${status}]` : `smithers-mon  run: ${runId}  status: ${status}`;
-  return (
-    <box width="100%" height={1}>
-      <text fg="#00d7ff">{label}</text>
-    </box>
-  );
-}
 
 function ModeBody({
   runId,
