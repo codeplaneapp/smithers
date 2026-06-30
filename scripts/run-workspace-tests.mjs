@@ -167,20 +167,30 @@ function killProcessTree(child) {
 }
 
 function runPackageTest(pkg, timeoutMinutes) {
-  const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+  const command = "pnpm";
   const timeoutMs = timeoutMinutes * 60 * 1000;
 
   return new Promise((resolve) => {
     console.log(`\n=== ${pkg.directory} (${pkg.name}) ===`);
     const startedAt = Date.now();
-    const child = spawn(command, ["--dir", pkg.directory, "test"], {
-      cwd: root,
-      detached: process.platform !== "win32",
-      env: process.env,
-      stdio: "inherit",
-    });
+    let child;
+    try {
+      child = spawn(command, ["--dir", pkg.directory, "test"], {
+        cwd: root,
+        detached: process.platform !== "win32",
+        shell: process.platform === "win32",
+        stdio: "inherit",
+      });
+    } catch (error) {
+      console.error(
+        `::error title=Package test failed::${pkg.directory} could not start: ${error.message}`,
+      );
+      resolve({ pkg, status: "failed to start", elapsedSeconds: "0.0" });
+      return;
+    }
 
     let timedOut = false;
+    let settled = false;
     const timer = setTimeout(() => {
       timedOut = true;
       console.error(
@@ -189,7 +199,24 @@ function runPackageTest(pkg, timeoutMinutes) {
       killProcessTree(child);
     }, timeoutMs);
 
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+      console.error(
+        `::error title=Package test failed::${pkg.directory} could not start: ${error.message}`,
+      );
+      resolve({ pkg, status: "failed to start", elapsedSeconds });
+    });
+
     child.on("close", (code, signal) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       clearTimeout(timer);
       const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
       if (timedOut) {
