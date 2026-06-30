@@ -2009,20 +2009,12 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                 let probe;
                 try {
                     const { openSmithersBackend } = await import("smithers-orchestrator");
-                    // Open the pglite store WITH this workflow's schemas so its
-                    // input/output tables are provisioned there. Opening with `{}`
-                    // leaves the output table missing, so the engine can never
-                    // persist a finished task — the run then polls run-status
-                    // forever and the CLI hangs. Reconstruct the schema map from
-                    // the loaded workflow's registry (output schemas) + inputSchema.
-                    const workflowSchemas = {};
-                    if (workflow.schemaRegistry instanceof Map) {
-                        for (const [name, entry] of workflow.schemaRegistry) {
-                            if (entry?.zodSchema) workflowSchemas[name] = entry.zodSchema;
-                        }
-                    }
-                    if (workflow.inputSchema) workflowSchemas.input = workflow.inputSchema;
-                    probe = await openSmithersBackend(workflowSchemas, { backend: "pglite" });
+                    // Validate the authoritative pglite store actually opens (so a
+                    // genuinely broken store surfaces as BACKEND_OPEN_FAILED rather
+                    // than being masked by the BACKEND_MISMATCH below). No schemas
+                    // are needed: this workflow cannot serve pglite regardless, so
+                    // the store is only probed, then closed.
+                    probe = await openSmithersBackend({}, { backend: "pglite" });
                 }
                 catch (err) {
                     return fail({
