@@ -24,10 +24,10 @@ import { agents } from "../agents";
  * with this full-screen app.
  *
  * THE FIVE MODES (v1 = all of them), sharing one header + keybar:
- *   ① TREE     split-pane node tree ◂▸ node detail (Output/Logs/Tools/Diff/Props)
+ *   ① TREE     split-pane node tree ◂▸ node detail (Output/Logs/Diff/Props)
  *   ② GRAPH    DAG of nodes, `g` toggles
- *   ③ LOGS     live agent transcript, follow-mode + tool side-effect badges
- *   ④ TIMELINE frame/time-travel scrubber (jump-to-frame, fork/rewind/replay)
+ *   ③ LOGS     live agent transcript, follow-mode + per-attempt filter
+ *   ④ TIMELINE inspect-only event scrubber (j/k scrub, L live; no in-TUI rewind)
  *   ⑤ HIJACK   suspend the renderer → hand off to the agent's native CLI → resume
  *
  * WHY THIS SHAPE
@@ -78,27 +78,33 @@ frame counter (n/total), live|paused indicator.
 Five modes share the header + a bottom keybar:
   (1) TREE  — left: collapsible <scrollbox> node tree (chevron ▾/▸/·, glyph
       ✓ ● ⏸ ○ ✗, right-aligned elapsed/meta); right: NodeInspector with tabs
-      Output/Logs/Tools/Diff/Props, auto-defaulting per node kind (Output if it
-      has output, Logs while running, Props for containers). Diff tab uses
-      OpenTUI <diff>; Output/Props use <code>. A waiting gate raises an approval
-      banner with [a]approve [d]deny.
+      Output/Logs/Diff/Props (NO Tools tab — the gateway exposes no per-node
+      tool-call stream to the monitor), auto-defaulting per node kind (Output if
+      it has output, Logs while running, Props for containers). Diff tab renders
+      unified-diff text in a <code filetype="diff"> block (NOT an OpenTUI <diff>
+      primitive); Output/Props use <code>. A waiting gate raises an approval
+      banner with [a]approve [d]deny ([/] cycle a select's options).
   (2) GRAPH — DAG of nodes as <box> cards joined by ──▶, status-colored; \`g\`
       toggles between tree and graph.
   (3) LOGS  — live agent transcript in a <scrollbox>, follow-mode on by default
-      (\`f\` toggles), tool calls rendered with read/write/shell side-effect
-      badges; \`[\`/\`]\` walk node attempts.
-  (4) TIMELINE — frame scrubber (tick strip with notable + gate markers), shows
-      the tree as it was at a frame; actions: jump-here, fork, rewind, replay,
-      back-to-live. Backed by the DevTools jump-to-frame protocol.
+      (\`f\` toggles); \`[\`/\`]\` walk node attempts (NO tool side-effect badges —
+      the gateway maps no tool-call events into the run-event stream).
+  (4) TIMELINE — INSPECT-ONLY event scrubber (tick strip with notable + gate
+      markers) showing node state reconstructed at the selected frame; \`j\`/\`k\`
+      scrub, \`L\` back to live. NO in-TUI fork/rewind/replay/jump mutations: the
+      live run-event stream carries no frame numbers, so a rewind would guess —
+      rewind durably via the \`smithers rewind\` CLI instead.
   (5) HIJACK — on a running node, confirm via <select>, then renderer.suspend(),
       spawn the agent's native CLI handoff via \`smithers hijack <runId>\`
-      (claude --resume / codex / etc., inheriting stdio), and on exit show a
-      banner offering [a] resume automation or [d] dismiss.
+      (claude --resume / codex / etc., inheriting stdio). On a clean exit
+      \`smithers hijack\` itself resumes the run, so the return banner only offers
+      [d] dismiss (there is no fake "resume automation" action).
 
 Keys: j/k+arrows move, space fold, ⏎ select, g graph, l logs, t timeline,
-h hijack, a/d approve/deny, c cancel, R resume (failed), y copy id, ? help,
-q back/quit. Esc closes overlays. Responsive: useTerminalDimensions ->
-stack panes vertically under a width threshold (compact mode).
+h hijack, a/d approve/deny, [/] cycle select options / walk attempts, ? help,
+q quit. Esc closes overlays. (No global cancel/resume/copy key — drive those
+from the CLI.) Responsive: useTerminalDimensions -> stack panes vertically
+under a width threshold (compact mode).
 
 Invocation (SHIPS): replace \`smithers up --interactive\` so it launches this
 full-screen monitor after starting/attaching a run; \`smithers up -i\` with no
@@ -204,7 +210,7 @@ const MODES = [
     id: "tree",
     title: "① Tree + Node detail",
     detail:
-      "Split-pane: left collapsible node <scrollbox> tree; right NodeInspector with Output/Logs/Tools/Diff/Props tabs (Diff via <diff>, Output/Props via <code>), auto-default tab per node kind, and the approval banner when a gate is waiting. This is the home mode.",
+      "Split-pane: left collapsible node <scrollbox> tree; right NodeInspector with Output/Logs/Diff/Props tabs (NO Tools tab — no per-node tool-call stream exists; Diff renders unified-diff text via <code filetype=\"diff\">, Output/Props via <code>), auto-default tab per node kind, and the approval banner when a gate is waiting. This is the home mode.",
   },
   {
     id: "graph",
@@ -216,19 +222,19 @@ const MODES = [
     id: "logs",
     title: "③ Logs / live transcript",
     detail:
-      "Live agent transcript in a <scrollbox> from useGatewayRunEvents, follow-mode on by default (`f`), tool calls with read/write/shell side-effect badges, `[`/`]` to walk node attempts.",
+      "Live agent transcript in a <scrollbox> from useGatewayRunEvents, follow-mode on by default (`f`), `[`/`]` to walk node attempts. NO tool side-effect badges — the gateway maps no tool-call events into the run-event stream, so a read/write/shell badge would never fire.",
   },
   {
     id: "timeline",
     title: "④ Timeline / frames",
     detail:
-      "Frame scrubber (tick strip with notable + gate markers) showing the tree as it was at a frame; jump-here / fork / rewind / replay / back-to-live via the DevTools jump-to-frame protocol and useGatewayActions.",
+      "INSPECT-ONLY event scrubber (tick strip with notable + gate markers) showing node state reconstructed at the selected frame; `j`/`k` scrub, `L` back to live. NO in-TUI jump/fork/rewind/replay mutations — the live run-event stream carries no frame numbers; rewind durably with the `smithers rewind` CLI instead.",
   },
   {
     id: "hijack",
     title: "⑤ Hijack handoff",
     detail:
-      "On a running node, confirm via <select>, renderer.suspend(), spawn `smithers hijack <runId>` inheriting stdio, then a return banner offering [a] resume automation / [d] dismiss.",
+      "On a running node, confirm via <select>, renderer.suspend(), spawn `smithers hijack <runId>` inheriting stdio. On a clean exit `smithers hijack` resumes the run itself, so the return banner only offers [d] dismiss (no fake 'resume automation' action).",
   },
 ] as const;
 
