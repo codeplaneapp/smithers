@@ -206,7 +206,7 @@ describe("diff bundle", () => {
                 }],
             }, target);
 
-            expect(readFileSync(join(target, "hello.txt"), "utf8")).toBe("hello\n");
+            expect(readFileSync(join(target, "hello.txt"), "utf8").replace(/\r\n/g, "\n")).toBe("hello\n");
         }
         finally {
             cleanup(target);

@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { existsSync } from "node:fs";
+import { delimiter } from "node:path";
 import {
   createExecutableDir,
   createTempRepo,
@@ -77,7 +78,7 @@ browserTest(
     const repo = createTempRepo();
     const env = {
       HOME: repo.dir,
-      PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+      PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
       ANTHROPIC_API_KEY: "",
       OPENAI_API_KEY: "sk-test-openai-key",
       GEMINI_API_KEY: "",

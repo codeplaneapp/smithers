@@ -297,7 +297,7 @@ describe("spawnCaptureEffect — external kill / spawn errors", () => {
       {},
     );
     // Node returns null exit code when terminated by signal
-    expect(result.exitCode === null || result.exitCode === 137).toBe(true);
+    expect(result.exitCode === null || result.exitCode === 137 || (process.platform === "win32" && result.exitCode === 1)).toBe(true);
   });
 
   test("non-existent command surfaces PROCESS_SPAWN_FAILED", async () => {

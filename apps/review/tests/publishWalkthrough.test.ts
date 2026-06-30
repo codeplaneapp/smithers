@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const originalPublishUrl = process.env.SMITHERS_REVIEW_PUBLISH_URL;
@@ -17,7 +18,7 @@ afterEach(() => {
 describe("publishWalkthrough", () => {
   test("requires an explicit publish URL instead of using a default host", async () => {
     const { publishWalkthrough } = await import("../src/cli/publishWalkthrough");
-    const dir = mkdtempSync(join("/tmp", "review-publish-"));
+    const dir = mkdtempSync(join(tmpdir(), "review-publish-"));
     const homeDir = join(dir, "home");
     const htmlPath = join(dir, "walkthrough.html");
     writeFileSync(htmlPath, "<!doctype html><html><body>walkthrough</body></html>");

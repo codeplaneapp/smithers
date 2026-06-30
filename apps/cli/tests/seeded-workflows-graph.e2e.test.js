@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import {
   createExecutableDir,
   createTempRepo,
@@ -34,7 +34,7 @@ test("every seeded init-pack workflow renders its graph without a load-time erro
   const repo = createTempRepo();
   const env = {
     HOME: repo.dir,
-    PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
     ANTHROPIC_API_KEY: "",
     OPENAI_API_KEY: "sk-test-openai-key",
     GEMINI_API_KEY: "",

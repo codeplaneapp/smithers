@@ -1,8 +1,8 @@
 import { describe, expect, onTestFinished, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { createExecutableDir, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeOpenCodeBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { delimiter, join } from "node:path";
+import { createExecutableDir, writeExecutable, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeOpenCodeBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
 import { ask } from "../src/ask.js";
 // We test the exported pure-logic functions by importing the module.
 // detectAvailableAgents calls spawnSync so we test the scoring/status logic
@@ -22,7 +22,7 @@ describe("detectAvailableAgents", () => {
     function envWithPath(home, binDir, extra = {}) {
         return {
             HOME: home,
-            PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+            PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
             ANTHROPIC_API_KEY: "",
             OPENAI_API_KEY: "",
             GOOGLE_API_KEY: "",
@@ -32,8 +32,7 @@ describe("detectAvailableAgents", () => {
     }
 
     function writeLoggedOutClaudeBinary(binDir) {
-        const binPath = join(binDir, "claude");
-        writeFileSync(binPath, [
+        writeExecutable(binDir, "claude", [
             `#!${process.execPath}`,
             "if (process.argv.slice(2).join(' ') === 'auth status') {",
             "  process.stdout.write(JSON.stringify({ loggedIn: false, authMethod: null }) + '\\n');",
@@ -42,7 +41,6 @@ describe("detectAvailableAgents", () => {
             "process.stdout.write('ok\\n');",
             "",
         ].join("\n"));
-        chmodSync(binPath, 0o755);
     }
 
     test("returns array with entries for all known agents", () => {
@@ -184,7 +182,7 @@ describe("detectAvailableAgents", () => {
         }) + "\n");
         const results = detectAvailableAgents({
             HOME: home,
-            PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+            PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
         });
         const claude = results.find((r) => r.id === "claude");
         expect(claude.hasBinary).toBe(true);
@@ -255,7 +253,7 @@ describe("detectAvailableAgents", () => {
             KIMI_SHARE_DIR: "/tmp/kimi-test",
         });
         const kimi = results.find((r) => r.id === "kimi");
-        const authCheck = kimi.checks.find((c) => c.includes("/tmp/kimi-test"));
+        const authCheck = kimi.checks.find((c) => c.replaceAll("\\", "/").includes("/tmp/kimi-test"));
         expect(authCheck).toBeDefined();
     });
 });

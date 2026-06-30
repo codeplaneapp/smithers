@@ -1,7 +1,7 @@
 import { onTestFinished } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 export const REPO_ROOT = resolve(import.meta.dir, "../../..");
 const CLI_ENTRY = resolve(REPO_ROOT, "apps/cli/src/index.js");
@@ -70,7 +70,7 @@ function linkRepoRuntimeDeps(repoDir) {
 export function createTempRepo() {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "smithers-e2e-")));
     onTestFinished(() => {
-        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 200 });
     });
     writeFile(join(dir, "package.json"), JSON.stringify({
         name: "smithers-e2e-fixture",
@@ -172,7 +172,7 @@ export function prependPath(dir, env) {
     const currentPath = env?.PATH ?? process.env.PATH ?? "";
     return {
         ...env,
-        PATH: `${dir}:${currentPath}`,
+        PATH: `${dir}${delimiter}${currentPath}`,
     };
 }
 /**
@@ -220,6 +220,15 @@ export function writeExecutable(dir, name, contents) {
     const path = join(dir, name);
     writeFile(path, contents);
     chmodSync(path, 0o755);
+    if (process.platform === "win32") {
+        const wrapperPath = `${path}.cmd`;
+        writeFile(wrapperPath, [
+            "@echo off",
+            `"${process.execPath}" "%~dp0${name}" %*`,
+            "",
+        ].join("\r\n"));
+        return wrapperPath;
+    }
     return path;
 }
 /**

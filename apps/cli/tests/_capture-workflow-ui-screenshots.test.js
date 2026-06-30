@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { delimiter, resolve } from "node:path";
 import {
   REPO_ROOT,
   createExecutableDir,
@@ -74,7 +74,7 @@ captureTest("capture workflow UI screenshots", async () => {
   const repo = createTempRepo();
   const env = {
     HOME: repo.dir,
-    PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
     ANTHROPIC_API_KEY: "", OPENAI_API_KEY: "sk-test-openai-key", GEMINI_API_KEY: "", GOOGLE_API_KEY: "",
   };
   repo.write(".claude/.credentials.json", "{}\n");

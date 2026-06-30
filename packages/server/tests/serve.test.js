@@ -88,11 +88,13 @@ describe("Hono Serve Mode", () => {
     let request;
     let abort;
     let runPromises;
+    let workflowDbs;
     beforeEach(() => {
         testDir = resolve(process.cwd(), "tests", ".test-serve-" + Math.random().toString(36).slice(2));
         mkdirSync(testDir, { recursive: true });
         abort = new AbortController();
         runPromises = [];
+        workflowDbs = [];
     });
     afterEach(async () => {
         abort.abort();
@@ -101,6 +103,12 @@ describe("Hono Serve Mode", () => {
             server = null;
         }
         await Promise.race([Promise.allSettled(runPromises), sleep(5_000)]);
+        for (const db of workflowDbs.splice(0)) {
+            try {
+                db?.$client?.close?.();
+            }
+            catch { }
+        }
         await sleep(50);
         try {
             rmSync(testDir, { recursive: true, force: true });
@@ -147,7 +155,7 @@ ${slowAgent}
 
 const { smithers, Workflow, Task, outputs } = createSmithers(
   { outputA: z.object({ value: z.number() }) },
-  { dbPath: "${dbPath}" },
+  { dbPath: ${JSON.stringify(dbPath)} },
 );
 
 export default smithers((ctx) => (
@@ -175,6 +183,7 @@ export default smithers((ctx) => (
    */
     async function startServeApp(workflowPath, opts = {}) {
         const workflow = await loadWorkflow(workflowPath);
+        workflowDbs.push(workflow.db);
         ensureSmithersTables(workflow.db);
         const adapter = new SmithersDb(workflow.db);
         const runId = `test-run-${Date.now()}`;

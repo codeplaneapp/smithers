@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createExecutableDir, createTempRepo, runSmithers, writeFakeClaudeBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
 
@@ -37,7 +37,7 @@ test("agents add (flag-driven) registers a subscription account and persists to 
         version: 1,
         accounts: [{ label: "claude-work", provider: "claude-code" }],
     });
-    expect(persisted.accounts[0].configDir).toContain("/accounts/claude-work");
+    expect(persisted.accounts[0].configDir.replaceAll("\\", "/")).toContain("/accounts/claude-work");
 });
 
 test("agents add for an api-key provider stores the key", () => {
@@ -179,7 +179,7 @@ test("agents add appends to a detection-based agents.ts without dropping detecte
         format: "json",
         env: {
             HOME: repo.dir,
-            PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+            PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
             SMITHERS_HOME: home,
             ANTHROPIC_API_KEY: "sk-ant-test",
             OPENAI_API_KEY: "",

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { delimiter } from "node:path";
 import { createExecutableDir, createTempRepo, pinSqliteBackend, runSmithers, writeFakeCodexBinary, writeTestWorkflow, } from "../../smithers/tests/e2e-helpers.js";
 /**
  * @param {string} homeDir
@@ -9,7 +10,7 @@ function buildWorkflowEnv(homeDir) {
     writeFakeCodexBinary(binDir);
     return {
         HOME: homeDir,
-        PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+        PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
         OPENAI_API_KEY: "sk-test-openai-key",
         ANTHROPIC_API_KEY: "",
         GEMINI_API_KEY: "",

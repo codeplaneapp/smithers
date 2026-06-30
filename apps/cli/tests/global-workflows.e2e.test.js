@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { createExecutableDir, createTempRepo, runSmithers, writeFakeCodexBinary, writeTestWorkflow, } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 /**
@@ -94,7 +94,7 @@ test("smithers init --global scaffolds the canonical ~/.smithers pack (no nested
         env: {
             SMITHERS_HOME: smithersHome,
             HOME: globalHome.dir,
-            PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+            PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
             OPENAI_API_KEY: "sk-test-openai-key",
             ANTHROPIC_API_KEY: "",
             GEMINI_API_KEY: "",

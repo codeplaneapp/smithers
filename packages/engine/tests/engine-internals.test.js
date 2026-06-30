@@ -435,9 +435,9 @@ describe("engine internals: durability, options and graph helpers", () => {
     });
 
     test("parses run config/auth and validates run options", () => {
-        expect(I.resolveRootDir({ rootDir: "/tmp/root" }, null)).toBe("/tmp/root");
+        expect(I.resolveRootDir({ rootDir: "/tmp/root" }, null)).toBe(resolvePath("/tmp/root"));
         expect(I.resolveLogDir("/tmp/root", "run", null)).toBeUndefined();
-        expect(I.resolveLogDir("/tmp/root", "run", "logs")).toBe("/tmp/root/logs");
+        expect(I.resolveLogDir("/tmp/root", "run", "logs")).toBe(resolvePath("/tmp/root", "logs"));
         expect(I.parseRunConfigJson("")).toEqual({});
         expect(I.parseRunConfigJson("[]")).toEqual({});
         expect(I.parseRunConfigJson("{")).toEqual({});

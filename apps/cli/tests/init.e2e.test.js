@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { delimiter } from "node:path";
 import { createExecutableDir, createTempRepo, runSmithers, writeFakeCodexBinary, } from "../../../packages/smithers/tests/e2e-helpers.js";
 /**
  * @param {string} homeDir
@@ -9,7 +10,7 @@ function buildInitEnv(homeDir) {
     writeFakeCodexBinary(binDir);
     return {
         HOME: homeDir,
-        PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+        PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
         OPENAI_API_KEY: "sk-test-openai-key",
         ANTHROPIC_API_KEY: "",
         GEMINI_API_KEY: "",

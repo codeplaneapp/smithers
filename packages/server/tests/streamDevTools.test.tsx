@@ -169,13 +169,15 @@ describe("streamDevTools RPC", () => {
   let server: any = null;
   let dbPath = "";
   let adapter: SmithersDb | null = null;
+  let sqlite: Database | null = null;
+  const workflowDbs: any[] = [];
 
   beforeEach(() => {
     dbPath = join(
       tmpdir(),
       `smithers-stream-devtools-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
     );
-    const sqlite = new Database(dbPath);
+    sqlite = new Database(dbPath);
     const db = drizzle(sqlite);
     ensureSmithersTables(db);
     adapter = new SmithersDb(db);
@@ -187,6 +189,15 @@ describe("streamDevTools RPC", () => {
       gateway = null;
     }
     server = null;
+    for (const db of workflowDbs.splice(0)) {
+      try {
+        db?.$client?.close?.();
+      } catch {}
+    }
+    try {
+      sqlite?.close();
+    } catch {}
+    sqlite = null;
     rmSync(dbPath, { force: true });
     rmSync(`${dbPath}-wal`, { force: true });
     rmSync(`${dbPath}-shm`, { force: true });
@@ -202,6 +213,7 @@ describe("streamDevTools RPC", () => {
         <Task id="task-a">{{ value: 1 }}</Task>
       </Workflow>
     ));
+    workflowDbs.push(workflow.db);
     gateway = new Gateway({
       protocol: 1,
       auth: {

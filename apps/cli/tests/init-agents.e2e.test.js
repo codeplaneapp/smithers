@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, writeFakeOpenCodeBinary, } from "../../../packages/smithers/tests/e2e-helpers.js";
 /**
  * @param {string} homeDir
@@ -10,7 +10,7 @@ import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityB
 function buildEnv(homeDir, binDir, extra = {}) {
     return {
         HOME: homeDir,
-        PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+        PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
         ANTHROPIC_API_KEY: "",
         OPENAI_API_KEY: "",
         GEMINI_API_KEY: "",

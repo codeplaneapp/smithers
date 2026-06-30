@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { constants, accessSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { listAccounts } from "@smithers-orchestrator/accounts";
@@ -363,17 +363,26 @@ function displayNameForProviderId(id) {
  * @param {NodeJS.ProcessEnv} env
  */
 function commandExists(binary, env) {
-    const pathEntries = env.PATH?.split(":") ?? [];
+    const pathEntries = env.PATH?.split(delimiter) ?? [];
+    const extensions = process.platform === "win32"
+        ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
+        : [""];
+    const candidates = /\.[^\\/]+$/.test(binary)
+        ? [binary]
+        : ["", ...extensions].map((ext) => `${binary}${ext.toLowerCase()}`);
     return pathEntries.some((entry) => {
         if (!entry)
             return false;
-        try {
-            accessSync(join(entry, binary), constants.X_OK);
-            return true;
+        for (const candidate of candidates) {
+            try {
+                accessSync(join(entry, candidate), constants.X_OK);
+                return true;
+            }
+            catch {
+                // keep looking
+            }
         }
-        catch {
-            return false;
-        }
+        return false;
     });
 }
 

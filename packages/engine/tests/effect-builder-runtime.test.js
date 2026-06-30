@@ -21,7 +21,7 @@ function tempDb() {
     const dir = mkdtempSync(join(tmpdir(), "smithers-builder-"));
     return {
         filename: join(dir, "smithers.db"),
-        cleanup: () => rmSync(dir, { recursive: true, force: true }),
+        cleanup: () => rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 200 }),
     };
 }
 

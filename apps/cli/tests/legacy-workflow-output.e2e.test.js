@@ -1,4 +1,5 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
+import { delimiter } from "node:path";
 import {
   createExecutableDir,
   createTempRepo,
@@ -28,7 +29,7 @@ function setup() {
   const repo = createTempRepo();
   const env = {
     HOME: repo.dir,
-    PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
     ANTHROPIC_API_KEY: "",
     OPENAI_API_KEY: "sk-test-openai-key",
     GEMINI_API_KEY: "",

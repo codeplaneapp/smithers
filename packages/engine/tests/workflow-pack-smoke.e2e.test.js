@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { delimiter } from "node:path";
 import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityBinary, writeFakeClaudeBinary, writeFakeCodexBinary, } from "../../smithers/tests/e2e-helpers.js";
 const WORKFLOW_PACK_SMOKE_TIMEOUT_MS = 30_000;
 /**
@@ -11,7 +12,7 @@ function buildWorkflowPackEnv(homeDir) {
     writeFakeAntigravityBinary(binDir);
     return {
         HOME: homeDir,
-        PATH: `${binDir}:/usr/bin:/bin:/usr/sbin:/sbin`,
+        PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
         ANTHROPIC_API_KEY: "",
         OPENAI_API_KEY: "sk-test-openai-key",
         GEMINI_API_KEY: "",

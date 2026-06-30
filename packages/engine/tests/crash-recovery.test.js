@@ -42,7 +42,7 @@ function createDiskDb() {
       } catch {
         // best-effort
       }
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 200 });
     },
   };
 }
