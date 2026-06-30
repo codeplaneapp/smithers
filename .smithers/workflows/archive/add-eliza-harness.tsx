@@ -5,13 +5,13 @@
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { agents } from "../agents";
+import { agents } from "../../agents";
 import {
   ValidationLoop,
   implementOutputSchema,
   validateOutputSchema,
-} from "../components/ValidationLoop";
-import { reviewOutputSchema } from "../components/Review";
+} from "../../components/ValidationLoop";
+import { reviewOutputSchema } from "../../components/Review";
 
 const inputSchema = z.object({
   // Default carries the full spec so `workflow run add-eliza-harness` works with
