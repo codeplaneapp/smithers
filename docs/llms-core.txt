@@ -8988,7 +8988,7 @@ A run id that does not exist is not a `RunState`. It's an error
 
 `bunx smithers-orchestrator tui` was removed in `0.20.2`. Use the commands in the table below instead.
 
-The removal dropped the OpenTUI dependency and the `apps/cli/src/tui/` tree from the package.
+That removal dropped the old `apps/cli/src/tui/` tree (and, at the time, the CLI's OpenTUI dependency). OpenTUI has since returned in a different place: the full-screen single-run monitor (a separate `@smithers-orchestrator/tui` package, `smithers-mon` bin) is built on OpenTUI and is what `up --interactive` hands off to (see below). The historical note above is about the *old* `tui` command, not the new monitor.
 
 If you want the old "pick a workflow, start it, and watch it live" experience, that flow now lives behind a flag on the run commands: [`up --interactive`](/cli/overview) (or [`workflow run --interactive`](/cli/overview)). With no workflow argument it opens an interactive picker, prompts for inputs, starts the run, and then hands off to the full-screen single-run monitor (a separate `smithers-mon` binary) for the lifetime of the run. When that monitor binary isn't installed (e.g. a slim install), it falls back to an inline append-only stream of the run's status until it finishes or pauses on a gate.
 

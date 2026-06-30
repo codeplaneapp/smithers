@@ -1,6 +1,7 @@
 # Single-Run Monitor TUI - Engineering Spec
 
-**Status**: Draft  
+**Status**: Draft
+
 **Date**: 2026-06-30
 
 ---
@@ -111,17 +112,25 @@ All five modes share:
 ### Header layout (all modes)
 
 ```
-● workflow-name  run-abc123  claude-opus-4-8  02:34  f14/21  [live]
+● workflow-name  run-abc123  claude-opus-4-8  02:34  [live]
 ```
 
+Implemented by `RunHeaderView` (presentational) in `packages/tui/src/Header.tsx`,
+fed by the gateway-connected `Header` (pulls `useGatewayRun`, ticks a 1s clock
+while the run is live). Pure helpers live in `packages/tui/src/headerUtils.ts`.
+
 Fields, left to right:
-- **Status dot** - `●` colored: green = running, yellow = waiting-approval/event/timer, red = failed, dim = done/cancelled.
-- **Workflow name** - from `useGatewayRun().data.workflowName`.
-- **Short run id** - first 12 chars.
-- **Model** - from run metadata.
-- **Elapsed** - ticking `mm:ss` counter from run `createdAtMs`.
-- **Frame counter** - `fn/total` from `FrameCommitted` event count vs `useGatewayRunEvents` total seq.
-- **live|paused** - `[live]` while following events; `[f14]` while frozen on frame 14 in TIMELINE mode.
+- **Status dot** - `●` colored by `statusDotColor`: cyan = running/recovering, amber = waiting-approval/event/timer, red = failed/cancelled, green = succeeded/finished, dim = unknown.
+- **Workflow name** - `useGatewayRun().data.workflowKey` (falls back to `(workflow)`).
+- **Short run id** - shown whole unless longer than 24 chars, then elided from the end.
+- **Model** - from the run row's `model` when present; **omitted** (never fabricated) when the row carries none.
+- **Elapsed** - ticking `mm:ss` (or `hh:mm:ss` past an hour) from `startedAtMs`/`createdAtMs`, frozen at `finishedAtMs` once the run is terminal.
+- **live|paused** - `[live]` while running, `[paused]` while parked on a gate/event/timer, else the literal terminal state.
+
+> No frame counter (`fn/total`): the monitor subscribes to the run-event stream,
+> which carries no `_smithers_frames.frame_no` total, so there is no honest frame
+> count to show in the header; it is intentionally omitted rather than guessed.
+> (TIMELINE mode has its own `frame n/total` over the events it actually holds.)
 
 ### Mode 1: TREE (default)
 
@@ -237,7 +246,9 @@ These are the keys actually wired in `App.tsx`. (There is intentionally no globa
 - LOGS: tag prefix truncated to 8 chars.
 - TIMELINE: tick strip compressed to show every Nth frame label.
 
-Width threshold is a constant `COMPACT_THRESHOLD = 100` in `packages/tui/src/layout.ts`.
+Width threshold is the constant `COMPACT_WIDTH = 100`, declared locally in each
+layout-aware module (`packages/tui/src/App.tsx` and the mode files under
+`packages/tui/src/modes/` that adapt to width).
 
 ---
 
