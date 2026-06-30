@@ -8,7 +8,11 @@ on:
 
 jobs:
   typecheck:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v6.0.2
@@ -40,7 +44,11 @@ jobs:
       - run: pnpm typecheck:evals
 
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     # `pnpm test` runs the gate checks + the full `pnpm -r --no-bail test` suite.
     # Coverage (a second, instrumented pass of the whole suite) runs in its own
     # `coverage` job so the two full passes run in PARALLEL instead of serially —
@@ -67,7 +75,13 @@ jobs:
       # The grep tool shells out to ripgrep (`rg`), which the clean runner image
       # does not ship. Without it packages/smithers file-tool tests spawn-fail
       # with PROCESS_FAILED instead of exercising real search.
-      - run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Install ripgrep (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Install ripgrep (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ripgrep -y
 
       - run: pnpm install --frozen-lockfile
 
@@ -85,7 +99,10 @@ jobs:
       # probes need no agent CLI, so they are safe on the clean CI box. The
       # daemon binary is downloaded from the zmux release; tests skip cleanly
       # when ZMUXD is unset, so this step is the only place they actually run.
+      # zmux only ships a Linux daemon, so this step is Linux-only; on Windows
+      # the tests skip cleanly because ZMUXD is unset.
       - name: Download zmux daemon (linux)
+        if: runner.os == 'Linux'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -93,6 +110,7 @@ jobs:
           chmod +x zmuxd-linux-x64
 
       - name: Run TUI zmux PTY e2e
+        if: runner.os == 'Linux'
         env:
           ZMUXD: ${{ github.workspace }}/zmuxd-linux-x64
         run: bun test --timeout=120000 apps/cli/tests/tui-zmux.e2e.test.js
