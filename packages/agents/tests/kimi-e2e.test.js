@@ -4,10 +4,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { KimiAgent } from "../src/KimiAgent.js";
+import { runRealAgentE2E } from "./real-agent-e2e.js";
 
 /**
  * E2E tests against the real Kimi CLI.
- * Skipped entirely if `kimi` is not installed on PATH.
+ * Skipped unless `SMITHERS_RUN_AGENT_E2E=1` and `kimi` is installed on PATH.
  *
  * These tests invoke the actual CLI so they:
  *   - require valid Kimi credentials (OAuth or API key)
@@ -33,7 +34,7 @@ try {
   supportsKimiE2EFlags = false;
 }
 
-describe.skipIf(!isKimiInstalled || !supportsKimiE2EFlags)(
+describe.skipIf(!runRealAgentE2E || !isKimiInstalled || !supportsKimiE2EFlags)(
   "KimiAgent E2E (real CLI)",
   () => {
   /** @type {string} */

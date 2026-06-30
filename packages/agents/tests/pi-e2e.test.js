@@ -4,10 +4,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PiAgent } from "../src/PiAgent.js";
+import { runRealAgentE2E } from "./real-agent-e2e.js";
 
 /**
  * E2E tests against the real Pi CLI.
- * Skipped entirely if `pi` is not installed on PATH.
+ * Skipped unless `SMITHERS_RUN_AGENT_E2E=1` and `pi` is installed on PATH.
  *
  * These tests invoke the actual CLI so they:
  *   - require valid API credentials configured for pi's active provider
@@ -33,7 +34,7 @@ try {
   supportsPiE2EFlags = false;
 }
 
-describe.skipIf(!isPiInstalled || !supportsPiE2EFlags)(
+describe.skipIf(!runRealAgentE2E || !isPiInstalled || !supportsPiE2EFlags)(
   "PiAgent E2E (real CLI)",
   () => {
   /** @type {string} */

@@ -4,10 +4,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ForgeAgent } from "../src/ForgeAgent.js";
+import { runRealAgentE2E } from "./real-agent-e2e.js";
 
 /**
  * E2E tests against the real Forge CLI.
- * Skipped entirely if `forge` is not installed on PATH.
+ * Skipped unless `SMITHERS_RUN_AGENT_E2E=1` and `forge` is installed on PATH.
  *
  * These tests invoke the actual CLI so they:
  *   - require valid API credentials configured in forge
@@ -32,7 +33,7 @@ try {
   supportsForgeE2EFlags = false;
 }
 
-describe.skipIf(!isForgeInstalled || !supportsForgeE2EFlags)(
+describe.skipIf(!runRealAgentE2E || !isForgeInstalled || !supportsForgeE2EFlags)(
   "ForgeAgent E2E (real CLI)",
   () => {
   /** @type {string} */

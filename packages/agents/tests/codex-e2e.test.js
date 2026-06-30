@@ -4,10 +4,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodexAgent } from "../src/CodexAgent.js";
+import { runRealAgentE2E } from "./real-agent-e2e.js";
 
 /**
  * E2E tests against the real OpenAI Codex CLI.
- * Skipped entirely if `codex` is not installed on PATH.
+ * Skipped unless `SMITHERS_RUN_AGENT_E2E=1` and `codex` is installed on PATH.
  *
  * These tests invoke the actual CLI so they:
  *   - require valid OPENAI_API_KEY or a configured codex profile
@@ -33,7 +34,7 @@ try {
   supportsCodexE2EFlags = false;
 }
 
-describe.skipIf(!isCodexInstalled || !supportsCodexE2EFlags)(
+describe.skipIf(!runRealAgentE2E || !isCodexInstalled || !supportsCodexE2EFlags)(
   "CodexAgent E2E (real CLI)",
   () => {
   /** @type {string} */

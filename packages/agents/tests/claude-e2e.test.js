@@ -4,10 +4,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaudeCodeAgent } from "../src/ClaudeCodeAgent.js";
+import { runRealAgentE2E } from "./real-agent-e2e.js";
 
 /**
  * E2E tests against the real Claude Code CLI.
- * Skipped entirely if `claude` is not installed on PATH.
+ * Skipped unless `SMITHERS_RUN_AGENT_E2E=1` and `claude` is installed on PATH.
  *
  * These tests invoke the actual CLI so they:
  *   - require a valid Claude Code subscription or ANTHROPIC_API_KEY
@@ -33,7 +34,7 @@ try {
   supportsClaudeE2EFlags = false;
 }
 
-describe.skipIf(!isClaudeInstalled || !supportsClaudeE2EFlags)(
+describe.skipIf(!runRealAgentE2E || !isClaudeInstalled || !supportsClaudeE2EFlags)(
   "ClaudeCodeAgent E2E (real CLI)",
   () => {
   /** @type {string} */

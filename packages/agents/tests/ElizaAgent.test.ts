@@ -9,7 +9,7 @@ const testCharacter = { name: "TestBot", bio: "A test bot" };
  * Minimal fake runtime that records constructor calls and returns canned text.
  */
 function createFakeRuntime(responseText = "hello from eliza") {
-    const calls: { modelType: string; prompt: string }[] = [];
+    const calls: { modelType: string; prompt: string; abortSignal?: AbortSignal }[] = [];
     let initCount = 0;
     let stopCount = 0;
 
@@ -17,8 +17,12 @@ function createFakeRuntime(responseText = "hello from eliza") {
         async initialize() {
             initCount++;
         },
-        async useModel(modelType: string, params: { prompt: string }) {
-            calls.push({ modelType, prompt: params.prompt });
+        async useModel(modelType: string, params: { prompt: string; abortSignal?: AbortSignal }) {
+            calls.push({
+                modelType,
+                prompt: params.prompt,
+                abortSignal: params.abortSignal,
+            });
             return responseText;
         },
         async stop() {
@@ -247,6 +251,48 @@ describe("ElizaAgent", () => {
             await expect(
                 agent.generate({ prompt: "aborted", abortSignal: controller.signal })
             ).rejects.toThrow(/aborted/);
+        });
+
+        test("passes abortSignal through to useModel", async () => {
+            const { agent, fake } = createAgentWithFakeRuntime();
+            const controller = new AbortController();
+            await agent.generate({
+                prompt: "signal please",
+                abortSignal: controller.signal,
+            });
+            expect(fake.getCalls()[0]?.abortSignal).toBe(controller.signal);
+        });
+
+        test("rejects promptly when abortSignal fires during useModel", async () => {
+            let markModelCalled!: () => void;
+            const modelCalled = new Promise<void>((resolve) => {
+                markModelCalled = resolve;
+            });
+            const fake = {
+                async initialize() {},
+                async useModel(
+                    _modelType: string,
+                    _params: { prompt: string; abortSignal?: AbortSignal }
+                ) {
+                    markModelCalled();
+                    return new Promise<string>(() => {});
+                },
+                async stop() {},
+            };
+            const agent = new ElizaAgent(
+                { character: testCharacter },
+                { runtimeFactory: async () => fake as any }
+            );
+            const controller = new AbortController();
+            const generation = agent.generate({
+                prompt: "abort mid-call",
+                abortSignal: controller.signal,
+            });
+
+            await modelCalled;
+            controller.abort();
+
+            await expect(generation).rejects.toThrow(/aborted/);
         });
     });
 

@@ -4,10 +4,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VibeAgent } from "../src/VibeAgent.js";
+import { runRealAgentE2E } from "./real-agent-e2e.js";
 
 /**
  * E2E tests against the real Vibe CLI.
- * Skipped entirely if `vibe` is not installed on PATH.
+ * Skipped unless `SMITHERS_RUN_AGENT_E2E=1` and `vibe` is installed on PATH.
  *
  * These tests invoke the actual CLI so they:
  *   - require valid API credentials configured in vibe
@@ -35,7 +36,7 @@ try {
   supportsVibeE2EFlags = false;
 }
 
-describe.skipIf(!isVibeInstalled || !supportsVibeE2EFlags)(
+describe.skipIf(!runRealAgentE2E || !isVibeInstalled || !supportsVibeE2EFlags)(
   "VibeAgent E2E (real CLI)",
   () => {
   /** @type {string} */

@@ -10,7 +10,7 @@ import { buildGenerateResult } from "./BaseCliAgent/buildGenerateResult.js";
  * don't hard-depend on @elizaos/core at module load time.
  * @typedef {{
  *   initialize(): Promise<void>;
- *   useModel(modelType: string, params: { prompt: string; stopSequences?: string[] }): Promise<string>;
+ *   useModel(modelType: string, params: { prompt: string; stopSequences?: string[]; abortSignal?: AbortSignal }): Promise<string>;
  *   stop?(): Promise<void>;
  * }} ElizaRuntime
  */
@@ -78,16 +78,13 @@ function raceAbort(promise, abortSignal) {
     if (abortSignal.aborted) {
         return Promise.reject(new Error("ElizaAgent: generation aborted"));
     }
-    return Promise.race([
-        promise,
-        new Promise((_, reject) => {
-            abortSignal.addEventListener(
-                "abort",
-                () => reject(new Error("ElizaAgent: generation aborted")),
-                { once: true }
-            );
-        }),
-    ]);
+    return new Promise((resolve, reject) => {
+        const onAbort = () => reject(new Error("ElizaAgent: generation aborted"));
+        abortSignal.addEventListener("abort", onAbort, { once: true });
+        promise.then(resolve, reject).finally(() => {
+            abortSignal.removeEventListener("abort", onAbort);
+        });
+    });
 }
 
 /**
@@ -225,7 +222,11 @@ export class ElizaAgent {
         let text;
         try {
             text = await raceAbort(
-                runtime.useModel("TEXT_LARGE", { prompt: promptText, stopSequences: [] }),
+                runtime.useModel("TEXT_LARGE", {
+                    prompt: promptText,
+                    stopSequences: [],
+                    abortSignal,
+                }),
                 abortSignal
             );
         } catch (err) {
@@ -233,7 +234,11 @@ export class ElizaAgent {
             // failures (network, rate-limit, auth) which should surface directly.
             if (isUnsupportedModelError(err)) {
                 text = await raceAbort(
-                    runtime.useModel("TEXT_SMALL", { prompt: promptText, stopSequences: [] }),
+                    runtime.useModel("TEXT_SMALL", {
+                        prompt: promptText,
+                        stopSequences: [],
+                        abortSignal,
+                    }),
                     abortSignal
                 );
             } else {
