@@ -28,18 +28,20 @@ function ModeBody({
   mode,
   treeSelectedNodeId,
   onSelectNode,
+  onBack,
 }: {
   runId: string;
   mode: Mode;
   treeSelectedNodeId: string | null;
   onSelectNode: (nodeId: string) => void;
+  onBack: () => void;
 }) {
   switch (mode) {
     case 1: return <TreeMode runId={runId} initialSelectedNodeId={treeSelectedNodeId} />;
     case 2: return <GraphMode runId={runId} onSelectNode={onSelectNode} />;
     case 3: return <LogMode runId={runId} />;
     case 4: return <TimelineMode runId={runId} />;
-    case 5: return <HijackMode runId={runId} />;
+    case 5: return <HijackMode runId={runId} onBack={onBack} />;
   }
 }
 
@@ -88,6 +90,7 @@ export function App({ runId }: { runId: string }) {
           mode={mode}
           treeSelectedNodeId={treeSelectedNodeId}
           onSelectNode={handleSelectNode}
+          onBack={() => setMode(1)}
         />
       </box>
       <Keybar compact={compact} />

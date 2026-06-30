@@ -11,6 +11,7 @@ import { spawn } from "node:child_process";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
 import { Theme } from "./Theme.tsx";
 import { Keybindings } from "./Keybindings.tsx";
+import { RendererProvider } from "./RendererContext.tsx";
 import { App } from "./App.tsx";
 
 const GATEWAY_PORT = 7331;
@@ -34,7 +35,10 @@ async function probeGateway(): Promise<boolean> {
 
 async function autoStartGateway(): Promise<boolean> {
   try {
-    const child = spawn(process.argv[0]!, [process.argv[1]!, "gateway", "--host", "127.0.0.1", "--port", String(GATEWAY_PORT)], {
+    // When launched from the CLI via SMITHERS_CLI env var, use that path so the
+    // gateway command is routed through the real CLI entry point, not the TUI.
+    const cliPath = process.env.SMITHERS_CLI ?? process.argv[1]!;
+    const child = spawn(process.argv[0]!, [cliPath, "gateway", "--host", "127.0.0.1", "--port", String(GATEWAY_PORT)], {
       stdio: "ignore",
       detached: true,
     });
@@ -74,13 +78,15 @@ const collections = createGatewayCollections({
 createRoot(renderer).render(
   <ErrorBoundary>
     <Theme>
-      <Keybindings>
-        <SmithersGatewayProvider client={client}>
-          <SyncProvider client={collections}>
-            <App runId={runId} />
-          </SyncProvider>
-        </SmithersGatewayProvider>
-      </Keybindings>
+      <RendererProvider value={renderer}>
+        <Keybindings>
+          <SmithersGatewayProvider client={client}>
+            <SyncProvider client={collections}>
+              <App runId={runId} />
+            </SyncProvider>
+          </SmithersGatewayProvider>
+        </Keybindings>
+      </RendererProvider>
     </Theme>
   </ErrorBoundary>,
 );
