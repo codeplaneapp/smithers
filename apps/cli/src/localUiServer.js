@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { connect as netConnect } from "node:net";
 import { request as httpRequest } from "node:http";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -132,14 +132,36 @@ function resolveStaticFile(distDir, pathname) {
  * Serve the bundle and reverse-proxy gateway traffic. Returns the listening
  * server. `gatewayBase` is e.g. `http://127.0.0.1:7331`.
  */
-export function startLocalUiServer({ distDir, gatewayBase, port, host = "127.0.0.1" }) {
+export function startLocalUiServer({ distDir, gatewayBase, port, host = "127.0.0.1", conciergePort }) {
   const gw = new URL(gatewayBase);
   const gatewayHost = gw.hostname;
   const gatewayPort = Number(gw.port || (gw.protocol === "https:" ? 443 : 80));
   const indexHtml = join(distDir, "index.html");
 
+  const proxyTo = (req, res, targetHost, targetPort, onError) => {
+    const headers = { ...req.headers, host: `${targetHost}:${targetPort}` };
+    if (headers.origin) headers.origin = `http://${targetHost}:${targetPort}`;
+    const proxyReq = httpRequest(
+      { host: targetHost, port: targetPort, method: req.method, path: req.url, headers },
+      (proxyRes) => {
+        res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+        proxyRes.pipe(res);
+      },
+    );
+    proxyReq.on("error", onError);
+    req.pipe(proxyReq);
+  };
+
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${host}`);
+    // The local concierge owns /api/chat (the chat backend).
+    if (conciergePort && url.pathname.startsWith("/api/")) {
+      proxyTo(req, res, "127.0.0.1", conciergePort, () => {
+        res.writeHead(502, { "content-type": "text/plain" });
+        res.end("Concierge unreachable");
+      });
+      return;
+    }
     if (isGatewayPath(url.pathname)) {
       // Reverse-proxy to the gateway, rewriting Host/Origin so the gateway sees
       // a same-origin loopback request (it may reject cross-origin upgrades).
@@ -234,8 +256,33 @@ export async function serveLocalUi({ gatewayBase, port, rebuild = false }) {
       throw new Error(`Prebuilt UI bundle missing at ${distDir}.`);
     }
   }
-  const server = await startLocalUiServer({ distDir, gatewayBase, port });
+  // Start the local concierge (the chat backend) when its source is present, so
+  // `smithers ui --app` serves a working chat that backgrounds workflows. It's
+  // best-effort: a missing concierge just leaves /api/chat unproxied.
+  let concierge = null;
+  let conciergePort;
+  const conciergeEntry = appDir ? join(appDir, "concierge", "server.ts") : null;
+  if (conciergeEntry && existsSync(conciergeEntry)) {
+    conciergePort = Number(process.env.SMITHERS_CONCIERGE_PORT ?? "5179");
+    concierge = spawn("bun", [conciergeEntry], {
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        SMITHERS_CONCIERGE_PORT: String(conciergePort),
+        SMITHERS_GATEWAY_PROXY_TARGET: gatewayBase,
+      },
+    });
+    concierge.on("error", () => {});
+  }
+
+  const server = await startLocalUiServer({ distDir, gatewayBase, port, conciergePort });
   const addr = server.address();
   const actualPort = typeof addr === "object" && addr ? addr.port : port;
+  // Tear the concierge down with the server.
+  const close = server.close.bind(server);
+  server.close = (...args) => {
+    concierge?.kill();
+    return close(...args);
+  };
   return { server, url: `http://127.0.0.1:${actualPort}/`, distDir };
 }
