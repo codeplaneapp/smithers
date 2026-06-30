@@ -1833,6 +1833,12 @@ function normalizeEventsQuery(options) {
  * @param {FailFn} fail
  */
 async function executeUpCommand(c, workflowPath, options, fail) {
+    // Opened lazily below when backend.json designates pglite as authoritative.
+    // Declared in the function scope (not the try block) so the finally can
+    // always close it: its PGLiteSocketServer is a live TCP listener that keeps
+    // the Node event loop alive, so without an explicit close the CLI never
+    // exits after the run completes.
+    let pgliteBackendApi;
     try {
         const resolvedWorkflowPath = resolve(process.cwd(), workflowPath);
         let input;
@@ -1992,7 +1998,6 @@ async function executeUpCommand(c, workflowPath, options, fail) {
         // If the workspace has been migrated to pglite (backend.json says pglite),
         // open the pglite backend and redirect workflow.db to it so new runs
         // land in the correct store instead of the leftover sqlite file.
-        let pgliteBackendApi;
         if (!options.backend && !process.env.SMITHERS_BACKEND) {
             const markerBackend = readBackendMarkerForCwd(process.cwd());
             if (markerBackend === "pglite") {
@@ -2219,6 +2224,16 @@ async function executeUpCommand(c, workflowPath, options, fail) {
     }
     catch (err) {
         return fail({ code: "RUN_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+    }
+    finally {
+        // Closing the pglite backend stops its PGLiteSocketServer and frees the
+        // event loop so the CLI exits cleanly once the run is done; otherwise the
+        // process hangs until it is killed. Runs after the (serve-mode) server has
+        // already been stopped, so it never tears the store out from under a run.
+        if (pgliteBackendApi) {
+            try { await pgliteBackendApi.close(); }
+            catch { /* best-effort teardown */ }
+        }
     }
 }
 /**
