@@ -62,7 +62,7 @@ function buildTypicalWorkflowGuidance(contract: SmithersAgentContract) {
 export function buildSmithersPiSystemPrompt(
   baseSystemPrompt: string,
   docs: string | undefined,
-  contract: SmithersAgentContract,
+  contract: SmithersAgentContract | undefined,
   activeRun?: SmithersPiRunContext,
 ) {
   const sections = [
@@ -70,9 +70,20 @@ export function buildSmithersPiSystemPrompt(
     "You are a Smithers workflow expert. Prefer the live Smithers tools over shelling out when they can answer the request.\n",
     "## Smithers PI Extension - User Guide\n",
     "The user is running PI with the Smithers extension. When they ask about capabilities, slash commands, or how to use this environment, refer to this section.\n",
-    "### Tools (available to you, the agent)",
-    renderSmithersAgentPromptGuidance(contract, { toolNamePrefix: "smithers_" }),
-    "",
+  ];
+
+  // The tool guidance depends on a live MCP contract. When the MCP server is
+  // unavailable the contract is absent; skip the agent-tool sections and still
+  // emit the user-facing guidance below so ordinary turns degrade gracefully.
+  if (contract) {
+    sections.push(
+      "### Tools (available to you, the agent)",
+      renderSmithersAgentPromptGuidance(contract, { toolNamePrefix: "smithers_" }),
+      "",
+    );
+  }
+
+  sections.push(
     "### Slash Commands (available to the user)",
     "Tell the user about these when they ask what they can do:",
     "- `/smithers` - Opens the live run inspector with a virtualized tree, frame scrubber, Output/Diff/Logs inspector tabs, heartbeat indicators, and ghost node badges.",
@@ -93,12 +104,16 @@ export function buildSmithersPiSystemPrompt(
     "- `--smithers-url` - Smithers server or gateway URL (default: http://127.0.0.1:7331)",
     "- `--smithers-key` - Smithers API key (also reads SMITHERS_API_KEY env var)",
     "",
-    "### Typical Workflows",
-    ...buildTypicalWorkflowGuidance(contract),
-    "",
+  );
+
+  if (contract) {
+    sections.push("### Typical Workflows", ...buildTypicalWorkflowGuidance(contract), "");
+  }
+
+  sections.push(
     "### Full Documentation",
     "Full Smithers docs are not included by default to keep ordinary repo work focused. When the user explicitly invokes `/smithers-docs`, that turn includes the complete Smithers docs bundle.",
-  ];
+  );
 
   if (docs) {
     sections.push("", "---", "", "## Full Smithers Docs (explicitly requested)", "", docs);

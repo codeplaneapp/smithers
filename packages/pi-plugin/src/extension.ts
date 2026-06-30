@@ -47,19 +47,28 @@ type TrackedRun = {
   store: DevToolsStore;
 };
 
+// The lifecycle code only ever calls close() on the transport, so it does not
+// depend on the concrete StdioClientTransport. Narrowing to this handle lets a
+// test inject a fake connection without spawning a real subprocess.
+type McpTransportHandle = { close: () => Promise<void> };
+type McpConnection = { client: Client; transport: McpTransportHandle };
+type McpConnectionFactory = () => Promise<McpConnection>;
+
 const DEFAULT_BASE = "http://127.0.0.1:7331";
 const requireFromHere = createRequire(import.meta.url);
 
 let piRef: ExtensionAPI | undefined;
 let smithersDocs: string | undefined;
 let mcpClient: Client | undefined;
-let mcpTransport: StdioClientTransport | undefined;
+let mcpClientPromise: Promise<Client> | undefined;
+let mcpTransport: McpTransportHandle | undefined;
 let smithersToolContract: SmithersAgentContract | undefined;
 let mcpToolsRegistered = false;
 let mcpToolsRegistration: Promise<void> | undefined;
 let pollInterval: ReturnType<typeof setInterval> | undefined;
 let activeRunId: string | undefined;
 let includeSmithersDocsNextTurn = false;
+let createMcpConnection: McpConnectionFactory = defaultCreateMcpConnection;
 
 const runs = new Map<string, TrackedRun>();
 
@@ -116,18 +125,15 @@ function resolveCliPath() {
   }
 }
 
-async function ensureMcpClient() {
-  if (mcpClient) {
-    return mcpClient;
-  }
-  // Assign the module globals only after a successful connect, so a transient
-  // startup failure (bun not on PATH, slow spawn, cli not built) doesn't poison
-  // them with a dead client that every later call would short-circuit to.
+async function defaultCreateMcpConnection(): Promise<McpConnection> {
+  // stderr is "ignore" so the child's stderr can't fill its bounded pipe buffer
+  // and block the MCP server's event loop (which would hang every
+  // listTools/callTool). Inheriting would corrupt the Pi TUI render.
   const transport = new StdioClientTransport({
     command: "bun",
     args: ["run", resolveCliPath(), "--mcp"],
     cwd: process.cwd(),
-    stderr: "pipe",
+    stderr: "ignore",
   });
   const client = new Client({ name: "smithers-pi-extension", version: "1.0.0" });
   try {
@@ -140,17 +146,73 @@ async function ensureMcpClient() {
     }
     throw error;
   }
-  mcpTransport = transport;
-  mcpClient = client;
-  return mcpClient;
+  return { client, transport };
+}
+
+export async function ensureMcpClient() {
+  if (mcpClient) {
+    return mcpClient;
+  }
+  // Dedupe concurrent callers onto a single in-flight connect promise. Without
+  // this, a second caller (e.g. before_agent_start overlapping session_start)
+  // would also see mcpClient undefined and spawn its own subprocess, leaking the
+  // loser. The client is exposed only after connect() completes, so concurrent
+  // callers all await the same fully-connected client.
+  if (mcpClientPromise) {
+    return mcpClientPromise;
+  }
+  // Assign the module globals only after a successful connect, so a transient
+  // startup failure (bun not on PATH, slow spawn, cli not built) doesn't poison
+  // them with a dead client that every later call would short-circuit to.
+  mcpClientPromise = (async () => {
+    const { client, transport } = await createMcpConnection();
+    mcpTransport = transport;
+    mcpClient = client;
+    return client;
+  })().finally(() => {
+    // Clear the cache once settled. On success the next caller reuses mcpClient;
+    // on failure the next caller retries the bootstrap from scratch.
+    mcpClientPromise = undefined;
+  });
+  return mcpClientPromise;
+}
+
+// Drop the current connection so the next ensureMcpClient() spawns a fresh one.
+// Used both on session shutdown and after a mid-session transport failure.
+async function resetMcpConnection() {
+  const transport = mcpTransport;
+  mcpClient = undefined;
+  mcpTransport = undefined;
+  mcpClientPromise = undefined;
+  if (transport) {
+    await transport.close().catch(() => {});
+  }
+}
+
+// Run an MCP call, recovering once if the subprocess died mid-session. A dead
+// transport surfaces as a rejected callTool/listTools; we drop it and rebuild
+// the connection exactly once. A second failure propagates so we never loop.
+async function withMcpRetry<T>(call: (client: Client) => Promise<T>): Promise<T> {
+  try {
+    const client = await ensureMcpClient();
+    return await call(client);
+  } catch {
+    await resetMcpConnection();
+    const client = await ensureMcpClient();
+    return await call(client);
+  }
+}
+
+async function listMcpTools() {
+  const { tools } = await withMcpRetry((client) => client.listTools());
+  return tools;
 }
 
 async function ensureSmithersToolContract() {
   if (smithersToolContract) {
     return smithersToolContract;
   }
-  const client = await ensureMcpClient();
-  const { tools } = await client.listTools();
+  const tools = await listMcpTools();
   smithersToolContract = createSmithersAgentContract({
     serverName: "smithers",
     toolSurface: "semantic",
@@ -165,14 +227,29 @@ async function ensureSmithersToolContract() {
 }
 
 async function callMcpTool(name: string, args: Record<string, unknown>) {
-  const client = await ensureMcpClient();
-  const result = await client.callTool({ name, arguments: args });
+  const result = await withMcpRetry((client) => client.callTool({ name, arguments: args }));
   const content = Array.isArray(result.content) ? result.content : [];
   const text = content
     .filter((item): item is { type: "text"; text: string } => item.type === "text" && typeof item.text === "string")
     .map((item) => item.text)
     .join("\n");
   return { text, isError: result.isError === true };
+}
+
+// Test seam: swap the connection factory (and reset module state) so the
+// lifecycle can be exercised with a fake transport, no subprocess, no network.
+export function setMcpConnectionFactoryForTesting(factory: McpConnectionFactory | undefined) {
+  createMcpConnection = factory ?? defaultCreateMcpConnection;
+}
+
+export function resetMcpStateForTesting() {
+  mcpClient = undefined;
+  mcpTransport = undefined;
+  mcpClientPromise = undefined;
+  smithersToolContract = undefined;
+  mcpToolsRegistered = false;
+  mcpToolsRegistration = undefined;
+  activeRunId = undefined;
 }
 
 export function jsonSchemaTypeToTypebox(node: any): TSchema {
@@ -328,8 +405,7 @@ async function registerMcpTools(pi: ExtensionAPI, ctx: ExtensionContext) {
 
 async function registerMcpToolsInner(pi: ExtensionAPI, ctx: ExtensionContext) {
   try {
-    const client = await ensureMcpClient();
-    const { tools } = await client.listTools();
+    const tools = await listMcpTools();
     smithersToolContract = createSmithersAgentContract({
       serverName: "smithers",
       toolSurface: "semantic",
@@ -426,17 +502,34 @@ export function extension(pi: ExtensionAPI) {
   pi.on("session_shutdown", async () => {
     if (pollInterval) {
       clearInterval(pollInterval);
+      pollInterval = undefined;
     }
     for (const run of runs.values()) {
       run.store.disconnect();
     }
     runs.clear();
+    activeRunId = undefined;
+    // Tear down the MCP subprocess + stdio transport so they don't leak across
+    // sessions, and reset the registration caches so a later session_start
+    // re-spawns and re-registers instead of reusing a now-dead client.
+    smithersToolContract = undefined;
+    mcpToolsRegistered = false;
+    mcpToolsRegistration = undefined;
+    await resetMcpConnection();
   });
 
   pi.on("before_agent_start", async (event: { systemPrompt: string }) => {
     const docs = includeSmithersDocsNextTurn ? loadSmithersDocs() : undefined;
     includeSmithersDocsNextTurn = false;
-    const contract = await ensureSmithersToolContract();
+    let contract: SmithersAgentContract | undefined;
+    try {
+      contract = await ensureSmithersToolContract();
+    } catch {
+      // The MCP server may be unavailable (bun missing, cli not built). Degrade
+      // to an ordinary turn instead of re-throwing on every agent start; the
+      // tool guidance is simply omitted until the server comes back.
+      contract = undefined;
+    }
     const active = activeRunId ? runs.get(activeRunId) : undefined;
     return {
       systemPrompt: buildSmithersPiSystemPrompt(
