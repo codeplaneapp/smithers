@@ -5265,17 +5265,23 @@ type GatherAndSynthesizeProps = {
 // Props
 import { Panel } from "smithers-orchestrator";
 
-type PanelistConfig = { agent: AgentLike; role?: string; label?: string };
+// agent may be a single agent or a failover chain (AgentLike[]) run as one panelist.
+type PanelistConfig = { agent: AgentLike | AgentLike[]; role?: string; label?: string };
+
+type PanelTaskOptions = { continueOnFail?: boolean; timeoutMs?: number; heartbeatTimeoutMs?: number; retries?: number };
 
 type PanelProps = {
   id?: string;                                           // default: "panel"
-  panelists: PanelistConfig[] | AgentLike[];
+  // each entry: an agent, a PanelistConfig, or a failover chain (AgentLike[])
+  panelists: Array<PanelistConfig | AgentLike | AgentLike[]>;
   moderator: AgentLike;
   panelistOutput: OutputTarget;
   moderatorOutput: OutputTarget;
   strategy?: "synthesize" | "vote" | "consensus";        // default: "synthesize"
   minAgree?: number;                                     // for "vote" / "consensus"
   maxConcurrency?: number;                               // default: Infinity
+  panelistTaskProps?: PanelTaskOptions;                  // extra Task props for each panelist
+  moderatorTaskProps?: PanelTaskOptions;                 // extra Task props for the moderator
   skipIf?: boolean;
   children: string | ReactNode;                          // prompt sent to every panelist
 };
