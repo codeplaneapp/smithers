@@ -50,6 +50,11 @@
       "import": "./src/gateway-react.js",
       "default": "./src/gateway-react.js"
     },
+    "./gateway-ui": {
+      "types": "./src/gateway-ui.d.ts",
+      "import": "./src/gateway-ui.js",
+      "default": "./src/gateway-ui.js"
+    },
     "./sandbox": {
       "types": "./src/sandbox.d.ts",
       "import": "./src/sandbox.js",
@@ -101,6 +106,7 @@
     "@smithers-orchestrator/errors": "workspace:*",
     "@smithers-orchestrator/gateway-client": "workspace:*",
     "@smithers-orchestrator/gateway-react": "workspace:*",
+    "@smithers-orchestrator/gateway-ui": "workspace:*",
     "@smithers-orchestrator/graph": "workspace:*",
     "@smithers-orchestrator/memory": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
