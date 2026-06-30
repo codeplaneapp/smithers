@@ -1,0 +1,33 @@
+{
+  "name": "@smithers-orchestrator/tui",
+  "version": "0.26.1",
+  "description": "Terminal monitor UI for Smithers runs",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "smithers-mon": "./src/index.tsx"
+  },
+  "scripts": {
+    "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "test": "bun test tests"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.4.2",
+    "@opentui/react": "^0.4.2",
+    "@smithers-orchestrator/gateway-client": "workspace:*",
+    "@smithers-orchestrator/gateway-react": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "typescript": "~5.9.3"
+  }
+}
