@@ -12,6 +12,18 @@ const initTemplateOption = z
     .optional()
     .describe("Show next steps for a canonical starter template ID after init");
 
+/**
+ * Optional positional args for `smithers init`.
+ * When `prompt` is provided, the pack is installed (if needed) and then the
+ * create-workflow builder is launched with the prompt pre-filled.
+ */
+export const initArgs = z.object({
+    prompt: z
+        .string()
+        .optional()
+        .describe("Optional plain-English task: after init, launch the create-workflow builder with this prompt pre-filled"),
+});
+
 export const initOptions = z.object({
     force: z.boolean().default(false).describe("Overwrite existing scaffold files"),
     agentsOnly: z.boolean().default(false).describe("Only create .smithers/agents/ and leave the rest of the workflow pack untouched"),

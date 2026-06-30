@@ -62,7 +62,7 @@ import {
     renderEvalReport,
     writeEvalReport,
 } from "./eval-suite.js";
-import { initOptions, runInitCommand } from "./init-command.js";
+import { initArgs, initOptions, runInitCommand } from "./init-command.js";
 import { startersArgs, startersOptions, runStartersCommand } from "./starter-gallery-command.js";
 import { runTuiCommand } from "./tui.js";
 import { optimizeOptions, runOptimizeCommand, withOptimizationArtifactEnv } from "./optimize-command.js";
@@ -3651,10 +3651,11 @@ const cli = Cli.create({
     mcp: { command: "bunx smithers-orchestrator --mcp" },
 })
     // =========================================================================
-    // smithers init
+    // smithers init [prompt]
     // =========================================================================
     .command("init", {
-    description: "Install the local Smithers workflow pack into .smithers/.",
+    description: "Install the local Smithers workflow pack into .smithers/. Pass an optional prompt to also launch the create-workflow builder after init.",
+    args: initArgs,
     options: initOptions,
     // The interactive run narrates its own progress + next steps; suppress the
     // raw result dump in a human TTY while keeping full JSON for piped/agent use.
@@ -3664,7 +3665,71 @@ const cli = Cli.create({
             commandExitOverride = opts.exitCode ?? 1;
             return c.error(opts);
         };
+        if (c.args.prompt) {
+            // Install the pack first (idempotent when already present), then
+            // launch the create-workflow builder with the prompt pre-filled.
+            let initFailed = false;
+            const initFail = (opts) => {
+                initFailed = true;
+                return fail(opts);
+            };
+            const initResult = await runInitCommand(c, initFail);
+            if (initFailed) return initResult;
+            try {
+                const workflow = resolveWorkflow("create-workflow", process.cwd());
+                return executeUpCommand(c, workflow.entryFile, normalizeWorkflowRunOptions({
+                    ...upOptions.parse({}),
+                    prompt: c.args.prompt,
+                }), fail);
+            }
+            catch (err) {
+                if (err instanceof SmithersError) {
+                    return fail({ code: err.code, message: err.message, exitCode: 4 });
+                }
+                return fail({ code: "CREATE_WORKFLOW_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+            }
+        }
         return runInitCommand(c, fail);
+    },
+})
+    // =========================================================================
+    // smithers make-workflow [task]
+    // =========================================================================
+    .command("make-workflow", {
+    description: "Build a new Smithers workflow from a plain-English description. Dispatches to the create-workflow builder. Run `smithers init` first if the .smithers/ pack is not yet installed.",
+    args: z.object({
+        task: z.string().optional().describe("Plain-English description of the workflow to build (forwarded as the builder prompt)"),
+    }),
+    options: workflowRunOptions,
+    alias: { detach: "d", runId: "r", input: "i", maxConcurrency: "c", prompt: "p" },
+    async run(c) {
+        const fail = (opts) => {
+            commandExitOverride = opts.exitCode ?? 1;
+            return c.error(opts);
+        };
+        try {
+            const workflow = resolveWorkflow("create-workflow", process.cwd());
+            if (c.options.interactive) {
+                if (!Boolean(process.stdin.isTTY && process.stdout.isTTY)) {
+                    return fail({ code: "INTERACTIVE_REQUIRES_TTY", message: "--interactive needs an interactive terminal (TTY).", exitCode: 4 });
+                }
+                return runTuiCommand(c, fail, { preselect: workflow });
+            }
+            const prompt = c.args.task ?? c.options.prompt;
+            return executeUpCommand(c, workflow.entryFile, normalizeWorkflowRunOptions({ ...c.options, prompt }), fail);
+        }
+        catch (err) {
+            if (err instanceof SmithersError) {
+                return fail({
+                    code: err.code,
+                    message: err.code === "RUN_NOT_FOUND"
+                        ? `${err.message} — run \`smithers init\` first to install the workflow pack`
+                        : err.message,
+                    exitCode: 4,
+                });
+            }
+            return fail({ code: "MAKE_WORKFLOW_FAILED", message: err?.message ?? String(err), exitCode: 1 });
+        }
     },
 })
     // =========================================================================
