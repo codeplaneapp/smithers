@@ -33,6 +33,9 @@ export default defineConfig({
     url: APP_ORIGIN,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
-    env: { SMITHERS_GATEWAY_PROXY_TARGET: GATEWAY_ORIGIN },
+    env: {
+      SMITHERS_GATEWAY_PROXY_TARGET: GATEWAY_ORIGIN,
+      SMITHERS_CONCIERGE_PROXY_TARGET: `http://127.0.0.1:${process.env.SMITHERS_CONCIERGE_PORT ?? "5179"}`,
+    },
   },
 });

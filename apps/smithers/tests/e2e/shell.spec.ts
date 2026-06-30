@@ -1,44 +1,36 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Shell + navigation: the app boots, connects to the real gateway, and every
- * nav entry routes to its surface. No mocks — the connection badge only reads
- * "Connected" once the real RPC/WS link to the seed gateway is live.
+ * The chat-first shell. The home view is the concierge hero + composer; there is
+ * no nav rail. You reach surfaces by talking to the concierge (slash commands or
+ * the command menu). No mocks: everything rides the real gateway + concierge.
  */
-test("boots and connects to the gateway", async ({ page }) => {
+test("home shows the concierge hero and composer", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".nav-rail")).toBeVisible();
-  // The ConnectionBadge flips to "Connected" off real gateway traffic.
-  await expect(page.getByText("Connected")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("How can I help you?")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Message Smithers" })).toBeVisible();
 });
 
-const SURFACES: ReadonlyArray<{ nav: string; testid: string }> = [
-  { nav: "Runs", testid: "runs-canvas" },
-  { nav: "Approvals", testid: "approvals-canvas" },
-  { nav: "Agents", testid: "agents-canvas" },
-  { nav: "Memory", testid: "memory-canvas" },
-  { nav: "Scores", testid: "scores-canvas" },
-  { nav: "Triggers", testid: "crons-canvas" },
-  { nav: "Prompts", testid: "prompts-canvas" },
-  { nav: "Tickets", testid: "tickets-canvas" },
-  { nav: "Palette", testid: "palette-canvas" },
-];
+test("the composer accepts input", async ({ page }) => {
+  await page.goto("/");
+  const input = page.getByRole("textbox", { name: "Message Smithers" });
+  await input.fill("hello there");
+  await expect(input).toHaveValue("hello there");
+});
 
-for (const surface of SURFACES) {
-  test(`nav: ${surface.nav} opens ${surface.testid}`, async ({ page }) => {
-    await page.goto("/");
-    await page.getByRole("link", { name: surface.nav, exact: true }).click();
-    await expect(page.getByTestId(surface.testid)).toBeVisible();
-  });
-}
+test("the theme toggle flips light/dark", async ({ page }) => {
+  await page.goto("/");
+  const before = await page.evaluate(() => document.documentElement.dataset.theme);
+  await page.getByRole("button", { name: /Switch to (light|dark) mode/ }).click();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.dataset.theme))
+    .not.toBe(before);
+});
 
-test("nav: Workflows returns to the store landing", async ({ page }) => {
-  await page.goto("/runs");
-  await expect(page.getByTestId("runs-canvas")).toBeVisible();
-  await page.getByRole("link", { name: "Workflows", exact: true }).click();
-  await expect(page).toHaveURL(/\/$|\/\?/);
-  // The store landing renders the workflow grid (the seeded e2e-task has a UI).
-  await expect(page.locator(".store")).toBeVisible();
+test("the layout toggle switches to the sidebar shell", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /sidebar layout/ }).click();
+  await expect(page.locator(".chat-rail")).toBeVisible();
 });
 
 test("unknown route renders the not-found page", async ({ page }) => {
