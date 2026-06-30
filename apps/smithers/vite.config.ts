@@ -16,6 +16,8 @@ import { defineConfig } from "vite";
  * `ws: true`; the gateway accepts a WS upgrade on any path.
  */
 const gatewayTarget = process.env.SMITHERS_GATEWAY_PROXY_TARGET ?? "http://127.0.0.1:7331";
+// The local concierge server owns `/api/chat` (the chat backend).
+const conciergeTarget = process.env.SMITHERS_CONCIERGE_PROXY_TARGET ?? "http://127.0.0.1:5179";
 
 // One instance of each of these must exist across the app AND the linked
 // gateway packages, or `useLiveQuery` subscribes to a different module's
@@ -40,6 +42,8 @@ export default defineConfig({
       "/v1/rpc": { target: gatewayTarget, changeOrigin: true, ws: true },
       "/health": { target: gatewayTarget, changeOrigin: true },
       "/workflows": { target: gatewayTarget, changeOrigin: true },
+      "/api/chat": { target: conciergeTarget, changeOrigin: true },
+      "/api/ask": { target: conciergeTarget, changeOrigin: true },
     },
   },
   preview: {
@@ -50,6 +54,8 @@ export default defineConfig({
       "/v1/rpc": { target: gatewayTarget, changeOrigin: true, ws: true },
       "/health": { target: gatewayTarget, changeOrigin: true },
       "/workflows": { target: gatewayTarget, changeOrigin: true },
+      "/api/chat": { target: conciergeTarget, changeOrigin: true },
+      "/api/ask": { target: conciergeTarget, changeOrigin: true },
     },
   },
   build: {

@@ -11,11 +11,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test --max-concurrency=1 --path-ignore-patterns=\"**/e2e/**\"",
     "e2e": "playwright test",
-    "e2e:install": "playwright install chromium"
+    "e2e:install": "playwright install chromium",
+    "concierge": "bun concierge/server.ts",
+    "dev:full": "bun concierge/server.ts & vite --host 127.0.0.1 --port 5180"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.71",
     "@pierre/diffs": "^1.2.11",
     "@pierre/trees": "1.0.0-beta.4",
+    "ai": "^6.0.168",
     "@smithers-orchestrator/gateway-client": "workspace:*",
     "@smithers-orchestrator/gateway-react": "workspace:*",
     "@smithers-orchestrator/gateway-ui": "workspace:*",
