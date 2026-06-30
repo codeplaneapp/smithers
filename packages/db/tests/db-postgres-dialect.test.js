@@ -36,39 +36,39 @@ let schema;
 /** @type {SqlMessageStorage} */
 let storage;
 
-beforeAll(async () => {
-    if (PG_URL) {
-        client = new pg.Client({ connectionString: PG_URL });
-        await client.connect();
-        schema = `smithers_test_${Date.now().toString(36)}`;
-        await client.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
-        await client.query(`SET search_path TO "${schema}"`);
-    }
-    else {
-        const { PGlite } = await import("@electric-sql/pglite");
-        const { PGLiteSocketServer } = await import("@electric-sql/pglite-socket");
-        pglite = await PGlite.create();
-        server = new PGLiteSocketServer({ db: pglite, host: HOST, port: PORT, maxConnections: 5 });
-        await server.start();
-        client = new pg.Client({ host: HOST, port: PORT, database: "postgres", user: "postgres", ssl: false });
-        await client.connect();
-    }
-    storage = new SqlMessageStorage({ dialect: "postgres", connection: client });
-    await storage.ensureSchema();
-});
-
-afterAll(async () => {
-    if (PG_URL && schema && client) {
-        await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => {});
-    }
-    await client?.end().catch(() => {});
-    await server?.stop().catch(() => {});
-    await pglite?.close().catch(() => {});
-});
-
 // PGlite's socket server currently desyncs node-postgres on Windows CI. The
 // real Postgres dialect still runs through the separate test-postgres job.
 describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage postgres dialect", () => {
+    beforeAll(async () => {
+        if (PG_URL) {
+            client = new pg.Client({ connectionString: PG_URL });
+            await client.connect();
+            schema = `smithers_test_${Date.now().toString(36)}`;
+            await client.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+            await client.query(`SET search_path TO "${schema}"`);
+        }
+        else {
+            const { PGlite } = await import("@electric-sql/pglite");
+            const { PGLiteSocketServer } = await import("@electric-sql/pglite-socket");
+            pglite = await PGlite.create();
+            server = new PGLiteSocketServer({ db: pglite, host: HOST, port: PORT, maxConnections: 5 });
+            await server.start();
+            client = new pg.Client({ host: HOST, port: PORT, database: "postgres", user: "postgres", ssl: false });
+            await client.connect();
+        }
+        storage = new SqlMessageStorage({ dialect: "postgres", connection: client });
+        await storage.ensureSchema();
+    });
+
+    afterAll(async () => {
+        if (PG_URL && schema && client) {
+            await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => {});
+        }
+        await client?.end().catch(() => {});
+        await server?.stop().catch(() => {});
+        await pglite?.close().catch(() => {});
+    });
+
     test("reports the postgres dialect", () => {
         expect(storage.dialect).toBe("postgres");
     });
