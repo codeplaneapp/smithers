@@ -1,0 +1,13 @@
+{
+  "name": "smithers",
+  "version": "0.1.0",
+  "description": "Drive Smithers, the durable control plane for long-running coding agents: run, watch, approve, and resume workflows instead of hand-rolling orchestration with Task/Agent/Workflow, and build a live custom UI for every run.",
+  "author": {
+    "name": "Smithers",
+    "email": "team@smithers.sh"
+  },
+  "homepage": "https://smithers.sh",
+  "repository": "https://github.com/smithersai/smithers",
+  "license": "MIT",
+  "keywords": ["workflows", "orchestration", "durable", "agents", "smithers"]
+}
