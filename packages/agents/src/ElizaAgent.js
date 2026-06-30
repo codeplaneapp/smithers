@@ -57,9 +57,56 @@ async function defaultRuntimeFactory(opts) {
             settings: mergedSettings,
         },
         plugins: opts.plugins ?? [],
+        // elizaOS 1.7.2 also reads settings at the top-level runtime option.
+        settings: mergedSettings,
     });
 
     return runtime;
+}
+
+/**
+ * Race a promise against an AbortSignal, rejecting immediately if the signal
+ * fires. Returns the original promise unchanged if abortSignal is absent.
+ *
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {AbortSignal | null | undefined} abortSignal
+ * @returns {Promise<T>}
+ */
+function raceAbort(promise, abortSignal) {
+    if (!abortSignal) return promise;
+    if (abortSignal.aborted) {
+        return Promise.reject(new Error("ElizaAgent: generation aborted"));
+    }
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => {
+            abortSignal.addEventListener(
+                "abort",
+                () => reject(new Error("ElizaAgent: generation aborted")),
+                { once: true }
+            );
+        }),
+    ]);
+}
+
+/**
+ * Returns true when the error indicates the model type name is not recognised
+ * by the runtime (as opposed to transient errors like network or auth failures).
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isUnsupportedModelError(err) {
+    if (!(err instanceof Error)) return false;
+    const msg = err.message.toLowerCase();
+    return (
+        msg.includes("unsupported model") ||
+        msg.includes("unknown model") ||
+        msg.includes("not supported") ||
+        msg.includes("invalid model type") ||
+        msg.includes("model type not found")
+    );
 }
 
 /**
@@ -87,6 +134,8 @@ export class ElizaAgent {
     #runtime = null;
     /** @type {Promise<ElizaRuntime> | null} */
     #initPromise = null;
+    /** @type {boolean} Set to true by stop() to prevent re-initialization. */
+    #stopped = false;
     /** @type {ElizaRuntimeFactory} */
     #runtimeFactory;
 
@@ -125,17 +174,24 @@ export class ElizaAgent {
 
     /**
      * Lazily construct + initialize the AgentRuntime exactly once.
-     * Guards against concurrent initialization.
+     * Guards against concurrent initialization and against use after stop().
      *
      * @returns {Promise<ElizaRuntime>}
      */
     async #ensureRuntime() {
+        if (this.#stopped) throw new Error("ElizaAgent: agent has been stopped");
         if (this.#runtime) return this.#runtime;
         if (this.#initPromise) return this.#initPromise;
 
         this.#initPromise = this.#runtimeFactory(this.#opts).then(
             async (rt) => {
                 await rt.initialize();
+                if (this.#stopped) {
+                    // stop() was called while we were initializing — clean up
+                    // and reject so the caller knows init was cancelled.
+                    if (rt.stop) await rt.stop().catch(() => {});
+                    throw new Error("ElizaAgent: agent was stopped during initialization");
+                }
                 this.#runtime = rt;
                 return rt;
             }
@@ -159,33 +215,30 @@ export class ElizaAgent {
                 ? String(prompt)
                 : "";
 
-        const runtime = await this.#ensureRuntime();
-
         if (abortSignal?.aborted) {
             throw new Error("ElizaAgent: generation aborted");
         }
 
+        const runtime = await raceAbort(this.#ensureRuntime(), abortSignal);
+
         /** @type {string} */
         let text;
         try {
-            text = await runtime.useModel("TEXT_LARGE", {
-                prompt: promptText,
-                stopSequences: [],
-            });
+            text = await raceAbort(
+                runtime.useModel("TEXT_LARGE", { prompt: promptText, stopSequences: [] }),
+                abortSignal
+            );
         } catch (err) {
-            // Fallback: some elizaOS builds expose TEXT_SMALL or TEXT
-            try {
-                text = await runtime.useModel("TEXT_SMALL", {
-                    prompt: promptText,
-                    stopSequences: [],
-                });
-            } catch {
+            // Only fall back on unrecognised model-type errors, not transient
+            // failures (network, rate-limit, auth) which should surface directly.
+            if (isUnsupportedModelError(err)) {
+                text = await raceAbort(
+                    runtime.useModel("TEXT_SMALL", { prompt: promptText, stopSequences: [] }),
+                    abortSignal
+                );
+            } else {
                 throw err;
             }
-        }
-
-        if (abortSignal?.aborted) {
-            throw new Error("ElizaAgent: generation aborted after model call");
         }
 
         if (onStdout) {
@@ -195,12 +248,8 @@ export class ElizaAgent {
         /** @type {unknown} */
         let output = undefined;
         if (outputSchema) {
-            try {
-                const parsed = JSON.parse(text);
-                output = outputSchema.parse(parsed);
-            } catch {
-                // Leave output undefined — prompt-based extraction; no native structured path.
-            }
+            const parsed = JSON.parse(text);
+            output = outputSchema.parse(parsed);
         }
 
         return buildGenerateResult(text, output, this.#modelId, undefined);
@@ -208,15 +257,25 @@ export class ElizaAgent {
 
     /**
      * Gracefully stop the runtime and release any held resources.
+     * Safe to call before init or while init is in progress.
      *
      * @returns {Promise<void>}
      */
     async stop() {
+        this.#stopped = true;
         const rt = this.#runtime;
+        const pending = this.#initPromise;
         this.#runtime = null;
         this.#initPromise = null;
-        if (rt?.stop) {
-            await rt.stop();
+
+        if (rt) {
+            // Runtime already fully initialized — stop it directly.
+            if (rt.stop) await rt.stop();
+        } else if (pending) {
+            // Init is still in progress. Wait for it: the .then() block above
+            // will see #stopped=true, call rt.stop(), and then throw — which
+            // we swallow here since stopping is the intended outcome.
+            await pending.catch(() => {});
         }
     }
 }

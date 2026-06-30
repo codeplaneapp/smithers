@@ -1460,6 +1460,82 @@ declare function createSerperSearchProvider(options: {
 }): GroundedWebSearchProvider;
 type GroundedWebSearchProvider = GroundedWebSearchProvider$5;
 
+/** Minimal elizaOS Character shape — structural only, no @elizaos/core import required. */
+type ElizaCharacter = {
+    name: string;
+    bio?: string | string[];
+    lore?: string[];
+    messageExamples?: unknown[];
+    postExamples?: string[];
+    topics?: string[];
+    adjectives?: string[];
+    knowledge?: string[];
+    clients?: string[];
+    plugins?: string[];
+    settings?: Record<string, unknown>;
+    system?: string;
+    [key: string]: unknown;
+};
+
+/** Minimal elizaOS Plugin shape — structural only, no @elizaos/core import required. */
+type ElizaPlugin = {
+    name: string;
+    description?: string;
+    actions?: unknown[];
+    providers?: unknown[];
+    evaluators?: unknown[];
+    services?: unknown[];
+    [key: string]: unknown;
+};
+
+/**
+ * Options for {@link ElizaAgent}.
+ *
+ * Wraps the elizaOS `AgentRuntime` in-process, forwarding plugins/settings
+ * so callers can use any elizaOS plugin (Slack, Discord, Telegram, etc.)
+ * as a Smithers agent backend.
+ */
+type ElizaAgentOptions = {
+    /** The elizaOS Character definition. */
+    character: ElizaCharacter;
+    /** elizaOS plugins to register on the runtime. */
+    plugins?: ElizaPlugin[];
+    /** Key-value settings forwarded to the runtime (e.g. SLACK_BOT_TOKEN). */
+    settings?: Record<string, string>;
+    /** Additional environment variables forwarded alongside settings. */
+    env?: Record<string, string>;
+    /** Optional model label for diagnostics. Defaults to "eliza". */
+    model?: string;
+    /** Alias for model. */
+    modelId?: string;
+    /** Optional unique identifier for this agent instance. */
+    id?: string;
+};
+
+/**
+ * Smithers agent harness that wraps an elizaOS `AgentRuntime` in-process.
+ *
+ * `@elizaos/core` is an optional peer dependency — resolved via a dynamic
+ * import so the package builds and tests without it installed.
+ */
+declare class ElizaAgent {
+    id: string | undefined;
+    supportsNativeStructuredOutput: boolean;
+    constructor(
+        opts: ElizaAgentOptions,
+        _internal?: {
+            runtimeFactory?: (opts: ElizaAgentOptions) => Promise<{
+                initialize(): Promise<void>;
+                useModel(modelType: string, params: { prompt: string; stopSequences?: string[] }): Promise<string>;
+                stop?(): Promise<void>;
+            }>;
+        }
+    );
+    preflight(args?: AgentGenerateOptions$2$1): Promise<void>;
+    generate(args?: AgentGenerateOptions$2$1): Promise<GenerateTextResult>;
+    stop(): Promise<void>;
+}
+
 type AgentCapabilityRegistry = AgentCapabilityRegistry$8;
 type AgentGenerateOptions = AgentGenerateOptions$2$1;
 type AgentLike = AgentLike$1;
@@ -1496,4 +1572,4 @@ type HttpToolAuth = HttpToolAuth$1;
 type HttpToolInput = HttpToolInput$1;
 type HttpToolOutput = HttpToolOutput$1;
 
-export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, VibeAgent, type VibeAgentOptions, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, ElizaAgent, type ElizaAgentOptions, type ElizaCharacter, type ElizaPlugin, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, VibeAgent, type VibeAgentOptions, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };

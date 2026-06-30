@@ -21,6 +21,8 @@
 /** @typedef {import("./HermesCliAgentOptions.ts").HermesCliAgentOptions} HermesCliAgentOptions */
 /** @typedef {import("./PiAgentOptions.ts").PiAgentOptions} PiAgentOptions */
 /** @typedef {import("./ElizaAgentOptions.ts").ElizaAgentOptions} ElizaAgentOptions */
+/** @typedef {import("./ElizaAgentOptions.ts").ElizaCharacter} ElizaCharacter */
+/** @typedef {import("./ElizaAgentOptions.ts").ElizaPlugin} ElizaPlugin */
 /** @typedef {import("./BaseCliAgent/PiExtensionUiRequest.ts").PiExtensionUiRequest} PiExtensionUiRequest */
 /** @typedef {import("./BaseCliAgent/PiExtensionUiResponse.ts").PiExtensionUiResponse} PiExtensionUiResponse */
 /** @typedef {import("./OpenCodeAgentOptions.ts").OpenCodeAgentOptions} OpenCodeAgentOptions */

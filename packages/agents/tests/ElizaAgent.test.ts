@@ -222,18 +222,15 @@ describe("ElizaAgent", () => {
             expect((result as any).experimental_output).toMatchObject({ count: 42 });
         });
 
-        test("with outputSchema: output is undefined when text is not valid JSON", async () => {
+        test("with outputSchema: throws when text is not valid JSON", async () => {
             const { agent } = createAgentWithFakeRuntime(
                 { character: testCharacter },
                 "plain text response"
             );
             const schema = z.object({ count: z.number() });
-            const result = await agent.generate({
-                prompt: "this won't parse",
-                outputSchema: schema,
-            });
-            expect(result.text).toBe("plain text response");
-            expect((result as any).output).toBeUndefined();
+            await expect(
+                agent.generate({ prompt: "this won't parse", outputSchema: schema })
+            ).rejects.toThrow();
         });
 
         test("reuses the same runtime across multiple generate calls", async () => {
@@ -271,6 +268,48 @@ describe("ElizaAgent", () => {
         test("safe to call before runtime is initialized", async () => {
             const { agent } = createAgentWithFakeRuntime();
             await expect(agent.stop()).resolves.toBeUndefined();
+        });
+
+        test("stop() during initialization properly cleans up the runtime", async () => {
+            let resolveInit!: () => void;
+            const initBlocker = new Promise<void>((resolve) => {
+                resolveInit = resolve;
+            });
+
+            const stopCalls: number[] = [];
+            const fake = {
+                initCount: 0,
+                async initialize() {
+                    await initBlocker;
+                    this.initCount++;
+                },
+                async useModel(_type: string, _params: { prompt: string }) {
+                    return "text";
+                },
+                async stop() {
+                    stopCalls.push(1);
+                },
+            };
+
+            const agent = new ElizaAgent(
+                { character: testCharacter },
+                { runtimeFactory: async () => fake as any }
+            );
+
+            // Start initialization (it will block on initBlocker).
+            const preflightPromise = agent.preflight().catch(() => {});
+
+            // Stop while init is still in flight.
+            const stopPromise = agent.stop();
+
+            // Unblock the factory so init can complete.
+            resolveInit();
+
+            await stopPromise;
+            await preflightPromise;
+
+            // The runtime's stop() must have been called to release resources.
+            expect(stopCalls.length).toBe(1);
         });
     });
 });
