@@ -1,0 +1,186 @@
+/* ---- Timeline / frame scrubber ----
+ * Feature-scoped styles for the time-travel scrubber. The base strip
+ * (.timeline, .tl-track, .tl-fill, .tl-dot, .tl-actions) already lives in
+ * featureCards.css; everything below is the parity upgrade: the monospace
+ * counter, the native slider, the tick row, the transport buttons, and the
+ * historical / error banners. Imported at the top of TimelineCanvas.tsx, so the
+ * shared featureCards.css never needs a second writer. */
+
+.tl-counter {
+  font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-2, #6b7280);
+  letter-spacing: 0.01em;
+}
+
+/* The native range input, sized to overlay the same width as the dot track so
+ * dots and slider thumb share one coordinate space. */
+.tl-slider {
+  display: block;
+  width: 100%;
+  margin: 12px 8px 4px;
+  box-sizing: border-box;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+.tl-slider:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* The terminal-state head: a denied/canceled run paints the head + fill red. */
+.tl-fill.is-failed { background: var(--st-failed); }
+.tl-dot.is-head.is-failed { border-color: var(--st-failed); }
+
+/* Tick row beneath the track: quarter/half/three-quarter notches plus the gate. */
+.tl-ticks {
+  position: relative;
+  height: 18px;
+  margin: 0 8px 4px;
+}
+.tl-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  width: 1px;
+  height: 7px;
+  background: var(--border-strong, #c7ccd1);
+}
+.tl-tick::after {
+  content: attr(data-frame);
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  transform: translateX(-50%);
+  font: 500 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-2, #8a9099);
+}
+.tl-tick-gate {
+  background: var(--st-waiting);
+  height: 9px;
+}
+.tl-tick-gate::after {
+  content: "gate";
+  color: var(--st-waiting);
+  font-weight: 700;
+}
+
+/* Transport row: play/pause, step, jump-to-edges. */
+.tl-transport {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+.tl-play,
+.tl-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tl-step {
+  min-width: 36px;
+  justify-content: center;
+}
+
+/* Historical banner: viewing a frame behind the live head. Warning-toned, like
+ * the base .tl-banner, with the running-task pill and the return-to-live button
+ * docked inside it. */
+.tl-historical {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 16px 0 4px;
+  padding: 8px 12px;
+  font: 600 12px/1.3 Inter, sans-serif;
+  color: var(--st-waiting);
+  background: color-mix(in srgb, var(--st-waiting) 11%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--st-waiting) 28%, transparent);
+  border-radius: 12px;
+}
+.tl-historical-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font: 700 11px/1 Inter, sans-serif;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 13%, var(--surface));
+}
+.tl-return-live {
+  margin-left: auto;
+}
+
+/* Destructive rewind: danger-toned, with a two-step inline confirm. */
+.tl-rewind {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+}
+.tl-rewind:hover {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface));
+}
+.tl-rewind-confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+  font: 500 12px/1.4 Inter, sans-serif;
+  color: var(--text-1, #1f2328);
+}
+.tl-rewind-confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Error banner: warning glyph, message + optional hint, retry/dismiss. */
+.tl-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 16px 0 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--st-failed) 30%, transparent);
+  background: color-mix(in srgb, var(--st-failed) 8%, var(--surface));
+  color: var(--st-failed);
+  font: 500 12px/1.4 Inter, sans-serif;
+}
+.tl-error-text {
+  flex: 1;
+  min-width: 0;
+}
+.tl-error-hint {
+  margin-top: 3px;
+  color: var(--text-2, #8a9099);
+  font-weight: 400;
+}
+.tl-error-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+/* The calm empty state when there is nothing to scrub. */
+.tl-disabled {
+  margin: 18px 8px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px dashed var(--border-strong, #c7ccd1);
+  text-align: center;
+  color: var(--text-2, #8a9099);
+  font: 500 13px/1.4 Inter, sans-serif;
+}
+
+.tl-frame-label {
+  font: 500 12px/1 Inter, sans-serif;
+  color: var(--text-2, #8a9099);
+}

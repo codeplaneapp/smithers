@@ -1,0 +1,228 @@
+/* Approvals surface: the pending-gate queue + decision history (list + detail).
+   Imported at the top of ApprovalsCanvas so it loads globally without touching
+   the shared featureCards.css. Reuses the .surface/.seg/.rev-* vocabulary; only
+   the appr-* classes below are new. Color = state via the --tone / --st-* tokens
+   so light and dark both resolve. */
+
+/* Two-pane body: pending/history list rail on the left, detail on the right. */
+.appr-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 340px 1fr;
+}
+.appr-list {
+  border-right: 1px solid var(--border);
+  overflow: auto;
+  padding: 8px;
+  background: var(--surface);
+}
+.appr-detail {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+
+/* One queue / history row. */
+.appr-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 11px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.appr-row:hover { background: var(--hover); }
+.appr-row.is-on { background: color-mix(in srgb, var(--brand) 11%, var(--surface)); }
+
+/* Status indicator: hollow amber ring (pending) or a filled tone dot/glyph. */
+.appr-ring {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font: 700 11px/1 Inter, sans-serif;
+  color: var(--tone, var(--st-waiting));
+}
+.appr-ring.is-pending {
+  border: 2px solid var(--st-waiting);
+  color: transparent;
+}
+.appr-ring.is-busy {
+  border: 2px solid var(--st-waiting);
+  border-top-color: transparent;
+  color: transparent;
+  animation: appr-spin 0.7s linear infinite;
+}
+@keyframes appr-spin { to { transform: rotate(360deg); } }
+
+.appr-row-main { flex: 1; min-width: 0; }
+.appr-gate {
+  font-weight: 600;
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.appr-runid {
+  margin-top: 3px;
+  font: 500 11px/1 ui-monospace, Menlo, monospace;
+  color: var(--text-muted);
+}
+
+/* Right-aligned mono wait-time badge, escalating by age. */
+.appr-wait {
+  flex: none;
+  font: 600 11px/1 ui-monospace, Menlo, monospace;
+  padding: 4px 7px;
+  border-radius: 6px;
+  color: var(--text-faint);
+  background: var(--hover-subtle);
+}
+.appr-wait.is-fresh { color: var(--text-faint); background: var(--hover-subtle); }
+.appr-wait.is-warn {
+  color: var(--st-waiting);
+  background: color-mix(in srgb, var(--st-waiting) 13%, var(--surface));
+}
+.appr-wait.is-stale {
+  color: var(--st-failed);
+  background: color-mix(in srgb, var(--st-failed) 13%, var(--surface));
+}
+
+/* The synthetic-fallback chip. */
+.appr-synthetic {
+  flex: none;
+  font: 700 9px/1 ui-monospace, Menlo, monospace;
+  letter-spacing: 0.05em;
+  padding: 3px 5px;
+  border-radius: 5px;
+  color: var(--st-waiting);
+  background: color-mix(in srgb, var(--st-waiting) 15%, var(--surface));
+}
+
+/* History action tag (APPROVED / DENIED), toned by outcome. */
+.appr-action-tag {
+  flex: none;
+  font: 700 10px/1 ui-monospace, Menlo, monospace;
+  letter-spacing: 0.05em;
+  padding: 4px 7px;
+  border-radius: 6px;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 13%, var(--surface));
+}
+
+/* Detail pane. */
+.appr-detail-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 16px 20px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.appr-detail-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+/* Metadata block: label/value fact rows. */
+.appr-meta {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 6px 14px;
+  align-items: baseline;
+}
+.appr-meta-label {
+  font: 700 10px/1.4 ui-monospace, Menlo, monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.appr-meta-value {
+  font: 500 12.5px/1.5 ui-monospace, Menlo, monospace;
+  color: var(--text);
+  word-break: break-word;
+}
+
+/* Eyebrow label above the payload block. */
+.appr-eyebrow {
+  font: 700 10px/1 ui-monospace, Menlo, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* Pretty-printed JSON payload block. */
+.appr-payload {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--code-bg);
+  color: var(--code-text);
+  font: 500 12px/1.6 ui-monospace, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  user-select: text;
+}
+
+/* The synthetic-derivation explanatory line. */
+.appr-synthetic-note {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--st-waiting);
+}
+
+/* Optional note input + decision actions. */
+.appr-note { width: 100%; }
+.appr-actions { display: flex; align-items: center; gap: 8px; }
+
+/* Two-step deny confirm strip. */
+.appr-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--st-failed) 45%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--st-failed) 7%, var(--surface));
+}
+.appr-confirm-msg { font-size: 13px; line-height: 1.5; color: var(--text); }
+.appr-confirm-msg b { font-weight: 650; }
+
+.appr-empty {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 200px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+.appr-empty svg { width: 30px; height: 30px; opacity: 0.7; }
+
+.appr-placeholder {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+.appr-placeholder svg { width: 30px; height: 30px; opacity: 0.7; }
+
+/* The in-flight badge dim on a row being resolved. */
+.appr-busy { opacity: 0.7; pointer-events: none; }
