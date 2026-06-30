@@ -64,6 +64,21 @@ paths:
                         idempotencyKey:
                           type: string
                           description: "Optional caller idempotency key."
+                        maxConcurrency:
+                          type: integer
+                          minimum: 1
+                          description: "Maximum parallel workflow tasks."
+                        allowNetwork:
+                          type: boolean
+                          description: "Allow network access for workflow tools."
+                        maxOutputBytes:
+                          type: integer
+                          minimum: 1
+                          description: "Maximum captured output bytes per tool/process."
+                        toolTimeoutMs:
+                          type: integer
+                          minimum: 1
+                          description: "Maximum wall-clock time per tool call in milliseconds."
                       required: []
                       additionalProperties: false
                   required:
@@ -78,6 +93,7 @@ paths:
                   sha: abc123
                 options:
                   runId: deploy-abc123
+                  allowNetwork: true
       responses:
         200:
           description: "Launch Run response."
