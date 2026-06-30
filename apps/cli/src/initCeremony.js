@@ -3,12 +3,15 @@ import { intro, isCancel, log, multiselect } from "@clack/prompts";
 import pc from "picocolors";
 import { detectAvailableAgents } from "./agent-detection.js";
 import { applyWorkflowPackUpdates, initWorkflowPack } from "./workflow-pack.js";
+import { runInteractiveInitFlow, buildDefaultSelections } from "./init/interactiveInit.js";
 
 /**
- * Render the human-facing `smithers init` flow: a clean clack ceremony that
- * narrates each step (scaffold → detect agents → install) instead of dumping
- * the raw result object. Returns the same {@link InitResult} as a plain
- * {@link initWorkflowPack} call so callers can attach templates/CTAs after.
+ * Render the human-facing `smithers init` flow: a clack ceremony that first
+ * shows the OpenTUI multiselect wizard (workflow/skill selection) and then
+ * narrates the scaffold → detect agents → install steps.
+ *
+ * Returns the same {@link InitResult} as a plain {@link initWorkflowPack} call
+ * so callers can attach templates/CTAs after.
  *
  * Only call this in interactive TTY mode; piped/agent callers should use
  * {@link initWorkflowPack} directly so structured output is preserved.
@@ -22,6 +25,23 @@ export async function runInitCeremony(opts = {}) {
     const global = Boolean(opts.global);
     const installSkill = opts.installSkill !== false;
 
+    // ------------------------------------------------------------------
+    // Step 1: Interactive selection wizard (OpenTUI full-screen)
+    // ------------------------------------------------------------------
+    // Skipped when --agents-only: workflows and skills are irrelevant there.
+    let selections = buildDefaultSelections(env);
+    if (!agentsOnly) {
+        const chosen = await runInteractiveInitFlow({ env });
+        if (chosen === null) {
+            // User pressed Esc / Ctrl-C in the wizard — cancel init.
+            process.exit(0);
+        }
+        selections = chosen;
+    }
+
+    // ------------------------------------------------------------------
+    // Step 2: Clack ceremony — narrate the actual work
+    // ------------------------------------------------------------------
     intro(`${pc.bgCyan(pc.black(" smithers "))} ${pc.dim(global ? "init --global" : "init")}`);
 
     const reporter = {
@@ -34,6 +54,10 @@ export async function runInitCeremony(opts = {}) {
             if (skippedCount > 0) parts.push(`${pc.bold(String(skippedCount))} ${pc.dim("preserved")}`);
             log.message(parts.length > 0 ? parts.join(pc.dim("  ·  ")) : pc.dim("nothing to write (pack already present)"));
             renderAgents(env);
+            if (!agentsOnly) {
+                const wfCount = selections.selectedWorkflows.length;
+                log.message(`${pc.dim("→")} Installing ${pc.bold(String(wfCount))} workflow${wfCount === 1 ? "" : "s"}`);
+            }
         },
         skillInstalled(result) {
             if (result.installed.length === 0) return;
@@ -66,6 +90,9 @@ export async function runInitCeremony(opts = {}) {
         global,
         installSkill,
         skipInstall: agentsOnly || opts.install === false,
+        selectedWorkflows: agentsOnly ? undefined : selections.selectedWorkflows,
+        selectedSkillTargets: agentsOnly ? undefined : selections.selectedSkillTargets,
+        selectedAgentDocs: agentsOnly ? undefined : selections.selectedAgentDocs,
         reporter,
     });
 
