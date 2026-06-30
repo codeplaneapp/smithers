@@ -34,11 +34,11 @@ function ModeBody({
   }
 }
 
-// In Tree mode (1), keys 1-5 are the inspector TABS — not mode switches — and
+// In Tree mode (1), keys 1-4 are the inspector TABS — not mode switches — and
 // modes are reached via the g/l/t/h letter aliases. Advertise those so the
 // keybar matches actual behavior instead of the default 1-5 mode list.
 const TREE_KEYBAR_ENTRIES: { key: string; description: string }[] = [
-  { key: "1-5", description: "Tabs" },
+  { key: "1-4", description: "Tabs" },
   { key: "g", description: "Graph" },
   { key: "l", description: "Logs" },
   { key: "t", description: "Timeline" },
@@ -62,7 +62,7 @@ function Keybar({ compact, mode }: { compact: boolean; mode: Mode }) {
 
 function HelpOverlay({ mode }: { mode: Mode }) {
   const keymap = useKeymap();
-  // Tree mode rebinds 1-5 to inspector tabs, so the global 1-5 mode list would
+  // Tree mode rebinds 1-4 to inspector tabs, so the global 1-5 mode list would
   // be a lie there. Show Tree's actual bindings (tabs + g/l/t/h) when in Tree,
   // and the global 1-5 mode list everywhere else — mirroring the Keybar.
   const entries = mode === 1 ? TREE_KEYBAR_ENTRIES : keymap.entries;
@@ -91,7 +91,7 @@ function HelpOverlay({ mode }: { mode: Mode }) {
         ))}
         <text> </text>
         {mode === 1 ? (
-          <text fg="#888888">  1-5 select an inspector tab in Tree</text>
+          <text fg="#888888">  1-4 select an inspector tab in Tree</text>
         ) : (
           <text fg="#888888">  g/l/t/h  switch mode from Tree</text>
         )}
@@ -120,9 +120,9 @@ export function App({ runId, onExit }: { runId: string; onExit: (code: number) =
       if (e.name === "escape") setShowHelp(false);
       return;
     }
-    // Tree mode owns 1-5 for its inspector tabs, so don't also treat them as
+    // Tree mode owns 1-4 for its inspector tabs, so don't also treat 1-5 as
     // global mode switches there (that collision would steal the tab keys and
-    // unmount the tree on every 2-5 press). Use 1 to return to Tree from any
+    // unmount the tree on every 2-4 press). Use 1 to return to Tree from any
     // other mode; the letter aliases (g/l/t/h) switch modes from within Tree.
     if (mode !== 1) {
       if (e.name === "1") return setMode(1);

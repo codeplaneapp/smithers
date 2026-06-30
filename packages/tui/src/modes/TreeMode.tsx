@@ -24,9 +24,14 @@ import {
   runApprovalSubmit,
   claimInFlight,
   releaseInFlight,
+  approvalRowKey,
+  selectNodeApproval,
+  pruneResolvedKeys,
+  routeApprovalKey,
   type ApprovalMode,
   type ApprovalOption,
   type ApprovalDecision,
+  type ApprovalKeyAction,
 } from "./approvalUtils.ts";
 import { isHumanTaskNode, buildHumanRequestUi, type HumanRequestUiState } from "./humanUtils.ts";
 import { toNodeDiffView, type NodeDiffView } from "./diffUtils.ts";
@@ -450,16 +455,18 @@ export function TreeMode({
   }, [focusedNode ? runNodeKey(focusedNode) : undefined]);
 
   const approvals = approvalsData ?? [];
-  // Match by node id AND iteration so loops/retries approve the request for the
-  // attempt currently in view, not the first row that happens to share the id.
-  // Container nodes carry no iteration; fall back to id-only for those.
-  const nodeApproval = focusedNode
-    ? approvals.find(
-        (a) =>
-          a.nodeId === focusedNode.id &&
-          (focusedNode.iteration === undefined || a.iteration === focusedNode.iteration),
-      )
-    : undefined;
+
+  // Approvals whose decision we submitted successfully but whose refetch hasn't
+  // landed yet. We suppress them from the active banner SYNCHRONOUSLY on success
+  // (see submitDecision) so a fast second [a]/[d] — after the in-flight guard
+  // releases in onSettled but before the stale pending row disappears — can't
+  // resubmit an already-decided gate. Pruned back to live rows once refetched.
+  const [resolvedKeys, setResolvedKeys] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    setResolvedKeys((prev) => pruneResolvedKeys(prev, approvals));
+  }, [approvals]);
+
+  const nodeApproval = selectNodeApproval(approvals, focusedNode, resolvedKeys);
 
   // Decode the approval's mode + options so we render mode-appropriate controls
   // and submit the right decision shape (gate vs select vs rank) — submitting a
@@ -474,9 +481,7 @@ export function TreeMode({
   // Highlighted option for a `select`. Reset to the first option whenever the
   // pending approval (node+iteration) changes so we never carry a stale pick.
   const [selectedOptionKey, setSelectedOptionKey] = useState<string | null>(null);
-  const approvalKey = nodeApproval
-    ? `${nodeApproval.nodeId}:${nodeApproval.iteration}`
-    : null;
+  const approvalKey = nodeApproval ? approvalRowKey(nodeApproval) : null;
   useEffect(() => {
     setSelectedOptionKey(
       approvalMode === "select" ? approvalOptions[0]?.key ?? null : null,
@@ -500,7 +505,7 @@ export function TreeMode({
   const submitDecision = useCallback(
     (approved: boolean) => {
       if (!nodeApproval) return;
-      const key = `${nodeApproval.nodeId}:${nodeApproval.iteration}`;
+      const key = approvalRowKey(nodeApproval);
       const decision: ApprovalDecision | null = buildApprovalDecision(
         approvalMode,
         approved,
@@ -528,11 +533,20 @@ export function TreeMode({
               decision,
             }),
           ),
-        // On success, re-pull the approvals list so the resolved gate's banner
-        // clears (the row leaves the pending set) — otherwise it stays stale and
-        // a second [a]/[d] could resubmit against an already-decided request.
+        // On success, suppress this row's banner/keys IMMEDIATELY (synchronously)
+        // by marking its key resolved, then re-pull the approvals list so the row
+        // leaves the pending set. The local suppression matters because the
+        // in-flight guard releases in onSettled before the async refetch lands —
+        // without it, a fast second [a]/[d] would resubmit an already-decided
+        // request against the still-stale pending row.
         onSuccess: () => {
-          if (mountedRef.current) void refetchApprovals().catch(() => {});
+          if (!mountedRef.current) return;
+          setResolvedKeys((prev) => {
+            const next = new Set(prev);
+            next.add(key);
+            return next;
+          });
+          void refetchApprovals().catch(() => {});
         },
         onError: (err) => {
           if (mountedRef.current) setApprovalError(err instanceof Error ? err.message : String(err));
@@ -563,6 +577,17 @@ export function TreeMode({
       });
     },
     [approvalMode, approvalOptions],
+  );
+
+  // Dispatch a routed approval-banner action. Shared by both panes so the
+  // banner's advertised a/d/[/] controls work wherever focus sits.
+  const handleApprovalAction = useCallback(
+    (action: ApprovalKeyAction) => {
+      if (action.kind === "approve") handleApprove();
+      else if (action.kind === "deny") handleDeny();
+      else cycleOption(action.dir);
+    },
+    [handleApprove, handleDeny, cycleOption],
   );
 
   // A focused HumanTask with a pending request cannot be resolved from the
@@ -597,9 +622,25 @@ export function TreeMode({
       return;
     }
 
-    // 1-5 switch NodeInspector tabs from anywhere in TREE mode
+    // 1-4 switch NodeInspector tabs from anywhere in TREE mode
     if (key in TAB_KEYS) {
       setActiveTab(TAB_KEYS[key]!);
+      return;
+    }
+
+    // Approval-banner controls (a/d approve|deny, [/] cycle a select's options)
+    // are handled BEFORE the pane-specific branches so they fire regardless of
+    // whether focus is in the tree or the inspector — the banner renders inside
+    // the inspector, so its advertised keys must keep working once that pane is
+    // focused (Tab/Enter). routeApprovalKey gates on pending/human/busy/mode.
+    const approvalAction = routeApprovalKey(key, {
+      hasApproval: nodeApproval !== undefined,
+      isHumanRequest,
+      mode: approvalMode,
+      busy: approvalBusy,
+    });
+    if (approvalAction) {
+      handleApprovalAction(approvalAction);
       return;
     }
 
@@ -638,12 +679,6 @@ export function TreeMode({
         }
       } else if (key === "return") {
         if (flat.length > 0) setFocusPane("inspector");
-      } else if ((key === "[" || key === "]") && nodeApproval && !isHumanRequest && approvalMode === "select") {
-        cycleOption(key === "]" ? 1 : -1);
-      } else if (key === "a" && nodeApproval && !isHumanRequest && !approvalBusy) {
-        handleApprove();
-      } else if (key === "d" && nodeApproval && !isHumanRequest && !approvalBusy) {
-        handleDeny();
       }
     }
   });

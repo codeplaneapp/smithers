@@ -7,6 +7,10 @@ import {
   runApprovalSubmit,
   claimInFlight,
   releaseInFlight,
+  approvalRowKey,
+  selectNodeApproval,
+  pruneResolvedKeys,
+  routeApprovalKey,
   type InFlightRef,
 } from "../src/modes/approvalUtils.ts";
 
@@ -195,6 +199,149 @@ describe("in-flight dup-submit guard (claimInFlight / releaseInFlight)", () => {
     submitOnce("node-a:0");
     submitOnce("node-a:0");
     await new Promise((r) => setTimeout(r, 0));
+    expect(rpcCount).toBe(1);
+  });
+});
+
+describe("approvalRowKey", () => {
+  it("builds the `${nodeId}:${iteration}` identity", () => {
+    expect(approvalRowKey({ nodeId: "n", iteration: 2 })).toBe("n:2");
+  });
+  it("renders a missing iteration as `undefined` (container nodes)", () => {
+    expect(approvalRowKey({ nodeId: "n" })).toBe("n:undefined");
+  });
+});
+
+describe("selectNodeApproval", () => {
+  const rows = [
+    { nodeId: "loop", iteration: 0, requestTitle: "first" },
+    { nodeId: "loop", iteration: 1, requestTitle: "second" },
+    { nodeId: "container" }, // no iteration
+  ];
+
+  it("returns undefined when no node is focused", () => {
+    expect(selectNodeApproval(rows, null)).toBeUndefined();
+  });
+
+  it("matches by node id AND iteration so each loop attempt resolves its own row", () => {
+    expect(selectNodeApproval(rows, { id: "loop", iteration: 1 })?.requestTitle).toBe("second");
+    expect(selectNodeApproval(rows, { id: "loop", iteration: 0 })?.requestTitle).toBe("first");
+  });
+
+  it("falls back to id-only for container nodes (no iteration in view)", () => {
+    expect(selectNodeApproval(rows, { id: "container" })?.nodeId).toBe("container");
+  });
+
+  it("suppresses a row whose key is in resolvedKeys", () => {
+    const resolved = new Set(["loop:1"]);
+    // The decided attempt is hidden; its sibling attempt is unaffected.
+    expect(selectNodeApproval(rows, { id: "loop", iteration: 1 }, resolved)).toBeUndefined();
+    expect(selectNodeApproval(rows, { id: "loop", iteration: 0 }, resolved)?.requestTitle).toBe("first");
+  });
+});
+
+describe("pruneResolvedKeys", () => {
+  it("returns the SAME set when empty (state updater bails out)", () => {
+    const empty = new Set<string>();
+    expect(pruneResolvedKeys(empty, [{ nodeId: "a", iteration: 0 }])).toBe(empty);
+  });
+
+  it("returns the SAME set when every resolved key is still pending", () => {
+    const resolved = new Set(["a:0"]);
+    expect(pruneResolvedKeys(resolved, [{ nodeId: "a", iteration: 0 }])).toBe(resolved);
+  });
+
+  it("drops resolved keys once their row leaves the pending set", () => {
+    const resolved = new Set(["a:0", "b:1"]);
+    const next = pruneResolvedKeys(resolved, [{ nodeId: "b", iteration: 1 }]);
+    expect(next).not.toBe(resolved);
+    expect([...next]).toEqual(["b:1"]);
+  });
+});
+
+describe("routeApprovalKey (pane-independent banner controls)", () => {
+  const ctx = { hasApproval: true, isHumanRequest: false, mode: "gate" as const, busy: false };
+
+  it("routes `a`/`d` to approve/deny — these fire in ANY pane (#1)", () => {
+    // The router takes no pane argument: the same key yields the same action
+    // whether focus is in the tree or the inspector, which is exactly why the
+    // banner's a/d keep working after Tab/Enter moves focus into the inspector.
+    expect(routeApprovalKey("a", ctx)).toEqual({ kind: "approve" });
+    expect(routeApprovalKey("d", ctx)).toEqual({ kind: "deny" });
+  });
+
+  it("routes `[`/`]` to option cycling only in select mode", () => {
+    const select = { ...ctx, mode: "select" as const };
+    expect(routeApprovalKey("]", select)).toEqual({ kind: "cycle", dir: 1 });
+    expect(routeApprovalKey("[", select)).toEqual({ kind: "cycle", dir: -1 });
+    // gate/rank have no per-option pick.
+    expect(routeApprovalKey("]", ctx)).toBeNull();
+    expect(routeApprovalKey("]", { ...ctx, mode: "rank" })).toBeNull();
+  });
+
+  it("ignores approval keys when there is no pending approval", () => {
+    expect(routeApprovalKey("a", { ...ctx, hasApproval: false })).toBeNull();
+  });
+
+  it("ignores a/d for a human request (resolved only via the CLI)", () => {
+    expect(routeApprovalKey("a", { ...ctx, isHumanRequest: true })).toBeNull();
+  });
+
+  it("ignores a/d while a submit is already in flight (busy)", () => {
+    expect(routeApprovalKey("a", { ...ctx, busy: true })).toBeNull();
+    // …but option cycling still works during a busy gate? No — cycle is select-only
+    // and busy only blocks submit; a select cycle is allowed while busy.
+    expect(routeApprovalKey("]", { ...ctx, mode: "select", busy: true })).toEqual({ kind: "cycle", dir: 1 });
+  });
+
+  it("ignores unrelated keys", () => {
+    expect(routeApprovalKey("j", ctx)).toBeNull();
+  });
+});
+
+describe("approval submit then immediate re-press issues no second RPC (#2)", () => {
+  it("synchronous resolved-key suppression hides the decided row before refetch", async () => {
+    // End-to-end of the helper logic TreeMode composes: a successful submit marks
+    // the row resolved (synchronously, in onSuccess) so the very next keypress —
+    // routed through selectNodeApproval + routeApprovalKey — sees no active
+    // approval and fires no second submitApproval, even though the in-flight
+    // guard already released in onSettled and the refetch hasn't landed.
+    const focusedNode = { id: "gate", iteration: 0 };
+    const approvals = [{ nodeId: "gate", iteration: 0, requestTitle: "ship?" }];
+    let resolvedKeys: ReadonlySet<string> = new Set();
+    const inFlight: InFlightRef = { current: null };
+    let rpcCount = 0;
+
+    const pressApprove = async () => {
+      const active = selectNodeApproval(approvals, focusedNode, resolvedKeys);
+      const action = routeApprovalKey("a", {
+        hasApproval: active !== undefined,
+        isHumanRequest: false,
+        mode: "gate",
+        busy: false,
+      });
+      if (!action || action.kind !== "approve" || !active) return;
+      const key = approvalRowKey(active);
+      if (!claimInFlight(inFlight, key)) return;
+      await runApprovalSubmit({
+        submit: async () => {
+          rpcCount += 1;
+        },
+        // Mirror TreeMode: mark resolved synchronously on success (NO refetch
+        // here — the stale row stays in `approvals` to prove suppression).
+        onSuccess: () => {
+          const next = new Set(resolvedKeys);
+          next.add(key);
+          resolvedKeys = next;
+        },
+        onError: () => {},
+        onSettled: () => releaseInFlight(inFlight, key),
+      });
+    };
+
+    await pressApprove(); // succeeds → row marked resolved
+    expect(rpcCount).toBe(1);
+    await pressApprove(); // immediate re-press: suppressed, no second RPC
     expect(rpcCount).toBe(1);
   });
 });

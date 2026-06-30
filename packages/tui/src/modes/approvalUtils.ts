@@ -106,6 +106,88 @@ export function releaseInFlight(ref: InFlightRef, key: string): void {
   if (ref.current === key) ref.current = null;
 }
 
+/** Stable `${nodeId}:${iteration}` identity for in-flight + resolved tracking. */
+export function approvalRowKey(row: { nodeId: string; iteration?: number }): string {
+  return `${row.nodeId}:${row.iteration}`;
+}
+
+/**
+ * Select the pending approval row for the focused node. Matches by node id AND
+ * iteration so loops/retries resolve the request for the attempt currently in
+ * view; container nodes carry no iteration, so they fall back to id-only.
+ * `resolvedKeys` suppresses rows whose decision we just submitted successfully
+ * but whose `refetchApprovals` hasn't landed yet — without this a fast second
+ * [a]/[d] after a successful submit (the in-flight guard already released in
+ * onSettled) would resubmit an already-decided gate.
+ */
+export function selectNodeApproval<T extends { nodeId: string; iteration?: number }>(
+  approvals: readonly T[],
+  focusedNode: { id: string; iteration?: number } | null | undefined,
+  resolvedKeys?: ReadonlySet<string>,
+): T | undefined {
+  if (!focusedNode) return undefined;
+  return approvals.find((a) => {
+    if (a.nodeId !== focusedNode.id) return false;
+    if (focusedNode.iteration !== undefined && a.iteration !== focusedNode.iteration) return false;
+    if (resolvedKeys && resolvedKeys.has(approvalRowKey(a))) return false;
+    return true;
+  });
+}
+
+/**
+ * Prune resolved-approval keys down to the ones still present in `approvals`.
+ * Once a successfully-decided row actually leaves the pending set (the refetch
+ * landed), we drop its key so the set can't grow unbounded or wrongly suppress a
+ * brand-new approval that happens to reuse the same `nodeId:iteration`. Returns
+ * the SAME set when nothing changed so a React state updater bails out without a
+ * re-render.
+ */
+export function pruneResolvedKeys(
+  resolved: ReadonlySet<string>,
+  approvals: readonly { nodeId: string; iteration?: number }[],
+): ReadonlySet<string> {
+  if (resolved.size === 0) return resolved;
+  const live = new Set(approvals.map(approvalRowKey));
+  let changed = false;
+  const next = new Set<string>();
+  for (const k of resolved) {
+    if (live.has(k)) next.add(k);
+    else changed = true;
+  }
+  return changed ? next : resolved;
+}
+
+/** An approval-banner control action routed from a raw key. */
+export type ApprovalKeyAction =
+  | { kind: "approve" }
+  | { kind: "deny" }
+  | { kind: "cycle"; dir: 1 | -1 };
+
+/**
+ * Route a raw key to an approval-banner action, INDEPENDENT of which pane (tree
+ * or inspector) is focused. The approval banner advertises `a`/`d` (approve/deny)
+ * and `[`/`]` (cycle a select's options) and renders inside the inspector, so
+ * those controls must fire wherever focus sits — the caller invokes this before
+ * any pane-specific early return. Returns null when the key isn't an approval
+ * control, or the action isn't currently allowed: no pending approval, a human
+ * request (resolved only via the CLI), a submit already in flight (`busy`), or
+ * option-cycling in a mode without a per-option pick (only `select` has one —
+ * gate has no options and rank submits the listed order).
+ */
+export function routeApprovalKey(
+  key: string,
+  ctx: { hasApproval: boolean; isHumanRequest: boolean; mode: ApprovalMode; busy: boolean },
+): ApprovalKeyAction | null {
+  if (!ctx.hasApproval || ctx.isHumanRequest) return null;
+  if ((key === "[" || key === "]") && ctx.mode === "select") {
+    return { kind: "cycle", dir: key === "]" ? 1 : -1 };
+  }
+  if (ctx.busy) return null;
+  if (key === "a") return { kind: "approve" };
+  if (key === "d") return { kind: "deny" };
+  return null;
+}
+
 /**
  * Drive one approval submission's side effects in a fixed order, pure of React:
  * await `submit()`, and ONLY on success run `onSuccess` (the approvals refetch
