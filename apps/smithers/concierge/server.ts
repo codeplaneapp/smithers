@@ -384,12 +384,12 @@ async function buildSystemPrompt(clientSystem: string | undefined): Promise<stri
   const catalog = [
     "",
     "## Smithers workflows on this gateway",
-    "Background any of these for the user by ending your reply with a smithers:action block: requestControl, then a `startWorkflow` directive with the workflow's `workflowKey` and an `inputs` object (usually `{\"prompt\":\"...\"}`).",
+    'Background any of these for the user by ending your reply with a smithers:action block containing a `startWorkflow` directive: {"tool":"startWorkflow","args":{"workflowKey":"<key>","inputs":{"prompt":"<task>"}}}. This needs NO permission — do not emit requestControl for a workflow launch.',
     list,
     hasCreate
       ? '\nTo CREATE a brand-new Smithers workflow, background `create-workflow` with the user\'s description as the prompt — e.g. {"tool":"startWorkflow","args":{"workflowKey":"create-workflow","inputs":{"prompt":"<what they want the workflow to do>"}}}. It generates a new workflow for them.'
       : "",
-    "When the user asks you to build, fix, review, research, plan, or create something, pick the best-matching workflow above and background it rather than saying you can't.",
+    "When the user asks you to build, fix, review, research, plan, or create something, immediately background the best-matching workflow above rather than saying you can't.",
   ]
     .filter(Boolean)
     .join("\n");

@@ -83,10 +83,9 @@ test("asking the concierge to create a workflow backgrounds a real create-workfl
   await input.fill("Create a Smithers workflow that runs the linter and fixes issues.");
   await input.press("Enter");
 
-  // The model streams a reply ending in a create-workflow directive; the control
-  // ring opens an approval gate. Grant it -> the client launches create-workflow.
-  await expect(page.locator(".control-allow")).toBeVisible({ timeout: 60_000 });
-  await page.locator(".control-allow").click();
-
-  await expect.poll(countCreate, { timeout: 30_000 }).toBeGreaterThan(before);
+  // Workflow launches are ungated now: the model's create-workflow directive
+  // executes immediately (no approval dialog), so a real create-workflow run
+  // appears and a run card shows in the transcript.
+  await expect(page.locator(".control-allow")).toHaveCount(0);
+  await expect.poll(countCreate, { timeout: 60_000 }).toBeGreaterThan(before);
 });

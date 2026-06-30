@@ -58,9 +58,19 @@ export const useControlStore = create<ControlState>((set, get) => ({
     if (directives.length === 0) {
       return;
     }
-    // Already in control: apply everything now, honoring a self-release.
+    // Backgrounding a workflow IS the concierge's job — it must not require the
+    // user to hand over control of the whole app. Launch directives execute
+    // immediately, ungated; only app-UI-mutating actions go through the gate.
+    const isWorkflowLaunch = (tool: string) => tool === "startWorkflow" || tool === "launchRun";
+    for (const directive of directives) {
+      if (isWorkflowLaunch(directive.tool)) {
+        dispatchDirective(directive);
+      }
+    }
+    // Already in control: apply the remaining actions now, honoring a self-release.
     if (get().controller === "agent") {
       for (const directive of directives) {
+        if (isWorkflowLaunch(directive.tool)) continue;
         if (directive.tool === "releaseControl") {
           get().releaseControl();
           break;
@@ -72,15 +82,17 @@ export const useControlStore = create<ControlState>((set, get) => ({
       }
       return;
     }
-    // User still in control: queue the real actions behind the approval gate.
+    // User still in control: queue the remaining UI actions behind the gate.
     const actions = directives.filter(
       (directive) =>
-        directive.tool !== "requestControl" && directive.tool !== "releaseControl",
+        !isWorkflowLaunch(directive.tool) &&
+        directive.tool !== "requestControl" &&
+        directive.tool !== "releaseControl",
     );
-    const reason = directives.find((directive) => directive.tool === "requestControl")?.reason;
-    if (actions.length === 0 && !reason) {
+    if (actions.length === 0) {
       return;
     }
+    const reason = directives.find((directive) => directive.tool === "requestControl")?.reason;
     set({ pendingControl: { reason: reason ?? "Make changes to the app", actions } });
   },
 }));
