@@ -1,26 +1,60 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useRunEvents } from "../data.ts";
+import type { GatewayEventFrame } from "../data.ts";
 import {
   classifyToolSideEffect,
-  extractNodeId,
   extractEventText,
   extractAttemptKeys,
   filterEventsByAttempt,
   badgeLabel,
   badgeColor,
 } from "./logUtils.ts";
+import { normalizeFrame } from "./eventFrame.ts";
 
 const COMPACT_WIDTH = 100;
 
+/**
+ * Thin wrapper: reads the gateway event stream and hands the data to the pure
+ * presentational `LogView`. Keeping the only gateway hook here means render
+ * tests can exercise the REAL view with injected events (no gateway/provider),
+ * so the tests can't pass against a divergent clone of this UI.
+ */
 export function LogMode({ runId }: { runId: string }) {
   const { events, streaming } = useRunEvents(runId, { maxEvents: 2000 });
+  return <LogView events={events} streaming={streaming} />;
+}
+
+/**
+ * Presentational LOGS view. Takes its events as a prop (no gateway hooks) and
+ * owns only local UI state: the follow toggle and the per-attempt filter. This
+ * is the exact component the render tests mount with canned data.
+ */
+export function LogView({
+  events,
+  streaming = false,
+}: {
+  events: GatewayEventFrame[];
+  streaming?: boolean;
+}) {
   const { width } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
   const [follow, setFollow] = useState(true);
   const [attemptIdx, setAttemptIdx] = useState(-1); // -1 = all attempts
 
   const attempts = useMemo(() => extractAttemptKeys(events), [events]);
+
+  // Keep the selection in range as attempts appear/disappear: snap back to -1
+  // ("all") when there are no attempts, and clamp to the last attempt when the
+  // list shrinks. Without this, a `]` press while empty would pin attemptIdx to
+  // 0 and silently filter every later event to the first attempt.
+  useEffect(() => {
+    setAttemptIdx((prev) => {
+      if (attempts.length === 0) return -1;
+      if (prev > attempts.length - 1) return attempts.length - 1;
+      return prev;
+    });
+  }, [attempts.length]);
 
   const filteredEvents = useMemo(() => {
     if (attemptIdx < 0 || attempts.length === 0) return events;
@@ -35,7 +69,10 @@ export function LogMode({ runId }: { runId: string }) {
     } else if (e.name === "[") {
       setAttemptIdx((prev) => Math.max(-1, prev - 1));
     } else if (e.name === "]") {
-      setAttemptIdx((prev) => Math.min(Math.max(0, attempts.length - 1), prev + 1));
+      // No attempts → stay at -1 ("all"); never jump to a phantom attempt 0.
+      setAttemptIdx((prev) =>
+        attempts.length === 0 ? -1 : Math.min(attempts.length - 1, prev + 1),
+      );
     }
   });
 
@@ -76,9 +113,9 @@ export function LogMode({ runId }: { runId: string }) {
           <text fg="#444444">{"  (no events)"}</text>
         ) : (
           filteredEvents.map((ev) => {
-            const nodeId = extractNodeId(ev.payload);
-            const effect = classifyToolSideEffect(ev.event, ev.payload);
-            const text = extractEventText(ev.event, ev.payload);
+            const { event, payload, nodeId } = normalizeFrame(ev);
+            const effect = classifyToolSideEffect(event, payload);
+            const text = extractEventText(event, payload);
             const tag = nodeId ? nodeId.slice(0, tagMaxLen) : "·";
             const seqStr = String(ev.seq).padStart(4, " ");
             const badge = badgeLabel(effect);

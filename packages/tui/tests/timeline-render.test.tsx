@@ -1,24 +1,20 @@
 /** @jsxImportSource @opentui/react */
 import { describe, it, expect } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
-import { act, useState, useMemo } from "react";
-import { useKeyboard } from "@opentui/react";
+import { renderForTest } from "./renderHelpers.tsx";
+import { act } from "react";
 import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
-import {
-  classifyFrame,
-  frameTickChar,
-  frameTickColor,
-  extractNodeSnapshots,
-  nodeStatusGlyph,
-  nodeStatusColor,
-} from "../src/modes/timelineUtils.ts";
+import { TimelineView } from "../src/modes/TimelineMode.tsx";
 
 /**
  * CI-safe terminal rendering tests for TIMELINE mode.
  * No gateway, no agent CLI, no browser.
  * Uses @opentui/react testRender (headless OpenTUI renderer).
  *
- * TestTimelineView replicates TimelineMode rendering with injected event data.
+ * These render the REAL presentational `TimelineView` (the same component
+ * production mounts via `TimelineMode`) with injected event data and a stub
+ * rewind callback — `TimelineMode` is a thin wrapper that only reads
+ * `useRunEvents`/`useActions` and forwards them. So the view can't drift from
+ * what these tests exercise.
  */
 
 function frame(seq: number, event: string, payload?: unknown): GatewayEventFrame {
@@ -36,117 +32,10 @@ const CANNED_EVENTS: GatewayEventFrame[] = [
   frame(8, "node.fail", { nodeId: "node-beta", status: "failed" }),
 ];
 
-// Standalone TestTimelineView – same visual logic as TimelineMode but takes events + onJump as props.
-function TestTimelineView({
-  events,
-  onJump,
-}: {
-  events: GatewayEventFrame[];
-  onJump?: (frameNo: number) => void;
-}) {
-  // -1 = live (show last frame)
-  const [selectedIdx, setSelectedIdx] = useState(-1);
-
-  const safeIdx =
-    events.length === 0
-      ? 0
-      : selectedIdx < 0
-        ? events.length - 1
-        : Math.min(selectedIdx, events.length - 1);
-
-  const isLive = selectedIdx < 0;
-  const selectedEvent = events[safeIdx];
-
-  const snapshots = useMemo(
-    () => (selectedEvent ? extractNodeSnapshots(events, selectedEvent.seq) : []),
-    [events, selectedEvent?.seq],
-  );
-
-  useKeyboard((e) => {
-    const key = e.name;
-    if (key === "j" || key === "right") {
-      setSelectedIdx((prev) => {
-        if (events.length === 0) return -1;
-        const cur = prev < 0 ? events.length - 1 : prev;
-        const next = cur + 1;
-        return next >= events.length ? events.length - 1 : next;
-      });
-    } else if (key === "k" || key === "left") {
-      setSelectedIdx((prev) => {
-        if (events.length === 0) return -1;
-        const cur = prev < 0 ? events.length - 1 : prev;
-        return Math.max(0, cur - 1);
-      });
-    } else if (key === "return") {
-      if (selectedEvent && onJump) onJump(selectedEvent.seq);
-    } else if (key === "L") {
-      setSelectedIdx(-1);
-    }
-  });
-
-  const liveLabel = isLive ? "[live]" : `[f${safeIdx + 1}]`;
-
-  return (
-    <box width="100%" height="100%" flexDirection="column">
-      {/* Status bar */}
-      <box width="100%" height={1} flexDirection="row">
-        <text fg="#555555">{"  TIMELINE "}</text>
-        <text fg={isLive ? "#00d787" : "#ffaf00"}>{liveLabel}</text>
-        <text fg="#555555">{`  ${events.length} frames`}</text>
-      </box>
-
-      {/* Tick strip */}
-      <box width="100%" height={1} flexDirection="row">
-        <text fg="#333333">{"  "}</text>
-        {events.map((ev, i) => {
-          const isSel = i === safeIdx;
-          const marker = classifyFrame(ev);
-          return (
-            <text key={ev.seq} fg={frameTickColor(marker, isSel)}>
-              {frameTickChar(marker, isSel)}
-            </text>
-          );
-        })}
-      </box>
-
-      {/* Position info */}
-      {selectedEvent ? (
-        <box width="100%" height={1} flexDirection="row">
-          <text fg="#444444">{`  frame ${safeIdx + 1}/${events.length}  seq:${selectedEvent.seq}  ${selectedEvent.event}`}</text>
-        </box>
-      ) : (
-        <box width="100%" height={1}>
-          <text fg="#444444">{"  (no events yet)"}</text>
-        </box>
-      )}
-
-      {/* Divider */}
-      <box width="100%" height={1}>
-        <text fg="#333333">{"─────────────────────────────────"}</text>
-      </box>
-
-      {/* Node snapshots */}
-      <scrollbox width="100%" flexGrow={1} scrollY>
-        {snapshots.length === 0 ? (
-          <text fg="#444444">{"  (no node activity at this frame)"}</text>
-        ) : (
-          snapshots.map((node) => (
-            <box key={node.id} width="100%" height={1} flexDirection="row">
-              <text fg={nodeStatusColor(node.status)}>{`  ${nodeStatusGlyph(node.status)} `}</text>
-              <text fg="#cccccc">{node.name ?? node.id}</text>
-              <text fg="#555555">{`  [${node.status}]`}</text>
-            </box>
-          ))
-        )}
-      </scrollbox>
-    </box>
-  );
-}
-
 describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
   it("renders TIMELINE header and frame count", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestTimelineView events={CANNED_EVENTS} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <TimelineView events={CANNED_EVENTS} />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
@@ -159,8 +48,8 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
   });
 
   it("starts in live mode showing [live]", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestTimelineView events={CANNED_EVENTS} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <TimelineView events={CANNED_EVENTS} />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
@@ -169,8 +58,8 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
   });
 
   it("renders tick strip with gate marker ⊛ for approval events", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestTimelineView events={CANNED_EVENTS} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <TimelineView events={CANNED_EVENTS} />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
@@ -181,8 +70,8 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
   });
 
   it("renders tick strip with notable marker │ for tool events", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestTimelineView events={CANNED_EVENTS} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <TimelineView events={CANNED_EVENTS} />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
@@ -193,8 +82,8 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
   });
 
   it("shows node snapshots at last frame in live mode", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestTimelineView events={CANNED_EVENTS} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <TimelineView events={CANNED_EVENTS} />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
@@ -206,8 +95,8 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
   });
 
   it("shows (no events yet) when event list is empty", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestTimelineView events={[]} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <TimelineView events={[]} />,
       { width: 120, height: 20 },
     );
     await waitForVisualIdle();
@@ -217,7 +106,7 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
 
   it("navigates frames backward with k key", async () => {
     const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await testRender(<TestTimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
+      await renderForTest(<TimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
     await waitForVisualIdle();
 
     // Initially in live mode (last frame = 8)
@@ -238,13 +127,13 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
   it("frame indicator changes when navigating, live mode is default", async () => {
     // Verifies: starts live, navigates to a numbered frame, can navigate back to last frame
     const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await testRender(<TestTimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
+      await renderForTest(<TimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
     await waitForVisualIdle();
 
     // Initial state is live
     expect(captureCharFrame()).toContain("[live]");
 
-    // Navigate backward twice
+    // Navigate backward (leaves live)
     act(() => { mockInput.pressKey("k"); });
     await flush();
     await waitForVisualIdle();
@@ -262,7 +151,7 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
 
   it("navigates forward with j key", async () => {
     const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await testRender(<TestTimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
+      await renderForTest(<TimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
     await waitForVisualIdle();
 
     // Go back 1 frame from live (last=8 → becomes frame 7 = index 6 → [f7])
@@ -281,9 +170,9 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
   });
 
   it("shows frame position info including seq", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
       // Single-event list so live mode == frame 1
-      <TestTimelineView events={[frame(42, "run.start")]} />,
+      <TimelineView events={[frame(42, "run.start")]} />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
@@ -301,8 +190,8 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
       frame(1, "node.start", { nodeId: "n-1", name: "task", status: "running" }),
       frame(2, "node.end", { nodeId: "n-1", name: "task", status: "done" }),
     ];
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestTimelineView events={events} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <TimelineView events={events} />,
       { width: 120, height: 20 },
     );
     await waitForVisualIdle();
@@ -315,8 +204,8 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
       frame(1, "node.start", { nodeId: "n-1", name: "task", status: "running" }),
       frame(2, "node.fail", { nodeId: "n-1", name: "task", status: "failed" }),
     ];
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestTimelineView events={events} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <TimelineView events={events} />,
       { width: 120, height: 20 },
     );
     await waitForVisualIdle();
@@ -324,30 +213,23 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
     renderer.destroy();
   });
 
-  it("calls onJump with correct seq when Enter pressed", async () => {
-    let jumpedTo: number | undefined;
-    const { waitForVisualIdle, renderer, flush } = await testRender(
-      <TestTimelineView
-        events={CANNED_EVENTS}
-        onJump={(seq) => { jumpedTo = seq; }}
-      />,
+  it("is honest that it is inspect-only and offers NO rewind affordance", async () => {
+    // The live run-event stream the monitor subscribes to does not carry
+    // `_smithers_frames.frame_no`, so the timeline cannot rewind. It must not
+    // advertise a rewind key (W) that would no-op or guess a frame; instead it
+    // points at the real `smithers rewind` CLI.
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <TimelineView events={CANNED_EVENTS} />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
-
-    // Use pressEnter() (the correct API for the Return key, not pressKey("return"))
-    const { createMockKeys } = await import("@opentui/core/testing");
-    // We can't easily access renderer internals here, so test the helper directly
-    // instead of going through the UI event chain.
-    // The key handler logic is covered by the unit tests in timeline-mode.test.ts.
-    // Verify the component renders with an onJump prop without error:
-    const lastSeq = CANNED_EVENTS[CANNED_EVENTS.length - 1]!.seq;
-    expect(lastSeq).toBe(8); // CANNED_EVENTS ends at seq 8
-
+    const f = captureCharFrame();
+    expect(f).toContain("inspect-only");
+    expect(f).toContain("smithers rewind");
+    // No "[W] rewind" affordance and no "W→frame"/"W: no frame" labels.
+    expect(f).not.toContain("rewind to frame");
+    expect(f).not.toContain("W→frame");
     renderer.destroy();
-    void createMockKeys; // suppress unused import warning
-    void flush;
-    void jumpedTo;
   });
 
   it("reconstructs partial node state when scrubbing to early frame", async () => {
@@ -357,7 +239,7 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
       frame(2, "node.start", { nodeId: "n-beta", name: "process", status: "running" }),
     ];
     const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await testRender(<TestTimelineView events={twoNodeEvents} />, { width: 120, height: 30 });
+      await renderForTest(<TimelineView events={twoNodeEvents} />, { width: 120, height: 30 });
     await waitForVisualIdle();
 
     // Live mode shows last frame (seq 2) — both nodes visible

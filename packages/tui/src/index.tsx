@@ -8,37 +8,116 @@ import {
   createGatewayCollections,
 } from "@smithers-orchestrator/gateway-react";
 import { spawn } from "node:child_process";
+import { resolveCliEntry } from "./cliEntry.ts";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
-import { Theme } from "./Theme.tsx";
 import { Keybindings } from "./Keybindings.tsx";
 import { RendererProvider } from "./RendererContext.tsx";
 import { App } from "./App.tsx";
 
-const GATEWAY_PORT = 7331;
-const GATEWAY_BASE = `http://127.0.0.1:${GATEWAY_PORT}`;
+const DEFAULT_GATEWAY_PORT = 7331;
+const USAGE = "Usage: smithers-mon <runId> [--gateway <url>] [--port <n>]\n";
 
+// The TUI drives the terminal in raw mode and reads keystrokes via useKeyboard,
+// so it needs BOTH an interactive stdout (to render frames) and an interactive
+// stdin (to receive keys). Without a TTY stdin the monitor would render but
+// never respond to q/Ctrl-C/navigation, leaving the user wedged — refuse up
+// front instead.
 if (!process.stdout.isTTY) {
   process.stderr.write("smithers-mon: stdout is not a TTY\n");
   process.exit(1);
 }
-
-const args = process.argv.slice(2);
-const runId = args[0];
-if (!runId) {
-  process.stderr.write("Usage: smithers-mon <runId>\n");
+if (!process.stdin.isTTY) {
+  process.stderr.write("smithers-mon: stdin is not a TTY (interactive input required)\n");
   process.exit(1);
 }
+
+// CLI: smithers-mon <runId> [--gateway <url>] [--port <n>]
+const args = process.argv.slice(2);
+let gatewayUrlArg: string | undefined;
+let portArg: number | undefined;
+const positionals: string[] = [];
+for (let i = 0; i < args.length; i++) {
+  const a = args[i]!;
+  if (a === "--gateway") {
+    gatewayUrlArg = args[++i];
+    if (gatewayUrlArg === undefined) {
+      process.stderr.write("smithers-mon: --gateway requires a value\n" + USAGE);
+      process.exit(1);
+    }
+  } else if (a.startsWith("--gateway=")) {
+    gatewayUrlArg = a.slice("--gateway=".length);
+  } else if (a === "--port") {
+    const raw = args[++i];
+    if (raw === undefined) {
+      process.stderr.write("smithers-mon: --port requires a value\n" + USAGE);
+      process.exit(1);
+    }
+    portArg = Number(raw);
+  } else if (a.startsWith("--port=")) {
+    portArg = Number(a.slice("--port=".length));
+  } else {
+    positionals.push(a);
+  }
+}
+
+// A NaN/out-of-range port would silently fall back or build a bad URL; reject it
+// before any probe/spawn so the user gets a clear usage error, not a mystery
+// "gateway unreachable".
+if (portArg !== undefined && (!Number.isInteger(portArg) || portArg < 1 || portArg > 65535)) {
+  process.stderr.write(`smithers-mon: invalid --port (expected 1-65535)\n${USAGE}`);
+  process.exit(1);
+}
+
+const runId = positionals[0];
+if (!runId) {
+  process.stderr.write(USAGE);
+  process.exit(1);
+}
+
+/**
+ * Resolve the gateway base URL + port from (in priority order) the --gateway/--port
+ * args, the SMITHERS_GATEWAY_URL / SMITHERS_GATEWAY_PORT env vars, then the local
+ * default. apps/cli forwards SMITHERS_GATEWAY_URL when it knows the real address.
+ *
+ * `autoStartAllowed` is true ONLY for the implicit/default local path: the user
+ * did not pin a gateway via --gateway or SMITHERS_GATEWAY_URL. When the user
+ * points us at an explicit gateway that is unreachable, autostarting a detached
+ * LOCAL gateway would spawn a process the monitor never connects to — so we must
+ * not. In that case we surface a clear "unreachable" error instead.
+ */
+function resolveGatewayConfig(): { base: string; port: number; autoStartAllowed: boolean } {
+  const fromArgOrEnv = gatewayUrlArg ?? process.env.SMITHERS_GATEWAY_URL;
+  if (fromArgOrEnv) {
+    const base = fromArgOrEnv.replace(/\/+$/, "");
+    let port = portArg;
+    if (port === undefined) {
+      try {
+        port = Number(new URL(base).port) || DEFAULT_GATEWAY_PORT;
+      } catch {
+        port = DEFAULT_GATEWAY_PORT;
+      }
+    }
+    return { base, port, autoStartAllowed: false };
+  }
+  const port = portArg ?? (Number(process.env.SMITHERS_GATEWAY_PORT) || DEFAULT_GATEWAY_PORT);
+  return { base: `http://127.0.0.1:${port}`, port, autoStartAllowed: true };
+}
+
+const { base: GATEWAY_BASE, port: GATEWAY_PORT, autoStartAllowed: AUTOSTART_ALLOWED } = resolveGatewayConfig();
 
 async function probeGateway(): Promise<boolean> {
   return fetch(`${GATEWAY_BASE}/health`).then((r) => r.ok, () => false);
 }
 
+// Resolve the REAL CLI entry to autostart the gateway through. Never fall back
+// to process.argv[1] — that is this TUI entry, so spawning it would recursively
+// launch another monitor instead of a gateway.
+const cliEntry = resolveCliEntry();
+
 async function autoStartGateway(): Promise<boolean> {
+  if (!cliEntry) return false;
   try {
-    // When launched from the CLI via SMITHERS_CLI env var, use that path so the
-    // gateway command is routed through the real CLI entry point, not the TUI.
-    const cliPath = process.env.SMITHERS_CLI ?? process.argv[1]!;
-    const child = spawn(process.argv[0]!, [cliPath, "gateway", "--host", "127.0.0.1", "--port", String(GATEWAY_PORT)], {
+    const child = spawn(process.argv[0]!, [cliEntry, "gateway", "--host", "127.0.0.1", "--port", String(GATEWAY_PORT)], {
       stdio: "ignore",
       detached: true,
     });
@@ -56,8 +135,23 @@ async function autoStartGateway(): Promise<boolean> {
 
 let reachable = await probeGateway();
 if (!reachable) {
-  process.stderr.write(`[smithers-mon] No Gateway at ${GATEWAY_BASE}; starting one…\n`);
-  reachable = await autoStartGateway();
+  if (!AUTOSTART_ALLOWED) {
+    // The user pinned an explicit gateway (--gateway / SMITHERS_GATEWAY_URL).
+    // Never autostart a detached LOCAL gateway they didn't ask for and that the
+    // monitor wouldn't even connect to — just report the pinned one is down.
+    process.stderr.write(
+      `[smithers-mon] Gateway at ${GATEWAY_BASE} is unreachable.\n` +
+        `  Start it (or fix the address), then retry.\n`,
+    );
+  } else if (cliEntry) {
+    process.stderr.write(`[smithers-mon] No Gateway at ${GATEWAY_BASE}; starting one…\n`);
+    reachable = await autoStartGateway();
+  } else {
+    process.stderr.write(
+      `[smithers-mon] No Gateway at ${GATEWAY_BASE} and no smithers CLI entry to autostart one.\n` +
+        `  Start it with \`smithers gateway\` (or pass --gateway <url>), then retry.\n`,
+    );
+  }
 }
 if (!reachable) {
   process.stderr.write(`[smithers-mon] Could not reach or start Gateway at ${GATEWAY_BASE}\n`);
@@ -65,6 +159,30 @@ if (!reachable) {
 }
 
 const renderer = await createCliRenderer({ exitOnCtrlC: false });
+
+const root = createRoot(renderer);
+
+/**
+ * Centralized teardown for every post-render quit path. OpenTUI puts the
+ * terminal into raw mode and registers native/stdin listeners; a bare
+ * `process.exit()` from inside React would skip that cleanup and leave the
+ * terminal wedged. So unmount the React tree (runs effect cleanups), destroy the
+ * renderer (restores cooked mode + native state), THEN exit. The quit key and
+ * Ctrl-C both route through here via `App`'s `onExit` prop.
+ */
+function onExit(code: number): never {
+  try {
+    root.unmount();
+  } catch {
+    /* tree already gone */
+  }
+  try {
+    renderer.destroy();
+  } catch {
+    /* renderer already torn down */
+  }
+  process.exit(code);
+}
 
 const client = new SmithersGatewayClient({
   baseUrl: GATEWAY_BASE,
@@ -75,18 +193,16 @@ const collections = createGatewayCollections({
   client: createSmithersGatewayTransport(client),
 });
 
-createRoot(renderer).render(
-  <ErrorBoundary>
-    <Theme>
-      <RendererProvider value={renderer}>
-        <Keybindings>
-          <SmithersGatewayProvider client={client}>
-            <SyncProvider client={collections}>
-              <App runId={runId} />
-            </SyncProvider>
-          </SmithersGatewayProvider>
-        </Keybindings>
-      </RendererProvider>
-    </Theme>
+root.render(
+  <ErrorBoundary onExit={onExit}>
+    <RendererProvider value={renderer}>
+      <Keybindings>
+        <SmithersGatewayProvider client={client}>
+          <SyncProvider client={collections}>
+            <App runId={runId} onExit={onExit} />
+          </SyncProvider>
+        </SmithersGatewayProvider>
+      </Keybindings>
+    </RendererProvider>
   </ErrorBoundary>,
 );

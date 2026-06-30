@@ -5,6 +5,7 @@ import {
   useGatewayRunTree,
   useGatewayNodeOutput,
   useGatewayActions,
+  useGatewayRpc,
 } from "@smithers-orchestrator/gateway-react";
 import type { GatewayAsyncState } from "@smithers-orchestrator/gateway-react";
 import type { UseGatewayRunTreeResult } from "@smithers-orchestrator/gateway-react";
@@ -43,6 +44,26 @@ export function useNodeOutput(params: {
 
 export function useActions() {
   return useGatewayActions();
+}
+
+/**
+ * Fetch the node-level diff bundle for one node iteration via the gateway's
+ * `getNodeDiff` RPC. Disabled (no request issued) until both runId and nodeId
+ * are known so switching focus to a node with no identity doesn't fire a bad
+ * request. Returns the standard async state; the payload is a `DiffBundle` or a
+ * stat-only summary (see `toNodeDiffView`).
+ */
+export function useNodeDiff(params: {
+  runId: string | undefined;
+  nodeId: string | undefined;
+  iteration?: number;
+}): GatewayAsyncState<GatewayRpcPayload<"getNodeDiff">> {
+  const enabled = Boolean(params.runId && params.nodeId);
+  return useGatewayRpc(
+    "getNodeDiff",
+    { runId: params.runId ?? "", nodeId: params.nodeId ?? "", iteration: params.iteration },
+    { enabled },
+  );
 }
 
 export type { GatewayAsyncState, GatewayRpcPayload, GatewayRunNode, GatewayApprovalRow, GatewayEventFrame, UseGatewayRunTreeResult };

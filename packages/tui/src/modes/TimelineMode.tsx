@@ -1,6 +1,6 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useRunEvents, useActions } from "../data.ts";
+import { useRunEvents } from "../data.ts";
 import type { GatewayEventFrame } from "../data.ts";
 import {
   classifyFrame,
@@ -42,8 +42,8 @@ function TickStrip({
   const selEvent = events[selectedIdx];
 
   const controls = compact
-    ? "[j/k]move [⏎]jump [F]fork [W]rwd [L]live"
-    : "[j/k] move  [⏎] jump  [F] fork  [W] rewind  [L] back to live";
+    ? "[j/k]scrub [L]live"
+    : "[j/k] scrub events  [L] back to live";
 
   return (
     <box width="100%" height={3} flexDirection="column">
@@ -112,16 +112,43 @@ function SnapshotPanel({
 
 // ─── Main TimelineMode ────────────────────────────────────────────────────────
 
+/**
+ * Thin wrapper: reads the gateway event stream and hands it to the pure
+ * presentational `TimelineView`. Keeping the gateway hook here lets render tests
+ * mount the REAL view with injected events (no gateway/provider), so the tests
+ * can't drift from production.
+ */
 export function TimelineMode({ runId }: { runId: string }) {
   const { events, streaming } = useRunEvents(runId, { maxEvents: 2000 });
-  const actions = useActions();
+  return <TimelineView events={events} streaming={streaming} />;
+}
+
+/**
+ * Presentational TIMELINE view. Takes its events as a prop (no gateway hooks)
+ * and owns only the local scrub position. This is the exact component the render
+ * tests mount with canned data.
+ *
+ * Scope note: this is an EVENT timeline you can scrub to inspect node state at
+ * any point in run history — it deliberately offers NO rewind. Frame rewind
+ * needs a real `_smithers_frames.frame_no`, and the live run-event stream the
+ * monitor subscribes to (`useGatewayRunEvents`) does not carry frame numbers
+ * (only `_smithers_frames` / the DevTools snapshot stream do). Advertising a "W
+ * rewind" here would either no-op or, worse, rewind to a guessed frame — so we
+ * surface the honest inspect-only affordance and point at the `smithers rewind`
+ * CLI for the destructive frame operation instead.
+ */
+export function TimelineView({
+  events,
+  streaming = false,
+}: {
+  events: GatewayEventFrame[];
+  streaming?: boolean;
+}) {
   const { width } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
 
   // selectedIdx = -1 means "live" (show latest frame)
   const [selectedIdx, setSelectedIdx] = useState(-1);
-  const [busy, setBusy] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
 
   const safeIdx =
     events.length === 0
@@ -132,22 +159,6 @@ export function TimelineMode({ runId }: { runId: string }) {
 
   const isLive = selectedIdx < 0;
   const selectedEvent = events[safeIdx];
-
-  const doRewind = useCallback(
-    async (frameNo: number) => {
-      if (busy) return;
-      setBusy(true);
-      setActionError(null);
-      try {
-        await actions.rewindRun({ runId, frameNo, confirm: true });
-      } catch (err) {
-        setActionError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [busy, actions, runId],
-  );
 
   useKeyboard((e) => {
     const key = e.name;
@@ -164,15 +175,8 @@ export function TimelineMode({ runId }: { runId: string }) {
         const cur = prev < 0 ? events.length - 1 : prev;
         return Math.max(0, cur - 1);
       });
-    } else if (key === "return") {
-      if (selectedEvent) void doRewind(selectedEvent.seq);
-    } else if (key === "F") {
-      if (selectedEvent) void doRewind(selectedEvent.seq);
-    } else if (key === "W") {
-      if (selectedEvent) void doRewind(selectedEvent.seq);
     } else if (key === "L") {
       setSelectedIdx(-1);
-      setActionError(null);
     }
   });
 
@@ -187,10 +191,7 @@ export function TimelineMode({ runId }: { runId: string }) {
         <text fg={liveColor}>{liveLabel}</text>
         <text fg="#555555">{`  ${events.length} frames`}</text>
         {streaming ? <text fg="#555555">{"  ●"}</text> : null}
-        {busy ? <text fg="#ffaf00">{"  (working…)"}</text> : null}
-        {actionError ? (
-          <text fg="#ff5f5f">{`  ! ${actionError.slice(0, 40)}`}</text>
-        ) : null}
+        <text fg="#444444">{"  inspect-only · rewind via `smithers rewind`"}</text>
       </box>
 
       {/* Tick strip */}

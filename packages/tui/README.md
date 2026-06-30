@@ -27,11 +27,11 @@ bun packages/tui/src/index.tsx <runId>
 ```
 
 The monitor auto-starts a local `smithers gateway` instance if one is not
-already reachable on port 7331, then exits after it starts successfully.
+already reachable on port 7331, then connects and renders the live monitor for
+the run. (If you pin an explicit gateway with `--gateway` / `SMITHERS_GATEWAY_URL`
+and it's unreachable, it errors out instead of starting a local one.)
 
 ## Modes
-
-Press the number key (or the letter alias) to switch views.
 
 | Key | Mode     | What you see |
 |-----|----------|--------------|
@@ -40,7 +40,16 @@ Press the number key (or the letter alias) to switch views.
 | `3` / `l` | **Logs**  | Filtered event stream (up to 2 000 events); per-attempt filter with `[` / `]`; `f` toggles follow mode |
 | `4` / `t` | **Timeline** | Horizontal event tick strip with snapshot table; arrow keys scrub through frames |
 | `5` / `h` | **Hijack** | Hand off to `smithers hijack` for an active node — suspends the TUI, drops into the hijack shell, returns when done |
-| `q` | — | Quit the monitor |
+| `q` / `Ctrl-C` | — | Quit the monitor |
+
+### Switching modes
+
+The number keys `1`-`5` switch modes globally **except in Tree mode**, where
+`1`-`5` are taken over by the node inspector's tabs (output / logs / tools /
+diff / props). The letter aliases `g` (Graph), `l` (Logs), `t` (Timeline), and
+`h` (Hijack) are *always* available — including inside Tree — so use them to
+leave Tree. Press `1` from any other mode to return to Tree (`g` toggles
+between Graph and Tree). `?` opens a mode-aware help overlay.
 
 ## Architecture
 
@@ -50,8 +59,8 @@ packages/tui/src/
   App.tsx            Root component — global keybindings, header, mode router, keybar
   Keybindings.tsx    Keymap context shared by all modes
   RendererContext.tsx OpenTUI renderer context (passed into Hijack for PTY hand-off)
-  Theme.tsx          Colour palette
   ErrorBoundary.tsx  Catches render errors and prints them in-terminal
+  cliEntry.ts        Resolves the real smithers CLI entry (gateway autostart / hijack)
   data.ts            Gateway-react hooks (useRun, useRunTree, useRunEvents, …)
   modes/
     TreeMode.tsx      Node tree + tab panels (output/logs/tools/diff/props)
@@ -59,6 +68,7 @@ packages/tui/src/
     LogMode.tsx       Event stream with attempt filter
     TimelineMode.tsx  Tick strip + snapshot table
     HijackMode.tsx    Node-picker and PTY hand-off
+    eventFrame.ts     Gateway event-frame unwrap/normalize helpers
     treeUtils.ts      Tree flattening, glyph helpers
     graphUtils.ts     Column layout algorithm
     logUtils.ts       Event classification and filter helpers

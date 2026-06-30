@@ -1,30 +1,34 @@
 /** @jsxImportSource @opentui/react */
 import { describe, it, expect } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
-import { act, useState } from "react";
-import { useKeyboard } from "@opentui/react";
+import { renderForTest } from "./renderHelpers.tsx";
+import { act } from "react";
 import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
-import {
-  extractNodeId,
-  extractEventText,
-  classifyToolSideEffect,
-  badgeLabel,
-  badgeColor,
-  extractAttemptKeys,
-  filterEventsByAttempt,
-} from "../src/modes/logUtils.ts";
+import { LogView } from "../src/modes/LogMode.tsx";
 
 /**
- * CI-safe rendering tests for LOGS mode logic.
+ * CI-safe rendering tests for LOGS mode.
  * No gateway, no agent CLI, no browser.
  * Uses @opentui/react testRender (headless OpenTUI renderer).
  *
- * Tests a standalone TestLogView that replicates LogMode rendering
- * with injected event data (no useRunEvents / provider required).
+ * These render the REAL presentational `LogView` (the same component production
+ * mounts via `LogMode`) with injected event data — `LogMode` is a thin wrapper
+ * that only reads `useRunEvents` and forwards it to `LogView`. So the view can't
+ * drift from what these tests exercise.
  */
 
 function frame(seq: number, event: string, payload?: unknown): GatewayEventFrame {
   return { type: "event", seq, event, payload, stateVersion: seq };
+}
+
+/** The REAL wrapped gateway shape: outer run.event, engine event under payload.event. */
+function wrapped(seq: number, engineEvent: string, enginePayload?: unknown): GatewayEventFrame {
+  return {
+    type: "event",
+    seq,
+    event: "run.event",
+    payload: { streamId: "s", seq, event: engineEvent, payload: enginePayload },
+    stateVersion: seq,
+  };
 }
 
 const CANNED_EVENTS: GatewayEventFrame[] = [
@@ -35,74 +39,10 @@ const CANNED_EVENTS: GatewayEventFrame[] = [
   frame(5, "run.event", { nodeId: "node-beta", text: "Second node", iteration: 0 }),
 ];
 
-// Minimal log view – same visual logic as LogMode but takes events as a prop.
-function TestLogView({
-  events,
-  follow: initialFollow = true,
-}: {
-  events: GatewayEventFrame[];
-  follow?: boolean;
-}) {
-  const [follow, setFollow] = useState(initialFollow);
-  const [attemptIdx, setAttemptIdx] = useState(-1);
-
-  const attempts = extractAttemptKeys(events);
-  const filteredEvents =
-    attemptIdx >= 0 && attempts.length > 0 && attempts[attemptIdx]
-      ? filterEventsByAttempt(events, attempts[attemptIdx]!)
-      : events;
-
-  useKeyboard((e) => {
-    if (e.name === "f") setFollow((prev) => !prev);
-    else if (e.name === "[") setAttemptIdx((prev) => Math.max(-1, prev - 1));
-    else if (e.name === "]")
-      setAttemptIdx((prev) => Math.min(Math.max(0, attempts.length - 1), prev + 1));
-  });
-
-  return (
-    <box width="100%" height="100%" flexDirection="column">
-      <box width="100%" height={1} flexDirection="row">
-        <text fg="#555555">{"  LOGS "}</text>
-        <text fg={follow ? "#00d787" : "#ffaf00"}>{follow ? "[live]" : "[paused]"}</text>
-        <text fg="#555555">{`  ${filteredEvents.length}/${events.length} events`}</text>
-        <text fg="#555555">{"  [f] follow  [[] prev  []] next"}</text>
-        {attemptIdx >= 0 && attempts[attemptIdx] ? (
-          <text fg="#888888">{`  attempt:${attempts[attemptIdx]}`}</text>
-        ) : null}
-      </box>
-      <scrollbox width="100%" flexGrow={1} scrollY stickyScroll={follow} stickyStart="bottom">
-        {filteredEvents.length === 0 ? (
-          <text fg="#444444">{"  (no events)"}</text>
-        ) : (
-          filteredEvents.map((ev) => {
-            const nodeId = extractNodeId(ev.payload);
-            const effect = classifyToolSideEffect(ev.event, ev.payload);
-            const text = extractEventText(ev.event, ev.payload);
-            const tag = nodeId ? nodeId.slice(0, 12) : "·";
-            const seqStr = String(ev.seq).padStart(4, " ");
-            const badge = badgeLabel(effect);
-            const bColor = badgeColor(effect);
-
-            return (
-              <box key={ev.seq} width="100%" height={1} flexDirection="row">
-                <text fg="#444444">{`${seqStr} `}</text>
-                <text fg="#555555">{`[${tag}]`}</text>
-                <text fg="#444444">{" │ "}</text>
-                {badge ? <text fg={bColor}>{`${badge} `}</text> : null}
-                <text fg="#cccccc" wrapMode="char">{text}</text>
-              </box>
-            );
-          })
-        )}
-      </scrollbox>
-    </box>
-  );
-}
-
 describe("LogMode – terminal rendering (CI-safe, no gateway)", () => {
   it("renders event seq numbers and node IDs", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestLogView events={CANNED_EVENTS} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <LogView events={CANNED_EVENTS} />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
@@ -120,8 +60,8 @@ describe("LogMode – terminal rendering (CI-safe, no gateway)", () => {
   });
 
   it("renders tool-call badges", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestLogView events={CANNED_EVENTS} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <LogView events={CANNED_EVENTS} />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
@@ -136,8 +76,8 @@ describe("LogMode – terminal rendering (CI-safe, no gateway)", () => {
   });
 
   it("shows event text content", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestLogView events={CANNED_EVENTS} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <LogView events={CANNED_EVENTS} />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
@@ -150,8 +90,8 @@ describe("LogMode – terminal rendering (CI-safe, no gateway)", () => {
   });
 
   it("shows (no events) when event list is empty", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestLogView events={[]} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <LogView events={[]} />,
       { width: 120, height: 20 },
     );
     await waitForVisualIdle();
@@ -161,8 +101,8 @@ describe("LogMode – terminal rendering (CI-safe, no gateway)", () => {
   });
 
   it("starts in live (follow) mode", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestLogView events={CANNED_EVENTS} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <LogView events={CANNED_EVENTS} />,
       { width: 120, height: 20 },
     );
     await waitForVisualIdle();
@@ -173,7 +113,7 @@ describe("LogMode – terminal rendering (CI-safe, no gateway)", () => {
 
   it("toggles follow mode with f key", async () => {
     const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await testRender(<TestLogView events={CANNED_EVENTS} />, { width: 120, height: 20 });
+      await renderForTest(<LogView events={CANNED_EVENTS} />, { width: 120, height: 20 });
     await waitForVisualIdle();
 
     expect(captureCharFrame()).toContain("[live]");
@@ -192,8 +132,8 @@ describe("LogMode – terminal rendering (CI-safe, no gateway)", () => {
   });
 
   it("shows event count in header", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestLogView events={CANNED_EVENTS} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <LogView events={CANNED_EVENTS} />,
       { width: 120, height: 20 },
     );
     await waitForVisualIdle();
@@ -210,7 +150,7 @@ describe("LogMode – terminal rendering (CI-safe, no gateway)", () => {
     ];
 
     const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await testRender(<TestLogView events={eventsWithAttempts} />, { width: 120, height: 20 });
+      await renderForTest(<LogView events={eventsWithAttempts} />, { width: 120, height: 20 });
     await waitForVisualIdle();
 
     // Initial: all events shown
@@ -235,14 +175,36 @@ describe("LogMode – terminal rendering (CI-safe, no gateway)", () => {
   });
 
   it("renders pipe separator between seq and content", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestLogView events={[frame(42, "run.event", { nodeId: "n-1", text: "hello" })]} />,
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <LogView events={[frame(42, "run.event", { nodeId: "n-1", text: "hello" })]} />,
       { width: 120, height: 10 },
     );
     await waitForVisualIdle();
     const f = captureCharFrame();
     expect(f).toContain("│");
     expect(f).toContain("hello");
+    renderer.destroy();
+  });
+
+  it("unwraps REAL wrapped run.event frames for tags, text, and badges", async () => {
+    const wrappedEvents: GatewayEventFrame[] = [
+      wrapped(1, "run.event", { nodeId: "node-wrapped", text: "Wrapped start" }),
+      wrapped(2, "tool.use", { nodeId: "node-wrapped", name: "read_file" }),
+      wrapped(3, "tool.use", { nodeId: "node-wrapped", name: "write_file" }),
+      wrapped(4, "tool.use", { nodeId: "node-wrapped", name: "bash" }),
+    ];
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <LogView events={wrappedEvents} />,
+      { width: 120, height: 30 },
+    );
+    await waitForVisualIdle();
+    const f = captureCharFrame();
+    // node tag (unwrapped from the envelope), text, and side-effect badges
+    expect(f).toContain("node-wrapped");
+    expect(f).toContain("Wrapped start");
+    expect(f).toContain("[read]");
+    expect(f).toContain("[write]");
+    expect(f).toContain("[shell]");
     renderer.destroy();
   });
 });

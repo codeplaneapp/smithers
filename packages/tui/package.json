@@ -3,10 +3,13 @@
   "version": "0.26.1",
   "description": "Terminal monitor UI for Smithers runs",
   "type": "module",
-  "private": true,
+  "sideEffects": false,
   "bin": {
     "smithers-mon": "./src/index.tsx"
   },
+  "files": [
+    "src/"
+  ],
   "scripts": {
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "test": "bun test tests"
@@ -15,8 +18,7 @@
     "@opentui/core": "^0.4.2",
     "@opentui/react": "^0.4.2",
     "@smithers-orchestrator/gateway-client": "workspace:*",
-    "@smithers-orchestrator/gateway-react": "workspace:*",
-    "zod": "^4.3.6"
+    "@smithers-orchestrator/gateway-react": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.0.0",

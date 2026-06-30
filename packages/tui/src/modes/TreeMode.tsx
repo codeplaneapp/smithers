@@ -1,10 +1,11 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { SyntaxStyle } from "@opentui/core";
 import { useGatewayActions, useGatewayNodeOutput } from "@smithers-orchestrator/gateway-react";
-import { useRunTree, useApprovals, useRunEvents } from "../data.ts";
-import type { GatewayApprovalRow } from "../data.ts";
+import { useRunTree, useApprovals, useRunEvents, useNodeDiff } from "../data.ts";
+import type { GatewayEventFrame } from "../data.ts";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { normalizeFrame, nodeLogEvents } from "./eventFrame.ts";
 import {
   flattenTree,
   nodeGlyph,
@@ -15,6 +16,31 @@ import {
   type FlatNode,
   type TabId,
 } from "./treeUtils.ts";
+import {
+  approvalModeOf,
+  approvalOptionsOf,
+  modeHasOptions,
+  buildApprovalDecision,
+  type ApprovalMode,
+  type ApprovalOption,
+  type ApprovalDecision,
+} from "./approvalUtils.ts";
+import { toNodeDiffView, type NodeDiffView } from "./diffUtils.ts";
+
+/**
+ * Everything the inspector needs to render a pending approval and its controls.
+ * `selectedKey` is the option the user has highlighted for a `select` (null for
+ * gate/rank). Kept as a flat prop bag so the presentational view stays pure.
+ */
+export type ApprovalUiState = {
+  title: string;
+  summary?: string;
+  mode: ApprovalMode;
+  options: ApprovalOption[];
+  selectedKey: string | null;
+  busy: boolean;
+  error: string | null;
+};
 
 const TAB_KEYS: Record<string, TabId> = {
   "1": "output",
@@ -33,19 +59,26 @@ const COMPACT_WIDTH = 100;
 
 // ─── Approval Banner ─────────────────────────────────────────────────────────
 
-function ApprovalBanner({
-  approval,
-  onApprove,
-  onDeny,
-}: {
-  approval: GatewayApprovalRow;
-  onApprove: () => void;
-  onDeny: () => void;
-}) {
+const MAX_OPTION_ROWS = 6;
+
+function ApprovalBanner({ approval }: { approval: ApprovalUiState }) {
+  const { title, summary, mode, options, selectedKey, busy, error } = approval;
+  const showOptions = modeHasOptions(mode);
+  const optionRows = showOptions ? Math.min(options.length, MAX_OPTION_ROWS) : 0;
+  // border(2) + title(1) + summary/error(1) + options + controls(1)
+  const height = 5 + optionRows;
+
+  const controls = (() => {
+    if (busy) return "submitting…";
+    if (mode === "select") return "[[/]] choose   [a] approve selected   [d] deny";
+    if (mode === "rank") return "[a] approve (ranked as listed)   [d] deny";
+    return "[a] approve   [d] deny";
+  })();
+
   return (
     <box
       width="100%"
-      height={5}
+      height={height}
       flexDirection="column"
       border={true}
       borderStyle="single"
@@ -53,14 +86,28 @@ function ApprovalBanner({
       paddingLeft={1}
       paddingRight={1}
     >
-      <text fg="#ffaf00">{`⏸  ${approval.requestTitle ?? "Approval required"}`}</text>
-      {approval.requestSummary ? (
-        <text fg="#888888">{`   ${approval.requestSummary}`}</text>
-      ) : null}
-      <box width="100%" height={1} flexDirection="row">
-        <text fg="#00d787">{"[a] approve"}</text>
-        <text fg="#555555">{"   "}</text>
-        <text fg="#ff5f5f">{"[d] deny"}</text>
+      <text fg="#ffaf00">{`⏸  ${title}  [${mode}]`}</text>
+      {error ? (
+        <text fg="#ff5f5f">{`   ! ${error.slice(0, 60)}`}</text>
+      ) : summary ? (
+        <text fg="#888888">{`   ${summary}`}</text>
+      ) : (
+        <text fg="#555555">{"   awaiting your decision"}</text>
+      )}
+      {showOptions
+        ? options.slice(0, MAX_OPTION_ROWS).map((opt, i) => {
+            const isSel = mode === "select" && opt.key === selectedKey;
+            const prefix = mode === "rank" ? `${i + 1}.` : isSel ? "›" : " ";
+            return (
+              <box key={opt.key} width="100%" height={1} flexDirection="row">
+                <text fg={isSel ? "#ffaf00" : "#888888"}>{`   ${prefix} `}</text>
+                <text fg={isSel ? "#ffffff" : "#cccccc"}>{opt.label}</text>
+              </box>
+            );
+          })
+        : null}
+      <box width="100%" height={1}>
+        <text fg={busy ? "#ffaf00" : "#888888"}>{controls}</text>
       </box>
     </box>
   );
@@ -80,26 +127,46 @@ function TabBar({ activeTab }: { activeTab: TabId }) {
   );
 }
 
-// ─── Node Inspector ───────────────────────────────────────────────────────────
+// ─── Node Inspector (presentational) ──────────────────────────────────────────
 
-function NodeInspector({
-  runId,
+function deriveOutputText(outputData: unknown, node: GatewayRunNode): string {
+  if (outputData && typeof outputData === "object") {
+    const d = outputData as Record<string, unknown>;
+    if (typeof d["output"] === "string") return d["output"];
+    if (typeof d["text"] === "string") return d["text"];
+    if (typeof d["content"] === "string") return d["content"];
+    return JSON.stringify(d, null, 2);
+  }
+  if (node.output) return String(node.output);
+  return "(no output)";
+}
+
+/**
+ * Presentational node inspector. Takes ALL data as props (no gateway hooks) so
+ * render tests can mount the REAL component the production wrapper uses, with
+ * injected output / logs / diff / approval — they can't drift from production.
+ */
+export function NodeInspectorView({
   node,
-  approval,
   activeTab,
-  onApprove,
-  onDeny,
+  outputText,
+  nodeLogs,
+  toolCallsText,
+  propsText,
+  diff,
+  diffLoading,
+  approval,
 }: {
-  runId: string;
   node: GatewayRunNode | null;
-  approval: GatewayApprovalRow | undefined;
   activeTab: TabId;
-  onApprove: () => void;
-  onDeny: () => void;
+  outputText: string;
+  nodeLogs: GatewayEventFrame[];
+  toolCallsText: string;
+  propsText: string;
+  diff: NodeDiffView;
+  diffLoading: boolean;
+  approval: ApprovalUiState | null;
 }) {
-  const { events } = useRunEvents(runId);
-  const { data: outputData } = useGatewayNodeOutput({ runId, nodeId: node?.id });
-
   if (!node) {
     return (
       <box width="100%" height="100%" flexDirection="column">
@@ -108,25 +175,99 @@ function NodeInspector({
     );
   }
 
-  const nodeLogs = events
-    .filter((e) => {
-      const p = e.payload as Record<string, unknown> | null;
-      return p != null && (p["nodeId"] === node.id || p["node_id"] === node.id);
-    })
-    .slice(-500);
+  const style = getPlainStyle();
 
-  const outputText: string = (() => {
-    if (outputData && typeof outputData === "object") {
-      const d = outputData as Record<string, unknown>;
-      if (typeof d["output"] === "string") return d["output"];
-      if (typeof d["text"] === "string") return d["text"];
-      if (typeof d["content"] === "string") return d["content"];
-      return JSON.stringify(d, null, 2);
-    }
-    if (node.output) return String(node.output);
-    return "(no output)";
-  })();
+  return (
+    <box width="100%" height="100%" flexDirection="column">
+      {approval ? <ApprovalBanner approval={approval} /> : null}
+      <TabBar activeTab={activeTab} />
+      <box width="100%" flexGrow={1}>
+        {activeTab === "output" && (
+          <scrollbox width="100%" height="100%" stickyScroll scrollY>
+            <code width="100%" content={outputText} syntaxStyle={style} wrapMode="char" />
+          </scrollbox>
+        )}
+        {activeTab === "logs" && (
+          <scrollbox width="100%" height="100%" stickyScroll stickyStart="bottom" scrollY>
+            {nodeLogs.length === 0 ? (
+              <text fg="#444444">{"  (no log events for this node)"}</text>
+            ) : (
+              nodeLogs.map((e, i) => {
+                const { event, payload } = normalizeFrame(e);
+                return (
+                  <text key={i} fg="#888888" wrapMode="char">
+                    {`  [${e.seq}] ${event}  ${typeof payload === "string" ? payload : JSON.stringify(payload)}`}
+                  </text>
+                );
+              })
+            )}
+          </scrollbox>
+        )}
+        {activeTab === "tools" && (
+          <scrollbox width="100%" height="100%" scrollY>
+            <code width="100%" content={toolCallsText} syntaxStyle={style} filetype="json" wrapMode="char" />
+          </scrollbox>
+        )}
+        {activeTab === "diff" && (
+          <scrollbox width="100%" height="100%" scrollY>
+            {diffLoading ? (
+              <text fg="#888888">{"  Loading diff…"}</text>
+            ) : diff.kind === "patch" ? (
+              <box width="100%" flexDirection="column">
+                <text fg="#888888">{`  ${diff.summary}`}</text>
+                <code width="100%" content={diff.unified} syntaxStyle={style} filetype="diff" wrapMode="char" />
+              </box>
+            ) : diff.kind === "stat" ? (
+              <box width="100%" flexDirection="column">
+                <text fg="#888888">{`  ${diff.summary}`}</text>
+                <code width="100%" content={diff.files} syntaxStyle={style} wrapMode="char" />
+              </box>
+            ) : (
+              <text fg="#444444">{`  ${diff.message}`}</text>
+            )}
+          </scrollbox>
+        )}
+        {activeTab === "props" && (
+          <scrollbox width="100%" height="100%" scrollY>
+            <code width="100%" content={propsText} syntaxStyle={style} filetype="json" wrapMode="char" />
+          </scrollbox>
+        )}
+      </box>
+    </box>
+  );
+}
 
+// ─── Node Inspector (gateway-connected wrapper) ───────────────────────────────
+
+function NodeInspector({
+  runId,
+  node,
+  approval,
+  activeTab,
+}: {
+  runId: string;
+  node: GatewayRunNode | null;
+  approval: ApprovalUiState | null;
+  activeTab: TabId;
+}) {
+  const { events } = useRunEvents(runId);
+  const { data: outputData } = useGatewayNodeOutput({ runId, nodeId: node?.id, iteration: node?.iteration });
+  // Only the Diff tab needs the (potentially expensive) node diff; gate the RPC
+  // on it so switching nodes/tabs doesn't fetch diffs nobody is looking at.
+  const { data: diffData, loading: diffLoading } = useNodeDiff({
+    runId,
+    nodeId: activeTab === "diff" ? node?.id : undefined,
+    iteration: node?.iteration,
+  });
+
+  if (!node) {
+    return <NodeInspectorView node={null} activeTab={activeTab} outputText="" nodeLogs={[]} toolCallsText="" propsText="" diff={{ kind: "empty", message: "" }} diffLoading={false} approval={null} />;
+  }
+
+  // Iteration-aware so loop/retry attempts don't show mixed logs (node output
+  // and approvals are already iteration-scoped); see nodeLogEvents.
+  const nodeLogs = nodeLogEvents(events, node.id, node.iteration).slice(-500);
+  const outputText = deriveOutputText(outputData, node);
   const propsText = JSON.stringify(
     {
       id: node.id,
@@ -142,56 +283,23 @@ function NodeInspector({
     null,
     2,
   );
-
   const toolCallsText =
     (node.toolCalls?.length ?? 0) > 0
       ? JSON.stringify(node.toolCalls, null, 2)
       : "(no tool calls)";
 
-  const style = getPlainStyle();
-
   return (
-    <box width="100%" height="100%" flexDirection="column">
-      {approval ? (
-        <ApprovalBanner approval={approval} onApprove={onApprove} onDeny={onDeny} />
-      ) : null}
-      <TabBar activeTab={activeTab} />
-      <box width="100%" flexGrow={1}>
-        {activeTab === "output" && (
-          <scrollbox width="100%" height="100%" stickyScroll scrollY>
-            <code width="100%" content={outputText} syntaxStyle={style} wrapMode="char" />
-          </scrollbox>
-        )}
-        {activeTab === "logs" && (
-          <scrollbox width="100%" height="100%" stickyScroll stickyStart="bottom" scrollY>
-            {nodeLogs.length === 0 ? (
-              <text fg="#444444">{"  (no log events for this node)"}</text>
-            ) : (
-              nodeLogs.map((e, i) => (
-                <text key={i} fg="#888888" wrapMode="char">
-                  {`  [${e.seq}] ${e.event}  ${typeof e.payload === "string" ? e.payload : JSON.stringify(e.payload)}`}
-                </text>
-              ))
-            )}
-          </scrollbox>
-        )}
-        {activeTab === "tools" && (
-          <scrollbox width="100%" height="100%" scrollY>
-            <code width="100%" content={toolCallsText} syntaxStyle={style} filetype="json" wrapMode="char" />
-          </scrollbox>
-        )}
-        {activeTab === "diff" && (
-          <scrollbox width="100%" height="100%" scrollY>
-            <diff width="100%" height="100%" />
-          </scrollbox>
-        )}
-        {activeTab === "props" && (
-          <scrollbox width="100%" height="100%" scrollY>
-            <code width="100%" content={propsText} syntaxStyle={style} filetype="json" wrapMode="char" />
-          </scrollbox>
-        )}
-      </box>
-    </box>
+    <NodeInspectorView
+      node={node}
+      activeTab={activeTab}
+      outputText={outputText}
+      nodeLogs={nodeLogs}
+      toolCallsText={toolCallsText}
+      propsText={propsText}
+      diff={toNodeDiffView(diffData)}
+      diffLoading={activeTab === "diff" && diffLoading}
+      approval={approval}
+    />
   );
 }
 
@@ -266,49 +374,150 @@ export function TreeMode({
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [focusIdx, setFocusIdx] = useState(0);
-
-  // When switching from Graph mode with a selected node, scroll to it
-  useEffect(() => {
-    if (!initialSelectedNodeId || nodes.length === 0) return;
-    const flat = flattenTree(nodes, root, collapsed);
-    const idx = flat.findIndex((f) => f.node.id === initialSelectedNodeId);
-    if (idx >= 0) setFocusIdx(idx);
-  }, [initialSelectedNodeId]); // eslint-disable-line react-hooks/exhaustive-deps
   const [focusPane, setFocusPane] = useState<"tree" | "inspector">("tree");
   const [activeTab, setActiveTab] = useState<TabId>("props");
 
-  const flat = flattenTree(nodes, root, collapsed);
+  const flat = useMemo(() => flattenTree(nodes, root, collapsed), [nodes, root, collapsed]);
+
+  // When switching from Graph mode with a selected node, focus it — but only
+  // once per selection. Reruns when `flat` changes so it still focuses if the
+  // tree data arrives AFTER the mode switch, while a ref guard keeps later live
+  // updates from yanking focus back off the user's manual j/k navigation.
+  const focusedSelectionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialSelectedNodeId) return;
+    if (focusedSelectionRef.current === initialSelectedNodeId) return;
+    const idx = flat.findIndex((f) => f.node.id === initialSelectedNodeId);
+    if (idx >= 0) {
+      setFocusIdx(idx);
+      focusedSelectionRef.current = initialSelectedNodeId;
+    }
+  }, [initialSelectedNodeId, flat]);
+
   const safeIdx = flat.length > 0 ? Math.min(focusIdx, flat.length - 1) : 0;
   const focusedNode = flat[safeIdx]?.node ?? null;
+
+  // Guards setState in async approval continuations that can resolve after a
+  // mode switch unmounts this component.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (focusedNode) setActiveTab(defaultTab(focusedNode));
   }, [focusedNode?.id]);
 
   const approvals = approvalsData ?? [];
+  // Match by node id AND iteration so loops/retries approve the request for the
+  // attempt currently in view, not the first row that happens to share the id.
+  // Container nodes carry no iteration; fall back to id-only for those.
   const nodeApproval = focusedNode
-    ? approvals.find((a) => a.nodeId === focusedNode.id)
+    ? approvals.find(
+        (a) =>
+          a.nodeId === focusedNode.id &&
+          (focusedNode.iteration === undefined || a.iteration === focusedNode.iteration),
+      )
     : undefined;
 
-  const handleApprove = useCallback(() => {
-    if (!nodeApproval) return;
-    void actions.submitApproval({
-      runId,
-      nodeId: nodeApproval.nodeId,
-      iteration: nodeApproval.iteration,
-      decision: { approved: true },
-    });
-  }, [nodeApproval, runId, actions]);
+  // Decode the approval's mode + options so we render mode-appropriate controls
+  // and submit the right decision shape (gate vs select vs rank) — submitting a
+  // bare `{ approved }` for a select/rank request would be rejected by the
+  // gateway's validateApprovalDecision.
+  const approvalMode = approvalModeOf(nodeApproval?.approvalMode);
+  const approvalOptions = useMemo(
+    () => approvalOptionsOf(nodeApproval?.options),
+    [nodeApproval?.options],
+  );
 
-  const handleDeny = useCallback(() => {
-    if (!nodeApproval) return;
-    void actions.submitApproval({
-      runId,
-      nodeId: nodeApproval.nodeId,
-      iteration: nodeApproval.iteration,
-      decision: { approved: false },
-    });
-  }, [nodeApproval, runId, actions]);
+  // Highlighted option for a `select`. Reset to the first option whenever the
+  // pending approval (node+iteration) changes so we never carry a stale pick.
+  const [selectedOptionKey, setSelectedOptionKey] = useState<string | null>(null);
+  const approvalKey = nodeApproval
+    ? `${nodeApproval.nodeId}:${nodeApproval.iteration}`
+    : null;
+  useEffect(() => {
+    setSelectedOptionKey(
+      approvalMode === "select" ? approvalOptions[0]?.key ?? null : null,
+    );
+    // Re-seed on the identity of the pending request, not on every options array
+    // recompute (which would fight the user's `[`/`]` navigation).
+  }, [approvalKey, approvalMode]);
+
+  // One in-flight decision at a time, keyed by the pending request, so a
+  // double-press can't fire two submits and the UI can surface failures.
+  const [pendingDecision, setPendingDecision] = useState<string | null>(null);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const approvalBusy = pendingDecision !== null && pendingDecision === approvalKey;
+
+  const submitDecision = useCallback(
+    (approved: boolean) => {
+      if (!nodeApproval) return;
+      const key = `${nodeApproval.nodeId}:${nodeApproval.iteration}`;
+      if (pendingDecision === key) return; // dup-submit guard
+      const decision: ApprovalDecision | null = buildApprovalDecision(
+        approvalMode,
+        approved,
+        approvalOptions,
+        selectedOptionKey,
+      );
+      if (!decision) {
+        // e.g. a select approve with no valid option chosen — refuse to send a
+        // shape the gateway would reject, and tell the user why.
+        setApprovalError("select an option before approving");
+        return;
+      }
+      setPendingDecision(key);
+      setApprovalError(null);
+      Promise.resolve(
+        actions.submitApproval({
+          runId,
+          nodeId: nodeApproval.nodeId,
+          iteration: nodeApproval.iteration,
+          decision,
+        }),
+      )
+        .catch((err: unknown) => {
+          if (mountedRef.current) setApprovalError(err instanceof Error ? err.message : String(err));
+        })
+        .finally(() => {
+          if (mountedRef.current) setPendingDecision((cur) => (cur === key ? null : cur));
+        });
+    },
+    [nodeApproval, pendingDecision, runId, actions, approvalMode, approvalOptions, selectedOptionKey],
+  );
+
+  const handleApprove = useCallback(() => submitDecision(true), [submitDecision]);
+  const handleDeny = useCallback(() => submitDecision(false), [submitDecision]);
+
+  // Cycle the highlighted option for a `select` (the gate/rank modes have no
+  // per-option pick — gate has none, rank submits the listed order).
+  const cycleOption = useCallback(
+    (dir: 1 | -1) => {
+      if (approvalMode !== "select" || approvalOptions.length === 0) return;
+      setSelectedOptionKey((cur) => {
+        const idx = Math.max(0, approvalOptions.findIndex((o) => o.key === cur));
+        const next = (idx + dir + approvalOptions.length) % approvalOptions.length;
+        return approvalOptions[next]?.key ?? cur;
+      });
+    },
+    [approvalMode, approvalOptions],
+  );
+
+  const approvalUi: ApprovalUiState | null = nodeApproval
+    ? {
+        title: nodeApproval.requestTitle ?? "Approval required",
+        summary: nodeApproval.requestSummary,
+        mode: approvalMode,
+        options: approvalOptions,
+        selectedKey: selectedOptionKey,
+        busy: approvalBusy,
+        error: approvalError,
+      }
+    : null;
 
   useKeyboard((e) => {
     const key = e.name;
@@ -361,9 +570,11 @@ export function TreeMode({
         }
       } else if (key === "return") {
         if (flat.length > 0) setFocusPane("inspector");
-      } else if (key === "a" && nodeApproval) {
+      } else if ((key === "[" || key === "]") && nodeApproval && approvalMode === "select") {
+        cycleOption(key === "]" ? 1 : -1);
+      } else if (key === "a" && nodeApproval && !approvalBusy) {
         handleApprove();
-      } else if (key === "d" && nodeApproval) {
+      } else if (key === "d" && nodeApproval && !approvalBusy) {
         handleDeny();
       }
     }
@@ -397,10 +608,8 @@ export function TreeMode({
           <NodeInspector
             runId={runId}
             node={focusedNode}
-            approval={nodeApproval}
+            approval={approvalUi}
             activeTab={activeTab}
-            onApprove={handleApprove}
-            onDeny={handleDeny}
           />
         </box>
       </box>
@@ -416,10 +625,8 @@ export function TreeMode({
         <NodeInspector
           runId={runId}
           node={focusedNode}
-          approval={nodeApproval}
+          approval={approvalUi}
           activeTab={activeTab}
-          onApprove={handleApprove}
-          onDeny={handleDeny}
         />
       </box>
     </box>

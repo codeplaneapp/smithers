@@ -1,144 +1,190 @@
 /** @jsxImportSource @opentui/react */
 import { describe, it, expect } from "bun:test";
-import { testRender } from "@opentui/react/test-utils";
-import { act, useState } from "react";
-import { useKeyboard } from "@opentui/react";
-import { nodeGlyph, nodeGlyphColor, ALL_TABS, type TabId } from "../src/modes/treeUtils.ts";
+import { renderForTest } from "./renderHelpers.tsx";
+import type { GatewayRunNode, GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
+import { NodeInspectorView, type ApprovalUiState } from "../src/modes/TreeMode.tsx";
+import type { NodeDiffView } from "../src/modes/diffUtils.ts";
+import { ALL_TABS, type TabId } from "../src/modes/treeUtils.ts";
 
 /**
- * Terminal rendering tests for TREE mode components.
- * CI-safe: no gateway, no agent CLI, no browser.
- * Uses @opentui/react testRender (headless OpenTUI renderer).
+ * Terminal rendering tests for the REAL Tree inspector (`NodeInspectorView`),
+ * the same presentational component production mounts via the gateway-connected
+ * `NodeInspector` wrapper. CI-safe: props-only, no gateway / agent / browser.
  */
 
-// Minimal tab bar identical to the one inside TreeMode
-function TabBar({ active }: { active: TabId }) {
-  return (
-    <box width="100%" height={1} flexDirection="row">
-      {ALL_TABS.map((t) => (
-        <text key={t} fg={t === active ? "#ffffff" : "#555555"} bg={t === active ? "#333333" : undefined}>
-          {` ${t} `}
-        </text>
-      ))}
-    </box>
-  );
+const NODE: GatewayRunNode = {
+  id: "node-alpha",
+  name: "fetch-data",
+  kind: "task",
+  status: "running",
+  iteration: 0,
+};
+
+const EMPTY_DIFF: NodeDiffView = { kind: "empty", message: "No diff available for this node." };
+
+function logFrame(seq: number, event: string, payload?: unknown): GatewayEventFrame {
+  return { type: "event", seq, event, payload, stateVersion: seq };
 }
 
-// Minimal interactive component: renders a 2-node tree + tab bar.
-// Accepts 1-5 keystrokes to switch tabs.
-function TestTreeView() {
-  const [activeTab, setActiveTab] = useState<TabId>("output");
-
-  useKeyboard((e) => {
-    if (e.name === "1") setActiveTab("output");
-    else if (e.name === "2") setActiveTab("logs");
-    else if (e.name === "3") setActiveTab("tools");
-    else if (e.name === "4") setActiveTab("diff");
-    else if (e.name === "5") setActiveTab("props");
-  });
-
-  return (
-    <box width="100%" height="100%" flexDirection="column">
-      <box width="100%" height={1} flexDirection="row">
-        <text fg={nodeGlyphColor("done")}>{nodeGlyph("done")}</text>
-        <text fg="#cccccc">{" done-node"}</text>
-      </box>
-      <box width="100%" height={1} flexDirection="row">
-        <text fg={nodeGlyphColor("running")}>{nodeGlyph("running")}</text>
-        <text fg="#cccccc">{" running-node"}</text>
-      </box>
-      <box width="100%" height={1} flexDirection="row">
-        <text fg={nodeGlyphColor("failed")}>{nodeGlyph("failed")}</text>
-        <text fg="#cccccc">{" failed-node"}</text>
-      </box>
-      <TabBar active={activeTab} />
-      <text fg="#888888">{`tab:${activeTab}`}</text>
-    </box>
-  );
+function baseProps(overrides: Partial<Parameters<typeof NodeInspectorView>[0]> = {}) {
+  return {
+    node: NODE,
+    activeTab: "output" as TabId,
+    outputText: "hello-output",
+    nodeLogs: [] as GatewayEventFrame[],
+    toolCallsText: "(no tool calls)",
+    propsText: '{ "id": "node-alpha" }',
+    diff: EMPTY_DIFF,
+    diffLoading: false,
+    approval: null as ApprovalUiState | null,
+    ...overrides,
+  };
 }
 
-describe("TreeMode – terminal rendering (CI-safe, no gateway)", () => {
-  it("renders node status glyphs in the terminal frame", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestTreeView />,
-      { width: 80, height: 24 },
+describe("NodeInspectorView – terminal rendering (CI-safe, no gateway)", () => {
+  it("shows the placeholder when no node is selected", async () => {
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <NodeInspectorView {...baseProps({ node: null })} />,
+      { width: 100, height: 24 },
     );
     await waitForVisualIdle();
-    const frame = captureCharFrame();
-
-    expect(frame).toContain(nodeGlyph("done"));       // ✓
-    expect(frame).toContain(nodeGlyph("running"));    // ●
-    expect(frame).toContain(nodeGlyph("failed"));     // ✗
-    expect(frame).toContain("done-node");
-    expect(frame).toContain("running-node");
-    expect(frame).toContain("failed-node");
-
+    expect(captureCharFrame()).toContain("Select a node");
     renderer.destroy();
   });
 
-  it("renders tab bar with correct initial active tab", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await testRender(
-      <TestTreeView />,
-      { width: 80, height: 24 },
+  it("renders all tab labels and the output text", async () => {
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <NodeInspectorView {...baseProps()} />,
+      { width: 100, height: 24 },
     );
     await waitForVisualIdle();
-    const frame = captureCharFrame();
-
-    // All 5 tab labels should appear
-    for (const tab of ALL_TABS) {
-      expect(frame).toContain(tab);
-    }
-    // Initial tab is output
-    expect(frame).toContain("tab:output");
-
+    const f = captureCharFrame();
+    for (const tab of ALL_TABS) expect(f).toContain(tab);
+    expect(f).toContain("hello-output");
     renderer.destroy();
   });
 
-  it("switches tabs via 1-5 keystrokes", async () => {
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await testRender(<TestTreeView />, { width: 80, height: 24 });
-    await waitForVisualIdle();
-
-    expect(captureCharFrame()).toContain("tab:output");
-
-    act(() => { mockInput.pressKey("2"); });
-    await flush();
-    await waitForVisualIdle();
-    expect(captureCharFrame()).toContain("tab:logs");
-
-    act(() => { mockInput.pressKey("5"); });
-    await flush();
-    await waitForVisualIdle();
-    expect(captureCharFrame()).toContain("tab:props");
-
-    act(() => { mockInput.pressKey("1"); });
-    await flush();
-    await waitForVisualIdle();
-    expect(captureCharFrame()).toContain("tab:output");
-
-    renderer.destroy();
-  });
-
-  it("maps all 5 tab keys to correct tabs", async () => {
-    const tabMap: Array<[string, TabId]> = [
-      ["1", "output"],
-      ["2", "logs"],
-      ["3", "tools"],
-      ["4", "diff"],
-      ["5", "props"],
+  it("renders injected node log events on the logs tab", async () => {
+    const logs = [
+      logFrame(11, "tool.use", { nodeId: "node-alpha", toolName: "read_file" }),
+      logFrame(12, "agent.message", { nodeId: "node-alpha", text: "working" }),
     ];
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <NodeInspectorView {...baseProps({ activeTab: "logs", nodeLogs: logs })} />,
+      { width: 120, height: 24 },
+    );
+    await waitForVisualIdle();
+    const f = captureCharFrame();
+    expect(f).toContain("tool.use");
+    expect(f).toContain("[11]");
+    renderer.destroy();
+  });
 
-    for (const [key, expectedTab] of tabMap) {
-      const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-        await testRender(<TestTreeView />, { width: 80, height: 24 });
-      await waitForVisualIdle();
+  it("renders a unified diff (summary + patch text) on the diff tab", async () => {
+    const diff: NodeDiffView = {
+      kind: "patch",
+      summary: "1 file changed",
+      unified: "# modify src/a.ts\n@@ -1 +1 @@\n-old\n+new",
+    };
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <NodeInspectorView {...baseProps({ activeTab: "diff", diff })} />,
+      { width: 120, height: 24 },
+    );
+    await waitForVisualIdle();
+    const f = captureCharFrame();
+    expect(f).toContain("1 file changed");
+    expect(f).toContain("src/a.ts");
+    expect(f).toContain("+new");
+    renderer.destroy();
+  });
 
-      act(() => { mockInput.pressKey(key); });
-      await flush();
-      await waitForVisualIdle();
-      expect(captureCharFrame()).toContain(`tab:${expectedTab}`);
+  it("shows a loading state for the diff tab", async () => {
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <NodeInspectorView {...baseProps({ activeTab: "diff", diffLoading: true })} />,
+      { width: 100, height: 24 },
+    );
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("Loading diff");
+    renderer.destroy();
+  });
 
-      renderer.destroy();
-    }
+  it("shows an explicit empty/unavailable state for the diff tab", async () => {
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <NodeInspectorView {...baseProps({ activeTab: "diff" })} />,
+      { width: 100, height: 24 },
+    );
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("No diff available");
+    renderer.destroy();
+  });
+
+  it("renders a gate approval banner with approve/deny controls", async () => {
+    const approval: ApprovalUiState = {
+      title: "Ship it?",
+      summary: "Deploy to prod",
+      mode: "gate",
+      options: [],
+      selectedKey: null,
+      busy: false,
+      error: null,
+    };
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <NodeInspectorView {...baseProps({ approval })} />,
+      { width: 120, height: 28 },
+    );
+    await waitForVisualIdle();
+    const f = captureCharFrame();
+    expect(f).toContain("Ship it?");
+    expect(f).toContain("[gate]");
+    expect(f).toContain("approve");
+    expect(f).toContain("deny");
+    renderer.destroy();
+  });
+
+  it("renders a select approval banner with options and the highlighted choice", async () => {
+    const approval: ApprovalUiState = {
+      title: "Pick a plan",
+      summary: "Choose the best option",
+      mode: "select",
+      options: [
+        { key: "light", label: "Light" },
+        { key: "balanced", label: "Balanced" },
+      ],
+      selectedKey: "balanced",
+      busy: false,
+      error: null,
+    };
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <NodeInspectorView {...baseProps({ approval })} />,
+      { width: 120, height: 30 },
+    );
+    await waitForVisualIdle();
+    const f = captureCharFrame();
+    expect(f).toContain("Pick a plan");
+    expect(f).toContain("[select]");
+    expect(f).toContain("Light");
+    expect(f).toContain("Balanced");
+    // The highlighted option is marked and the controls advertise approve-selected.
+    expect(f).toContain("›");
+    expect(f).toContain("approve selected");
+    renderer.destroy();
+  });
+
+  it("surfaces an approval error in the banner", async () => {
+    const approval: ApprovalUiState = {
+      title: "Pick a plan",
+      mode: "select",
+      options: [{ key: "a", label: "A" }],
+      selectedKey: null,
+      busy: false,
+      error: "select an option before approving",
+    };
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <NodeInspectorView {...baseProps({ approval })} />,
+      { width: 120, height: 28 },
+    );
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("select an option");
+    renderer.destroy();
   });
 });

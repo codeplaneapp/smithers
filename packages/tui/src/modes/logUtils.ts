@@ -1,4 +1,5 @@
 import type { GatewayEventFrame } from "../data.ts";
+import { normalizeFrame } from "./eventFrame.ts";
 
 export type SideEffect = "read" | "write" | "shell" | null;
 
@@ -67,9 +68,9 @@ export function extractAttemptKeys(events: GatewayEventFrame[]): AttemptKey[] {
   const seen: AttemptKey[] = [];
   const seenSet = new Set<string>();
   for (const e of events) {
-    const nodeId = extractNodeId(e.payload);
+    const { payload, nodeId } = normalizeFrame(e);
     if (!nodeId) continue;
-    const iter = extractIteration(e.payload);
+    const iter = extractIteration(payload);
     const k = makeAttemptKey(nodeId, iter);
     if (!seenSet.has(k)) {
       seenSet.add(k);
@@ -90,8 +91,9 @@ export function filterEventsByAttempt(
   const iteration = parseInt(iterStr, 10);
 
   return events.filter((e) => {
-    if (extractNodeId(e.payload) !== nodeId) return false;
-    const eIter = extractIteration(e.payload) ?? 0;
+    const norm = normalizeFrame(e);
+    if (norm.nodeId !== nodeId) return false;
+    const eIter = extractIteration(norm.payload) ?? 0;
     return eIter === iteration;
   });
 }

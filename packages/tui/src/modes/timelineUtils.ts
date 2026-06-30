@@ -1,4 +1,7 @@
 import type { GatewayEventFrame } from "../data.ts";
+import { unwrapEvent } from "./eventFrame.ts";
+
+export { unwrapEvent };
 
 export type FrameMarker = "notable" | "gate" | "normal";
 
@@ -9,7 +12,7 @@ export type NodeSnapshot = {
 };
 
 export function classifyFrame(ev: GatewayEventFrame): FrameMarker {
-  const event = ev.event.toLowerCase();
+  const event = unwrapEvent(ev).name.toLowerCase();
   if (event.includes("approval") || event.includes("gate") || event.includes("wait")) {
     return "gate";
   }
@@ -50,7 +53,7 @@ export function extractNodeSnapshots(
 
   for (const ev of events) {
     if (ev.seq > upToSeq) break;
-    const p = ev.payload as Record<string, unknown> | null | undefined;
+    const { name: rawEventName, payload: p } = unwrapEvent(ev);
     if (!p) continue;
     const rawId = p["nodeId"] ?? p["node_id"];
     const nodeId = typeof rawId === "string" ? rawId : undefined;
@@ -60,7 +63,7 @@ export function extractNodeSnapshots(
     const name = typeof rawName === "string" ? rawName : undefined;
     const rawStatus = p["status"] ?? p["state"];
     const statusFromPayload = typeof rawStatus === "string" ? rawStatus : undefined;
-    const eventName = ev.event.toLowerCase();
+    const eventName = rawEventName.toLowerCase();
 
     let inferredStatus: string | undefined;
     if (statusFromPayload) {
