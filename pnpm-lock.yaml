@@ -45,6 +45,9 @@ importers:
       '@smithers-orchestrator/accounts':
         specifier: workspace:*
         version: link:packages/accounts
+      '@smithers-orchestrator/agent-eliza':
+        specifier: workspace:*
+        version: link:packages/agent-eliza
       '@smithers-orchestrator/agents':
         specifier: workspace:*
         version: link:packages/agents
