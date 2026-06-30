@@ -1,4 +1,4 @@
-# Single-Run Monitor TUI — Engineering Spec
+# Single-Run Monitor TUI - Engineering Spec
 
 **Status**: Draft  
 **Date**: 2026-06-30
@@ -7,13 +7,13 @@
 
 ## 1. Goal & How It Ships
 
-The single-run monitor TUI is a full-screen terminal UI that replaces the current scroll-based `smithers up --interactive` flow (`apps/cli/src/tui.js` → `runTuiCommand`). Instead of clack cards streaming down the terminal, the user gets a persistent, keyboard-driven, five-mode monitor that stays live for the full lifetime of a run.
+The single-run monitor TUI is a full-screen terminal UI that replaces the current scroll-based `bunx smithers-orchestrator up --interactive` flow (`apps/cli/src/tui.js` → `runTuiCommand`). Instead of clack cards streaming down the terminal, the user gets a persistent, keyboard-driven, five-mode monitor that stays live for the full lifetime of a run.
 
 **Entry points:**
 
-- `smithers up --interactive` / `smithers up -i <workflow>` — existing flag; now launches the TUI after starting/attaching to a run.
-- `smithers up -i` with no workflow argument — shows the fuzzy workflow picker (reusing existing `fuzzySelect` + `buildWorkflowPickerOptions` logic from `tui.js`), then monitors the selected run.
-- `smithers up --run-id <id>` — attach the TUI to an already-running run without starting a new one.
+- `bunx smithers-orchestrator up --interactive` / `bunx smithers-orchestrator up -i <workflow>` - existing flag; now launches the TUI after starting/attaching to a run.
+- `bunx smithers-orchestrator up -i` with no workflow argument - shows the fuzzy workflow picker (reusing existing `fuzzySelect` + `buildWorkflowPickerOptions` logic from `tui.js`), then monitors the selected run.
+- `bunx smithers-orchestrator up --run-id RUN_ID` - attach the TUI to an already-running run without starting a new one.
 
 The old `runTuiCommand` scroll path is removed. The new entry point is `runTuiMonitor(runId, opts)` exported from `packages/tui/src/index.ts`.
 
@@ -30,7 +30,7 @@ The old `runTuiCommand` scroll path is removed. The new entry point is `runTuiMo
 | JSX | **`/** @jsxImportSource react */`** | Standard React JSX, **NOT** `smithers-orchestrator`'s jsx-runtime. The smithers jsx-runtime is only for workflow definition files. |
 | Data | `smithers-orchestrator/gateway-react` | `SmithersGatewayProvider` + gateway hooks |
 
-**Critical JSX note**: Every file in `packages/tui` must use `/** @jsxImportSource react */` (or `tsconfig`-level `jsxImportSource: "react"`). Never use the `smithers-orchestrator` jsx runtime here — that pragma is exclusively for `.tsx` workflow files that use smithers's declarative task DSL.
+**Critical JSX note**: Every file in `packages/tui` must use `/** @jsxImportSource react */` (or `tsconfig`-level `jsxImportSource: "react"`). Never use the `smithers-orchestrator` jsx runtime here - that pragma is exclusively for `.tsx` workflow files that use smithers's declarative task DSL.
 
 ---
 
@@ -43,7 +43,7 @@ The TUI uses the same gateway hooks as the web UI. There is no DB adapter depend
 ```
 SmithersGatewayClient({
   baseUrl: "http://127.0.0.1:7331",    // default; overridable via env / CLI flag
-  WebSocket: globalThis.WebSocket,      // Bun exposes WebSocket globally — inject it
+  WebSocket: globalThis.WebSocket,      // Bun exposes WebSocket globally - inject it
 })
 ```
 
@@ -51,7 +51,7 @@ SmithersGatewayClient({
 
 **No `createGatewayReactRoot`.** That helper wraps `react-dom/client` and is for browser contexts. Use `@opentui/react`'s `createRoot` directly.
 
-**Gateway autostart**: Before constructing the client, probe `http://127.0.0.1:7331/health`. If unreachable, spawn `smithers gateway --background` (or reuse the existing `ensureGateway` utility from `apps/cli/src/gateway.js`) and wait up to 10 s for it to answer. This mirrors the behavior of `smithers ui`.
+**Gateway autostart**: Before constructing the client, probe `http://127.0.0.1:7331/health`. If unreachable, spawn `smithers gateway --background` (or reuse the existing `ensureGateway` utility from `apps/cli/src/gateway.js`) and wait up to 10 s for it to answer. This mirrors the behavior of `bunx smithers-orchestrator ui`.
 
 ### Hook inventory
 
@@ -114,13 +114,13 @@ All five modes share:
 ```
 
 Fields, left to right:
-- **Status dot** — `●` colored: green = running, yellow = waiting-approval/event/timer, red = failed, dim = done/cancelled.
-- **Workflow name** — from `useGatewayRun().data.workflowName`.
-- **Short run id** — first 12 chars.
-- **Model** — from run metadata.
-- **Elapsed** — ticking `mm:ss` counter from run `createdAtMs`.
-- **Frame counter** — `fn/total` from `FrameCommitted` event count vs `useGatewayRunEvents` total seq.
-- **live|paused** — `[live]` while following events; `[f14]` while frozen on frame 14 in TIMELINE mode.
+- **Status dot** - `●` colored: green = running, yellow = waiting-approval/event/timer, red = failed, dim = done/cancelled.
+- **Workflow name** - from `useGatewayRun().data.workflowName`.
+- **Short run id** - first 12 chars.
+- **Model** - from run metadata.
+- **Elapsed** - ticking `mm:ss` counter from run `createdAtMs`.
+- **Frame counter** - `fn/total` from `FrameCommitted` event count vs `useGatewayRunEvents` total seq.
+- **live|paused** - `[live]` while following events; `[f14]` while frozen on frame 14 in TIMELINE mode.
 
 ### Mode 1: TREE (default)
 
@@ -163,7 +163,7 @@ Fields, left to right:
 
 **Layout**: full-body `<scrollbox>`.
 
-- Live agent transcript — all `AgentStream` / tool-call events from `useGatewayRunEvents`, interleaved in seq order.
+- Live agent transcript - all `AgentStream` / tool-call events from `useGatewayRunEvents`, interleaved in seq order.
 - Each line: `[nodeId-color] │ event text`
 - Tool calls rendered with side-effect badges: `[read]` (dim), `[write]` (yellow), `[shell]` (red).
 - **Follow mode**: on by default. Scrollbox auto-scrolls to bottom as new events arrive. `f` toggles follow; the `[live]`/`[paused]` indicator in the header reflects this.
@@ -187,10 +187,10 @@ Fields, left to right:
 **Flow**:
 1. A `<select>` overlay appears (OpenTUI select primitive): "Hijack [nodeId] ([engine])? [confirm / cancel]".
 2. On confirm:
-   a. `renderer.suspend()` — yields the terminal back to raw stdio.
+   a. `renderer.suspend()` - yields the terminal back to raw stdio.
    b. Resolve hijack candidate via `resolveHijackCandidate(adapter, runId)` from `apps/cli/src/hijack.js`.
    c. Build the launch spec via `buildHijackLaunchSpec(candidate)`.
-   d. `launchHijackSession(spec)` — spawns `claude --resume <id>` / `codex resume <id>` / etc. inheriting stdio.
+   d. `launchHijackSession(spec)` - spawns `claude --resume <id>` / `codex resume <id>` / etc. inheriting stdio.
    e. On native CLI exit: `renderer.resume()` (or re-initialize if needed), show a banner: "Hijack session ended. [a] resume automation  [d] dismiss".
 3. `a` calls `actions.resumeRun({ runId })` and returns to live TREE mode.
 4. `d` dismisses the banner; the run remains paused.
@@ -265,9 +265,9 @@ CI has **no agent CLIs and no browser**. Every test must be self-contained again
 - The seeded Gateway is a real `packages/server` instance seeded with a `SmithersDb` fixture; no mocking of the Gateway itself.
 
 **CI constraints addressed**:
-- No agent CLI required — the fake agent is a stub workflow that emits canned `AgentStream` events into the seeded DB.
-- No browser — `@microsoft/tui-test` drives a PTY subprocess, not a browser.
-- Deterministic timing — elapsed timers in the header are frozen by injecting `createdAtMs` into the seeded run row such that elapsed = a fixed value.
+- No agent CLI required - the fake agent is a stub workflow that emits canned `AgentStream` events into the seeded DB.
+- No browser - `@microsoft/tui-test` drives a PTY subprocess, not a browser.
+- Deterministic timing - elapsed timers in the header are frozen by injecting `createdAtMs` into the seeded run row such that elapsed = a fixed value.
 
 **Test file layout**:
 ```
@@ -330,16 +330,16 @@ packages/tui/
 
 ### CLI wiring change (`apps/cli/src/`)
 
-- `apps/cli/src/tui.js` — **`runTuiCommand` is removed** (the scroll-based path). The file retains only pure utility exports consumed by other CLI commands: `buildWorkflowPickerOptions`, `pickerMaxItems`, `truncate`, `wrapText`, `renderRunCard`, `fetchCard`, `streamRun`, `childFailurePromise`, `waitForRunRow`, `formatOutputRow`, `formatStreamText`, `normalizeStreamText`, `displayNode`, `isCompletedToolPhase`.
+- `apps/cli/src/tui.js` - **`runTuiCommand` is removed** (the scroll-based path). The file retains only pure utility exports consumed by other CLI commands: `buildWorkflowPickerOptions`, `pickerMaxItems`, `truncate`, `wrapText`, `renderRunCard`, `fetchCard`, `streamRun`, `childFailurePromise`, `waitForRunRow`, `formatOutputRow`, `formatStreamText`, `normalizeStreamText`, `displayNode`, `isCompletedToolPhase`.
 
-- `apps/cli/src/commands/up.js` — the `--interactive` / `-i` branch, instead of calling `runTuiCommand`, calls:
+- `apps/cli/src/commands/up.js` - the `--interactive` / `-i` branch, instead of calling `runTuiCommand`, calls:
   ```js
   const { runTuiMonitor } = await import("@smithers-orchestrator/tui");
   await runTuiMonitor(runId, { gatewayUrl: opts.gatewayUrl });
   ```
   The workflow-pick and input-prompt flow before launching the run remains in the CLI command (not in the TUI package) so the fuzzy-picker can still run pre-fullscreen.
 
-- No changes to `apps/cli/src/hijack.js` — `packages/tui` imports `resolveHijackCandidate`, `buildHijackLaunchSpec`, and `launchHijackSession` directly from the CLI package via workspace import.
+- No changes to `apps/cli/src/hijack.js` - `packages/tui` imports `resolveHijackCandidate`, `buildHijackLaunchSpec`, and `launchHijackSession` directly from the CLI package via workspace import.
 
 ---
 
@@ -351,6 +351,6 @@ packages/tui/
 
 3. **`@microsoft/tui-test` PTY driver**: Does it support Bun-spawned processes, or does it require Node? If Bun subprocess PTY attachment is unsupported, the integration test may need to use a Node shim or switch to OpenTUI's own test renderer API.
 
-4. **Gateway autostart interface**: The existing `ensureGateway` utility in `apps/cli` — is it a stable function export that `packages/tui` can import, or does it need to be moved to a shared package first?
+4. **Gateway autostart interface**: The existing `ensureGateway` utility in `apps/cli` - is it a stable function export that `packages/tui` can import, or does it need to be moved to a shared package first?
 
 5. **DevTools frame protocol completeness**: Does the current `packages/protocol/src/devtools` include a stable `applyDelta(snapshot, delta): DevToolsSnapshot` helper, or does `packages/tui` need to implement the merge logic itself from the `DevToolsDelta` / `DevToolsDeltaOp` types?

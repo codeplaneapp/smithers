@@ -2007,6 +2007,29 @@ To drive a run to completion across pauses, use a keeper loop around the persist
 
 If resume fails with `RESUME_METADATA_MISMATCH`, the workflow file changed after the run started. Resume validates the original workflow metadata and source hash; it is not a hot-reload mechanism for stopped runs. Start a fresh run instead, for example with a new `--run-id`, or overwrite an existing planned id with `--force` when that command supports it. When iterating on a workflow definition, expect each edit to require a fresh run rather than `--resume`.
 
+## Interactive mode and the full-screen TUI monitor
+
+`bunx smithers-orchestrator up --interactive` (or just `bunx smithers-orchestrator up` / `bunx smithers-orchestrator workflow run` from an interactive TTY without a positional argument) opens a terminal UI that guides you through three steps:
+
+1. **Workflow picker** - fuzzy-search your installed workflows and select one.
+2. **Input prompts** - fill required fields for the chosen workflow.
+3. **Full-screen monitor** - the run starts in a detached background process and the terminal switches into a full-screen view that tracks it live.
+
+The monitor connects to a local Gateway on port 7331, starting one automatically if none is running.  It exits when you press `q`.
+
+### Monitor modes and keybindings
+
+| Key | Mode | What you see |
+|-----|------|--------------|
+| `1` | **Tree** | Node tree with per-node output, logs, tool calls, diffs, and props; inline approval banner when waiting |
+| `2` / `g` | **Graph** | Directed dependency graph; navigate with arrow keys |
+| `3` / `l` | **Logs** | Filtered event stream (up to 2 000 events); `[`/`]` to filter by attempt, `f` to toggle follow |
+| `4` / `t` | **Timeline** | Horizontal tick strip with snapshot table; arrow keys to scrub |
+| `5` / `h` | **Hijack** | Hand off to `bunx smithers-orchestrator hijack` for an active node |
+| `q` | - | Quit |
+
+The status header shrinks to a compact one-liner on terminals narrower than 100 columns; the keybar adapts the same way.
+
 ## Monitoring a background run
 
 A detached run (`up --detach` / `run --detach`) and an MCP `run_workflow` background launch both execute where the user has no live view of progress. To close that gap, the CLI returns a `monitoring` block with the run and prints agent-directed guidance in the "Next steps" CTA: offer the user one of three ways to watch the run, then set up whichever they pick.
@@ -7984,6 +8007,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/smithers-ui` | Private local-only UI app: the full run/approval/memory control surface, served by `bunx smithers-orchestrator ui --app` against a local Gateway | [Gateway UI Components](/reference/gateway-ui) |
 | `@smithers-orchestrator/time-travel` | Snapshots, diffs, forks, replay, timelines, VCS tags, rewind locks/audits, and time-travel metrics | [Time Travel](/recipes), [Time Travel Quickstart](/guides/time-travel-quickstart) |
 | `@smithers-orchestrator/tool-context` | AsyncLocalStorage tool-execution context (run/node/idempotency keys, durability snapshot hook) shared by the engine and `smithers-orchestrator` without a dependency cycle | [Execution Model](/how-it-works) |
+| `@smithers-orchestrator/tui` | Full-screen OpenTUI + React single-run monitor launched by `bunx smithers-orchestrator up --interactive`; reuses the gateway-react hooks for live tree, graph, logs, timeline, and hijack views of one run | [CLI Overview](/cli/overview) |
 | `@smithers-orchestrator/usage` | Account quota and rate-limit usage reporting for Smithers providers | [CLI Overview](/cli/overview) |
 | `@smithers-orchestrator/vcs` | VCS discovery and jj workspace operations such as `runJj`, `workspaceAdd`, `workspaceList`, and pointer reverts | [VCS Helpers](/reference/vcs-helpers), [VCS Guide](/guides/vcs) |
 
