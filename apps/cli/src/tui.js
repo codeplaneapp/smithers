@@ -1,7 +1,7 @@
 import { intro, log, outro, select, spinner, text, confirm, isCancel, cancel } from "@clack/prompts";
 import pc from "picocolors";
 import { spawn } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
+import { closeSync, openSync, readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { discoverWorkflows, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
@@ -399,6 +399,17 @@ async function sleepOrChildFailure(ms, childFailure) {
 }
 
 /**
+ * Signals that mean the monitor was asked to stop (or its terminal went away) —
+ * a clean user quit, not a failure. Any OTHER terminating signal
+ * (SIGSEGV/SIGABRT/SIGKILL/SIGBUS/SIGILL/SIGFPE/SIGQUIT…) means the monitor
+ * crashed and must be reported as such, never as success.
+ * @type {ReadonlySet<NodeJS.Signals>}
+ */
+const CLEAN_EXIT_SIGNALS = new Set(
+    /** @type {NodeJS.Signals[]} */ (["SIGINT", "SIGTERM", "SIGHUP"]),
+);
+
+/**
  * @param {number | null} code
  * @param {NodeJS.Signals | null} signal
  */
@@ -509,25 +520,6 @@ function terminateDetachedChild(child) {
     try {
         child.kill("SIGTERM");
     } catch { }
-}
-
-/**
- * Spawn `smithers up` for a run as a detached, log-redirected process. Used for
- * the initial launch and to resume the run after a gate is resolved.
- * @param {{ indexPath: string; entryFile: string; runId: string; inputs?: Record<string, unknown>; resume?: boolean }} opts
- * @returns {import("node:child_process").ChildProcess}
- */
-function spawnUpProcess({ indexPath, entryFile, runId, inputs, resume }) {
-    const logFile = resolve(dirname(entryFile), `${runId}.log`);
-    const args = [indexPath, "up", entryFile, "--run-id", runId];
-    if (resume) args.push("--resume");
-    if (inputs && Object.keys(inputs).length > 0) args.push("--input", JSON.stringify(inputs));
-    const fd = openSync(logFile, "a");
-    try {
-        return spawn("bun", args, { detached: true, stdio: ["ignore", fd, fd], env: process.env });
-    } finally {
-        closeSync(fd);
-    }
 }
 
 /**
@@ -725,23 +717,46 @@ async function askWorkflowInputs(workflow) {
 }
 
 /**
+ * Resolve the full-screen TUI monitor entry point through the installed
+ * `@smithers-orchestrator/tui` package (its `smithers-mon` bin), so it works for
+ * published installs — not just from a relative path inside this monorepo.
+ * Returns null when the package can't be resolved (e.g. it wasn't installed),
+ * letting the caller fall back to the inline stream loop.
+ * @returns {string | null}
+ */
+export function resolveTuiEntry() {
+    try {
+        const pkgUrl = import.meta.resolve("@smithers-orchestrator/tui/package.json");
+        const pkgPath = fileURLToPath(pkgUrl);
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+        const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.["smithers-mon"];
+        if (!bin) return null;
+        return resolve(dirname(pkgPath), bin);
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Spawn the full-screen TUI monitor as a foreground child process.
- * Inherits the current TTY (stdio: "inherit") and resolves when the user exits.
+ * Inherits the current TTY (stdio: "inherit") and resolves when the child exits,
+ * carrying its exit code/signal so the caller can distinguish a clean user quit
+ * (code 0 / killed by signal) from a startup failure (non-zero code).
  *
+ * @param {string} tuiEntry - absolute path to the TUI monitor entry (smithers-mon bin)
  * @param {string} runId
  * @param {string} cliIndexPath - absolute path to apps/cli/src/index.js (passed as
  *   SMITHERS_CLI so the TUI can start the Gateway via the real CLI entry point)
- * @returns {Promise<void>}
+ * @param {string} [gatewayUrl] - gateway base URL the TUI should connect to
+ * @returns {Promise<{ code: number | null; signal: NodeJS.Signals | null }>}
  */
-async function launchTuiMonitor(runId, cliIndexPath) {
-    const tuiPath = fileURLToPath(new URL("../../../packages/tui/src/index.tsx", import.meta.url));
+async function launchTuiMonitor(tuiEntry, runId, cliIndexPath, gatewayUrl) {
     return new Promise((resolve, reject) => {
-        const child = spawn("bun", [tuiPath, runId], {
-            stdio: "inherit",
-            env: { ...process.env, SMITHERS_CLI: cliIndexPath },
-        });
+        const env = { ...process.env, SMITHERS_CLI: cliIndexPath };
+        if (gatewayUrl) env.SMITHERS_GATEWAY_URL = gatewayUrl;
+        const child = spawn("bun", [tuiEntry, runId], { stdio: "inherit", env });
         child.once("error", (err) => reject(err));
-        child.once("exit", () => resolve());
+        child.once("exit", (code, signal) => resolve({ code, signal }));
     });
 }
 
@@ -877,10 +892,40 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     }
     s.stop(`Run ${pc.dim(runId)} started ${pc.dim("·")} logs → ${pc.dim(logFile)}`);
 
+    const tuiEntry = resolveTuiEntry();
     try {
-        // Hand off to the full-screen TUI monitor. The TUI handles all views
-        // (tree, logs, timeline, approvals) and exits when the user presses q/Q.
-        await launchTuiMonitor(runId, indexPath);
+        if (tuiEntry) {
+            // Hand off to the full-screen TUI monitor. The TUI handles all views
+            // (tree, logs, timeline, approvals) and exits when the user presses q/Q.
+            const { code, signal } = await launchTuiMonitor(tuiEntry, runId, indexPath, process.env.SMITHERS_GATEWAY_URL);
+            // A clean quit is code 0 or an expected interrupt/terminal signal
+            // (Ctrl-C / kill / terminal close). A non-zero exit code means the
+            // monitor failed to start, and a CRASH signal (SIGSEGV/SIGABRT/…)
+            // means it died abnormally — surface both as failures rather than
+            // reporting success.
+            if (code !== null && code !== 0) {
+                return fail({
+                    code: "TUI_MONITOR_FAILED",
+                    message: `The run monitor exited with code ${code}. Run started — see ${logFile}.`,
+                    exitCode: code,
+                    runId,
+                    logFile,
+                });
+            }
+            if (code === null && signal && !CLEAN_EXIT_SIGNALS.has(signal)) {
+                return fail({
+                    code: "TUI_MONITOR_CRASHED",
+                    message: `The run monitor was killed by ${signal}. Run started — see ${logFile}.`,
+                    exitCode: 1,
+                    runId,
+                    logFile,
+                });
+            }
+        } else {
+            // The TUI package isn't available (e.g. a slim install) — fall back to
+            // the inline append-only stream loop so the run is still observable.
+            await streamRun(db.adapter, runId, name, promptText, { childFailure });
+        }
     } finally {
         db.cleanup();
     }

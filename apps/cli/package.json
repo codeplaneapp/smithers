@@ -48,6 +48,7 @@
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/server": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
+    "@smithers-orchestrator/tui": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
     "smithers-orchestrator": "workspace:*",
     "cron-parser": "^5.5.0",

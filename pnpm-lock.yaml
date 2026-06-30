@@ -116,6 +116,9 @@ importers:
       '@smithers-orchestrator/tool-context':
         specifier: workspace:*
         version: link:packages/tool-context
+      '@smithers-orchestrator/tui':
+        specifier: workspace:*
+        version: link:packages/tui
       '@smithers-orchestrator/usage':
         specifier: workspace:*
         version: link:packages/usage
@@ -289,6 +292,9 @@ importers:
       '@smithers-orchestrator/time-travel':
         specifier: workspace:*
         version: link:../../packages/time-travel
+      '@smithers-orchestrator/tui':
+        specifier: workspace:*
+        version: link:../../packages/tui
       '@smithers-orchestrator/usage':
         specifier: workspace:*
         version: link:../../packages/usage
@@ -1533,9 +1539,6 @@ importers:
       '@smithers-orchestrator/gateway-react':
         specifier: workspace:*
         version: link:../gateway-react
-      zod:
-        specifier: ^4.3.6
-        version: 4.3.6
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -5277,6 +5280,7 @@ packages:
 
   elliptic@6.6.1:
     resolution: {integrity: sha512-RaddvvMatK2LJHqFJ+YA4WysVN5Ita9E35botqIYspQ4TkRAlCicdzKOjlyv/1Za5RyTNn7di//eEV0uTAfe3g==}
+
   emoji-regex@10.6.0:
     resolution: {integrity: sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A==}
 
@@ -11176,6 +11180,7 @@ snapshots:
       inherits: 2.0.4
       minimalistic-assert: 1.0.1
       minimalistic-crypto-utils: 1.0.1
+
   emoji-regex@10.6.0: {}
 
   emoji-regex@8.0.0: {}
