@@ -6,6 +6,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
+    buildAgentSetupOptions,
     buildWorkflowOptions,
     buildSkillOptions,
     buildAgentDocOptions,
@@ -50,6 +51,27 @@ describe("buildWorkflowOptions", () => {
     test("labels are unique", () => {
         const labels = buildWorkflowOptions().map((o) => o.label);
         expect(labels.length).toBe(new Set(labels).size);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// buildAgentSetupOptions
+// ---------------------------------------------------------------------------
+
+describe("buildAgentSetupOptions", () => {
+    test("includes provider and custom adapter choices", () => {
+        const ids = buildAgentSetupOptions().map((o) => o.id);
+        expect(ids).toContain("openrouter");
+        expect(ids).toContain("claude");
+        expect(ids).toContain("codex");
+        expect(ids).toContain("opencode");
+        expect(ids).toContain("custom");
+    });
+
+    test("documents the AgentLike generate contract for custom adapters", () => {
+        const custom = buildAgentSetupOptions().find((o) => o.id === "custom");
+        expect(custom?.detail).toContain("generate(args)");
+        expect(custom?.detail).toContain("return");
     });
 });
 
@@ -158,6 +180,7 @@ describe("selectionsToPackOptions", () => {
         expect(packed.selectedWorkflows).toEqual([]);
         expect(packed.selectedSkillTargets).toEqual([]);
         expect(packed.selectedAgentDocs).toEqual([]);
+        expect(packed.scaffoldCustomAgent).toBe(false);
     });
 
     test("full selections include all workflows from buildWorkflowOptions", () => {
@@ -165,6 +188,16 @@ describe("selectionsToPackOptions", () => {
         const packed = selectionsToPackOptions(defs);
         const allIds = buildWorkflowOptions().map((o) => o.id);
         expect(packed.selectedWorkflows.sort()).toEqual(allIds.sort());
+    });
+
+    test("custom agent setup maps to custom adapter scaffold option", () => {
+        const sel = {
+            selectedAgentSetup: "custom",
+            selectedWorkflows: ["implement"],
+            selectedSkillTargets: [],
+            selectedAgentDocs: [],
+        };
+        expect(selectionsToPackOptions(sel).scaffoldCustomAgent).toBe(true);
     });
 });
 

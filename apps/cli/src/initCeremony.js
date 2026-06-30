@@ -3,7 +3,7 @@ import { intro, isCancel, log, multiselect } from "@clack/prompts";
 import pc from "picocolors";
 import { detectAvailableAgents } from "./agent-detection.js";
 import { applyWorkflowPackUpdates, initWorkflowPack } from "./workflow-pack.js";
-import { runInteractiveInitFlow, buildDefaultSelections } from "./init/interactiveInit.js";
+import { runInteractiveInitFlow, buildDefaultSelections, selectionsToPackOptions } from "./init/interactiveInit.js";
 
 /**
  * Render the human-facing `smithers init` flow: a clack ceremony that first
@@ -84,15 +84,17 @@ export async function runInitCeremony(opts = {}) {
         },
     };
 
+    const selectedOptions = selectionsToPackOptions(selections);
     const result = initWorkflowPack({
         force: opts.force,
         agentsOnly,
         global,
         installSkill,
         skipInstall: agentsOnly || opts.install === false,
-        selectedWorkflows: agentsOnly ? undefined : selections.selectedWorkflows,
-        selectedSkillTargets: agentsOnly ? undefined : selections.selectedSkillTargets,
-        selectedAgentDocs: agentsOnly ? undefined : selections.selectedAgentDocs,
+        selectedWorkflows: agentsOnly ? undefined : selectedOptions.selectedWorkflows,
+        selectedSkillTargets: agentsOnly ? undefined : selectedOptions.selectedSkillTargets,
+        selectedAgentDocs: agentsOnly ? undefined : selectedOptions.selectedAgentDocs,
+        scaffoldCustomAgent: agentsOnly ? undefined : selectedOptions.scaffoldCustomAgent,
         reporter,
     });
 

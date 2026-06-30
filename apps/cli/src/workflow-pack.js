@@ -17,7 +17,7 @@ import { GENERATED_SEEDED_FILES } from "./seeded-workflow-pack.generated.js";
  * @typedef {{ onSkip?: (relPath: string) => void; scaffolded?: (counts: { writtenCount: number; skippedCount: number; preservedCount: number }) => void; skillInstalled?: (result: import("./installCuratedSkill.js").CuratedSkillResult) => void; agentDocsNoted?: (result: import("./noteWorkflowPreferenceInAgentDocs.js").AgentDocsNoteSummary) => void; installStart?: () => void; installDone?: (result: InitInstallResult, captured?: { stdout: string; stderr: string }) => void; }} InitReporter
  */
 /**
- * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; agentsOnly?: boolean; global?: boolean; installSkill?: boolean; skillOptions?: Parameters<typeof installCuratedSkill>[0]; reporter?: InitReporter; env?: NodeJS.ProcessEnv; selectedWorkflows?: string[]; selectedSkillTargets?: string[]; selectedAgentDocs?: string[]; }} InitOptions
+ * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; agentsOnly?: boolean; global?: boolean; installSkill?: boolean; skillOptions?: Parameters<typeof installCuratedSkill>[0]; reporter?: InitReporter; env?: NodeJS.ProcessEnv; selectedWorkflows?: string[]; selectedSkillTargets?: string[]; selectedAgentDocs?: string[]; scaffoldCustomAgent?: boolean; }} InitOptions
  */
 /**
  * @typedef {{ status: "ok" | "skipped" | "failed"; reason?: string; }} InitInstallResult
@@ -326,10 +326,11 @@ function filterSeededFiles(files, workflowIds) {
     });
 }
 /**
+ * @param {{ scaffoldCustomAgent?: boolean }} [options]
  * @returns {TemplateFile[]}
  */
-function renderAgentScaffoldFiles() {
-    return [
+function renderAgentScaffoldFiles(options = {}) {
+    const files = [
         {
             path: ".smithers/agents/claude-code.ts",
             preserveExisting: true,
@@ -411,6 +412,7 @@ function renderAgentScaffoldFiles() {
                 'export { CodexAgent } from "./codex";',
                 'export { OpenCodeAgent } from "./opencode";',
                 'export { AntigravityAgent } from "./antigravity";',
+                ...(options.scaffoldCustomAgent ? ['export { CustomAgent } from "./custom";'] : []),
                 "",
             ].join("\n"),
         },
@@ -443,6 +445,30 @@ function renderAgentScaffoldFiles() {
             ].join("\n"),
         },
     ];
+    if (options.scaffoldCustomAgent) {
+        files.splice(4, 0, {
+            path: ".smithers/agents/custom.ts",
+            preserveExisting: true,
+            contents: [
+                'import { type AgentLike } from "smithers-orchestrator";',
+                "",
+                "// Custom AgentLike adapter scaffold.",
+                "// Implement generate(args) to run your provider/tool and return the assistant text.",
+                "export const CustomAgent: AgentLike = {",
+                "  async generate(args = {}) {",
+                '    const prompt = typeof args === "object" && args && "prompt" in args',
+                "      ? String((args as { prompt?: unknown }).prompt ?? \"\")",
+                "      : String(args ?? \"\");",
+                "    throw new Error(",
+                '      "CustomAgent is scaffolded but not implemented. Replace generate(args) with your adapter; it must return the assistant text for: " + prompt,',
+                "    );",
+                "  },",
+                "};",
+                "",
+            ].join("\n"),
+        });
+    }
+    return files;
 }
 /**
  * @param {Set<string>} [promptIds] - when provided, only emit prompts whose id is in this set.
@@ -4494,7 +4520,7 @@ function renderWorkflows(workflowIds) {
  * @param {{ workflowIds: Set<string>; componentNames: Set<string>; promptIds: Set<string> }} closure
  * @returns {TemplateFile[]}
  */
-function renderTemplateFiles(versions, env, projectRoot, closure) {
+function renderTemplateFiles(versions, env, projectRoot, closure, options = {}) {
     const { workflowIds, componentNames, promptIds } = closure;
     return [
         {
@@ -4565,7 +4591,7 @@ function renderTemplateFiles(versions, env, projectRoot, closure) {
             contents: ['import { mdxPlugin } from "smithers-orchestrator";', "", "mdxPlugin();", ""].join("\n"),
         },
         renderGatewayFile(workflowIds),
-        ...renderAgentScaffoldFiles(),
+        ...renderAgentScaffoldFiles({ scaffoldCustomAgent: options.scaffoldCustomAgent }),
         {
             path: ".smithers/agents.ts",
             contents: generateAgentsTs(env, { cwd: projectRoot }),
@@ -4630,7 +4656,7 @@ export function initWorkflowPack(options = {}) {
     /** @type {TemplateFile[]} */
     let templateFiles;
     if (options.agentsOnly) {
-        templateFiles = renderAgentScaffoldFiles();
+        templateFiles = renderAgentScaffoldFiles({ scaffoldCustomAgent: options.scaffoldCustomAgent });
     }
     else {
         const versions = readDependencyVersions();
@@ -4647,7 +4673,9 @@ export function initWorkflowPack(options = {}) {
             ensureDir(executionsDir);
         }
         const closure = computeClosure(options.selectedWorkflows);
-        templateFiles = renderTemplateFiles(versions, env, projectRoot, closure);
+        templateFiles = renderTemplateFiles(versions, env, projectRoot, closure, {
+            scaffoldCustomAgent: options.scaffoldCustomAgent,
+        });
     }
     const importerMap = buildComponentImporterMap(templateFiles);
     for (const file of templateFiles) {

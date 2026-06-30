@@ -72,11 +72,14 @@ const AGENT_DOC_FILES: string[] = ["CLAUDE.md", "AGENTS.md"];
 // ---------------------------------------------------------------------------
 
 export type InitSelections = {
+    selectedAgentSetup?: AgentSetupOptionId;
     selectedWorkflows: string[];
     selectedSkillTargets: string[];
     selectedAgentDocs: string[];
 };
 
+export type AgentSetupOptionId = "openrouter" | "claude" | "codex" | "opencode" | "custom";
+export type AgentSetupOption = { id: AgentSetupOptionId; label: string; detail: string };
 export type WorkflowOption = { id: string; label: string };
 export type SkillOption = { id: string; label: string };
 export type AgentDocOption = { filename: string; label: string };
@@ -88,6 +91,37 @@ export type AgentDocOption = { filename: string; label: string };
 /** All installable workflow options with human-readable labels. */
 export function buildWorkflowOptions(): WorkflowOption[] {
     return ALL_WORKFLOW_IDS.map((id) => ({ id, label: WORKFLOW_LABELS[id] ?? id }));
+}
+
+/** Agent setup paths shown when no usable agent is detected. */
+export function buildAgentSetupOptions(): AgentSetupOption[] {
+    return [
+        {
+            id: "openrouter",
+            label: "OpenRouter API key",
+            detail: "Set OPENROUTER_API_KEY. Smithers uses OpenAIAgent with the OpenRouter base URL; first run errors loudly until the key exists.",
+        },
+        {
+            id: "claude",
+            label: "Claude Code CLI",
+            detail: "Install the claude CLI, run claude, then /login. Smithers will uncomment the provider after detection succeeds.",
+        },
+        {
+            id: "codex",
+            label: "Codex CLI / OpenAI key",
+            detail: "Install the codex CLI and log in, or set OPENAI_API_KEY for Codex-backed runs.",
+        },
+        {
+            id: "opencode",
+            label: "OpenCode CLI / provider key",
+            detail: "Install opencode and authenticate, or set one of its provider API keys.",
+        },
+        {
+            id: "custom",
+            label: "Custom AgentLike adapter",
+            detail: "Scaffold .smithers/agents/custom.ts. Implement generate(args) so it returns the assistant text for a task.",
+        },
+    ];
 }
 
 /** Skill install targets (agent IDs that can receive the smithers skill). */
@@ -109,11 +143,13 @@ export function selectionsToPackOptions(sel: InitSelections): {
     selectedWorkflows: string[];
     selectedSkillTargets: string[];
     selectedAgentDocs: string[];
+    scaffoldCustomAgent: boolean;
 } {
     return {
         selectedWorkflows: sel.selectedWorkflows,
         selectedSkillTargets: sel.selectedSkillTargets,
         selectedAgentDocs: sel.selectedAgentDocs,
+        scaffoldCustomAgent: sel.selectedAgentSetup === "custom",
     };
 }
 
@@ -130,7 +166,7 @@ export function buildDefaultSelections(env: NodeJS.ProcessEnv = process.env): In
 // Internal types and helpers
 // ---------------------------------------------------------------------------
 
-type CheckItem = { id: string; label: string; checked: boolean };
+type CheckItem = { id: string; label: string; checked: boolean; detail?: string };
 type WizardStep = "agent" | "workflows" | "skills";
 
 function formatRow(label: string, isActive: boolean, isChecked: boolean): string {
@@ -149,6 +185,7 @@ type WizardRef = {
     scrollOff: number;
     wfItems: CheckItem[];
     skItems: CheckItem[];
+    agentItems: CheckItem[];
     visible: number;
     steps: WizardStep[];
 };
@@ -157,28 +194,30 @@ type WizardProps = {
     steps: WizardStep[];
     workflowItems: CheckItem[];
     skillItems: CheckItem[];
+    agentItems: CheckItem[];
     noAgentsMessage: string;
     onConfirm: (selections: InitSelections) => void;
     onCancel: () => void;
 };
 
-function InitWizard({ steps, workflowItems: initWf, skillItems: initSk, noAgentsMessage, onConfirm, onCancel }: WizardProps) {
+function InitWizard({ steps, workflowItems: initWf, skillItems: initSk, agentItems: initAgents, noAgentsMessage, onConfirm, onCancel }: WizardProps) {
     const { height } = useTerminalDimensions();
     const visible = Math.max(5, height - 12);
 
     const [stepIdx, setStepIdx] = useState(0);
     const [wfItems, setWfItems] = useState<CheckItem[]>(initWf);
     const [skItems, setSkItems] = useState<CheckItem[]>(initSk);
+    const [agentItems, setAgentItems] = useState<CheckItem[]>(initAgents);
     const [cursor, setCursor] = useState(0);
     const [scrollOff, setScrollOff] = useState(0);
 
     // Ref keeps the keyboard handler free of stale closures
-    const stateRef = useRef<WizardRef>({ stepIdx, cursor, scrollOff, wfItems, skItems, visible, steps });
-    stateRef.current = { stepIdx, cursor, scrollOff, wfItems, skItems, visible, steps };
+    const stateRef = useRef<WizardRef>({ stepIdx, cursor, scrollOff, wfItems, skItems, agentItems, visible, steps });
+    stateRef.current = { stepIdx, cursor, scrollOff, wfItems, skItems, agentItems, visible, steps };
 
     const step = steps[stepIdx] ?? "workflows";
     const isLastStep = stepIdx === steps.length - 1;
-    const items = step === "workflows" ? wfItems : step === "skills" ? skItems : [];
+    const items = step === "workflows" ? wfItems : step === "skills" ? skItems : agentItems;
     const checkedCount = items.filter((i) => i.checked).length;
     const visibleItems = items.slice(scrollOff, scrollOff + visible);
 
@@ -192,9 +231,14 @@ function InitWizard({ steps, workflowItems: initWf, skillItems: initSk, noAgents
             return;
         }
 
-        // Agent info step: just press Enter to proceed
+        // Agent setup is a single-select list.
         if (st === "agent") {
-            if (key.name === "return") {
+            if (key.name === "up" || (key.name === "k" && !key.ctrl && !key.meta)) {
+                setCursor(Math.max(0, s.cursor - 1));
+            } else if (key.name === "down" || (key.name === "j" && !key.ctrl && !key.meta)) {
+                setCursor(Math.min(s.agentItems.length - 1, s.cursor + 1));
+            } else if (key.name === "space" || key.name === "return") {
+                setAgentItems((prev) => prev.map((item, i) => ({ ...item, checked: i === s.cursor })));
                 setStepIdx(s.stepIdx + 1);
                 setCursor(0);
                 setScrollOff(0);
@@ -245,7 +289,8 @@ function InitWizard({ steps, workflowItems: initWf, skillItems: initSk, noAgents
                 const docs = s.skItems
                     .filter((i) => i.id.startsWith("doc:") && i.checked)
                     .map((i) => i.id.slice("doc:".length));
-                onConfirm({ selectedWorkflows: wf, selectedSkillTargets: sk, selectedAgentDocs: docs });
+                const agent = s.agentItems.find((i) => i.checked)?.id as AgentSetupOptionId | undefined;
+                onConfirm({ selectedAgentSetup: agent, selectedWorkflows: wf, selectedSkillTargets: sk, selectedAgentDocs: docs });
             }
         }
     });
@@ -254,6 +299,7 @@ function InitWizard({ steps, workflowItems: initWf, skillItems: initSk, noAgents
     // Agent info screen (no usable agents detected)
     // -------------------------------------------------------------------------
     if (step === "agent") {
+        const selected = agentItems.find((item, idx) => idx === cursor) ?? agentItems[0];
         return (
             <box width="100%" height="100%" flexDirection="column" padding={2}>
                 <text content="smithers init — agent setup" fg="#ffcc00" />
@@ -262,8 +308,18 @@ function InitWizard({ steps, workflowItems: initWf, skillItems: initSk, noAgents
                 <text content="" />
                 <text content={noAgentsMessage} fg="#cccccc" wrapMode="word" />
                 <text content="" />
-                <text content="Press Enter to continue with scaffolding." fg="#666666" />
-                <text content="Smithers will emit an actionable error on the first workflow run." fg="#666666" />
+                {agentItems.map((item, idx) => (
+                    <text
+                        key={item.id}
+                        content={formatRow(item.label, idx === cursor, item.checked)}
+                        fg={idx === cursor ? "#ffffff" : "#888888"}
+                    />
+                ))}
+                <text content="" />
+                <text content={selected?.label ?? ""} fg="#00cccc" />
+                <text content={selected?.detail ?? ""} fg="#cccccc" wrapMode="word" />
+                <text content="" />
+                <text content="↑↓ / jk navigate   enter choose   esc cancel" fg="#666666" />
             </box>
         );
     }
@@ -318,14 +374,8 @@ function buildNoAgentsMessage(detections: AgentAvailability[]): string {
         lines.push("");
     }
     lines.push(
-        "Options to add an agent:",
-        "  • Claude Code   → install `claude` CLI, run `claude` then `/login`",
-        "  • Codex         → install `codex` CLI, or set OPENAI_API_KEY",
-        "  • OpenCode      → install `opencode` CLI with any supported API key",
-        "  • OpenRouter    → set OPENROUTER_API_KEY (uses OpenAI-compatible SDK agent)",
-        "",
-        "Custom adapter: implement { generate(prompt): Promise<string> } (AgentLike contract).",
-        "Run `smithers agents add` after init to register accounts interactively.",
+        "Choose the setup path you want. Smithers still scaffolds a default OpenRouter-backed AgentLike so init never fails here.",
+        "AgentLike contract: implement generate(args) and return the assistant text for the task.",
     );
     return lines.join("\n");
 }
@@ -374,6 +424,12 @@ export async function runInteractiveInitFlow(
         : ["workflows", "skills"];
 
     const noAgentsMessage = buildNoAgentsMessage(detections);
+    const agentItems: CheckItem[] = buildAgentSetupOptions().map((o, idx) => ({
+        id: o.id,
+        label: o.label,
+        detail: o.detail,
+        checked: idx === 0,
+    }));
 
     return new Promise<InitSelections | null>((resolve) => {
         createCliRenderer({ exitOnCtrlC: false, clearOnShutdown: true })
@@ -397,6 +453,7 @@ export async function runInteractiveInitFlow(
                         steps={steps}
                         workflowItems={workflowItems}
                         skillItems={skillItems}
+                        agentItems={agentItems}
                         noAgentsMessage={noAgentsMessage}
                         onConfirm={handleConfirm}
                         onCancel={handleCancel}

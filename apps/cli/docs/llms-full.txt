@@ -2084,16 +2084,58 @@ If no Gateway is reachable on the default local port, `bunx smithers-orchestrato
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[80]:
+commands[81]:
   - name: init
-    purpose: Install the workflow pack into .smithers/ (local) or ~/.smithers/ (--global)
-    flags[6]{name,short,type,default,desc}:
+    purpose: Install the local Smithers workflow pack into .smithers/. Pass an optional prompt to also launch the create-workflow builder after init.
+    args[1]{name,type,required,desc}:
+      prompt,string,false,Optional plain-English task: after init, launch the create-workflow builder with this prompt pre-filled
+    flags[9]{name,short,type,default,desc}:
       force,,boolean,false,Overwrite existing scaffold files
       agents-only,,boolean,false,Only create .smithers/agents/ and leave workflow pack untouched
       install,,boolean,true,Run bun install inside the pack after scaffolding
       add-agents,,boolean,false,Launch the account registration wizard after scaffolding
+      skill,,boolean,true,Install the curated smithers skill into detected coding agents and append workflow guidance to existing CLAUDE.md/AGENTS.md files
       global,,boolean,false,Scaffold the global pack in ~/.smithers (honors SMITHERS_HOME) instead of ./.smithers
       template,,string,,Show next steps for a canonical starter template ID after init
+      yes,,boolean,false,Non-interactive: skip prompts and use defaults; alias for --non-interactive
+      non-interactive,,boolean,false,Non-interactive: skip prompts and use defaults; alias for --yes
+  - name: make-workflow
+    purpose: Build a new Smithers workflow from a plain-English description. Dispatches to the create-workflow builder.
+    args[1]{name,type,required,desc}:
+      task,string,false,Plain-English description of the workflow to build (forwarded as the builder prompt)
+    flags[31]{name,short,type,default,desc}:
+      detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
+      run-id,r,string,,Explicit run ID
+      max-concurrency,c,number,4,Maximum parallel tasks
+      root,,string,,Tool sandbox root directory
+      log,,boolean,true,Enable NDJSON event log file output
+      log-dir,,string,,NDJSON event logs directory
+      allow-network,,boolean,false,Allow bash tool network requests
+      max-output-bytes,,number,,Max bytes a single tool call can return
+      tool-timeout-ms,,number,,Max wall-clock time per tool call in ms
+      hot,,boolean,false,Hot reload for .tsx workflows
+      input,i,string,,Input data as JSON string or '-' to read JSON from stdin
+      annotations,,string,,Run annotations as flat JSON string/number/boolean object or '-' to read JSON from stdin
+      resume,,boolean|string,false,Resume an existing run; may be true or a run ID
+      force,,boolean,false,Resume even if still marked running
+      resume-claim-owner,,string,,Internal durable resume claim owner
+      resume-claim-heartbeat,,number,,Internal durable resume claim heartbeat
+      resume-restore-owner,,string,,Internal durable resume restore owner
+      resume-restore-heartbeat,,number,,Internal durable resume restore heartbeat
+      serve,,boolean,false,Start an HTTP server alongside the workflow
+      supervise,,boolean,false,Run stale-run supervisor loop with --serve
+      supervise-dry-run,,boolean,false,With --supervise; detect without resuming
+      supervise-interval,,string,10s,Supervisor poll interval
+      supervise-stale-threshold,,string,30s,Heartbeat staleness threshold
+      supervise-max-concurrent,,number,3,Max runs resumed per poll
+      port,,number,7331,HTTP server port when --serve
+      host,,string,127.0.0.1,HTTP bind address when --serve
+      auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
+      insecure,,boolean,false,Allow unauthenticated non-loopback HTTP binding; dangerous
+      metrics,,boolean,true,Expose /metrics endpoint when --serve
+      backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
+      prompt,p,string,,Prompt text mapped to input.prompt when --input is omitted
+      interactive,,boolean,false,Pick inputs through interactive terminal prompts and live-render the run
   - name: starters
     purpose: Show plain-English starter workflows with copy-paste commands
     args[1]{name,type,required,desc}:

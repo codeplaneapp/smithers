@@ -10,6 +10,10 @@ import { createExecutableDir, createTempRepo, runSmithers, writeFakeAntigravityB
 function buildEnv(homeDir, binDir, extra = {}) {
     return {
         HOME: homeDir,
+        CLAUDE_CONFIG_DIR: join(homeDir, ".claude"),
+        CODEX_HOME: join(homeDir, ".codex"),
+        GEMINI_DIR: join(homeDir, ".gemini"),
+        KIMI_SHARE_DIR: join(homeDir, ".kimi"),
         PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
         ANTHROPIC_API_KEY: "",
         OPENAI_API_KEY: "",
