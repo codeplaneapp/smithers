@@ -1491,7 +1491,7 @@ const upOptions = z.object({
 const interactiveRunOption = z
     .boolean()
     .default(false)
-    .describe("Pick a workflow and its inputs through interactive terminal prompts, then live-render the run (TTY only)");
+    .describe("Pick a workflow and its inputs through interactive terminal prompts, then launch the full-screen TUI monitor for the run (TTY only)");
 const upRunOptions = upOptions.extend({ interactive: interactiveRunOption });
 const evalOptions = z.object({
     cases: z.string().describe("JSON or JSONL eval case file"),
@@ -3710,7 +3710,7 @@ const cli = Cli.create({
     // smithers up [workflow]
     // =========================================================================
     .command("up", {
-    description: "Start a workflow execution. Omit the workflow (or pass --interactive) to pick one interactively; use -d for detached (background) mode.",
+    description: "Start a workflow execution. Omit the workflow (or pass --interactive) to pick one interactively and monitor it in the full-screen TUI; use -d for detached (background) mode.",
     args: upArgs,
     options: upRunOptions,
     alias: { detach: "d", runId: "r", input: "i", maxConcurrency: "c" },

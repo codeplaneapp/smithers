@@ -725,6 +725,27 @@ async function askWorkflowInputs(workflow) {
 }
 
 /**
+ * Spawn the full-screen TUI monitor as a foreground child process.
+ * Inherits the current TTY (stdio: "inherit") and resolves when the user exits.
+ *
+ * @param {string} runId
+ * @param {string} cliIndexPath - absolute path to apps/cli/src/index.js (passed as
+ *   SMITHERS_CLI so the TUI can start the Gateway via the real CLI entry point)
+ * @returns {Promise<void>}
+ */
+async function launchTuiMonitor(runId, cliIndexPath) {
+    const tuiPath = fileURLToPath(new URL("../../../packages/tui/src/index.tsx", import.meta.url));
+    return new Promise((resolve, reject) => {
+        const child = spawn("bun", [tuiPath, runId], {
+            stdio: "inherit",
+            env: { ...process.env, SMITHERS_CLI: cliIndexPath },
+        });
+        child.once("error", (err) => reject(err));
+        child.once("exit", () => resolve());
+    });
+}
+
+/**
  * The interactive run flow (`up --interactive` / `workflow run --interactive`):
  * optionally pick a workflow, start a real run, and live-render its status card
  * until the run finishes or pauses for approval.
@@ -854,58 +875,12 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
             logFile,
         });
     }
-    s.stop(`Watching ${pc.dim(runId)} ${pc.dim("·")} logs → ${pc.dim(logFile)}`);
+    s.stop(`Run ${pc.dim(runId)} started ${pc.dim("·")} logs → ${pc.dim(logFile)}`);
 
     try {
-        let result = await streamRun(db.adapter, runId, name, promptText, { childFailure });
-        let finalState = result.state;
-        // The detached `up` process exits whenever the run pauses for a gate
-        // (approval or human input). Resolve the gate via clack, resume the run
-        // as a fresh process, and keep streaming. Repeat until the run finishes.
-        while (true) {
-            let approvals = await db.adapter.listPendingApprovals(runId);
-            let humans = (await db.adapter.listPendingHumanRequests()).filter((r) => r.runId === runId);
-            // A HumanTask surfaces as BOTH a pending approval AND a human request,
-            // but the two can land a tick apart. If we only see the approval, give
-            // the human request a beat to materialize so we don't mis-route to a
-            // bare Approve/Deny prompt instead of asking for the real answer.
-            if (approvals.length > 0 && humans.length === 0) {
-                await sleep(400);
-                humans = (await db.adapter.listPendingHumanRequests()).filter((r) => r.runId === runId);
-                approvals = await db.adapter.listPendingApprovals(runId);
-            }
-            if (approvals.length === 0 && humans.length === 0) {
-                if (result.error) {
-                    const message = `${result.error.message} See ${logFile}.`;
-                    return fail({ code: "TUI_RUN_EXITED", message, exitCode: 1, runId, logFile });
-                }
-                break;
-            }
-
-            const gate = humans.length > 0
-                ? await handleHumanRequests(db.adapter, runId)
-                : await handleApprovals(db.adapter, runId);
-            if (gate.cancelled) {
-                return c.ok({ ran: true, runId, paused: true });
-            }
-
-            const runRow = await db.adapter.getRun(runId);
-            const view = runRow
-                ? await computeRunStateFromRow(db.adapter, runRow).catch(() => ({ state: runRow.status }))
-                : { state: undefined };
-            finalState = view.state ?? finalState;
-            if (["succeeded", "failed", "cancelled"].includes(view.state)) break;
-
-            const resumeChild = spawnUpProcess({ indexPath, entryFile: workflow.entryFile, runId, inputs, resume: true });
-            const resumeFailure = childFailurePromise(resumeChild);
-            resumeChild.unref();
-            result = await streamRun(db.adapter, runId, name, promptText, { childFailure: resumeFailure });
-            finalState = result.state ?? finalState;
-        }
-        if (["succeeded", "failed", "cancelled"].includes(String(finalState))) {
-            log.message(pc.bold("Outputs"));
-            await renderRunOutputs(db.adapter, runId);
-        }
+        // Hand off to the full-screen TUI monitor. The TUI handles all views
+        // (tree, logs, timeline, approvals) and exits when the user presses q/Q.
+        await launchTuiMonitor(runId, indexPath);
     } finally {
         db.cleanup();
     }
