@@ -87,8 +87,9 @@ export function agentPresent(id, base, detections) {
 
 /**
  * Copy the curated `smithers` onboarding skill (SKILL.md mental-model on-ramp +
- * the full docs bundle it reads on demand) into every detected coding agent's
- * skills directory. This is what makes `smithers init` "do everything": users
+ * the full docs bundle it reads on demand) into the skills directory of every
+ * detected agent Smithers can write directly today — Claude Code and Pi (see
+ * `skillTargets`). This is what makes `smithers init` "do everything": users
  * never hand-run the old `mkdir ~/.claude/skills/... && curl ...` dance.
  *
  * Best-effort: a missing source or a per-agent failure is recorded and never
