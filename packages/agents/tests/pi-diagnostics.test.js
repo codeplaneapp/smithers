@@ -28,7 +28,12 @@ describe("Pi diagnostics provider mapping", () => {
     });
     test("uses Anthropic checks for provider hint", async () => {
         const check = apiKeyCheck(getDiagnosticStrategy("pi", { provider: "anthropic" }));
-        const result = await check.run({ env: {}, cwd: "/tmp" });
+        // A valid-prefixed key keeps the anthropic check deterministic across CI
+        // (no Claude Code login) and local (logged in): it validates the key
+        // format instead of probing `claude auth status`. The message naming
+        // ANTHROPIC_API_KEY uniquely identifies the anthropic check (openai/google
+        // checks name their own env vars).
+        const result = await check.run({ env: { ANTHROPIC_API_KEY: "sk-ant-test" }, cwd: "/tmp" });
         expect(result.message).toContain("ANTHROPIC_API_KEY");
     });
     test("infers OpenAI checks from provider/model prefix", async () => {
@@ -43,7 +48,7 @@ describe("Pi diagnostics provider mapping", () => {
     });
     test("infers Anthropic checks from a bare claude- model id", async () => {
         const check = apiKeyCheck(getDiagnosticStrategy("pi", { model: "claude-3-5-sonnet" }));
-        const result = await check.run({ env: {}, cwd: "/tmp" });
+        const result = await check.run({ env: { ANTHROPIC_API_KEY: "sk-ant-test" }, cwd: "/tmp" });
         expect(result.message).toContain("ANTHROPIC_API_KEY");
     });
     test("keeps Google checks for a bare gemini- model id", () => {
