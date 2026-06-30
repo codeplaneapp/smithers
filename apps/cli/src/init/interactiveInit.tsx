@@ -29,6 +29,7 @@ const ALL_WORKFLOW_IDS: string[] = [
     "hello", "create-workflow", "context-engineer", "route-task", "create-skill",
     "extract-skill", "monitor-smithers", "monitor", "triage-run", "context-doctor",
     "backpressure-plan", "eval-author", "report-slideshow", "smithering",
+    "make-workflow-tutorial",
 ];
 
 const WORKFLOW_LABELS: Record<string, string> = {
@@ -63,6 +64,7 @@ const WORKFLOW_LABELS: Record<string, string> = {
     "eval-author": "eval-author – write evals for workflows",
     "report-slideshow": "report-slideshow – generate a report deck",
     smithering: "smithering – build + monitor + self-improve loop",
+    "make-workflow-tutorial": "make-workflow-tutorial – first-run workflow builder tutorial",
 };
 
 const AGENT_DOC_FILES: string[] = ["CLAUDE.md", "AGENTS.md"];

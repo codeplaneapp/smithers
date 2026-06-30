@@ -1,0 +1,47 @@
+---
+title: make-workflow-tutorial
+description: First-run tutorial that recommends, builds, launches, and monitors a project-specific workflow.
+---
+
+`make-workflow-tutorial` is the guided first-run path for turning "what should I automate?"
+into a real Smithers workflow. It reads the Smithers docs, scans the current repo, samples
+recent external coding-agent sessions, recommends a ranked list of workflow ideas, asks you
+which one to build, then delegates the build to [`create-workflow`](/workflows/create-workflow).
+
+```bash
+bunx smithers-orchestrator workflow run make-workflow-tutorial
+```
+
+You can bias the recommendation step with a hint:
+
+```bash
+bunx smithers-orchestrator workflow run make-workflow-tutorial \
+  --input '{"hint":"Find a workflow for release prep and changelog publishing"}'
+```
+
+## Stages
+
+1. **bootstrap**: read the repo file tree, `package.json`, recent commits, and the Smithers docs index.
+2. **sessions**: bounded, read-only scan of recent Claude Code, Codex, and Pi session JSONL files, with secrets redacted.
+3. **recommend**: rank five candidate workflows for this codebase and recent work.
+4. **pick**: pause for the human to choose or modify one recommendation.
+5. **build-launch**: start `create-workflow` with the selected goal and require a custom `.smithers/ui/<id>.tsx`.
+6. **monitor-loop**: poll the child run, narrate progress, resume stale work, and triage failures when possible.
+7. **dive-deeper**: read human guide docs and preview other "You say -> Smithers runs" capabilities.
+
+## Inputs
+
+| Input | Type | Default |
+| --- | --- | --- |
+| `hint` | string or null | `null` (infer from repo and sessions) |
+
+## What it reads
+
+The session reader is read-only and bounded. It samples recent files from
+`~/.claude/projects`, `~/.codex/sessions`, `~/.codex/history.jsonl`, and
+`~/.pi/agent/sessions`, extracts user and assistant text where schemas are known, and
+redacts API keys and bearer tokens before passing snippets to the recommendation task.
+
+Use this when you have just initialized Smithers and want your agent to discover a
+high-leverage workflow from your actual repo and recent work instead of starting from a blank
+catalog.

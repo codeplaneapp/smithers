@@ -41,6 +41,7 @@ describe("buildWorkflowOptions", () => {
         expect(ids).toContain("hello");
         expect(ids).toContain("create-workflow");
         expect(ids).toContain("smithering");
+        expect(ids).toContain("make-workflow-tutorial");
     });
 
     test("ids are unique", () => {

@@ -143,6 +143,7 @@
               "workflows/context-engineer",
               "workflows/route-task",
               "workflows/smithering",
+              "workflows/make-workflow-tutorial",
               "workflows/extract-skill",
               "workflows/vcs",
               "workflows/catalog"

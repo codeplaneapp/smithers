@@ -53,6 +53,8 @@ const SEEDED_WORKFLOW_IDS = [
   "report-slideshow",
   // Fable-as-operator meta-workflow (authored in fable-smithers, moved here).
   "smithering",
+  // First-run tutorial that recommends and builds a project-specific workflow.
+  "make-workflow-tutorial",
 ];
 
 type TemplateFile = { path: string; contents: string };

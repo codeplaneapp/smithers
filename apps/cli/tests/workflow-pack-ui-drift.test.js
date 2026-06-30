@@ -30,6 +30,7 @@ const DESCRIPTOR_EXCLUDED_WORKFLOWS = new Set([
     "eval-author",
     "report-slideshow",
     "smithering",
+    "make-workflow-tutorial",
 ]);
 
 // CI has no agent CLIs/credentials, so agent detection throws NO_USABLE_AGENTS.

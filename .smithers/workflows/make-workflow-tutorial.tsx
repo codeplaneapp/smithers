@@ -5,6 +5,7 @@
 // smithers-tags: tutorial, onboarding, create-workflow, first-time
 /** @jsxImportSource smithers-orchestrator */
 import { $ } from "bun";
+import { existsSync } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -42,9 +43,25 @@ async function listJsonlFiles(dir: string): Promise<string[]> {
   }
 }
 
-// Inline subset of _traceRedaction.js rules — keeps seeded workflow
-// self-contained (no cross-package import that breaks when installed).
-function redactLine(s: string): string {
+async function trySharedRedactValue(value: string): Promise<string | null> {
+  try {
+    // Reuse the observability package's canonical redactor when the seeded pack
+    // is running inside the monorepo. Keep a fallback for user repos where only
+    // the public smithers-orchestrator facade may be installed.
+    const dynamicImport = new Function("specifier", "return import(specifier)") as (
+      specifier: string,
+    ) => Promise<{ redactValue?: (value: unknown) => { value: unknown } }>;
+    const mod = await dynamicImport("@smithers-orchestrator/observability/_traceRedaction");
+    const redacted = mod.redactValue?.(value)?.value;
+    return typeof redacted === "string" ? redacted : null;
+  } catch {
+    return null;
+  }
+}
+
+// Fallback subset of _traceRedaction.js rules — keeps seeded workflow
+// self-contained when the private observability subpath is unavailable.
+function fallbackRedactValue(s: string): string {
   return s
     .replace(/\b(?:sk|pk)[-_][A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g, "[REDACTED_API_KEY]")
     .replace(/Bearer\s+[A-Za-z0-9._-]{8,}/gi, "Bearer [REDACTED]")
@@ -54,24 +71,46 @@ function redactLine(s: string): string {
     });
 }
 
-function extractUserText(obj: unknown): string | null {
+async function redactText(s: string): Promise<string> {
+  return (await trySharedRedactValue(s)) ?? fallbackRedactValue(s);
+}
+
+function textFromContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const c of content as Array<Record<string, unknown>>) {
+    if (typeof c === "string") parts.push(c);
+    if (c?.type === "text" && typeof c.text === "string") parts.push(c.text);
+    if (typeof c?.content === "string") parts.push(c.content);
+  }
+  return parts.join(" ");
+}
+
+function extractSessionText(obj: unknown): { role: "user" | "assistant"; text: string } | null {
   if (typeof obj !== "object" || obj === null) return null;
   const o = obj as Record<string, unknown>;
-  // Claude Code JSONL: {type:"user"|"human", message:{content:[{type:"text",text:"..."}]}}
-  if (o.type === "user" || o.type === "human") {
+  // Claude Code JSONL: {type:"user"|"assistant", message:{content:[...]}}
+  if (o.type === "user" || o.type === "human" || o.type === "assistant") {
     const msg = o.message as Record<string, unknown> | undefined;
     if (!msg) return null;
-    const parts: string[] = [];
-    if (typeof msg.content === "string") parts.push(msg.content);
-    if (Array.isArray(msg.content)) {
-      for (const c of msg.content as Array<Record<string, unknown>>) {
-        if (c?.type === "text" && typeof c.text === "string") parts.push(c.text);
-      }
-    }
-    return parts.length ? parts.join(" ") : null;
+    const text = textFromContent(msg.content).trim();
+    if (!text) return null;
+    return { role: o.type === "assistant" ? "assistant" : "user", text };
   }
-  // Codex / Pi JSONL: {role:"user", content:"..."}
-  if (o.role === "user" && typeof o.content === "string") return o.content;
+  // Codex / Pi JSONL: {role:"user"|"assistant", content:"..."}
+  if ((o.role === "user" || o.role === "assistant") && o.content) {
+    const text = textFromContent(o.content).trim();
+    if (!text) return null;
+    return { role: o.role, text };
+  }
+  // Newer Codex JSONL often stores messages under payload.
+  const payload = o.payload as Record<string, unknown> | undefined;
+  if (payload && (payload.role === "user" || payload.role === "assistant")) {
+    const text = textFromContent(payload.content ?? payload.message).trim();
+    if (!text) return null;
+    return { role: payload.role, text };
+  }
   return null;
 }
 
@@ -105,11 +144,14 @@ async function readRepoContext() {
 
 async function readExternalSessions() {
   const home = homedir();
+  // Locations mirror apps/observability/src/_sessionFileResolvers.js, plus
+  // Codex's history.jsonl index used before a concrete session file is known.
   const agentDirs = [
     { label: "claude", dir: join(home, ".claude", "projects") },
     { label: "codex", dir: join(home, ".codex", "sessions") },
     { label: "pi", dir: join(home, ".pi", "agent", "sessions") },
   ];
+  const extraFiles = [{ label: "codex", file: join(home, ".codex", "history.jsonl") }];
 
   const messages: string[] = [];
   let fileCount = 0;
@@ -143,10 +185,10 @@ async function readExternalSessions() {
           if (messages.length >= MAX_SESSION_MESSAGES) break;
           try {
             const obj = JSON.parse(line);
-            const text = extractUserText(obj);
-            if (text) {
-              const clean = redactLine(text.trim().slice(0, 300));
-              messages.push(`[${label}] ${clean}`);
+            const extracted = extractSessionText(obj);
+            if (extracted) {
+              const clean = await redactText(extracted.text.trim().slice(0, 300));
+              messages.push(`[${label}:${extracted.role}] ${clean}`);
             }
           } catch {
             // malformed JSONL line — skip
@@ -156,6 +198,31 @@ async function readExternalSessions() {
         // unreadable file — skip
       }
       if (messages.length >= MAX_SESSION_MESSAGES) break;
+    }
+  }
+
+  for (const { label, file } of extraFiles) {
+    if (messages.length >= MAX_SESSION_MESSAGES || !existsSync(file)) continue;
+    if (!agentTypes.includes(label)) agentTypes.push(label);
+    fileCount++;
+    try {
+      const raw = await readFile(file, "utf8");
+      const lines = raw.slice(0, MAX_BYTES_PER_FILE).split(/\r?\n/).filter(Boolean);
+      for (const line of lines) {
+        if (messages.length >= MAX_SESSION_MESSAGES) break;
+        try {
+          const obj = JSON.parse(line);
+          const extracted = extractSessionText(obj);
+          if (extracted) {
+            const clean = await redactText(extracted.text.trim().slice(0, 300));
+            messages.push(`[${label}:history:${extracted.role}] ${clean}`);
+          }
+        } catch {
+          // malformed JSONL line — skip
+        }
+      }
+    } catch {
+      // unreadable file — skip
     }
   }
 
@@ -234,7 +301,26 @@ async function pollBuild(childRunId: string) {
 }
 
 async function gatherDiveDeeperDocs() {
-  // Run smithers docs (concise llms.txt index) — works in any installation context.
+  try {
+    const guideDir = join(process.cwd(), "docs", "guide");
+    const files = (await readdir(guideDir))
+      .filter((f) => f.endsWith(".mdx"))
+      .sort()
+      .map((f) => join(guideDir, f));
+    const sections: string[] = [];
+    for (const file of files) {
+      const source = await readFile(file, "utf8");
+      if (!/(You say|You ask your agent).*(Smithers runs|agent reaches for|under the hood)/is.test(source)) {
+        continue;
+      }
+      sections.push(`--- ${file.replace(process.cwd() + "/", "")} ---\n${source.slice(0, 12_000)}`);
+    }
+    if (sections.length > 0) {
+      return { docs: sections.join("\n\n").slice(0, 50_000) };
+    }
+  } catch {
+    // User repos usually do not include smithers.sh human docs; fall through.
+  }
   const res = await $`bunx smithers-orchestrator docs`.nothrow().quiet();
   return { docs: (res.stdout?.toString() ?? "").slice(0, 50_000) };
 }
