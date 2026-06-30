@@ -1833,12 +1833,6 @@ function normalizeEventsQuery(options) {
  * @param {FailFn} fail
  */
 async function executeUpCommand(c, workflowPath, options, fail) {
-    // Opened lazily below when backend.json designates pglite as authoritative.
-    // Declared in the function scope (not the try block) so the finally can
-    // always close it: its PGLiteSocketServer is a live TCP listener that keeps
-    // the Node event loop alive, so without an explicit close the CLI never
-    // exits after the run completes.
-    let pgliteBackendApi;
     try {
         const resolvedWorkflowPath = resolve(process.cwd(), workflowPath);
         let input;
@@ -1995,16 +1989,27 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             });
         }
         const workflow = await loadWorkflow(workflowPath);
-        // If the workspace has been migrated to pglite (backend.json says pglite),
-        // open the pglite backend and redirect workflow.db to it so new runs
-        // land in the correct store instead of the leftover sqlite file.
+        // If the workspace has been migrated to pglite (backend.json says pglite)
+        // but this workflow was authored with the synchronous createSmithers()
+        // bun:sqlite factory, fail loud. Silently swapping its db to the async
+        // pglite store deadlocks the sync engine (a run never completes), and
+        // degrading to the leftover sqlite file is forbidden — createSmithers is
+        // the sqlite-only path ("never silently degrade"; the `--backend pglite`
+        // path rejects it for the same reason). The fix is to re-author the
+        // workflow with the async `openSmithersBackend` factory.
         if (!options.backend && !process.env.SMITHERS_BACKEND) {
             const markerBackend = readBackendMarkerForCwd(process.cwd());
-            if (markerBackend === "pglite") {
+            // A createSmithers (sqlite) workflow exposes its bun:sqlite handle as
+            // `db.$client`; an `openSmithersBackend` (pglite/postgres) workflow
+            // does not, and manages its own backend, so leave those untouched.
+            const isSqliteWorkflow = Boolean(workflow.db?.$client);
+            if (markerBackend === "pglite" && isSqliteWorkflow) {
+                // Open the authoritative pglite store first so a broken store is
+                // reported as such (rather than masking it behind the mismatch).
+                let probe;
                 try {
                     const { openSmithersBackend } = await import("smithers-orchestrator");
-                    pgliteBackendApi = await openSmithersBackend({}, { backend: "pglite" });
-                    workflow.db = pgliteBackendApi.db;
+                    probe = await openSmithersBackend({}, { backend: "pglite" });
                 }
                 catch (err) {
                     return fail({
@@ -2013,15 +2018,22 @@ async function executeUpCommand(c, workflowPath, options, fail) {
                         exitCode: 4,
                     });
                 }
+                await probe.close?.().catch(() => undefined);
+                return fail({
+                    code: "BACKEND_MISMATCH",
+                    message: "backend.json designates pglite as authoritative, but this workflow uses the synchronous createSmithers() bun:sqlite backend, which cannot serve pglite. " +
+                        "Re-author it with the async factory:\n\n" +
+                        "  const { smithers, Workflow, outputs } = await openSmithersBackend(schemas);\n\n" +
+                        "or run on the leftover SQLite store with SMITHERS_BACKEND=sqlite (or --backend sqlite).",
+                    exitCode: 4,
+                });
             }
         }
         ensureSmithersTables(workflow.db);
         if (options.hot) {
             process.stderr.write(`[hot] Hot reload enabled\n`);
         }
-        if (!pgliteBackendApi) {
-            setupSqliteCleanup(workflow);
-        }
+        setupSqliteCleanup(workflow);
         const adapter = new SmithersDb(workflow.db);
         // Recover rewinds interrupted by a prior crash before driving the run.
         // jumpToFrame writes a durable in_progress audit marker before mutating,
@@ -2224,16 +2236,6 @@ async function executeUpCommand(c, workflowPath, options, fail) {
     }
     catch (err) {
         return fail({ code: "RUN_FAILED", message: err?.message ?? String(err), exitCode: 1 });
-    }
-    finally {
-        // Closing the pglite backend stops its PGLiteSocketServer and frees the
-        // event loop so the CLI exits cleanly once the run is done; otherwise the
-        // process hangs until it is killed. Runs after the (serve-mode) server has
-        // already been stopped, so it never tears the store out from under a run.
-        if (pgliteBackendApi) {
-            try { await pgliteBackendApi.close(); }
-            catch { /* best-effort teardown */ }
-        }
     }
 }
 /**

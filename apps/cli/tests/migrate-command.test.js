@@ -245,7 +245,7 @@ test("a fresh workspace never triggers the ps migration guard", () => {
 // not to the leftover sqlite file. This exercises the readBackendMarkerForCwd +
 // workflow.db redirect code path inside executeUpCommand.
 // Timeout is 5 minutes: migration (pglite init ~30s) + workflow run (pglite open ~30s).
-test("post-migration smithers workflow run writes new runs to pglite without SMITHERS_BACKEND env", () => {
+test("post-migration smithers workflow run fails loud for a sync createSmithers workflow on a pglite marker", () => {
   const repo = createTempRepo();
   const env = { HOME: repo.dir };
   seedLegacyStore(repo);
@@ -282,20 +282,25 @@ test("post-migration smithers workflow run writes new runs to pglite without SMI
   expect(migrate.exitCode).toBe(0);
   expect(repo.exists(".smithers/backend.json")).toBe(true);
 
-  // Run the workflow WITHOUT any SMITHERS_BACKEND env override. executeUpCommand
-  // must read backend.json via readBackendMarkerForCwd and redirect workflow.db
-  // to pglite, so the new run lands in pglite. Use the workflow ID (not the file
-  // path) since `smithers workflow run` resolves by ID from .smithers/workflows/.
+  // Run the workflow WITHOUT any SMITHERS_BACKEND override. executeUpCommand reads
+  // backend.json (pglite) via readBackendMarkerForCwd, but the workflow uses the
+  // synchronous createSmithers() bun:sqlite factory, which cannot serve pglite.
+  // Smithers must FAIL LOUD (never silently swap the sync db onto async pglite —
+  // that deadlocks the engine — and never silently degrade to the leftover sqlite
+  // file). Use the workflow ID since `workflow run` resolves by ID.
   const run = runSmithers(
     ["workflow", "run", "up-backend-test", "--run-id", "post-migrate-up-run"],
     // HOME deliberately equals the workspace to exercise the marker lookup at
     // $HOME/.smithers/backend.json. No SMITHERS_BACKEND=pglite override.
-    { cwd: repo.dir, env, format: "json", timeoutMs: 240_000 },
+    { cwd: repo.dir, env, format: "json", timeoutMs: 60_000 },
   );
-  expect(run.exitCode).toBe(0);
-  expect(run.stderr).not.toContain("SMITHERS_MIGRATION_REQUIRED");
+  expect(run.exitCode).toBe(4);
+  const runText = `${run.stdout}\n${run.stderr}`;
+  expect(runText).toContain("BACKEND_MISMATCH");
+  expect(runText).toContain("backend.json designates pglite as authoritative");
+  expect(runText).toContain("openSmithersBackend");
 
-  // ps without env should read pglite (backend.json) and show the new run.
+  // The failed run must not have been written to either store.
   const ps = runSmithers(["ps", "--all"], {
     cwd: repo.dir,
     env,
@@ -303,13 +308,12 @@ test("post-migration smithers workflow run writes new runs to pglite without SMI
     timeoutMs: 30_000,
   });
   expect(ps.exitCode).toBe(0);
-  expect(JSON.stringify(ps.json)).toContain("post-migrate-up-run");
+  expect(JSON.stringify(ps.json)).not.toContain("post-migrate-up-run");
 
-  // The original migrated legacy run should also appear (it's in pglite now).
+  // The migration itself succeeded, so the migrated legacy run is in pglite.
   expect(JSON.stringify(ps.json)).toContain("cli-migrate-run");
 
-  // Verify the new run is in pglite: ps with SMITHERS_BACKEND=sqlite should
-  // NOT list it (it was written to pglite, not the leftover sqlite file).
+  // It must not have silently degraded to the leftover sqlite store either.
   const psSqlite = runSmithers(["ps", "--all"], {
     cwd: repo.dir,
     env: { ...env, SMITHERS_BACKEND: "sqlite" },
@@ -318,7 +322,7 @@ test("post-migration smithers workflow run writes new runs to pglite without SMI
   });
   expect(psSqlite.exitCode).toBe(0);
   expect(JSON.stringify(psSqlite.json)).not.toContain("post-migrate-up-run");
-}, 300_000); // 5 min: pglite migration (~30s) + pglite workflow run (~30s) + ps reads
+}, 180_000); // pglite migration (~30s) + fast fail-loud run + ps reads
 
 test("post-migration smithers up honors SMITHERS_BACKEND=sqlite instead of marker pglite", () => {
   const repo = createTempRepo();
