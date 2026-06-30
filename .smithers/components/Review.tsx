@@ -91,6 +91,8 @@ export function ReviewPanel({ idPrefix, prompt, agents, moderator = defaultSynth
       panelistOutput={reviewOutputSchema}
       moderatorOutput={reviewSynthesisSchema}
       strategy="synthesize"
+      panelistTaskProps={{ continueOnFail: true, timeoutMs: 1_800_000, heartbeatTimeoutMs: 600_000 }}
+      moderatorTaskProps={{ timeoutMs: 1_800_000, heartbeatTimeoutMs: 600_000 }}
     >
       <ReviewPrompt reviewer="review panelist" prompt={promptText} />
     </Panel>

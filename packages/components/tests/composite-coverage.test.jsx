@@ -302,6 +302,37 @@ describe("composite component expansion coverage", () => {
         expect(consensusResult.tasks[1].prompt).toContain("Strategy: CONSENSUS");
     });
 
+    test("Panel supports failover-chain panelists and per-task options", async () => {
+        const result = await render(
+            <Panel
+                id="rp"
+                panelists={[[agent, otherAgent], agent]}
+                moderator={otherAgent}
+                panelistOutput="panel_out"
+                moderatorOutput="moderator_out"
+                strategy="synthesize"
+                panelistTaskProps={{ continueOnFail: true, timeoutMs: 1000, heartbeatTimeoutMs: 500 }}
+                moderatorTaskProps={{ timeoutMs: 2000 }}
+            >
+                review this
+            </Panel>,
+        );
+        expect(result.tasks.map((task) => task.nodeId)).toEqual([
+            "rp-panelist-0",
+            "rp-panelist-1",
+            "rp-moderator",
+        ]);
+        // A failover-chain entry becomes one panelist whose agent IS the chain.
+        expect(result.tasks[0].agent).toEqual([agent, otherAgent]);
+        expect(result.tasks[1].agent).toBe(agent);
+        // panelistTaskProps apply to every panelist task; moderatorTaskProps to the moderator.
+        expect(result.tasks[0].continueOnFail).toBe(true);
+        expect(result.tasks[0].timeoutMs).toBe(1000);
+        expect(result.tasks[0].heartbeatTimeoutMs).toBe(500);
+        expect(result.tasks[1].continueOnFail).toBe(true);
+        expect(result.tasks[2].timeoutMs).toBe(2000);
+    });
+
     test("Debate, ReviewLoop, Optimizer, and ScanFixVerify expand their loops", async () => {
         expect(Debate({ skipIf: true })).toBeNull();
         expect(ReviewLoop({ skipIf: true })).toBeNull();

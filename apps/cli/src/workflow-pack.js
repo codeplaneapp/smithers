@@ -22,7 +22,8 @@ import { GENERATED_SEEDED_FILES } from "./seeded-workflow-pack.generated.js";
  * @typedef {{ status: "ok" | "skipped" | "failed"; reason?: string; }} InitInstallResult
  */
 /**
- * @typedef {{ rootDir: string; writtenFiles: string[]; skippedFiles: string[]; preservedPaths: string[]; install: InitInstallResult; skill?: import("./installCuratedSkill.js").CuratedSkillResult; agentDocs?: import("./noteWorkflowPreferenceInAgentDocs.js").AgentDocsNoteSummary; }} InitResult
+ * @typedef {{ path: string; absolutePath: string; contents: string; isComponent: boolean; importedBy: string[] }} ChangedPackFile
+ * @typedef {{ rootDir: string; writtenFiles: string[]; skippedFiles: string[]; preservedPaths: string[]; changedFiles: ChangedPackFile[]; updatedFiles?: string[]; install: InitInstallResult; skill?: import("./installCuratedSkill.js").CuratedSkillResult; agentDocs?: import("./noteWorkflowPreferenceInAgentDocs.js").AgentDocsNoteSummary; }} InitResult
  */
 /**
  * @typedef {{ command: string; description: string; }} WorkflowCta
@@ -1062,7 +1063,7 @@ function renderComponents() {
     return [
         {
             path: ".smithers/components/Review.tsx",
-            contents: "// smithers-source: seeded\n/** @jsxImportSource smithers-orchestrator */\nimport { Panel, Parallel, Task, type AgentLike } from \"smithers-orchestrator\";\nimport { z } from \"zod/v4\";\nimport { synthesizer as defaultSynthesizer } from \"./roles\";\nimport ReviewPrompt from \"../prompts/review.mdx\";\n\nconst reviewIssueSchema = z.object({\n  severity: z.enum([\"critical\", \"major\", \"minor\", \"nit\"]),\n  title: z.string(),\n  file: z.string().nullable().default(null),\n  description: z.string(),\n});\n\n// One reviewer's verdict — produced by each panelist.\nexport const reviewOutputSchema = z.object({\n  reviewer: z.string(),\n  approved: z.boolean(),\n  feedback: z.string(),\n  issues: z.array(reviewIssueSchema).default([]),\n});\n\n// The MODERATOR's synthesized verdict — one consolidated decision merged from\n// every panelist. MUST be a distinct schema object from reviewOutputSchema so\n// it resolves to its own output channel (channels are keyed by schema identity).\nexport const reviewSynthesisSchema = z.object({\n  approved: z\n    .boolean()\n    .describe(\n      \"true ONLY if there are no remaining critical or major issues across all reviewers\",\n    ),\n  feedback: z\n    .string()\n    .describe(\"consolidated, actionable feedback merged from every reviewer\"),\n  issues: z.array(reviewIssueSchema).default([]),\n});\n\ntype ReviewProps = {\n  idPrefix: string;\n  prompt: unknown;\n  agents: AgentLike[];\n};\n\n/**\n * Legacy parallel review: N reviewers, no synthesis. Kept for back-compat;\n * prefer <ReviewPanel> for a synthesized verdict.\n */\nexport function Review({ idPrefix, prompt, agents }: ReviewProps) {\n  const promptText = typeof prompt === \"string\" ? prompt : JSON.stringify(prompt ?? null);\n  return (\n    <Parallel>\n      {agents.map((agent, index) => (\n        <Task\n          key={`${idPrefix}:${index}`}\n          id={`${idPrefix}:${index}`}\n          output={reviewOutputSchema}\n          agent={agent}\n          continueOnFail\n          timeoutMs={1_800_000}\n          heartbeatTimeoutMs={600_000}\n        >\n          <ReviewPrompt reviewer={`reviewer-${index + 1}`} prompt={promptText} />\n        </Task>\n      ))}\n    </Parallel>\n  );\n}\n\ntype ReviewPanelProps = {\n  idPrefix: string;\n  prompt: unknown;\n  /** Panelist reviewers (run in parallel). */\n  agents: AgentLike[];\n  /** The moderator that synthesizes the panelists into one verdict; defaults to the shared synthesizer (usually Codex). */\n  moderator?: AgentLike;\n};\n\n/**\n * <ReviewPanel> — a model-diverse review PANEL that gets SYNTHESIZED. Each\n * panelist in `agents` reviews in parallel (writing reviewOutputSchema), then\n * the moderator merges them into a single reviewSynthesisSchema verdict at the\n * node `${idPrefix}-moderator`. Read that verdict with `reviewGate`.\n */\nexport function ReviewPanel({ idPrefix, prompt, agents, moderator = defaultSynthesizer }: ReviewPanelProps) {\n  const promptText = typeof prompt === \"string\" ? prompt : JSON.stringify(prompt ?? null);\n  return (\n    <Panel\n      id={idPrefix}\n      panelists={agents}\n      moderator={moderator}\n      panelistOutput={reviewOutputSchema}\n      moderatorOutput={reviewSynthesisSchema}\n      strategy=\"synthesize\"\n    >\n      <ReviewPrompt reviewer=\"review panelist\" prompt={promptText} />\n    </Panel>\n  );\n}\n\nexport type ReviewGate = {\n  /** Whether the moderator has produced a verdict yet. */\n  hasVerdict: boolean;\n  /** Whether the synthesized verdict approved the change. */\n  approved: boolean;\n  /** Consolidated rejection feedback (null when approved or no verdict yet). */\n  feedback: string | null;\n};\n\n/**\n * Read a ReviewPanel's synthesized verdict from the workflow context. The\n * workflow must register `reviewSynthesis: reviewSynthesisSchema` in\n * createSmithers. `nodeId` is the moderator node (`${idPrefix}-moderator`).\n */\nexport function reviewGate(\n  ctx: { outputMaybe: (channel: string, opts: { nodeId: string }) => unknown },\n  nodeId: string,\n): ReviewGate {\n  const verdict = ctx.outputMaybe(\"reviewSynthesis\", { nodeId }) as\n    | z.infer<typeof reviewSynthesisSchema>\n    | undefined;\n  const approved = verdict?.approved === true;\n  let feedback: string | null = null;\n  if (verdict && !approved) {\n    const parts: string[] = [];\n    if (verdict.feedback) parts.push(verdict.feedback);\n    for (const issue of verdict.issues ?? []) {\n      parts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : \"\"}`);\n    }\n    feedback = parts.length > 0 ? parts.join(\"\\n\") : null;\n  }\n  return { hasVerdict: verdict !== undefined, approved, feedback };\n}\n",
+            contents: "// smithers-source: seeded\n/** @jsxImportSource smithers-orchestrator */\nimport { Panel, Parallel, Task, type AgentLike } from \"smithers-orchestrator\";\nimport { z } from \"zod/v4\";\nimport { synthesizer as defaultSynthesizer } from \"./roles\";\nimport ReviewPrompt from \"../prompts/review.mdx\";\n\nconst reviewIssueSchema = z.object({\n  severity: z.enum([\"critical\", \"major\", \"minor\", \"nit\"]),\n  title: z.string(),\n  file: z.string().nullable().default(null),\n  description: z.string(),\n});\n\n// One reviewer's verdict — produced by each panelist.\nexport const reviewOutputSchema = z.object({\n  reviewer: z.string(),\n  approved: z.boolean(),\n  feedback: z.string(),\n  issues: z.array(reviewIssueSchema).default([]),\n});\n\n// The MODERATOR's synthesized verdict — one consolidated decision merged from\n// every panelist. MUST be a distinct schema object from reviewOutputSchema so\n// it resolves to its own output channel (channels are keyed by schema identity).\nexport const reviewSynthesisSchema = z.object({\n  approved: z\n    .boolean()\n    .describe(\n      \"true ONLY if there are no remaining critical or major issues across all reviewers\",\n    ),\n  feedback: z\n    .string()\n    .describe(\"consolidated, actionable feedback merged from every reviewer\"),\n  issues: z.array(reviewIssueSchema).default([]),\n});\n\ntype ReviewProps = {\n  idPrefix: string;\n  prompt: unknown;\n  agents: AgentLike[];\n};\n\n/**\n * Legacy parallel review: N reviewers, no synthesis. Kept for back-compat;\n * prefer <ReviewPanel> for a synthesized verdict.\n */\nexport function Review({ idPrefix, prompt, agents }: ReviewProps) {\n  const promptText = typeof prompt === \"string\" ? prompt : JSON.stringify(prompt ?? null);\n  return (\n    <Parallel>\n      {agents.map((agent, index) => (\n        <Task\n          key={`${idPrefix}:${index}`}\n          id={`${idPrefix}:${index}`}\n          output={reviewOutputSchema}\n          agent={agent}\n          continueOnFail\n          timeoutMs={1_800_000}\n          heartbeatTimeoutMs={600_000}\n        >\n          <ReviewPrompt reviewer={`reviewer-${index + 1}`} prompt={promptText} />\n        </Task>\n      ))}\n    </Parallel>\n  );\n}\n\ntype ReviewPanelProps = {\n  idPrefix: string;\n  prompt: unknown;\n  /** Panelist reviewers (run in parallel). */\n  agents: AgentLike[];\n  /** The moderator that synthesizes the panelists into one verdict; defaults to the shared synthesizer (usually Codex). */\n  moderator?: AgentLike;\n};\n\n/**\n * <ReviewPanel> — a model-diverse review PANEL that gets SYNTHESIZED. Each\n * panelist in `agents` reviews in parallel (writing reviewOutputSchema), then\n * the moderator merges them into a single reviewSynthesisSchema verdict at the\n * node `${idPrefix}-moderator`. Read that verdict with `reviewGate`.\n */\nexport function ReviewPanel({ idPrefix, prompt, agents, moderator = defaultSynthesizer }: ReviewPanelProps) {\n  const promptText = typeof prompt === \"string\" ? prompt : JSON.stringify(prompt ?? null);\n  return (\n    <Panel\n      id={idPrefix}\n      panelists={agents}\n      moderator={moderator}\n      panelistOutput={reviewOutputSchema}\n      moderatorOutput={reviewSynthesisSchema}\n      strategy=\"synthesize\"\n      panelistTaskProps={{ continueOnFail: true, timeoutMs: 1_800_000, heartbeatTimeoutMs: 600_000 }}\n      moderatorTaskProps={{ timeoutMs: 1_800_000, heartbeatTimeoutMs: 600_000 }}\n    >\n      <ReviewPrompt reviewer=\"review panelist\" prompt={promptText} />\n    </Panel>\n  );\n}\n\nexport type ReviewGate = {\n  /** Whether the moderator has produced a verdict yet. */\n  hasVerdict: boolean;\n  /** Whether the synthesized verdict approved the change. */\n  approved: boolean;\n  /** Consolidated rejection feedback (null when approved or no verdict yet). */\n  feedback: string | null;\n};\n\n/**\n * Read a ReviewPanel's synthesized verdict from the workflow context. The\n * workflow must register `reviewSynthesis: reviewSynthesisSchema` in\n * createSmithers. `nodeId` is the moderator node (`${idPrefix}-moderator`).\n */\nexport function reviewGate(\n  ctx: { outputMaybe: (channel: string, opts: { nodeId: string }) => unknown },\n  nodeId: string,\n): ReviewGate {\n  const verdict = ctx.outputMaybe(\"reviewSynthesis\", { nodeId }) as\n    | z.infer<typeof reviewSynthesisSchema>\n    | undefined;\n  const approved = verdict?.approved === true;\n  let feedback: string | null = null;\n  if (verdict && !approved) {\n    const parts: string[] = [];\n    if (verdict.feedback) parts.push(verdict.feedback);\n    for (const issue of verdict.issues ?? []) {\n      parts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : \"\"}`);\n    }\n    feedback = parts.length > 0 ? parts.join(\"\\n\") : null;\n  }\n  return { hasVerdict: verdict !== undefined, approved, feedback };\n}\n",
         },
         {
             path: ".smithers/components/ValidationLoop.tsx",
@@ -2887,7 +2888,6 @@ function renderWorkflows() {
             "",
             "export default smithers((ctx) => {",
             '  const validate = ctx.outputMaybe("validate", { nodeId: "impl:validate" });',
-            "  const reviews = ctx.outputs.review ?? [];",
             "  const impl = ctx.outputs.implement?.at(-1);",
             "",
             "  // done = false until validate has actually run AND passed, AND at least one reviewer approved",
@@ -2901,15 +2901,8 @@ function renderWorkflows() {
             "  if (validate && !validationPassed && validate.failingSummary) {",
             "    feedbackParts.push(`VALIDATION FAILED:\\n${validate.failingSummary}`);",
             "  }",
-            "  for (const review of reviews) {",
-            "    if (review.approved === false) {",
-            "      feedbackParts.push(`REVIEWER REJECTED:\\n${review.feedback}`);",
-            "      if (review.issues?.length) {",
-            "        for (const issue of review.issues) {",
-            "          feedbackParts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : \"\"}`);",
-            "        }",
-            "      }",
-            "    }",
+            "  if (gate.feedback) {",
+            "    feedbackParts.push(`REVIEW PANEL REJECTED:\\n${gate.feedback}`);",
             "  }",
             "  const feedback = feedbackParts.length > 0 ? feedbackParts.join(\"\\n\\n\") : null;",
             "",
@@ -3011,7 +3004,6 @@ function renderWorkflows() {
             "",
             "  // Validation loop feedback",
             '  const validate = ctx.outputMaybe("validate", { nodeId: "impl:validate" });',
-            "  const reviews = ctx.outputs.review ?? [];",
             "",
             "  const hasValidated = validate !== undefined;",
             "  const validationPassed = hasValidated && validate.allPassed !== false;",
@@ -3023,15 +3015,8 @@ function renderWorkflows() {
             "  if (validate && !validationPassed && validate.failingSummary) {",
             "    feedbackParts.push(`VALIDATION FAILED:\\n${validate.failingSummary}`);",
             "  }",
-            "  for (const review of reviews) {",
-            "    if (review.approved === false) {",
-            "      feedbackParts.push(`REVIEWER REJECTED:\\n${review.feedback}`);",
-            "      if (review.issues?.length) {",
-            "        for (const issue of review.issues) {",
-            "          feedbackParts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : \"\"}`);",
-            "        }",
-            "      }",
-            "    }",
+            "  if (gate.feedback) {",
+            "    feedbackParts.push(`REVIEW PANEL REJECTED:\\n${gate.feedback}`);",
             "  }",
             "  const feedback = feedbackParts.length > 0 ? feedbackParts.join(\"\\n\\n\") : null;",
             "",

@@ -15,6 +15,12 @@ import { Task } from "./Task.js";
  * @returns {PanelistConfig}
  */
 function normalizePanelist(entry, index) {
+    // A failover chain (AgentLike[]) is one panelist whose agent IS the chain —
+    // the Task runs the chain as a failover sequence. Without this, an array
+    // entry falls through to the PanelistConfig branch and `p.agent` is undefined.
+    if (Array.isArray(entry)) {
+        return { agent: entry, label: `panelist-${index}` };
+    }
     if ("generate" in entry && !("agent" in entry)) {
         return { agent: entry, label: `panelist-${index}` };
     }
@@ -29,7 +35,7 @@ function normalizePanelist(entry, index) {
 export function Panel(props) {
     if (props.skipIf)
         return null;
-    const { id, panelists, moderator, panelistOutput, moderatorOutput, strategy = "synthesize", minAgree, maxConcurrency, children, } = props;
+    const { id, panelists, moderator, panelistOutput, moderatorOutput, strategy = "synthesize", minAgree, maxConcurrency, panelistTaskProps, moderatorTaskProps, children, } = props;
     const prefix = id ?? "panel";
     const normalized = panelists.map(normalizePanelist);
     // Build parallel panelist tasks
@@ -41,6 +47,7 @@ export function Panel(props) {
             output: panelistOutput,
             agent: p.agent,
             label: p.role ?? p.label,
+            ...panelistTaskProps,
             children,
         });
     });
@@ -63,6 +70,7 @@ export function Panel(props) {
         output: moderatorOutput,
         agent: moderator,
         needs,
+        ...moderatorTaskProps,
         children: moderatorChildren,
     });
     return React.createElement(Sequence, null, parallelEl, moderatorTask);

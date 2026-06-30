@@ -881,8 +881,17 @@ type OptimizerProps = {
 };
 
 type PanelistConfig = { agent: AgentLike; role?: string; label?: string };
+type PanelTaskOptions = {
+  continueOnFail?: boolean;
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  retries?: number;
+};
+
 type PanelProps = {
   id?: string;
+  // Each entry is an agent or PanelistConfig. A failover chain (AgentLike[])
+  // passed via a cast also works: it becomes one panelist run as failover.
   panelists: PanelistConfig[] | AgentLike[];
   moderator: AgentLike;
   panelistOutput: OutputTarget;
@@ -890,6 +899,8 @@ type PanelProps = {
   strategy?: "synthesize" | "vote" | "consensus";
   minAgree?: number;
   maxConcurrency?: number;
+  panelistTaskProps?: PanelTaskOptions;   // extra Task props for each panelist (continueOnFail, timeouts)
+  moderatorTaskProps?: PanelTaskOptions;  // extra Task props for the moderator
   skipIf?: boolean;
   children: string | React.ReactNode;
 };

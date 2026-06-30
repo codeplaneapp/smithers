@@ -113,8 +113,12 @@ async function promptPackUpdates(changedFiles) {
         required: false,
     });
 
-    if (isCancel(selected) || !Array.isArray(selected) || selected.length === 0) {
-        log.message(pc.dim("No pack files updated."));
+    if (isCancel(selected)) {
+        log.message(pc.dim("Update prompt cancelled — pack files left as-is."));
+        return [];
+    }
+    if (!Array.isArray(selected) || selected.length === 0) {
+        log.message(pc.dim("No pack files selected — left as-is."));
         return [];
     }
 
