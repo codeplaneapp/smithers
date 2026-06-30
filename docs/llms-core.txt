@@ -8098,8 +8098,8 @@ Defined in the root `package.json` for development:
 | `typecheck` | `tsc --noEmit` | Type-check the `src/` and `tests/` trees against `tsconfig.json` |
 | `typecheck:examples` | `tsc -p examples/tsconfig.json --noEmit` | Type-check example files against a separate config that maps `smithers-orchestrator` to `examples-entry.js` |
 | `typecheck:evals` | `tsc -p evals/tsconfig.json --noEmit` | Type-check the agent-fluency eval suite under `evals/` against its own config |
-| `lint` | `oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore -A react/no-children-prop -A unicorn/no-thenable --ignore-pattern 'packages/*/src/**/*.d.ts' packages/*/src packages/*/tests` | Lint package source and tests with oxlint |
-| `lint:fix` | `oxlint --react-plugin --node-plugin --import-plugin --ignore-path .gitignore -A react/no-children-prop -A unicorn/no-thenable --ignore-pattern 'packages/*/src/**/*.d.ts' --fix --fix-suggestions packages/*/src packages/*/tests` | Apply supported oxlint fixes |
+| `lint` | `node scripts/lint.mjs` | Lint package source and tests with oxlint (cross-platform glob expansion) |
+| `lint:fix` | `node scripts/lint.mjs --fix --fix-suggestions` | Apply supported oxlint fixes |
 | `cli` | `bun run apps/cli/src/index.js` | Run the local development CLI entrypoint |
 | `generate:init-pack` | `bun scripts/generate-workflow-pack.ts` | Regenerate the local workflow pack used by `bunx smithers-orchestrator init` |
 | `test` | `node scripts/check-single-effect-version.mjs && node scripts/check-dependency-boundaries.mjs && node scripts/check-docs.mjs && node scripts/check-llms.mjs && node scripts/check-smithers-test-script.mjs && pnpm -r --no-bail test` | Run docs/config guards, dependency guards, llms guards, and each package test script (no-bail so every failing package is reported) |
