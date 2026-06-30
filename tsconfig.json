@@ -267,5 +267,9 @@
   "include": [
     "packages/smithers/src/**/*",
     "packages/smithers/tests/**/*"
+  ],
+  "exclude": [
+    "packages/smithers/src/gateway-ui.js",
+    "packages/smithers/src/gateway-ui.d.ts"
   ]
 }

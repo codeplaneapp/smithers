@@ -190,6 +190,8 @@
     "../packages/smithers/tests/**/*",
     "../packages/smithers/src/pi-plugin/**/*",
     "../packages/smithers/src/devtools/**/*",
+    "../packages/smithers/src/gateway-ui.js",
+    "../packages/smithers/src/gateway-ui.d.ts",
     "swe-evo/score-x86.ts"
   ]
 }
