@@ -21,6 +21,20 @@ export { JumpToFrameError } from '@smithers-orchestrator/time-travel/jumpToFrame
 
 type ServerOptions$1 = {
     port?: number;
+    /**
+     * Network interface to bind. Defaults to the loopback address 127.0.0.1.
+     * Binding a non-loopback host (e.g. 0.0.0.0) requires an authToken unless
+     * `insecure` is set, because the control plane can launch/cancel/approve
+     * arbitrary workflow runs.
+     * @default "127.0.0.1"
+     */
+    host?: string;
+    /**
+     * Allow binding a non-loopback host with no authToken configured. This
+     * exposes a full-control, unauthenticated HTTP control plane to the network.
+     * @default false
+     */
+    insecure?: boolean;
     db?: unknown;
     authToken?: string;
     maxBodyBytes?: number;
@@ -911,10 +925,14 @@ declare class Gateway {
    * @param {Record<string, unknown>} input
    * @param {RunStartAuthContext} auth
    * @param {string} [runId]
-   * @param {{ resume?: boolean }} [options]
+   * @param {{ resume?: boolean; maxConcurrency?: number; allowNetwork?: boolean; maxOutputBytes?: number; toolTimeoutMs?: number }} [options]
    */
     startRun(workflowKey: string, input: Record<string, unknown>, auth: RunStartAuthContext, runId?: string, options?: {
         resume?: boolean;
+        maxConcurrency?: number;
+        allowNetwork?: boolean;
+        maxOutputBytes?: number;
+        toolTimeoutMs?: number;
     }): Promise<{
         runId: string;
         workflow: string;
