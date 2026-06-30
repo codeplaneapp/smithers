@@ -4,7 +4,7 @@ import { SyntaxStyle } from "@opentui/core";
 import { useGatewayActions, useGatewayNodeOutput } from "@smithers-orchestrator/gateway-react";
 import { useRunTree, useApprovals, useRunEvents, useNodeDiff } from "../data.ts";
 import type { GatewayEventFrame } from "../data.ts";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import { normalizeFrame, nodeLogEvents } from "./eventFrame.ts";
 import {
   flattenTree,
@@ -45,9 +45,8 @@ export type ApprovalUiState = {
 const TAB_KEYS: Record<string, TabId> = {
   "1": "output",
   "2": "logs",
-  "3": "tools",
-  "4": "diff",
-  "5": "props",
+  "3": "diff",
+  "4": "props",
 };
 
 let _syntaxStyle: SyntaxStyle | null = null;
@@ -151,7 +150,6 @@ export function NodeInspectorView({
   activeTab,
   outputText,
   nodeLogs,
-  toolCallsText,
   propsText,
   diff,
   diffLoading,
@@ -161,7 +159,6 @@ export function NodeInspectorView({
   activeTab: TabId;
   outputText: string;
   nodeLogs: GatewayEventFrame[];
-  toolCallsText: string;
   propsText: string;
   diff: NodeDiffView;
   diffLoading: boolean;
@@ -201,11 +198,6 @@ export function NodeInspectorView({
                 );
               })
             )}
-          </scrollbox>
-        )}
-        {activeTab === "tools" && (
-          <scrollbox width="100%" height="100%" scrollY>
-            <code width="100%" content={toolCallsText} syntaxStyle={style} filetype="json" wrapMode="char" />
           </scrollbox>
         )}
         {activeTab === "diff" && (
@@ -261,7 +253,7 @@ function NodeInspector({
   });
 
   if (!node) {
-    return <NodeInspectorView node={null} activeTab={activeTab} outputText="" nodeLogs={[]} toolCallsText="" propsText="" diff={{ kind: "empty", message: "" }} diffLoading={false} approval={null} />;
+    return <NodeInspectorView node={null} activeTab={activeTab} outputText="" nodeLogs={[]} propsText="" diff={{ kind: "empty", message: "" }} diffLoading={false} approval={null} />;
   }
 
   // Iteration-aware so loop/retry attempts don't show mixed logs (node output
@@ -283,18 +275,12 @@ function NodeInspector({
     null,
     2,
   );
-  const toolCallsText =
-    (node.toolCalls?.length ?? 0) > 0
-      ? JSON.stringify(node.toolCalls, null, 2)
-      : "(no tool calls)";
-
   return (
     <NodeInspectorView
       node={node}
       activeTab={activeTab}
       outputText={outputText}
       nodeLogs={nodeLogs}
-      toolCallsText={toolCallsText}
       propsText={propsText}
       diff={toNodeDiffView(diffData)}
       diffLoading={activeTab === "diff" && diffLoading}
@@ -339,7 +325,7 @@ function TreePanel({
 
         return (
           <box
-            key={node.id}
+            key={runNodeKey(node)}
             width="100%"
             height={1}
             flexDirection="row"
@@ -387,7 +373,8 @@ export function TreeMode({
   useEffect(() => {
     if (!initialSelectedNodeId) return;
     if (focusedSelectionRef.current === initialSelectedNodeId) return;
-    const idx = flat.findIndex((f) => f.node.id === initialSelectedNodeId);
+    // Graph mode hands us a row `key` (unique per attempt), so match on `key`.
+    const idx = flat.findIndex((f) => runNodeKey(f.node) === initialSelectedNodeId);
     if (idx >= 0) {
       setFocusIdx(idx);
       focusedSelectionRef.current = initialSelectedNodeId;
@@ -409,7 +396,7 @@ export function TreeMode({
 
   useEffect(() => {
     if (focusedNode) setActiveTab(defaultTab(focusedNode));
-  }, [focusedNode?.id]);
+  }, [focusedNode ? runNodeKey(focusedNode) : undefined]);
 
   const approvals = approvalsData ?? [];
   // Match by node id AND iteration so loops/retries approve the request for the
@@ -560,11 +547,13 @@ export function TreeMode({
       } else if (key === "space") {
         const item = flat[safeIdx];
         if (item?.hasChildren) {
-          const id = item.node.id;
+          // Collapse state is keyed by the unique row `key` (matches flattenTree),
+          // so two attempts of the same logical node fold independently.
+          const key = runNodeKey(item.node);
           setCollapsed((prev) => {
             const next = new Set(prev);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
             return next;
           });
         }

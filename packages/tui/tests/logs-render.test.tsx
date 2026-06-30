@@ -59,22 +59,6 @@ describe("LogMode – terminal rendering (CI-safe, no gateway)", () => {
     renderer.destroy();
   });
 
-  it("renders tool-call badges", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <LogView events={CANNED_EVENTS} />,
-      { width: 120, height: 30 },
-    );
-    await waitForVisualIdle();
-    const frame = captureCharFrame();
-
-    // read badge for read_file, write for write_file, shell for bash
-    expect(frame).toContain("[read]");
-    expect(frame).toContain("[write]");
-    expect(frame).toContain("[shell]");
-
-    renderer.destroy();
-  });
-
   it("shows event text content", async () => {
     const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
       <LogView events={CANNED_EVENTS} />,
@@ -186,12 +170,10 @@ describe("LogMode – terminal rendering (CI-safe, no gateway)", () => {
     renderer.destroy();
   });
 
-  it("unwraps REAL wrapped run.event frames for tags, text, and badges", async () => {
+  it("unwraps REAL wrapped run.event frames for tags and text", async () => {
     const wrappedEvents: GatewayEventFrame[] = [
       wrapped(1, "run.event", { nodeId: "node-wrapped", text: "Wrapped start" }),
-      wrapped(2, "tool.use", { nodeId: "node-wrapped", name: "read_file" }),
-      wrapped(3, "tool.use", { nodeId: "node-wrapped", name: "write_file" }),
-      wrapped(4, "tool.use", { nodeId: "node-wrapped", name: "bash" }),
+      wrapped(2, "agent.message", { nodeId: "node-wrapped", text: "second line" }),
     ];
     const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
       <LogView events={wrappedEvents} />,
@@ -199,12 +181,10 @@ describe("LogMode – terminal rendering (CI-safe, no gateway)", () => {
     );
     await waitForVisualIdle();
     const f = captureCharFrame();
-    // node tag (unwrapped from the envelope), text, and side-effect badges
+    // node tag (unwrapped from the envelope) and text survive the unwrap
     expect(f).toContain("node-wrapped");
     expect(f).toContain("Wrapped start");
-    expect(f).toContain("[read]");
-    expect(f).toContain("[write]");
-    expect(f).toContain("[shell]");
+    expect(f).toContain("second line");
     renderer.destroy();
   });
 });

@@ -171,8 +171,8 @@ describe("treeUtils", () => {
   });
 
   describe("ALL_TABS", () => {
-    it("contains all five tabs", () => {
-      expect(ALL_TABS).toEqual(["output", "logs", "tools", "diff", "props"]);
+    it("contains the inspector tabs (Tools removed — no real source)", () => {
+      expect(ALL_TABS).toEqual(["output", "logs", "diff", "props"]);
     });
   });
 });

@@ -1,4 +1,4 @@
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 
 export type FlatNode = {
   node: GatewayRunNode;
@@ -7,9 +7,9 @@ export type FlatNode = {
   isCollapsed: boolean;
 };
 
-export type TabId = "output" | "logs" | "tools" | "diff" | "props";
+export type TabId = "output" | "logs" | "diff" | "props";
 
-export const ALL_TABS: readonly TabId[] = ["output", "logs", "tools", "diff", "props"];
+export const ALL_TABS: readonly TabId[] = ["output", "logs", "diff", "props"];
 
 export function flattenTree(
   nodes: ReadonlyArray<GatewayRunNode>,
@@ -21,19 +21,22 @@ export function flattenTree(
       node,
       depth: 0,
       hasChildren: (node.childIds?.length ?? 0) > 0,
-      isCollapsed: collapsed.has(node.id),
+      isCollapsed: collapsed.has(runNodeKey(node)),
     }));
   }
 
+  // Index by the unique row `key` (not the logical `id`) so loop/retry attempts
+  // sharing an `id` resolve to the right row; `childIds`/`collapsed` are keyed
+  // the same way.
   const nodeMap = new Map<string, GatewayRunNode>();
-  for (const n of nodes) nodeMap.set(n.id, n);
+  for (const n of nodes) nodeMap.set(runNodeKey(n), n);
 
   const result: FlatNode[] = [];
 
   function walk(n: GatewayRunNode, depth: number) {
     const childIds = n.childIds ?? [];
     const hasChildren = childIds.length > 0;
-    const isCollapsed = collapsed.has(n.id);
+    const isCollapsed = collapsed.has(runNodeKey(n));
     result.push({ node: n, depth, hasChildren, isCollapsed });
     if (!isCollapsed && hasChildren) {
       for (const childId of childIds) {

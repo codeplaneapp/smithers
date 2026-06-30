@@ -3,12 +3,9 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useRunEvents } from "../data.ts";
 import type { GatewayEventFrame } from "../data.ts";
 import {
-  classifyToolSideEffect,
   extractEventText,
   extractAttemptKeys,
   filterEventsByAttempt,
-  badgeLabel,
-  badgeColor,
 } from "./logUtils.ts";
 import { normalizeFrame } from "./eventFrame.ts";
 
@@ -114,21 +111,15 @@ export function LogView({
         ) : (
           filteredEvents.map((ev) => {
             const { event, payload, nodeId } = normalizeFrame(ev);
-            const effect = classifyToolSideEffect(event, payload);
             const text = extractEventText(event, payload);
             const tag = nodeId ? nodeId.slice(0, tagMaxLen) : "·";
             const seqStr = String(ev.seq).padStart(4, " ");
-            const badge = badgeLabel(effect);
-            const bColor = badgeColor(effect);
 
             return (
               <box key={ev.seq} width="100%" height={1} flexDirection="row">
                 <text fg="#444444">{`${seqStr} `}</text>
                 <text fg="#555555">{`[${tag}]`}</text>
                 <text fg="#444444">{" │ "}</text>
-                {badge ? (
-                  <text fg={bColor}>{`${badge} `}</text>
-                ) : null}
                 <text fg="#cccccc" wrapMode="char">{text}</text>
               </box>
             );

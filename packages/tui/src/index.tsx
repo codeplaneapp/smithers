@@ -169,8 +169,34 @@ const root = createRoot(renderer);
  * terminal wedged. So unmount the React tree (runs effect cleanups), destroy the
  * renderer (restores cooked mode + native state), THEN exit. The quit key and
  * Ctrl-C both route through here via `App`'s `onExit` prop.
+ *
+ * `tearingDown` guards against double-invocation: a SIGTERM that lands while
+ * React is mid-unmount (or a second signal) must not unmount/destroy twice — it
+ * just exits.
  */
+let tearingDown = false;
+
+// External SIGINT/SIGTERM/SIGHUP after raw mode is enabled would otherwise kill
+// the process WITHOUT running OpenTUI's cleanup, leaving the terminal wedged
+// (no echo, raw mode stuck). Route them through the SAME teardown as `q`/Ctrl-C.
+// 128 + signal number is the conventional exit code (SIGHUP 1, SIGINT 2, SIGTERM 15).
+const SIGNAL_EXIT_CODES = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 } as const;
+type TeardownSignal = keyof typeof SIGNAL_EXIT_CODES;
+const TEARDOWN_SIGNALS = Object.keys(SIGNAL_EXIT_CODES) as TeardownSignal[];
+
+function onSignal(signal: TeardownSignal): void {
+  onExit(SIGNAL_EXIT_CODES[signal]);
+}
+
 function onExit(code: number): never {
+  if (tearingDown) {
+    // Already torn down once (or re-entered from a second signal); just leave.
+    process.exit(code);
+  }
+  tearingDown = true;
+  // Remove our signal handlers first so a stray second signal during teardown
+  // can't re-enter this path or leak listeners.
+  for (const signal of TEARDOWN_SIGNALS) process.removeListener(signal, onSignal);
   try {
     root.unmount();
   } catch {
@@ -183,6 +209,8 @@ function onExit(code: number): never {
   }
   process.exit(code);
 }
+
+for (const signal of TEARDOWN_SIGNALS) process.on(signal, onSignal);
 
 const client = new SmithersGatewayClient({
   baseUrl: GATEWAY_BASE,

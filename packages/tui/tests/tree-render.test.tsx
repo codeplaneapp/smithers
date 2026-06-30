@@ -32,7 +32,6 @@ function baseProps(overrides: Partial<Parameters<typeof NodeInspectorView>[0]> =
     activeTab: "output" as TabId,
     outputText: "hello-output",
     nodeLogs: [] as GatewayEventFrame[],
-    toolCallsText: "(no tool calls)",
     propsText: '{ "id": "node-alpha" }',
     diff: EMPTY_DIFF,
     diffLoading: false,

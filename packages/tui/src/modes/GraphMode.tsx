@@ -7,7 +7,7 @@ import {
   edgesForConnector,
   hasIncomingEdge,
 } from "./graphUtils.ts";
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 
 const CARD_H = 3;       // top border + 1 content row + bottom border
 const ROW_GAP = 1;      // vertical space between cards in a column
@@ -168,7 +168,9 @@ export function GraphMode({
     );
   }
 
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  // Graph layout (colGroups/positions/edges) is keyed by the unique row `key`,
+  // so the lookup and the selection identity must use `key` too.
+  const nodeMap = new Map(nodes.map((n) => [runNodeKey(n), n]));
   const { positions, colGroups, edges, numCols } = layout;
 
   // Build the column elements interleaved with connector elements
@@ -182,8 +184,8 @@ export function GraphMode({
     elements.push(
       <box key={`col-${c}`} flexDirection="column" flexShrink={0}>
         {Array.from({ length: numSlots }, (_, slotIdx) => {
-          const nodeId = colIds[slotIdx];
-          const node = nodeId ? nodeMap.get(nodeId) : undefined;
+          const nodeKey = colIds[slotIdx];
+          const node = nodeKey ? nodeMap.get(nodeKey) : undefined;
 
           if (!node) {
             // Empty slot — preserve vertical alignment
@@ -197,10 +199,10 @@ export function GraphMode({
           }
 
           return (
-            <box key={nodeId} flexDirection="column" flexShrink={0}>
+            <box key={nodeKey} flexDirection="column" flexShrink={0}>
               <NodeCard
                 node={node}
-                isSelected={nodeId === selectedNodeId}
+                isSelected={nodeKey === selectedNodeId}
                 cardWidth={cardWidth}
               />
               {slotIdx < numSlots - 1 ? (

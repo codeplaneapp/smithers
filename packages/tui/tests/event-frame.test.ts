@@ -2,7 +2,6 @@ import { describe, it, expect } from "bun:test";
 import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
 import { normalizeFrame, unwrapEvent, nodeLogEvents } from "../src/modes/eventFrame.ts";
 import {
-  classifyToolSideEffect,
   extractEventText,
   extractAttemptKeys,
   filterEventsByAttempt,
@@ -109,15 +108,6 @@ describe("nodeLogEvents", () => {
 });
 
 describe("log readers on wrapped frames", () => {
-  it("classifies side effects from the inner tool payload", () => {
-    expect(
-      classifyToolSideEffect(...readerArgs(wrapped(1, "tool.use", { name: "bash" }))),
-    ).toBe("shell");
-    expect(
-      classifyToolSideEffect(...readerArgs(wrapped(2, "tool.use", { name: "read_file" }))),
-    ).toBe("read");
-  });
-
   it("extracts text from the inner payload", () => {
     expect(extractEventText(...readerArgs(wrapped(1, "run.event", { text: "hello" })))).toBe("hello");
   });

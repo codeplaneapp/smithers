@@ -1,4 +1,4 @@
-import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
+import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 
 export type GraphPos = { col: number; row: number };
 
@@ -22,38 +22,41 @@ export function computeColumnDepths(
   nodes: ReadonlyArray<GatewayRunNode>,
   root: GatewayRunNode | null,
 ): Map<string, number> {
+  // Index by the unique row `key` (not the logical `id`): `childIds`/`parentId`
+  // link by `key`, and loop/retry attempts share an `id`, so id-keying would
+  // merge their graph positions.
   const nodeMap = new Map<string, GatewayRunNode>();
-  for (const n of nodes) nodeMap.set(n.id, n);
+  for (const n of nodes) nodeMap.set(runNodeKey(n), n);
 
   const depths = new Map<string, number>();
 
-  function bfsFrom(startId: string, startDepth: number) {
-    const queue: Array<[string, number]> = [[startId, startDepth]];
+  function bfsFrom(startKey: string, startDepth: number) {
+    const queue: Array<[string, number]> = [[startKey, startDepth]];
     while (queue.length > 0) {
-      const [id, d] = queue.shift()!;
-      const prev = depths.get(id) ?? -1;
+      const [key, d] = queue.shift()!;
+      const prev = depths.get(key) ?? -1;
       if (d <= prev) continue;
-      depths.set(id, d);
-      const n = nodeMap.get(id);
-      for (const childId of n?.childIds ?? []) {
-        if (nodeMap.has(childId)) queue.push([childId, d + 1]);
+      depths.set(key, d);
+      const n = nodeMap.get(key);
+      for (const childKey of n?.childIds ?? []) {
+        if (nodeMap.has(childKey)) queue.push([childKey, d + 1]);
       }
     }
   }
 
   if (root) {
-    bfsFrom(root.id, 0);
+    bfsFrom(runNodeKey(root), 0);
   } else {
     // Start BFS from every parentless node
     const rootNodes = nodes.filter(
       (n) => !n.parentId || !nodeMap.has(n.parentId),
     );
-    for (const n of rootNodes) bfsFrom(n.id, 0);
+    for (const n of rootNodes) bfsFrom(runNodeKey(n), 0);
   }
 
   // Any node not reached by BFS gets column 0
   for (const n of nodes) {
-    if (!depths.has(n.id)) depths.set(n.id, 0);
+    if (!depths.has(runNodeKey(n))) depths.set(runNodeKey(n), 0);
   }
 
   return depths;
@@ -71,9 +74,9 @@ export function computeGraphLayout(
 
   const colMap = new Map<number, string[]>();
   for (const n of nodes) {
-    const col = depths.get(n.id) ?? 0;
+    const col = depths.get(runNodeKey(n)) ?? 0;
     if (!colMap.has(col)) colMap.set(col, []);
-    colMap.get(col)!.push(n.id);
+    colMap.get(col)!.push(runNodeKey(n));
   }
 
   const numCols = colMap.size > 0 ? Math.max(...colMap.keys()) + 1 : 0;
@@ -91,12 +94,12 @@ export function computeGraphLayout(
   }
 
   const nodeMap = new Map<string, GatewayRunNode>();
-  for (const n of nodes) nodeMap.set(n.id, n);
+  for (const n of nodes) nodeMap.set(runNodeKey(n), n);
 
   const edges: GraphEdge[] = [];
   for (const n of nodes) {
-    for (const childId of n.childIds ?? []) {
-      if (nodeMap.has(childId)) edges.push({ fromId: n.id, toId: childId });
+    for (const childKey of n.childIds ?? []) {
+      if (nodeMap.has(childKey)) edges.push({ fromId: runNodeKey(n), toId: childKey });
     }
   }
 
