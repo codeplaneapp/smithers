@@ -336,6 +336,67 @@ async function parseChatRequest(request: Request): Promise<ValidationResult> {
   return validateChatBody(parsed);
 }
 
+/** The local gateway whose registered workflows the concierge can background. */
+const GATEWAY_BASE = (process.env.SMITHERS_GATEWAY_PROXY_TARGET ?? "http://127.0.0.1:7331").replace(
+  /\/+$/,
+  "",
+);
+
+type WorkflowSummary = { key: string; readableName?: string; description?: string };
+
+/** Pull the workflows registered on the gateway (best-effort, bounded). */
+async function listGatewayWorkflows(): Promise<WorkflowSummary[]> {
+  try {
+    const res = await fetch(`${GATEWAY_BASE}/v1/rpc/listWorkflows`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(2500),
+    });
+    const frame = (await res.json()) as { ok?: boolean; payload?: unknown };
+    return frame?.ok && Array.isArray(frame.payload) ? (frame.payload as WorkflowSummary[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The system prompt the model actually sees: the client's app-control prompt
+ * (withAgentSystem) PLUS a live catalog of the workflows registered on the
+ * gateway, so the agent knows exactly what it can background — including
+ * `create-workflow`, the meta-workflow that builds a brand-new workflow. This is
+ * the local equivalent of multi's worker knowing the workspace; without it the
+ * model can't know which workflows exist (it would say "I can't create one").
+ */
+async function buildSystemPrompt(clientSystem: string | undefined): Promise<string> {
+  const base = clientSystem ?? process.env.CHAT_SYSTEM_PROMPT ?? DEFAULT_CHAT_SYSTEM_PROMPT;
+  const workflows = await listGatewayWorkflows();
+  if (workflows.length === 0) return base;
+
+  const list = workflows
+    .map(
+      (w) =>
+        `- ${w.key}${w.readableName ? ` (${w.readableName})` : ""}${w.description ? `: ${w.description}` : ""}`,
+    )
+    .join("\n");
+  const hasCreate = workflows.some((w) => w.key === "create-workflow");
+
+  const catalog = [
+    "",
+    "## Smithers workflows on this gateway",
+    "Background any of these for the user by ending your reply with a smithers:action block: requestControl, then a `startWorkflow` directive with the workflow's `workflowKey` and an `inputs` object (usually `{\"prompt\":\"...\"}`).",
+    list,
+    hasCreate
+      ? '\nTo CREATE a brand-new Smithers workflow, background `create-workflow` with the user\'s description as the prompt — e.g. {"tool":"startWorkflow","args":{"workflowKey":"create-workflow","inputs":{"prompt":"<what they want the workflow to do>"}}}. It generates a new workflow for them.'
+      : "",
+    "When the user asks you to build, fix, review, research, plan, or create something, pick the best-matching workflow above and background it rather than saying you can't.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return `${base}\n${catalog}`;
+}
+
 async function handleChat(request: Request): Promise<Response> {
   const env = process.env;
   const codexCredential = codexCredentialFromEnv(env);
@@ -350,6 +411,7 @@ async function handleChat(request: Request): Promise<Response> {
   const validation = await parseChatRequest(request);
   if (!validation.ok) return new Response(validation.message, { status: validation.status });
   const body = validation.body;
+  const systemPrompt = await buildSystemPrompt(body.system);
 
   if (conciergeConfig.provider === "cerebras") {
     return streamChatResponse({
@@ -358,7 +420,7 @@ async function handleChat(request: Request): Promise<Response> {
       api: conciergeConfig.api,
       model: conciergeConfig.model,
       effort: conciergeConfig.effort,
-      systemPrompt: body.system ?? env.CHAT_SYSTEM_PROMPT ?? DEFAULT_CHAT_SYSTEM_PROMPT,
+      systemPrompt,
       messages: body.messages,
       usingSubscription: conciergeConfig.usingSubscription,
     });
@@ -387,7 +449,7 @@ async function handleChat(request: Request): Promise<Response> {
     api,
     model: conciergeConfig.model,
     effort: conciergeConfig.effort,
-    systemPrompt: body.system ?? env.CHAT_SYSTEM_PROMPT ?? DEFAULT_CHAT_SYSTEM_PROMPT,
+    systemPrompt,
     messages: body.messages,
     usingSubscription,
     defaultHeaders: codexAuth?.headers,
