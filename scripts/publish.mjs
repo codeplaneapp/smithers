@@ -120,6 +120,20 @@ try {
 } catch {
   throw new Error(`docs/changelogs/${version}.mdx missing — write it before releasing`);
 }
+for (const docsArtifact of [`llms-v${version}.txt`, `llms-full-v${version}.txt`]) {
+  try {
+    readFileSync(join(root, "docs", docsArtifact));
+  } catch {
+    throw new Error(`docs/${docsArtifact} missing — run bun scripts/generate-llms.ts and commit the versioned docs artifacts before releasing`);
+  }
+}
+for (const packageArtifact of ["llms.txt", "llms-full.txt"]) {
+  try {
+    readFileSync(join(root, "packages", "smithers", "docs", packageArtifact));
+  } catch {
+    throw new Error(`packages/smithers/docs/${packageArtifact} missing — run bun scripts/generate-llms.ts and commit the npm-bundled docs artifacts before releasing`);
+  }
+}
 
 if (!SKIP_GIT) {
   log("git", "checking clean working tree");

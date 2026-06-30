@@ -26,6 +26,6 @@ bun scripts/generate-llms.ts
 ## Key Details
 
 - Follows the `llms.txt` convention: produces a family of text files for AI model context.
-- Writes 9 files: `llms-core.txt`, `llms-memory.txt`, `llms-openapi.txt`, `llms-observability.txt`, `llms-effect.txt`, `llms-integrations.txt`, `llms-events.txt`, `llms-full.txt` (concatenation of all fragments), and `llms.txt` (index).
+- Writes the current `llms-*.txt` bundle set plus version-pinned `llms-v<version>.txt` and `llms-full-v<version>.txt` artifacts for exact-release lookups.
 - Pages are listed in hardcoded manifest arrays inside the script; edit the manifests to change what each fragment contains.
 - Strips YAML frontmatter; converts MDX bodies to Markdown. Each section is emitted as `## title` + optional blockquote description + raw MDX body, separated by `---`.

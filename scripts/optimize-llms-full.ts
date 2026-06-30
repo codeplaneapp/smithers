@@ -27,9 +27,17 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 const TARGET = resolve(import.meta.dir, "../docs/llms-full.txt");
+const PACKAGE_VERSION = JSON.parse(
+  readFileSync(resolve(import.meta.dir, "../package.json"), "utf8"),
+).version;
 const MIRRORS = [
   resolve(import.meta.dir, "../skills/smithers/llms-full.txt"),
   resolve(import.meta.dir, "../apps/cli/docs/llms-full.txt"),
+  // Version-pinned + npm-bundled copies. generate-llms.ts emits these from the
+  // UN-optimized bundle, so they must be re-mirrored here or they ship docs that
+  // diverge from the canonical (optimized) docs/llms-full.txt.
+  resolve(import.meta.dir, `../docs/llms-full-v${PACKAGE_VERSION}.txt`),
+  resolve(import.meta.dir, "../packages/smithers/docs/llms-full.txt"),
 ];
 const before = readFileSync(TARGET, "utf8");
 let text = before;

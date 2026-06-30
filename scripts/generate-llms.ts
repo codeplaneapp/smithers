@@ -26,6 +26,15 @@ const SKILL_DIR = resolve(import.meta.dir, "../skills/smithers");
 // The CLI package carries the docs commands' default, version-matched output so
 // `bunx smithers-orchestrator@x docs-full` does not depend on the latest website.
 const CLI_DOCS_DIR = resolve(import.meta.dir, "../apps/cli/docs");
+const PACKAGE_DOCS = resolve(import.meta.dir, "../packages/smithers/docs");
+const ROOT_PACKAGE = resolve(import.meta.dir, "../package.json");
+const PACKAGE_VERSION = JSON.parse(readFileSync(ROOT_PACKAGE, "utf8")).version;
+
+if (typeof PACKAGE_VERSION !== "string" || PACKAGE_VERSION.length === 0) {
+  throw new Error("Could not resolve package version from package.json");
+}
+
+mkdirSync(PACKAGE_DOCS, { recursive: true });
 
 // -----------------------------------------------------------------------------
 // Manifests
@@ -293,6 +302,8 @@ for (const b of builds) {
   ].join("\n");
   const fullContent = fullHeader + fragmentBodies.join("\n\n===============================================================================\n\n");
   writeFileSync(resolve(DOCS, "llms-full.txt"), fullContent);
+  writeFileSync(resolve(DOCS, `llms-full-v${PACKAGE_VERSION}.txt`), fullContent);
+  writeFileSync(resolve(PACKAGE_DOCS, "llms-full.txt"), fullContent);
   const bytes = fullContent.length;
   console.log(`\n→ llms-full.txt (full concat)`);
   console.log(`  ${bytes.toLocaleString()} bytes (~${Math.round(bytes / 4).toLocaleString()} tokens)`);
@@ -312,6 +323,8 @@ for (const b of builds) {
   const skillMd = readFileSync(resolve(SKILL_DIR, "SKILL.md"), "utf8");
   writeFileSync(resolve(CLI_DOCS_DIR, "SKILL.md"), skillMd);
   console.log(`\n→ apps/cli/docs/SKILL.md (packaged CLI copy)`);
+  console.log(`→ llms-full-v${PACKAGE_VERSION}.txt (versioned full concat)`);
+  console.log(`→ packages/smithers/docs/llms-full.txt (npm bundle)`);
 }
 
 // -----------------------------------------------------------------------------
@@ -375,7 +388,11 @@ Examples:
 `;
 
 writeFileSync(resolve(DOCS, "llms.txt"), indexContent);
+writeFileSync(resolve(DOCS, `llms-v${PACKAGE_VERSION}.txt`), indexContent);
+writeFileSync(resolve(PACKAGE_DOCS, "llms.txt"), indexContent);
 console.log(`\n→ llms.txt (index)`);
+console.log(`→ llms-v${PACKAGE_VERSION}.txt (versioned index)`);
+console.log(`→ packages/smithers/docs/llms.txt (npm bundle)`);
 console.log(`  ${indexContent.length.toLocaleString()} bytes`);
 
 mkdirSync(CLI_DOCS_DIR, { recursive: true });

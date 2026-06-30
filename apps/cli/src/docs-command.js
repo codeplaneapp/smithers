@@ -2,7 +2,6 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const LATEST_DOCS_BASE_URL = "https://smithers.sh";
-const VERSIONED_DOCS_BASE_URL = "https://raw.githubusercontent.com/smithersai/smithers";
 const SEMVER_TAG_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /**
@@ -22,7 +21,9 @@ export function normalizeDocsVersion(version) {
  * @param {string} version
  */
 export function versionedDocsUrl(file, version) {
-    return `${VERSIONED_DOCS_BASE_URL}/v${normalizeDocsVersion(version)}/docs/${file}`;
+    const normalizedVersion = normalizeDocsVersion(version);
+    const stem = file.replace(/\.txt$/, "");
+    return `${LATEST_DOCS_BASE_URL}/${stem}-v${normalizedVersion}.txt`;
 }
 
 /**

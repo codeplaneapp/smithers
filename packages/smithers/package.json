@@ -78,7 +78,9 @@
   },
   "files": [
     "src/",
-    "README.md"
+    "README.md",
+    "docs/llms.txt",
+    "docs/llms-full.txt"
   ],
   "bin": {
     "smithers": "./src/bin/smithers.js"

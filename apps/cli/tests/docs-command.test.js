@@ -46,9 +46,9 @@ describe("docs command source resolution", () => {
         expect(() => normalizeDocsVersion("../main")).toThrow("Invalid Smithers docs version");
     });
 
-    test("builds version-pinned GitHub raw URLs", () => {
+    test("builds version-pinned smithers.sh URLs", () => {
         expect(versionedDocsUrl("llms-full.txt", "v0.22.0")).toBe(
-            "https://raw.githubusercontent.com/smithersai/smithers/v0.22.0/docs/llms-full.txt",
+            "https://smithers.sh/llms-full-v0.22.0.txt",
         );
     });
 
@@ -62,7 +62,7 @@ describe("docs command source resolution", () => {
             })).toEqual({
                 kind: "local",
                 path: join(docsRoot, "llms-full.txt"),
-                url: "https://raw.githubusercontent.com/smithersai/smithers/v0.22.0/docs/llms-full.txt",
+                url: "https://smithers.sh/llms-full-v0.22.0.txt",
             });
         }
         finally {
@@ -77,7 +77,7 @@ describe("docs command source resolution", () => {
             localDocsRoots: [],
         })).toEqual({
             kind: "remote",
-            url: "https://raw.githubusercontent.com/smithersai/smithers/v0.22.0/docs/llms.txt",
+            url: "https://smithers.sh/llms-v0.22.0.txt",
         });
     });
 
@@ -91,7 +91,7 @@ describe("docs command source resolution", () => {
                 localDocsRoots: [docsRoot],
             })).toEqual({
                 kind: "remote",
-                url: "https://raw.githubusercontent.com/smithersai/smithers/v0.21.0/docs/llms.txt",
+                url: "https://smithers.sh/llms-v0.21.0.txt",
             });
         }
         finally {
@@ -124,7 +124,7 @@ describe("docs command source resolution", () => {
         const result = runCli(["docs", "--json"]);
         expect(result.status).toBe(0);
         const payload = JSON.parse(result.stdout);
-        expect(payload.url).toBe(`https://raw.githubusercontent.com/smithersai/smithers/v${CLI_VERSION}/docs/llms.txt`);
+        expect(payload.url).toBe(`https://smithers.sh/llms-v${CLI_VERSION}.txt`);
         expect(payload.content).toBe(readFileSync(resolve(CLI_DOCS_ROOT, "llms.txt"), "utf8"));
     });
 
@@ -132,7 +132,7 @@ describe("docs command source resolution", () => {
         const result = runCli(["docs-full", "--json"]);
         expect(result.status).toBe(0);
         const payload = JSON.parse(result.stdout);
-        expect(payload.url).toBe(`https://raw.githubusercontent.com/smithersai/smithers/v${CLI_VERSION}/docs/llms-full.txt`);
+        expect(payload.url).toBe(`https://smithers.sh/llms-full-v${CLI_VERSION}.txt`);
         expect(payload.content).toBe(readFileSync(resolve(CLI_DOCS_ROOT, "llms-full.txt"), "utf8"));
     });
 

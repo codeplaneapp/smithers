@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const packageVersion = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).version;
 const generatedFiles = [
   "docs/llms.txt",
   "docs/llms-core.txt",
@@ -14,9 +16,13 @@ const generatedFiles = [
   "docs/llms-integrations.txt",
   "docs/llms-events.txt",
   "docs/llms-full.txt",
+  `docs/llms-v${packageVersion}.txt`,
+  `docs/llms-full-v${packageVersion}.txt`,
   "skills/smithers/llms-full.txt",
   "apps/cli/docs/llms.txt",
   "apps/cli/docs/llms-full.txt",
+  "packages/smithers/docs/llms.txt",
+  "packages/smithers/docs/llms-full.txt",
 ];
 
 function run(command, args) {
