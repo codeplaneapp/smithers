@@ -48,6 +48,7 @@ describe("detectAvailableAgents", () => {
         const ids = results.map((r) => r.id);
         expect(ids).toContain("claude");
         expect(ids).toContain("codex");
+        expect(ids).toContain("openrouter");
         expect(ids).toContain("opencode");
         expect(ids).toContain("antigravity");
         expect(ids).toContain("pi");
@@ -55,7 +56,7 @@ describe("detectAvailableAgents", () => {
         expect(ids).toContain("amp");
         expect(ids).toContain("vibe");
         expect(ids).toContain("hermes");
-        expect(results.length).toBe(9);
+        expect(results.length).toBe(10);
     });
     test("each result has required fields", () => {
         const results = detectAvailableAgents({});
@@ -107,6 +108,19 @@ describe("detectAvailableAgents", () => {
         expect(codex.usable).toBe(false);
         expect(codex.unusableReasons.join(" ")).toContain("missing `codex`");
     });
+    test("openrouter api key is detected without a CLI binary", () => {
+        const emptyPathDir = tempHome();
+        const results = detectAvailableAgents({
+            HOME: "/nonexistent-path-xyz",
+            PATH: emptyPathDir,
+            OPENROUTER_API_KEY: "sk-or-test",
+        });
+        const openrouter = results.find((r) => r.id === "openrouter");
+        expect(openrouter.hasBinary).toBe(false);
+        expect(openrouter.hasApiKeySignal).toBe(true);
+        expect(openrouter.usable).toBe(true);
+        expect(openrouter.checks).toContain("binary:openrouter-api:not-required");
+    });
     test("OpenCode detects opencode plus auth.json credentials", () => {
         const home = tempHome();
         const binDir = createExecutableDir();
@@ -119,15 +133,18 @@ describe("detectAvailableAgents", () => {
         expect(opencode.hasAuthSignal).toBe(true);
         expect(opencode.usable).toBe(true);
     });
-    test("generated agents.ts rejects OpenCode-only defaults", () => {
+    test("generated agents.ts falls back to OpenRouter for OpenCode-only defaults", () => {
         const home = tempHome();
         const binDir = createExecutableDir();
         writeFakeOpenCodeBinary(binDir);
         mkdirSync(join(home, ".local", "share", "opencode"), { recursive: true });
         writeFileSync(join(home, ".local", "share", "opencode", "auth.json"), JSON.stringify({ anthropic: { accessToken: "test" } }) + "\n");
-        expect(() => generateAgentsTs(envWithPath(home, binDir), {
+        const source = generateAgentsTs(envWithPath(home, binDir), {
             cwd: home,
-        })).toThrow("required default pools");
+        });
+        expect(source).toContain("openrouter: createOpenRouterAgent()");
+        expect(source).toContain("smart: [\n    providers.openrouter,");
+        expect(source).toContain("smartTool: [\n    providers.openrouter,");
     });
     test("Antigravity detects agy plus antigravity-cli config", () => {
         const home = tempHome();

@@ -3,10 +3,12 @@ import { constants, accessSync, existsSync, readdirSync, readFileSync, statSync 
 import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
-import { SmithersError } from "@smithers-orchestrator/errors";
 import { listAccounts } from "@smithers-orchestrator/accounts";
 /** @typedef {import("./AgentAvailability.ts").AgentAvailability} AgentAvailability */
 /** @typedef {import("./AgentAvailabilityStatus.ts").AgentAvailabilityStatus} AgentAvailabilityStatus */
+
+const DEFAULT_PROVIDER_ID = "openrouter";
+const OPENROUTER_DEFAULT_MODEL = "openai/gpt-4.1-mini";
 
 const DETECTORS = [
     {
@@ -62,6 +64,18 @@ const DETECTORS = [
             return failProbe(status.output || auth.reason || "Codex login not verified");
         },
         setupHint: "Install the Codex CLI and run `codex login`, or set `OPENAI_API_KEY`.",
+    },
+    {
+        id: DEFAULT_PROVIDER_ID,
+        displayName: "OpenRouter",
+        binary: "openrouter-api",
+        requiresBinary: false,
+        authSignals: () => [],
+        apiKeys: ["OPENROUTER_API_KEY"],
+        availabilityProbe: (_homeDir, env) => env.OPENROUTER_API_KEY
+            ? passProbe("$OPENROUTER_API_KEY is set")
+            : failProbe("OPENROUTER_API_KEY is not set"),
+        setupHint: "Set `OPENROUTER_API_KEY`, or run `smithers agent add` to configure another provider.",
     },
     {
         id: "opencode",
@@ -251,8 +265,8 @@ const LOCAL_SCAFFOLDED_PROVIDER_FILES = {
 };
 const TIER_PREFERENCES = {
     cheapFast: { order: ["claudeSonnet", "kimi", "vibe", "antigravity", "pi"], maxSize: 2 },
-    smart: { order: ["claude", "claudeOpus", "codex", "kimi", "antigravity", "amp"], maxSize: 3 },
-    smartTool: { order: ["claude", "claudeOpus", "codex", "kimi", "antigravity", "amp"], maxSize: 3 },
+    smart: { order: ["claude", "claudeOpus", "codex", DEFAULT_PROVIDER_ID, "kimi", "antigravity", "amp"], maxSize: 3 },
+    smartTool: { order: ["claude", "claudeOpus", "codex", DEFAULT_PROVIDER_ID, "kimi", "antigravity", "amp"], maxSize: 3 },
 };
 const REQUIRED_DEFAULT_TIERS = ["smart", "smartTool"];
 const CONSTRUCTORS = {
@@ -263,6 +277,10 @@ const CONSTRUCTORS = {
     codex: {
         importName: "CodexAgent",
         expr: 'new SmithersCodexAgent({ model: "gpt-5.5", cwd: process.cwd(), skipGitRepoCheck: true })',
+    },
+    openrouter: {
+        importName: "OpenAIAgent",
+        expr: "createOpenRouterAgent()",
     },
     opencode: {
         importName: "OpenCodeAgent",
@@ -681,7 +699,8 @@ export function detectAvailableAgents(env = process.env, options = {}) {
     const cwd = options.cwd ?? process.cwd();
     return DETECTORS.map((detector) => {
         const authSignals = detector.authSignals(homeDir, env);
-        const hasBinary = commandExists(detector.binary, env);
+        const requiresBinary = detector.requiresBinary !== false;
+        const hasBinary = requiresBinary ? commandExists(detector.binary, env) : false;
         const authSignalChecks = authSignals.map((signal) => ({
             signal,
             exists: existsSync(signal),
@@ -690,7 +709,7 @@ export function detectAvailableAgents(env = process.env, options = {}) {
         const hasApiKeySignal = detector.apiKeys.some((name) => Boolean(env[name]));
         const projectTrust = detector.projectTrust?.(homeDir, env, cwd) ?? { trusted: true, checks: [] };
         const hasProjectTrustSignal = projectTrust.trusted;
-        const availabilityProbe = hasBinary
+        const availabilityProbe = hasBinary || !requiresBinary
             ? detector.availabilityProbe?.(homeDir, env, cwd)
             : undefined;
         const hasAvailabilityProbeSignal = availabilityProbe ? availabilityProbe.verified : true;
@@ -698,7 +717,7 @@ export function detectAvailableAgents(env = process.env, options = {}) {
         const status = computeStatus(hasBinary, hasAuthSignal || hasProbeCredentialSignal, hasApiKeySignal);
         const hasCredentialSignal = hasAuthSignal || hasApiKeySignal || hasProbeCredentialSignal;
         const unusableReasons = [];
-        if (!hasBinary) {
+        if (requiresBinary && !hasBinary) {
             unusableReasons.push(`missing \`${detector.binary}\` on PATH`);
         }
         if (!hasCredentialSignal) {
@@ -726,7 +745,7 @@ export function detectAvailableAgents(env = process.env, options = {}) {
             score: scoreStatus(status),
             usable: unusableReasons.length === 0,
             checks: [
-                `binary:${detector.binary}:${hasBinary ? "yes" : "no"}`,
+                `binary:${detector.binary}:${requiresBinary ? (hasBinary ? "yes" : "no") : "not-required"}`,
                 ...authSignalChecks.map((check) => `auth:${check.signal}:${check.exists ? "yes" : "no"}`),
                 ...detector.apiKeys.map((name) => `env:${name}:${env[name] ? "yes" : "no"}`),
                 ...projectTrust.checks,
@@ -958,13 +977,102 @@ function renderUnavailablePreferenceComments(tier, order, allProviderIds, detect
 
 /**
  * @param {string} tier
- * @param {string[]} providerIds
+ * @param {string[]} activeProviderIds
+ * @param {string[]} commentedProviderIds
  * @param {string[]} comments
  */
-function renderTierLine(tier, providerIds, comments) {
+function renderTierLine(tier, activeProviderIds, commentedProviderIds, comments) {
     return [
         ...comments,
-        `  ${tier}: [${providerIds.map((id) => `providers.${id}`).join(", ")}],`,
+        `  ${tier}: [`,
+        ...activeProviderIds.map((id) => `    providers.${id},`),
+        ...commentedProviderIds.map((id) => `    // providers.${id},`),
+        `  ],`,
+    ];
+}
+
+/**
+ * @param {boolean} active
+ * @param {string} line
+ */
+function commentIfInactive(active, line) {
+    return active ? line : `// ${line}`;
+}
+
+/**
+ * @param {string} providerId
+ */
+function canRenderProvider(providerId) {
+    return providerId in LOCAL_SCAFFOLDED_PROVIDERS || providerId in CONSTRUCTORS;
+}
+
+/**
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {AgentAvailability}
+ */
+function createDefaultOpenRouterAvailability(env) {
+    const detector = detectorForId(DEFAULT_PROVIDER_ID);
+    const hasApiKeySignal = Boolean(env.OPENROUTER_API_KEY);
+    return {
+        id: DEFAULT_PROVIDER_ID,
+        displayName: detector?.displayName ?? "OpenRouter",
+        binary: detector?.binary ?? "openrouter-api",
+        hasBinary: false,
+        hasAuthSignal: false,
+        hasApiKeySignal,
+        hasProjectTrustSignal: true,
+        status: hasApiKeySignal ? "api-key" : "unavailable",
+        score: hasApiKeySignal ? scoreStatus("api-key") : scoreStatus("unavailable"),
+        usable: true,
+        checks: [
+            "binary:openrouter-api:not-required",
+            `env:OPENROUTER_API_KEY:${hasApiKeySignal ? "yes" : "no"}`,
+            "fallback:openrouter:yes",
+        ],
+        unusableReasons: [],
+    };
+}
+
+/**
+ * @param {Set<string>} activeBaseIds
+ * @param {import("@smithers-orchestrator/accounts").Account[]} registeredAccounts
+ */
+function requiredTiersHaveCandidates(activeBaseIds, registeredAccounts) {
+    return REQUIRED_DEFAULT_TIERS.every((tier) => {
+        const preference = TIER_PREFERENCES[tier];
+        if (!preference) return true;
+        const activeProviderIds = new Set(activeBaseIds);
+        for (const variant of AGENT_VARIANTS) {
+            if (activeBaseIds.has(variant.derivedFrom)) activeProviderIds.add(variant.variantId);
+        }
+        if (preference.order.some((id) => activeProviderIds.has(id))) return true;
+        const tierFamilies = new Set(preference.order.map(baseAgentIdForProviderId));
+        return registeredAccounts.some((account) => tierFamilies.has(ACCOUNT_PROVIDER_POOL[account.provider]));
+    });
+}
+
+/**
+ * @param {boolean} active
+ * @returns {string[]}
+ */
+function renderOpenRouterHelper(active) {
+    return [
+        commentIfInactive(active, "class SmithersOpenRouterAgent extends SmithersOpenAIAgent {"),
+        commentIfInactive(active, "  generate(args = {}) {"),
+        commentIfInactive(active, "    if (!process.env.OPENROUTER_API_KEY) {"),
+        commentIfInactive(active, '      throw new Error("Smithers generated an OpenRouter default agent, but OPENROUTER_API_KEY is not set. Set OPENROUTER_API_KEY, or run `smithers agent add` to configure another agent, then rerun this workflow.");'),
+        commentIfInactive(active, "    }"),
+        commentIfInactive(active, "    return super.generate(args);"),
+        commentIfInactive(active, "  }"),
+        commentIfInactive(active, "}"),
+        commentIfInactive(active, ""),
+        commentIfInactive(active, "function createOpenRouterAgent() {"),
+        commentIfInactive(active, "  return new SmithersOpenRouterAgent({"),
+        commentIfInactive(active, `    model: ${JSON.stringify(OPENROUTER_DEFAULT_MODEL)},`),
+        commentIfInactive(active, '    baseURL: "https://openrouter.ai/api/v1",'),
+        commentIfInactive(active, "    apiKey: process.env.OPENROUTER_API_KEY,"),
+        commentIfInactive(active, "  });"),
+        commentIfInactive(active, "}"),
     ];
 }
 
@@ -997,75 +1105,89 @@ export function generateAgentsTs(env = process.env, options = {}) {
             unusableReasons: [],
         });
     }
-    const available = [...availableById.values()];
-    if (available.length === 0 && registeredAccounts.length === 0) {
-        throw new SmithersError("NO_USABLE_AGENTS", formatNoUsableAgentsMessage(detections));
+    if (!requiredTiersHaveCandidates(new Set(availableById.keys()), registeredAccounts)) {
+        availableById.set(DEFAULT_PROVIDER_ID, createDefaultOpenRouterAvailability(env));
     }
-    // When no agents are detected (e.g. fresh machine with only API keys
-    // registered via `smithers agent add`), emit the accounts-only shape with
-    // engine-family pools — there's no detection-derived base to merge into.
-    if (available.length === 0) {
-        return generateAccountsAgentsTs(registeredAccounts, env);
-    }
-    // Base providers in detection order. Never let a detected provider we
-    // can't render (no local scaffold and no SDK constructor mapping) crash
-    // agents.ts generation with an opaque `CONSTRUCTORS[...].importName` error —
-    // skip it with a warning instead. This keeps `smithers init` working even
-    // when a newer detector ships before its constructor mapping.
-    const orderedProviders = DETECTORS
-        .map((detector) => availableById.get(detector.id))
-        .filter((entry) => Boolean(entry))
-        .filter((entry) => {
-            if (usesLocalScaffold(entry.id) || CONSTRUCTORS[entry.id]) return true;
-            console.warn(
-                `agents.ts: skipping detected agent "${entry.id}" (no SDK constructor mapping yet).`,
-            );
+    const providerStates = DETECTORS
+        .filter((detector) => {
+            if (canRenderProvider(detector.id)) return true;
+            if (availableById.has(detector.id)) {
+                console.warn(`agents.ts: skipping detected agent "${detector.id}" (no SDK constructor mapping yet).`);
+            }
             return false;
-        });
-    // Derive variants (e.g. claudeSonnet from claude)
-    const availableIds = new Set(orderedProviders.map((p) => p.id));
-    const activeVariants = AGENT_VARIANTS.filter((v) => availableIds.has(v.derivedFrom));
-    // Smithers SDK class imports needed: detection variants + non-scaffolded
-    // detection providers + every account class.
-    const importNames = new Set();
-    for (const provider of orderedProviders) {
+        })
+        .map((detector) => ({
+            id: detector.id,
+            active: availableById.has(detector.id),
+            detection: availableById.get(detector.id) ?? detections.find((entry) => entry.id === detector.id),
+        }));
+    const activeProviderStates = providerStates.filter((entry) => entry.active);
+    const activeBaseIds = new Set(activeProviderStates.map((entry) => entry.id));
+    const variantStates = AGENT_VARIANTS.map((variant) => ({
+        ...variant,
+        active: activeBaseIds.has(variant.derivedFrom),
+    }));
+    // Smithers SDK class imports needed: active imports stay live; imports used
+    // only by unavailable/commented provider lines are rendered as comments.
+    const activeImportNames = new Set();
+    const inactiveImportNames = new Set();
+    for (const provider of providerStates) {
         if (!usesLocalScaffold(provider.id)) {
-            importNames.add(CONSTRUCTORS[provider.id].importName);
+            const importName = CONSTRUCTORS[provider.id]?.importName;
+            if (importName) (provider.active ? activeImportNames : inactiveImportNames).add(importName);
         }
     }
-    for (const variant of activeVariants)
-        importNames.add(variant.constructor.importName);
+    for (const variant of variantStates) {
+        (variant.active ? activeImportNames : inactiveImportNames).add(variant.constructor.importName);
+    }
     for (const account of registeredAccounts) {
         const cls = ACCOUNT_PROVIDER_CLASSES[account.provider];
-        if (cls) importNames.add(cls);
+        if (cls) activeImportNames.add(cls);
     }
-    const smithersImportSpecifiers = [
-        "type AgentLike",
-        ...[...importNames].map((importName) => `${importName} as Smithers${importName}`),
+    for (const importName of activeImportNames) {
+        inactiveImportNames.delete(importName);
+    }
+    const smithersImportLines = [
+        'import { type AgentLike } from "smithers-orchestrator";',
+        ...[...activeImportNames].map((importName) => `import { ${importName} as Smithers${importName} } from "smithers-orchestrator";`),
+        ...[...inactiveImportNames].map((importName) => `// import { ${importName} as Smithers${importName} } from "smithers-orchestrator";`),
     ];
     const homeDir = env.HOME ?? homedir();
     const hasAccounts = registeredAccounts.length > 0;
     // Provider lines: detection base + variants + accounts (additive — `agent
     // add` must never silently delete a previously-emitted provider).
     const providerLines = [
-        ...orderedProviders.map((provider) => `  ${provider.id}: ${usesLocalScaffold(provider.id) ? LOCAL_SCAFFOLDED_PROVIDERS[provider.id] : CONSTRUCTORS[provider.id].expr},`),
-        ...activeVariants.map((variant) => `  ${variant.variantId}: ${variant.constructor.expr},`),
+        ...providerStates.map((provider) => commentIfInactive(provider.active, `  ${provider.id}: ${usesLocalScaffold(provider.id) ? LOCAL_SCAFFOLDED_PROVIDERS[provider.id] : CONSTRUCTORS[provider.id].expr},`)),
+        ...variantStates.map((variant) => commentIfInactive(variant.active, `  ${variant.variantId}: ${variant.constructor.expr},`)),
         ...registeredAccounts.map((account) => renderAccountProviderLine(account, homeDir)),
     ];
-    const scaffoldImportLines = orderedProviders
+    const scaffoldImportLines = providerStates
         .filter((provider) => usesLocalScaffold(provider.id))
-        .map((provider) => `import { ${LOCAL_SCAFFOLDED_PROVIDERS[provider.id]} } from "./agents/${LOCAL_SCAFFOLDED_PROVIDER_FILES[provider.id]}";`);
-    const scaffoldExportLines = orderedProviders
+        .map((provider) => commentIfInactive(provider.active, `import { ${LOCAL_SCAFFOLDED_PROVIDERS[provider.id]} } from "./agents/${LOCAL_SCAFFOLDED_PROVIDER_FILES[provider.id]}";`));
+    const scaffoldExportLines = providerStates
         .filter((provider) => usesLocalScaffold(provider.id))
-        .map((provider) => `export { ${LOCAL_SCAFFOLDED_PROVIDERS[provider.id]} } from "./agents/${LOCAL_SCAFFOLDED_PROVIDER_FILES[provider.id]}";`);
+        .map((provider) => commentIfInactive(provider.active, `export { ${LOCAL_SCAFFOLDED_PROVIDERS[provider.id]} } from "./agents/${LOCAL_SCAFFOLDED_PROVIDER_FILES[provider.id]}";`));
+    const openRouterHelperLines = renderOpenRouterHelper(activeBaseIds.has(DEFAULT_PROVIDER_ID));
     // All known provider/variant IDs for tier resolution
     const allProviderIds = new Set([
-        ...orderedProviders.map((p) => p.id),
-        ...activeVariants.map((v) => v.variantId),
+        ...activeProviderStates.map((p) => p.id),
+        ...variantStates.filter((v) => v.active).map((v) => v.variantId),
     ]);
     const detectionsById = new Map(detections.map((entry) => [entry.id, entry]));
     // Fallback: all base provider IDs sorted by score (for tiers with no preferred match)
-    const fallbackIds = orderedProviders.map((p) => p.id);
+    const fallbackIds = activeProviderStates.map((p) => p.id);
+    /** @type {Map<string, string[]>} */
+    const accountPoolMembers = new Map();
+    for (const account of registeredAccounts) {
+        const family = ACCOUNT_PROVIDER_POOL[account.provider];
+        if (!family) continue;
+        const arr = accountPoolMembers.get(family) ?? [];
+        arr.push(labelToCamel(account.label));
+        accountPoolMembers.set(family, arr);
+    }
+    const accountPoolLines = [...accountPoolMembers.entries()].map(([family, members]) =>
+        renderTierLine(family, members, [], []),
+    ).flat();
     // Tier lines: detection-resolved members, then accounts whose engine
     // family is in the tier's preference order get appended.
     const resolvedTiers = Object.entries(TIER_PREFERENCES).map(([tier, { order, maxSize }]) => {
@@ -1078,41 +1200,38 @@ export function generateAgentsTs(env = process.env, options = {}) {
                 : fallbackIds;
             resolved = fallbackPool.slice(0, maxSize);
         }
-        const tierFamilies = new Set(order);
+        const tierFamilies = new Set(order.map(baseAgentIdForProviderId));
         const tierAccounts = registeredAccounts
             .filter((account) => tierFamilies.has(ACCOUNT_PROVIDER_POOL[account.provider]))
             .map((account) => labelToCamel(account.label));
         const merged = [...resolved, ...tierAccounts];
+        const commented = order.filter((id) => !allProviderIds.has(id));
         return {
             tier,
             members: merged,
             lines: renderTierLine(
                 tier,
                 merged,
+                commented,
                 renderUnavailablePreferenceComments(tier, order, allProviderIds, detectionsById),
             ),
         };
     });
-    const missingRequiredTiers = REQUIRED_DEFAULT_TIERS.filter((tier) => {
-        const resolved = resolvedTiers.find((entry) => entry.tier === tier);
-        return !resolved || resolved.members.length === 0;
-    });
-    if (missingRequiredTiers.length > 0) {
-        throw new SmithersError(
-            "NO_USABLE_AGENTS",
-            `${formatNoUsableAgentsMessage(detections)} Detected agents cannot populate required default pools: ${missingRequiredTiers.join(", ")}.`,
-        );
-    }
-    const tierLines = resolvedTiers.flatMap((entry) => entry.lines);
+    const tierLines = [
+        ...accountPoolLines,
+        ...resolvedTiers.flatMap((entry) => entry.lines),
+    ];
     return [
         "// smithers-source: generated",
         ...(hasAccounts ? ["// Account providers (camelCase labels) come from ~/.smithers/accounts.json — managed via `smithers agent add|list|remove`."] : []),
         ...(hasAccounts ? ['import { homedir } from "node:os";', 'import path from "node:path";'] : []),
-        `import { ${smithersImportSpecifiers.join(", ")} } from "smithers-orchestrator";`,
+        ...smithersImportLines,
         ...scaffoldImportLines,
         "",
         ...scaffoldExportLines,
         ...(scaffoldExportLines.length ? [""] : []),
+        ...openRouterHelperLines,
+        "",
         "export const providers = {",
         ...providerLines,
         "} as const;",

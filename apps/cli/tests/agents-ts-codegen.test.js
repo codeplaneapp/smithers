@@ -21,6 +21,13 @@ function newSmithersHome() {
     return { SMITHERS_HOME: dir, HOME: dir };
 }
 
+function uncommented(source) {
+    return source
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("//"))
+        .join("\n");
+}
+
 describe("generateAgentsTs (account-driven)", () => {
     test("emits one provider per account and a pool per engine family", () => {
         const env = newSmithersHome();
@@ -39,11 +46,11 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).toContain("claudePersonal: new SmithersClaudeCodeAgent(");
         expect(generated).toContain("codexWork: new SmithersCodexAgent(");
         // pools group by engine family
-        expect(generated).toContain("claude: [providers.claudeWork, providers.claudePersonal]");
-        expect(generated).toContain("codex: [providers.codexWork]");
+        expect(generated).toMatch(/claude:\s*\[\s*providers\.claudeWork,\s*providers\.claudePersonal,\s*\]/);
+        expect(generated).toMatch(/codex:\s*\[\s*providers\.codexWork,\s*\]/);
         // Smart pools lead with subscription Claude so failover is not on the hot path.
-        expect(generated).toContain("smart: [providers.claudeWork, providers.claudePersonal, providers.codexWork]");
-        expect(generated).toContain("smartTool: [providers.claudeWork, providers.claudePersonal, providers.codexWork]");
+        expect(generated).toMatch(/smart:\s*\[\s*providers\.claudeWork,\s*providers\.claudePersonal,\s*providers\.codexWork,/);
+        expect(generated).toMatch(/smartTool:\s*\[\s*providers\.claudeWork,\s*providers\.claudePersonal,\s*providers\.codexWork,/);
     });
 
     test("path.join(homedir(), ...) is used for paths under $HOME", () => {
@@ -72,8 +79,8 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).toContain('apiKey: "sk-xyz"');
         expect(generated).toContain('apiKey: "sk-ant"');
         // openai-api goes in the codex pool, anthropic-api in the claude pool
-        expect(generated).toContain("codex: [providers.openaiProd]");
-        expect(generated).toContain("claude: [providers.anthropicProd]");
+        expect(generated).toMatch(/codex:\s*\[\s*providers\.openaiProd,\s*\]/);
+        expect(generated).toMatch(/claude:\s*\[\s*providers\.anthropicProd,\s*\]/);
         // user-specified model wins over the default
         expect(generated).toContain('model: "gpt-5"');
     });
@@ -109,17 +116,21 @@ describe("generateAgentsTs (account-driven)", () => {
         });
 
         expect(generated).not.toContain("gpt-5.3-codex");
-        expect(generated).toContain("smart: [providers.claude, providers.claudeOpus, providers.codex]");
-        expect(generated).toContain("smartTool: [providers.claude, providers.claudeOpus, providers.codex]");
-        expect(generated).not.toContain("smart: [providers.claude, providers.claudeOpus, providers.codex, providers.opencode]");
-        expect(generated).not.toContain("smartTool: [providers.codex");
+        expect(generated).toMatch(/smart:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,\s*providers\.codex,/);
+        expect(generated).toMatch(/smartTool:\s*\[\s*providers\.claude,\s*providers\.claudeOpus,\s*providers\.codex,/);
+        expect(uncommented(generated)).not.toContain("providers.opencode");
+        expect(uncommented(generated)).not.toMatch(/smartTool:\s*\[\s*providers\.codex/);
     });
 
-    test("detection smart pools do not fall back to opencode-only", () => {
+    test("detection smart pools fall back to OpenRouter for opencode-only", () => {
         const env = newSmithersHome();
-        expect(() => generateAgentsTs(env, {
+        const generated = generateAgentsTs(env, {
             preserveProviderIds: ["opencode"],
-        })).toThrow("required default pools");
+        });
+        expect(generated).toContain("openrouter: createOpenRouterAgent()");
+        expect(generated).toMatch(/smart:\s*\[\s*providers\.openrouter,/);
+        expect(generated).toMatch(/smartTool:\s*\[\s*providers\.openrouter,/);
+        expect(generated).toContain("opencode: OpenCodeAgent");
     });
 
     test("preserves generated detection providers when adding accounts in a different shell", () => {
@@ -154,8 +165,8 @@ describe("generateAgentsTs (account-driven)", () => {
         const regenerated = generateAgentsTs(env, { preserveProviderIds: preserved });
         expect(regenerated).toContain("codex: new SmithersCodexAgent(");
         expect(regenerated).toContain("claudeSonnet: new SmithersClaudeCodeAgent(");
-        expect(regenerated).not.toContain("codex: CodexAgent");
-        expect(regenerated).not.toContain("claude: ClaudeCodeAgent");
+        expect(uncommented(regenerated)).not.toContain("codex: CodexAgent");
+        expect(uncommented(regenerated)).not.toContain("claude: ClaudeCodeAgent");
     });
 
     test("preserves generated detection providers during account-driven rewrites", () => {
@@ -177,5 +188,30 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).toContain("claudeOpus: new SmithersClaudeCodeAgent(");
         expect(generated).toContain("claudeSonnet: new SmithersClaudeCodeAgent(");
         expect(generated).toContain("codexProd: new SmithersCodexAgent(");
+    });
+
+    test("no detected CLI binaries emits OpenRouter default and comments unavailable providers", () => {
+        const env = newSmithersHome();
+        const generated = generateAgentsTs({ ...env, PATH: "/no-agent-binaries", OPENROUTER_API_KEY: "" });
+        const active = uncommented(generated);
+        expect(generated).toContain("import { OpenAIAgent as SmithersOpenAIAgent } from \"smithers-orchestrator\";");
+        expect(generated).toContain("openrouter: createOpenRouterAgent()");
+        expect(generated).toContain("//   claude: ClaudeCodeAgent,");
+        expect(generated).toContain("// import { CodexAgent } from \"./agents/codex\";");
+        expect(generated).toContain("// export { CodexAgent } from \"./agents/codex\";");
+        expect(active).toContain("smart: [\n    providers.openrouter,");
+        expect(active).toContain("smartTool: [\n    providers.openrouter,");
+        expect(active).not.toContain("providers.claude");
+        expect(active).not.toContain("providers.codex");
+    });
+
+    test("generated detection id round-trip keeps OpenRouter default and commented providers stable", () => {
+        const env = { ...newSmithersHome(), PATH: "/no-agent-binaries", OPENROUTER_API_KEY: "" };
+        const initial = generateAgentsTs(env);
+        const regenerated = generateAgentsTs(env, {
+            preserveProviderIds: extractGeneratedDetectionProviderIds(initial),
+        });
+        expect([...extractGeneratedDetectionProviderIds(initial)]).toEqual(["openrouter"]);
+        expect(regenerated).toBe(initial);
     });
 });
