@@ -62,6 +62,21 @@ function extractReview(index: number, value: unknown): ReviewRow | null {
   };
 }
 
+type Synthesis = { approved: boolean; feedback: string; issues: ReviewIssue[] };
+function extractSynthesis(value: unknown): Synthesis | null {
+  const response = isRecord(value) ? value : {};
+  const row = isRecord(response.row) ? response.row : isRecord(response) ? response : {};
+  if (typeof row.approved !== "boolean" && asString(row.feedback) === undefined) return null;
+  const rawIssues = Array.isArray(row.issues) ? row.issues : [];
+  const issues: ReviewIssue[] = rawIssues.filter(isRecord).map((it) => ({
+    severity: asSeverity(it.severity),
+    title: asString(it.title) ?? "Untitled issue",
+    file: asString(it.file) ?? null,
+    description: asString(it.description) ?? "",
+  }));
+  return { approved: row.approved === true, feedback: asString(row.feedback) ?? "", issues };
+}
+
 function statusClass(status: string | undefined) {
   if (status === "running" || status === "continued") return "running";
   if (status === "finished") return "finished";
@@ -160,14 +175,17 @@ function App() {
   const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
   const eventCount = (stream.events ?? []).length;
 
-  // Probe a fixed set of reviewer lanes (Parallel node ids review:0 .. review:N).
-  const n0 = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review:0", iteration: 0 });
-  const n1 = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review:1", iteration: 0 });
-  const n2 = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review:2", iteration: 0 });
-  const n3 = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review:3", iteration: 0 });
-  const n4 = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review:4", iteration: 0 });
-  const n5 = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review:5", iteration: 0 });
+  // Probe a fixed set of panelist reviewer lanes (Panel node ids review-panelist-0 .. review-panelist-N).
+  const n0 = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review-panelist-0", iteration: 0 });
+  const n1 = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review-panelist-1", iteration: 0 });
+  const n2 = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review-panelist-2", iteration: 0 });
+  const n3 = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review-panelist-3", iteration: 0 });
+  const n4 = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review-panelist-4", iteration: 0 });
+  const n5 = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review-panelist-5", iteration: 0 });
   const nodeQueries = [n0, n1, n2, n3, n4, n5];
+  // The synthesized verdict from the moderator (usually Codex).
+  const moderator = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review-moderator", iteration: 0 });
+  const synthesis = useMemo(() => extractSynthesis(moderator.data), [moderator.data]);
 
   const reviews = useMemo(() => {
     const out: ReviewRow[] = [];
@@ -180,7 +198,10 @@ function App() {
   }, [n0.data, n1.data, n2.data, n3.data, n4.data, n5.data]);
 
   const approvedCount = reviews.filter((r) => r.approved).length;
-  const allApproved = reviews.length > 0 && approvedCount === reviews.length;
+  // The synthesized moderator verdict is the source of truth; fall back to
+  // panelist consensus until the moderator has produced its verdict.
+  const verdictApproved = synthesis ? synthesis.approved : reviews.length > 0 && approvedCount === reviews.length;
+  const hasContent = reviews.length > 0 || synthesis !== null;
   const allIssues = reviews.flatMap((r) => r.issues.map((it) => ({ ...it, reviewer: r.reviewer })));
   const sevCounts = SEVERITIES.reduce((acc, s) => {
     acc[s] = allIssues.filter((it) => it.severity === s).length;
@@ -189,7 +210,7 @@ function App() {
   const visibleIssues = sevFilter === "all" ? allIssues : allIssues.filter((it) => it.severity === sevFilter);
 
   async function refresh() {
-    await Promise.all([runsQuery.refetch(), ...nodeQueries.map((q) => q.refetch())]);
+    await Promise.all([runsQuery.refetch(), moderator.refetch(), ...nodeQueries.map((q) => q.refetch())]);
   }
   async function launch() {
     setBusy(true);
@@ -241,15 +262,20 @@ function App() {
 
       <div className="main">
         <div className="content">
-          {reviews.length > 0 ? (
+          {hasContent ? (
             <>
-              <div className={"verdict " + (allApproved ? "approved" : "blocked")} data-testid="review-verdict">
-                <span className="verdict-mark">{allApproved ? "✓" : "✗"}</span>
+              <div className={"verdict " + (verdictApproved ? "approved" : "blocked")} data-testid="review-verdict">
+                <span className="verdict-mark">{verdictApproved ? "✓" : "✗"}</span>
                 <div className="verdict-body">
                   <div className="verdict-headline">
-                    {allApproved ? "Approved by all reviewers" : "Blocked — not all reviewers approved"}
+                    {synthesis
+                      ? (verdictApproved ? "Approved — synthesized verdict" : "Blocked — synthesized verdict")
+                      : (verdictApproved ? "Approved by all panelists" : "Blocked — not all panelists approved")}
                   </div>
-                  <div className="verdict-sub">{approvedCount} of {reviews.length} reviewers approved</div>
+                  <div className="verdict-sub">{approvedCount} of {reviews.length} panelists approved{synthesis ? " · moderator synthesized" : ""}</div>
+                  {synthesis && synthesis.feedback ? (
+                    <div className="verdict-sub" data-testid="review-synthesis-feedback" style={{ marginTop: 6, color: "var(--text)" }}>{synthesis.feedback}</div>
+                  ) : null}
                   <div className="approval-bar">
                     <span style={{ width: (reviews.length ? (approvedCount / reviews.length) * 100 : 0) + "%" }} />
                   </div>
@@ -261,7 +287,7 @@ function App() {
                 </div>
               </div>
 
-              <div className="section-head">Reviewers ({reviews.length})</div>
+              <div className="section-head">Panelists ({reviews.length})</div>
               <div className="lanes" data-testid="review-reviewers">
                 {reviews.map((r) => (
                   <div
@@ -328,16 +354,16 @@ function App() {
               </div>
 
               <div className="section-head" style={{ color: "var(--muted)" }}>
-                {eventCount} events{nodeQueries.some((q) => q.loading) ? " · refreshing…" : ""}
+                {eventCount} events{nodeQueries.some((q) => q.loading) || moderator.loading ? " · refreshing…" : ""}
               </div>
             </>
           ) : (
             <div className="empty" data-testid="review-empty">
-              <div>{activeRunId ? "Waiting for reviewers…" : "No review runs yet."}</div>
+              <div>{activeRunId ? "Waiting for the review panel…" : "No review runs yet."}</div>
               <div className="desc">
-                Launch a review to have the code changes examined by reviewers in parallel. Each reviewer reports
-                an approve/deny verdict, written feedback, and a list of issues by severity. The verdict above
-                turns green only when every reviewer approves.
+                Launch a review to have the code changes examined by a panel of reviewers in parallel, then
+                synthesized by a moderator into one verdict. Each panelist reports an approve/deny verdict,
+                written feedback, and issues by severity; the verdict above reflects the moderator's synthesis.
               </div>
               <button className="button primary" data-testid="review-launch-empty" onClick={() => void launch()} disabled={busy}>
                 Launch Review

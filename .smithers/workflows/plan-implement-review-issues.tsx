@@ -50,7 +50,7 @@ import { createSmithers, Parallel, Sequence, Task, Worktree, type AgentLike } fr
 import { z } from "zod/v4";
 import { providers } from "../agents";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
-import { reviewOutputSchema } from "../components/Review";
+import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
 
 // ----------------------------------------------------------------------------
 // Agent pools. An ARRAY is a failover chain: Smithers tries the first agent and,
@@ -122,7 +122,6 @@ const prSchema = z.object({
 });
 
 type Group = z.infer<typeof groupSchema>;
-type ReviewOut = z.infer<typeof reviewOutputSchema>;
 
 const { Workflow, smithers } = createSmithers({
   input: inputSchema,
@@ -131,6 +130,7 @@ const { Workflow, smithers } = createSmithers({
   implement: implementOutputSchema,
   validate: validateOutputSchema,
   review: reviewOutputSchema,
+  reviewSynthesis: reviewSynthesisSchema,
   pr: prSchema,
 });
 
@@ -154,18 +154,13 @@ function slugify(value: string): string {
     .slice(0, 50) || "item";
 }
 
-function buildFeedback(validate: z.infer<typeof validateOutputSchema> | undefined, reviews: ReviewOut[]): string | null {
+function buildFeedback(validate: z.infer<typeof validateOutputSchema> | undefined, reviewFeedback: string | null): string | null {
   const parts: string[] = [];
   if (validate && validate.allPassed === false && validate.failingSummary) {
     parts.push(`VALIDATION FAILED:\n${validate.failingSummary}`);
   }
-  for (const review of reviews) {
-    if (review.approved === false) {
-      parts.push(`REVIEWER REJECTED:\n${review.feedback}`);
-      for (const issue of review.issues ?? []) {
-        parts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : ""}`);
-      }
-    }
+  if (reviewFeedback) {
+    parts.push(`REVIEW PANEL REJECTED:\n${reviewFeedback}`);
   }
   return parts.length > 0 ? parts.join("\n\n") : null;
 }
@@ -300,13 +295,10 @@ function renderGroup(opts: {
 
   // Per-group loop control, scoped to THIS group's nodes.
   const validate = ctx.outputMaybe("validate", { nodeId: `${key}:validate` }) as z.infer<typeof validateOutputSchema> | undefined;
-  const reviews = [0, 1, 2]
-    .map((i) => ctx.outputMaybe("review", { nodeId: `${key}:review:${i}` }) as ReviewOut | undefined)
-    .filter((r): r is ReviewOut => r != null);
+  const gate = reviewGate(ctx, `${key}:review-moderator`);
   const validationPassed = validate !== undefined && validate.allPassed !== false;
-  const anyApproved = reviews.length > 0 && reviews.some((r) => r.approved === true);
-  const done = validationPassed && anyApproved;
-  const feedback = buildFeedback(validate, reviews);
+  const done = validationPassed && gate.approved;
+  const feedback = buildFeedback(validate, gate.feedback);
 
   const implementPrompt = buildImplementPrompt({ repo, branch, baseBranch, group, difficulty, plan });
 
@@ -329,6 +321,7 @@ function renderGroup(opts: {
             implementAgents={implementAgents}
             validateAgents={validateChain}
             reviewAgents={reviewers}
+            reviewModerator={providers.codex}
             feedback={feedback}
             done={done}
             maxIterations={reviewIterations}

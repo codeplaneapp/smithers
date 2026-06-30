@@ -98,7 +98,8 @@ function App() {
   const activeRunId = selectedRunId ?? planRuns[0]?.runId;
   const activeRun = planRuns.find((r) => r.runId === activeRunId);
   const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
-  const planOutput = useGatewayNodeOutput({ runId: activeRunId, nodeId: "plan", iteration: 0 });
+  // The plan is now a synthesized panel: read the moderator's merged plan.
+  const planOutput = useGatewayNodeOutput({ runId: activeRunId, nodeId: "plan-moderator", iteration: 0 });
   const plan = useMemo(() => extractPlan(planOutput.data), [planOutput.data]);
   const eventCount = (stream.events ?? []).length;
 

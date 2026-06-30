@@ -4,8 +4,10 @@
 import { createSmithers, Sequence, Loop } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
+import { implementer, panelists } from "../components/roles";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
-import { reviewOutputSchema } from "../components/Review";
+import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
+import { PlanPanel } from "../components/PlanPanel";
 
 /**
  * Validated Implement — one ticket, driven through:
@@ -64,6 +66,14 @@ const planSchema = z.looseObject({
   risks: z.array(z.string()).default([]),
 });
 
+// Synthesized plan from the plan panel's moderator — distinct schema object so
+// it resolves to its own output channel (channels are keyed by schema identity).
+const planSynthesisSchema = z.looseObject({
+  summary: z.string(),
+  steps: z.array(z.string()).default([]),
+  risks: z.array(z.string()).default([]),
+});
+
 const inputSchema = z.object({
   ticketId: z.string().default("ticket"),
   title: z.string().default("Untitled ticket"),
@@ -81,9 +91,11 @@ const { Workflow, Task, Approval, smithers, outputs } = createSmithers({
   depvalidate: depvalidateSchema,
   approval: approvalSchema,
   plan: planSchema,
+  planSynthesis: planSynthesisSchema,
   implement: implementOutputSchema,
   validate: validateOutputSchema,
   review: reviewOutputSchema,
+  reviewSynthesis: reviewSynthesisSchema,
 });
 
 type DepValidate = z.infer<typeof depvalidateSchema>;
@@ -121,7 +133,8 @@ export default smithers((ctx) => {
 
   const research = ctx.outputMaybe(outputs.research, { nodeId: "research" });
   const depgate = ctx.outputMaybe(outputs.depgate, { nodeId: "depgate" });
-  const plan = ctx.outputMaybe(outputs.plan, { nodeId: "plan" });
+  // The plan is the synthesized output of the plan panel's moderator.
+  const plan = ctx.outputMaybe(outputs.planSynthesis, { nodeId: "plan-moderator" });
 
   const needsValidation = depgate?.needsValidation === true && (depgate?.testCommand ?? "").trim().length > 0;
 
@@ -157,10 +170,9 @@ export default smithers((ctx) => {
 
   // ── implement-loop convergence (mirrors research-plan-implement) ──────────
   const validateOut = ctx.outputMaybe(outputs.validate, { nodeId: "impl:validate" });
-  const reviews = (ctx.outputs.review ?? []) as Array<z.infer<typeof reviewOutputSchema>>;
   const implValidationPassed = validateOut !== undefined && validateOut.allPassed !== false;
-  const anyApproved = reviews.length > 0 && reviews.some((r) => r.approved === true);
-  const done = implValidationPassed && anyApproved;
+  const gate = reviewGate(ctx, "impl:review-moderator");
+  const done = implValidationPassed && gate.approved;
   const implIterations = (ctx.outputs.validate ?? []).length;
   const loopExhausted = !done && implIterations >= maxReviewIterations;
 
@@ -168,13 +180,8 @@ export default smithers((ctx) => {
   if (validateOut && !implValidationPassed && validateOut.failingSummary) {
     feedbackParts.push(`VALIDATION FAILED:\n${validateOut.failingSummary}`);
   }
-  for (const review of reviews) {
-    if (review.approved === false) {
-      feedbackParts.push(`REVIEWER REJECTED:\n${review.feedback}`);
-      for (const issue of review.issues ?? []) {
-        feedbackParts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : ""}`);
-      }
-    }
+  if (gate.feedback) {
+    feedbackParts.push(`REVIEW PANEL REJECTED:\n${gate.feedback}`);
   }
   const feedback = feedbackParts.length ? feedbackParts.join("\n\n") : null;
 
@@ -286,16 +293,14 @@ Rules:
           </Loop>
         ) : null}
 
-        <Task id="plan" output={outputs.plan} agent={agents.smart} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>
-          {planPrompt}
-        </Task>
+        <PlanPanel idPrefix="plan" prompt={planPrompt} panelistOutput={planSchema} synthesisOutput={planSynthesisSchema} />
 
         <ValidationLoop
           idPrefix="impl"
           prompt={implementPrompt}
-          implementAgents={agents.smart}
+          implementAgents={implementer}
           validateAgents={agents.cheapFast}
-          reviewAgents={agents.smart}
+          reviewAgents={panelists}
           feedback={feedback}
           done={done}
           maxIterations={maxReviewIterations}

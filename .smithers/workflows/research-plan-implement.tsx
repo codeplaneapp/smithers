@@ -4,19 +4,15 @@
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
+import { implementer, panelists } from "../components/roles";
 import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";
-import { reviewOutputSchema } from "../components/Review";
+import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";
+import { PlanPanel, planOutputSchema, planSynthesisSchema } from "../components/PlanPanel";
 import ResearchPrompt from "../prompts/research.mdx";
-import PlanPrompt from "../prompts/plan.mdx";
 
 const researchOutputSchema = z.looseObject({
   summary: z.string(),
   keyFindings: z.array(z.string()).default([]),
-});
-
-const planOutputSchema = z.looseObject({
-  summary: z.string(),
-  steps: z.array(z.string()).default([]),
 });
 
 const inputSchema = z.object({
@@ -28,9 +24,11 @@ const { Workflow, Task, Sequence, smithers } = createSmithers({
   input: inputSchema,
   research: researchOutputSchema,
   plan: planOutputSchema,
+  planSynthesis: planSynthesisSchema,
   implement: implementOutputSchema,
   validate: validateOutputSchema,
   review: reviewOutputSchema,
+  reviewSynthesis: reviewSynthesisSchema,
 });
 
 export default smithers((ctx) => {
@@ -38,9 +36,10 @@ export default smithers((ctx) => {
   const tdd = ctx.input.tdd;
 
   const research = ctx.outputMaybe("research", { nodeId: "research" });
-  const plan = ctx.outputMaybe("plan", { nodeId: "plan" });
+  // The plan is the synthesized output of the plan panel's moderator.
+  const plan = ctx.outputMaybe("planSynthesis", { nodeId: "plan-moderator" });
 
-  // Enrich plan prompt with research findings
+  // Enrich plan prompt with research findings (fed to the plan panelists)
   const planPromptParts = [
     prompt,
     research
@@ -52,7 +51,7 @@ export default smithers((ctx) => {
   ];
   const planPrompt = planPromptParts.filter(Boolean).join("\n\n---\n");
 
-  // Enrich implement prompt with both research and plan
+  // Enrich implement prompt with both research and the synthesized plan
   const implementPrompt = [
     prompt,
     research ? `RESEARCH FINDINGS:\n${research.summary}\n\nKey findings:\n${research.keyFindings.map((f: string) => `- ${f}`).join("\n")}` : null,
@@ -62,26 +61,18 @@ export default smithers((ctx) => {
 
   // Validation loop feedback
   const validate = ctx.outputMaybe("validate", { nodeId: "impl:validate" });
-  const reviews = ctx.outputs.review ?? [];
 
   const hasValidated = validate !== undefined;
   const validationPassed = hasValidated && validate.allPassed !== false;
-  const anyApproved = reviews.length > 0 && reviews.some((r: any) => r.approved === true);
-  const done = validationPassed && anyApproved;
+  const gate = reviewGate(ctx, "impl:review-moderator");
+  const done = validationPassed && gate.approved;
 
   const feedbackParts: string[] = [];
   if (validate && !validationPassed && validate.failingSummary) {
     feedbackParts.push(`VALIDATION FAILED:\n${validate.failingSummary}`);
   }
-  for (const review of reviews) {
-    if (review.approved === false) {
-      feedbackParts.push(`REVIEWER REJECTED:\n${review.feedback}`);
-      if (review.issues?.length) {
-        for (const issue of review.issues) {
-          feedbackParts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : ""}`);
-        }
-      }
-    }
+  if (gate.feedback) {
+    feedbackParts.push(`REVIEW PANEL REJECTED:\n${gate.feedback}`);
   }
   const feedback = feedbackParts.length > 0 ? feedbackParts.join("\n\n") : null;
 
@@ -91,15 +82,13 @@ export default smithers((ctx) => {
         <Task id="research" output={researchOutputSchema} agent={agents.smartTool}>
           <ResearchPrompt prompt={prompt} />
         </Task>
-        <Task id="plan" output={planOutputSchema} agent={agents.smart}>
-          <PlanPrompt prompt={planPrompt} />
-        </Task>
+        <PlanPanel idPrefix="plan" prompt={planPrompt} />
         <ValidationLoop
           idPrefix="impl"
           prompt={implementPrompt}
-          implementAgents={agents.smart}
+          implementAgents={implementer}
           validateAgents={agents.cheapFast}
-          reviewAgents={agents.smart}
+          reviewAgents={panelists}
           feedback={feedback}
           done={done}
           maxIterations={3}

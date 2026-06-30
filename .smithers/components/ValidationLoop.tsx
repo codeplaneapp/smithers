@@ -2,7 +2,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { Sequence, Loop, Task, type AgentLike } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { Review } from "~/components/Review";
+import { ReviewPanel } from "~/components/Review";
 import ImplementPrompt from "~/prompts/implement.mdx";
 import ValidatePrompt from "~/prompts/validate.mdx";
 
@@ -23,6 +23,8 @@ export type ValidationLoopProps = {
   implementAgents: AgentLike[];
   reviewAgents: AgentLike[];
   validateAgents?: AgentLike[];
+  /** Moderator that synthesizes the review panel into one verdict; defaults to the shared synthesizer (usually Codex). */
+  reviewModerator?: AgentLike;
   feedback?: string | null;
   done?: boolean;
   maxIterations?: number;
@@ -34,6 +36,7 @@ export function ValidationLoop({
   implementAgents,
   reviewAgents,
   validateAgents,
+  reviewModerator,
   feedback,
   done = false,
   maxIterations = 3,
@@ -52,7 +55,7 @@ export function ValidationLoop({
           : implementAgents} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>
           <ValidatePrompt prompt={promptText} />
         </Task>
-        <Review idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} />
+        <ReviewPanel idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} moderator={reviewModerator} />
       </Sequence>
     </Loop>
   );

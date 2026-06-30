@@ -232,10 +232,11 @@ function App() {
 
   const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
   const researchOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "research", iteration: 0 });
-  const planOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "plan", iteration: 0 });
+  // Plan and review are now synthesized panels — read the moderator nodes.
+  const planOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "plan-moderator", iteration: 0 });
   const implementOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "impl:implement", iteration: 0 });
   const validateOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "impl:validate", iteration: 0 });
-  const reviewOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "impl:review:0", iteration: 0 });
+  const reviewOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "impl:review-moderator", iteration: 0 });
 
   const research = useMemo(() => extractResearch(researchOut.data), [researchOut.data]);
   const plan = useMemo(() => extractPlan(planOut.data), [planOut.data]);
@@ -511,7 +512,7 @@ function App() {
                       {review ? (
                         <div className="reviewer-card">
                           <div className="reviewer-head">
-                            <strong>{review.reviewer}</strong>
+                            <strong>Synthesized verdict (moderator)</strong>
                             <span className={"badge " + (review.approved ? "ok" : "err")}>
                               {review.approved ? "approved" : "rejected"}
                             </span>
@@ -544,9 +545,9 @@ function App() {
                     </>
                   ) : (
                     <>
-                      <span className="badge warn">awaiting reviewer approvals</span>
+                      <span className="badge warn">awaiting synthesized approval</span>
                       <span className="muted">
-                        Multi-reviewer approval is the final gate before completion.
+                        The moderator's synthesized review verdict is the final gate before completion.
                       </span>
                     </>
                   )}
