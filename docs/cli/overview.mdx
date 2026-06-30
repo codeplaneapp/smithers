@@ -143,7 +143,7 @@ commands[80]:
       host,,string,127.0.0.1,HTTP bind address when --serve
       auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
-      interactive,,boolean,false,Pick a workflow and inputs interactively then live-render the run
+      interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (falls back to inline streaming)
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
   - name: migrate
     purpose: Copy the legacy bun:sqlite smithers.db into PGlite or Postgres and write the migrated.json marker
@@ -605,7 +605,7 @@ commands[80]:
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
       prompt,p,string,,Shorthand for input.prompt when --input is omitted
-      interactive,,boolean,false,Pick a workflow and inputs interactively then live-render the run
+      interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (falls back to inline streaming)
   - name: workflow.path
     purpose: Resolve a workflow ID to its entry file path
     args[1]{name,type,required,desc}:

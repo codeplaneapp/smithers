@@ -7,7 +7,7 @@ description: The old smithers tui command is no longer shipped; use the CLI comm
 
 The removal dropped the OpenTUI dependency and the `apps/cli/src/tui/` tree from the package.
 
-If you want the old "pick a workflow, start it, and watch it live" experience, that flow now lives behind a flag on the run commands: [`up --interactive`](/cli/overview) (or [`workflow run --interactive`](/cli/overview)). With no workflow argument it opens an interactive picker, prompts for inputs, and live-renders the run's status card until it finishes or pauses on a gate.
+If you want the old "pick a workflow, start it, and watch it live" experience, that flow now lives behind a flag on the run commands: [`up --interactive`](/cli/overview) (or [`workflow run --interactive`](/cli/overview)). With no workflow argument it opens an interactive picker, prompts for inputs, starts the run, and then hands off to the full-screen single-run monitor (a separate `smithers-mon` binary) for the lifetime of the run. When that monitor binary isn't installed (e.g. a slim install), it falls back to an inline append-only stream of the run's status until it finishes or pauses on a gate.
 
 ## Replacements
 

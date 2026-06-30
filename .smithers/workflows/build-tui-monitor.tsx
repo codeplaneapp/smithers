@@ -55,9 +55,11 @@ const DESIGN_CONTRACT = `
 SINGLE-RUN MONITOR TUI — DESIGN CONTRACT
 
 Stack: Bun runtime; OpenTUI core (@opentui/core) + React 19 renderer
-(@opentui/react). The TUI package uses STANDARD React JSX
-(jsxImportSource "react"), NOT smithers-orchestrator's jsx-runtime — that
-runtime is only for workflow files. Render with
+(@opentui/react). The TUI package uses the OpenTUI React JSX runtime
+(jsxImportSource "@opentui/react") — needed so the OpenTUI intrinsic
+elements (box/text/select/scrollbox/code/diff…) type-check — NOT plain
+"react" and NOT smithers-orchestrator's jsx-runtime (that runtime is only
+for workflow files). Render with
 createCliRenderer({ exitOnCtrlC:false }) -> createRoot(renderer).render(...).
 
 Data layer (NO mocks): wrap <SmithersGatewayProvider> (from
@@ -356,8 +358,9 @@ missing:
   "react-dom" peers as required by @opentui/react, "zod". Match this repo's
   workspace + build conventions (look at a sibling package's package.json/
   tsconfig). Wire its "test"/"typecheck" scripts like siblings.
-- tsconfig.json: STANDARD react JSX (jsx "react-jsx", jsxImportSource "react") —
-  NOT smithers-orchestrator. This is an OpenTUI React app, not a workflow.
+- tsconfig.json: STANDARD react JSX (jsx "react-jsx", jsxImportSource
+  "@opentui/react"). NOT smithers-orchestrator. This is an OpenTUI React app,
+  not a workflow.
 - src/index.tsx entry (#!/usr/bin/env bun): assert TTY, parse a runId arg,
   createCliRenderer({ exitOnCtrlC:false }), createRoot(renderer), and mount the
   provider stack: ErrorBoundary > Theme > Keybindings > SmithersGatewayProvider

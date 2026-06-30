@@ -7,15 +7,14 @@
 
 ## 1. Goal & How It Ships
 
-The single-run monitor TUI is a full-screen terminal UI that replaces the current scroll-based `bunx smithers-orchestrator up --interactive` flow (`apps/cli/src/tui.js` → `runTuiCommand`). Instead of clack cards streaming down the terminal, the user gets a persistent, keyboard-driven, five-mode monitor that stays live for the full lifetime of a run.
+The single-run monitor TUI is a full-screen terminal UI launched from the `bunx smithers-orchestrator up --interactive` flow (`apps/cli/src/tui.js` → `runTuiCommand`). Instead of clack cards streaming down the terminal, the user gets a persistent, keyboard-driven, five-mode monitor that stays live for the full lifetime of a run.
 
 **Entry points:**
 
-- `bunx smithers-orchestrator up --interactive` / `bunx smithers-orchestrator up -i <workflow>` - existing flag; now launches the TUI after starting/attaching to a run.
+- `bunx smithers-orchestrator up --interactive` / `bunx smithers-orchestrator up -i <workflow>` - existing flag; picks/starts a run, then hands off to the monitor.
 - `bunx smithers-orchestrator up -i` with no workflow argument - shows the fuzzy workflow picker (reusing existing `fuzzySelect` + `buildWorkflowPickerOptions` logic from `tui.js`), then monitors the selected run.
-- `bunx smithers-orchestrator up --run-id RUN_ID` - attach the TUI to an already-running run without starting a new one.
 
-The old `runTuiCommand` scroll path is removed. The new entry point is `runTuiMonitor(runId, opts)` exported from `packages/tui/src/index.ts`.
+**How it ships (as built):** `runTuiCommand` is retained; it still owns the pre-fullscreen picker/input prompts and starting the run. After the run starts it spawns the monitor as a child process via the `smithers-mon` bin (the `@smithers-orchestrator/tui` package's `bin`, resolved by `resolveTuiEntry()`), passing the `runId` and forwarding `SMITHERS_CLI` / `SMITHERS_GATEWAY_URL`. The monitor (`packages/tui/src/index.tsx`) is a bin entry script, **not** an exported `runTuiMonitor(runId, opts)` function. When the `smithers-mon` bin can't be resolved (e.g. a slim install), `runTuiCommand` falls back to the inline `streamRun` append-only path so the run is still observable. There is no `up --run-id` attach mode.
 
 ---
 
@@ -27,10 +26,10 @@ The old `runTuiCommand` scroll path is removed. The new entry point is `runTuiMo
 | TUI renderer | `@opentui/core` | Zig-native core via Bun FFI; `createCliRenderer` |
 | React reconciler | `@opentui/react` | `createRoot(renderer).render(...)` |
 | React | `react` 19 (peer) | Standard reconciler; `react-dom` is a peer of `@opentui/react` |
-| JSX | **`/** @jsxImportSource react */`** | Standard React JSX, **NOT** `smithers-orchestrator`'s jsx-runtime. The smithers jsx-runtime is only for workflow definition files. |
+| JSX | **`jsxImportSource: "@opentui/react"`** | The OpenTUI React JSX runtime, **NOT** plain `react` and **NOT** `smithers-orchestrator`'s jsx-runtime. OpenTUI's runtime supplies the intrinsic element types (`box`/`text`/`select`/`scrollbox`/`code`/`diff`…) so the TUI's JSX type-checks. The smithers jsx-runtime is only for workflow definition files. |
 | Data | `smithers-orchestrator/gateway-react` | `SmithersGatewayProvider` + gateway hooks |
 
-**Critical JSX note**: Every file in `packages/tui` must use `/** @jsxImportSource react */` (or `tsconfig`-level `jsxImportSource: "react"`). Never use the `smithers-orchestrator` jsx runtime here - that pragma is exclusively for `.tsx` workflow files that use smithers's declarative task DSL.
+**Critical JSX note**: `packages/tui` sets `jsxImportSource: "@opentui/react"` at the `tsconfig` level (so every file uses the OpenTUI React JSX runtime, which declares the OpenTUI intrinsic elements). Never use plain `react` (its JSX runtime has no OpenTUI element types) and never use the `smithers-orchestrator` jsx runtime here - that runtime is exclusively for `.tsx` workflow files that use smithers's declarative task DSL.
 
 ---
 
@@ -69,8 +68,10 @@ The `useGatewayRun` hook drives the header and is polled via the collection's bu
 
 ## 4. Bootstrap / Provider Stack
 
+> **As built:** the bootstrap below lives at module top-level in `packages/tui/src/index.tsx`, the `smithers-mon` **bin entry script**, run as a child process. It is not exported as a `runTuiMonitor(runId, opts)` function; the sketch below is illustrative of the same wiring (gateway autostart, `exitOnCtrlC: false`, `onExit` teardown).
+
 ```tsx
-/** @jsxImportSource react */
+/** @jsxImportSource @opentui/react */
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { SmithersGatewayClient } from "smithers-orchestrator/gateway-client";
@@ -300,7 +301,7 @@ packages/tui/
                         # jsxImportSource: react (tsconfig)
   tsconfig.json
   src/
-    index.ts            # export runTuiMonitor(runId, opts)
+    index.tsx           # smithers-mon BIN entry: gateway autostart + createRoot + providers
     bootstrap.tsx       # createCliRenderer + createRoot + providers
     ensureGateway.ts    # probe + autostart logic (mirrors apps/cli)
     App.tsx             # root component: header + mode router + keybar
@@ -328,18 +329,15 @@ packages/tui/
   e2e/                  # (see §7)
 ```
 
-### CLI wiring change (`apps/cli/src/`)
+### CLI wiring (`apps/cli/src/`), as built
 
-- `apps/cli/src/tui.js` - **`runTuiCommand` is removed** (the scroll-based path). The file retains only pure utility exports consumed by other CLI commands: `buildWorkflowPickerOptions`, `pickerMaxItems`, `truncate`, `wrapText`, `renderRunCard`, `fetchCard`, `streamRun`, `childFailurePromise`, `waitForRunRow`, `formatOutputRow`, `formatStreamText`, `normalizeStreamText`, `displayNode`, `isCompletedToolPhase`.
+- `apps/cli/src/tui.js` - **`runTuiCommand` is retained.** It owns the pre-fullscreen flow (fuzzy picker + input prompts), starts the run as a detached background process, then hands off to the monitor. The handoff is a **child-process spawn of the `smithers-mon` bin** (`launchTuiMonitor()` → `spawn("bun", [tuiEntry, runId], { stdio: "inherit", env: { SMITHERS_CLI, SMITHERS_GATEWAY_URL } })`), where `tuiEntry` is resolved by `resolveTuiEntry()` from the `@smithers-orchestrator/tui` package `bin`. The CLI distinguishes a clean monitor quit (exit 0, or an expected interrupt signal SIGINT/SIGTERM/SIGHUP) from a startup failure (non-zero exit) or a crash (other terminating signals → reported as `TUI_MONITOR_CRASHED`).
 
-- `apps/cli/src/commands/up.js` - the `--interactive` / `-i` branch, instead of calling `runTuiCommand`, calls:
-  ```js
-  const { runTuiMonitor } = await import("@smithers-orchestrator/tui");
-  await runTuiMonitor(runId, { gatewayUrl: opts.gatewayUrl });
-  ```
-  The workflow-pick and input-prompt flow before launching the run remains in the CLI command (not in the TUI package) so the fuzzy-picker can still run pre-fullscreen.
+- **Fallback stream path:** when `resolveTuiEntry()` returns null (e.g. a slim install without the TUI package), `runTuiCommand` calls the inline `streamRun(...)` append-only loop instead, so the run stays observable without the full-screen monitor.
 
-- No changes to `apps/cli/src/hijack.js` - `packages/tui` imports `resolveHijackCandidate`, `buildHijackLaunchSpec`, and `launchHijackSession` directly from the CLI package via workspace import.
+- The monitor is a **bin entry script** (`packages/tui/src/index.tsx`), not an exported `runTuiMonitor(...)` function; there is no `import { runTuiMonitor }` call site.
+
+- No changes to `apps/cli/src/hijack.js` from the monitor side. The monitor's HIJACK mode shells out to `bunx smithers-orchestrator hijack RUN_ID --target NODE_ID` via the resolved CLI entry (`SMITHERS_CLI` or the resolved `@smithers-orchestrator/cli` package).
 
 ---
 
