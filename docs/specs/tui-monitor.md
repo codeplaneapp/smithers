@@ -12,8 +12,8 @@ The single-run monitor TUI is a full-screen terminal UI launched from the `bunx 
 
 **Entry points:**
 
-- `bunx smithers-orchestrator up --interactive` / `bunx smithers-orchestrator up -i <workflow>` - existing flag; picks/starts a run, then hands off to the monitor.
-- `bunx smithers-orchestrator up -i` with no workflow argument - shows the fuzzy workflow picker (reusing existing `fuzzySelect` + `buildWorkflowPickerOptions` logic from `tui.js`), then monitors the selected run.
+- `bunx smithers-orchestrator up --interactive <workflow>` - existing flag (no short alias; `-i` is `--input`); picks/starts a run, then hands off to the monitor.
+- `bunx smithers-orchestrator up --interactive` with no workflow argument - shows the fuzzy workflow picker (reusing existing `fuzzySelect` + `buildWorkflowPickerOptions` logic from `tui.js`), then monitors the selected run.
 
 **How it ships (as built):** `runTuiCommand` is retained; it still owns the pre-fullscreen picker/input prompts and starting the run. After the run starts it spawns the monitor as a child process via the `smithers-mon` bin (the `@smithers-orchestrator/tui` package's `bin`, resolved by `resolveTuiEntry()`), passing the `runId` and forwarding `SMITHERS_CLI` / `SMITHERS_GATEWAY_URL`. The monitor (`packages/tui/src/index.tsx`) is a bin entry script, **not** an exported `runTuiMonitor(runId, opts)` function. When the `smithers-mon` bin can't be resolved (e.g. a slim install), `runTuiCommand` falls back to the inline `streamRun` append-only path so the run is still observable. There is no `up --run-id` attach mode.
 
@@ -57,7 +57,7 @@ SmithersGatewayClient({
 
 | Hook | Source | Feeds |
 |---|---|---|
-| `useGatewayRun(runId)` | `gateway-react` | Header status dot, workflow name, model, run state, frame counter |
+| `useGatewayRun(runId)` | `gateway-react` | Header status dot, workflow name, model, run state |
 | `useGatewayRunEvents(runId, { maxEvents: 2000 })` | `gateway-react` | LOGS mode transcript; TIMELINE tick strip (seq numbers → frame markers) |
 | `useGatewayNodeOutput({ runId, nodeId, iteration })` | `gateway-react` | NodeInspector Output tab; TREE node metadata/elapsed |
 | `useGatewayApprovals({ runId })` | `gateway-react` | Approval banner in TREE mode; gate markers in TIMELINE. Exposes `refetch`, called after a successful `submitApproval` so the resolved gate's banner clears. |

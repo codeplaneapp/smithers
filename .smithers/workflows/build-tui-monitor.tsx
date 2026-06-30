@@ -73,7 +73,7 @@ if absent, exactly like \`smithers ui\`.
 
 Header (persistent every mode): status dot (green running / yellow waiting /
 red failed / dim done), workflow name, short run id, model, ticking elapsed,
-frame counter (n/total), live|paused indicator.
+live|paused indicator.
 
 Five modes share the header + a bottom keybar:
   (1) TREE  — left: collapsible <scrollbox> node tree (chevron ▾/▸/·, glyph
@@ -107,7 +107,7 @@ from the CLI.) Responsive: useTerminalDimensions -> stack panes vertically
 under a width threshold (compact mode).
 
 Invocation (SHIPS): replace \`smithers up --interactive\` so it launches this
-full-screen monitor after starting/attaching a run; \`smithers up -i\` with no
+full-screen monitor after starting/attaching a run; \`smithers up --interactive\` with no
 workflow still picks one, then monitors it.
 
 Testing: terminal snapshot/interaction tests (e.g. @microsoft/tui-test or
@@ -433,7 +433,7 @@ Report { mode: "${m.id}", summary, files }.`}
 Wire the monitor into the CLI so it SHIPS. In apps/cli, make
 \`smithers up --interactive\` launch the new ${pkg} full-screen monitor instead of
 today's append-only stream (apps/cli/src/tui.js): after a run is started or
-attached, hand off to the monitor for that runId. \`smithers up -i\` with no
+attached, hand off to the monitor for that runId. \`smithers up --interactive\` with no
 workflow must still pick a workflow interactively, then monitor the run it
 starts. Preserve detached/non-interactive behavior unchanged. Keep the existing
 streaming code path available as a fallback for non-TTY contexts.
