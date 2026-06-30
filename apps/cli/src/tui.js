@@ -8,7 +8,6 @@ import { discoverWorkflows, summarizeWorkflowInputSchema, workflowInputJsonSchem
 import { mdxPlugin } from "./mdx-plugin.js";
 import { openSmithersStore } from "smithers-orchestrator/openSmithersStore";
 import { parseAgentEvent, parseNodeOutputEvent } from "./chat.js";
-import { handleApprovals, handleHumanRequests } from "./tui-gates.js";
 import { formatStreamText } from "./tui-format.js";
 import { fuzzySelect } from "./fuzzy-select.js";
 import { renderRunOutputs } from "./pretty.js";
