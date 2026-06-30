@@ -47,14 +47,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            shard: 1
+            total_shards: 1
+          - os: windows-latest
+            shard: 1
+            total_shards: 4
+          - os: windows-latest
+            shard: 2
+            total_shards: 4
+          - os: windows-latest
+            shard: 3
+            total_shards: 4
+          - os: windows-latest
+            shard: 4
+            total_shards: 4
     runs-on: ${{ matrix.os }}
-    # `pnpm test` runs the gate checks + the full `pnpm -r --no-bail test` suite.
     # Coverage (a second, instrumented pass of the whole suite) runs in its own
-    # `coverage` job so the two full passes run in PARALLEL instead of serially —
-    # serially they overflowed this job's wall-clock budget.
-    # Windows runners are appreciably slower than Linux and the matrix shares this
-    # budget, so it is sized for the slower leg.
+    # `coverage` job so the two full passes run in PARALLEL instead of serially.
+    # Windows runners are appreciably slower than Linux, so the Windows package
+    # tests are split into shards with per-package timeouts.
     timeout-minutes: 40
 
     steps:
@@ -87,7 +100,22 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm test
+      - name: Run test gates
+        if: runner.os != 'Windows' || matrix.shard == 1
+        run: |
+          node scripts/check-single-effect-version.mjs
+          node scripts/check-dependency-boundaries.mjs
+          node scripts/check-docs.mjs
+          node scripts/check-llms.mjs
+          node scripts/check-smithers-test-script.mjs
+
+      - name: Run workspace package tests
+        if: runner.os != 'Windows'
+        run: pnpm -r --no-bail test
+
+      - name: Run workspace package tests (Windows shard)
+        if: runner.os == 'Windows'
+        run: node scripts/run-workspace-tests.mjs --shard ${{ matrix.shard }}/${{ matrix.total_shards }} --timeout-minutes 5
 
       # The examples/ tree (porting rules + worked ports) is otherwise only
       # typechecked; run its bun tests so structural porting rules are gated.
@@ -95,6 +123,7 @@ jobs:
       # Aspects + TryCatchFinally + ContinueAsNew handoff embedded in the
       # context-engineering guide (graph render only, no agent CLIs needed).
       - name: Run examples bun tests
+        if: runner.os != 'Windows' || matrix.shard == 1
         run: bun test examples/bun-port-smithers/components/porting-rules.test.ts examples/context-handoff/workflow.test.ts
 
       # Real-PTY TUI e2e (picker / input / approval) driven through zmux. These
