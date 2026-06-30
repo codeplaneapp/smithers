@@ -13,7 +13,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
@@ -418,7 +418,7 @@ function collectDocumentedSmithersImports() {
 
 function currentDocFiles() {
   const changelogDir = join(DOCS, "changelogs");
-  return [...walk(DOCS).filter((file) => !file.startsWith(`${changelogDir}/`)), README];
+  return [...walk(DOCS).filter((file) => !file.startsWith(`${changelogDir}${sep}`)), README];
 }
 
 // Packages documented for external install that are intentionally NOT wired
