@@ -2269,6 +2269,12 @@ async function runUiCommand(c) {
     if (!reachable) {
         return fail("GATEWAY_UNREACHABLE", `No Smithers Gateway reachable at ${base}. Start one with \`smithers gateway\` (it serves workspace UIs from .smithers/ui/), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.`);
     }
+    // `--app`: serve the FULL local Smithers UI (apps/smithers) instead of a
+    // single workflow-run UI. Build the bundle if needed, then serve it from a
+    // static server that reverse-proxies the gateway so the app is same-origin.
+    if (c.options.app) {
+        return runFullUiCommand(c, base, fail);
+    }
     const rpc = async (method, params = {}) => {
         const res = await fetch(`${base}/v1/rpc/${method}`, {
             method: "POST",
@@ -2328,6 +2334,42 @@ async function runUiCommand(c) {
     }
     catch (err) {
         return fail("UI_OPEN_FAILED", err?.message ?? String(err));
+    }
+}
+/**
+ * Serve the full local Smithers UI (apps/smithers) against a running Gateway.
+ * Builds the bundle on first use, then keeps a static+proxy server alive so the
+ * single-page app runs same-origin with the gateway (its WebSocket needs it).
+ */
+async function runFullUiCommand(c, base, fail) {
+    const { serveLocalUi } = await import("./localUiServer.js");
+    const openInBrowser = (url) => {
+        const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
+        const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+        const proc = spawn(cmd, args, { stdio: "ignore", detached: true });
+        proc.unref();
+        proc.on("error", () => { });
+    };
+    try {
+        const { server, url } = await serveLocalUi({
+            gatewayBase: base,
+            port: c.options.appPort,
+            rebuild: c.options.rebuild,
+        });
+        if (c.options.open) openInBrowser(url);
+        console.log(`${c.options.open ? "Opening" : "UI URL:"} ${url}`);
+        console.log(`[smithers] Serving the full Smithers UI (gateway: ${base}). Press Ctrl-C to stop.`);
+        const stop = () => {
+            server.close();
+            process.exit(0);
+        };
+        process.on("SIGINT", stop);
+        process.on("SIGTERM", stop);
+        await new Promise(() => { });
+        return c.ok({ opened: c.options.open, url, gateway: base });
+    }
+    catch (err) {
+        return fail("UI_SERVE_FAILED", err?.message ?? String(err));
     }
 }
 const GATEWAY_LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"]);
@@ -6629,6 +6671,9 @@ const cli = Cli.create({
         gateway: z.string().optional().describe("Gateway base URL (default http://127.0.0.1:<port>)."),
         port: z.number().int().min(1).max(65535).default(7331).describe("Gateway port when --gateway is not set."),
         workflow: z.string().optional().describe("Open this workflow's UI directly, skipping run lookup."),
+        app: z.boolean().default(false).describe("Open the full local Smithers UI (the apps/smithers control surface) instead of a single workflow run UI. Builds the bundle on first use and serves it against the local Gateway."),
+        appPort: z.number().int().min(1).max(65535).default(7332).describe("Port to serve the full UI on (with --app)."),
+        rebuild: z.boolean().default(false).describe("Force a rebuild of the full UI bundle before serving (with --app)."),
         open: z.boolean().default(true).describe("Open a browser. Use --no-open to just print the URL."),
         autostart: z.boolean().default(true).describe("If no Gateway is reachable on the local port, start one automatically. Use --no-autostart to disable."),
     }),
