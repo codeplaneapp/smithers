@@ -76,6 +76,15 @@ import { WATCH_MIN_INTERVAL_MS, runWatchLoop, watchIntervalSecondsToMs, } from "
 import { runMcpModeIfRequested } from "./mcp/mcp-mode.js";
 import { issueSmithersBrokerToken, parseTokenScopes, readSmithersTokenStore, resolveSmithersActionTokenFromStore, revokeSmithersToken, smithersTokenStorePath, writeSmithersTokenStore, } from "./token-store.js";
 import { resolveSmithersDocsSource } from "./docs-command.js";
+import {
+    SMITHERS_PACKAGE,
+    buildUpdatePlan,
+    detectInstallMethod,
+    ensureUpdateCheck,
+    fetchLatestVersion,
+    formatUpdateNotice,
+    isUpdateAvailable,
+} from "./update-check.js";
 import { reportReplayResult } from "./reportReplayResult.js";
 import pc from "picocolors";
 import crypto from "node:crypto";
@@ -6652,6 +6661,59 @@ const cli = Cli.create({
         return printSmithersDocs(c, "llms-full.txt", "DOCS_FULL_FETCH_FAILED");
     },
 })
+    // =========================================================================
+    // smithers update
+    // Detect how Smithers was installed and either run the upgrade or print it.
+    // =========================================================================
+    .command("update", {
+    description: "Check for a newer Smithers release and upgrade the install (or print how).",
+    options: z.object({
+        check: z.boolean().default(false).describe("Only report current vs latest version; never upgrade"),
+        dryRun: z.boolean().default(false).describe("Print the upgrade command without running it"),
+    }),
+    async run(c) {
+        const current = readPackageVersion();
+        const latest = await fetchLatestVersion({});
+        const install = detectInstallMethod();
+        if (!latest) {
+            process.stderr.write("Could not reach the npm registry to check for updates.\n");
+            return c.error({ message: "Could not reach the npm registry to check for updates.", code: "UPDATE_CHECK_FAILED" });
+        }
+        const available = isUpdateAvailable(latest, current);
+        if (!available) {
+            process.stderr.write(`Smithers is up to date (${current}).\n`);
+            return c.ok({ current, latest, updateAvailable: false, action: "none" });
+        }
+        const plan = buildUpdatePlan(install, SMITHERS_PACKAGE);
+        process.stderr.write(`Smithers ${latest} is available (you have ${current}).\n`);
+        process.stderr.write(`${plan.explanation}\n`);
+        if (plan.command) {
+            process.stderr.write(`  ${plan.command}\n`);
+        }
+        // `--check` reports only; a non-runnable plan (bunx/local/unknown) can only
+        // ever print guidance; `--dry-run` prints the command but stops short.
+        if (c.options.check || c.options.dryRun || !plan.runnable || !plan.command) {
+            return c.ok({ current, latest, updateAvailable: true, action: "print", command: plan.command, installKind: install.kind });
+        }
+        process.stderr.write(`Running: ${plan.command}\n`);
+        const [cmd, ...cmdArgs] = plan.command.split(" ");
+        const child = spawn(cmd, cmdArgs, { stdio: "inherit" });
+        const result = await new Promise((resolve) => {
+            child.on("close", (code) => resolve({ exitCode: code ?? 0 }));
+            child.on("error", (err) => {
+                process.stderr.write(`Failed to run \`${plan.command}\`: ${err.message}\n`);
+                process.stderr.write(`Run it yourself, or re-run with \`--dry-run\` to just print it.\n`);
+                resolve({ exitCode: 1 });
+            });
+        });
+        if (result.exitCode !== 0) {
+            commandExitOverride = result.exitCode;
+            return c.error({ message: `Upgrade command exited with code ${result.exitCode}.`, code: "UPDATE_FAILED" });
+        }
+        process.stderr.write(`✓ Upgraded to ${latest}.\n`);
+        return c.ok({ current, latest, updateAvailable: true, action: "upgraded", command: plan.command });
+    },
+})
     .command("usage", {
     description: "Show how much rate limit / subscription quota each registered account has used.",
     options: z.object({
@@ -7188,6 +7250,28 @@ async function main() {
         !argv.includes("-h")) {
         const refreshNotice = formatRefreshNotice(ensureCuratedSkillsFresh());
         if (refreshNotice) console.error(refreshNotice);
+    }
+    // Passive "new version available" notice. Hits npm at most once a day (see
+    // ensureUpdateCheck) and only on an interactive, human-facing invocation so
+    // it never adds latency or noise to scripted/agent/CI use. The `update`
+    // command does its own, fresher check, so skip it here. Opt out entirely
+    // with SMITHERS_NO_UPDATE_CHECK=1.
+    if (command &&
+        command !== "completions" &&
+        command !== "update" &&
+        !process.env.CI &&
+        process.stderr.isTTY &&
+        !argvRequestsJsonMode(argv) &&
+        !argv.includes("--version") &&
+        !argv.includes("--help") &&
+        !argv.includes("-h")) {
+        try {
+            const check = await ensureUpdateCheck({ currentVersion: readPackageVersion() });
+            const notice = formatUpdateNotice(check, detectInstallMethod());
+            if (notice) console.error(notice);
+        } catch {
+            /* best-effort: a failed update check never blocks a command */
+        }
     }
     // `--backend` is a registered option only on up/gateway/monitor/workflow.
     // The SMITHERS_MIGRATION_REQUIRED error tells users to run any command with

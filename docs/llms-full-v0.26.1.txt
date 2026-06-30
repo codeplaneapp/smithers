@@ -123,6 +123,48 @@ Most teams should start with the workflow pack. It gives you a working `.smither
 
 If you previously ran `npm i -g smithers-orchestrator`, uninstall it (`npm rm -g smithers-orchestrator`) and switch to `bunx`.
 
+## Updating Smithers
+
+How you update depends on how you run Smithers:
+
+- **`bunx` / `npx` (recommended):** nothing to update. `bunx smithers-orchestrator@latest <command>` always resolves the newest published version, and inside a workflow project it uses the version pinned in `package.json`. To move a pinned project forward, bump the dependency. Running `bunx smithers-orchestrator@latest init` re-scaffolds with the latest, or you can edit the `smithers-orchestrator` version in `.smithers/package.json` directly.
+- **Global install:** upgrade with your package manager.
+
+  ```bash
+  bun add -g smithers-orchestrator@latest    # bun
+  npm install -g smithers-orchestrator@latest # npm
+  pnpm add -g smithers-orchestrator@latest    # pnpm
+  yarn global add smithers-orchestrator@latest # yarn
+  ```
+
+Or let Smithers do it for you. `smithers update` detects how the binary was installed and runs the right command (or, for a `bunx`/project install, prints exactly what to run):
+
+```bash
+smithers update            # detect the install method and upgrade
+smithers update --check    # just report current vs latest, never change anything
+smithers update --dry-run  # print the upgrade command without running it
+```
+
+Verify the installed version any time with:
+
+```bash
+smithers --version
+```
+
+Smithers also checks npm at most once a day and prints a one-line notice on an interactive run when a newer release is available. Disable that passive check with `SMITHERS_NO_UPDATE_CHECK=1` (it is already skipped in CI, in JSON/agent output, and for non-interactive shells).
+
+### Clean reinstall
+
+If you suspect a stale cache or a leftover global symlink shadowing the project version, remove the global install and the runner cache, then reinstall:
+
+```bash
+npm rm -g smithers-orchestrator   # or: bun remove -g smithers-orchestrator
+which smithers                    # confirm no stale binary remains on PATH
+bunx smithers-orchestrator@latest --version
+```
+
+`bunx`/`npx` keep their own download caches; appending `@latest` forces them to fetch the newest version rather than reuse a cached one.
+
 ## Recommended: Install the Workflow Pack
 
 ```bash
@@ -2015,7 +2057,7 @@ If no Gateway is reachable on the default local port, `bunx smithers-orchestrato
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[79]:
+commands[80]:
   - name: init
     purpose: Install the workflow pack into .smithers/ (local) or ~/.smithers/ (--global)
     flags[6]{name,short,type,default,desc}:
@@ -2458,6 +2500,11 @@ commands[79]:
     flags[2]{name,short,type,default,desc}:
       latest,,boolean,false,Fetch the latest docs from smithers.sh instead of docs for this CLI version
       docs-version,,string,,Fetch docs for a specific Smithers version, e.g. 0.22.0 or v0.22.0
+  - name: update
+    purpose: Check for a newer Smithers release and upgrade the install (or print how)
+    flags[2]{name,short,type,default,desc}:
+      check,,boolean,false,Only report current vs latest version; never upgrade
+      dry-run,,boolean,false,Print the upgrade command without running it
   - name: agents.capabilities
     purpose: Print JSON capability registry for built-in CLI agents
   - name: agents.doctor
@@ -2494,7 +2541,7 @@ commands[79]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
-    flags[31]{name,short,type,default,desc}:
+    flags[32]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2522,6 +2569,7 @@ commands[79]:
       port,,number,7331,HTTP server port when --serve
       host,,string,127.0.0.1,HTTP bind address when --serve
       auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
+      insecure,,boolean,false,Allow binding a non-loopback --host with NO auth (exposes unauthenticated approve/deny/cancel control of the run; dangerous)
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
       prompt,p,string,,Shorthand for input.prompt when --input is omitted
