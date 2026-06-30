@@ -14,13 +14,27 @@ import * as path from "node:path";
 let counter = 0;
 
 /**
- * A short, collision-free socket path (kept well under the ~104-char unix socket
- * limit by not embedding the run/node ids).
+ * Windows has no filesystem Unix-domain sockets; `net` there speaks named pipes,
+ * which live in the `\\.\pipe\` namespace rather than on disk. Detecting this
+ * lets the path generator and the (un)link cleanup branch correctly.
+ */
+const IS_WINDOWS = process.platform === "win32";
+
+/**
+ * A short, collision-free local-IPC endpoint for the engine ↔ snapshot-hook
+ * channel. On POSIX this is a Unix-domain socket file under tmpdir (kept well
+ * under the ~104-char limit by not embedding the run/node ids). On Windows it
+ * is a named pipe under `\\.\pipe\`, which `net.listen`/`net.connect` accept in
+ * place of a path.
  * @returns {string}
  */
 export function nextSnapshotSocketPath() {
     counter += 1;
-    return path.join(os.tmpdir(), `sm-snap-${process.pid.toString(36)}-${counter.toString(36)}.sock`);
+    const name = `sm-snap-${process.pid.toString(36)}-${counter.toString(36)}`;
+    if (IS_WINDOWS) {
+        return `\\\\.\\pipe\\${name}`;
+    }
+    return path.join(os.tmpdir(), `${name}.sock`);
 }
 
 /**
@@ -29,8 +43,11 @@ export function nextSnapshotSocketPath() {
  */
 export function createSnapshotServer(opts) {
     const { socketPath, onHook } = opts;
-    try { fs.unlinkSync(socketPath); }
-    catch { /* not there yet */ }
+    // Named pipes are not filesystem entries, so unlink is meaningless there.
+    if (!IS_WINDOWS) {
+        try { fs.unlinkSync(socketPath); }
+        catch { /* not there yet */ }
+    }
 
     // Newline-framed request/response (no half-close): client writes one JSON
     // line, server replies with one JSON line, client closes. Avoids the
@@ -66,8 +83,10 @@ export function createSnapshotServer(opts) {
                 close() {
                     try { server.close(); }
                     catch { /* already closed */ }
-                    try { fs.unlinkSync(socketPath); }
-                    catch { /* already gone */ }
+                    if (!IS_WINDOWS) {
+                        try { fs.unlinkSync(socketPath); }
+                        catch { /* already gone */ }
+                    }
                 },
             });
         });
