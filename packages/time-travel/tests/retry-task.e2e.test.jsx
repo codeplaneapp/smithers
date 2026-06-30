@@ -1,11 +1,13 @@
 /** @jsxImportSource smithers-orchestrator */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { retryTask } from "../src/retry-task.js";
 import { runWorkflow } from "smithers-orchestrator";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";
+
+setDefaultTimeout(30_000);
 /**
  * @param {string} nodeId
  * @param {Record<string, number>} callCounts

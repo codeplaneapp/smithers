@@ -35,19 +35,19 @@ function newSmithersHome() {
 describe("accountsRoot / accountsFilePath / defaultConfigDir", () => {
     test("uses SMITHERS_HOME when set", () => {
         const env = { SMITHERS_HOME: "/tmp/x" };
-        expect(accountsRoot(env)).toBe("/tmp/x");
-        expect(accountsFilePath(env)).toBe("/tmp/x/accounts.json");
-        expect(defaultConfigDir("foo", env)).toBe("/tmp/x/accounts/foo");
+        expect(accountsRoot(env)).toBe(join("/tmp/x"));
+        expect(accountsFilePath(env)).toBe(join("/tmp/x", "accounts.json"));
+        expect(defaultConfigDir("foo", env)).toBe(join("/tmp/x", "accounts", "foo"));
     });
     test("falls back to $HOME/.smithers when SMITHERS_HOME unset", () => {
         const env = { HOME: "/tmp/home" };
-        expect(accountsRoot(env)).toBe("/tmp/home/.smithers");
+        expect(accountsRoot(env)).toBe(join("/tmp/home", ".smithers"));
     });
     test("treats empty SMITHERS_HOME as unset", () => {
         const env = { SMITHERS_HOME: "", HOME: "/tmp/home" };
-        expect(accountsRoot(env)).toBe("/tmp/home/.smithers");
-        expect(accountsFilePath(env)).toBe("/tmp/home/.smithers/accounts.json");
-        expect(defaultConfigDir("foo", env)).toBe("/tmp/home/.smithers/accounts/foo");
+        expect(accountsRoot(env)).toBe(join("/tmp/home", ".smithers"));
+        expect(accountsFilePath(env)).toBe(join("/tmp/home", ".smithers", "accounts.json"));
+        expect(defaultConfigDir("foo", env)).toBe(join("/tmp/home", ".smithers", "accounts", "foo"));
     });
     test("rejects path-traversal labels", () => {
         const env = { SMITHERS_HOME: "/tmp/x" };
@@ -57,8 +57,8 @@ describe("accountsRoot / accountsFilePath / defaultConfigDir", () => {
     });
     test("accepts wizard-valid labels and keeps them under the smithers root", () => {
         const env = { SMITHERS_HOME: "/tmp/x" };
-        expect(defaultConfigDir("claude-work", env)).toBe("/tmp/x/accounts/claude-work");
-        expect(defaultConfigDir("Acct.1_2-3", env)).toBe("/tmp/x/accounts/Acct.1_2-3");
+        expect(defaultConfigDir("claude-work", env)).toBe(join("/tmp/x", "accounts", "claude-work"));
+        expect(defaultConfigDir("Acct.1_2-3", env)).toBe(join("/tmp/x", "accounts", "Acct.1_2-3"));
     });
 });
 
@@ -191,7 +191,7 @@ describe("readAccounts / writeAccounts / addAccount / removeAccount", () => {
         const list = listAccounts(env);
         expect(list).toHaveLength(1);
         expect(list[0].label).toBe("claude-work");
-        expect(list[0].configDir).toContain("/accounts/claude-work");
+        expect(list[0].configDir).toContain(join("accounts", "claude-work"));
     });
     test("addAccount rejects duplicate label by default; replace overrides", () => {
         const env = newSmithersHome();
@@ -282,6 +282,7 @@ describe("readAccounts / writeAccounts / addAccount / removeAccount", () => {
         expect(getAccount("missing", env)).toBeUndefined();
     });
     test("writeAccounts produces a mode-0600 file", () => {
+        if (process.platform === "win32") return;
         const env = newSmithersHome();
         writeAccounts({ version: 1, accounts: [] }, env);
         const stat = statSync(accountsFilePath(env));
@@ -451,6 +452,7 @@ removeAccount("b", { env: { SMITHERS_HOME: process.env.SMITHERS_HOME } });
 
 describe("writeAccounts secret-safe permissions and crash atomicity", () => {
     test("overwriting a pre-existing world-readable accounts.json re-tightens to 0600", () => {
+        if (process.platform === "win32") return;
         const env = newSmithersHome();
         const path = accountsFilePath(env);
         // Simulate an upgrade/migration where a loose-perm file already exists.

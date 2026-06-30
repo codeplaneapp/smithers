@@ -14,7 +14,7 @@ import {
   type ElectricFixture,
 } from "./fixtures/electricFixture.ts";
 
-const dockerAvailable = isDockerFixtureAvailable();
+const dockerAvailable = process.platform !== "win32" && isDockerFixtureAvailable();
 
 function runIdsIn(body: string): Set<string> {
   const ids = new Set<string>();

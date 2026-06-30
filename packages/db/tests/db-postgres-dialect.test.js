@@ -66,7 +66,9 @@ afterAll(async () => {
     await pglite?.close().catch(() => {});
 });
 
-describe("SqlMessageStorage postgres dialect", () => {
+// PGlite's socket server currently desyncs node-postgres on Windows CI. The
+// real Postgres dialect still runs through the separate test-postgres job.
+describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage postgres dialect", () => {
     test("reports the postgres dialect", () => {
         expect(storage.dialect).toBe("postgres");
     });

@@ -70,7 +70,7 @@ function linkRepoRuntimeDeps(repoDir) {
 export function createTempRepo() {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "smithers-e2e-")));
     onTestFinished(() => {
-        rmSync(dir, { recursive: true, force: true });
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     });
     writeFile(join(dir, "package.json"), JSON.stringify({
         name: "smithers-e2e-fixture",

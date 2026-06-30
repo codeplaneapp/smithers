@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import { Effect } from "effect";
 import { buildCurrentScopes } from "../src/buildCurrentScopes.js";
 import { defaultTaskExecutor } from "../src/defaultTaskExecutor.js";
@@ -271,7 +272,7 @@ describe("SmithersCtx output access", () => {
       },
     });
 
-    expect(ctx.resolveWorktreePath(".smithers/wt/t1")).toBe("/repo/.smithers/workflows/.smithers/wt/t1");
+    expect(ctx.resolveWorktreePath(".smithers/wt/t1")).toBe(resolve("/repo/.smithers/workflows", ".smithers/wt/t1"));
   });
 
   test("looks up resolved Worktree paths by task or worktree id", () => {

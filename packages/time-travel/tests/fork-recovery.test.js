@@ -8,7 +8,7 @@
  * cleanup tests are skipped with a FIXME pending a fork that allocates
  * external resources.
  */
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
@@ -16,12 +16,27 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { captureSnapshot } from "../src/snapshot/index.js";
 import { forkRun, getBranchInfo, listBranches } from "../src/fork/index.js";
 
+setDefaultTimeout(30_000);
+
+const openSqlites = [];
+
 function createTestDb() {
   const sqlite = new Database(":memory:");
+  openSqlites.push(sqlite);
   const db = drizzle(sqlite);
   ensureSmithersTables(db);
   return { adapter: new SmithersDb(db), db, sqlite };
 }
+
+afterEach(() => {
+  while (openSqlites.length) {
+    try {
+      openSqlites.pop()?.close();
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+});
 
 function sampleData(overrides = {}) {
   return {

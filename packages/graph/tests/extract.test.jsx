@@ -1,5 +1,6 @@
 /** @jsxImportSource smithers-orchestrator */
 import { describe, expect, spyOn, test } from "bun:test";
+import { resolve } from "node:path";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 import { extractGraph } from "../src/extract.js";
@@ -461,7 +462,7 @@ describe("extractGraph", () => {
 			);
 			const result = silenceWorktreePathWarning(() => extractGraph(root, { baseRootDir: "/tmp/root" }));
 			expect(result.tasks[0].worktreeId).toBe("wt1");
-			expect(result.tasks[0].worktreePath).toBe("/tmp/root/workspace");
+			expect(result.tasks[0].worktreePath).toBe(resolve("/tmp/root", "workspace"));
 			expect(result.tasks[0].worktreeBranch).toBe("feature");
 			expect(result.tasks[0].worktreeBaseBranch).toBe("main");
 		});
@@ -526,7 +527,7 @@ describe("extractGraph", () => {
 			expect(task.dependsOn).toEqual(["a", "b"]);
 			expect(task.needs).toEqual({ plan: "plan" });
 			expect(task.worktreeId).toBe("wt");
-			expect(task.worktreePath).toBe("/tmp/root/workspace");
+			expect(task.worktreePath).toBe(resolve("/tmp/root", "workspace"));
 			expect(task.worktreeBranch).toBe("feature");
 			expect(task.worktreeBaseBranch).toBe("main");
 			expect(task.parallelGroupId).toBe("p");

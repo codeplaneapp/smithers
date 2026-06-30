@@ -1,5 +1,6 @@
 /** @jsxImportSource smithers-orchestrator */
 import { describe, expect, spyOn, test } from "bun:test";
+import { resolve } from "node:path";
 import { extractFromHost, } from "../src/dom/extract.js";
 import { z } from "zod";
 import { sqliteTable, text } from "drizzle-orm/sqlite-core";
@@ -505,7 +506,7 @@ describe("extractFromHost", () => {
         expect(task.dependsOn).toEqual(["a", "b"]);
         expect(task.needs).toEqual({ plan: "plan" });
         expect(task.worktreeId).toBe("wt");
-        expect(task.worktreePath).toBe("/tmp/root/workspace");
+        expect(task.worktreePath).toBe(resolve("/tmp/root", "workspace"));
         expect(task.worktreeBranch).toBe("feature");
         expect(task.worktreeBaseBranch).toBe("main");
         expect(task.parallelGroupId).toBe("p");

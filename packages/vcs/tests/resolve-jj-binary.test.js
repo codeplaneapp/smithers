@@ -23,11 +23,14 @@ afterEach(() => {
 async function writeFakeBinary(script) {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "resolve-jj-"));
 	const file = path.join(dir, process.platform === "win32" ? "jj.cmd" : "jj");
-	const body =
-		process.platform === "win32"
-			? `@echo off\r\n${script.replaceAll("\n", "\r\n")}`
-			: `#!/usr/bin/env bash\nset -euo pipefail\n${script}`;
-	await fs.writeFile(file, body, { mode: 0o755 });
+	if (process.platform === "win32") {
+		const bashPath = "C:\\Program Files\\Git\\bin\\bash.exe";
+		const scriptPath = path.join(dir, "jj.sh");
+		await fs.writeFile(scriptPath, `#!/usr/bin/env bash\nset -euo pipefail\n${script}`, { mode: 0o755 });
+		await fs.writeFile(file, `@echo off\r\n"${bashPath}" "%~dp0jj.sh" %*\r\n`, { mode: 0o755 });
+	} else {
+		await fs.writeFile(file, `#!/usr/bin/env bash\nset -euo pipefail\n${script}`, { mode: 0o755 });
+	}
 	return file;
 }
 

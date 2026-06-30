@@ -41,10 +41,15 @@ function vcsDurationSum() {
 async function withFakeJj(script, fn) {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "jj-bin-"));
     const binPath = path.join(tmp, process.platform === "win32" ? "jj.cmd" : "jj");
-    const content = process.platform === "win32"
-        ? `@echo off\r\n${script.replaceAll("\n", "\r\n")}`
-        : `#!/usr/bin/env bash\nset -euo pipefail\n${script}`;
-    await fs.writeFile(binPath, content, { mode: 0o755 });
+    if (process.platform === "win32") {
+        const bashPath = "C:\\Program Files\\Git\\bin\\bash.exe";
+        const scriptPath = path.join(tmp, "jj.sh");
+        await fs.writeFile(scriptPath, `#!/usr/bin/env bash\nset -euo pipefail\n${script}`, { mode: 0o755 });
+        await fs.writeFile(binPath, `@echo off\r\n"${bashPath}" "%~dp0jj.sh" %*\r\n`, { mode: 0o755 });
+    }
+    else {
+        await fs.writeFile(binPath, `#!/usr/bin/env bash\nset -euo pipefail\n${script}`, { mode: 0o755 });
+    }
     const prevPath = process.env.PATH || "";
     const prevJj = process.env[JJ_ENV];
     process.env.PATH = `${tmp}${path.delimiter}${prevPath}`;
@@ -83,7 +88,7 @@ describe("runJj", () => {
     });
     test("forwards cwd option to spawned process", async () => {
         const tmpCwd = await fs.mkdtemp(path.join(os.tmpdir(), "jj-cwd-"));
-        await withFakeJj(`pwd; exit 0`, async () => {
+        await withFakeJj(`pwd -W 2>/dev/null || pwd; exit 0`, async () => {
             const res = await vcs.runJj(["echo-pwd"], { cwd: tmpCwd });
             expect(res.code).toBe(0);
             const got = res.stdout.trim();

@@ -22,6 +22,48 @@ function truncateToBytes(text, maxBytes, keep = "head") {
         : buf.subarray(0, maxBytes).toString("utf8");
 }
 /**
+ * @param {import("node:child_process").ChildProcess} child
+ * @param {boolean} detached
+ */
+function killChildTree(child, detached) {
+    if (!child.pid) {
+        child.kill("SIGKILL");
+        return;
+    }
+    if (process.platform === "win32") {
+        const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+            stdio: "ignore",
+            windowsHide: true,
+        });
+        killer.on("error", () => {
+            try {
+                child.kill("SIGKILL");
+            }
+            catch {
+                // ignore
+            }
+        });
+        killer.on("exit", (code) => {
+            if (code === 0) {
+                return;
+            }
+            try {
+                child.kill("SIGKILL");
+            }
+            catch {
+                // ignore
+            }
+        });
+        return;
+    }
+    if (detached) {
+        process.kill(-child.pid, "SIGKILL");
+    }
+    else {
+        child.kill("SIGKILL");
+    }
+}
+/**
  * @param {string} command
  * @param {string[]} args
  * @param {SpawnCaptureOptions} options
@@ -68,12 +110,7 @@ export function spawnCaptureEffect(command, args, options) {
                 errorCode: code,
             }, span);
             try {
-                if (detached && child.pid) {
-                    process.kill(-child.pid, "SIGKILL");
-                }
-                else {
-                    child.kill("SIGKILL");
-                }
+                killChildTree(child, detached);
             }
             catch {
                 try {
@@ -219,12 +256,7 @@ export function spawnCaptureEffect(command, args, options) {
             if (!settled) {
                 yield* Effect.try({
                     try: () => {
-                        if (detached && child.pid) {
-                            process.kill(-child.pid, "SIGKILL");
-                        }
-                        else {
-                            child.kill("SIGKILL");
-                        }
+                        killChildTree(child, detached);
                     },
                     catch: (cause) => toSmithersError(cause, "kill process group", {
                         code: "PROCESS_ABORTED",
