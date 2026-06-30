@@ -5,6 +5,7 @@
   "author": "William Cory",
   "license": "MIT",
   "private": true,
+  "packageManager": "pnpm@10.6.1",
   "module": "packages/smithers/src/index.js",
   "type": "module",
   "workspaces": [

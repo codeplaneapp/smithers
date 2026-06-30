@@ -31,6 +31,8 @@
     "@effect/workflow": "^0.18.0",
     "@clack/core": "^0.4.2",
     "@clack/prompts": "^0.10.1",
+    "@opentui/core": "^0.4.2",
+    "@opentui/react": "^0.4.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@smithers-orchestrator/accounts": "workspace:*",
     "@smithers-orchestrator/agents": "workspace:*",
