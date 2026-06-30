@@ -1,0 +1,103 @@
+---
+title: Gateway UI Components
+description: Prebuilt React components (RunList, RunTree, RunEventLog, ApprovalPanel, LaunchButton, and more) for assembling a custom workflow UI in minutes, built on the gateway-react hooks.
+---
+
+`@smithers-orchestrator/gateway-ui` is a set of drop-in React components for
+building a custom workflow UI. They are built on the
+[`gateway-react`](/reference/gateway-react) hooks, so each one connects to the
+Gateway by itself: give it a `runId` or a filter and it renders live data and
+wires the actions. Reach for these instead of hand-wiring hooks when you want a
+run dashboard fast.
+
+Import them from the `smithers-orchestrator/gateway-ui` subpath, alongside
+`createGatewayReactRoot` from `gateway-react`. Every component is styled with
+inline styles (no CSS import), so it bundles cleanly through the Gateway's
+bundler, and every component accepts `className` and `style` to override.
+
+## Components
+
+| Component | What it renders | Key props |
+| --- | --- | --- |
+| `RunList` | A live, selectable list of runs with a status pill per row. | `filter`, `activeRunId`, `onSelect`, `pollMs` |
+| `RunTree` | The node tree for a run (initial snapshot plus live updates). | `runId`, `onSelectNode`, `activeNodeId` |
+| `RunEventLog` | A scrolling, auto-following event log for a run. | `runId`, `maxEvents`, `follow` |
+| `NodeOutputView` | The output of a single node, fetched on demand. | `runId`, `nodeId`, `iteration` |
+| `ApprovalPanel` | The pending approval queue with Approve and Deny buttons. | `filter`, `pollMs` |
+| `LaunchButton` | A button that launches a workflow run. | `workflow`, `input`, `onLaunched` |
+| `WorkflowPicker` | A select of the workflows registered on the Gateway. | `value`, `onChange`, `hasUiOnly` |
+| `ConnectionBadge` | A live Gateway connection indicator. | none |
+| `StatusPill` | A colored status badge for any run or node status string. | `status`, `label` |
+
+`StatusPill`, `statusColor`, and the `theme` style tokens are also exported for
+building your own rows that match the components.
+
+## A complete UI
+
+This is a full `.smithers/ui/<workflow>.tsx` bundle: a run picker, the node tree,
+a live event log, a node-output pane, and the approval queue, wired together with
+local state. Save it next to a workflow, register the workflow with
+`ui: { entry: ".smithers/ui/<workflow>.tsx" }`, and open it with
+`bunx smithers-orchestrator ui --app` or `bunx smithers-orchestrator ui RUN_ID`.
+
+```tsx
+/** @jsxImportSource react */
+import { useState } from "react";
+import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";
+import {
+  ApprovalPanel,
+  ConnectionBadge,
+  LaunchButton,
+  NodeOutputView,
+  RunEventLog,
+  RunList,
+  RunTree,
+  WorkflowPicker,
+} from "smithers-orchestrator/gateway-ui";
+
+const WORKFLOW = "implement";
+
+function App() {
+  const [runId, setRunId] = useState<string>();
+  const [nodeId, setNodeId] = useState<string>();
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}>
+      <header style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <h1 style={{ margin: 0, fontSize: 18 }}>Implement</h1>
+        <ConnectionBadge />
+        <span style={{ flex: 1 }} />
+        <LaunchButton workflow={WORKFLOW} onLaunched={setRunId} />
+      </header>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <RunList filter={{ workflow: WORKFLOW, limit: 20 }} activeRunId={runId} onSelect={setRunId} />
+        <RunTree runId={runId} activeNodeId={nodeId} onSelectNode={(node) => setNodeId(node.id)} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <NodeOutputView runId={runId} nodeId={nodeId} />
+          <RunEventLog runId={runId} style={{ height: 240 }} />
+        </div>
+      </div>
+
+      <ApprovalPanel filter={{ workflow: WORKFLOW }} />
+    </div>
+  );
+}
+
+createGatewayReactRoot(<App />);
+```
+
+That is the whole UI. `RunList` polls for new runs, `RunTree` and `RunEventLog`
+stream live as the run advances, `ApprovalPanel` lets you clear human gates, and
+`LaunchButton` starts a fresh run. Mix these with raw
+[`gateway-react`](/reference/gateway-react) hooks whenever you need something the
+components do not cover.
+
+## When to drop to hooks
+
+The components own the common shapes. When you need a bespoke layout, an
+embedded editor, or a custom card, read the same hooks the components use
+(`useGatewayRuns`, `useGatewayRunTree`, `useGatewayRunEvents`,
+`useGatewayApprovals`, `useGatewayActions`) directly. See
+[Custom Workflow UIs](/guides/custom-workflow-ui) for the full hook walkthrough
+and [Workflow UI (React)](/examples/workflow-ui-react) for a hand-wired example.

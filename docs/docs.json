@@ -355,6 +355,7 @@
               "reference/server-gateway",
               "reference/gateway-client",
               "reference/gateway-react",
+              "reference/gateway-ui",
               "reference/db",
               "reference/time-travel"
             ]

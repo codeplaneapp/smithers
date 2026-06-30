@@ -103,6 +103,9 @@ const CORE_PAGES = [
   "reference/errors.mdx",
   "reference/package-configuration.mdx",
   "reference/vcs-helpers.mdx",
+  // Building a workflow UI: prebuilt React components agents drop into
+  // .smithers/ui/<workflow>.tsx (built on the gateway-react hooks).
+  "reference/gateway-ui.mdx",
   // Runtime API (small, useful in core). Events moved to its own opt-in
   // fragment because the SmithersEvent union is too detailed for everyday
   // schema noise for everyday use.
