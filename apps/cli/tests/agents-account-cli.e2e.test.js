@@ -179,7 +179,7 @@ test("agents add appends to a detection-based agents.ts without dropping detecte
         format: "json",
         env: {
             HOME: repo.dir,
-            PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
+            PATH: [binDir, process.env.PATH ?? ""].filter(Boolean).join(delimiter),
             SMITHERS_HOME: home,
             ANTHROPIC_API_KEY: "sk-ant-test",
             OPENAI_API_KEY: "",
@@ -198,7 +198,7 @@ test("agents add appends to a detection-based agents.ts without dropping detecte
             format: "json",
             env: {
                 HOME: repo.dir,
-                PATH: cleanBinDir,
+                PATH: [cleanBinDir, process.env.PATH ?? ""].filter(Boolean).join(delimiter),
                 SMITHERS_HOME: home,
                 ANTHROPIC_API_KEY: "",
                 OPENAI_API_KEY: "",

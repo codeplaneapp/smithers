@@ -27,7 +27,6 @@ import { openSmithersStore } from "smithers-orchestrator/openSmithersStore";
  */
 export function findSmithersDb(from) {
     const startDir = resolve(from ?? process.cwd());
-    const root = resolve("/");
 
     // Collect every smithers.db along the upward walk so we can warn about
     // multiple candidates and enforce the anchor-preference rule.
@@ -35,13 +34,16 @@ export function findSmithersDb(from) {
     const allCandidates = [];
     let dir = startDir;
     while (true) {
-        // Stop at the filesystem root — never add /smithers.db as a candidate.
-        if (dir === root) break;
         const candidate = resolve(dir, "smithers.db");
         if (existsSync(candidate)) {
             allCandidates.push(candidate);
         }
-        dir = dirname(dir);
+        const parent = dirname(dir);
+        // Stop at the root of the drive/volume that `from` is on. Windows CI may
+        // put tmpdir() on a different drive than process.cwd(), so resolve("/")
+        // can point at the wrong root and leave this loop stuck.
+        if (parent === dir) break;
+        dir = parent;
     }
 
     if (allCandidates.length === 0) {
