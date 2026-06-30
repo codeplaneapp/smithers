@@ -5,6 +5,14 @@ import { z } from "zod/v4";
 import { synthesizer as defaultSynthesizer } from "./roles";
 import ReviewPrompt from "../prompts/review.mdx";
 
+// A reviewer entry: a single agent, a failover chain, or a labelled config
+// (mirrors the library PanelistConfig, inlined to avoid a type-only import).
+type PanelistConfig = { agent: AgentLike | AgentLike[]; role?: string; label?: string };
+export type Panelist = AgentLike | AgentLike[] | PanelistConfig;
+function panelistAgent(entry: Panelist): AgentLike | AgentLike[] {
+  return !Array.isArray(entry) && typeof entry === "object" && "agent" in entry ? entry.agent : entry;
+}
+
 const reviewIssueSchema = z.object({
   severity: z.enum(["critical", "major", "minor", "nit"]),
   title: z.string(),
@@ -38,7 +46,7 @@ export const reviewSynthesisSchema = z.object({
 type ReviewProps = {
   idPrefix: string;
   prompt: unknown;
-  agents: AgentLike[];
+  agents: Panelist[];
 };
 
 /**
@@ -49,12 +57,12 @@ export function Review({ idPrefix, prompt, agents }: ReviewProps) {
   const promptText = typeof prompt === "string" ? prompt : JSON.stringify(prompt ?? null);
   return (
     <Parallel>
-      {agents.map((agent, index) => (
+      {agents.map((entry, index) => (
         <Task
           key={`${idPrefix}:${index}`}
           id={`${idPrefix}:${index}`}
           output={reviewOutputSchema}
-          agent={agent}
+          agent={panelistAgent(entry)}
           continueOnFail
           timeoutMs={1_800_000}
           heartbeatTimeoutMs={600_000}
@@ -69,8 +77,8 @@ export function Review({ idPrefix, prompt, agents }: ReviewProps) {
 type ReviewPanelProps = {
   idPrefix: string;
   prompt: unknown;
-  /** Panelist reviewers (run in parallel). */
-  agents: AgentLike[];
+  /** Panelist reviewers (run in parallel). Each may be an agent, a failover chain, or a config. */
+  agents: Panelist[];
   /** The moderator that synthesizes the panelists into one verdict; defaults to the shared synthesizer (usually Codex). */
   moderator?: AgentLike;
 };
@@ -92,7 +100,7 @@ export function ReviewPanel({ idPrefix, prompt, agents, moderator = defaultSynth
       moderatorOutput={reviewSynthesisSchema}
       strategy="synthesize"
       panelistTaskProps={{ continueOnFail: true, timeoutMs: 1_800_000, heartbeatTimeoutMs: 600_000 }}
-      moderatorTaskProps={{ timeoutMs: 1_800_000, heartbeatTimeoutMs: 600_000 }}
+      moderatorTaskProps={{ continueOnFail: true, timeoutMs: 1_800_000, heartbeatTimeoutMs: 600_000 }}
     >
       <ReviewPrompt reviewer="review panelist" prompt={promptText} />
     </Panel>

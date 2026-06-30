@@ -67,14 +67,14 @@ const codexImplChain: AgentLike[] = [providers.codex, providers.codex1, provider
 const validateChain: AgentLike[] = [providers.claudeSonnet, providers.codex, providers.antigravity1];
 const prChain: AgentLike[] = [providers.claudeSonnet, providers.claudeOpus, providers.codex];
 
-// Three reviewers — Claude, Gemini, Codex — and each reviewer is itself a failover
-// chain (primary + backups). <Review> maps each element of `reviewAgents` to one
-// reviewer <Task>, and a <Task> accepts an agent array as a failover chain, so a
-// chain-per-reviewer gives every reviewer its own rate-limit backups.
+// Three reviewers (Claude, Gemini, Codex), each itself a failover chain
+// (primary + backups). reviewAgents accepts a chain-per-reviewer (each entry is
+// one panelist whose task runs the chain as failover), so every reviewer keeps
+// its own rate-limit backups.
 const claudeReviewChain: AgentLike[] = [providers.claudeOpus, providers.claudeSonnet, providers.codex];
 const geminiReviewChain: AgentLike[] = [providers.antigravity1, providers.codex1, providers.claudeSonnet];
 const codexReviewChain: AgentLike[] = [providers.codex, providers.codex1, providers.antigravity1];
-const reviewers = [claudeReviewChain, geminiReviewChain, codexReviewChain] as unknown as AgentLike[];
+const reviewers = [claudeReviewChain, geminiReviewChain, codexReviewChain];
 
 // ----------------------------------------------------------------------------
 // Schemas

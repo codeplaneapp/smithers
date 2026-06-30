@@ -2,7 +2,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { Sequence, Loop, Task, type AgentLike } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { Review, ReviewPanel } from "~/components/Review";
+import { Review, ReviewPanel, type Panelist } from "~/components/Review";
 import ImplementPrompt from "~/prompts/implement.mdx";
 import ValidatePrompt from "~/prompts/validate.mdx";
 
@@ -21,7 +21,8 @@ export type ValidationLoopProps = {
   idPrefix: string;
   prompt: unknown;
   implementAgents: AgentLike[];
-  reviewAgents: AgentLike[];
+  /** Reviewers — each may be an agent, a failover chain, or a PanelistConfig. */
+  reviewAgents: Panelist[];
   validateAgents?: AgentLike[];
   /**
    * When true, the review step is a synthesized PANEL: parallel panelists feed a

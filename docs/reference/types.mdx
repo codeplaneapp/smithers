@@ -880,27 +880,22 @@ type OptimizerProps = {
   children: string | React.ReactNode;
 };
 
-type PanelistConfig = { agent: AgentLike; role?: string; label?: string };
-type PanelTaskOptions = {
-  continueOnFail?: boolean;
-  timeoutMs?: number;
-  heartbeatTimeoutMs?: number;
-  retries?: number;
-};
+type PanelistConfig = { agent: AgentLike | AgentLike[]; role?: string; label?: string };
 
 type PanelProps = {
   id?: string;
-  // Each entry is an agent or PanelistConfig. A failover chain (AgentLike[])
-  // passed via a cast also works: it becomes one panelist run as failover.
-  panelists: PanelistConfig[] | AgentLike[];
+  // Each entry is an agent, a PanelistConfig, or a failover chain (AgentLike[]);
+  // a chain becomes one panelist run as failover.
+  panelists: Array<PanelistConfig | AgentLike | AgentLike[]>;
   moderator: AgentLike;
   panelistOutput: OutputTarget;
   moderatorOutput: OutputTarget;
   strategy?: "synthesize" | "vote" | "consensus";
   minAgree?: number;
   maxConcurrency?: number;
-  panelistTaskProps?: PanelTaskOptions;   // extra Task props for each panelist (continueOnFail, timeouts)
-  moderatorTaskProps?: PanelTaskOptions;  // extra Task props for the moderator
+  // extra Task props for each panelist / the moderator (continueOnFail, timeouts)
+  panelistTaskProps?: { continueOnFail?: boolean; timeoutMs?: number; heartbeatTimeoutMs?: number; retries?: number };
+  moderatorTaskProps?: { continueOnFail?: boolean; timeoutMs?: number; heartbeatTimeoutMs?: number; retries?: number };
   skipIf?: boolean;
   children: string | React.ReactNode;
 };

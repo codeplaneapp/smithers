@@ -522,7 +522,8 @@ type ParallelProps$2 = {
 };
 
 type PanelistConfig$1 = {
-    agent: AgentLike;
+    /** A single agent, or a failover CHAIN (`AgentLike[]`) run as one panelist. */
+    agent: AgentLike | AgentLike[];
     role?: string;
     label?: string;
 };
@@ -537,12 +538,11 @@ type PanelTaskOptions = {
 type PanelProps$2 = {
     id?: string;
     /**
-     * Panelists. Each entry is a single agent or a {@link PanelistConfig}. An
-     * entry may also be a failover CHAIN (`AgentLike[]`) passed through a cast:
-     * `normalizePanelist` treats a chain as one panelist whose task runs it as a
-     * failover sequence.
+     * Panelists. Each entry is a single agent, a {@link PanelistConfig}, or a
+     * failover CHAIN (`AgentLike[]`). A chain becomes one panelist whose task
+     * runs it as a failover sequence.
      */
-    panelists: PanelistConfig$1[] | AgentLike[];
+    panelists: Array<PanelistConfig$1 | AgentLike | AgentLike[]>;
     moderator: AgentLike;
     panelistOutput: OutputTarget$1;
     moderatorOutput: OutputTarget$1;
