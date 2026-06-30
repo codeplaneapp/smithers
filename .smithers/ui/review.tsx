@@ -110,9 +110,11 @@ const styles = [
   ".verdict { display:flex; align-items:center; gap:18px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:18px 22px; margin-bottom:18px; }",
   ".verdict.approved { box-shadow:inset 4px 0 0 var(--ok); }",
   ".verdict.blocked { box-shadow:inset 4px 0 0 var(--err); }",
+  ".verdict.pending { box-shadow:inset 4px 0 0 var(--muted); }",
   ".verdict-mark { font-size:34px; line-height:1; }",
   ".verdict.approved .verdict-mark { color:var(--ok); }",
   ".verdict.blocked .verdict-mark { color:var(--err); }",
+  ".verdict.pending .verdict-mark { color:var(--muted); }",
   ".verdict-body { flex:1; }",
   ".verdict-headline { font-size:16px; font-weight:600; margin-bottom:4px; }",
   ".verdict-sub { color:var(--muted); font-size:12px; }",
@@ -198,9 +200,11 @@ function App() {
   }, [n0.data, n1.data, n2.data, n3.data, n4.data, n5.data]);
 
   const approvedCount = reviews.filter((r) => r.approved).length;
-  // The synthesized moderator verdict is the source of truth; fall back to
-  // panelist consensus until the moderator has produced its verdict.
-  const verdictApproved = synthesis ? synthesis.approved : reviews.length > 0 && approvedCount === reviews.length;
+  // The synthesized moderator verdict is the ONLY source of truth. The moderator
+  // task is continueOnFail, so a run can have panelist output but no synthesis;
+  // in that case the verdict is pending (never inferred from panelist consensus).
+  const verdictPending = synthesis === null;
+  const verdictApproved = synthesis ? synthesis.approved : false;
   const hasContent = reviews.length > 0 || synthesis !== null;
   // Prefer the moderator's consolidated issues once synthesized; the panelist
   // union can differ (the moderator may merge, escalate, or drop issues).
@@ -268,15 +272,15 @@ function App() {
         <div className="content">
           {hasContent ? (
             <>
-              <div className={"verdict " + (verdictApproved ? "approved" : "blocked")} data-testid="review-verdict">
-                <span className="verdict-mark">{verdictApproved ? "✓" : "✗"}</span>
+              <div className={"verdict " + (verdictPending ? "pending" : verdictApproved ? "approved" : "blocked")} data-testid="review-verdict">
+                <span className="verdict-mark">{verdictPending ? "…" : verdictApproved ? "✓" : "✗"}</span>
                 <div className="verdict-body">
                   <div className="verdict-headline">
-                    {synthesis
-                      ? (verdictApproved ? "Approved — synthesized verdict" : "Blocked — synthesized verdict")
-                      : (verdictApproved ? "Approved by all panelists" : "Blocked — not all panelists approved")}
+                    {verdictPending
+                      ? "Awaiting synthesized verdict"
+                      : (verdictApproved ? "Approved — synthesized verdict" : "Blocked — synthesized verdict")}
                   </div>
-                  <div className="verdict-sub">{approvedCount} of {reviews.length} panelists approved{synthesis ? " · moderator synthesized" : ""}</div>
+                  <div className="verdict-sub">{approvedCount} of {reviews.length} panelists approved{verdictPending ? " · awaiting moderator synthesis" : " · moderator synthesized"}</div>
                   {synthesis && synthesis.feedback ? (
                     <div className="verdict-sub" data-testid="review-synthesis-feedback" style={{ marginTop: 6, color: "var(--text)" }}>{synthesis.feedback}</div>
                   ) : null}

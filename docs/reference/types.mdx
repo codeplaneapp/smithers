@@ -887,7 +887,8 @@ type PanelProps = {
   // Each entry is an agent, a PanelistConfig, or a failover chain (AgentLike[]);
   // a chain becomes one panelist run as failover.
   panelists: Array<PanelistConfig | AgentLike | AgentLike[]>;
-  moderator: AgentLike;
+  // the synthesizing moderator; a chain (AgentLike[]) runs as failover.
+  moderator: AgentLike | AgentLike[];
   panelistOutput: OutputTarget;
   moderatorOutput: OutputTarget;
   strategy?: "synthesize" | "vote" | "consensus";

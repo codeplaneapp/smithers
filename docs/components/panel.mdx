@@ -16,7 +16,7 @@ type PanelProps = {
   id?: string;                                           // default: "panel"
   // each entry: an agent, a PanelistConfig, or a failover chain (AgentLike[])
   panelists: Array<PanelistConfig | AgentLike | AgentLike[]>;
-  moderator: AgentLike;
+  moderator: AgentLike | AgentLike[];                    // a chain runs as failover
   panelistOutput: OutputTarget;
   moderatorOutput: OutputTarget;
   strategy?: "synthesize" | "vote" | "consensus";        // default: "synthesize"
@@ -507,7 +507,7 @@ export type PanelProps = {
 	 * runs it as a failover sequence.
 	 */
 	panelists: Array<PanelistConfig | AgentLike | AgentLike[]>;
-	moderator: AgentLike;
+	moderator: AgentLike | AgentLike[];
 	panelistOutput: OutputTarget;
 	moderatorOutput: OutputTarget;
 	strategy?: "synthesize" | "vote" | "consensus";

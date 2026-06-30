@@ -17,7 +17,7 @@
 //      implement → Gemini=antigravity for "easy", Codex for "hard"   (+ backups)
 //      validate  → Claude (runs the gate)                            (+ backups)
 //      review    → Claude + Gemini + Codex in parallel               (each + backups)
-//    looping implement→validate→review until the gate passes AND a reviewer approves
+//    looping implement→validate→review until validation passes AND the synthesized review verdict approves
 //    (or reviewIterations is hit).
 // 3. pr (Claude/Sonnet): commit + push the branch and open exactly ONE PR per group,
 //    reusing an existing PR for the branch if present. `Closes #N` for issues fully

@@ -19,9 +19,9 @@ bunx smithers-orchestrator workflow run implement --prompt "Add rate limiting to
 
 1. An implementation agent works from the prompt.
 2. A validation agent checks the repo state.
-3. Reviewer agents inspect the result.
-4. The orchestrator feeds failed validation output and reviewer rejection notes back into the next implementation pass.
-5. The loop stops after validation passes and at least one reviewer approves, or after 3 iterations.
+3. A panel of reviewer agents inspects the result; a moderator synthesizes them into one verdict.
+4. The orchestrator feeds failed validation output and the synthesized review feedback back into the next implementation pass.
+5. The loop stops after validation passes and the synthesized review verdict approves, or after 3 iterations.
 
 ## Output Shape
 
@@ -40,4 +40,4 @@ bunx smithers-orchestrator workflow run implement --prompt "Add rate limiting to
 
 ## Resume & retry
 
-The run is durable: if the process is interrupted, resume with `up --resume` and finished iterations are not repeated. The validation loop runs up to 3 iterations, stopping once validation passes and at least one reviewer approves.
+The run is durable: if the process is interrupted, resume with `up --resume` and finished iterations are not repeated. The validation loop runs up to 3 iterations, stopping once validation passes and the synthesized review verdict approves.

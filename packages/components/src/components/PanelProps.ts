@@ -19,7 +19,7 @@ export type PanelProps = {
 	 * runs it as a failover sequence.
 	 */
 	panelists: Array<PanelistConfig | AgentLike | AgentLike[]>;
-	moderator: AgentLike;
+	moderator: AgentLike | AgentLike[];
 	panelistOutput: OutputTarget;
 	moderatorOutput: OutputTarget;
 	strategy?: "synthesize" | "vote" | "consensus";

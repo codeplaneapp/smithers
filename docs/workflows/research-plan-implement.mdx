@@ -45,4 +45,4 @@ bunx smithers-orchestrator workflow run research-plan-implement \
 
 ## Resume & retry
 
-Runs are durable and resume with `up --resume`; completed research and planning are not re-run. The implementation stage uses the same validation loop as `implement` (up to 3 iterations, stopping on validation pass plus reviewer approval).
+Runs are durable and resume with `up --resume`; completed research and planning are not re-run. The implementation stage uses the same validation loop as `implement` (up to 3 iterations, stopping on validation pass plus the synthesized review verdict approval).

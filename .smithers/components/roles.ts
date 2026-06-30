@@ -75,5 +75,10 @@ const detectedPanel: AgentLike[] = [
 export const panelists: AgentLike[] =
   detectedPanel.length >= 2 ? detectedPanel.slice(0, 2) : [opus, codex];
 
-// The panel moderator / synthesizer — usually Codex.
-export const synthesizer: AgentLike = hasCodex ? codex : opus;
+// The panel moderator / synthesizer failover chain — usually Codex, with Opus
+// as the always-present final fallback. A chain (not a single agent) so the
+// panel still yields a synthesized verdict when the Codex CLI is missing or its
+// auth has gone stale at run time: a moderator that hard-fails because one CLI
+// is misconfigured would make every plan/review panel fragile. Codex stays first
+// so it remains the usual synthesizer whenever it is healthy.
+export const synthesizer: AgentLike[] = [...(hasCodex ? [codex] : []), opus];

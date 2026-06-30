@@ -314,7 +314,7 @@ Rules:
             request={{
               title: `Ticket "${ticketId}" did not converge after ${maxReviewIterations} review iterations`,
               summary: [
-                `The implement → validate → review loop ran ${implIterations} time(s) without a green validation + reviewer approval.`,
+                `The implement → validate → review loop ran ${implIterations} time(s) without a green validation + synthesized review approval.`,
                 ``,
                 `Latest blocking feedback:`,
                 feedback ?? "(no structured feedback captured)",

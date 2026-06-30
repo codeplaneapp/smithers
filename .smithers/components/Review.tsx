@@ -79,8 +79,8 @@ type ReviewPanelProps = {
   prompt: unknown;
   /** Panelist reviewers (run in parallel). Each may be an agent, a failover chain, or a config. */
   agents: Panelist[];
-  /** The moderator that synthesizes the panelists into one verdict; defaults to the shared synthesizer (usually Codex). */
-  moderator?: AgentLike;
+  /** The moderator that synthesizes the panelists into one verdict; defaults to the shared synthesizer (usually Codex, with Opus fallback). An AgentLike[] is a failover chain. */
+  moderator?: AgentLike | AgentLike[];
 };
 
 /**

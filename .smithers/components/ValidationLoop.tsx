@@ -31,8 +31,8 @@ export type ValidationLoopProps = {
    * plain parallel `Review` (per-reviewer verdicts via `ctx.outputs.review`).
    */
   synthesizeReview?: boolean;
-  /** Moderator for the synthesized review panel; defaults to the shared synthesizer (usually Codex). Only used when synthesizeReview is true. */
-  reviewModerator?: AgentLike;
+  /** Moderator for the synthesized review panel; defaults to the shared synthesizer (usually Codex, with Opus fallback). An AgentLike[] is a failover chain. Only used when synthesizeReview is true. */
+  reviewModerator?: AgentLike | AgentLike[];
   feedback?: string | null;
   done?: boolean;
   maxIterations?: number;

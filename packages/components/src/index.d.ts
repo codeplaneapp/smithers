@@ -543,7 +543,7 @@ type PanelProps$2 = {
      * runs it as a failover sequence.
      */
     panelists: Array<PanelistConfig$1 | AgentLike | AgentLike[]>;
-    moderator: AgentLike;
+    moderator: AgentLike | AgentLike[];
     panelistOutput: OutputTarget$1;
     moderatorOutput: OutputTarget$1;
     strategy?: "synthesize" | "vote" | "consensus";

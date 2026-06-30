@@ -307,7 +307,7 @@ describe("composite component expansion coverage", () => {
             <Panel
                 id="rp"
                 panelists={[[agent, otherAgent], agent]}
-                moderator={otherAgent}
+                moderator={[otherAgent, agent]}
                 panelistOutput="panel_out"
                 moderatorOutput="moderator_out"
                 strategy="synthesize"
@@ -325,6 +325,9 @@ describe("composite component expansion coverage", () => {
         // A failover-chain entry becomes one panelist whose agent IS the chain.
         expect(result.tasks[0].agent).toEqual([agent, otherAgent]);
         expect(result.tasks[1].agent).toBe(agent);
+        // A failover-chain moderator passes the chain through to the moderator Task,
+        // which runs it as failover (e.g. Codex-first, Opus fallback).
+        expect(result.tasks[2].agent).toEqual([otherAgent, agent]);
         // panelistTaskProps apply to every panelist task; moderatorTaskProps to the moderator.
         expect(result.tasks[0].continueOnFail).toBe(true);
         expect(result.tasks[0].timeoutMs).toBe(1000);

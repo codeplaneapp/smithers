@@ -77,7 +77,7 @@
     "primaryTestId": "review-ui",
     "populatedTestId": "review-verdict",
     "expectedText": [
-      "Approved by all reviewers",
+      "synthesized verdict",
       "mock-reviewer",
       "looks good",
       "No issues raised"

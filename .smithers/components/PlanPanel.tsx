@@ -24,8 +24,8 @@ type PlanPanelProps = {
   prompt: unknown;
   /** Panelist planners (run in parallel); defaults to the shared model-diverse pair. */
   panelists?: AgentLike[];
-  /** The moderator that synthesizes the plans into one; defaults to the shared synthesizer (usually Codex). */
-  moderator?: AgentLike;
+  /** The moderator that synthesizes the plans into one; defaults to the shared synthesizer (usually Codex, with Opus fallback). An AgentLike[] is a failover chain. */
+  moderator?: AgentLike | AgentLike[];
   /** Per-panelist plan schema; defaults to planOutputSchema. Pass a workflow's own schema to preserve extra fields (e.g. risks). */
   panelistOutput?: z.ZodObject<any>;
   /** Synthesized plan schema; defaults to planSynthesisSchema. Must be a DISTINCT object from panelistOutput. */
@@ -58,6 +58,8 @@ export function PlanPanel({
       panelistOutput={panelistOutput}
       moderatorOutput={synthesisOutput}
       strategy="synthesize"
+      panelistTaskProps={{ continueOnFail: true, timeoutMs: 1_800_000, heartbeatTimeoutMs: 600_000 }}
+      moderatorTaskProps={{ timeoutMs: 1_800_000, heartbeatTimeoutMs: 600_000 }}
     >
       <PlanPrompt prompt={promptText} />
     </Panel>
