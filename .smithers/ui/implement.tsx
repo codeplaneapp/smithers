@@ -250,11 +250,11 @@ function App() {
   const eventCount = (stream.events ?? []).length;
 
   const validationPassed = validate !== null && validate.allPassed !== false;
-  // The synthesized moderator verdict is the source of truth; fall back to
-  // panelist consensus until the moderator has produced its verdict.
-  const anyApproved = verdict ? verdict.approved === true : reviews.length > 0 && reviews.some((r) => r.approved === true);
-  const anyRejected = reviews.some((r) => r.approved === false);
-  const reviewRejected = verdict ? verdict.approved === false : anyRejected;
+  // Mirror the workflow gate exactly: the synthesized moderator verdict is the
+  // source of truth. Until it exists the review is pending (a single approving
+  // panelist must NOT flip the run to DONE ahead of the moderator).
+  const anyApproved = verdict?.approved === true;
+  const reviewRejected = verdict?.approved === false;
   const done = validationPassed && anyApproved;
   const blocked = (validate !== null && validate.allPassed === false) || (!anyApproved && reviewRejected);
 
@@ -323,7 +323,7 @@ function App() {
 
   const implDot = implement ? (implement.allTestsPassing === false ? "err" : "ok") : "pending";
   const valDot = validate ? (validate.allPassed === false ? "err" : "ok") : "pending";
-  const revDot = reviews.length === 0 && !verdict ? "pending" : anyApproved ? "ok" : "err";
+  const revDot = !verdict ? "pending" : anyApproved ? "ok" : "err";
 
   return (
     <main className="shell" data-testid="implement-ui">

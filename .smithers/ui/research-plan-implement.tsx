@@ -347,7 +347,7 @@ function App() {
           {!activeRunId ? (
             <div className="launch-form" data-testid="research-plan-implement-empty">
               <h2>Launch a workflow</h2>
-              <p>Describe the change. Research informs the plan, then an implement → validate → review loop runs until reviewers approve.</p>
+              <p>Describe the change. Research informs the plan, then an implement → validate → review loop runs until the synthesized review verdict approves.</p>
               <input
                 className="prompt"
                 value={prompt}
@@ -507,7 +507,7 @@ function App() {
                           : null
                       }
                       pending={review === null}
-                      pendingText="Awaiting reviewer..."
+                      pendingText="Awaiting synthesized verdict..."
                     >
                       {review ? (
                         <div className="reviewer-card">
@@ -541,7 +541,7 @@ function App() {
                   {reviewerApproved && validate && validate.allPassed ? (
                     <>
                       <span className="badge ok">complete</span>
-                      <span>Validation passed and reviewers approved.</span>
+                      <span>Validation passed and the synthesized review verdict approved.</span>
                     </>
                   ) : (
                     <>

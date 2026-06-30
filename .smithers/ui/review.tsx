@@ -202,7 +202,11 @@ function App() {
   // panelist consensus until the moderator has produced its verdict.
   const verdictApproved = synthesis ? synthesis.approved : reviews.length > 0 && approvedCount === reviews.length;
   const hasContent = reviews.length > 0 || synthesis !== null;
-  const allIssues = reviews.flatMap((r) => r.issues.map((it) => ({ ...it, reviewer: r.reviewer })));
+  // Prefer the moderator's consolidated issues once synthesized; the panelist
+  // union can differ (the moderator may merge, escalate, or drop issues).
+  const allIssues = synthesis
+    ? synthesis.issues.map((it) => ({ ...it, reviewer: "synthesized" }))
+    : reviews.flatMap((r) => r.issues.map((it) => ({ ...it, reviewer: r.reviewer })));
   const sevCounts = SEVERITIES.reduce((acc, s) => {
     acc[s] = allIssues.filter((it) => it.severity === s).length;
     return acc;
