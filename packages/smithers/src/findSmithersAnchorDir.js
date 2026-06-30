@@ -15,7 +15,6 @@ import { existsSync, statSync } from "node:fs";
  */
 export function findSmithersAnchorDir(from) {
     let dir = resolve(from);
-    const fsRoot = resolve("/");
     const home = process.env.HOME ? resolve(process.env.HOME) : undefined;
     while (true) {
         // Stop at or above HOME — anchors must be proper project directories
@@ -27,14 +26,17 @@ export function findSmithersAnchorDir(from) {
                 return undefined;
             }
         }
-        // Guard: never scan the filesystem root itself.
-        if (dir === fsRoot) {
-            return undefined;
-        }
         const candidate = join(dir, ".smithers");
         if (existsSync(candidate) && statSync(candidate).isDirectory()) {
             return dir;
         }
-        dir = dirname(dir);
+        const parent = dirname(dir);
+        // Stop at the root of whatever drive/volume `from` is on. On Windows CI
+        // tmpdir() may live on a different drive than process.cwd(), so comparing
+        // against resolve("/") can miss the real root and loop forever.
+        if (parent === dir) {
+            return undefined;
+        }
+        dir = parent;
     }
 }
