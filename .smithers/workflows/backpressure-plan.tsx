@@ -107,6 +107,7 @@ export default smithers((ctx) => {
   // Gate the plan-gates stage on the extracted criteria being available.
   const criteria = ctx.outputMaybe("extractCriteria", { nodeId: "extract-criteria" });
   const gates = ctx.outputMaybe("planGates", { nodeId: "plan-gates" });
+  const criteriaList = Array.isArray(criteria?.criteria) ? criteria.criteria : [];
 
   // Gate the printed terminal roll-up on the parity check having run.
   const verify = ctx.outputMaybe("verify", { nodeId: "verify" });
@@ -121,7 +122,7 @@ export default smithers((ctx) => {
 
         {/* 1b — Backpressure on the plan itself: a goal with no verifiable
             criteria must fail loudly, not produce an empty gate matrix. */}
-        {criteria && criteria.criteria.length === 0 ? (
+        {criteria && criteriaList.length === 0 ? (
           <Task id="no-verifiable-acceptance-criteria" output={outputs.verify} retries={0}>
             {() => {
               throw new Error(
@@ -133,23 +134,24 @@ export default smithers((ctx) => {
         ) : null}
 
         {/* 2 — Map each criterion to a verification method + enforcement gate. */}
-        {criteria && criteria.criteria.length > 0 ? (
+        {criteria && criteriaList.length > 0 ? (
           <Task id="plan-gates" output={outputs.planGates} agent={agents.smart}>
-            <PlanGatesPrompt criteria={criteria.criteria} prompt={prompt} />
+            <PlanGatesPrompt criteria={criteriaList} prompt={prompt} />
           </Task>
         ) : null}
 
         {/* 3 — Deterministic parity check of the matrix against the criteria. */}
-        {criteria && criteria.criteria.length > 0 && gates ? (
+        {criteria && criteriaList.length > 0 && gates ? (
           <Task id="verify" output={outputs.verify}>
             {() => {
-              const wanted = criteria.criteria;
-              const produced = gates.gates.map((gate) => gate.criterion);
+              const wanted = criteriaList;
+              const gateList = Array.isArray(gates.gates) ? gates.gates : [];
+              const produced = gateList.map((gate) => gate.criterion);
               const missing = wanted.filter((criterion) => !produced.includes(criterion));
               const orderedMatch =
                 produced.length === wanted.length &&
                 wanted.every((criterion, index) => produced[index] === criterion);
-              const unverifiedBlocking = gates.gates
+              const unverifiedBlocking = gateList
                 .filter((gate) => gate.gateType === "blocking" && gate.verificationMethod === "manual_check" && gate.checkedBy.trim().length === 0)
                 .map((gate) => gate.criterion);
               const match = orderedMatch && unverifiedBlocking.length === 0;

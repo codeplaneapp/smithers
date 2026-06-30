@@ -278,6 +278,7 @@ export default smithers((ctx) => {
               const errors = check.issues.filter((i) => i.severity === "error").length;
               const warnings = check.issues.filter((i) => i.severity === "warning").length;
               const passed = check.issues.filter((i) => i.severity === "ok").length;
+              const fixes = Array.isArray(advise.fixes) ? advise.fixes : [];
               return {
                 verdict: errors > 0 ? "fail" : "pass",
                 score: check.score,
@@ -287,7 +288,7 @@ export default smithers((ctx) => {
                 total: check.issues.length,
                 diagnosis: check.summary,
                 advice: advise.summary,
-                fixes: advise.fixes.length,
+                fixes: fixes.length,
               };
             }}
           </Task>
