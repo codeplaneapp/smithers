@@ -123,11 +123,13 @@ function mapNode(
   runStatus: string,
   blockedNodeId: string | undefined,
 ): GatewayRunNode {
+  const iteration = node.task?.iteration;
   return {
     id: nodeId(node),
     name: nodeName(node),
     kind: nodeKind(node),
     status: nodeStatus(node, isRoot, runStatus, blockedNodeId),
+    ...(typeof iteration === "number" ? { iteration } : {}),
     children: (node.children ?? []).map((child) =>
       mapNode(child, false, runStatus, blockedNodeId),
     ),
