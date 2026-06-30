@@ -19,6 +19,8 @@ import { BubblewrapSandboxExecutorLive } from "../src/effect/socket-runner.js";
 import { layerForSandboxRuntime, resolveSandboxRuntime } from "../src/transport.js";
 import { bubblewrapArgs, dockerArgs, sandboxExecArgs, sandboxRunnerEnv, spawnSandboxCommand } from "../src/effect/process-runner.js";
 
+const isWindows = process.platform === "win32";
+
 /**
  * @param {string} prefix
  */
@@ -245,7 +247,7 @@ describe("sandbox transport runners", () => {
         expect(args).not.toContain("--network");
     });
 
-    test("local sandbox handles merge egress proxy config into sandbox env", async () => {
+    test.skipIf(isWindows)("local sandbox handles merge egress proxy config into sandbox env", async () => {
         const fake = makeFakeBin("bwrap");
         await withPlatform("linux", () =>
             withBunWhich((command) => (command === "bwrap" ? fake.binPath : null), async () => {
@@ -321,7 +323,7 @@ describe("sandbox transport runners", () => {
         ).toThrow("volume remapping");
     });
 
-    test("bubblewrap executor creates, ships, executes, collects, and cleans up", async () => {
+    test.skipIf(isWindows)("bubblewrap executor creates, ships, executes, collects, and cleans up", async () => {
         const fake = makeFakeBin("bwrap");
         await withPlatform("linux", () =>
             withBunWhich((command) => (command === "bwrap" ? fake.binPath : null), async () => {
@@ -333,7 +335,7 @@ describe("sandbox transport runners", () => {
         );
     });
 
-    test("bubblewrap executor does not inherit host secrets", async () => {
+    test.skipIf(isWindows)("bubblewrap executor does not inherit host secrets", async () => {
         const fake = makeFakeBin("bwrap", [
             "#!/bin/sh",
             "last=''",
@@ -414,7 +416,7 @@ describe("sandbox transport runners", () => {
         );
     });
 
-    test("macOS fallback executes with a writable sandbox temp directory", async () => {
+    test.skipIf(isWindows)("macOS fallback executes with a writable sandbox temp directory", async () => {
         const captureDir = tempDir("smithers-sandbox-exec-capture-");
         const fake = makeFakeSandboxExecBin(captureDir);
         await withPlatform("darwin", () =>
@@ -447,7 +449,7 @@ describe("sandbox transport runners", () => {
         );
     });
 
-    test("docker executor uses docker info before creating the workspace", async () => {
+    test.skipIf(isWindows)("docker executor uses docker info before creating the workspace", async () => {
         const fakeDocker = makeFakeDockerBin();
         await withEnv({ PATH: `${fakeDocker.binDir}:${process.env.PATH ?? ""}` }, async () => {
             await expectExecutorLifecycle(
@@ -457,7 +459,7 @@ describe("sandbox transport runners", () => {
         });
     });
 
-    test("docker executor reports an unreachable daemon", async () => {
+    test.skipIf(isWindows)("docker executor reports an unreachable daemon", async () => {
         await withEnv({ PATH: tempDir("smithers-empty-path-") }, async () => {
             await expect(
                 runExecutor(DockerSandboxExecutorLive, (executor) =>
@@ -628,7 +630,7 @@ describe("spawnSandboxCommand cancellation", () => {
     // command spawn, so a cancel/down left the docker/bwrap/sandbox-exec command
     // running until its 10-minute default timeout. The signal now SIGKILLs the
     // detached process group on abort.
-    test("aborting the signal kills the command promptly instead of running to its timeout", async () => {
+    test.skipIf(isWindows)("aborting the signal kills the command promptly instead of running to its timeout", async () => {
         const controller = new AbortController();
         const start = performance.now();
         const promise = Effect.runPromise(

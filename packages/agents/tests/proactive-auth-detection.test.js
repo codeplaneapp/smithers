@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, chmodSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { KimiAgent } from "../src/index.js";
 import { BaseCliAgent } from "../src/BaseCliAgent/index.js";
+import { makeFakeNodeCliSync } from "./fake-cli.js";
 
 /**
  * Coverage for commit 1bb532e00 — proactive expired-credential detection
@@ -172,16 +173,12 @@ beforeEach(() => {
  * @param {{ name?: string, stderr?: string, stdout?: string, exitCode?: number }} cfg
  */
 function makeFakeCli(cfg) {
-    const binPath = join(fakeBinDir, cfg.name ?? "fake");
     const lines = [
-        "#!/usr/bin/env node",
         cfg.stdout ? `process.stdout.write(${JSON.stringify(cfg.stdout)});` : "",
         cfg.stderr ? `process.stderr.write(${JSON.stringify(cfg.stderr)});` : "",
         `process.exit(${cfg.exitCode ?? 0});`,
     ].filter(Boolean).join("\n");
-    writeFileSync(binPath, lines + "\n", { mode: 0o755 });
-    chmodSync(binPath, 0o755);
-    return binPath;
+    return makeFakeNodeCliSync(fakeBinDir, cfg.name ?? "fake", lines).binPath;
 }
 
 describe("BaseCliAgent.classifyNonRetryableAgentError — auth patterns (covers Codex/Claude/Pi via stderr)", () => {

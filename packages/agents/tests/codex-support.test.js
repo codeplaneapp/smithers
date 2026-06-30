@@ -1,20 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CodexAgent } from "../src/index.js";
 import { z } from "zod";
+import { makeFakeNodeCli, prependPath } from "./fake-cli.js";
 const originalPath = process.env.PATH ?? "";
 /**
  * @param {string} stdoutScript
  */
 async function makeFakeCodex(stdoutScript) {
     const dir = await mkdtemp(join(tmpdir(), "smithers-codex-test-"));
-    const binPath = join(dir, "codex");
-    const script = `#!/usr/bin/env node\n${stdoutScript}\n`;
-    await writeFile(binPath, script, "utf8");
-    await chmod(binPath, 0o755);
-    return { dir, binPath };
+    return makeFakeNodeCli(dir, "codex", stdoutScript);
 }
 afterEach(() => {
     process.env.PATH = originalPath;
@@ -80,7 +77,7 @@ process.stdout.write(JSON.stringify({
 process.stdout.write(JSON.stringify({ type: "turn.completed" }) + "\\n");
 `);
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.CODEX_ARGS_FILE = argsFile;
             const agent = new CodexAgent({
                 env: { PATH: process.env.PATH },

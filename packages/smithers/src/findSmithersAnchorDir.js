@@ -1,4 +1,4 @@
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname, join, relative, isAbsolute } from "node:path";
 import { existsSync, statSync } from "node:fs";
 
 /**
@@ -20,10 +20,12 @@ export function findSmithersAnchorDir(from) {
     while (true) {
         // Stop at or above HOME — anchors must be proper project directories
         // strictly below the user's home directory.
-        // Use startsWith rather than length comparison so that symlinks and
-        // unusual mount points (e.g. /home2) don't produce false positives.
-        if (home && (dir === home || !dir.startsWith(home + "/"))) {
-            return undefined;
+        if (home) {
+            const relToHome = relative(home, dir);
+            const isInsideHome = relToHome !== "" && !relToHome.startsWith("..") && !isAbsolute(relToHome);
+            if (!isInsideHome) {
+                return undefined;
+            }
         }
         // Guard: never scan the filesystem root itself.
         if (dir === fsRoot) {

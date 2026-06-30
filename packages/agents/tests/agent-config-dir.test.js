@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AntigravityAgent, ClaudeCodeAgent, CodexAgent } from "../src/index.js";
+import { makeFakeNodeCli, prependPath } from "./fake-cli.js";
 
 const originalPath = process.env.PATH ?? "";
 const originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
@@ -28,9 +29,7 @@ afterEach(() => {
  */
 async function makeFakeCliWithEnvDump(name, stdoutEmitter) {
     const dir = await mkdtemp(join(tmpdir(), `smithers-${name}-test-`));
-    const binPath = join(dir, name);
     const script = [
-        "#!/usr/bin/env node",
         'const fs = require("node:fs");',
         "if (process.env.SMITHERS_ENV_DUMP_FILE) {",
         "  fs.writeFileSync(process.env.SMITHERS_ENV_DUMP_FILE, JSON.stringify({",
@@ -47,9 +46,7 @@ async function makeFakeCliWithEnvDump(name, stdoutEmitter) {
         stdoutEmitter,
         "",
     ].join("\n");
-    await writeFile(binPath, script, "utf8");
-    await chmod(binPath, 0o755);
-    return { dir, binPath };
+    return makeFakeNodeCli(dir, name, script);
 }
 
 async function readEnvDump(dumpFile) {
@@ -65,7 +62,7 @@ describe("ClaudeCodeAgent configDir/apiKey", () => {
             'process.stdout.write(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } }) + "\\n");',
         );
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.SMITHERS_ENV_DUMP_FILE = dumpFile;
             const agent = new ClaudeCodeAgent({
                 model: "claude-opus-4-7",
@@ -92,7 +89,7 @@ describe("ClaudeCodeAgent configDir/apiKey", () => {
             'process.stdout.write(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } }) + "\\n");',
         );
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.SMITHERS_ENV_DUMP_FILE = dumpFile;
             // Pre-existing ANTHROPIC_API_KEY in parent env: with apiKey set we
             // must NOT clobber it back to "".
@@ -129,7 +126,7 @@ describe("CodexAgent configDir/apiKey", () => {
             ].join("\n"),
         );
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.SMITHERS_ENV_DUMP_FILE = dumpFile;
             const agent = new CodexAgent({
                 model: "gpt-5.4-codex",
@@ -159,7 +156,7 @@ describe("AntigravityAgent configDir/apiKey", () => {
             'process.stdout.write(JSON.stringify({ text: "```json\\n{\\"summary\\":\\"ok\\"}\\n```\\n" }) + "\\n");',
         );
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.SMITHERS_ENV_DUMP_FILE = dumpFile;
             const agent = new AntigravityAgent({
                 configDir: "/tmp/smithers-test-antigravity-work",
@@ -189,7 +186,7 @@ describe("AntigravityAgent configDir/apiKey", () => {
             'process.stdout.write(JSON.stringify({ text: "```json\\n{\\"summary\\":\\"ok\\"}\\n```\\n" }) + "\\n");',
         );
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.SMITHERS_ENV_DUMP_FILE = dumpFile;
             const agent = new AntigravityAgent({
                 resume: "d1d8a55b-cc27-4dd4-bc62-2f73015960d2",

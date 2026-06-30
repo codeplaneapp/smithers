@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { OpenCodeAgent } from "../src/OpenCodeAgent.js";
+import { makeFakeNodeCli, prependPath } from "./fake-cli.js";
 
 const originalPath = process.env.PATH ?? "";
 
@@ -11,11 +12,7 @@ const originalPath = process.env.PATH ?? "";
  */
 async function makeFakeOpenCode(stdoutScript) {
   const dir = await mkdtemp(join(tmpdir(), "smithers-opencode-test-"));
-  const binPath = join(dir, "opencode");
-  const script = `#!/usr/bin/env node\n${stdoutScript}\n`;
-  await writeFile(binPath, script, "utf8");
-  await chmod(binPath, 0o755);
-  return { dir, binPath };
+  return makeFakeNodeCli(dir, "opencode", stdoutScript);
 }
 
 afterEach(() => {
@@ -221,7 +218,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.OPENCODE_ARGS_FILE = argsFile;
 
       const agent = new OpenCodeAgent({
@@ -265,7 +262,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.OPENCODE_ARGS_FILE = argsFile;
 
       const agent = new OpenCodeAgent({
@@ -305,7 +302,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.OPENCODE_ARGS_FILE = argsFile;
 
       const agent = new OpenCodeAgent({
@@ -352,7 +349,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.OPENCODE_ARGS_FILE = argsFile;
 
       const agent = new OpenCodeAgent({
@@ -403,7 +400,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.OPENCODE_ARGS_FILE = argsFile;
 
       const agent = new OpenCodeAgent({
@@ -446,7 +443,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.OPENCODE_ARGS_FILE = argsFile;
 
       const agent = new OpenCodeAgent({
@@ -485,7 +482,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.OPENCODE_ARGS_FILE = argsFile;
 
       const agent = new OpenCodeAgent({
@@ -525,7 +522,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.OPENCODE_ARGS_FILE = argsFile;
 
       const agent = new OpenCodeAgent({
@@ -564,7 +561,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.OPENCODE_ARGS_FILE = argsFile;
 
       const agent = new OpenCodeAgent({
@@ -604,7 +601,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.OPENCODE_ARGS_FILE = argsFile;
 
       const agent = new OpenCodeAgent({
@@ -649,7 +646,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.OPENCODE_ARGS_FILE = argsFile;
 
       const agent = new OpenCodeAgent({
@@ -685,7 +682,7 @@ process.exit(0);
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",
@@ -715,7 +712,7 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-1" })}' + "
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",
@@ -743,7 +740,7 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", reason: "stop" })}' + "\\
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",
@@ -790,7 +787,7 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-2", reason:
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",
@@ -846,7 +843,7 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-2", reason:
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",
@@ -902,7 +899,7 @@ process.stdout.write('${stepFinish({
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",
@@ -946,7 +943,7 @@ process.stdout.write('${stepFinish({
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",
@@ -1020,7 +1017,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.OPENCODE_ARGS_FILE = argsFile;
 
       const agent = new OpenCodeAgent({
@@ -1053,7 +1050,7 @@ process.exit(1);
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",
@@ -1097,7 +1094,7 @@ process.exit(1);
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",
@@ -1138,7 +1135,7 @@ process.exit(1);
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",
@@ -1176,7 +1173,7 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-2", reason:
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",
@@ -1230,7 +1227,7 @@ process.stdout.write('${stepFinish({
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",
@@ -1267,7 +1264,7 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-1" })}' + "
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",
@@ -1301,7 +1298,7 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-1" })}' + "
 `);
 
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
 
       const agent = new OpenCodeAgent({
         model: "anthropic/claude-opus-4-20250514",

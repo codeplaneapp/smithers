@@ -8,16 +8,22 @@ function makeTempDir() {
 }
 describe("resolveOverlayEntry", () => {
     test("resolves entry path relative to overlay dir", () => {
-        const result = resolveOverlayEntry("/project/src/workflow.ts", "/project", "/project/.smithers/hmr/gen-1");
-        expect(result).toBe("/project/.smithers/hmr/gen-1/src/workflow.ts");
+        const projectRoot = join(tmpdir(), "project");
+        const genDir = join(projectRoot, ".smithers", "hmr", "gen-1");
+        const result = resolveOverlayEntry(join(projectRoot, "src", "workflow.ts"), projectRoot, genDir);
+        expect(result).toBe(join(genDir, "src", "workflow.ts"));
     });
     test("handles entry at root", () => {
-        const result = resolveOverlayEntry("/project/workflow.ts", "/project", "/tmp/overlay/gen-1");
-        expect(result).toBe("/tmp/overlay/gen-1/workflow.ts");
+        const projectRoot = join(tmpdir(), "project");
+        const genDir = join(tmpdir(), "overlay", "gen-1");
+        const result = resolveOverlayEntry(join(projectRoot, "workflow.ts"), projectRoot, genDir);
+        expect(result).toBe(join(genDir, "workflow.ts"));
     });
     test("handles nested paths", () => {
-        const result = resolveOverlayEntry("/project/a/b/c/entry.ts", "/project", "/out/gen-5");
-        expect(result).toBe("/out/gen-5/a/b/c/entry.ts");
+        const projectRoot = join(tmpdir(), "project");
+        const genDir = join(tmpdir(), "out", "gen-5");
+        const result = resolveOverlayEntry(join(projectRoot, "a", "b", "c", "entry.ts"), projectRoot, genDir);
+        expect(result).toBe(join(genDir, "a", "b", "c", "entry.ts"));
     });
 });
 describe("buildOverlay", () => {

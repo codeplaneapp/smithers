@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { HermesCliAgent } from "../src/index.js";
+import { makeFakeNodeCli, prependPath } from "./fake-cli.js";
 
 const originalPath = process.env.PATH ?? "";
 
@@ -11,11 +12,7 @@ const originalPath = process.env.PATH ?? "";
  */
 async function makeFakeHermes(stdoutScript) {
   const dir = await mkdtemp(join(tmpdir(), "smithers-hermes-test-"));
-  const binPath = join(dir, "hermes");
-  const script = `#!/usr/bin/env node\n${stdoutScript}\n`;
-  await writeFile(binPath, script, "utf8");
-  await chmod(binPath, 0o755);
-  return { dir, binPath };
+  return makeFakeNodeCli(dir, "hermes", stdoutScript);
 }
 
 afterEach(() => {
@@ -36,7 +33,7 @@ describe("Hermes CLI agent", () => {
     const argsFile = join(argsFileDir, "args.json");
     const fake = await makeFakeHermes(captureScript);
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.HERMES_ARGS_FILE = argsFile;
       const agent = new HermesCliAgent({
         model: "hermes-4",
@@ -72,7 +69,7 @@ describe("Hermes CLI agent", () => {
     const argsFile = join(argsFileDir, "args.json");
     const fake = await makeFakeHermes(captureScript);
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.HERMES_ARGS_FILE = argsFile;
       const agent = new HermesCliAgent({
         continueSession: "ignored-when-resuming",
@@ -98,7 +95,7 @@ describe("Hermes CLI agent", () => {
     const argsFile = join(argsFileDir, "args.json");
     const fake = await makeFakeHermes(captureScript);
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       process.env.HERMES_ARGS_FILE = argsFile;
       const agent = new HermesCliAgent({
         continueSession: "latest",
@@ -117,7 +114,7 @@ describe("Hermes CLI agent", () => {
   test("HermesCliAgent returns the final text output", async () => {
     const fake = await makeFakeHermes(`process.stdout.write("Paris is the capital of France\\n");`);
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       const agent = new HermesCliAgent({ env: { PATH: process.env.PATH } });
       const result = await agent.generate({
         messages: [{ role: "user", content: "capital of France?" }],
@@ -131,7 +128,7 @@ describe("Hermes CLI agent", () => {
   test("HermesCliAgent surfaces stderr on non-zero exit", async () => {
     const fake = await makeFakeHermes(`process.stderr.write("hermes blew up\\n");\nprocess.exit(7);`);
     try {
-      process.env.PATH = `${fake.dir}:${originalPath}`;
+      process.env.PATH = prependPath(fake.dir, originalPath);
       const agent = new HermesCliAgent({ env: { PATH: process.env.PATH } });
       await expect(
         agent.generate({ messages: [{ role: "user", content: "fail" }] }),

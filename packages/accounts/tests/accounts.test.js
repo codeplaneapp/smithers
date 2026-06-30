@@ -35,7 +35,7 @@ function newSmithersHome() {
 describe("accountsRoot / accountsFilePath / defaultConfigDir", () => {
     test("uses SMITHERS_HOME when set", () => {
         const env = { SMITHERS_HOME: "/tmp/x" };
-        expect(accountsRoot(env)).toBe(join("/tmp/x"));
+        expect(accountsRoot(env)).toBe(env.SMITHERS_HOME);
         expect(accountsFilePath(env)).toBe(join("/tmp/x", "accounts.json"));
         expect(defaultConfigDir("foo", env)).toBe(join("/tmp/x", "accounts", "foo"));
     });

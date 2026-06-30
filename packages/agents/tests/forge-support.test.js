@@ -1,19 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ForgeAgent } from "../src/index.js";
+import { makeFakeNodeCli, prependPath } from "./fake-cli.js";
 const originalPath = process.env.PATH ?? "";
 /**
  * @param {string} stdoutScript
  */
 async function makeFakeForge(stdoutScript) {
     const dir = await mkdtemp(join(tmpdir(), "smithers-forge-test-"));
-    const binPath = join(dir, "forge");
-    const script = `#!/usr/bin/env node\n${stdoutScript}\n`;
-    await writeFile(binPath, script, "utf8");
-    await chmod(binPath, 0o755);
-    return { dir, binPath };
+    return makeFakeNodeCli(dir, "forge", stdoutScript);
 }
 afterEach(() => {
     process.env.PATH = originalPath;
@@ -30,7 +27,7 @@ if (process.env.FORGE_ARGS_FILE) fs.writeFileSync(process.env.FORGE_ARGS_FILE, J
 process.stdout.write("done\\n");
 `);
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.FORGE_ARGS_FILE = argsFile;
             const agent = new ForgeAgent({
                 model: "anthropic/claude-sonnet-4-20250514",
@@ -76,7 +73,7 @@ process.stderr.write("forge failed for test\\n");
 process.exit(23);
 `);
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             const agent = new ForgeAgent({
                 env: { PATH: process.env.PATH },
             });
@@ -93,7 +90,7 @@ process.exit(23);
 process.stdout.write("Here is the generated code\\n");
 `);
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             const agent = new ForgeAgent({
                 env: { PATH: process.env.PATH },
             });
@@ -116,7 +113,7 @@ if (process.env.FORGE_ARGS_FILE) fs.writeFileSync(process.env.FORGE_ARGS_FILE, J
 process.stdout.write("ok\\n");
 `);
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.FORGE_ARGS_FILE = argsFile;
             const agent = new ForgeAgent({
                 systemPrompt: "You are a helpful assistant.",
@@ -151,7 +148,7 @@ if (process.env.FORGE_ARGS_FILE) fs.writeFileSync(process.env.FORGE_ARGS_FILE, J
 process.stdout.write("ok\\n");
 `);
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.FORGE_ARGS_FILE = argsFile;
             const agent = new ForgeAgent({
                 extraArgs: ["--custom-flag", "custom-value"],

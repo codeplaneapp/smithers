@@ -1,19 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ClaudeCodeAgent } from "../src/index.js";
+import { makeFakeNodeCli, prependPath } from "./fake-cli.js";
 const originalPath = process.env.PATH ?? "";
 /**
  * @param {string} stdoutScript
  */
 async function makeFakeClaude(stdoutScript) {
     const dir = await mkdtemp(join(tmpdir(), "smithers-claude-test-"));
-    const binPath = join(dir, "claude");
-    const script = `#!/usr/bin/env node\n${stdoutScript}\n`;
-    await writeFile(binPath, script, "utf8");
-    await chmod(binPath, 0o755);
-    return { dir, binPath };
+    return makeFakeNodeCli(dir, "claude", stdoutScript);
 }
 afterEach(() => {
     process.env.PATH = originalPath;
@@ -33,7 +30,7 @@ process.stdout.write(JSON.stringify({
 }) + "\\n");
 `);
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.CLAUDE_ARGS_FILE = argsFile;
             const agent = new ClaudeCodeAgent({
                 model: "claude-opus-4-7",
@@ -64,7 +61,7 @@ if (process.env.CLAUDE_ARGS_FILE) fs.writeFileSync(process.env.CLAUDE_ARGS_FILE,
 process.stdout.write("done\\n");
 `);
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.CLAUDE_ARGS_FILE = argsFile;
             const agent = new ClaudeCodeAgent({ model: "claude-opus-4-7", outputFormat: "text", env: { PATH: process.env.PATH } });
             await agent.generate({ messages: [{ role: "user", content: "Ping?" }], continueSession: true });
@@ -86,7 +83,7 @@ fs.writeFileSync(process.env.CLAUDE_ARGS_FILE, JSON.stringify({ args: process.ar
 process.stdout.write("done\\n");
 `);
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.CLAUDE_ARGS_FILE = argsFile;
             const agent = new ClaudeCodeAgent({ model: "claude-opus-4-7", outputFormat: "text", env: { PATH: process.env.PATH } });
             await agent.generate({ messages: [{ role: "user", content: "Ping?" }], durabilitySocket: "/tmp/sm-snap-test.sock" });
@@ -118,7 +115,7 @@ if (process.env.CLAUDE_ARGS_FILE) fs.writeFileSync(process.env.CLAUDE_ARGS_FILE,
 process.stdout.write("done\\n");
 `);
         try {
-            process.env.PATH = `${fake.dir}:${originalPath}`;
+            process.env.PATH = prependPath(fake.dir, originalPath);
             process.env.CLAUDE_ARGS_FILE = argsFile;
             const agent = new ClaudeCodeAgent({
                 model: "claude-opus-4-7",
