@@ -2019,14 +2019,18 @@ The monitor connects to a local Gateway on port 7331, starting one automatically
 
 ### Monitor modes and keybindings
 
-| Key | Mode | What you see |
-|-----|------|--------------|
-| `1` | **Tree** | Node tree with per-node output, logs, tool calls, diffs, and props; inline approval banner when waiting |
-| `2` / `g` | **Graph** | Directed dependency graph; navigate with arrow keys |
-| `3` / `l` | **Logs** | Filtered event stream (up to 2 000 events); `[`/`]` to filter by attempt, `f` to toggle follow |
-| `4` / `t` | **Timeline** | Horizontal tick strip with snapshot table; arrow keys to scrub |
-| `5` / `h` | **Hijack** | Hand off to `bunx smithers-orchestrator hijack` for an active node |
-| `q` | - | Quit |
+The monitor opens in **Tree** mode. Switch modes with the letter aliases below. From any *non-Tree* mode the number keys `1`–`5` also jump straight to a mode (and `1` returns to Tree).
+
+| Mode | Reach it with | What you see |
+|------|---------------|--------------|
+| **Tree** | `1` (from another mode) | Node tree with per-node output, logs, diffs, and props; inline approval banner when waiting |
+| **Graph** | `g` (toggles Tree ↔ Graph), or `2` | Directed dependency graph; `j`/`k` navigate, `⏎` inspects a node in Tree |
+| **Logs** | `l`, or `3` | Filtered event stream (up to 2 000 events); `[`/`]` filter by attempt, `f` toggles follow |
+| **Timeline** | `t`, or `4` | Horizontal tick strip you scrub with `j`/`k` to inspect node state at past frames; `L` jumps back to live (inspect-only; rewind with `bunx smithers-orchestrator rewind`) |
+| **Hijack** | `h`, or `5` | Hand off to `bunx smithers-orchestrator hijack` for an active node |
+| **Quit** | `q` (or Ctrl-C) | (quit) |
+
+Inside **Tree** mode the number keys are **inspector tabs, not mode switches**: `1` output, `2` logs, `3` diff, `4` props (`←`/`→` also walk the tabs). Use the `g`/`l`/`t`/`h` aliases to leave Tree.
 
 The status header shrinks to a compact one-liner on terminals narrower than 100 columns; the keybar adapts the same way.
 

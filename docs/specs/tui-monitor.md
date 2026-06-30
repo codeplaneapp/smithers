@@ -135,17 +135,16 @@ Fields, left to right:
   - Data: `useGatewayRunEvents` + DevTools snapshot/delta reconstruction.
 
 - **Right pane** (`NodeInspector`): tabbed panel for the selected node.
-  - Tabs: **Output** / **Logs** / **Tools** / **Diff** / **Props**
+  - Tabs: **Output** / **Logs** / **Diff** / **Props**. (There is no Tools tab: the gateway exposes no per-node tool-call stream to the monitor; tool calls live only in the durable store and are surfaced by `bunx smithers-orchestrator node`, so an always-empty tab would be dishonest.)
   - Auto-default per node kind:
     - Has output → Output tab.
     - Currently running → Logs tab.
     - Container/parallel node → Props tab.
   - **Output tab**: `<code>` block with formatted node output from `useGatewayNodeOutput`.
   - **Logs tab**: scrollable `<scrollbox>` of agent transcript events filtered to this node from `useGatewayRunEvents`.
-  - **Tools tab**: tool-call events for this node, each with read/write/shell side-effect badge.
   - **Diff tab**: `<diff>` element (OpenTUI diff primitive) showing code changes if node produced a diff in its output.
   - **Props tab**: `<code>` block with node metadata (nodeId, iteration, attempt, state, timing) from the DevTools snapshot.
-  - Tab switching: `1`–`5` or left/right arrows when inspector is focused.
+  - Tab switching: `1`–`4` (output/logs/diff/props) or left/right arrows when inspector is focused.
 
 - **Approval banner**: when `useGatewayApprovals({ runId }).data` has a pending item, a highlighted overlay row appears above the keybar: `[approval needed: <label>]  a approve  d deny`. Keys `a`/`d` call `actions.submitApproval`.
 
@@ -164,9 +163,8 @@ Fields, left to right:
 
 **Layout**: full-body `<scrollbox>`.
 
-- Live agent transcript - all `AgentStream` / tool-call events from `useGatewayRunEvents`, interleaved in seq order.
-- Each line: `[nodeId-color] │ event text`
-- Tool calls rendered with side-effect badges: `[read]` (dim), `[write]` (yellow), `[shell]` (red).
+- Live agent transcript - the mapped run events from `useGatewayRunEvents`, interleaved in seq order.
+- Each line: `seq [nodeId] │ event text`. (No side-effect badges: the gateway maps no tool-call events into the run-event stream, so a read/write/shell badge would never fire on a real run.)
 - **Follow mode**: on by default. Scrollbox auto-scrolls to bottom as new events arrive. `f` toggles follow; the `[live]`/`[paused]` indicator in the header reflects this.
 - `[`/`]` walk backward/forward across node attempts (filters events to the selected attempt).
 - Data: `useGatewayRunEvents` with `maxEvents: 2000`.
@@ -175,11 +173,11 @@ Fields, left to right:
 
 **Layout**: horizontal split.
 
-- **Top strip** (`<scrollbox>` horizontal): tick bar showing frame numbers. Notable frames (first agent event, tool calls, gate raises) are marked with `│`. Gate/approval frames are marked `⊛`. The selected frame is highlighted.
-- **Body**: the TREE view rendered as it was at the selected frame, reconstructed from the DevTools snapshot at that frame number.
-- **Bottom controls**: `jump` (⏎ on a frame), `fork` (spawns a new run from this frame via `actions.rewindRun`), `rewind` (calls `actions.rewindRun` then re-attaches), `replay` (re-runs from frame 0), `back-to-live` (`L`) returns to the live head.
-- Backed by the DevTools jump-to-frame protocol: `DevToolsEvent` stream from `useGatewayRunEvents`, replaying `DevToolsDelta` ops against the initial `DevToolsSnapshot` to build the tree at each frame.
-- Data: `useGatewayRunEvents` (full event buffer), `useGatewayActions` for fork/rewind mutations.
+- **Top strip** (`<scrollbox>` horizontal): tick bar of run events. Notable frames (first agent event, gate raises) are marked; gate/approval frames stand out. The selected frame is highlighted.
+- **Body**: node state inspected as of the selected frame, reconstructed from the event history.
+- **Inspect-only**: this is an event timeline you *scrub* to read run history; it deliberately offers **no** fork/rewind/replay/jump mutations. Wiring a "rewind" here would either no-op or rewind to a guessed frame, so the timeline stays honest and points you at the durable command instead: rewind a run with `bunx smithers-orchestrator rewind` (fork with `bunx smithers-orchestrator fork`, replay with `bunx smithers-orchestrator replay`).
+- **Keys**: `j`/`k` (or `←`/`→`) scrub events; `L` returns to the live head.
+- Data: `useGatewayRunEvents` (full event buffer); no mutating actions.
 
 ### Mode 5: HIJACK
 
@@ -202,37 +200,33 @@ Fields, left to right:
 
 ### Global keys (all modes)
 
+These are the keys actually wired in `App.tsx`. (There is intentionally no global cancel/resume/copy key; drive those from the CLI: `bunx smithers-orchestrator cancel`, `bunx smithers-orchestrator up --resume`, etc.)
+
 | Key | Action |
 |---|---|
-| `j` / `↓` | Move cursor down |
-| `k` / `↑` | Move cursor up |
-| `space` | Fold/unfold node (TREE); page-down (LOGS) |
-| `⏎` | Select / confirm |
 | `g` | Toggle TREE ↔ GRAPH |
 | `l` | Switch to LOGS mode |
 | `t` | Switch to TIMELINE mode |
-| `h` | HIJACK active node |
-| `a` | Approve pending gate |
-| `d` | Deny pending gate |
-| `c` | Cancel run (shows confirmation banner first) |
-| `R` | Resume failed run (`actions.resumeRun`) |
-| `y` | Copy run id to clipboard (via `Bun.write` to pbcopy/xclip) |
-| `?` | Toggle help overlay (lists all keys) |
-| `q` | Back one level / quit (Esc also closes overlays) |
-| `Esc` | Close overlay / back |
+| `h` | Switch to HIJACK mode |
+| `1`–`5` | Jump to a mode **from a non-Tree mode** (`1` Tree, `2` Graph, … `5` Hijack); in Tree these are inspector tabs (below) |
+| `?` | Toggle help overlay |
+| `q` / `Q` / Ctrl-C | Quit (routes through full teardown; external SIGINT/SIGTERM/SIGHUP do too) |
+| `Esc` | Close help overlay |
 
 ### Mode-specific keys
 
 | Key | Mode | Action |
 |---|---|---|
-| `1`–`5` | TREE | Switch NodeInspector tab |
+| `j`/`k` / `↑`/`↓` | TREE, GRAPH, TIMELINE | Move cursor / scrub |
+| `space` | TREE | Fold/unfold node |
+| `⏎` | TREE | Focus inspector pane · GRAPH: inspect node in Tree |
+| `tab` | TREE | Toggle focus between tree and inspector |
+| `1`–`4` | TREE | Switch NodeInspector tab (output/logs/diff/props) |
 | `←`/`→` | TREE (inspector focused) | Walk inspector tabs |
+| `a` / `d` | TREE | Approve / deny the focused node's pending gate |
+| `[` / `]` | TREE (approval), LOGS | Cycle a `select` approval's options · walk node attempts |
 | `f` | LOGS | Toggle follow mode |
-| `[` / `]` | LOGS | Walk node attempts |
 | `L` | TIMELINE | Back to live head |
-| `⏎` on tick | TIMELINE | Jump to frame |
-| `F` | TIMELINE | Fork from current frame |
-| `W` | TIMELINE | Rewind from current frame |
 
 ### Responsive / compact behavior
 
@@ -316,7 +310,7 @@ packages/tui/
       HijackMode.tsx    # HIJACK: confirm overlay + stdio handoff
     components/
       NodeTree.tsx      # collapsible tree with glyphs/chevrons
-      NodeInspector.tsx # tabbed Output/Logs/Tools/Diff/Props
+      NodeInspector.tsx # tabbed Output/Logs/Diff/Props
       ApprovalBanner.tsx
       HelpOverlay.tsx
     hooks/
