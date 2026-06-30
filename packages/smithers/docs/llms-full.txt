@@ -8300,6 +8300,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `smithers-orchestrator` | Public facade for workflow authoring, components, agents, tools, server helpers, memory, OpenAPI tools, scorers, and JSX runtime setup | This page, Types |
 | `@smithers-orchestrator/cli` | CLI entrypoint, MCP server, local workflow pack, account registry commands, DevTools commands, cron, alerts, and server commands | CLI Overview, MCP Server |
 | `@smithers-orchestrator/accounts` | Subscription and API-key account registry helpers: `listAccounts`, `addAccount`, `removeAccount`, `getAccount`, `accountToProviderEnv` | CLI Agents |
+| `@smithers-orchestrator/agent-eliza` | elizaOS `AgentRuntime` harness for Smithers; opt-in package that owns the `@elizaos/core` dependency | SDK Agents |
 | `@smithers-orchestrator/agents` | AI SDK and CLI agent adapters, CLI capability reports, agent contracts, and tool capability registry | CLI Agents, SDK Agents |
 | `@smithers-orchestrator/components` | JSX workflow components such as `Task`, `Workflow`, `Approval`, `Sandbox`, `Timer`, `Signal`, and control-flow components | Components |
 | `@smithers-orchestrator/control-plane` | Durable organization, project, team, billing, usage, secret-reference, and audit primitives for hosted deployments | Control Plane |

@@ -113,6 +113,7 @@
     "@happy-dom/global-registrator": "^20.9.0",
     "@mdx-js/esbuild": "^3.1.1",
     "@smithers-orchestrator/accounts": "workspace:*",
+    "@smithers-orchestrator/agent-eliza": "workspace:*",
     "@smithers-orchestrator/agents": "workspace:*",
     "@smithers-orchestrator/cli": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",

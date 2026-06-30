@@ -20,9 +20,6 @@
  */
 /** @typedef {import("./HermesCliAgentOptions.ts").HermesCliAgentOptions} HermesCliAgentOptions */
 /** @typedef {import("./PiAgentOptions.ts").PiAgentOptions} PiAgentOptions */
-/** @typedef {import("./ElizaAgentOptions.ts").ElizaAgentOptions} ElizaAgentOptions */
-/** @typedef {import("./ElizaAgentOptions.ts").ElizaCharacter} ElizaCharacter */
-/** @typedef {import("./ElizaAgentOptions.ts").ElizaPlugin} ElizaPlugin */
 /** @typedef {import("./BaseCliAgent/PiExtensionUiRequest.ts").PiExtensionUiRequest} PiExtensionUiRequest */
 /** @typedef {import("./BaseCliAgent/PiExtensionUiResponse.ts").PiExtensionUiResponse} PiExtensionUiResponse */
 /** @typedef {import("./OpenCodeAgentOptions.ts").OpenCodeAgentOptions} OpenCodeAgentOptions */
@@ -67,7 +64,6 @@ export { KimiAgent } from "./KimiAgent.js";
 export { ForgeAgent } from "./ForgeAgent.js";
 export { OpenCodeAgent } from "./OpenCodeAgent.js";
 export { VibeAgent } from "./VibeAgent.js";
-export { ElizaAgent } from "./ElizaAgent.js";
 export {
   getCliAgentCapabilityReport,
   getCliAgentCapabilityDoctorReport,
