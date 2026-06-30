@@ -262,6 +262,11 @@ function App() {
   if (validate && validate.allPassed === false && validate.failingSummary) {
     feedbackParts.push("VALIDATION FAILED:\n" + validate.failingSummary);
   }
+  // The synthesized moderator verdict is what gates the loop, so surface its
+  // consolidated feedback first (a moderator-only rejection has no panelist row).
+  if (verdict && verdict.approved === false && verdict.feedback) {
+    feedbackParts.push("SYNTHESIZED REVIEW REJECTED (moderator):\n" + verdict.feedback);
+  }
   for (const review of reviews) {
     if (review.approved === false) {
       feedbackParts.push("REVIEWER REJECTED (" + review.reviewer + "):\n" + review.feedback);
@@ -274,7 +279,7 @@ function App() {
   }
   const feedback = feedbackParts.length > 0 ? feedbackParts.join("\n\n") : null;
 
-  const hasAnyOutput = implement !== null || validate !== null || reviews.length > 0;
+  const hasAnyOutput = implement !== null || validate !== null || reviews.length > 0 || verdict !== null;
 
   async function refresh() {
     await Promise.all([
@@ -311,9 +316,9 @@ function App() {
   const bannerIcon = done ? "✓" : blocked ? "✕" : "○";
   const bannerLabel = done ? "DONE" : blocked ? "BLOCKED" : "IN PROGRESS";
   const bannerSub = done
-    ? "Validation passed and at least one reviewer approved."
+    ? "Validation passed and the synthesized review verdict approved."
     : blocked
-      ? "Validation failed or reviewers rejected this attempt."
+      ? "Validation failed or the synthesized review rejected this attempt."
       : "Iterating: implement, validate, then review.";
 
   const implDot = implement ? (implement.allTestsPassing === false ? "err" : "ok") : "pending";
@@ -412,10 +417,23 @@ function App() {
                 testId="implement-phase-review"
                 title="Review"
                 dot={revDot}
-                meta={reviews.length > 0 ? reviews.length + " reviewer(s)" : "pending"}
-                emptyText="Waiting for reviewers to produce verdicts."
-                hasContent={reviews.length > 0}
+                meta={verdict
+                  ? (verdict.approved ? "synthesized: approved" : "synthesized: rejected")
+                  : reviews.length > 0 ? reviews.length + " panelist(s)" : "pending"}
+                emptyText="Waiting for the review panel to produce verdicts."
+                hasContent={reviews.length > 0 || verdict !== null}
               >
+                {verdict ? (
+                  <div className="reviewer-card" data-testid="implement-synthesis" style={{ marginBottom: 12 }}>
+                    <div className="reviewer-head">
+                      <span className="reviewer-name">Synthesized verdict (moderator)</span>
+                      <span className={"verdict " + (verdict.approved ? "approved" : "rejected")}>
+                        {verdict.approved ? "Approved" : "Rejected"}
+                      </span>
+                    </div>
+                    <div className="reviewer-feedback">{verdict.feedback || "No feedback text."}</div>
+                  </div>
+                ) : null}
                 <div className="reviewers">
                   {reviews.map((r, i) => (
                     <div className="reviewer-card" key={i} data-testid={"implement-reviewer-" + i}>
