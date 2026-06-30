@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { installCuratedSkill } from "../src/installCuratedSkill.js";
+import { installCuratedSkill, loadSkillDeselections, saveSkillDeselections } from "../src/installCuratedSkill.js";
 
 function makeSandbox() {
   const root = mkdtempSync(join(tmpdir(), "smithers-curated-skill-"));
@@ -87,4 +87,49 @@ test("records a skip when the bundled skill source is missing", () => {
   expect(result.source).toBeNull();
   expect(result.installed).toHaveLength(0);
   expect(result.skipped[0]?.reason).toContain("not found");
+});
+
+test("targets filter: only installs to the specified agent IDs", () => {
+  const { home, source } = makeSandbox();
+  // Both agents are present on disk.
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(home, ".pi"), { recursive: true });
+
+  const result = installCuratedSkill({ homeDir: home, sourceDir: source, detections: [], targets: ["claude"] });
+
+  expect(result.installed.map((e) => e.agent)).toEqual(["Claude Code"]);
+  expect(existsSync(join(home, ".claude", "skills", "smithers", "SKILL.md"))).toBe(true);
+  // Pi was excluded from the targets list — its skill dir must not be created.
+  expect(existsSync(join(home, ".pi", "agent", "skills", "smithers"))).toBe(false);
+});
+
+test("targets filter: empty list installs nothing", () => {
+  const { home, source } = makeSandbox();
+  mkdirSync(join(home, ".claude"), { recursive: true });
+
+  const result = installCuratedSkill({ homeDir: home, sourceDir: source, detections: [], targets: [] });
+
+  expect(result.installed).toHaveLength(0);
+  expect(existsSync(join(home, ".claude", "skills", "smithers"))).toBe(false);
+});
+
+test("saveSkillDeselections and loadSkillDeselections roundtrip", () => {
+  const { home } = makeSandbox();
+
+  saveSkillDeselections(home, ["pi", "codex"]);
+  expect(loadSkillDeselections(home)).toEqual(["pi", "codex"]);
+});
+
+test("loadSkillDeselections returns [] when the file is absent", () => {
+  const { home } = makeSandbox();
+
+  expect(loadSkillDeselections(home)).toEqual([]);
+});
+
+test("saveSkillDeselections with empty list clears prior deselections", () => {
+  const { home } = makeSandbox();
+
+  saveSkillDeselections(home, ["pi"]);
+  saveSkillDeselections(home, []);
+  expect(loadSkillDeselections(home)).toEqual([]);
 });

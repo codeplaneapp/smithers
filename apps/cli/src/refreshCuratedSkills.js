@@ -16,6 +16,7 @@ import { detectAvailableAgents } from "./agent-detection.js";
 import {
   agentPresent,
   CURATED_SKILL_NAME,
+  loadSkillDeselections,
   resolveSkillSource,
   RETIRED_SKILL_NAMES,
   skillTargets,
@@ -163,6 +164,9 @@ export function refreshCuratedSkills(opts = {}) {
 
   const detections = opts.detections ?? detectAvailableAgents(env);
   const sourceHash = sha256File(source.skillMd);
+  // Honor deselections persisted during `smithers init`: skip any agent the
+  // user explicitly opted out of so upgrades don't re-add a skill they removed.
+  const deselected = new Set(loadSkillDeselections(homeDir));
   /** @param {string} dest @param {string} agent @param {RefreshResult["updated"][number]["reason"]} reason */
   const writeSkill = (dest, agent, reason) => {
     mkdirSync(dest, { recursive: true });
@@ -173,6 +177,7 @@ export function refreshCuratedSkills(opts = {}) {
   };
 
   for (const target of skillTargets(homeDir)) {
+    if (deselected.has(target.id)) continue;
     const skillsDir = target.skillsDir;
     const dest = join(skillsDir, CURATED_SKILL_NAME);
     const installedMd = readSkillMdMaybe(dest);

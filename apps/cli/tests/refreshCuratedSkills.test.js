@@ -8,6 +8,7 @@ import {
   isRetiredCuratedSkill,
   refreshCuratedSkills,
 } from "../src/refreshCuratedSkills.js";
+import { saveSkillDeselections } from "../src/installCuratedSkill.js";
 
 const CURRENT_SKILL = "---\nname: smithers\n---\n# Smithers\nDo it — don't describe it.\n";
 const CURRENT_BUNDLE = "LLMS-FULL BUNDLE v2\n";
@@ -159,4 +160,30 @@ test("a day later, ensureCuratedSkillsFresh scans again to catch new stale copie
     now: 1000 + 25 * 60 * 60 * 1000,
   });
   expect(later?.pluginWarnings).toContain(pluginSkill);
+});
+
+test("refreshCuratedSkills skips agents that have been deselected during init", () => {
+  const f = fixture();
+  // Persist a deselection for "claude" (the only agent present in this fixture).
+  saveSkillDeselections(f.homeDir, ["claude"]);
+
+  const result = refresh(f);
+
+  // Claude is opted out — should not be installed or updated.
+  expect(result.updated).toHaveLength(0);
+  expect(result.fresh).toHaveLength(0);
+  expect(existsSync(f.claudeSkill("smithers"))).toBe(false);
+  expect(result.changed).toBe(false);
+});
+
+test("refreshCuratedSkills installs to agents NOT in the deselection list", () => {
+  const f = fixture();
+  // Deselect "pi" (not present in fixture); "claude" remains opted-in.
+  saveSkillDeselections(f.homeDir, ["pi"]);
+
+  const result = refresh(f);
+
+  // Claude should still get the skill.
+  expect(result.updated.some((u) => u.agent === "Claude Code")).toBe(true);
+  expect(existsSync(f.claudeSkill("smithers"))).toBe(true);
 });

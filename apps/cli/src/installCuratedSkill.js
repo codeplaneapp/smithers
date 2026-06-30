@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,7 +95,7 @@ export function agentPresent(id, base, detections) {
  * Best-effort: a missing source or a per-agent failure is recorded and never
  * aborts init.
  *
- * @param {{ homeDir?: string; env?: NodeJS.ProcessEnv; sourceDir?: string; detections?: import("./AgentAvailability.ts").AgentAvailability[] }} [opts]
+ * @param {{ homeDir?: string; env?: NodeJS.ProcessEnv; sourceDir?: string; detections?: import("./AgentAvailability.ts").AgentAvailability[]; targets?: string[] }} [opts]
  * @returns {CuratedSkillResult}
  */
 export function installCuratedSkill(opts = {}) {
@@ -109,7 +109,12 @@ export function installCuratedSkill(opts = {}) {
     result.skipped.push({ agent: "all", reason: "bundled skill source not found" });
     return result;
   }
-  for (const target of skillTargets(homeDir)) {
+  const all = skillTargets(homeDir);
+  // When the caller supplies an explicit target list (from a multiselect), only
+  // install to those agent IDs. Unknown IDs are silently ignored so callers can
+  // pass a validated user selection without being coupled to the full target list.
+  const targets = opts.targets ? all.filter((t) => opts.targets.includes(t.id)) : all;
+  for (const target of targets) {
     if (!agentPresent(target.id, target.base, detections)) {
       result.skipped.push({ agent: target.displayName, reason: "not-detected" });
       continue;
@@ -125,4 +130,46 @@ export function installCuratedSkill(opts = {}) {
     }
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Skill deselection persistence
+// ---------------------------------------------------------------------------
+
+/** Absolute path to the deselections marker. */
+export function skillDeselectionsPath(homeDir) {
+  return join(homeDir, ".smithers", "skill-deselections.json");
+}
+
+/**
+ * Read the persisted opt-out list for the curated skill.
+ * Returns an array of agent IDs (e.g. `["pi"]`) that the user explicitly
+ * deselected during `smithers init`. Returns `[]` when no file is found.
+ *
+ * @param {string} homeDir
+ * @returns {string[]}
+ */
+export function loadSkillDeselections(homeDir) {
+  try {
+    const raw = readFileSync(skillDeselectionsPath(homeDir), "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed.optedOut) ? parsed.optedOut : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Persist which agent targets the user deselected during `smithers init` so
+ * `refreshCuratedSkills` does not re-add the skill on CLI upgrades.
+ *
+ * Passing an empty array clears prior deselections (user selected all targets).
+ *
+ * @param {string} homeDir
+ * @param {string[]} optedOutIds Agent IDs (e.g. `["pi"]`) to opt out of.
+ */
+export function saveSkillDeselections(homeDir, optedOutIds) {
+  const path = skillDeselectionsPath(homeDir);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify({ optedOut: optedOutIds }, null, 2)}\n`, "utf8");
 }

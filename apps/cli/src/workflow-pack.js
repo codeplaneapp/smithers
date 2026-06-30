@@ -1,12 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { accountsRoot } from "@smithers-orchestrator/accounts";
 import { generateAgentsTs } from "./agent-detection.js";
 import { buildComponentImporterMap, componentBaseName } from "./initPackUpdates.js";
-import { installCuratedSkill } from "./installCuratedSkill.js";
+import { installCuratedSkill, saveSkillDeselections, skillTargets } from "./installCuratedSkill.js";
 import { noteWorkflowPreferenceInAgentDocs } from "./noteWorkflowPreferenceInAgentDocs.js";
 import { WORKFLOW_UI_SOURCES } from "./workflowUiSources.js";
 // Seeded workflows authored as canonical files in .smithers/ and emitted by
@@ -16,7 +17,7 @@ import { GENERATED_SEEDED_FILES } from "./seeded-workflow-pack.generated.js";
  * @typedef {{ onSkip?: (relPath: string) => void; scaffolded?: (counts: { writtenCount: number; skippedCount: number; preservedCount: number }) => void; skillInstalled?: (result: import("./installCuratedSkill.js").CuratedSkillResult) => void; agentDocsNoted?: (result: import("./noteWorkflowPreferenceInAgentDocs.js").AgentDocsNoteSummary) => void; installStart?: () => void; installDone?: (result: InitInstallResult, captured?: { stdout: string; stderr: string }) => void; }} InitReporter
  */
 /**
- * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; agentsOnly?: boolean; global?: boolean; installSkill?: boolean; skillOptions?: Parameters<typeof installCuratedSkill>[0]; reporter?: InitReporter; env?: NodeJS.ProcessEnv; selectedWorkflows?: string[]; }} InitOptions
+ * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; agentsOnly?: boolean; global?: boolean; installSkill?: boolean; skillOptions?: Parameters<typeof installCuratedSkill>[0]; reporter?: InitReporter; env?: NodeJS.ProcessEnv; selectedWorkflows?: string[]; selectedSkillTargets?: string[]; selectedAgentDocs?: string[]; }} InitOptions
  */
 /**
  * @typedef {{ status: "ok" | "skipped" | "failed"; reason?: string; }} InitInstallResult
@@ -4695,8 +4696,27 @@ export function initWorkflowPack(options = {}) {
     // direct callers and tests default to off so they don't write to ~/.
     let skill;
     if (options.installSkill && !options.agentsOnly) {
-        skill = installCuratedSkill(options.skillOptions);
+        const skillOpts = {
+            ...options.skillOptions,
+            ...(options.selectedSkillTargets ? { targets: options.selectedSkillTargets } : {}),
+        };
+        skill = installCuratedSkill(skillOpts);
         options.reporter?.skillInstalled?.(skill);
+        // Persist which agents the user deselected so refreshCuratedSkills does
+        // not re-add them on upgrade. Only write the marker when the caller
+        // passed an explicit selection (undefined = non-interactive = install all,
+        // no deselection record needed).
+        if (options.selectedSkillTargets !== undefined) {
+            const env = options.env ?? process.env;
+            const homeDir = options.skillOptions?.homeDir ?? env.HOME ?? homedir();
+            const allIds = skillTargets(homeDir).map((t) => t.id);
+            const deselectedIds = allIds.filter((id) => !options.selectedSkillTargets.includes(id));
+            try {
+                saveSkillDeselections(homeDir, deselectedIds);
+            } catch {
+                /* best-effort */
+            }
+        }
     }
     // If the repo already keeps a CLAUDE.md / AGENTS.md, append guidance on when
     // to reach for durable smithers.sh workflows over plain subagents. Gated with
@@ -4705,7 +4725,10 @@ export function initWorkflowPack(options = {}) {
     // appends to files that already exist.
     let agentDocs;
     if (options.installSkill && !options.agentsOnly) {
-        agentDocs = noteWorkflowPreferenceInAgentDocs({ projectRoot });
+        agentDocs = noteWorkflowPreferenceInAgentDocs({
+            projectRoot,
+            ...(options.selectedAgentDocs ? { fileNames: options.selectedAgentDocs } : {}),
+        });
         options.reporter?.agentDocsNoted?.(agentDocs);
     }
     const install = options.agentsOnly
