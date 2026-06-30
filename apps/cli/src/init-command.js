@@ -5,6 +5,7 @@ import { runInitCeremony } from "./initCeremony.js";
 import { renderInitNextSteps } from "./renderInitNextSteps.js";
 import { STARTER_TEMPLATE_IDS, buildStarterGallery, findStarterRecipe } from "./starter-gallery.js";
 import { initWorkflowPack } from "./workflow-pack.js";
+import { isCI, isAgentHarness } from "./util/envDetect.js";
 
 const initTemplateOption = z
     .union(STARTER_TEMPLATE_IDS.map((id) => z.literal(id)))
@@ -20,23 +21,36 @@ export const initOptions = z.object({
     global: z.boolean().default(false).describe("Scaffold the global pack in ~/.smithers (honors SMITHERS_HOME) instead of ./.smithers. Global workflows run from any repo; a repo's local pack takes precedence."),
     updatePrompt: z.boolean().default(true).describe("In an interactive terminal, when shipped pack files differ from the latest bundled version, ask which to update (warning when a shared component is selected). Use --no-update-prompt to skip the question."),
     template: initTemplateOption,
+    yes: z.boolean().default(false).describe("Non-interactive: skip prompts and use defaults (safe for agents and CI). Alias: --non-interactive."),
+    nonInteractive: z.boolean().default(false).describe("Non-interactive: skip prompts and use defaults (safe for agents and CI). Alias: --yes."),
 });
 
 /**
- * Whether this invocation is an interactive human terminal. Piped/agent runs
- * (and any explicit `--format`) keep the structured output untouched.
+ * Resolve whether this invocation should run interactively (clack ceremony)
+ * or non-interactively (structured initWorkflowPack with defaults).
  *
- * The incur framework renders the structured dump under this command's
- * agent-only policy exactly when `formatExplicit` is set (Cli renderOutput =
- * !(human && !formatExplicit && policy === 'agent-only')). So the ceremony must
- * stand down whenever an explicit format was passed, otherwise both the
- * interactive ceremony and the raw structured output hit stdout.
+ * Interactive only when ALL of the following hold:
+ *   - stdin AND stdout are TTYs
+ *   - no explicit --format / --json flag
+ *   - no --yes / --non-interactive flag
+ *   - SMITHERS_NONINTERACTIVE and SMITHERS_YES are unset
+ *   - not a known CI environment
+ *   - not a known agent-harness environment (read EARLY before harnesses clear env)
+ *   - TERM is not "dumb"
  *
- * @param {{ options?: { json?: boolean }; format?: string; formatExplicit?: boolean }} c
+ * @param {{ options?: { json?: boolean; yes?: boolean; nonInteractive?: boolean }; format?: string; formatExplicit?: boolean }} c
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {"interactive" | "non-interactive"}
  */
-function isHumanTty(c) {
-    if (c.options?.json || c.formatExplicit) return false;
-    return process.stdout.isTTY === true;
+export function resolveInitMode(c, env = process.env) {
+    if (c.options?.json || c.formatExplicit) return "non-interactive";
+    if (c.options?.yes || c.options?.nonInteractive) return "non-interactive";
+    if (env.SMITHERS_NONINTERACTIVE || env.SMITHERS_YES) return "non-interactive";
+    if (isCI(env)) return "non-interactive";
+    if (isAgentHarness(env)) return "non-interactive";
+    if (env.TERM === "dumb") return "non-interactive";
+    if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) return "non-interactive";
+    return "interactive";
 }
 
 /**
@@ -69,7 +83,7 @@ function buildInitCta(templateResult) {
  */
 export async function runInitCommand(c, fail) {
     try {
-        const human = isHumanTty(c);
+        const human = resolveInitMode(c) === "interactive";
         const selectedTemplate = c.options.template ? findStarterRecipe(c.options.template) : undefined;
         const result = human
             ? await runInitCeremony({

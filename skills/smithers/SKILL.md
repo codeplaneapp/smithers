@@ -177,7 +177,9 @@ is no global install, so prefer `bunx smithers-orchestrator …` when unsure:
 
 ```bash
 # 1. Scaffold .smithers/ with ready-made workflows (implement, review, plan, ralph, debug…)
-smithers init
+#    Add --yes (or set SMITHERS_NONINTERACTIVE=1) when running as an agent so init
+#    never hangs waiting for interactive prompts.
+smithers init --yes
 
 # 2. Browse plain-English starters and their copy-paste commands
 smithers starters
