@@ -4,6 +4,8 @@ import type { GatewayEventFrame, GatewayRunEventRow } from "@smithers-orchestrat
 import { useSyncClient } from "./sync/useSyncClient.ts";
 
 const DEFAULT_MAX_EVENTS = 1000;
+/** Mirrors the `runEvents` collection's default `maxRows` ring size (see gatewayCollectionDefs). */
+const DEFAULT_COLLECTION_MAX_ROWS = 1024;
 
 /**
  * Reconstruct a `GatewayEventFrame` from a stored row. The transport collapses
@@ -38,7 +40,13 @@ export function useGatewayRunEvents(
   );
   const afterSeq = options.afterSeq;
   const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
-  const collection = runId ? registry.runEvents(runId) : undefined;
+  // Size the underlying ring to hold at least the requested display window so a
+  // large `maxEvents` (e.g. the TUI's 2000) actually retains that much history
+  // instead of being silently clamped to the collection's default cap. Floor at
+  // DEFAULT_COLLECTION_MAX_ROWS so the common (web) path is unchanged.
+  const collection = runId
+    ? registry.runEvents(runId, Math.max(maxEvents, DEFAULT_COLLECTION_MAX_ROWS))
+    : undefined;
   const live = useLiveQuery(
     (q) => (collection ? q.from({ row: collection }) : undefined),
     [collection],

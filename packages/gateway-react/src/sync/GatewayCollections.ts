@@ -97,8 +97,13 @@ export type GatewayCollections = {
   tickets(params?: ListTicketsRequest): Collection<GatewayTicketRow, string>;
   /** Flattened devtools run-node tree, reconciled per devtools frame. */
   nodes(runId: string): Collection<GatewayRunNode, string>;
-  /** Bounded append-only run-event ring. */
-  runEvents(runId: string): Collection<GatewayRunEventRow, number>;
+  /**
+   * Bounded append-only run-event ring. `maxRows` sizes the ring (default 1024);
+   * pass the consumer's `maxEvents` so a reader asking for more history (e.g. the
+   * TUI's 2000) actually retains it instead of being silently clamped. The
+   * collection is cached per run, so the FIRST caller's `maxRows` wins.
+   */
+  runEvents(runId: string, maxRows?: number): Collection<GatewayRunEventRow, number>;
 
   /** Resolve (or create) the generic single-value query collection for `key`. */
   query<T>(key: SyncKey, fetcher: () => Promise<T>): GatewayQueryHandle<T>;

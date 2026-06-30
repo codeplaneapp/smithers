@@ -504,8 +504,8 @@ export function createGatewayCollections(
       knownCollection<GatewayTicketRow, string>(gatewayCollectionDefs.tickets(params), listGcTime),
     nodes: (runId: string) =>
       knownCollection<GatewayRunNode, string>(gatewayCollectionDefs.nodes(runId), RUN_GC_TIME),
-    runEvents: (runId: string) =>
-      knownCollection<GatewayRunEventRow, number>(gatewayCollectionDefs.runEvents(runId), RUN_GC_TIME),
+    runEvents: (runId: string, maxRows?: number) =>
+      knownCollection<GatewayRunEventRow, number>(gatewayCollectionDefs.runEvents(runId, maxRows), RUN_GC_TIME),
 
     query: queryHandle,
     stream: streamHandle,
