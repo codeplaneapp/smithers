@@ -23,6 +23,8 @@
     "@smithers-orchestrator/gateway-client": "workspace:*",
     "@smithers-orchestrator/gateway-react": "workspace:*",
     "@smithers-orchestrator/gateway-ui": "workspace:*",
+    "@tanstack/ai": "^0.27.0",
+    "@tanstack/ai-openai": "^0.13.0",
     "@tanstack/db": "^0.6.8",
     "@tanstack/react-db": "^0.1.86",
     "@tanstack/react-router": "^1.135.5",

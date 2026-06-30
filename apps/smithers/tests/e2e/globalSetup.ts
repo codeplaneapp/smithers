@@ -68,13 +68,13 @@ export default async function globalSetup(): Promise<void> {
   child.unref();
   writeFileSync(resolve(here, ".gateway.pid"), String(child.pid ?? ""));
 
-  // The concierge (chat backend). No ANTHROPIC_API_KEY in CI/e2e, so it runs its
-  // deterministic heuristic path: a build request backgrounds a real workflow.
-  const conciergeEnv = { ...process.env };
-  delete conciergeEnv.ANTHROPIC_API_KEY;
+  // The concierge (real-LLM chat backend). It inherits the LLM credential env
+  // (CEREBRAS_API_KEY / OPENAI_API_KEY / CODEX_ACCESS_TOKEN). Locally the chat
+  // specs run against the real model (no mocks); in CI no credential is set, so
+  // the concierge returns 500 on /api/chat and the chat specs skip themselves.
   const concierge = spawn("bun", [resolve(appDir, "concierge", "server.ts")], {
     env: {
-      ...conciergeEnv,
+      ...process.env,
       SMITHERS_CONCIERGE_PORT: String(CONCIERGE_PORT),
       SMITHERS_GATEWAY_PROXY_TARGET: GW,
     },

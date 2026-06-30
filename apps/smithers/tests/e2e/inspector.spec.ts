@@ -9,7 +9,7 @@ test("opening a run from the list shows the inspector", async ({ page }) => {
 });
 
 test("deep-linking a run renders the inspector", async ({ page }) => {
-  const res = await page.request.post("http://127.0.0.1:5180/v1/rpc/listRuns", { data: {} });
+  const res = await page.request.post("/v1/rpc/listRuns", { data: {} });
   const runs = (await res.json()).payload as Array<{ runId: string; workflowName?: string }>;
   const run = runs[0];
   await page.goto(`/gw/${run.workflowName ?? "e2e-task"}/${run.runId}`);

@@ -1,12 +1,16 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * The concierge. You chat in the composer and the concierge answers in the
- * transcript and aggressively backgrounds real Smithers workflows on the gateway.
- * No mocks: the reply streams from the real local concierge server (its
- * deterministic heuristic path, since there's no API key in CI), and a build
- * request launches a real run.
+ * The concierge — a REAL LLM, exactly like ../multi's /api/chat: a thin
+ * single-turn streaming proxy (Cerebras -> Codex subscription -> OpenAI). No
+ * mocks. These specs need a real model credential; in CI none is set, so the
+ * concierge returns 500 and we skip rather than fake a reply.
  */
+const HAS_LLM = Boolean(
+  process.env.CEREBRAS_API_KEY || process.env.OPENAI_API_KEY || process.env.CODEX_ACCESS_TOKEN,
+);
+test.skip(!HAS_LLM, "no LLM credential (CEREBRAS_API_KEY / OPENAI_API_KEY / CODEX_ACCESS_TOKEN)");
+
 async function send(page: import("@playwright/test").Page, text: string) {
   const input = page.getByRole("textbox", { name: "Message Smithers" });
   await input.fill(text);
@@ -19,30 +23,20 @@ test("a user message appears in the transcript", async ({ page }) => {
   await expect(page.locator(".message.user")).toContainText("hello concierge");
 });
 
-test("a build request backgrounds a workflow and the concierge confirms", async ({ page }) => {
+test("the concierge streams a real reply", async ({ page }) => {
   await page.goto("/");
-  await send(page, "build me a dark mode toggle");
+  await send(page, "In one sentence, what is your role?");
   const reply = page.locator(".message.assistant").last();
-  await expect(reply).toContainText(/backgrounding/i, { timeout: 15_000 });
-  await expect(reply).toContainText(/Run/i);
+  // A real model reply: substantial text, mentioning Smithers / the app.
+  await expect(reply).toContainText(/Smithers|app|workflow|assist|help/i, { timeout: 30_000 });
+  expect((await reply.innerText()).trim().length).toBeGreaterThan(15);
 });
 
-test("a build request actually creates a run on the gateway", async ({ page }) => {
+test("the concierge stops streaming (pending clears)", async ({ page }) => {
   await page.goto("/");
-  const countRuns = async () => {
-    const res = await page.request.post("/v1/rpc/listRuns", { data: {} });
-    const body = await res.json();
-    return Array.isArray(body.payload) ? body.payload.length : 0;
-  };
-  const before = await countRuns();
-  await send(page, "implement a new settings page");
-  await expect(page.locator(".message.assistant").last()).toContainText(/Run/i, { timeout: 15_000 });
-  await expect.poll(countRuns, { timeout: 15_000 }).toBeGreaterThan(before);
-});
-
-test("a question gets a conversational reply, not a launch", async ({ page }) => {
-  await page.goto("/");
-  await send(page, "what can you do?");
-  const reply = page.locator(".message.assistant").last();
-  await expect(reply).toContainText(/concierge|workflow/i, { timeout: 15_000 });
+  await send(page, "say hi");
+  await expect(page.locator(".message.assistant").last()).not.toHaveText("", { timeout: 30_000 });
+  // After the stream ends the composer accepts a new message (not stuck pending).
+  const input = page.getByRole("textbox", { name: "Message Smithers" });
+  await expect(input).toBeEnabled();
 });
