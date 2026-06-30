@@ -22,6 +22,19 @@ import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { EventBus } from "../src/events.js";
 
+function cleanupTempDir(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 200 });
+  } catch (error) {
+    // Windows can keep SQLite WAL/shared-memory files locked briefly after close.
+    // The crash-recovery assertions have already run, so don't fail the suite on
+    // temp-dir teardown lag in CI.
+    if (process.platform !== "win32" || !["EBUSY", "EPERM"].includes(error?.code)) {
+      throw error;
+    }
+  }
+}
+
 function createDiskDb() {
   const dir = mkdtempSync(join(tmpdir(), "smithers-engine-crash-"));
   const dbPath = join(dir, "store.sqlite");
@@ -42,7 +55,7 @@ function createDiskDb() {
       } catch {
         // best-effort
       }
-      rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 200 });
+      cleanupTempDir(dir);
     },
   };
 }
@@ -389,7 +402,7 @@ describe("engine crash recovery: multiple crash points across run lifecycle", ()
       expect(events).toHaveLength(5);
       sqlite2.close();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      cleanupTempDir(dir);
     }
   });
 });

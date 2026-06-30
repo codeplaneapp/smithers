@@ -37,6 +37,22 @@ function writeFile(path, contents) {
     writeFileSync(path, contents, "utf8");
 }
 /**
+ * @param {string} dir
+ */
+function cleanupTempDir(dir) {
+    try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 200 });
+    }
+    catch (error) {
+        // Windows can keep subprocess-created files locked briefly after the test
+        // process exits. The assertions have already run, so don't fail on temp
+        // teardown lag in CI.
+        if (process.platform !== "win32" || !["EBUSY", "EPERM"].includes(error?.code)) {
+            throw error;
+        }
+    }
+}
+/**
  * @param {string} target
  * @param {string} path
  * @param {"dir" | "file" | "junction"} [type]
@@ -70,7 +86,7 @@ function linkRepoRuntimeDeps(repoDir) {
 export function createTempRepo() {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "smithers-e2e-")));
     onTestFinished(() => {
-        rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 200 });
+        cleanupTempDir(dir);
     });
     writeFile(join(dir, "package.json"), JSON.stringify({
         name: "smithers-e2e-fixture",
@@ -207,7 +223,7 @@ export function writeTestWorkflow(repo, relativePath = "workflow.tsx") {
 export function createExecutableDir(prefix = "smithers-fake-bin-") {
     const dir = mkdtempSync(join(tmpdir(), prefix));
     onTestFinished(() => {
-        rmSync(dir, { recursive: true, force: true });
+        cleanupTempDir(dir);
     });
     return dir;
 }

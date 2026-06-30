@@ -10,7 +10,7 @@ function buildWorkflowEnv(homeDir) {
     writeFakeCodexBinary(binDir);
     return {
         HOME: homeDir,
-        PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
+        PATH: [binDir, process.env.PATH ?? ""].filter(Boolean).join(delimiter),
         OPENAI_API_KEY: "sk-test-openai-key",
         ANTHROPIC_API_KEY: "",
         GEMINI_API_KEY: "",

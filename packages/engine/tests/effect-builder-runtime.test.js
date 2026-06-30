@@ -21,7 +21,18 @@ function tempDb() {
     const dir = mkdtempSync(join(tmpdir(), "smithers-builder-"));
     return {
         filename: join(dir, "smithers.db"),
-        cleanup: () => rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 200 }),
+        cleanup: () => {
+            try {
+                rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 200 });
+            }
+            catch (error) {
+                // Windows can keep SQLite files locked briefly after close. The
+                // test assertions have already completed; don't fail on teardown lag.
+                if (process.platform !== "win32" || !["EBUSY", "EPERM"].includes(error?.code)) {
+                    throw error;
+                }
+            }
+        },
     };
 }
 
