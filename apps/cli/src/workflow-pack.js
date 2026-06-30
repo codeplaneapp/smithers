@@ -2890,7 +2890,7 @@ function renderWorkflows() {
             '  const validate = ctx.outputMaybe("validate", { nodeId: "impl:validate" });',
             "  const impl = ctx.outputs.implement?.at(-1);",
             "",
-            "  // done = false until validate has actually run AND passed, AND at least one reviewer approved",
+            "  // done = false until validate has run AND passed, AND the synthesized review verdict approved.",
             "  const hasValidated = validate !== undefined;",
             "  const validationPassed = hasValidated && validate.allPassed !== false;",
             '  const gate = reviewGate(ctx, "impl:review-moderator");',
