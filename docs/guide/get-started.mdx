@@ -18,6 +18,26 @@ This creates `.smithers/` and seeds **`.smithers/prompts/hello.mdx`** - your edi
 
 </Step>
 
+<Step title="Make sure your agent knows Smithers">
+
+Your agent drives Smithers, so it needs the Smithers context. Two ways to get it there:
+
+- **Have your agent read the docs.** Ask it to run `bunx smithers-orchestrator docs` (concise index) or `bunx smithers-orchestrator docs-full`, or point it at [`https://smithers.sh/llms-full.txt`](https://smithers.sh/llms-full.txt). Quick, no install.
+- **Install the plugin or skill for your harness** so the context is always loaded. Each page below has the exact plugin/skill install:
+
+| Harness | Install the plugin / skill |
+|---|---|
+| Claude Code | [Claude Code plugin + skill](/agents/claude-code) |
+| Codex | [Codex skill + MCP](/agents/codex) |
+| Pi | [Pi plugin + skill](/agents/pi) |
+| Any other agent | [Set up in your harness](/agents/setup) |
+
+<Note>
+`init` already installs the curated onboarding skill when it detects Claude Code or Pi. For everything else, or to add the deeper plugin, use the page for your harness above.
+</Note>
+
+</Step>
+
 <Step title="Ask your agent to run your hello-world workflow">
 
 You don't run Smithers yourself - your coding agent does. Ask it, in plain language:
