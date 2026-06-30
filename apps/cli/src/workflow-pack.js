@@ -16,7 +16,7 @@ import { GENERATED_SEEDED_FILES } from "./seeded-workflow-pack.generated.js";
  * @typedef {{ onSkip?: (relPath: string) => void; scaffolded?: (counts: { writtenCount: number; skippedCount: number; preservedCount: number }) => void; skillInstalled?: (result: import("./installCuratedSkill.js").CuratedSkillResult) => void; agentDocsNoted?: (result: import("./noteWorkflowPreferenceInAgentDocs.js").AgentDocsNoteSummary) => void; installStart?: () => void; installDone?: (result: InitInstallResult, captured?: { stdout: string; stderr: string }) => void; }} InitReporter
  */
 /**
- * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; agentsOnly?: boolean; global?: boolean; installSkill?: boolean; skillOptions?: Parameters<typeof installCuratedSkill>[0]; reporter?: InitReporter; env?: NodeJS.ProcessEnv; }} InitOptions
+ * @typedef {{ force?: boolean; rootDir?: string; skipInstall?: boolean; agentsOnly?: boolean; global?: boolean; installSkill?: boolean; skillOptions?: Parameters<typeof installCuratedSkill>[0]; reporter?: InitReporter; env?: NodeJS.ProcessEnv; selectedWorkflows?: string[]; }} InitOptions
  */
 /**
  * @typedef {{ status: "ok" | "skipped" | "failed"; reason?: string; }} InitInstallResult
@@ -184,6 +184,147 @@ function renderTsconfig() {
     }, null, 2) + "\n";
 }
 /**
+ * Component dependency manifest — each component's direct deps.
+ * @type {Record<string, { components: string[]; prompts: string[] }>}
+ */
+const COMPONENT_MANIFEST = {
+    Review: { components: [], prompts: ["review"] },
+    ValidationLoop: { components: ["Review"], prompts: ["implement", "validate"] },
+    CommandProbe: { components: [], prompts: [] },
+    GrillMe: { components: [], prompts: ["grill-me", "ask-user-instructions"] },
+    ForEachFeature: { components: [], prompts: ["feature-task"] },
+    FeatureEnum: { components: [], prompts: ["feature-enum-scan", "feature-enum-refine"] },
+};
+/**
+ * @typedef {{ id: string; ui: string; components: string[]; prompts: string[]; seeded?: boolean }} WorkflowManifestEntry
+ */
+/**
+ * Single source of truth for every installable workflow — its UI key, the
+ * components it directly uses, and the prompts from renderPrompts() it imports.
+ * Seeded workflows live in GENERATED_SEEDED_FILES; their prompts are bundled
+ * inside that array and are filtered via path-prefix matching.
+ * @type {WorkflowManifestEntry[]}
+ */
+const WORKFLOW_MANIFEST = [
+    { id: "vcs", ui: "vcs", components: [], prompts: [] },
+    { id: "implement", ui: "implement", components: ["ValidationLoop"], prompts: [] },
+    { id: "research-plan-implement", ui: "research-plan-implement", components: ["ValidationLoop"], prompts: ["research", "plan"] },
+    { id: "review", ui: "review", components: ["Review"], prompts: [] },
+    { id: "plan", ui: "plan", components: [], prompts: ["plan"] },
+    { id: "research", ui: "research", components: [], prompts: ["research"] },
+    { id: "ticket-create", ui: "ticket-create", components: [], prompts: ["ticket"] },
+    { id: "tickets-create", ui: "tickets-create", components: [], prompts: ["tickets-create"] },
+    { id: "ralph", ui: "ralph", components: [], prompts: [] },
+    { id: "improve-test-coverage", ui: "improve-test-coverage", components: ["ValidationLoop"], prompts: [] },
+    { id: "debug", ui: "debug", components: ["ValidationLoop"], prompts: [] },
+    { id: "grill-me", ui: "grill-me", components: ["GrillMe"], prompts: [] },
+    { id: "feature-enum", ui: "feature-enum", components: ["FeatureEnum"], prompts: [] },
+    { id: "audit", ui: "audit", components: ["ForEachFeature"], prompts: ["audit"] },
+    { id: "mission", ui: "mission", components: [], prompts: ["ask-user-instructions", "mission-plan", "mission-worker", "mission-integrate", "mission-validate", "mission-follow-up", "mission-final"] },
+    { id: "workflow-skill", ui: "workflow-skill", components: [], prompts: ["workflow-skill"] },
+    { id: "kanban", ui: "kanban", components: ["ValidationLoop"], prompts: ["merge-tickets"] },
+    // Seeded workflows — their prompts are in GENERATED_SEEDED_FILES, not renderPrompts().
+    { id: "hello", ui: "hello", components: [], prompts: [], seeded: true },
+    { id: "create-workflow", ui: "create-workflow", components: [], prompts: [], seeded: true },
+    { id: "context-engineer", ui: "context-engineer", components: ["GrillMe"], prompts: [], seeded: true },
+    { id: "route-task", ui: "route-task", components: [], prompts: [], seeded: true },
+    { id: "create-skill", ui: "create-skill", components: [], prompts: [], seeded: true },
+    { id: "extract-skill", ui: "extract-skill", components: [], prompts: [], seeded: true },
+    { id: "monitor-smithers", ui: "monitor-smithers", components: [], prompts: [], seeded: true },
+    { id: "monitor", ui: "monitor", components: [], prompts: [], seeded: true },
+    { id: "triage-run", ui: "triage-run", components: [], prompts: [], seeded: true },
+    { id: "context-doctor", ui: "context-doctor", components: [], prompts: [], seeded: true },
+    { id: "backpressure-plan", ui: "backpressure-plan", components: [], prompts: [], seeded: true },
+    { id: "eval-author", ui: "eval-author", components: [], prompts: [], seeded: true },
+    { id: "report-slideshow", ui: "report-slideshow", components: [], prompts: [], seeded: true },
+    { id: "smithering", ui: "smithering", components: [], prompts: [], seeded: true },
+];
+/**
+ * Prompt IDs from renderPrompts() that are always emitted regardless of
+ * selectedWorkflows — utility prompts not owned by any specific manifest entry.
+ * @type {ReadonlySet<string>}
+ */
+const ALWAYS_EMIT_PROMPTS = new Set([
+    "coverage",
+    "audit-feature",
+    "sweep-documentation",
+    "sweep-e2e-testing",
+    "sweep-unit-tests",
+    "sweep-observability",
+    "sweep-implementation",
+    "sweep-cli",
+    "sync-features-scan",
+    "sync-features-refine",
+    "sync-features-write",
+]);
+// Utility components not referenced by any specific workflow but always shipped.
+const ALWAYS_EMIT_COMPONENTS = new Set(["CommandProbe"]);
+/**
+ * Compute the transitive closure of components and prompts needed by the
+ * selected workflows. Defaults to all workflows when selectedWorkflows is
+ * undefined (byte-identical to today's output).
+ *
+ * @param {string[] | undefined} selectedWorkflows
+ * @returns {{ workflowIds: Set<string>; componentNames: Set<string>; promptIds: Set<string> }}
+ */
+function computeClosure(selectedWorkflows) {
+    const allIds = WORKFLOW_MANIFEST.map((w) => w.id);
+    const workflowIds = new Set(selectedWorkflows ?? allIds);
+    const componentNames = /** @type {Set<string>} */ (new Set(ALWAYS_EMIT_COMPONENTS));
+    const promptIds = new Set(ALWAYS_EMIT_PROMPTS);
+    for (const entry of WORKFLOW_MANIFEST) {
+        if (!workflowIds.has(entry.id)) continue;
+        for (const c of entry.components) componentNames.add(c);
+        for (const p of entry.prompts) promptIds.add(p);
+    }
+    // Resolve component deps transitively.
+    const worklist = [...componentNames];
+    while (worklist.length > 0) {
+        const comp = /** @type {string} */ (worklist.pop());
+        const deps = COMPONENT_MANIFEST[comp];
+        if (!deps) continue;
+        for (const c of deps.components) {
+            if (!componentNames.has(c)) {
+                componentNames.add(c);
+                worklist.push(c);
+            }
+        }
+        for (const p of deps.prompts) promptIds.add(p);
+    }
+    return { workflowIds, componentNames, promptIds };
+}
+/**
+ * Filter GENERATED_SEEDED_FILES to only include files owned by a selected
+ * seeded workflow. Each seeded workflow owns its .tsx file and any prompt
+ * whose path starts with `.smithers/prompts/<id>` (exact or `<id>-*`).
+ *
+ * @param {TemplateFile[]} files
+ * @param {Set<string>} workflowIds
+ * @returns {TemplateFile[]}
+ */
+function filterSeededFiles(files, workflowIds) {
+    // Sort seeded IDs longest-first to resolve prefix ambiguity
+    // (e.g. "monitor-smithers" before "monitor").
+    const seededIds = WORKFLOW_MANIFEST
+        .filter((w) => w.seeded)
+        .map((w) => w.id)
+        .sort((a, b) => b.length - a.length);
+    return files.filter((f) => {
+        if (f.path.startsWith(".smithers/workflows/")) {
+            const id = f.path.replace(".smithers/workflows/", "").replace(/\.tsx$/, "");
+            return workflowIds.has(id);
+        }
+        if (f.path.startsWith(".smithers/prompts/")) {
+            const promptId = f.path.replace(".smithers/prompts/", "").replace(/\.mdx$/, "");
+            const owner = seededIds.find(
+                (id) => promptId === id || promptId.startsWith(id + "-"),
+            );
+            return owner !== undefined && workflowIds.has(owner);
+        }
+        return true;
+    });
+}
+/**
  * @returns {TemplateFile[]}
  */
 function renderAgentScaffoldFiles() {
@@ -303,10 +444,13 @@ function renderAgentScaffoldFiles() {
     ];
 }
 /**
+ * @param {Set<string>} [promptIds] - when provided, only emit prompts whose id is in this set.
  * @returns {TemplateFile[]}
  */
-function renderPrompts() {
-    return [
+function renderPrompts(promptIds) {
+    /** @param {string} path @returns {string} */
+    function promptId(path) { return path.replace(/^\.smithers\/prompts\//, "").replace(/\.mdx$/, ""); }
+    const all = [
         {
             path: ".smithers/prompts/review.mdx",
             contents: [
@@ -1055,12 +1199,16 @@ function renderPrompts() {
             ].join("\n"),
         },
     ];
+    return promptIds ? all.filter((f) => promptIds.has(promptId(f.path))) : all;
 }
 /**
+ * @param {Set<string>} [componentNames] - when provided, only emit components whose name is in this set.
  * @returns {TemplateFile[]}
  */
-function renderComponents() {
-    return [
+function renderComponents(componentNames) {
+    /** @param {string} path @returns {string} */
+    function compName(path) { return path.replace(/^\.smithers\/components\//, "").replace(/\.tsx$/, ""); }
+    const all = [
         {
             path: ".smithers/components/Review.tsx",
             contents: "// smithers-source: seeded\n/** @jsxImportSource smithers-orchestrator */\nimport { Panel, Parallel, Task, type AgentLike } from \"smithers-orchestrator\";\nimport { z } from \"zod/v4\";\nimport { synthesizer as defaultSynthesizer } from \"./roles\";\nimport ReviewPrompt from \"../prompts/review.mdx\";\n\n// A reviewer entry: a single agent, a failover chain, or a labelled config\n// (mirrors the library PanelistConfig, inlined to avoid a type-only import).\ntype PanelistConfig = { agent: AgentLike | AgentLike[]; role?: string; label?: string };\nexport type Panelist = AgentLike | AgentLike[] | PanelistConfig;\nfunction panelistAgent(entry: Panelist): AgentLike | AgentLike[] {\n  return !Array.isArray(entry) && typeof entry === \"object\" && \"agent\" in entry ? entry.agent : entry;\n}\n\nconst reviewIssueSchema = z.object({\n  severity: z.enum([\"critical\", \"major\", \"minor\", \"nit\"]),\n  title: z.string(),\n  file: z.string().nullable().default(null),\n  description: z.string(),\n});\n\n// One reviewer's verdict — produced by each panelist.\nexport const reviewOutputSchema = z.object({\n  reviewer: z.string(),\n  approved: z.boolean(),\n  feedback: z.string(),\n  issues: z.array(reviewIssueSchema).default([]),\n});\n\n// The MODERATOR's synthesized verdict — one consolidated decision merged from\n// every panelist. MUST be a distinct schema object from reviewOutputSchema so\n// it resolves to its own output channel (channels are keyed by schema identity).\nexport const reviewSynthesisSchema = z.object({\n  approved: z\n    .boolean()\n    .describe(\n      \"true ONLY if there are no remaining critical or major issues across all reviewers\",\n    ),\n  feedback: z\n    .string()\n    .describe(\"consolidated, actionable feedback merged from every reviewer\"),\n  issues: z.array(reviewIssueSchema).default([]),\n});\n\ntype ReviewProps = {\n  idPrefix: string;\n  prompt: unknown;\n  agents: Panelist[];\n};\n\n/**\n * Legacy parallel review: N reviewers, no synthesis. Kept for back-compat;\n * prefer <ReviewPanel> for a synthesized verdict.\n */\nexport function Review({ idPrefix, prompt, agents }: ReviewProps) {\n  const promptText = typeof prompt === \"string\" ? prompt : JSON.stringify(prompt ?? null);\n  return (\n    <Parallel>\n      {agents.map((entry, index) => (\n        <Task\n          key={`${idPrefix}:${index}`}\n          id={`${idPrefix}:${index}`}\n          output={reviewOutputSchema}\n          agent={panelistAgent(entry)}\n          continueOnFail\n          timeoutMs={1_800_000}\n          heartbeatTimeoutMs={600_000}\n        >\n          <ReviewPrompt reviewer={`reviewer-${index + 1}`} prompt={promptText} />\n        </Task>\n      ))}\n    </Parallel>\n  );\n}\n\ntype ReviewPanelProps = {\n  idPrefix: string;\n  prompt: unknown;\n  /** Panelist reviewers (run in parallel). Each may be an agent, a failover chain, or a config. */\n  agents: Panelist[];\n  /** The moderator that synthesizes the panelists into one verdict; defaults to the shared synthesizer (usually Codex, with Opus fallback). An AgentLike[] is a failover chain. */\n  moderator?: AgentLike | AgentLike[];\n};\n\n/**\n * <ReviewPanel> — a model-diverse review PANEL that gets SYNTHESIZED. Each\n * panelist in `agents` reviews in parallel (writing reviewOutputSchema), then\n * the moderator merges them into a single reviewSynthesisSchema verdict at the\n * node `${idPrefix}-moderator`. Read that verdict with `reviewGate`.\n */\nexport function ReviewPanel({ idPrefix, prompt, agents, moderator = defaultSynthesizer }: ReviewPanelProps) {\n  const promptText = typeof prompt === \"string\" ? prompt : JSON.stringify(prompt ?? null);\n  return (\n    <Panel\n      id={idPrefix}\n      panelists={agents}\n      moderator={moderator}\n      panelistOutput={reviewOutputSchema}\n      moderatorOutput={reviewSynthesisSchema}\n      strategy=\"synthesize\"\n      panelistTaskProps={{ continueOnFail: true, timeoutMs: 1_800_000, heartbeatTimeoutMs: 600_000 }}\n      moderatorTaskProps={{ continueOnFail: true, timeoutMs: 1_800_000, heartbeatTimeoutMs: 600_000 }}\n    >\n      <ReviewPrompt reviewer=\"review panelist\" prompt={promptText} />\n    </Panel>\n  );\n}\n\nexport type ReviewGate = {\n  /** Whether the moderator has produced a verdict yet. */\n  hasVerdict: boolean;\n  /** Whether the synthesized verdict approved the change. */\n  approved: boolean;\n  /** Consolidated rejection feedback (null when approved or no verdict yet). */\n  feedback: string | null;\n};\n\n/**\n * Read a ReviewPanel's synthesized verdict from the workflow context. The\n * workflow must register `reviewSynthesis: reviewSynthesisSchema` in\n * createSmithers. `nodeId` is the moderator node (`${idPrefix}-moderator`).\n */\nexport function reviewGate(\n  ctx: { outputMaybe: (channel: string, opts: { nodeId: string }) => unknown },\n  nodeId: string,\n): ReviewGate {\n  const verdict = ctx.outputMaybe(\"reviewSynthesis\", { nodeId }) as\n    | z.infer<typeof reviewSynthesisSchema>\n    | undefined;\n  const approved = verdict?.approved === true;\n  let feedback: string | null = null;\n  if (verdict && !approved) {\n    const parts: string[] = [];\n    if (verdict.feedback) parts.push(verdict.feedback);\n    for (const issue of verdict.issues ?? []) {\n      parts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : \"\"}`);\n    }\n    feedback = parts.length > 0 ? parts.join(\"\\n\") : null;\n  }\n  return { hasVerdict: verdict !== undefined, approved, feedback };\n}\n",
@@ -1457,6 +1605,7 @@ function renderComponents() {
             ].join("\n"),
         },
     ];
+    return componentNames ? all.filter((f) => componentNames.has(compName(f.path))) : all;
 }
 const DEFAULT_WORKFLOW_METADATA = {
     implement: {
@@ -1600,13 +1749,16 @@ const UI_WORKFLOWS = [
  * Emit a .smithers/ui/<key>.tsx file for every workflow whose UI source lives in
  * WORKFLOW_UI_SOURCES (the swarm-generated bespoke UIs). kanban and plan keep
  * their own dedicated render functions, so they're not in the map.
+ * @param {Set<string>} [workflowIds] - when provided, only emit UI files for selected workflows.
  * @returns {TemplateFile[]}
  */
-function renderUiFiles() {
-    return Object.entries(WORKFLOW_UI_SOURCES).map(([key, contents]) => ({
-        path: `.smithers/ui/${key}.tsx`,
-        contents,
-    }));
+function renderUiFiles(workflowIds) {
+    return Object.entries(WORKFLOW_UI_SOURCES)
+        .filter(([key]) => !workflowIds || workflowIds.has(key))
+        .map(([key, contents]) => ({
+            path: `.smithers/ui/${key}.tsx`,
+            contents,
+        }));
 }
 
 /** A safe JS identifier for a workflow key used in the generated gateway.ts. */
@@ -1615,8 +1767,12 @@ function toUiIdent(key) {
     return /^[a-zA-Z_]/.test(ident) ? ident : `_${ident}`;
 }
 
-function renderGatewayFile() {
-    const mounts = UI_WORKFLOWS.map(
+/**
+ * @param {Set<string>} [workflowIds] - when provided, only mount selected workflows.
+ */
+function renderGatewayFile(workflowIds) {
+    const workflows = workflowIds ? UI_WORKFLOWS.filter((w) => workflowIds.has(w.key)) : UI_WORKFLOWS;
+    const mounts = workflows.map(
         (w) => `await mountWorkflow(${JSON.stringify(w.key)}, ${JSON.stringify(w.title)});`,
     );
     return {
@@ -2651,13 +2807,16 @@ function renderVcsUiFile() {
         ].join("\n") + "\n",
     };
 }
-function renderWorkflows() {
+/**
+ * @param {Set<string>} [workflowIds] - when provided, only render selected workflows.
+ */
+function renderWorkflows(workflowIds) {
     const sharedImports = [
         'import { createSmithers } from "smithers-orchestrator";',
         'import { z } from "zod/v4";',
         'import { agents } from "../agents";',
     ];
-    return [
+    const all = [
         renderWorkflowFile("vcs", "VCS", [
             "import { createSmithers, Task, Sequence } from 'smithers-orchestrator';",
             "import { execFileSync } from 'node:child_process';",
@@ -4321,14 +4480,21 @@ function renderWorkflows() {
             ].join("\n"),
         },
     ];
+    if (!workflowIds) return all;
+    return all.filter((f) => {
+        const id = f.path.replace(/^\.smithers\/workflows\//, "").replace(/\.tsx$/, "");
+        return workflowIds.has(id);
+    });
 }
 /**
  * @param {DependencyVersions} versions
  * @param {NodeJS.ProcessEnv} env
  * @param {string} projectRoot
+ * @param {{ workflowIds: Set<string>; componentNames: Set<string>; promptIds: Set<string> }} closure
  * @returns {TemplateFile[]}
  */
-function renderTemplateFiles(versions, env, projectRoot) {
+function renderTemplateFiles(versions, env, projectRoot, closure) {
+    const { workflowIds, componentNames, promptIds } = closure;
     return [
         {
             path: ".smithers/.gitignore",
@@ -4397,7 +4563,7 @@ function renderTemplateFiles(versions, env, projectRoot) {
             path: ".smithers/preload.ts",
             contents: ['import { mdxPlugin } from "smithers-orchestrator";', "", "mdxPlugin();", ""].join("\n"),
         },
-        renderGatewayFile(),
+        renderGatewayFile(workflowIds),
         ...renderAgentScaffoldFiles(),
         {
             path: ".smithers/agents.ts",
@@ -4416,15 +4582,15 @@ function renderTemplateFiles(versions, env, projectRoot) {
                 "",
             ].join("\n"),
         },
-        ...renderPrompts(),
-        ...renderComponents(),
-        ...renderWorkflows(),
+        ...renderPrompts(promptIds),
+        ...renderComponents(componentNames),
+        ...renderWorkflows(workflowIds),
         // Generated seeded workflows (+ their prompts) from .smithers/ canonical sources.
-        ...GENERATED_SEEDED_FILES,
-        renderKanbanUiFile(),
-        renderPlanUiFile(),
-        renderVcsUiFile(),
-        ...renderUiFiles(),
+        ...filterSeededFiles(GENERATED_SEEDED_FILES, workflowIds),
+        ...(workflowIds.has("kanban") ? [renderKanbanUiFile()] : []),
+        ...(workflowIds.has("plan") ? [renderPlanUiFile()] : []),
+        ...(workflowIds.has("vcs") ? [renderVcsUiFile()] : []),
+        ...renderUiFiles(workflowIds),
         {
             path: ".smithers/skills/.gitkeep",
             contents: "",
@@ -4479,7 +4645,8 @@ export function initWorkflowPack(options = {}) {
         else {
             ensureDir(executionsDir);
         }
-        templateFiles = renderTemplateFiles(versions, env, projectRoot);
+        const closure = computeClosure(options.selectedWorkflows);
+        templateFiles = renderTemplateFiles(versions, env, projectRoot, closure);
     }
     const importerMap = buildComponentImporterMap(templateFiles);
     for (const file of templateFiles) {
