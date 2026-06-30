@@ -232,8 +232,9 @@ function App() {
 
   const implementOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "impl:implement", iteration: 0 });
   const validateOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "impl:validate", iteration: 0 });
-  const review0Out = useGatewayNodeOutput({ runId: activeRunId, nodeId: "impl:review:0", iteration: 0 });
-  const review1Out = useGatewayNodeOutput({ runId: activeRunId, nodeId: "impl:review:1", iteration: 0 });
+  const review0Out = useGatewayNodeOutput({ runId: activeRunId, nodeId: "impl:review-panelist-0", iteration: 0 });
+  const review1Out = useGatewayNodeOutput({ runId: activeRunId, nodeId: "impl:review-panelist-1", iteration: 0 });
+  const moderatorOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "impl:review-moderator", iteration: 0 });
 
   const implement = useMemo(() => extractImplement(implementOut.data), [implementOut.data]);
   const validate = useMemo(() => extractValidate(validateOut.data), [validateOut.data]);
@@ -243,14 +244,19 @@ function App() {
     () => [review0, review1].filter((r): r is ReviewOutput => r !== null),
     [review0, review1],
   );
+  // The synthesized verdict from the review panel's moderator (usually Codex).
+  const verdict = useMemo(() => extractReview(moderatorOut.data), [moderatorOut.data]);
 
   const eventCount = (stream.events ?? []).length;
 
   const validationPassed = validate !== null && validate.allPassed !== false;
-  const anyApproved = reviews.length > 0 && reviews.some((r) => r.approved === true);
+  // The synthesized moderator verdict is the source of truth; fall back to
+  // panelist consensus until the moderator has produced its verdict.
+  const anyApproved = verdict ? verdict.approved === true : reviews.length > 0 && reviews.some((r) => r.approved === true);
   const anyRejected = reviews.some((r) => r.approved === false);
+  const reviewRejected = verdict ? verdict.approved === false : anyRejected;
   const done = validationPassed && anyApproved;
-  const blocked = (validate !== null && validate.allPassed === false) || (reviews.length > 0 && anyRejected && !anyApproved);
+  const blocked = (validate !== null && validate.allPassed === false) || (!anyApproved && reviewRejected);
 
   const feedbackParts: string[] = [];
   if (validate && validate.allPassed === false && validate.failingSummary) {
@@ -277,6 +283,7 @@ function App() {
       validateOut.refetch(),
       review0Out.refetch(),
       review1Out.refetch(),
+      moderatorOut.refetch(),
     ]);
   }
   async function launch() {
@@ -311,7 +318,7 @@ function App() {
 
   const implDot = implement ? (implement.allTestsPassing === false ? "err" : "ok") : "pending";
   const valDot = validate ? (validate.allPassed === false ? "err" : "ok") : "pending";
-  const revDot = reviews.length === 0 ? "pending" : anyApproved ? "ok" : "err";
+  const revDot = reviews.length === 0 && !verdict ? "pending" : anyApproved ? "ok" : "err";
 
   return (
     <main className="shell" data-testid="implement-ui">

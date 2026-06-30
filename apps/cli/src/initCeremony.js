@@ -1,8 +1,8 @@
 import { basename } from "node:path";
-import { intro, log } from "@clack/prompts";
+import { intro, isCancel, log, multiselect } from "@clack/prompts";
 import pc from "picocolors";
 import { detectAvailableAgents } from "./agent-detection.js";
-import { initWorkflowPack } from "./workflow-pack.js";
+import { applyWorkflowPackUpdates, initWorkflowPack } from "./workflow-pack.js";
 
 /**
  * Render the human-facing `smithers init` flow: a clean clack ceremony that
@@ -13,10 +13,10 @@ import { initWorkflowPack } from "./workflow-pack.js";
  * Only call this in interactive TTY mode; piped/agent callers should use
  * {@link initWorkflowPack} directly so structured output is preserved.
  *
- * @param {{ force?: boolean; agentsOnly?: boolean; install?: boolean; global?: boolean; installSkill?: boolean; env?: NodeJS.ProcessEnv }} opts
- * @returns {import("./workflow-pack.js").InitResult}
+ * @param {{ force?: boolean; agentsOnly?: boolean; install?: boolean; global?: boolean; installSkill?: boolean; updatePrompt?: boolean; env?: NodeJS.ProcessEnv }} opts
+ * @returns {Promise<import("./workflow-pack.js").InitResult>}
  */
-export function runInitCeremony(opts = {}) {
+export async function runInitCeremony(opts = {}) {
     const env = opts.env ?? process.env;
     const agentsOnly = Boolean(opts.agentsOnly);
     const global = Boolean(opts.global);
@@ -60,7 +60,7 @@ export function runInitCeremony(opts = {}) {
         },
     };
 
-    return initWorkflowPack({
+    const result = initWorkflowPack({
         force: opts.force,
         agentsOnly,
         global,
@@ -68,6 +68,68 @@ export function runInitCeremony(opts = {}) {
         skipInstall: agentsOnly || opts.install === false,
         reporter,
     });
+
+    // Offer to update any shipped pack files that drifted from the latest
+    // bundled version (a default run preserves existing files). Skipped with
+    // --no-update-prompt and whenever nothing drifted.
+    if (opts.updatePrompt !== false && result.changedFiles && result.changedFiles.length > 0) {
+        result.updatedFiles = await promptPackUpdates(result.changedFiles);
+    }
+
+    return result;
+}
+
+const relPack = (path) => path.replace(/^\.smithers\//, "");
+
+/**
+ * Interactive multi-select over the pack files that differ from the latest
+ * bundled version. Warns when a selected file is a shared component (other
+ * workflows are built on it), then writes the chosen files.
+ *
+ * @param {Array<{ path: string; absolutePath: string; contents: string; isComponent: boolean; importedBy: string[] }>} changedFiles
+ * @returns {Promise<string[]>} absolute paths written
+ */
+async function promptPackUpdates(changedFiles) {
+    const count = changedFiles.length;
+    log.warn(`${pc.bold(String(count))} pack file${count === 1 ? "" : "s"} differ from the latest bundled version.`);
+
+    const sharedChanged = changedFiles.filter((file) => file.isComponent && file.importedBy.length > 0);
+    if (sharedChanged.length > 0) {
+        log.message(`${pc.yellow("Shared components")} ${pc.dim("— updating one re-affects every workflow that imports it:")}`);
+        for (const file of sharedChanged) {
+            log.message(`  ${pc.yellow(relPack(file.path))} ${pc.dim("→ " + file.importedBy.join(", "))}`);
+        }
+    }
+
+    const selected = await multiselect({
+        message: "Update which pack files? " + pc.dim("(the latest version overwrites your local copy)"),
+        options: changedFiles.map((file) => ({
+            value: file.path,
+            label: relPack(file.path),
+            hint: file.isComponent && file.importedBy.length > 0
+                ? `shared · affects ${file.importedBy.length} workflow${file.importedBy.length === 1 ? "" : "s"}`
+                : undefined,
+        })),
+        required: false,
+    });
+
+    if (isCancel(selected) || !Array.isArray(selected) || selected.length === 0) {
+        log.message(pc.dim("No pack files updated."));
+        return [];
+    }
+
+    const chosen = changedFiles.filter((file) => selected.includes(file.path));
+    const written = applyWorkflowPackUpdates(chosen);
+    log.success(`Updated ${pc.bold(String(written.length))} pack file${written.length === 1 ? "" : "s"}`);
+
+    const chosenShared = chosen.filter((file) => file.isComponent && file.importedBy.length > 0);
+    if (chosenShared.length > 0) {
+        log.warn("You updated shared component(s) — re-check the workflows built on them:");
+        for (const file of chosenShared) {
+            log.message(`  ${pc.yellow(relPack(file.path))} ${pc.dim("→ " + file.importedBy.join(", "))}`);
+        }
+    }
+    return written;
 }
 
 /**

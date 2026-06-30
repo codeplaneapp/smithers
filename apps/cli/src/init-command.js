@@ -18,6 +18,7 @@ export const initOptions = z.object({
     addAgents: z.boolean().default(false).describe("After scaffolding, launch the interactive `agents add` wizard to register one or more accounts."),
     skill: z.boolean().default(true).describe("Install the curated `smithers` skill into your detected coding agents (Claude Code, Pi) and, if a CLAUDE.md or AGENTS.md exists, append guidance on when to use smithers.sh workflows. Use --no-skill to skip."),
     global: z.boolean().default(false).describe("Scaffold the global pack in ~/.smithers (honors SMITHERS_HOME) instead of ./.smithers. Global workflows run from any repo; a repo's local pack takes precedence."),
+    updatePrompt: z.boolean().default(true).describe("In an interactive terminal, when shipped pack files differ from the latest bundled version, ask which to update (warning when a shared component is selected). Use --no-update-prompt to skip the question."),
     template: initTemplateOption,
 });
 
@@ -71,12 +72,13 @@ export async function runInitCommand(c, fail) {
         const human = isHumanTty(c);
         const selectedTemplate = c.options.template ? findStarterRecipe(c.options.template) : undefined;
         const result = human
-            ? runInitCeremony({
+            ? await runInitCeremony({
                 force: c.options.force,
                 agentsOnly: c.options.agentsOnly,
                 install: c.options.install,
                 global: c.options.global,
                 installSkill: c.options.skill,
+                updatePrompt: c.options.updatePrompt,
             })
             : initWorkflowPack({
                 force: c.options.force,

@@ -77,6 +77,7 @@ function buildFakeInstallTree() {
         }) + "\n",
     );
     cpSync(join(CLI_SRC, "workflow-pack.js"), join(cliDir, "src/workflow-pack.js"));
+    cpSync(join(CLI_SRC, "initPackUpdates.js"), join(cliDir, "src/initPackUpdates.js"));
     cpSync(join(CLI_SRC, "workflowUiSources.js"), join(cliDir, "src/workflowUiSources.js"));
     cpSync(join(CLI_SRC, "agent-detection.js"), join(cliDir, "src/agent-detection.js"));
     cpSync(join(CLI_SRC, "installCuratedSkill.js"), join(cliDir, "src/installCuratedSkill.js"));

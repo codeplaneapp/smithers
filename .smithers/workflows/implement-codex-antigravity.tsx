@@ -46,6 +46,7 @@ export default smithers((ctx) => {
         implementAgents={codexAntigravityOnly}
         validateAgents={codexAntigravityOnly}
         reviewAgents={codexAntigravityOnly}
+        synthesizeReview
         reviewModerator={providers.codex}
         feedback={feedback}
         done={done}

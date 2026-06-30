@@ -2,7 +2,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { Sequence, Loop, Task, type AgentLike } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { ReviewPanel } from "~/components/Review";
+import { Review, ReviewPanel } from "~/components/Review";
 import ImplementPrompt from "~/prompts/implement.mdx";
 import ValidatePrompt from "~/prompts/validate.mdx";
 
@@ -23,7 +23,14 @@ export type ValidationLoopProps = {
   implementAgents: AgentLike[];
   reviewAgents: AgentLike[];
   validateAgents?: AgentLike[];
-  /** Moderator that synthesizes the review panel into one verdict; defaults to the shared synthesizer (usually Codex). */
+  /**
+   * When true, the review step is a synthesized PANEL: parallel panelists feed a
+   * moderator that produces one verdict (read it with `reviewGate`, and register
+   * `reviewSynthesis: reviewSynthesisSchema` in createSmithers). Default is the
+   * plain parallel `Review` (per-reviewer verdicts via `ctx.outputs.review`).
+   */
+  synthesizeReview?: boolean;
+  /** Moderator for the synthesized review panel; defaults to the shared synthesizer (usually Codex). Only used when synthesizeReview is true. */
   reviewModerator?: AgentLike;
   feedback?: string | null;
   done?: boolean;
@@ -36,6 +43,7 @@ export function ValidationLoop({
   implementAgents,
   reviewAgents,
   validateAgents,
+  synthesizeReview = false,
   reviewModerator,
   feedback,
   done = false,
@@ -55,7 +63,9 @@ export function ValidationLoop({
           : implementAgents} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>
           <ValidatePrompt prompt={promptText} />
         </Task>
-        <ReviewPanel idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} moderator={reviewModerator} />
+        {synthesizeReview
+          ? <ReviewPanel idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} moderator={reviewModerator} />
+          : <Review idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} />}
       </Sequence>
     </Loop>
   );

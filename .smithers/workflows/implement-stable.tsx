@@ -48,6 +48,7 @@ export default smithers((ctx) => {
         implementAgents={implementAgents}
         validateAgents={validateAgents}
         reviewAgents={reviewAgents}
+        synthesizeReview
         reviewModerator={providers.claude}
         feedback={feedback}
         done={done}

@@ -321,6 +321,7 @@ function renderGroup(opts: {
             implementAgents={implementAgents}
             validateAgents={validateChain}
             reviewAgents={reviewers}
+            synthesizeReview
             reviewModerator={providers.codex}
             feedback={feedback}
             done={done}

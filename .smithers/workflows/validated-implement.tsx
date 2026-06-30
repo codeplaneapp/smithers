@@ -301,6 +301,7 @@ Rules:
           implementAgents={implementer}
           validateAgents={agents.cheapFast}
           reviewAgents={panelists}
+          synthesizeReview
           feedback={feedback}
           done={done}
           maxIterations={maxReviewIterations}

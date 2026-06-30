@@ -5,6 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { accountsRoot } from "@smithers-orchestrator/accounts";
 import { generateAgentsTs } from "./agent-detection.js";
+import { buildComponentImporterMap, componentBaseName } from "./initPackUpdates.js";
 import { installCuratedSkill } from "./installCuratedSkill.js";
 import { noteWorkflowPreferenceInAgentDocs } from "./noteWorkflowPreferenceInAgentDocs.js";
 import { WORKFLOW_UI_SOURCES } from "./workflowUiSources.js";
@@ -1061,118 +1062,19 @@ function renderComponents() {
     return [
         {
             path: ".smithers/components/Review.tsx",
-            contents: [
-                "// smithers-source: seeded",
-                "/** @jsxImportSource smithers-orchestrator */",
-                'import { Parallel, Task, type AgentLike } from "smithers-orchestrator";',
-                'import { z } from "zod/v4";',
-                'import ReviewPrompt from "../prompts/review.mdx";',
-                "",
-                "const reviewIssueSchema = z.object({",
-                '  severity: z.enum(["critical", "major", "minor", "nit"]),',
-                "  title: z.string(),",
-                "  file: z.string().nullable().default(null),",
-                "  description: z.string(),",
-                "});",
-                "",
-                "export const reviewOutputSchema = z.object({",
-                "  reviewer: z.string(),",
-                "  approved: z.boolean(),",
-                "  feedback: z.string(),",
-                "  issues: z.array(reviewIssueSchema).default([]),",
-                "});",
-                "",
-                "type ReviewProps = {",
-                "  idPrefix: string;",
-                "  prompt: unknown;",
-                "  agents: AgentLike[];",
-                "};",
-                "",
-                "export function Review({ idPrefix, prompt, agents }: ReviewProps) {",
-                '  const promptText = typeof prompt === "string" ? prompt : JSON.stringify(prompt ?? null);',
-                "  return (",
-                "    <Parallel>",
-                "      {agents.map((agent, index) => (",
-                "        <Task",
-                "          key={`${idPrefix}:${index}`}",
-                "          id={`${idPrefix}:${index}`}",
-                "          output={reviewOutputSchema}",
-                "          agent={agent}",
-                "          continueOnFail",
-                "        >",
-                '          <ReviewPrompt reviewer={`reviewer-${index + 1}`} prompt={promptText} />',
-                "        </Task>",
-                "      ))}",
-                "    </Parallel>",
-                "  );",
-                "}",
-                "",
-            ].join("\n"),
+            contents: "// smithers-source: seeded\n/** @jsxImportSource smithers-orchestrator */\nimport { Panel, Parallel, Task, type AgentLike } from \"smithers-orchestrator\";\nimport { z } from \"zod/v4\";\nimport { synthesizer as defaultSynthesizer } from \"./roles\";\nimport ReviewPrompt from \"../prompts/review.mdx\";\n\nconst reviewIssueSchema = z.object({\n  severity: z.enum([\"critical\", \"major\", \"minor\", \"nit\"]),\n  title: z.string(),\n  file: z.string().nullable().default(null),\n  description: z.string(),\n});\n\n// One reviewer's verdict — produced by each panelist.\nexport const reviewOutputSchema = z.object({\n  reviewer: z.string(),\n  approved: z.boolean(),\n  feedback: z.string(),\n  issues: z.array(reviewIssueSchema).default([]),\n});\n\n// The MODERATOR's synthesized verdict — one consolidated decision merged from\n// every panelist. MUST be a distinct schema object from reviewOutputSchema so\n// it resolves to its own output channel (channels are keyed by schema identity).\nexport const reviewSynthesisSchema = z.object({\n  approved: z\n    .boolean()\n    .describe(\n      \"true ONLY if there are no remaining critical or major issues across all reviewers\",\n    ),\n  feedback: z\n    .string()\n    .describe(\"consolidated, actionable feedback merged from every reviewer\"),\n  issues: z.array(reviewIssueSchema).default([]),\n});\n\ntype ReviewProps = {\n  idPrefix: string;\n  prompt: unknown;\n  agents: AgentLike[];\n};\n\n/**\n * Legacy parallel review: N reviewers, no synthesis. Kept for back-compat;\n * prefer <ReviewPanel> for a synthesized verdict.\n */\nexport function Review({ idPrefix, prompt, agents }: ReviewProps) {\n  const promptText = typeof prompt === \"string\" ? prompt : JSON.stringify(prompt ?? null);\n  return (\n    <Parallel>\n      {agents.map((agent, index) => (\n        <Task\n          key={`${idPrefix}:${index}`}\n          id={`${idPrefix}:${index}`}\n          output={reviewOutputSchema}\n          agent={agent}\n          continueOnFail\n          timeoutMs={1_800_000}\n          heartbeatTimeoutMs={600_000}\n        >\n          <ReviewPrompt reviewer={`reviewer-${index + 1}`} prompt={promptText} />\n        </Task>\n      ))}\n    </Parallel>\n  );\n}\n\ntype ReviewPanelProps = {\n  idPrefix: string;\n  prompt: unknown;\n  /** Panelist reviewers (run in parallel). */\n  agents: AgentLike[];\n  /** The moderator that synthesizes the panelists into one verdict; defaults to the shared synthesizer (usually Codex). */\n  moderator?: AgentLike;\n};\n\n/**\n * <ReviewPanel> — a model-diverse review PANEL that gets SYNTHESIZED. Each\n * panelist in `agents` reviews in parallel (writing reviewOutputSchema), then\n * the moderator merges them into a single reviewSynthesisSchema verdict at the\n * node `${idPrefix}-moderator`. Read that verdict with `reviewGate`.\n */\nexport function ReviewPanel({ idPrefix, prompt, agents, moderator = defaultSynthesizer }: ReviewPanelProps) {\n  const promptText = typeof prompt === \"string\" ? prompt : JSON.stringify(prompt ?? null);\n  return (\n    <Panel\n      id={idPrefix}\n      panelists={agents}\n      moderator={moderator}\n      panelistOutput={reviewOutputSchema}\n      moderatorOutput={reviewSynthesisSchema}\n      strategy=\"synthesize\"\n    >\n      <ReviewPrompt reviewer=\"review panelist\" prompt={promptText} />\n    </Panel>\n  );\n}\n\nexport type ReviewGate = {\n  /** Whether the moderator has produced a verdict yet. */\n  hasVerdict: boolean;\n  /** Whether the synthesized verdict approved the change. */\n  approved: boolean;\n  /** Consolidated rejection feedback (null when approved or no verdict yet). */\n  feedback: string | null;\n};\n\n/**\n * Read a ReviewPanel's synthesized verdict from the workflow context. The\n * workflow must register `reviewSynthesis: reviewSynthesisSchema` in\n * createSmithers. `nodeId` is the moderator node (`${idPrefix}-moderator`).\n */\nexport function reviewGate(\n  ctx: { outputMaybe: (channel: string, opts: { nodeId: string }) => unknown },\n  nodeId: string,\n): ReviewGate {\n  const verdict = ctx.outputMaybe(\"reviewSynthesis\", { nodeId }) as\n    | z.infer<typeof reviewSynthesisSchema>\n    | undefined;\n  const approved = verdict?.approved === true;\n  let feedback: string | null = null;\n  if (verdict && !approved) {\n    const parts: string[] = [];\n    if (verdict.feedback) parts.push(verdict.feedback);\n    for (const issue of verdict.issues ?? []) {\n      parts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : \"\"}`);\n    }\n    feedback = parts.length > 0 ? parts.join(\"\\n\") : null;\n  }\n  return { hasVerdict: verdict !== undefined, approved, feedback };\n}\n",
         },
         {
             path: ".smithers/components/ValidationLoop.tsx",
-            contents: [
-                "// smithers-source: seeded",
-                "/** @jsxImportSource smithers-orchestrator */",
-                'import { Sequence, Loop, Task, type AgentLike } from "smithers-orchestrator";',
-                'import { z } from "zod/v4";',
-                'import { Review } from "~/components/Review";',
-                'import ImplementPrompt from "~/prompts/implement.mdx";',
-                'import ValidatePrompt from "~/prompts/validate.mdx";',
-                "",
-                "export const implementOutputSchema = z.object({",
-                "  summary: z.string(),",
-                "  filesChanged: z.array(z.string()).default([]),",
-                "  allTestsPassing: z.boolean().default(true),",
-                "});",
-                "export const validateOutputSchema = z.object({",
-                "  summary: z.string(),",
-                "  allPassed: z.boolean().default(true),",
-                "  failingSummary: z.string().nullable().default(null),",
-                "});",
-                "",
-                "export type ValidationLoopProps = {",
-                "  idPrefix: string;",
-                "  prompt: unknown;",
-                "  implementAgents: AgentLike[];",
-                "  reviewAgents: AgentLike[];",
-                "  validateAgents?: AgentLike[];",
-                "  feedback?: string | null;",
-                "  done?: boolean;",
-                "  maxIterations?: number;",
-                "};",
-                "",
-                "export function ValidationLoop({",
-                "  idPrefix,",
-                "  prompt,",
-                "  implementAgents,",
-                "  reviewAgents,",
-                "  validateAgents,",
-                "  feedback,",
-                "  done = false,",
-                "  maxIterations = 3,",
-                "}: ValidationLoopProps) {",
-                '  const promptText = typeof prompt === "string" ? prompt : JSON.stringify(prompt ?? null);',
-                "  return (",
-                '    <Loop id={`${idPrefix}:loop`} until={done} maxIterations={maxIterations} onMaxReached="return-last">',
-                "      <Sequence>",
-                "        <Task id={`${idPrefix}:implement`} output={implementOutputSchema} agent={implementAgents} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>",
-                "          <ImplementPrompt prompt={feedback",
-                "            ? `${promptText}\\n\\n---\\nPREVIOUS ATTEMPT FEEDBACK (fix these issues):\\n${feedback}`",
-                "            : promptText} />",
-                "        </Task>",
-                "        <Task id={`${idPrefix}:validate`} output={validateOutputSchema} agent={validateAgents && validateAgents.length > 0",
-                "          ? validateAgents",
-                "          : implementAgents} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>",
-                "          <ValidatePrompt prompt={promptText} />",
-                "        </Task>",
-                "        <Review idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} />",
-                "      </Sequence>",
-                "    </Loop>",
-                "  );",
-                "}",
-                "",
-            ].join("\n"),
+            contents: "// smithers-source: seeded\n/** @jsxImportSource smithers-orchestrator */\nimport { Sequence, Loop, Task, type AgentLike } from \"smithers-orchestrator\";\nimport { z } from \"zod/v4\";\nimport { Review, ReviewPanel } from \"~/components/Review\";\nimport ImplementPrompt from \"~/prompts/implement.mdx\";\nimport ValidatePrompt from \"~/prompts/validate.mdx\";\n\nexport const implementOutputSchema = z.object({\n  summary: z.string(),\n  filesChanged: z.array(z.string()).default([]),\n  allTestsPassing: z.boolean().default(true),\n});\nexport const validateOutputSchema = z.object({\n  summary: z.string(),\n  allPassed: z.boolean().default(true),\n  failingSummary: z.string().nullable().default(null),\n});\n\nexport type ValidationLoopProps = {\n  idPrefix: string;\n  prompt: unknown;\n  implementAgents: AgentLike[];\n  reviewAgents: AgentLike[];\n  validateAgents?: AgentLike[];\n  /**\n   * When true, the review step is a synthesized PANEL: parallel panelists feed a\n   * moderator that produces one verdict (read it with `reviewGate`, and register\n   * `reviewSynthesis: reviewSynthesisSchema` in createSmithers). Default is the\n   * plain parallel `Review` (per-reviewer verdicts via `ctx.outputs.review`).\n   */\n  synthesizeReview?: boolean;\n  /** Moderator for the synthesized review panel; defaults to the shared synthesizer (usually Codex). Only used when synthesizeReview is true. */\n  reviewModerator?: AgentLike;\n  feedback?: string | null;\n  done?: boolean;\n  maxIterations?: number;\n};\n\nexport function ValidationLoop({\n  idPrefix,\n  prompt,\n  implementAgents,\n  reviewAgents,\n  validateAgents,\n  synthesizeReview = false,\n  reviewModerator,\n  feedback,\n  done = false,\n  maxIterations = 3,\n}: ValidationLoopProps) {\n  const promptText = typeof prompt === \"string\" ? prompt : JSON.stringify(prompt ?? null);\n  return (\n    <Loop id={`${idPrefix}:loop`} until={done} maxIterations={maxIterations} onMaxReached=\"return-last\">\n      <Sequence>\n        <Task id={`${idPrefix}:implement`} output={implementOutputSchema} agent={implementAgents} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>\n          <ImplementPrompt prompt={feedback\n            ? `${promptText}\\n\\n---\\nPREVIOUS ATTEMPT FEEDBACK (fix these issues):\\n${feedback}`\n            : promptText} />\n        </Task>\n        <Task id={`${idPrefix}:validate`} output={validateOutputSchema} agent={validateAgents && validateAgents.length > 0\n          ? validateAgents\n          : implementAgents} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>\n          <ValidatePrompt prompt={promptText} />\n        </Task>\n        {synthesizeReview\n          ? <ReviewPanel idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} moderator={reviewModerator} />\n          : <Review idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} />}\n      </Sequence>\n    </Loop>\n  );\n}\n",
+        },
+        {
+            path: ".smithers/components/roles.ts",
+            contents: "// smithers-source: seeded\n//\n// Central role registry for the plan-implement family. Defines WHO plays each\n// role so the workflows stay declarative:\n//\n//   - implementer  — the heavy implementation tier. Prefers Gemini when its CLI\n//                    is installed, otherwise the latest Sonnet, with Codex as a\n//                    final fallback. This is where \"use Sonnet more often\" lives.\n//   - panelists    — the model-diverse pair for the PLAN and REVIEW panels\n//                    (Claude + Codex by default, or whatever 2 CLIs are present).\n//                    Deliberately NOT Sonnet: planning and reviewing stay on the\n//                    stronger Opus/Codex tier.\n//   - synthesizer  — the panel MODERATOR that merges panelist outputs. Usually\n//                    Codex.\n//\n// These are self-contained agent instances (not the generated `../agents`\n// providers) so the file is robust regardless of which accounts a given user\n// has registered.\nimport { spawnSync } from \"node:child_process\";\nimport {\n  type AgentLike,\n  AntigravityAgent,\n  ClaudeCodeAgent,\n  CodexAgent,\n} from \"smithers-orchestrator\";\n\n// The implementer model. Sonnet is the strong default for the implementation\n// tier. NOTE (verified 2026-06-30 against the live Anthropic Models API): there\n// is NO `claude-sonnet-5` yet — every candidate id 404s; the newest real Sonnet\n// is `claude-sonnet-4-6`. When a genuine Sonnet 5 ships, set\n// SMITHERS_IMPLEMENTER_MODEL (or flip this default) and nothing else changes.\nexport const IMPLEMENTER_MODEL =\n  process.env.SMITHERS_IMPLEMENTER_MODEL?.trim() || \"claude-sonnet-4-6\";\n\n// Gemini is reached through Antigravity's `agy` CLI (the legacy `gemini` CLI is\n// sunset in Smithers and only throws), so we probe for `agy`, not `gemini`.\nexport const GEMINI_MODEL =\n  process.env.SMITHERS_GEMINI_MODEL?.trim() || \"gemini-3.1-pro-preview\";\n\nfunction commandExists(command: string): boolean {\n  const probe =\n    process.platform === \"win32\"\n      ? spawnSync(\"where\", [command], { stdio: \"ignore\" })\n      : spawnSync(\"which\", [command], { stdio: \"ignore\" });\n  return probe.status === 0;\n}\n\nconst hasGemini = commandExists(\"agy\");\nconst hasCodex = commandExists(\"codex\");\nconst hasClaude = commandExists(\"claude\");\n\nconst sonnet = new ClaudeCodeAgent({ model: IMPLEMENTER_MODEL });\nconst opus = new ClaudeCodeAgent({ model: \"claude-opus-4-8\" });\nconst codex = new CodexAgent({ model: \"gpt-5.5\", skipGitRepoCheck: true });\nconst gemini = new AntigravityAgent({ model: GEMINI_MODEL });\n\n// Implementer failover chain: prefer Gemini if available, then Sonnet, then\n// Codex. Sonnet always stays in the chain as the guaranteed strong fallback so\n// the implementer works even with no Gemini/Codex CLI installed.\nexport const implementer: AgentLike[] = [\n  ...(hasGemini ? [gemini] : []),\n  sonnet,\n  ...(hasCodex ? [codex] : []),\n];\n\n// Plan & review panel: a model-diverse pair. Claude (Opus) + Codex by default,\n// or whatever 2 CLIs are installed (never Sonnet). Falls back to the static\n// Opus+Codex pair when fewer than 2 CLIs are detected (e.g. CI without agent\n// CLIs) so panel structure and graph-rendering never break.\nconst detectedPanel: AgentLike[] = [\n  ...(hasClaude ? [opus] : []),\n  ...(hasCodex ? [codex] : []),\n  ...(hasGemini ? [gemini] : []),\n];\nexport const panelists: AgentLike[] =\n  detectedPanel.length >= 2 ? detectedPanel.slice(0, 2) : [opus, codex];\n\n// The panel moderator / synthesizer — usually Codex.\nexport const synthesizer: AgentLike = hasCodex ? codex : opus;\n",
+        },
+        {
+            path: ".smithers/components/PlanPanel.tsx",
+            contents: "// smithers-source: seeded\n/** @jsxImportSource smithers-orchestrator */\nimport { Panel, type AgentLike } from \"smithers-orchestrator\";\nimport { z } from \"zod/v4\";\nimport { panelists as defaultPanelists, synthesizer as defaultSynthesizer } from \"./roles\";\nimport PlanPrompt from \"../prompts/plan.mdx\";\n\n// One panelist's plan. Loose so panelists may include extra grounded detail.\nexport const planOutputSchema = z.looseObject({\n  summary: z.string(),\n  steps: z.array(z.string()).default([]),\n});\n\n// The MODERATOR's synthesized plan — one consolidated plan merged from every\n// panelist. MUST be a distinct schema object from planOutputSchema so it\n// resolves to its own output channel (channels are keyed by schema identity).\nexport const planSynthesisSchema = z.looseObject({\n  summary: z.string(),\n  steps: z.array(z.string()).default([]),\n});\n\ntype PlanPanelProps = {\n  idPrefix: string;\n  prompt: unknown;\n  /** Panelist planners (run in parallel); defaults to the shared model-diverse pair. */\n  panelists?: AgentLike[];\n  /** The moderator that synthesizes the plans into one; defaults to the shared synthesizer (usually Codex). */\n  moderator?: AgentLike;\n  /** Per-panelist plan schema; defaults to planOutputSchema. Pass a workflow's own schema to preserve extra fields (e.g. risks). */\n  panelistOutput?: z.ZodObject<any>;\n  /** Synthesized plan schema; defaults to planSynthesisSchema. Must be a DISTINCT object from panelistOutput. */\n  synthesisOutput?: z.ZodObject<any>;\n};\n\n/**\n * <PlanPanel> — a model-diverse planning PANEL that gets SYNTHESIZED. Each\n * panelist plans in parallel (writing the panelist schema), then the moderator\n * merges them into a single synthesized plan at the node `${idPrefix}-moderator`.\n * Read the merged plan from the `planSynthesis` channel at that node id.\n *\n * The workflow must register both the panelist plan schema and\n * `planSynthesis: <synthesis schema>` (moderator) in createSmithers.\n */\nexport function PlanPanel({\n  idPrefix,\n  prompt,\n  panelists = defaultPanelists,\n  moderator = defaultSynthesizer,\n  panelistOutput = planOutputSchema,\n  synthesisOutput = planSynthesisSchema,\n}: PlanPanelProps) {\n  const promptText = typeof prompt === \"string\" ? prompt : JSON.stringify(prompt ?? null);\n  return (\n    <Panel\n      id={idPrefix}\n      panelists={panelists}\n      moderator={moderator}\n      panelistOutput={panelistOutput}\n      moderatorOutput={synthesisOutput}\n      strategy=\"synthesize\"\n    >\n      <PlanPrompt prompt={promptText} />\n    </Panel>\n  );\n}\n",
         },
         {
             path: ".smithers/components/CommandProbe.tsx",
@@ -2958,7 +2860,8 @@ function renderWorkflows() {
         renderWorkflowFile("implement", "Implement", [
             ...sharedImports,
             'import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";',
-            'import { reviewOutputSchema } from "../components/Review";',
+            'import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";',
+            'import { implementer, panelists } from "../components/roles";',
             "",
             "// The run's printed output: what the implementation changed and whether it",
             "// validated + was approved, so a finished run reports the result.",
@@ -2978,6 +2881,7 @@ function renderWorkflows() {
             "  implement: implementOutputSchema,",
             "  validate: validateOutputSchema,",
             "  review: reviewOutputSchema,",
+            "  reviewSynthesis: reviewSynthesisSchema,",
             "  output: outputSchema,",
             "});",
             "",
@@ -2989,7 +2893,8 @@ function renderWorkflows() {
             "  // done = false until validate has actually run AND passed, AND at least one reviewer approved",
             "  const hasValidated = validate !== undefined;",
             "  const validationPassed = hasValidated && validate.allPassed !== false;",
-            "  const anyApproved = reviews.length > 0 && reviews.some((r: any) => r.approved === true);",
+            '  const gate = reviewGate(ctx, "impl:review-moderator");',
+            "  const anyApproved = gate.approved;",
             "  const done = validationPassed && anyApproved;",
             "",
             "  const feedbackParts: string[] = [];",
@@ -3014,9 +2919,10 @@ function renderWorkflows() {
             "        <ValidationLoop",
             '          idPrefix="impl"',
             "          prompt={ctx.input.prompt}",
-            "          implementAgents={agents.smartTool}",
+            "          implementAgents={implementer}",
             "          validateAgents={agents.cheapFast}",
-            "          reviewAgents={agents.smart}",
+            "          reviewAgents={panelists}",
+            "          synthesizeReview",
             "          feedback={feedback}",
             "          done={done}",
             "          maxIterations={3}",
@@ -3039,18 +2945,14 @@ function renderWorkflows() {
         renderWorkflowFile("research-plan-implement", "Research Plan Implement", [
             ...sharedImports,
             'import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../components/ValidationLoop";',
-            'import { reviewOutputSchema } from "../components/Review";',
+            'import { reviewOutputSchema, reviewSynthesisSchema, reviewGate } from "../components/Review";',
+            'import { implementer, panelists } from "../components/roles";',
             'import ResearchPrompt from "../prompts/research.mdx";',
-            'import PlanPrompt from "../prompts/plan.mdx";',
+            'import { PlanPanel, planOutputSchema, planSynthesisSchema } from "../components/PlanPanel";',
             "",
             "const researchOutputSchema = z.looseObject({",
             "  summary: z.string(),",
             "  keyFindings: z.array(z.string()).default([]),",
-            "});",
-            "",
-            "const planOutputSchema = z.looseObject({",
-            "  summary: z.string(),",
-            "  steps: z.array(z.string()).default([]),",
             "});",
             "",
             "// The run's printed output: research + plan size, files changed, validated, approved.",
@@ -3071,9 +2973,11 @@ function renderWorkflows() {
             "  input: inputSchema,",
             "  research: researchOutputSchema,",
             "  plan: planOutputSchema,",
+            "  planSynthesis: planSynthesisSchema,",
             "  implement: implementOutputSchema,",
             "  validate: validateOutputSchema,",
             "  review: reviewOutputSchema,",
+            "  reviewSynthesis: reviewSynthesisSchema,",
             "  output: outputSchema,",
             "});",
             "",
@@ -3082,7 +2986,7 @@ function renderWorkflows() {
             "  const tdd = ctx.input.tdd;",
             "",
             '  const research = ctx.outputMaybe("research", { nodeId: "research" });',
-            '  const plan = ctx.outputMaybe("plan", { nodeId: "plan" });',
+            '  const plan = ctx.outputMaybe("planSynthesis", { nodeId: "plan-moderator" });',
             "  const impl = ctx.outputs.implement?.at(-1);",
             "",
             "  // Enrich plan prompt with research findings",
@@ -3111,7 +3015,8 @@ function renderWorkflows() {
             "",
             "  const hasValidated = validate !== undefined;",
             "  const validationPassed = hasValidated && validate.allPassed !== false;",
-            "  const anyApproved = reviews.length > 0 && reviews.some((r: any) => r.approved === true);",
+            '  const gate = reviewGate(ctx, "impl:review-moderator");',
+            "  const anyApproved = gate.approved;",
             "  const done = validationPassed && anyApproved;",
             "",
             "  const feedbackParts: string[] = [];",
@@ -3136,15 +3041,14 @@ function renderWorkflows() {
             '        <Task id="research" output={researchOutputSchema} agent={agents.smartTool}>',
             "          <ResearchPrompt prompt={prompt} />",
             "        </Task>",
-            '        <Task id="plan" output={planOutputSchema} agent={agents.smart}>',
-            "          <PlanPrompt prompt={planPrompt} />",
-            "        </Task>",
+            '        <PlanPanel idPrefix="plan" prompt={planPrompt} />',
             "        <ValidationLoop",
             '          idPrefix="impl"',
             "          prompt={implementPrompt}",
-            "          implementAgents={agents.smartTool}",
+            "          implementAgents={implementer}",
             "          validateAgents={agents.cheapFast}",
-            "          reviewAgents={agents.smart}",
+            "          reviewAgents={panelists}",
+            "          synthesizeReview",
             "          feedback={feedback}",
             "          done={done}",
             "          maxIterations={3}",
@@ -3167,7 +3071,8 @@ function renderWorkflows() {
         ]),
         renderWorkflowFile("review", "Review", [
             ...sharedImports,
-            'import { Review, reviewOutputSchema } from "../components/Review";',
+            'import { ReviewPanel, reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";',
+            'import { panelists } from "../components/roles";',
             "",
             "// The run's printed output: a deterministic verdict aggregated across every",
             "// reviewer, so a finished run reports the outcome instead of `output: null`.",
@@ -3185,27 +3090,29 @@ function renderWorkflows() {
             "const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({",
             "  input: inputSchema,",
             "  review: reviewOutputSchema,",
+            "  reviewSynthesis: reviewSynthesisSchema,",
             "  output: outputSchema,",
             "});",
             "",
             "export default smithers((ctx) => {",
             "  const reviews = ctx.outputs.review ?? [];",
-            "  const issues = reviews.flatMap((r: any) => r.issues ?? []);",
+            '  const verdict = ctx.outputMaybe("reviewSynthesis", { nodeId: "review-moderator" });',
+            "  const verdictIssues = (verdict?.issues ?? []) as any[];",
             "  return (",
             '    <Workflow name="review">',
             "      <Sequence>",
-            "        <Review",
+            "        <ReviewPanel",
             '          idPrefix="review"',
             "          prompt={ctx.input.prompt}",
-            "          agents={agents.smart}",
+            "          agents={panelists}",
             "        />",
-            "        {reviews.length > 0 ? (",
+            "        {verdict ? (",
             '          <Task id="output" output={outputs.output}>',
             "            {() => ({",
             "              reviewers: reviews.length,",
-            "              approved: reviews.every((r: any) => r.approved === true),",
-            "              totalIssues: issues.length,",
-            "              criticalIssues: issues.filter((i: any) => i.severity === \"critical\").length,",
+            "              approved: verdict?.approved === true,",
+            "              totalIssues: verdictIssues.length,",
+            "              criticalIssues: verdictIssues.filter((i: any) => i.severity === \"critical\").length,",
             "            })}",
             "          </Task>",
             "        ) : null}",
@@ -3216,12 +3123,7 @@ function renderWorkflows() {
         ]),
         renderWorkflowFile("plan", "Plan", [
             ...sharedImports,
-            'import PlanPrompt from "../prompts/plan.mdx";',
-            "",
-            "const planOutputSchema = z.looseObject({",
-            "  summary: z.string(),",
-            "  steps: z.array(z.string()).default([]),",
-            "});",
+            'import { PlanPanel, planOutputSchema, planSynthesisSchema } from "../components/PlanPanel";',
             "",
             "// The run's printed output: a deterministic summary of the plan produced,",
             "// so a finished run reports what it did instead of `output: null`.",
@@ -3238,17 +3140,16 @@ function renderWorkflows() {
             "const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({",
             "  input: inputSchema,",
             "  plan: planOutputSchema,",
+            "  planSynthesis: planSynthesisSchema,",
             "  output: outputSchema,",
             "});",
             "",
             "export default smithers((ctx) => {",
-            '  const plan = ctx.outputMaybe("plan", { nodeId: "plan" });',
+            '  const plan = ctx.outputMaybe("planSynthesis", { nodeId: "plan-moderator" });',
             "  return (",
             '    <Workflow name="plan">',
             "      <Sequence>",
-            '        <Task id="plan" output={planOutputSchema} agent={agents.smart}>',
-            "          <PlanPrompt prompt={ctx.input.prompt} />",
-            "        </Task>",
+            '        <PlanPanel idPrefix="plan" prompt={ctx.input.prompt} />',
             "        {plan ? (",
             '          <Task id="output" output={outputs.output}>',
             "            {() => ({ summary: plan.summary, steps: plan.steps ?? [], stepCount: (plan.steps ?? []).length })}",
@@ -4566,6 +4467,11 @@ export function initWorkflowPack(options = {}) {
     const writtenFiles = [];
     const skippedFiles = [];
     const preservedPaths = [];
+    // Pack files that exist on disk but differ from the latest bundled template
+    // (non-preserve files skipped on a default, non-force run). The interactive
+    // `init` ceremony offers these for selective update; other callers just see
+    // them in the result. Enriched with shared-component impact for the warning.
+    const changedFiles = [];
     ensureDir(rootDir);
     ensureDir(resolve(rootDir, "agents"));
     /** @type {TemplateFile[]} */
@@ -4589,6 +4495,7 @@ export function initWorkflowPack(options = {}) {
         }
         templateFiles = renderTemplateFiles(versions, env, projectRoot);
     }
+    const importerMap = buildComponentImporterMap(templateFiles);
     for (const file of templateFiles) {
         const absolutePath = resolve(rootDir, file.path.replace(/^\.smithers\//, ""));
         ensureParent(absolutePath);
@@ -4597,6 +4504,28 @@ export function initWorkflowPack(options = {}) {
             if (file.preserveExisting) {
                 if (options.reporter) options.reporter.onSkip?.(file.path);
                 else process.stderr.write(`[smithers:init] ${file.path} skipped: already exists\n`);
+            }
+            else {
+                // A shippable (non-preserve) pack file that already exists and is
+                // being skipped on this run. If its content drifted from the
+                // bundled template, record it as an updatable candidate.
+                let current;
+                try {
+                    current = readFileSync(absolutePath, "utf8");
+                }
+                catch {
+                    current = undefined;
+                }
+                if (current !== undefined && current !== file.contents) {
+                    const component = componentBaseName(file.path);
+                    changedFiles.push({
+                        path: file.path,
+                        absolutePath,
+                        contents: file.contents,
+                        isComponent: component !== null,
+                        importedBy: component ? (importerMap.get(component) ?? []) : [],
+                    });
+                }
             }
             continue;
         }
@@ -4634,10 +4563,29 @@ export function initWorkflowPack(options = {}) {
         writtenFiles,
         skippedFiles,
         preservedPaths,
+        changedFiles,
         install,
         ...(skill ? { skill } : {}),
         ...(agentDocs ? { agentDocs } : {}),
     };
+}
+
+/**
+ * Write the selected changed pack files to disk. Used by the interactive `init`
+ * ceremony after the user picks which drifted pack files to update; each entry
+ * is a {@link initWorkflowPack} `changedFiles` item.
+ *
+ * @param {Array<{ absolutePath: string; contents: string }>} entries
+ * @returns {string[]} the absolute paths written
+ */
+export function applyWorkflowPackUpdates(entries) {
+    const written = [];
+    for (const entry of entries) {
+        ensureParent(entry.absolutePath);
+        writeFileSync(entry.absolutePath, entry.contents, "utf8");
+        written.push(entry.absolutePath);
+    }
+    return written;
 }
 /**
  * Install `.smithers/` workspace deps so the first workflow run isn't blocked

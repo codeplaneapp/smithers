@@ -37,6 +37,7 @@ function writeWorkflowPackTypecheckHarness(repo) {
         "  export const Task: any;",
         "  export const Sequence: any;",
         "  export const Parallel: any;",
+        "  export const Panel: any;",
         "  export const Ralph: any;",
         "  export const Branch: any;",
         "  export const Loop: any;",
@@ -439,14 +440,18 @@ test("seeded workflows reuse the shared review substrate", () => {
     expect(implementSource).toContain('../components/Review');
     expect(researchPlanImplementSource).toContain('../components/ValidationLoop');
     expect(coverageSource).toContain('../components/ValidationLoop');
-    for (const [workflowName, reviewPrefix] of [
-        ["implement", "impl:review"],
-        ["research-plan-implement", "impl:review"],
-        ["improve-test-coverage", "improve-test-coverage:review"],
+    // Every seeded workflow drives review through the shared ValidationLoop
+    // substrate. The plan-implement family opts into the synthesized review
+    // PANEL (parallel panelists → one moderator verdict node); other
+    // ValidationLoop users keep the plain parallel review (per-reviewer nodes).
+    for (const { workflow, synthesized, reviewNode } of [
+        { workflow: "implement", synthesized: true, reviewNode: "impl:review" },
+        { workflow: "research-plan-implement", synthesized: true, reviewNode: "impl:review" },
+        { workflow: "improve-test-coverage", synthesized: false, reviewNode: "improve-test-coverage:review" },
     ]) {
         const graph = runSmithers([
             "graph",
-            `.smithers/workflows/${workflowName}.tsx`,
+            `.smithers/workflows/${workflow}.tsx`,
             "--input",
             JSON.stringify({ prompt: "hello" }),
         ], {
@@ -454,6 +459,12 @@ test("seeded workflows reuse the shared review substrate", () => {
             format: "json",
         });
         expect(graph.exitCode).toBe(0);
-        expect(JSON.stringify(graph.json)).toContain(`${reviewPrefix}:0`);
+        const json = JSON.stringify(graph.json);
+        if (synthesized) {
+            expect(json).toContain(`${reviewNode}-panelist-0`);
+            expect(json).toContain(`${reviewNode}-moderator`);
+        } else {
+            expect(json).toContain(`${reviewNode}:0`);
+        }
     }
 }, 60_000);
