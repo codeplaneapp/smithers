@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
+import readline from "node:readline";
 import { isCancel } from "@clack/core";
 import { fuzzyFilter, fuzzyScore, fuzzySelect } from "../src/fuzzy-select.js";
 
@@ -127,6 +128,9 @@ class FakeInput extends EventEmitter {
         super();
         this.isTTY = true;
         this.readable = true;
+        this._line = "";
+        this._cursor = 0;
+        this._rl = undefined;
     }
     setRawMode() {}
     setEncoding() {}
@@ -145,9 +149,41 @@ class FakeInput extends EventEmitter {
     on(event, cb) {
         return super.on(event, cb);
     }
-    /** Drive the prompt's onKeypress directly, mirroring readline keypress events. */
-    keypress(seq, key) {
-        this.emit("keypress", seq, key);
+
+    attachReadline(rl) {
+        this._rl = rl;
+        this._syncReadline();
+    }
+
+    _syncReadline() {
+        if (!this._rl) return;
+        this._rl.line = this._line;
+        this._rl.cursor = this._cursor;
+    }
+
+    _insert(text) {
+        this._line = `${this._line.slice(0, this._cursor)}${text}${this._line.slice(this._cursor)}`;
+        this._cursor += text.length;
+    }
+
+    _deleteBackward() {
+        if (this._cursor === 0) return;
+        this._line = `${this._line.slice(0, this._cursor - 1)}${this._line.slice(this._cursor)}`;
+        this._cursor -= 1;
+    }
+
+    /** Keep readline's editable line in sync before the prompt handles a key. */
+    keypress(seq, key = {}) {
+        if (key.name === "backspace") {
+            this._deleteBackward();
+        } else if (typeof seq === "string" && seq.length === 1 && seq >= " " && seq !== "\x7f") {
+            this._insert(seq);
+        }
+        this._syncReadline();
+
+        const eventSeq = key.name === "return" ? seq : undefined;
+        const eventKey = seq === "\x03" ? { ...key, sequence: "\x03" } : key;
+        this.emit("keypress", eventSeq, eventKey);
     }
 }
 
@@ -169,13 +205,24 @@ class FakeOutput extends EventEmitter {
 function startPicker(options, extra = {}) {
     const input = new FakeInput();
     const output = new FakeOutput();
-    const promise = fuzzySelect({
-        message: "Pick one",
-        options,
-        input,
-        output,
-        ...extra,
-    });
+    const createInterface = readline.createInterface;
+    readline.createInterface = function createInterfaceWithFakeInputCapture(opts, ...args) {
+        const rl = createInterface.call(this, opts, ...args);
+        if (opts?.input === input) input.attachReadline(rl);
+        return rl;
+    };
+    let promise;
+    try {
+        promise = fuzzySelect({
+            message: "Pick one",
+            options,
+            input,
+            output,
+            ...extra,
+        });
+    } finally {
+        readline.createInterface = createInterface;
+    }
     return { promise, input, output };
 }
 

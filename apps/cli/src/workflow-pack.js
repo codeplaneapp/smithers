@@ -187,6 +187,7 @@ function renderTsconfig() {
             strict: true,
             skipLibCheck: true,
             baseUrl: ".",
+            ignoreDeprecations: "6.0",
             paths: {
                 "~/*": ["./*"],
             },
