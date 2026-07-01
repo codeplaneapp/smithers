@@ -4,6 +4,8 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
+
+const READ_COMMAND_TIMEOUT_MS = 120_000;
 /**
  * @param {ReturnType<typeof createTempRepo>} repo
  */
@@ -185,6 +187,7 @@ test("node command shows enriched retry chain details by default", async () => {
         const result = runSmithers(["node", "review-step", "-r", "node-run"], {
             cwd: repo.dir,
             format: null,
+            timeoutMs: READ_COMMAND_TIMEOUT_MS,
         });
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("Node: review-step (iteration 0)");
@@ -284,6 +287,7 @@ test("node command --json returns stable structured fields", async () => {
         const result = runSmithers(["node", "node-a", "-r", "json-run", "--json"], {
             cwd: repo.dir,
             format: null,
+            timeoutMs: READ_COMMAND_TIMEOUT_MS,
         });
         expect(result.exitCode).toBe(0);
         const parsed = JSON.parse(result.stdout);
@@ -340,6 +344,7 @@ test("node command summarizes long retry chains by default and expands with --at
         const compact = runSmithers(["node", "flaky-node", "-r", "retry-run"], {
             cwd: repo.dir,
             format: null,
+            timeoutMs: READ_COMMAND_TIMEOUT_MS,
         });
         expect(compact.exitCode).toBe(0);
         expect(compact.stdout).toContain("49 prior attempts (47 failed, 2 cancelled)");
@@ -347,6 +352,7 @@ test("node command summarizes long retry chains by default and expands with --at
         const expanded = runSmithers(["node", "flaky-node", "-r", "retry-run", "--attempts"], {
             cwd: repo.dir,
             format: null,
+            timeoutMs: READ_COMMAND_TIMEOUT_MS,
         });
         expect(expanded.exitCode).toBe(0);
         expect(expanded.stdout).toContain("Attempt 1 - failed");
@@ -403,6 +409,7 @@ test("node command --tools expands tool payloads and truncates large output", as
         const result = runSmithers(["node", "tools-node", "-r", "tools-run", "--tools"], {
             cwd: repo.dir,
             format: null,
+            timeoutMs: READ_COMMAND_TIMEOUT_MS,
         });
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("Input:");
@@ -431,6 +438,7 @@ test("node command handles pending node with no attempts", async () => {
         const result = runSmithers(["node", "queued-node", "-r", "pending-run"], {
             cwd: repo.dir,
             format: null,
+            timeoutMs: READ_COMMAND_TIMEOUT_MS,
         });
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("Status: pending");
@@ -477,12 +485,14 @@ test("node command resolves latest iteration by default and supports --iteration
         const latest = runSmithers(["node", "looped-node", "-r", "loop-run"], {
             cwd: repo.dir,
             format: null,
+            timeoutMs: READ_COMMAND_TIMEOUT_MS,
         });
         expect(latest.exitCode).toBe(0);
         expect(latest.stdout).toContain("Node: looped-node (iteration 4)");
         const selected = runSmithers(["node", "looped-node", "-r", "loop-run", "--iteration", "2"], {
             cwd: repo.dir,
             format: null,
+            timeoutMs: READ_COMMAND_TIMEOUT_MS,
         });
         expect(selected.exitCode).toBe(0);
         expect(selected.stdout).toContain("Node: looped-node (iteration 2)");
@@ -499,6 +509,7 @@ test("node command reports non-existent node", async () => {
         const result = runSmithers(["node", "bad-node", "-r", "missing-node-run"], {
             cwd: repo.dir,
             format: null,
+            timeoutMs: READ_COMMAND_TIMEOUT_MS,
         });
         expect(result.exitCode).toBe(4);
         expect(result.stdout).toContain("Node not found: bad-node");

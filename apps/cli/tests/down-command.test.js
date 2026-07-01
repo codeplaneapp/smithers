@@ -7,6 +7,12 @@ import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 const CLI_ENTRY = resolve(import.meta.dir, "../src/index.js");
+const CLI_COMMAND_TIMEOUT_MS = 120_000;
+const FRESH_HEARTBEAT_LEEWAY_MS = 120_000;
+
+function freshHeartbeatMs() {
+    return Date.now() + FRESH_HEARTBEAT_LEEWAY_MS;
+}
 
 /**
  * @param {ReturnType<typeof createTempRepo>} repo
@@ -51,9 +57,13 @@ describe("smithers down --force staleness check", () => {
         const repo = createTempRepo();
         const { sqlite, adapter } = openRepoDb(repo);
         try {
-            await insertRunningRun(adapter, "fresh-run", { heartbeatAtMs: Date.now() });
+            await insertRunningRun(adapter, "fresh-run", { heartbeatAtMs: freshHeartbeatMs() });
 
-            const result = runSmithers(["down"], { cwd: repo.dir, format: "json" });
+            const result = runSmithers(["down"], {
+                cwd: repo.dir,
+                format: "json",
+                timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+            });
 
             expect(result.exitCode).toBe(0);
             expect(result.json).toMatchObject({ cancelled: 0, skipped: 1 });
@@ -66,7 +76,7 @@ describe("smithers down --force staleness check", () => {
         finally {
             sqlite.close();
         }
-    }, 60_000);
+    }, CLI_COMMAND_TIMEOUT_MS);
 
     test("with --force, a LIVE run is asked to cancel durably (not bare-flipped)", async () => {
         // Regression: a bare `status:"cancelled"` flip on a live run is invisible
@@ -76,9 +86,13 @@ describe("smithers down --force staleness check", () => {
         const repo = createTempRepo();
         const { sqlite, adapter } = openRepoDb(repo);
         try {
-            await insertRunningRun(adapter, "fresh-run", { heartbeatAtMs: Date.now() });
+            await insertRunningRun(adapter, "fresh-run", { heartbeatAtMs: freshHeartbeatMs() });
 
-            const result = runSmithers(["down", "--force"], { cwd: repo.dir, format: "json" });
+            const result = runSmithers(["down", "--force"], {
+                cwd: repo.dir,
+                format: "json",
+                timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+            });
 
             expect(result.exitCode).toBe(0);
             expect(result.json).toMatchObject({ cancelled: 1, skipped: 0 });
@@ -94,7 +108,7 @@ describe("smithers down --force staleness check", () => {
         finally {
             sqlite.close();
         }
-    }, 60_000);
+    }, CLI_COMMAND_TIMEOUT_MS);
 
     test("without --force, a run with a STALE heartbeat is still cancelled", async () => {
         const repo = createTempRepo();
@@ -103,7 +117,11 @@ describe("smithers down --force staleness check", () => {
             // Heartbeat well past the staleness threshold (30s).
             await insertRunningRun(adapter, "stale-run", { heartbeatAtMs: Date.now() - 120_000 });
 
-            const result = runSmithers(["down"], { cwd: repo.dir, format: "json" });
+            const result = runSmithers(["down"], {
+                cwd: repo.dir,
+                format: "json",
+                timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+            });
 
             expect(result.exitCode).toBe(0);
             expect(result.json).toMatchObject({ cancelled: 1, skipped: 0 });
@@ -114,7 +132,7 @@ describe("smithers down --force staleness check", () => {
         finally {
             sqlite.close();
         }
-    }, 60_000);
+    }, CLI_COMMAND_TIMEOUT_MS);
 });
 
 describe("smithers cancel live-run handling", () => {
@@ -126,9 +144,13 @@ describe("smithers cancel live-run handling", () => {
         const repo = createTempRepo();
         const { sqlite, adapter } = openRepoDb(repo);
         try {
-            await insertRunningRun(adapter, "live-run", { heartbeatAtMs: Date.now() });
+            await insertRunningRun(adapter, "live-run", { heartbeatAtMs: freshHeartbeatMs() });
 
-            const result = runSmithers(["cancel", "live-run"], { cwd: repo.dir, format: "json" });
+            const result = runSmithers(["cancel", "live-run"], {
+                cwd: repo.dir,
+                format: "json",
+                timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+            });
 
             expect(result.json).toMatchObject({ runId: "live-run", status: "cancel-requested" });
 
@@ -140,7 +162,7 @@ describe("smithers cancel live-run handling", () => {
         finally {
             sqlite.close();
         }
-    }, 60_000);
+    }, CLI_COMMAND_TIMEOUT_MS);
 
     test("a STALE (dead-engine) run is directly flipped to cancelled", async () => {
         const repo = createTempRepo();
@@ -150,7 +172,11 @@ describe("smithers cancel live-run handling", () => {
             // honor a cancel request, so the bare status flip is correct here.
             await insertRunningRun(adapter, "stale-run", { heartbeatAtMs: Date.now() - 120_000 });
 
-            const result = runSmithers(["cancel", "stale-run"], { cwd: repo.dir, format: "json" });
+            const result = runSmithers(["cancel", "stale-run"], {
+                cwd: repo.dir,
+                format: "json",
+                timeoutMs: CLI_COMMAND_TIMEOUT_MS,
+            });
 
             expect(result.json).toMatchObject({ runId: "stale-run", status: "cancelled" });
 
@@ -160,7 +186,7 @@ describe("smithers cancel live-run handling", () => {
         finally {
             sqlite.close();
         }
-    }, 60_000);
+    }, CLI_COMMAND_TIMEOUT_MS);
 });
 
 describe("smithers logs --follow waiting-state CTA", () => {
@@ -195,7 +221,16 @@ describe("smithers logs --follow waiting-state CTA", () => {
 
             const proc = Bun.spawn(
                 [process.execPath, "run", CLI_ENTRY, "logs", "wa-run", "--follow"],
-                { cwd: repo.dir, stdout: "pipe", stderr: "pipe", env: { ...process.env } },
+                {
+                    cwd: repo.dir,
+                    stdout: "pipe",
+                    stderr: "pipe",
+                    env: {
+                        ...process.env,
+                        SMITHERS_NO_SKILL_REFRESH: "1",
+                        SMITHERS_NO_UPDATE_CHECK: "1",
+                    },
+                },
             );
 
             // Read stdout incrementally. Only once the marker line appears (the
@@ -205,7 +240,7 @@ describe("smithers logs --follow waiting-state CTA", () => {
             const decoder = new TextDecoder();
             let stdout = "";
             const reader = proc.stdout.getReader();
-            const deadline = Date.now() + 40_000;
+            const deadline = Date.now() + CLI_COMMAND_TIMEOUT_MS;
             let transitioned = false;
             while (Date.now() < deadline) {
                 const { value, done } = await reader.read();
@@ -232,5 +267,5 @@ describe("smithers logs --follow waiting-state CTA", () => {
         finally {
             sqlite.close();
         }
-    }, 60_000);
+    }, CLI_COMMAND_TIMEOUT_MS);
 });

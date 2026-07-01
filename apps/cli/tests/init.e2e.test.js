@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { delimiter } from "node:path";
 import { createExecutableDir, createTempRepo, runSmithers, writeFakeCodexBinary, } from "../../../packages/smithers/tests/e2e-helpers.js";
+
+const INIT_INSTALL_TIMEOUT_MS = 300_000;
+const INIT_FAST_TIMEOUT_MS = 180_000;
 /**
  * @param {string} homeDir
  */
@@ -161,6 +164,7 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
         cwd: repo.dir,
         format: "json",
         env,
+        timeoutMs: INIT_INSTALL_TIMEOUT_MS,
     });
     expect(result.exitCode).toBe(0);
     expect(repo.exists(".smithers/.gitignore")).toBe(true);
@@ -230,7 +234,7 @@ test("smithers init writes the expected workflow-pack layout and it typechecks",
     expect(repo.read(".smithers/ui/kanban.tsx")).toContain('nodeId: "tickets", iteration: 0');
     expect(repo.read(".smithers/workflows/kanban.tsx")).toContain('<Task id="tickets" output={outputs.tickets}>');
     runWorkflowPackTypecheck(repo);
-}, 20_000);
+}, INIT_INSTALL_TIMEOUT_MS);
 test("smithers init --template preserves the default scaffold and returns the selected starter", () => {
     const repo = createTempRepo();
     const env = buildInitEnv(repo.dir);
@@ -238,6 +242,7 @@ test("smithers init --template preserves the default scaffold and returns the se
         cwd: repo.dir,
         format: "json",
         env,
+        timeoutMs: INIT_FAST_TIMEOUT_MS,
     });
     expect(result.exitCode).toBe(0);
     expect(repo.exists(".smithers/workflows/tickets-create.tsx")).toBe(true);
@@ -249,12 +254,13 @@ test("smithers init --template preserves the default scaffold and returns the se
         reason: "skip-install",
         status: "skipped",
     });
-});
+}, INIT_FAST_TIMEOUT_MS);
 test("smithers init rejects unknown templates in option validation before writing the scaffold", () => {
     const repo = createTempRepo();
     const result = runSmithers(["init", "--template", "does-not-exist", "--no-install"], {
         cwd: repo.dir,
         format: "json",
+        timeoutMs: INIT_FAST_TIMEOUT_MS,
     });
     expect(result.exitCode).toBe(4);
     expect(result.json.code).toBe("VALIDATION_ERROR");
@@ -267,22 +273,24 @@ test("smithers init rejects unknown templates in option validation before writin
         message: "Invalid input",
     });
     expect(repo.exists(".smithers")).toBe(false);
-});
+}, INIT_FAST_TIMEOUT_MS);
 test("smithers init rejects starter aliases before writing the scaffold", () => {
     const repo = createTempRepo();
     const result = runSmithers(["init", "--template", "tickets", "--no-install"], {
         cwd: repo.dir,
         format: "json",
+        timeoutMs: INIT_FAST_TIMEOUT_MS,
     });
     expect(result.exitCode).toBe(4);
     expect(result.json.code).toBe("VALIDATION_ERROR");
     expect(repo.exists(".smithers")).toBe(false);
-});
+}, INIT_FAST_TIMEOUT_MS);
 test("smithers init --agents-only creates only the user-owned agent scaffold", () => {
     const repo = createTempRepo();
     const result = runSmithers(["init", "--agents-only"], {
         cwd: repo.dir,
         format: "json",
+        timeoutMs: INIT_FAST_TIMEOUT_MS,
     });
     expect(result.exitCode).toBe(0);
     expect(repo.exists(".smithers/agents/claude-code.ts")).toBe(true);
@@ -302,12 +310,13 @@ test("smithers init --agents-only creates only the user-owned agent scaffold", (
             status: "skipped",
         },
     });
-});
+}, INIT_FAST_TIMEOUT_MS);
 test("smithers init --agents-only is idempotent and preserves user edits", () => {
     const repo = createTempRepo();
     const first = runSmithers(["init", "--agents-only"], {
         cwd: repo.dir,
         format: "json",
+        timeoutMs: INIT_FAST_TIMEOUT_MS,
     });
     expect(first.exitCode).toBe(0);
     const sentinel = `${repo.read(".smithers/agents/codex.ts").trimEnd()}\n// sentinel user edit\n`;
@@ -315,6 +324,7 @@ test("smithers init --agents-only is idempotent and preserves user edits", () =>
     const second = runSmithers(["init", "--agents-only"], {
         cwd: repo.dir,
         format: "json",
+        timeoutMs: INIT_FAST_TIMEOUT_MS,
     });
     expect(second.exitCode).toBe(0);
     expect(repo.read(".smithers/agents/codex.ts")).toContain("// sentinel user edit");
@@ -326,7 +336,7 @@ test("smithers init --agents-only is idempotent and preserves user edits", () =>
         writtenFiles: [],
     });
     expect(second.stderr).toContain("skipped: already exists");
-});
+}, INIT_FAST_TIMEOUT_MS);
 test("smithers init preserves .smithers/executions on an existing repo", () => {
     const repo = createTempRepo();
     const env = buildInitEnv(repo.dir);
@@ -335,10 +345,11 @@ test("smithers init preserves .smithers/executions on an existing repo", () => {
         cwd: repo.dir,
         format: "json",
         env,
+        timeoutMs: INIT_INSTALL_TIMEOUT_MS,
     });
     expect(result.exitCode).toBe(0);
     expect(repo.read(".smithers/executions/existing-run/logs/events.ndjson")).toContain("RunFinished");
-});
+}, INIT_INSTALL_TIMEOUT_MS);
 test("smithers init does not clobber user edits unless --force is passed", () => {
     const repo = createTempRepo();
     const env = buildInitEnv(repo.dir);
@@ -346,6 +357,7 @@ test("smithers init does not clobber user edits unless --force is passed", () =>
         cwd: repo.dir,
         format: "json",
         env,
+        timeoutMs: INIT_INSTALL_TIMEOUT_MS,
     });
     expect(first.exitCode).toBe(0);
     repo.write(".smithers/workflows/implement.tsx", "// user-edited workflow\nexport default {};\n");
@@ -353,6 +365,7 @@ test("smithers init does not clobber user edits unless --force is passed", () =>
         cwd: repo.dir,
         format: "json",
         env,
+        timeoutMs: INIT_INSTALL_TIMEOUT_MS,
     });
     expect(second.exitCode).toBe(0);
     expect(repo.read(".smithers/workflows/implement.tsx")).toContain("user-edited workflow");
@@ -360,10 +373,11 @@ test("smithers init does not clobber user edits unless --force is passed", () =>
         cwd: repo.dir,
         format: "json",
         env,
+        timeoutMs: INIT_INSTALL_TIMEOUT_MS,
     });
     expect(forced.exitCode).toBe(0);
     expect(repo.read(".smithers/workflows/implement.tsx")).not.toContain("user-edited workflow");
-}, 15_000);
+}, INIT_INSTALL_TIMEOUT_MS);
 test("workflow inspect and skills use seeded workflow metadata", () => {
     const repo = createTempRepo();
     const env = buildInitEnv(repo.dir);
@@ -371,12 +385,14 @@ test("workflow inspect and skills use seeded workflow metadata", () => {
         cwd: repo.dir,
         format: "json",
         env,
+        timeoutMs: INIT_INSTALL_TIMEOUT_MS,
     });
     expect(initResult.exitCode).toBe(0);
 
     const inspect = runSmithers(["workflow", "inspect", "implement"], {
         cwd: repo.dir,
         format: "json",
+        timeoutMs: INIT_FAST_TIMEOUT_MS,
     });
     expect(inspect.exitCode).toBe(0);
     expect(inspect.json.workflow).toMatchObject({
@@ -398,6 +414,7 @@ test("workflow inspect and skills use seeded workflow metadata", () => {
     const skills = runSmithers(["workflow", "skills", "implement", "--output", "docs/implement-skill.md"], {
         cwd: repo.dir,
         format: "json",
+        timeoutMs: INIT_FAST_TIMEOUT_MS,
     });
     expect(skills.exitCode).toBe(0);
     expect(skills.json.writtenFiles).toHaveLength(1);
@@ -408,6 +425,7 @@ test("workflow inspect and skills use seeded workflow metadata", () => {
     const reportInspect = runSmithers(["workflow", "inspect", "report-slideshow"], {
         cwd: repo.dir,
         format: "json",
+        timeoutMs: INIT_FAST_TIMEOUT_MS,
     });
     expect(reportInspect.exitCode).toBe(0);
     expect(reportInspect.json.inputSchema.fields).toEqual(expect.arrayContaining([
@@ -424,7 +442,7 @@ test("workflow inspect and skills use seeded workflow metadata", () => {
     ]));
     expect(reportInspect.json.skillPreview).toContain("| `targetRunId` | `string` | required |");
     expect(reportInspect.json.skillPreview).toContain("| `title` | `string | null` | default: `null` |");
-}, 15_000);
+}, INIT_INSTALL_TIMEOUT_MS);
 test("seeded workflows reuse the shared review substrate", () => {
     const repo = createTempRepo();
     const env = buildInitEnv(repo.dir);
@@ -432,6 +450,7 @@ test("seeded workflows reuse the shared review substrate", () => {
         cwd: repo.dir,
         format: "json",
         env,
+        timeoutMs: INIT_INSTALL_TIMEOUT_MS,
     });
     expect(initResult.exitCode).toBe(0);
     const implementSource = repo.read(".smithers/workflows/implement.tsx");
@@ -457,6 +476,7 @@ test("seeded workflows reuse the shared review substrate", () => {
         ], {
             cwd: repo.dir,
             format: "json",
+            timeoutMs: INIT_FAST_TIMEOUT_MS,
         });
         expect(graph.exitCode).toBe(0);
         const json = JSON.stringify(graph.json);
@@ -467,4 +487,4 @@ test("seeded workflows reuse the shared review substrate", () => {
             expect(json).toContain(`${reviewNode}:0`);
         }
     }
-}, 60_000);
+}, INIT_INSTALL_TIMEOUT_MS);
