@@ -6,10 +6,14 @@
 
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { loadWorkflowsFromDir } from "../src/conventions/loader.js";
+
+// Derive the package root from this test file's location: tests/../ = package root.
+const packageRoot = resolve(fileURLToPath(import.meta.url), "../..");
 
 // ---------------------------------------------------------------------------
 // Node.js resolution test
@@ -20,18 +24,18 @@ describe("conventions subpath export — plain node resolution", () => {
     // Spawn a plain `node` process — this exercises the `./conventions` export map
     // entry which points to `./src/conventions/index.js`. If only `.ts` exists,
     // node cannot load it and exits non-zero.
-    const script = `
-import('@smithers-orchestrator/agent-eliza/conventions').then(m => {
-  if (typeof m.defineWorkflow !== 'function') {
-    console.error('defineWorkflow is not a function:', typeof m.defineWorkflow);
-    process.exit(1);
-  }
-  console.log('ok');
-}).catch(err => {
-  console.error(err.message);
-  process.exit(1);
-});
-`;
+    const script = [
+      "import('@smithers-orchestrator/agent-eliza/conventions').then(m => {",
+      "  if (typeof m.defineWorkflow !== 'function') {",
+      "    console.error('defineWorkflow is not a function:', typeof m.defineWorkflow);",
+      "    process.exit(1);",
+      "  }",
+      "  console.log('ok');",
+      "}).catch(err => {",
+      "  console.error(err.message);",
+      "  process.exit(1);",
+      "});",
+    ].join("\n");
     let stdout = "";
     try {
       // Run from the package root so Node picks up the package exports map.
@@ -42,7 +46,7 @@ import('@smithers-orchestrator/agent-eliza/conventions').then(m => {
         ["--input-type=module"],
         {
           input: script,
-          cwd: "/Users/williamcory/smithers4/packages/agent-eliza",
+          cwd: packageRoot,
           encoding: "utf8",
           timeout: 15_000,
         }
@@ -58,13 +62,46 @@ import('@smithers-orchestrator/agent-eliza/conventions').then(m => {
 });
 
 // ---------------------------------------------------------------------------
-// Block-comment frontmatter loader test
+// Block-comment frontmatter loader tests
 // ---------------------------------------------------------------------------
 
 describe("loadWorkflowsFromDir — block-comment frontmatter in executable files", () => {
+  test("loads a .tsx workflow file with /* --- yaml --- */ leading comment block and parses metadata from frontmatter", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-tsx-fm-test-"));
+    // A .tsx workflow file where name/description/tags are ONLY in the block-comment
+    // frontmatter — the default export deliberately omits them so we can verify
+    // that metadata comes from frontmatter parsing, not from the export object.
+    writeFileSync(
+      join(dir, "tsx-workflow.tsx"),
+      `/* ---
+name: tsx-workflow
+description: TSX workflow loaded via block-comment frontmatter
+tags:
+  - tsx
+  - test
+--- */
+export default { workflow: { build: () => null, opts: {} } };
+`,
+      "utf8"
+    );
+
+    const result = await loadWorkflowsFromDir({ dir, source: "test" });
+    const errors = result.diagnostics.filter((d) => d.type === "error");
+    expect(errors).toHaveLength(0);
+    expect(result.workflows).toHaveLength(1);
+
+    const wf = result.workflows[0]!;
+    // Default export has no workflow property in smithers sense but has a .workflow key,
+    // so it IS a recognized workflow object. Name/description/tags must come from frontmatter.
+    expect(wf.name).toBe("tsx-workflow");
+    expect(wf.description).toBe("TSX workflow loaded via block-comment frontmatter");
+    expect(wf.tags).toEqual(["tsx", "test"]);
+    // The default export itself (the module object) is present
+    expect(wf.workflow).toBeDefined();
+  });
+
   test("loads a .js workflow file with /* --- yaml --- */ leading comment block", async () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-comment-fm-test-"));
-    // A valid .js workflow file with block-comment frontmatter.
     writeFileSync(
       join(dir, "my-workflow.js"),
       `/* ---
@@ -86,11 +123,10 @@ export default { workflow: { build: () => null, opts: {} }, name: "my-workflow",
     const wf = result.workflows[0]!;
     expect(wf.name).toBe("my-workflow");
     expect(wf.description).toBe("A workflow with block-comment frontmatter");
-    // Tags parsed from block-comment frontmatter
     expect(wf.tags).toEqual(["demo"]);
   });
 
-  test("block-comment frontmatter tags override nothing when export already has name", async () => {
+  test("block-comment frontmatter tags are parsed when export has name", async () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-comment-fm2-test-"));
     writeFileSync(
       join(dir, "tagged.js"),
