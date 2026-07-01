@@ -1,8 +1,6 @@
 /** @jsxImportSource react */
-// n8n-style workflow graph, ported from the multi app
-// (src/askme/WorkflowGraph.tsx + src/askme/workflowFlow.ts). ReactFlow + dagre
-// LR layout, a custom node with a kind-colored left stripe, kicker, title, and
-// a monospace output line. Used to render the DESIGNED workflow's task graph.
+// n8n-style workflow graph, ported from multi's workflow graph idiom. ReactFlow
+// renders the canvas; dagre computes a left-to-right layout.
 import { memo, useMemo } from "react";
 import {
   Background,
@@ -81,7 +79,6 @@ const nodeTypes = { smithersTask: memo(SmithersTaskNode) };
 const FIT_VIEW_OPTIONS = { padding: 0.18 };
 const PRO_OPTIONS = { hideAttribution: true };
 
-/** dagre left-to-right layout (ported from multi workflowFlow.ts). */
 export function workflowToFlow(spec: WorkflowSpecNode[]): {
   nodes: SmithersFlowNode[];
   edges: Edge[];
@@ -91,8 +88,11 @@ export function workflowToFlow(spec: WorkflowSpecNode[]): {
   graph.setGraph({ rankdir: "LR", ranksep: 130, nodesep: 90, marginx: 32, marginy: 32 });
 
   for (const node of spec) graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
-  for (const node of spec)
-    for (const dep of node.dependsOn) if (spec.some((n) => n.id === dep)) graph.setEdge(dep, node.id);
+  for (const node of spec) {
+    for (const dep of node.dependsOn) {
+      if (spec.some((candidate) => candidate.id === dep)) graph.setEdge(dep, node.id);
+    }
+  }
 
   dagre.layout(graph);
 
@@ -112,7 +112,7 @@ export function workflowToFlow(spec: WorkflowSpecNode[]): {
   });
   const edges: Edge[] = spec.flatMap((node) =>
     node.dependsOn
-      .filter((dep) => spec.some((n) => n.id === dep))
+      .filter((dep) => spec.some((candidate) => candidate.id === dep))
       .map((dep) => ({
         id: `${dep}->${node.id}`,
         source: dep,
@@ -123,13 +123,7 @@ export function workflowToFlow(spec: WorkflowSpecNode[]): {
   return { nodes, edges };
 }
 
-function WorkflowGraphImpl({
-  spec,
-  onNodeClick,
-}: {
-  spec: WorkflowSpecNode[];
-  onNodeClick?: (id: string) => void;
-}) {
+function WorkflowGraphImpl({ spec }: { spec: WorkflowSpecNode[] }) {
   const { nodes, edges } = useMemo(() => workflowToFlow(spec), [spec]);
   return (
     <ReactFlow
@@ -143,7 +137,6 @@ function WorkflowGraphImpl({
       nodesDraggable={false}
       nodesConnectable={false}
       proOptions={PRO_OPTIONS}
-      onNodeClick={onNodeClick ? (_event, node) => onNodeClick(node.id) : undefined}
     >
       <Background gap={26} color="var(--graph-dots)" />
       <Controls showInteractive={false} />

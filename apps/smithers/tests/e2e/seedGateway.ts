@@ -43,14 +43,19 @@ for (const key of ["e2e-task", "e2e-approval"]) {
 // Register a few REAL default-pack workflows so the concierge has genuine work
 // to background — including `create-workflow`, the meta-workflow that builds a
 // new workflow. This is what proves "the concierge can create a workflow".
+// Pack workflows that ship a `.smithers/ui/<key>.tsx` are registered WITH that
+// custom UI so `/workflows/<key>` serves the real UI for the e2e specs.
 const PACK = resolve(here, "..", "..", "..", "..", ".smithers", "workflows");
+const PACK_UI = resolve(here, "..", "..", "..", "..", ".smithers", "ui");
 for (const key of ["create-workflow", "implement", "research-plan-implement", "review", "debug"]) {
   const entry = resolve(PACK, `${key}.tsx`);
   if (!existsSync(entry)) continue;
   try {
     const mod = await import(entry);
-    gateway.register(key, mod.default);
-    console.log(`[seed-gateway] registered pack workflow ${key}`);
+    const packUi = resolve(PACK_UI, `${key}.tsx`);
+    const options = existsSync(packUi) ? { ui: { entry: packUi, title: key } } : {};
+    gateway.register(key, mod.default, options);
+    console.log(`[seed-gateway] registered pack workflow ${key}${existsSync(packUi) ? " (with UI)" : ""}`);
   } catch (err) {
     console.warn(`[seed-gateway] skipped ${key}: ${(err as Error).message?.slice(0, 120)}`);
   }

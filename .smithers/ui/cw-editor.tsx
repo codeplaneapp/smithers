@@ -1,9 +1,7 @@
 /** @jsxImportSource react */
-// Milkdown Crepe WYSIWYG markdown editor, ported from the multi app
-// (.smithers/ui/ddd-shared.tsx MarkdownEditor). Two modes:
-//   - read-only: render run-produced assets (specs, rationale, docs) as rich text
-//   - editable: answer open questions / write the approval note in markdown
-// The Crepe theme CSS is injected once by the parent via crepeThemeCss.
+// Milkdown Crepe WYSIWYG markdown editor wrapper. The parent injects the
+// generated Crepe CSS string; this component only owns lifecycle and read-only
+// state.
 import { useEffect, useRef } from "react";
 import { Crepe } from "@milkdown/crepe";
 
@@ -17,9 +15,6 @@ export function MarkdownEditor({
   value: string;
   readOnly?: boolean;
   onChange?: (markdown: string) => void;
-  // Re-create the editor when this changes. Read-only assets pass the content
-  // itself (re-render when the run produces it); editable fields pass a stable
-  // id so live keystrokes are never reset.
   resetKey?: string;
   compact?: boolean;
 }) {
