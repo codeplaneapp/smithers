@@ -144,6 +144,7 @@
     "@smithers-orchestrator/vcs": "workspace:*",
     "@tanstack/react-query": "^5.99.1",
     "@types/bun": "latest",
+    "@types/dagre": "^0.7.54",
     "@types/mdx": "^2.0.13",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
@@ -154,6 +155,7 @@
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",
     "effect": "^3.21.1",
+    "esbuild": "^0.28.1",
     "oxlint": "^1.60.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
@@ -163,5 +165,10 @@
     "typescript": "~5.9.3",
     "yaml": "^2.8.1",
     "zod": "^4.3.6"
+  },
+  "dependencies": {
+    "@milkdown/crepe": "7.21.2",
+    "@xyflow/react": "^12.10.2",
+    "dagre": "^0.8.5"
   }
 }
