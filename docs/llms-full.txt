@@ -9948,6 +9948,57 @@ Gateway client exports:
 | `smithers-orchestrator/gateway-client` | `SmithersGatewayClient`, `SmithersGatewayConnection`, `GatewayRpcError`, `gatewayBackoffDelay`, RPC frame/type-map types, extension envelope helpers/types, `GatewayUiBootConfig`, `SmithersGatewayClientOptions`, `createGatewayCollection`, `gatewayCollectionDefs`, `flattenGatewayRunNode`, `snapshotToGatewayRunNode`, `reconcileSnapshotNodes`, collection row types, `syncBackoffDelay`, `syncKeyFingerprint`, `syncKeyMatches`, `gatewayKeys`, `createSmithersGatewayTransport` |
 | `smithers-orchestrator/gateway-react` | `SmithersGatewayProvider`, `createGatewayReactRoot`, `useGatewayRun`, `useGatewayRuns`, `useGatewayWorkflows`, `useGatewayApprovals`, `useGatewayNodeOutput`, `useGatewayRunEvents`, `useGatewayActions`, `useGatewayRpc`, `useSmithersGateway`, `useGatewayExtensionResource`, `useGatewayExtensionAction`, `useGatewayExtensionStream`, `SyncProvider`, `createGatewayCollections`, `useSyncClient`, `useSyncQuery`, `useSyncMutation`, `useSyncSubscription`, `useGatewayQuery`, `useGatewayMutation`, `useGatewayRunStream`, `useGatewayRunTree`, `useGatewayConnectionStatus` |
 
+## REST domain API
+
+The Gateway also exposes a typed REST domain surface under `/v1/api/*`. These
+routes share the same auth modes, scope checks, validation, and backend code
+paths as their `/v1/rpc/<method>` twins. Responses use `{ ok: true, data }` for
+reads and `{ ok: false, error }` for failures.
+
+Mutating routes include a write acknowledgement. SQLite and embedded PGlite
+return `{ seq }`, where `seq` is the invalidation frame emitted by
+`GET /v1/api/stream`. Real Postgres returns `{ txid }`, a numeric string from
+`pg_current_xact_id()::xid::text`, for Electric transaction matching.
+
+```toon
+api[24]{route,rpc,scope}:
+  GET /v1/api/runs,listRuns,run:read
+  GET /v1/api/runs/:id,getRun,run:read
+  POST /v1/api/runs,launchRun,run:write
+  POST /v1/api/runs/:id/resume,resumeRun,run:write
+  POST /v1/api/runs/:id/cancel,cancelRun,run:write
+  POST /v1/api/runs/:id/rewind,rewindRun,run:admin
+  GET /v1/api/runs/:id/tree,getDevToolsSnapshot,observability:read
+  GET /v1/api/events,streamRunEvents tail snapshot,run:read
+  GET /v1/api/nodes/:runId/:nodeId/output,getNodeOutput,run:read
+  GET /v1/api/nodes/:runId/:nodeId/diff,getNodeDiff,run:read
+  GET /v1/api/approvals,listApprovals,run:read
+  POST /v1/api/approvals/:id,submitApproval,approval:submit
+  POST /v1/api/signals,submitSignal,signal:submit
+  GET /v1/api/workflows,listWorkflows,run:read
+  GET /v1/api/docs,listDocs,run:read
+  GET /v1/api/prompts,listPrompts,prompt:read
+  GET /v1/api/scores,listScores,score:read
+  GET /v1/api/tickets,listTickets,ticket:read
+  GET /v1/api/memory-facts,listMemoryFacts,memory:read
+  GET /v1/api/crons,cronList,cron:read
+  GET /v1/api/accounts,listAccounts,account:read
+  GET /v1/api/schema-signature,getSchemaSignature,run:read
+  GET /v1/api/stream,SSE invalidation feed,run:read
+```
+
+`GET /v1/api/stream` is a `text/event-stream` invalidation feed for local
+TanStack Query collections. Change events are `event: change` frames with
+`data: {"seq": number, "collections": string[]}`. Writes that happen inside a
+short coalescing window emit one frame with the union of collection names.
+
+Clients should send `Last-Event-ID` when reconnecting. The Gateway replays
+missed frames from its bounded ring buffer when possible. If the requested seq
+is too old, it sends `event: reset` with the current seq so the client can
+invalidate all collection query keys. Each connection also has a bounded
+outbound queue; a slow consumer is resynced through the same reset path, which
+bounds memory per stream.
+
 ## RPC methods (TOON)
 
 ```toon
@@ -9985,7 +10036,7 @@ rpc[26]{method,params,returns,scope,transport}:
 ### Scopes
 
 ```toon
-scopes[13]{scope,allows}:
+scopes[14]{scope,allows}:
   run:read,Read run state/lists/event streams/node output/node diffs
   run:write,Launch/resume/cancel runs; implies run:read
   run:admin,Hijack or rewind runs; implies run:write and run:read
@@ -9995,6 +10046,7 @@ scopes[13]{scope,allows}:
   cron:write,Create/delete/trigger cron schedules; implies cron:read
   account:read,List registered agent accounts (api keys redacted)
   memory:read,List cross-run memory facts
+  prompt:read,List workspace prompts
   score:read,List scorer/eval results for a run
   ticket:read,List work docs (tickets/plans/specs/proposals)
   ticket:write,Create/update/soft-delete work docs; implies ticket:read

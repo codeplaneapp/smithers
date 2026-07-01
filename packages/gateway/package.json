@@ -19,6 +19,11 @@
       "types": "./src/auth/scopes.ts",
       "import": "./src/auth/scopes.ts",
       "default": "./src/auth/scopes.ts"
+    },
+    "./api": {
+      "types": "./src/api/index.ts",
+      "import": "./src/api/index.ts",
+      "default": "./src/api/index.ts"
     }
   },
   "files": [

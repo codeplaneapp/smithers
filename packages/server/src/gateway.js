@@ -18,6 +18,7 @@ import { resolveSchema, runWorkflow } from "@smithers-orchestrator/engine";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
 import { signalRun } from "@smithers-orchestrator/engine/signals";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { captureTxid } from "@smithers-orchestrator/db/captureTxid";
 import { getSmithersSchemaSignature } from "@smithers-orchestrator/db/getSmithersSchemaSignature";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
@@ -44,6 +45,7 @@ import { writeRewindAuditRow } from "@smithers-orchestrator/time-travel/writeRew
 import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-travel/recoverInProgressRewindAudits";
 import { GATEWAY_EVENT_WINDOW_DEFAULT, SMITHERS_API_VERSION, getRequiredScopeForGatewayMethod, } from "@smithers-orchestrator/gateway/rpc";
 import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
+import { serializeAccountRow, serializeApprovalRow, serializeCronRow, serializeDocRow, serializeMemoryFactRow, serializePromptRow, serializeRunEventRow, serializeRunRow, serializeScoreRow, serializeTicketRow, serializeWorkflowRow, } from "@smithers-orchestrator/gateway/api";
 import { listAccounts } from "@smithers-orchestrator/accounts/listAccounts";
 import { EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, GatewayExtensions, isExtensionMethod, } from "./GatewayExtensions.js";
 import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
@@ -153,6 +155,12 @@ const RUN_EVENT_HEARTBEAT_MS = 1_000;
 const RUN_EVENT_STREAM_OUTBOUND_QUEUE_LIMIT = 1_000;
 const RUN_EVENT_STREAM_WS_BUFFERED_HIGH_WATER_BYTES = 8 * 1024 * 1024;
 const RUN_EVENT_STREAM_DRAIN_RETRY_MS = 10;
+const API_STREAM_COALESCE_MS = 50;
+const API_STREAM_HEARTBEAT_MS = 15_000;
+const API_STREAM_REPLAY_LIMIT = 256;
+const API_STREAM_REPLAY_BYTES = 64 * 1024;
+const API_STREAM_OUTBOUND_QUEUE_LIMIT = 256;
+const API_STREAM_OUTBOUND_BYTES = 64 * 1024;
 const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "continued"]);
 export const GATEWAY_RPC_MAX_PAYLOAD_BYTES = DEFAULT_MAX_BODY_BYTES;
 export const GATEWAY_RPC_MAX_DEPTH = 32;
@@ -1301,6 +1309,171 @@ function shouldDeliverEvent(connection, runId) {
     }
     return connection.subscribedRuns.has(runId);
 }
+/**
+ * @param {unknown} value
+ * @param {string} field
+ * @returns {number | undefined}
+ */
+function asOptionalNonNegativeInt(value, field) {
+    if (value === undefined || value === null || value === "") {
+        return undefined;
+    }
+    const number = Number(value);
+    if (!Number.isInteger(number) || number < 0) {
+        throw new SmithersError("INVALID_INPUT", `${field} must be a non-negative integer.`, { field, value });
+    }
+    return number;
+}
+/**
+ * @param {URLSearchParams} searchParams
+ * @param {string} name
+ * @returns {string | undefined}
+ */
+function queryString(searchParams, name) {
+    const value = searchParams.get(name);
+    return value === null || value === "" ? undefined : value;
+}
+/**
+ * @param {URLSearchParams} searchParams
+ * @param {string} name
+ * @returns {number | undefined}
+ */
+function queryPositiveInt(searchParams, name) {
+    const value = searchParams.get(name);
+    return value === null || value === "" ? undefined : asOptionalPositiveInt(value, name);
+}
+/**
+ * @param {URLSearchParams} searchParams
+ * @param {string} name
+ * @returns {number | undefined}
+ */
+function queryNonNegativeInt(searchParams, name) {
+    const value = searchParams.get(name);
+    return asOptionalNonNegativeInt(value, name);
+}
+/**
+ * @param {unknown} value
+ * @param {(row: Record<string, unknown>) => Record<string, unknown>} serializer
+ */
+function serializeRowOrRows(value, serializer) {
+    if (Array.isArray(value)) {
+        return value.map((row) => serializer(asObject(row) ?? {}));
+    }
+    if (value && typeof value === "object") {
+        return serializer(/** @type {Record<string, unknown>} */ (value));
+    }
+    return value;
+}
+/**
+ * @param {string} method
+ * @param {unknown} payload
+ * @returns {unknown}
+ */
+function serializeGatewayApiPayload(method, payload) {
+    switch (method) {
+        case "getRun":
+        case "listRuns":
+        case "launchRun":
+        case "resumeRun":
+        case "cancelRun":
+        case "rewindRun":
+            return serializeRowOrRows(payload, serializeRunRow);
+        case "streamRunEvents":
+            return serializeRowOrRows(payload, serializeRunEventRow);
+        case "listWorkflows":
+            return serializeRowOrRows(payload, serializeWorkflowRow);
+        case "listApprovals":
+        case "submitApproval":
+            return serializeRowOrRows(payload, serializeApprovalRow);
+        case "listDocs":
+            return serializeRowOrRows(payload, serializeDocRow);
+        case "listPrompts":
+            return serializeRowOrRows(payload, serializePromptRow);
+        case "listMemoryFacts":
+            return serializeRowOrRows(payload, serializeMemoryFactRow);
+        case "listScores":
+            return serializeRowOrRows(payload, serializeScoreRow);
+        case "listTickets":
+            return serializeRowOrRows(payload, serializeTicketRow);
+        case "cronList":
+            return serializeRowOrRows(payload, serializeCronRow);
+        case "listAccounts":
+            return serializeRowOrRows(payload, serializeAccountRow);
+        default:
+            return payload;
+    }
+}
+/**
+ * @param {string} method
+ * @returns {string[]}
+ */
+function apiMutationCollections(method) {
+    switch (method) {
+        case "launchRun":
+            return ["runs", "run_events"];
+        case "resumeRun":
+        case "cancelRun":
+        case "rewindRun":
+            return ["runs", "run_events", "nodes", "node_outputs"];
+        case "submitApproval":
+            return ["approvals", "runs", "run_events", "nodes"];
+        case "submitSignal":
+            return ["runs", "run_events", "nodes"];
+        default:
+            return ["runs"];
+    }
+}
+/**
+ * @param {string} event
+ * @returns {string[]}
+ */
+function apiCollectionsForGatewayEvent(event) {
+    if (event.startsWith("approval.")) {
+        return ["approvals", "runs", "run_events", "nodes"];
+    }
+    if (event.startsWith("node.") || event.startsWith("task.") || event.startsWith("agent.")) {
+        return event === "task.output"
+            ? ["run_events", "nodes", "node_outputs"]
+            : ["run_events", "nodes"];
+    }
+    if (event.startsWith("run.")) {
+        return ["runs", "run_events", "nodes"];
+    }
+    if (event.startsWith("cron.")) {
+        return ["crons", "runs"];
+    }
+    return ["runs", "run_events"];
+}
+/**
+ * @param {string} event
+ * @param {unknown} data
+ * @param {number} [id]
+ * @returns {string}
+ */
+function formatSseEvent(event, data, id) {
+    const lines = [];
+    if (id !== undefined) {
+        lines.push(`id: ${id}`);
+    }
+    lines.push(`event: ${event}`);
+    lines.push(`data: ${JSON.stringify(data)}`);
+    lines.push("");
+    return `${lines.join("\n")}\n`;
+}
+/**
+ * @param {number} seq
+ * @returns {string}
+ */
+function formatSseHeartbeat(seq) {
+    return `: heartbeat\n${formatSseEvent("heartbeat", { seq })}`;
+}
+/**
+ * @param {unknown} value
+ * @returns {number}
+ */
+function byteLengthOfJson(value) {
+    return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
 export class Gateway {
     protocol;
     features;
@@ -1332,6 +1505,13 @@ export class Gateway {
     inflightRuns = new Map();
     devtoolsSubscribers = new Map();
     runEventWindows = new Map();
+    apiStreamSeq = 0;
+    apiStreamFrames = [];
+    apiStreamFrameBytes = 0;
+    apiStreamSubscribers = new Set();
+    apiStreamPendingCollections = new Set();
+    apiStreamPendingResolvers = [];
+    apiStreamFlushTimer = null;
     /** Absolute active subscriber count per runId (gauge source of truth). */
     devtoolsSubscriberCounts = new Map();
     /** Flagged subscriber IDs that should force a snapshot on their next emit. */
@@ -2217,6 +2397,517 @@ export class Gateway {
         return sendJson(res, status, response);
     }
     /**
+     * @param {Record<string, unknown>} frame
+     */
+    recordApiStreamFrame(frame) {
+        const size = byteLengthOfJson(frame);
+        this.apiStreamFrames.push({ frame, size });
+        this.apiStreamFrameBytes += size;
+        while (this.apiStreamFrames.length > API_STREAM_REPLAY_LIMIT ||
+            this.apiStreamFrameBytes > API_STREAM_REPLAY_BYTES) {
+            const dropped = this.apiStreamFrames.shift();
+            this.apiStreamFrameBytes -= dropped?.size ?? 0;
+        }
+    }
+    /**
+     * @param {Record<string, unknown>} subscriber
+     */
+    drainApiStreamSubscriber(subscriber) {
+        if (subscriber.closed || subscriber.flushing) {
+            return;
+        }
+        subscriber.flushing = true;
+        try {
+            if (subscriber.needsReset) {
+                subscriber.needsReset = false;
+                const reset = formatSseEvent("reset", { seq: this.apiStreamSeq });
+                const ok = subscriber.res.write(reset);
+                if (!ok) {
+                    subscriber.res.once("drain", () => {
+                        subscriber.flushing = false;
+                        this.drainApiStreamSubscriber(subscriber);
+                    });
+                    return;
+                }
+            }
+            while (subscriber.queue.length > 0 && !subscriber.closed) {
+                const item = subscriber.queue.shift();
+                if (!item) {
+                    continue;
+                }
+                subscriber.queueBytes -= item.bytes;
+                const ok = subscriber.res.write(item.text);
+                if (!ok) {
+                    subscriber.res.once("drain", () => {
+                        subscriber.flushing = false;
+                        this.drainApiStreamSubscriber(subscriber);
+                    });
+                    return;
+                }
+            }
+        }
+        finally {
+            subscriber.flushing = false;
+        }
+    }
+    /**
+     * @param {Record<string, unknown>} subscriber
+     * @param {string} text
+     * @param {number} bytes
+     */
+    enqueueApiStreamText(subscriber, text, bytes = Buffer.byteLength(text, "utf8")) {
+        if (subscriber.closed) {
+            return;
+        }
+        if (!subscriber.flushing && subscriber.queue.length === 0) {
+            const ok = subscriber.res.write(text);
+            if (!ok) {
+                subscriber.flushing = true;
+                subscriber.res.once("drain", () => {
+                    subscriber.flushing = false;
+                    this.drainApiStreamSubscriber(subscriber);
+                });
+            }
+            return;
+        }
+        if (subscriber.queue.length >= API_STREAM_OUTBOUND_QUEUE_LIMIT ||
+            subscriber.queueBytes + bytes > API_STREAM_OUTBOUND_BYTES) {
+            subscriber.queue.length = 0;
+            subscriber.queueBytes = 0;
+            subscriber.needsReset = true;
+            return;
+        }
+        subscriber.queue.push({ text, bytes });
+        subscriber.queueBytes += bytes;
+        this.drainApiStreamSubscriber(subscriber);
+    }
+    /**
+     * @param {Record<string, unknown>} subscriber
+     * @param {Record<string, unknown>} frame
+     */
+    sendApiStreamFrame(subscriber, frame) {
+        this.enqueueApiStreamText(subscriber, formatSseEvent("change", frame, Number(frame.seq)), byteLengthOfJson(frame) + 64);
+    }
+    /**
+     * @param {string[]} collections
+     * @returns {Promise<number>}
+     */
+    queueApiInvalidation(collections) {
+        for (const collection of collections) {
+            if (typeof collection === "string" && collection.trim() !== "") {
+                this.apiStreamPendingCollections.add(collection);
+            }
+        }
+        return new Promise((resolve) => {
+            this.apiStreamPendingResolvers.push(resolve);
+            if (this.apiStreamFlushTimer) {
+                return;
+            }
+            this.apiStreamFlushTimer = setTimeout(() => {
+                this.apiStreamFlushTimer = null;
+                this.flushApiInvalidation();
+            }, API_STREAM_COALESCE_MS);
+        });
+    }
+    flushApiInvalidation() {
+        const collections = [...this.apiStreamPendingCollections].sort();
+        const resolvers = this.apiStreamPendingResolvers.splice(0);
+        this.apiStreamPendingCollections.clear();
+        if (collections.length === 0) {
+            for (const resolve of resolvers) {
+                resolve(this.apiStreamSeq);
+            }
+            return;
+        }
+        this.apiStreamSeq += 1;
+        const frame = { seq: this.apiStreamSeq, collections };
+        this.recordApiStreamFrame(frame);
+        for (const subscriber of this.apiStreamSubscribers) {
+            this.sendApiStreamFrame(subscriber, frame);
+        }
+        for (const resolve of resolvers) {
+            resolve(this.apiStreamSeq);
+        }
+    }
+    /**
+     * @param {IncomingMessage} req
+     * @param {ServerResponse} res
+     */
+    async handleApiStream(req, res) {
+        const requestId = headerValue(req, "x-request-id") ?? randomUUID();
+        const context = {
+            connectionId: `api-stream:${requestId}`,
+            transport: "http",
+            role: null,
+            scopes: [],
+            userId: null,
+            tokenId: null,
+            subscribedRuns: null,
+            devtoolsStreams: null,
+        };
+        const authResult = await this.authenticateRequest(req, bearerTokenFromHeaders(req));
+        if (authResult.ok === false) {
+            return sendJson(res, statusForRpcError(authResult.code), {
+                ok: false,
+                error: { code: authResult.code, message: authResult.message, details: authResult.details },
+            });
+        }
+        context.role = authResult.role;
+        context.scopes = [...authResult.scopes];
+        context.userId = authResult.userId ?? null;
+        context.tokenId = authResult.tokenId ?? null;
+        if (!hasScope(context.scopes, "listRuns", this.extensions)) {
+            const forbidden = responseForbidden(requestId, "listRuns", this.extensions);
+            return sendJson(res, statusForRpcError(forbidden.error?.code), {
+                ok: false,
+                error: forbidden.error,
+            });
+        }
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+            Connection: "keep-alive",
+            "X-Accel-Buffering": "no",
+            "X-Smithers-API-Version": SMITHERS_API_VERSION,
+        });
+        res.flushHeaders?.();
+        const subscriber = {
+            id: requestId,
+            res,
+            queue: [],
+            queueBytes: 0,
+            flushing: false,
+            needsReset: false,
+            closed: false,
+            heartbeat: null,
+        };
+        const cleanup = () => {
+            if (subscriber.closed) {
+                return;
+            }
+            subscriber.closed = true;
+            if (subscriber.heartbeat) {
+                clearInterval(subscriber.heartbeat);
+            }
+            this.apiStreamSubscribers.delete(subscriber);
+        };
+        req.on("close", cleanup);
+        res.on("close", cleanup);
+        this.apiStreamSubscribers.add(subscriber);
+        const host = headerValue(req, "host") ?? "127.0.0.1";
+        const url = new URL(`http://${host}${req.url ?? "/"}`);
+        const lastEventIdRaw = headerValue(req, "last-event-id") ?? url.searchParams.get("lastEventId");
+        const lastEventId = asOptionalNonNegativeInt(lastEventIdRaw, "Last-Event-ID");
+        const firstSeq = this.apiStreamFrames.length > 0
+            ? Number(this.apiStreamFrames[0].frame.seq)
+            : this.apiStreamSeq + 1;
+        if (lastEventId !== undefined && lastEventId < firstSeq - 1) {
+            this.enqueueApiStreamText(subscriber, formatSseEvent("reset", { seq: this.apiStreamSeq }));
+        }
+        else if (lastEventId !== undefined) {
+            for (const { frame } of this.apiStreamFrames) {
+                if (Number(frame.seq) > lastEventId) {
+                    this.sendApiStreamFrame(subscriber, frame);
+                }
+            }
+        }
+        this.enqueueApiStreamText(subscriber, formatSseHeartbeat(this.apiStreamSeq));
+        subscriber.heartbeat = setInterval(() => {
+            this.enqueueApiStreamText(subscriber, formatSseHeartbeat(this.apiStreamSeq));
+        }, API_STREAM_HEARTBEAT_MS);
+    }
+    /**
+     * @param {string} method
+     * @param {Record<string, unknown>} params
+     * @returns {Promise<SmithersDb | null>}
+     */
+    async adapterForApiMutation(method, params) {
+        if (method === "launchRun") {
+            const workflowKey = asString(params.workflow);
+            const entry = workflowKey ? this.workflows.get(workflowKey) : undefined;
+            return entry ? this.adapterForWorkflow(entry.workflow) : null;
+        }
+        const runId = asString(params.runId);
+        if (!runId) {
+            return null;
+        }
+        const resolved = await this.resolveRun(runId);
+        return resolved?.adapter ?? null;
+    }
+    /**
+     * @param {string} httpMethod
+     * @param {URL} url
+     * @param {Record<string, unknown>} body
+     * @returns {{ method: string; params: Record<string, unknown>; mutation?: boolean; direct?: "events" } | null}
+     */
+    apiRouteForRequest(httpMethod, url, body) {
+        const pathname = url.pathname;
+        if (httpMethod === "GET" && pathname === "/v1/api/runs") {
+            return {
+                method: "listRuns",
+                params: {
+                    limit: queryPositiveInt(url.searchParams, "limit"),
+                    status: queryString(url.searchParams, "status"),
+                },
+            };
+        }
+        if (httpMethod === "POST" && pathname === "/v1/api/runs") {
+            return {
+                method: "launchRun",
+                params: {
+                    ...body,
+                    workflow: asString(body.workflow) ?? asString(body.workflowKey) ?? asString(body.workflowId),
+                    input: body.input ?? {},
+                },
+                mutation: true,
+            };
+        }
+        const runAction = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/(cancel|resume|rewind)$/);
+        if (httpMethod === "POST" && runAction) {
+            const action = runAction[2];
+            return {
+                method: action === "cancel" ? "cancelRun" : action === "resume" ? "resumeRun" : "rewindRun",
+                params: { ...body, runId: decodeURIComponent(runAction[1]) },
+                mutation: true,
+            };
+        }
+        const runTree = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/(?:tree|devtools)$/);
+        if (httpMethod === "GET" && runTree) {
+            return {
+                method: "getDevToolsSnapshot",
+                params: {
+                    runId: decodeURIComponent(runTree[1]),
+                    frameNo: queryNonNegativeInt(url.searchParams, "frameNo"),
+                },
+            };
+        }
+        const runEvents = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/events$/);
+        if (httpMethod === "GET" && (pathname === "/v1/api/events" || runEvents)) {
+            return {
+                method: "streamRunEvents",
+                direct: "events",
+                params: {
+                    runId: runEvents ? decodeURIComponent(runEvents[1]) : queryString(url.searchParams, "runId"),
+                    afterSeq: queryNonNegativeInt(url.searchParams, "afterSeq"),
+                    limit: queryPositiveInt(url.searchParams, "limit"),
+                },
+            };
+        }
+        const runById = pathname.match(/^\/v1\/api\/runs\/([^/]+)$/);
+        if (httpMethod === "GET" && runById) {
+            return { method: "getRun", params: { runId: decodeURIComponent(runById[1]) } };
+        }
+        const nodeRoute = pathname.match(/^\/v1\/api\/nodes\/([^/]+)\/([^/]+)\/(output|diff)$/) ??
+            pathname.match(/^\/v1\/api\/runs\/([^/]+)\/nodes\/([^/]+)\/(output|diff)$/);
+        if (httpMethod === "GET" && nodeRoute) {
+            return {
+                method: nodeRoute[3] === "output" ? "getNodeOutput" : "getNodeDiff",
+                params: {
+                    runId: decodeURIComponent(nodeRoute[1]),
+                    nodeId: decodeURIComponent(nodeRoute[2]),
+                    iteration: queryNonNegativeInt(url.searchParams, "iteration") ?? 0,
+                },
+            };
+        }
+        if (httpMethod === "GET" && pathname === "/v1/api/approvals") {
+            return {
+                method: "listApprovals",
+                params: {
+                    runId: queryString(url.searchParams, "runId"),
+                    workflow: queryString(url.searchParams, "workflow"),
+                    limit: queryPositiveInt(url.searchParams, "limit"),
+                },
+            };
+        }
+        const approvalSubmit = pathname.match(/^\/v1\/api\/approvals\/([^/]+)$/);
+        if (httpMethod === "POST" && approvalSubmit) {
+            const approvalId = decodeURIComponent(approvalSubmit[1]);
+            const first = approvalId.indexOf(":");
+            const last = approvalId.lastIndexOf(":");
+            const parsed = first > 0 && last > first
+                ? {
+                    runId: approvalId.slice(0, first),
+                    nodeId: approvalId.slice(first + 1, last),
+                    iteration: Number(approvalId.slice(last + 1)),
+                }
+                : {};
+            return {
+                method: "submitApproval",
+                params: {
+                    ...parsed,
+                    ...body,
+                    approvalId,
+                },
+                mutation: true,
+            };
+        }
+        if (httpMethod === "POST" && pathname === "/v1/api/signals") {
+            return { method: "submitSignal", params: body, mutation: true };
+        }
+        const simpleReads = new Map([
+            ["/v1/api/workflows", "listWorkflows"],
+            ["/v1/api/docs", "listDocs"],
+            ["/v1/api/prompts", "listPrompts"],
+            ["/v1/api/scores", "listScores"],
+            ["/v1/api/tickets", "listTickets"],
+            ["/v1/api/memory-facts", "listMemoryFacts"],
+            ["/v1/api/crons", "cronList"],
+            ["/v1/api/accounts", "listAccounts"],
+            ["/v1/api/schema-signature", "getSchemaSignature"],
+        ]);
+        const method = simpleReads.get(pathname);
+        if (httpMethod === "GET" && method) {
+            return {
+                method,
+                params: {
+                    hasUi: queryString(url.searchParams, "hasUi") === undefined ? undefined : url.searchParams.get("hasUi") === "true",
+                    kind: queryString(url.searchParams, "kind"),
+                    namespace: queryString(url.searchParams, "namespace"),
+                    runId: queryString(url.searchParams, "runId"),
+                    nodeId: queryString(url.searchParams, "nodeId"),
+                    workflow: queryString(url.searchParams, "workflow"),
+                    limit: queryPositiveInt(url.searchParams, "limit"),
+                    includeDeleted: queryString(url.searchParams, "includeDeleted") === undefined ? undefined : url.searchParams.get("includeDeleted") === "true",
+                    updatedAfterMs: queryNonNegativeInt(url.searchParams, "updatedAfterMs"),
+                },
+            };
+        }
+        return null;
+    }
+    /**
+     * @param {Record<string, unknown>} params
+     * @returns {Promise<Record<string, unknown>[]>}
+     */
+    async listApiRunEvents(params) {
+        const runId = asString(params.runId);
+        if (!runId) {
+            throw new SmithersError("INVALID_INPUT", "runId is required");
+        }
+        const resolved = await this.resolveRun(runId);
+        if (!resolved) {
+            throw new SmithersError("NOT_FOUND", `Run not found: ${runId}`);
+        }
+        const rows = await resolved.adapter.listEventHistory(runId, {
+            afterSeq: asOptionalNonNegativeInt(params.afterSeq, "afterSeq"),
+            limit: asOptionalPositiveInt(params.limit, "limit") ?? 100,
+        });
+        return rows.map((row) => serializeRunEventRow(row));
+    }
+    /**
+     * @param {IncomingMessage} req
+     * @param {ServerResponse} res
+     */
+    async handleHttpApi(req, res) {
+        const requestId = headerValue(req, "x-request-id") ?? randomUUID();
+        const httpMethod = req.method ?? "GET";
+        const host = headerValue(req, "host") ?? "127.0.0.1";
+        const url = new URL(`http://${host}${req.url ?? "/"}`);
+        const baseContext = {
+            connectionId: `api:${requestId}`,
+            transport: "http",
+            role: null,
+            scopes: [],
+            userId: null,
+            tokenId: null,
+            subscribedRuns: null,
+            devtoolsStreams: null,
+        };
+        let context = baseContext;
+        this.recordMessageReceived("http", "request", { route: "api" });
+        try {
+            const authResult = await this.authenticateRequest(req, bearerTokenFromHeaders(req));
+            if (authResult.ok === false) {
+                this.recordAuthEvent("http", "failure", context, {
+                    requestId,
+                    authCode: authResult.code,
+                    authMessage: authResult.message,
+                }, "warning");
+                return sendJson(res, statusForRpcError(authResult.code), {
+                    ok: false,
+                    error: { code: authResult.code, message: authResult.message, details: authResult.details },
+                });
+            }
+            context = {
+                ...baseContext,
+                role: authResult.role,
+                scopes: [...authResult.scopes],
+                userId: authResult.userId ?? null,
+                tokenId: authResult.tokenId ?? null,
+            };
+            this.recordAuthEvent("http", "success", context, {
+                requestId,
+                scopeCount: authResult.scopes.length,
+            }, "debug");
+            const body = httpMethod === "POST" || httpMethod === "PUT" || httpMethod === "PATCH"
+                ? (asObject(await readBody(req, this.maxBodyBytes)) ?? {})
+                : {};
+            const route = this.apiRouteForRequest(httpMethod, url, body);
+            if (!route) {
+                return sendJson(res, 404, { ok: false, error: { code: "NOT_FOUND", message: "Route not found" } });
+            }
+            const frame = {
+                type: "req",
+                id: requestId,
+                method: route.method,
+                params: route.params,
+            };
+            const response = await this.executeRpc(context, frame, async () => {
+                if (!hasScope(context.scopes, route.method, this.extensions)) {
+                    return responseForbidden(requestId, route.method, this.extensions);
+                }
+                if (route.direct === "events") {
+                    return responseOk(requestId, await this.listApiRunEvents(route.params));
+                }
+                return this.routeRequest(context, frame);
+            });
+            if (!response.ok) {
+                return sendJson(res, statusForRpcError(response.error?.code), {
+                    ok: false,
+                    error: response.error,
+                });
+            }
+            const data = serializeGatewayApiPayload(route.method, response.payload);
+            if (!route.mutation) {
+                return sendJson(res, 200, { ok: true, data });
+            }
+            const adapter = await this.adapterForApiMutation(route.method, route.params);
+            const txid = adapter ? await captureTxid(adapter).catch(() => null) : null;
+            if (txid) {
+                await this.queueApiInvalidation(apiMutationCollections(route.method));
+                return sendJson(res, 200, { ok: true, data, txid });
+            }
+            const seq = await this.queueApiInvalidation(apiMutationCollections(route.method));
+            return sendJson(res, 200, { ok: true, data, seq });
+        }
+        catch (error) {
+            emitGatewayEffect(incrementMetric(gatewayErrorsTotal, {
+                kind: "http",
+                transport: "http",
+                code: gatewayErrorCode(error),
+            }));
+            emitGatewayLog(isSmithersError(error) ? "warning" : "error", "Gateway HTTP API failed", {
+                ...gatewayContextAnnotations(context),
+                requestId,
+                ...gatewayErrorAnnotations(error),
+            }, "gateway:http-api");
+            if (isSmithersError(error)) {
+                return sendJson(res, statusForRpcError(error.code), {
+                    ok: false,
+                    error: { code: error.code, message: error.summary },
+                });
+            }
+            const message = error?.message ?? "Gateway API request failed";
+            const status = message.includes("valid JSON") ? 400 : message.includes("exceeds") ? 413 : 500;
+            return sendJson(res, status, {
+                ok: false,
+                error: {
+                    code: status === 413 ? "PAYLOAD_TOO_LARGE" : status === 400 ? "INVALID_JSON" : "SERVER_ERROR",
+                    message,
+                },
+            });
+        }
+    }
+    /**
    * @param {SmithersDb} adapter
    * @param {string} runId
    * @param {string} signalName
@@ -2501,6 +3192,12 @@ export class Gateway {
             if ((req.method ?? "GET") === "POST" && webhookMatch) {
                 return this.handleWebhook(req, res, decodeURIComponent(webhookMatch[1]));
             }
+            if ((req.method ?? "GET") === "GET" && url.pathname === "/v1/api/stream") {
+                return this.handleApiStream(req, res);
+            }
+            if (url.pathname === "/v1/api" || url.pathname.startsWith("/v1/api/")) {
+                return this.handleHttpApi(req, res);
+            }
             if ((req.method ?? "GET") === "POST" && rpcMatch) {
                 return this.handleHttpRpc(req, res, decodeURIComponent(rpcMatch[1]));
             }
@@ -2638,6 +3335,21 @@ export class Gateway {
             clearInterval(this.schedulerTimer);
             this.schedulerTimer = null;
         }
+        if (this.apiStreamFlushTimer) {
+            clearTimeout(this.apiStreamFlushTimer);
+            this.apiStreamFlushTimer = null;
+        }
+        for (const subscriber of this.apiStreamSubscribers) {
+            subscriber.closed = true;
+            if (subscriber.heartbeat) {
+                clearInterval(subscriber.heartbeat);
+            }
+            try {
+                subscriber.res.end();
+            }
+            catch { }
+        }
+        this.apiStreamSubscribers.clear();
         // Durability seam teardown: close every `_smithers_docs` file-watcher
         // (`fs.watch` handles) started via `watchTicketsDirectory`, so a closed
         // gateway never leaks watchers (e.g. across e2e boots or test runs).
@@ -3753,6 +4465,7 @@ export class Gateway {
         const runId = eventRunId(payload);
         this.stateVersion += 1;
         const runFrame = this.appendRunEventWindow(event, payload, this.stateVersion);
+        void this.queueApiInvalidation(apiCollectionsForGatewayEvent(event));
         let recipientCount = 0;
         for (const connection of this.connections) {
             if (!connection.authenticated || !shouldDeliverEvent(connection, runId)) {

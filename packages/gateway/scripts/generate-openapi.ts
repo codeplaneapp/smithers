@@ -5,10 +5,12 @@ import {
   GATEWAY_RPC_DEFINITIONS,
   GATEWAY_RPC_ERRORS,
   SMITHERS_API_VERSION,
+  getRequiredScopeForGatewayMethod,
   type GatewayRpcDefinition,
   type JsonSchema,
 } from "../src/rpc/index.ts";
 import { GATEWAY_SCOPE_DESCRIPTIONS, GATEWAY_SCOPE_VALUES } from "../src/auth/scopes.ts";
+import type { GatewayScope } from "../src/auth/scopes.ts";
 
 type OpenApiDocument = {
   openapi: string;
@@ -26,12 +28,64 @@ type OpenApiDocument = {
   };
 };
 
+type GatewayApiRouteDefinition = {
+  method: "get" | "post";
+  path: string;
+  operationId: string;
+  summary: string;
+  rpcMethod?: string;
+  requiredScope: GatewayScope;
+  requestSchema?: JsonSchema;
+  responseSchema?: JsonSchema;
+  mutation?: boolean;
+  sse?: boolean;
+};
+
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outPath = resolve(packageDir, "openapi.yaml");
 
 function rpcPath(definition: GatewayRpcDefinition): string {
   return `/v1/rpc/${definition.method}`;
 }
+
+function scopeForRpc(method: string): GatewayScope {
+  return getRequiredScopeForGatewayMethod(method) ?? "run:read";
+}
+
+const objectSchema = {
+  type: "object",
+  additionalProperties: true,
+} satisfies JsonSchema;
+
+const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
+  { method: "get", path: "/v1/api/runs", operationId: "apiListRuns", summary: "List runs.", rpcMethod: "listRuns", requiredScope: scopeForRpc("listRuns"), responseSchema: { type: "array", items: objectSchema } },
+  { method: "post", path: "/v1/api/runs", operationId: "apiLaunchRun", summary: "Launch a run.", rpcMethod: "launchRun", requiredScope: scopeForRpc("launchRun"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
+  { method: "get", path: "/v1/api/runs/{runId}", operationId: "apiGetRun", summary: "Read one run.", rpcMethod: "getRun", requiredScope: scopeForRpc("getRun"), responseSchema: objectSchema },
+  { method: "post", path: "/v1/api/runs/{runId}/cancel", operationId: "apiCancelRun", summary: "Cancel a run.", rpcMethod: "cancelRun", requiredScope: scopeForRpc("cancelRun"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
+  { method: "post", path: "/v1/api/runs/{runId}/resume", operationId: "apiResumeRun", summary: "Resume a run.", rpcMethod: "resumeRun", requiredScope: scopeForRpc("resumeRun"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
+  { method: "post", path: "/v1/api/runs/{runId}/rewind", operationId: "apiRewindRun", summary: "Rewind a run.", rpcMethod: "rewindRun", requiredScope: scopeForRpc("rewindRun"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
+  { method: "get", path: "/v1/api/runs/{runId}/tree", operationId: "apiGetRunTree", summary: "Read a DevTools tree snapshot.", rpcMethod: "getDevToolsSnapshot", requiredScope: scopeForRpc("getDevToolsSnapshot"), responseSchema: objectSchema },
+  { method: "get", path: "/v1/api/runs/{runId}/devtools", operationId: "apiGetRunDevtools", summary: "Read a DevTools snapshot.", rpcMethod: "getDevToolsSnapshot", requiredScope: scopeForRpc("getDevToolsSnapshot"), responseSchema: objectSchema },
+  { method: "get", path: "/v1/api/runs/{runId}/events", operationId: "apiListRunEvents", summary: "List persisted run events.", rpcMethod: "streamRunEvents", requiredScope: scopeForRpc("streamRunEvents"), responseSchema: { type: "array", items: objectSchema } },
+  { method: "get", path: "/v1/api/events", operationId: "apiListEvents", summary: "List persisted run events.", rpcMethod: "streamRunEvents", requiredScope: scopeForRpc("streamRunEvents"), responseSchema: { type: "array", items: objectSchema } },
+  { method: "get", path: "/v1/api/approvals", operationId: "apiListApprovals", summary: "List approvals.", rpcMethod: "listApprovals", requiredScope: scopeForRpc("listApprovals"), responseSchema: { type: "array", items: objectSchema } },
+  { method: "post", path: "/v1/api/approvals/{approvalId}", operationId: "apiSubmitApproval", summary: "Submit an approval decision.", rpcMethod: "submitApproval", requiredScope: scopeForRpc("submitApproval"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
+  { method: "post", path: "/v1/api/signals", operationId: "apiSubmitSignal", summary: "Submit a workflow signal.", rpcMethod: "submitSignal", requiredScope: scopeForRpc("submitSignal"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },
+  { method: "get", path: "/v1/api/workflows", operationId: "apiListWorkflows", summary: "List workflows.", rpcMethod: "listWorkflows", requiredScope: scopeForRpc("listWorkflows"), responseSchema: { type: "array", items: objectSchema } },
+  { method: "get", path: "/v1/api/docs", operationId: "apiListDocs", summary: "List docs.", rpcMethod: "listDocs", requiredScope: scopeForRpc("listDocs"), responseSchema: { type: "array", items: objectSchema } },
+  { method: "get", path: "/v1/api/prompts", operationId: "apiListPrompts", summary: "List prompts.", rpcMethod: "listPrompts", requiredScope: scopeForRpc("listPrompts"), responseSchema: { type: "array", items: objectSchema } },
+  { method: "get", path: "/v1/api/scores", operationId: "apiListScores", summary: "List scores for a run.", rpcMethod: "listScores", requiredScope: scopeForRpc("listScores"), responseSchema: { type: "array", items: objectSchema } },
+  { method: "get", path: "/v1/api/tickets", operationId: "apiListTickets", summary: "List work docs.", rpcMethod: "listTickets", requiredScope: scopeForRpc("listTickets"), responseSchema: { type: "array", items: objectSchema } },
+  { method: "get", path: "/v1/api/memory-facts", operationId: "apiListMemoryFacts", summary: "List memory facts.", rpcMethod: "listMemoryFacts", requiredScope: scopeForRpc("listMemoryFacts"), responseSchema: { type: "array", items: objectSchema } },
+  { method: "get", path: "/v1/api/crons", operationId: "apiCronList", summary: "List cron schedules.", rpcMethod: "cronList", requiredScope: scopeForRpc("cronList"), responseSchema: { type: "array", items: objectSchema } },
+  { method: "get", path: "/v1/api/accounts", operationId: "apiListAccounts", summary: "List registered accounts.", rpcMethod: "listAccounts", requiredScope: scopeForRpc("listAccounts"), responseSchema: { type: "array", items: objectSchema } },
+  { method: "get", path: "/v1/api/nodes/{runId}/{nodeId}/output", operationId: "apiGetNodeOutput", summary: "Read node output.", rpcMethod: "getNodeOutput", requiredScope: scopeForRpc("getNodeOutput"), responseSchema: objectSchema },
+  { method: "get", path: "/v1/api/nodes/{runId}/{nodeId}/diff", operationId: "apiGetNodeDiff", summary: "Read node diff.", rpcMethod: "getNodeDiff", requiredScope: scopeForRpc("getNodeDiff"), responseSchema: objectSchema },
+  { method: "get", path: "/v1/api/runs/{runId}/nodes/{nodeId}/output", operationId: "apiGetRunNodeOutput", summary: "Read node output.", rpcMethod: "getNodeOutput", requiredScope: scopeForRpc("getNodeOutput"), responseSchema: objectSchema },
+  { method: "get", path: "/v1/api/runs/{runId}/nodes/{nodeId}/diff", operationId: "apiGetRunNodeDiff", summary: "Read node diff.", rpcMethod: "getNodeDiff", requiredScope: scopeForRpc("getNodeDiff"), responseSchema: objectSchema },
+  { method: "get", path: "/v1/api/schema-signature", operationId: "apiGetSchemaSignature", summary: "Read the schema signature.", rpcMethod: "getSchemaSignature", requiredScope: scopeForRpc("getSchemaSignature"), responseSchema: objectSchema },
+  { method: "get", path: "/v1/api/stream", operationId: "apiStreamInvalidations", summary: "Subscribe to collection invalidations.", requiredScope: scopeForRpc("listRuns"), sse: true },
+];
 
 function errorSchema(definition: GatewayRpcDefinition) {
   return {
@@ -152,17 +206,121 @@ function buildPath(definition: GatewayRpcDefinition) {
   };
 }
 
+function apiResponseSchema(definition: GatewayApiRouteDefinition) {
+  if (definition.sse) {
+    return { type: "string", description: "Server-sent event stream." };
+  }
+  return {
+    type: "object",
+    required: ["ok", "data"],
+    additionalProperties: false,
+    properties: {
+      ok: { const: true },
+      data: definition.responseSchema ?? objectSchema,
+      txid: { type: "string", pattern: "^\\d+$" },
+      seq: { type: "integer", minimum: 0 },
+    },
+  };
+}
+
+function apiErrorSchema() {
+  return {
+    type: "object",
+    required: ["ok", "error"],
+    additionalProperties: false,
+    properties: {
+      ok: { const: false },
+      error: {
+        type: "object",
+        required: ["code", "message"],
+        additionalProperties: true,
+        properties: {
+          code: { type: "string" },
+          message: { type: "string" },
+          requiredScope: { type: "string", enum: GATEWAY_SCOPE_VALUES },
+        },
+      },
+    },
+  };
+}
+
+function buildApiPath(definition: GatewayApiRouteDefinition) {
+  const contentType = definition.sse ? "text/event-stream" : "application/json";
+  const operation: Record<string, unknown> = {
+    operationId: definition.operationId,
+    summary: definition.summary,
+    description: definition.rpcMethod
+      ? `REST domain API wrapper over the ${definition.rpcMethod} Gateway RPC internals.`
+      : "Server-sent event invalidation stream for REST collection clients.",
+    tags: definition.sse ? ["Gateway REST stream"] : ["Gateway REST"],
+    security: [{ bearerAuth: [definition.requiredScope] }],
+    "x-smithers-api-version": SMITHERS_API_VERSION,
+    "x-smithers-required-scope": definition.requiredScope,
+    ...(definition.rpcMethod ? { "x-smithers-rpc-method": definition.rpcMethod } : {}),
+    responses: {
+      "200": {
+        description: definition.sse ? "Invalidation event stream." : "Gateway REST response.",
+        headers: {
+          "X-Smithers-API-Version": {
+            schema: { type: "string", enum: [SMITHERS_API_VERSION] },
+            description: "Stable Smithers Gateway API version.",
+          },
+        },
+        content: {
+          [contentType]: {
+            schema: apiResponseSchema(definition),
+          },
+        },
+      },
+      "400": {
+        description: "Invalid request.",
+        content: { "application/json": { schema: apiErrorSchema() } },
+      },
+      "401": {
+        description: "Authentication failed.",
+        content: { "application/json": { schema: apiErrorSchema() } },
+      },
+      "403": {
+        description: "Missing required scope.",
+        content: { "application/json": { schema: apiErrorSchema() } },
+      },
+      "404": {
+        description: "Route or resource not found.",
+        content: { "application/json": { schema: apiErrorSchema() } },
+      },
+      "500": {
+        description: "Internal server error.",
+        content: { "application/json": { schema: apiErrorSchema() } },
+      },
+    },
+  };
+  if (definition.requestSchema && definition.method !== "get") {
+    operation.requestBody = {
+      required: true,
+      content: {
+        "application/json": {
+          schema: definition.requestSchema,
+        },
+      },
+    };
+  }
+  return { [definition.method]: operation };
+}
+
 function buildOpenApiDocument(): OpenApiDocument {
   const paths: Record<string, unknown> = {};
   for (const definition of GATEWAY_RPC_DEFINITIONS) {
     paths[rpcPath(definition)] = buildPath(definition);
   }
+  for (const definition of gatewayApiRoutes) {
+    paths[definition.path] = buildApiPath(definition);
+  }
   return {
     openapi: "3.1.0",
     info: {
-      title: "Smithers Gateway RPC API",
+      title: "Smithers Gateway API",
       version: SMITHERS_API_VERSION,
-      description: "Stable v1 Smithers Gateway RPC contract generated from packages/gateway/src/rpc.",
+      description: "Stable v1 Smithers Gateway RPC and REST domain API contract generated from packages/gateway.",
     },
     servers: [
       {
@@ -250,7 +408,7 @@ function toYaml(value: unknown, indent = 0): string {
   return `${pad}${scalarToYaml(value)}`;
 }
 
-export { buildOpenApiDocument, toYaml, scalarToYaml, rpcPath, buildPath, errorSchema, successSchema, requestFrameSchema };
+export { buildOpenApiDocument, toYaml, scalarToYaml, rpcPath, buildPath, buildApiPath, errorSchema, successSchema, requestFrameSchema };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const rendered = `${toYaml(buildOpenApiDocument())}\n`;
