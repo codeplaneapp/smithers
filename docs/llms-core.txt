@@ -1581,7 +1581,7 @@ and explain the code.
 | Human prompt | What you should do |
 | --- | --- |
 | "Build this product idea start to finish. I have thoughts but not a spec." | Run an interview or `grill-me` flow first. Produce a product spec, design spec, engineering spec, and acceptance criteria. Add a gate before implementation. |
-| "Add rate limiting and don't stop until it is production-ready." | Run an implementation workflow with a test and review loop. Define production-ready as passing tests, reviewer approval, docs updates, and an evidence report. |
+| "Add rate limiting and don't stop until it is production-ready." | Run an implementation workflow with a test and review loop. Define production-ready as passing tests, review approval, docs updates, and an evidence report. |
 | "Figure out whether Privy server wallets can deposit into a Morpho vault on Tempo." | Treat it as an assumption-probe workflow. Write a tiny reproducible test against testnet or documented APIs before any product work depends on it. Report exact evidence and remaining unknowns. |
 | "Make the UI look like the design and show me it actually works." | Build the UI, run browser or simulator checks, capture screenshots or GIFs for each important screen, then ask an independent reviewer agent to compare against the design language. |
 | "Keep working on flaky tests while I am away." | Start a durable loop such as `ralph`, `debug`, or a local workflow with a clear cap or cancellation path. Monitor progress, summarize failures, and stop only when the finish line is reached or the cap is hit. |
@@ -1831,7 +1831,7 @@ Good response:
 
 ```text
 The run is paused at the deployment approval gate. I inspected the node output:
-tests passed, the reviewer approved, and the only remaining action is your
+tests passed, the review approved, and the only remaining action is your
 approval to deploy. I recommend approving because the diff is limited to the
 rate-limit middleware and the rollback path is unchanged.
 ```
