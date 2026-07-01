@@ -124,17 +124,17 @@
     "@smithers-orchestrator/time-travel": "workspace:*",
     "@smithers-orchestrator/tool-context": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
-    "ai": "^7.0.9",
+    "ai": "^7.0.10",
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",
     "effect": "3.21.4",
-    "incur": "^0.4.1",
+    "incur": "^0.4.10",
     "react": "^19.2.7",
     "zod": "^4.4.3"
   },
   "optionalDependencies": {
-    "@electric-sql/pglite": "0.5.1",
-    "@electric-sql/pglite-socket": "0.2.1",
+    "@electric-sql/pglite": "0.5.3",
+    "@electric-sql/pglite-socket": "0.2.6",
     "pg": "^8.22.0"
   },
   "devDependencies": {

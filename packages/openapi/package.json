@@ -37,7 +37,7 @@
     "@smithers-orchestrator/errors": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
-    "ai": "^7.0.9",
+    "ai": "^7.0.10",
     "effect": "3.21.4",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"

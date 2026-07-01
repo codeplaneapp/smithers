@@ -25,7 +25,7 @@
   },
   "dependencies": {
     "@smithers-orchestrator/gateway": "workspace:*",
-    "@tanstack/db": "0.6.8"
+    "@tanstack/db": "0.6.13"
   },
   "optionalDependencies": {
     "@electric-sql/client": "^1.5.22"

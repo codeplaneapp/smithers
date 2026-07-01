@@ -34,7 +34,7 @@
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/react-reconciler": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
-    "bippy": "^0.5.39",
+    "bippy": "^0.5.42",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "zod": "^4.4.3"

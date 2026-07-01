@@ -55,7 +55,7 @@
     "@smithers-orchestrator/driver": "workspace:*",
     "@smithers-orchestrator/errors": "workspace:*",
     "@smithers-orchestrator/graph": "workspace:*",
-    "bippy": "^0.5.39",
+    "bippy": "^0.5.42",
     "react": "^19.2.7",
     "react-reconciler": "^0.33.0"
   },

@@ -69,13 +69,13 @@
     "build": "tsup --dts-only"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.4",
-    "@ai-sdk/openai": "^4.0.4",
+    "@ai-sdk/anthropic": "^4.0.5",
+    "@ai-sdk/openai": "^4.0.5",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@smithers-orchestrator/driver": "workspace:*",
     "@smithers-orchestrator/errors": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
-    "ai": "^7.0.9",
+    "ai": "^7.0.10",
     "effect": "3.21.4",
     "zod": "^4.4.3"
   },
