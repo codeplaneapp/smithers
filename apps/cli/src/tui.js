@@ -1588,33 +1588,12 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     const tuiEntry = resolveTuiEntry();
     try {
         if (tuiEntry) {
-            // Guard against a stray REUSED gateway on a different backend/workspace.
-            // The monitor reuses any healthy gateway at the default address before
-            // autostarting its own; if that one serves a different store, the
-            // detached run writes here while the monitor reads there — a silently
-            // empty monitor. Only a REUSED (already-listening) gateway can mismatch;
-            // an autostarted one inherits the forwarded backend, so we validate only
-            // when a gateway is already up.
-            const monitorBase = resolveMonitorGatewayBase(process.env);
-            const monitorToken = resolveMonitorToken(authToken, process.env);
-            if (await gatewayHealthy(monitorBase, monitorToken)) {
-                const check = await validateGatewayServesRun(
-                    (id) => gatewayGetRun(monitorBase, id, monitorToken),
-                    runId,
-                    monitorBase,
-                    { timeoutMs: 10_000, intervalMs: 250 },
-                );
-                if (!check.ok) {
-                    terminateDetachedChild(child);
-                    return fail({
-                        code: "TUI_GATEWAY_RUN_MISMATCH",
-                        message: `${check.message} See ${logFile}.`,
-                        exitCode: 1,
-                        runId,
-                        logFile,
-                    });
-                }
-            }
+            // Gateway resolution (and the stray-gateway guard) lives in the monitor
+            // itself now: smithers-mon validates that a reachable gateway actually
+            // serves this run and autostarts its own workspace-bound gateway on a
+            // free port when it doesn't. So the launcher just hands off — no
+            // pre-validation that would pre-empt that self-heal.
+            //
             // Hand off to the full-screen TUI monitor. The TUI handles all views
             // (tree, logs, timeline, approvals) and exits when the user presses q/Q.
             // Keep supervising the detached run child while it runs: if that child
