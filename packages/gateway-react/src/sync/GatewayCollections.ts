@@ -101,7 +101,8 @@ export type GatewayCollections = {
    * Bounded append-only run-event ring. `maxRows` sizes the ring (default 1024);
    * pass the consumer's `maxEvents` so a reader asking for more history (e.g. the
    * TUI's 2000) actually retains it instead of being silently clamped. The
-   * collection is cached per run, so the FIRST caller's `maxRows` wins.
+   * collection is cached per `(runId, maxRows)`, so consumers asking for
+   * different caps get their own correctly-sized ring — no first-caller-wins.
    */
   runEvents(runId: string, maxRows?: number): Collection<GatewayRunEventRow, number>;
 

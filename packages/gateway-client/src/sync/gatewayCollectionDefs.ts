@@ -189,7 +189,9 @@ export const gatewayCollectionDefs = {
     rows: arrayRows<GatewayTicketRow>,
   }),
   runEvents: (runId: string, maxRows = 1_024) => ({
-    key: gatewayKeys.runEvents(runId),
+    // Thread the effective cap into the key so different caps resolve to
+    // different collections (each sized to its own `maxRows` ring below).
+    key: gatewayKeys.runEvents(runId, maxRows),
     getKey: (row: GatewayRunEventRow) => row.seq,
     stream: {
       scope: "streamRunEvents",

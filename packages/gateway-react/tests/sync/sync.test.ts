@@ -1013,6 +1013,28 @@ describe("useGatewayRunEvents over the runEvents collection", () => {
 
     await harness.unmount();
   });
+
+  test("a larger cap gets its own sized collection even when a default cap subscribed first", () => {
+    const registry = createGatewayCollections({ client: makeTransport(() => Promise.resolve({})).transport });
+
+    // Default-cap subscriber mounts first (mirrors the web UI / TUI Tree mode).
+    const small = registry.runEvents("run-1", 1024);
+    // A later larger-cap subscriber (e.g. the TUI's 2000/5000 window) must NOT be
+    // handed the smaller ring: distinct caps resolve to distinct collections.
+    const large = registry.runEvents("run-1", 2000);
+    const larger = registry.runEvents("run-1", 5000);
+
+    expect(large).not.toBe(small);
+    expect(larger).not.toBe(small);
+    expect(larger).not.toBe(large);
+
+    // Same cap → same cached collection, so consumers asking for the same window
+    // still share one ring (and one stream).
+    expect(registry.runEvents("run-1", 2000)).toBe(large);
+    expect(registry.runEvents("run-1", 1024)).toBe(small);
+
+    registry.reset();
+  });
 });
 
 describe("useGatewayRunTree reconcile", () => {

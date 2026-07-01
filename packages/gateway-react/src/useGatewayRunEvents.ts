@@ -43,7 +43,10 @@ export function useGatewayRunEvents(
   // Size the underlying ring to hold at least the requested display window so a
   // large `maxEvents` (e.g. the TUI's 2000) actually retains that much history
   // instead of being silently clamped to the collection's default cap. Floor at
-  // DEFAULT_COLLECTION_MAX_ROWS so the common (web) path is unchanged.
+  // DEFAULT_COLLECTION_MAX_ROWS so the common (web) path is unchanged. The
+  // registry caches the ring per `(runId, effective maxRows)`, so a small
+  // default subscriber that mounts first no longer pins a later larger one to
+  // the smaller ring — each distinct cap resolves to its own sized collection.
   const collection = runId
     ? registry.runEvents(runId, Math.max(maxEvents, DEFAULT_COLLECTION_MAX_ROWS))
     : undefined;

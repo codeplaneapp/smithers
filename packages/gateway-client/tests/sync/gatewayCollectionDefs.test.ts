@@ -178,9 +178,12 @@ describe("gatewayCollectionDefs", () => {
 
     const runEvents = gatewayCollectionDefs.runEvents("run-1", 2);
     expect(runEvents).toMatchObject({
-      key: ["gateway:streamRunEvents", { runId: "run-1" }],
+      // The cap is part of the key so different caps resolve to distinct collections.
+      key: ["gateway:streamRunEvents", { runId: "run-1", maxRows: 2 }],
       stream: { scope: "streamRunEvents", params: { runId: "run-1" }, maxRows: 2 },
     });
+    // A larger cap yields a DIFFERENT key (no first-subscriber-wins collision).
+    expect(gatewayCollectionDefs.runEvents("run-1", 2000).key).not.toEqual(runEvents.key);
     expect(runEvents.getKey({ key: ["gateway:streamRunEvents", { runId: "run-1" }], seq: 12, event: "event", payload: {} })).toBe(12);
   });
 });

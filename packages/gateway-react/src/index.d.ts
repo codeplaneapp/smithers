@@ -289,8 +289,8 @@ type GatewayCollections = {
     tickets(params?: ListTicketsRequest): Collection<GatewayTicketRow, string>;
     /** Flattened devtools run-node tree, reconciled per devtools frame. */
     nodes(runId: string): Collection<GatewayRunNode, string>;
-    /** Bounded append-only run-event ring. */
-    runEvents(runId: string): Collection<GatewayRunEventRow, number>;
+    /** Bounded append-only run-event ring, cached per `(runId, maxRows)` so different caps get their own correctly-sized ring. */
+    runEvents(runId: string, maxRows?: number): Collection<GatewayRunEventRow, number>;
     /** Resolve (or create) the generic single-value query collection for `key`. */
     query<T>(key: SyncKey, fetcher: () => Promise<T>): GatewayQueryHandle<T>;
     /** Resolve (or create) the bounded streaming collection for `key`. */

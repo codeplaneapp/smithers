@@ -26,6 +26,15 @@ export const gatewayKeys = {
   prompts: (params?: Record<string, unknown>): SyncKey => ["gateway:listPrompts", params ?? {}],
   scores: (params?: Record<string, unknown>): SyncKey => ["gateway:listScores", params ?? {}],
   tickets: (params?: Record<string, unknown>): SyncKey => ["gateway:listTickets", params ?? {}],
-  runEvents: (runId: string): SyncKey => ["gateway:streamRunEvents", { runId }],
+  // Include the effective ring size (`maxRows`) in the key so consumers asking
+  // for different caps get DISTINCT collections instead of colliding on whichever
+  // subscriber mounted first (a small default cap must not pin a later larger
+  // one to the smaller ring). Omit `maxRows` (the raw-subscription key used by
+  // `useGatewayRunStream`, which sizes via its own `maxFrames`) to keep that key
+  // stable and independent of the sized collection registry.
+  runEvents: (runId: string, maxRows?: number): SyncKey =>
+    maxRows === undefined
+      ? ["gateway:streamRunEvents", { runId }]
+      : ["gateway:streamRunEvents", { runId, maxRows }],
   devtools: (runId: string): SyncKey => ["gateway:streamDevTools", { runId }],
 } as const;

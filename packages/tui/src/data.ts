@@ -28,13 +28,12 @@ export function useApprovals(runId: string): GatewayAsyncState<GatewayApprovalRo
 /**
  * Single source of truth for how much run-event history the TUI retains.
  *
- * The gateway caches one `runEvents` collection per run and the FIRST caller's
- * `maxRows` sizes its ring (see gatewayCollectionDefs / createGatewayCollections
- * — the collection key omits `maxRows`). Tree is the initial mode, so if it
- * requested the small default while Logs/Timeline/Hijack asked for more, the
- * ring would be pinned to the default and later history silently dropped. Every
- * TUI consumer therefore requests THIS one cap, so the ring is created at the
- * right size regardless of which mode mounts first.
+ * The gateway caches one `runEvents` collection per `(runId, maxRows)` (the cap
+ * is part of the collection key — see gatewayCollectionDefs / gatewayKeys), so
+ * consumers asking for different caps get separate rings and separate streams.
+ * Every TUI event consumer therefore requests THIS one cap, so they all share a
+ * single correctly-sized ring (and one stream) regardless of mount order —
+ * rather than fragmenting into per-cap collections.
  */
 export const TUI_EVENT_CAP = 2000;
 
