@@ -75,6 +75,7 @@
     "check:effect": "node scripts/check-single-effect-version.mjs",
     "check:deps": "node scripts/check-dependency-boundaries.mjs",
     "check:docs": "node scripts/check-docs.mjs",
+    "check:openapi": "pnpm --filter @smithers-orchestrator/gateway check:openapi",
     "check:llms": "node scripts/check-llms.mjs",
     "fetch:jj": "node scripts/fetch-jj-binaries.mjs",
     "docs:components": "node scripts/generate-component-source.mjs",

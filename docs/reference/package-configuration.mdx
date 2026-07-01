@@ -204,6 +204,7 @@ Defined in the root `package.json` for development:
 | `check:effect` | `node scripts/check-single-effect-version.mjs` | Verify the workspace resolves a single Effect version |
 | `check:deps` | `node scripts/check-dependency-boundaries.mjs` | Verify package dependency boundaries |
 | `check:docs` | `node scripts/check-docs.mjs` | Verify documentation style and API drift guards |
+| `check:openapi` | `pnpm --filter @smithers-orchestrator/gateway check:openapi` | Verify the committed Gateway OpenAPI document is current |
 | `check:llms` | `node scripts/check-llms.mjs` | Verify generated llms docs are current |
 | `fetch:jj` | `node scripts/fetch-jj-binaries.mjs` | Fetch vendored jj binaries for supported platforms |
 | `docs:components` | `node scripts/generate-component-source.mjs` | Embed composite component source as tabs in their docs pages |
