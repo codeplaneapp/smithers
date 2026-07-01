@@ -6,11 +6,14 @@ import {
     childFailurePromise,
     displayNode,
     formatStreamText,
+    includeFieldValue,
     isCleanMonitorExit,
     mergeInteractiveInputs,
     normalizeStreamText,
     normalizeSuppliedInput,
+    OMIT_FIELD,
     pickerMaxItems,
+    promptForField,
     streamRun,
     truncate,
     waitForRunRow,
@@ -344,15 +347,76 @@ describe("tui helpers", () => {
         expect(normalizeSuppliedInput({ prompt: "hello" })).toEqual({ prompt: "hello" });
         // --input wins over --prompt, mirroring normalizeWorkflowRunOptions.
         expect(normalizeSuppliedInput({ input: '{"a":1}', prompt: "ignored" })).toEqual({ a: 1 });
-        // No supplied input, non-object payloads, and stdin `-` all normalize to {}.
+        // No supplied input and stdin `-` normalize to {} (no supplied input).
         expect(normalizeSuppliedInput({})).toEqual({});
         expect(normalizeSuppliedInput(undefined)).toEqual({});
         expect(normalizeSuppliedInput({ input: "-" })).toEqual({});
-        expect(normalizeSuppliedInput({ input: "[1,2,3]" })).toEqual({});
     });
 
     test("normalizeSuppliedInput throws on invalid --input JSON", () => {
         expect(() => normalizeSuppliedInput({ input: "{not json" })).toThrow();
+    });
+
+    test("normalizeSuppliedInput rejects non-object top-level --input instead of dropping it", () => {
+        // Arrays/scalars/null carry real user data but can't be merged into the
+        // field-built input object, so they're a usage error, not silently {}.
+        expect(() => normalizeSuppliedInput({ input: "[1,2,3]" })).toThrow(/must be a JSON object/);
+        expect(() => normalizeSuppliedInput({ input: "42" })).toThrow(/must be a JSON object/);
+        expect(() => normalizeSuppliedInput({ input: '"hi"' })).toThrow(/must be a JSON object/);
+        expect(() => normalizeSuppliedInput({ input: "null" })).toThrow(/must be a JSON object/);
+    });
+
+    test("promptForField gives optional enum/boolean a skip choice and omits skipped keys", async () => {
+        // Optional enum: a "(leave unset)" option is appended and, when chosen,
+        // returns OMIT_FIELD so includeFieldValue drops the key.
+        let enumOptions;
+        const enumSkip = await promptForField(
+            { name: "mode", type: "string", required: false, enum: ["fast", "slow"] },
+            {
+                select: async ({ options }) => {
+                    enumOptions = options;
+                    return options.at(-1).value; // the skip choice
+                },
+            },
+        );
+        expect(enumOptions.at(-1).value).toBe(OMIT_FIELD);
+        expect(enumSkip).toBe(OMIT_FIELD);
+        expect(includeFieldValue(enumSkip)).toBe(false);
+
+        // Optional boolean with no default: rendered as a select (not a forced
+        // yes/no confirm) with true/false/skip; skipping omits the key.
+        let boolOptions;
+        const boolSkip = await promptForField(
+            { name: "verbose", type: "boolean", required: false },
+            {
+                select: async ({ options }) => {
+                    boolOptions = options;
+                    return OMIT_FIELD;
+                },
+            },
+        );
+        expect(boolOptions.map((o) => o.value)).toEqual([true, false, OMIT_FIELD]);
+        expect(includeFieldValue(boolSkip)).toBe(false);
+
+        // A required enum has NO skip option (a member must be chosen), and a
+        // real chosen value is kept.
+        let requiredOptions;
+        const chosen = await promptForField(
+            { name: "mode", type: "string", required: true, enum: ["fast", "slow"] },
+            {
+                select: async ({ options }) => {
+                    requiredOptions = options;
+                    return options[0].value;
+                },
+            },
+        );
+        expect(requiredOptions.some((o) => o.value === OMIT_FIELD)).toBe(false);
+        expect(chosen).toBe("fast");
+        expect(includeFieldValue(chosen)).toBe(true);
+
+        // A chosen boolean `false` is still a real answer that must be kept.
+        expect(includeFieldValue(false)).toBe(true);
+        expect(includeFieldValue(undefined)).toBe(false);
     });
 
     test("mergeInteractiveInputs preserves supplied input when no prompts run", () => {

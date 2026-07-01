@@ -670,6 +670,22 @@ export async function streamRun(adapter, runId, name, promptText, opts = {}) {
  * @param {string} entryFile
  * @returns {Promise<{ name: string; type: string; required: boolean; default?: unknown; enum?: unknown[]; description?: string }[]>}
  */
+/**
+ * Close a loaded workflow's storage backend, mirroring `up`'s
+ * `closeWorkflowBackend()` (apps/cli/src/index.js): an async
+ * `openSmithersBackend` workflow exposes `close`, a sync `createSmithers`
+ * workflow exposes `db.close`. Loading a workflow just to read its input schema
+ * still opens that backend (pglite/postgres handles), so the interactive parent
+ * must release it or it leaks for the parent's whole lifetime.
+ * @param {{ close?: () => unknown; db?: { close?: () => unknown } } | null | undefined} workflow
+ */
+async function closeWorkflowBackend(workflow) {
+    const close = workflow?.close ?? workflow?.db?.close;
+    if (typeof close === "function") {
+        await close.call(workflow?.close ? workflow : workflow.db);
+    }
+}
+
 async function loadWorkflowInputFields(entryFile) {
     // Loading a workflow constructs its agents, which can log init warnings;
     // silence both streams so discovery cannot corrupt the interactive prompt.
@@ -677,9 +693,10 @@ async function loadWorkflowInputFields(entryFile) {
     const origStderrWrite = process.stderr.write.bind(process.stderr);
     process.stdout.write = () => true;
     process.stderr.write = () => true;
+    let mod;
     try {
         mdxPlugin();
-        const mod = await import(pathToFileURL(resolve(process.cwd(), entryFile)).href);
+        mod = await import(pathToFileURL(resolve(process.cwd(), entryFile)).href);
         const summary = summarizeWorkflowInputSchema(workflowInputJsonSchema(mod.default?.inputSchema));
         return summary?.fields ?? [];
     } catch {
@@ -687,30 +704,77 @@ async function loadWorkflowInputFields(entryFile) {
     } finally {
         process.stdout.write = origStdoutWrite;
         process.stderr.write = origStderrWrite;
+        // Release the workflow's backend on BOTH success and error paths so
+        // async openSmithersBackend workflows don't leak pglite/postgres handles
+        // in the interactive parent (we only inspected the input schema).
+        await closeWorkflowBackend(mod?.default).catch(() => {});
     }
 }
 
 /**
- * Prompt for one input field with a clack control matched to its type, re-asking
- * (via clack's validate) until the value is valid.
- * @param {{ name: string; type: string; required: boolean; default?: unknown; enum?: unknown[]; description?: string }} field
- * @returns {Promise<unknown | symbol>} coerced value, or a clack cancel symbol
+ * Sentinel returned by {@link promptForField} when the user chooses to leave an
+ * OPTIONAL field unset. It is NOT `undefined` (which a text field also returns
+ * for "no default, left blank") so the collector can tell "explicitly skipped"
+ * apart and, either way, OMIT the key from the built input object — never coerce
+ * an absent optional enum/boolean into a forced value.
  */
-export async function promptForField(field) {
+export const OMIT_FIELD = Symbol("smithers.tui.omitField");
+
+/**
+ * Whether a {@link promptForField} result should be written into the collected
+ * input. Both `undefined` (blank optional text / no default) and
+ * {@link OMIT_FIELD} (explicit skip of an optional enum/boolean) mean "leave the
+ * key absent" so the workflow's own schema defaults/optionality apply.
+ * @param {unknown} value
+ */
+export function includeFieldValue(value) {
+    return value !== undefined && value !== OMIT_FIELD;
+}
+
+/**
+ * Prompt for one input field with a clack control matched to its type, re-asking
+ * (via clack's validate) until the value is valid. OPTIONAL enum/boolean fields
+ * get a "(leave unset)" choice that returns {@link OMIT_FIELD} so absence stays
+ * absence instead of being coerced (an optional enum forced to its first member,
+ * an optional boolean forced to `false`).
+ *
+ * @param {{ name: string; type: string; required: boolean; default?: unknown; enum?: unknown[]; description?: string }} field
+ * @param {{ select: typeof select; confirm: typeof confirm; text: typeof text }} [prompts] - injectable clack controls (tests)
+ * @returns {Promise<unknown | symbol>} coerced value, {@link OMIT_FIELD}, or a clack cancel symbol
+ */
+export async function promptForField(field, prompts = { select, confirm, text }) {
     const types = String(field.type ?? "").split(" | ");
     const isNumber = types.includes("number") || types.includes("integer");
     const isInteger = types.includes("integer");
     const isBoolean = types.includes("boolean");
     const suffix = field.required ? "" : pc.dim(" (optional)");
     const message = `${field.name}${suffix}${field.description ? ` — ${pc.dim(field.description)}` : ""}`;
+    const skipOption = { value: OMIT_FIELD, label: pc.dim("(leave unset)") };
 
     if (Array.isArray(field.enum) && field.enum.length > 0) {
-        return select({ message, options: field.enum.map((v) => ({ value: v, label: String(v) })) });
+        const options = field.enum.map((v) => ({ value: v, label: String(v) }));
+        // Optional enums must offer an explicit escape hatch; a required enum
+        // has none (one of its members must be chosen).
+        if (!field.required) options.push(skipOption);
+        return prompts.select({ message, options });
     }
     if (isBoolean) {
-        return confirm({ message, initialValue: field.default === true });
+        // An optional boolean with NO declared default has three outcomes, not
+        // two: true, false, or absent. A yes/no confirm can't express "absent"
+        // (it forces false), so present a select with a skip choice instead.
+        if (!field.required && field.default === undefined) {
+            return prompts.select({
+                message,
+                options: [
+                    { value: true, label: "true" },
+                    { value: false, label: "false" },
+                    skipOption,
+                ],
+            });
+        }
+        return prompts.confirm({ message, initialValue: field.default === true });
     }
-    const raw = await text({
+    const raw = await prompts.text({
         message,
         placeholder: field.default !== undefined ? String(field.default) : undefined,
         validate: (value) => {
@@ -736,7 +800,10 @@ export async function promptForField(field) {
  * (`--input` JSON wins; otherwise `--prompt` maps to `{ prompt }`). Interactive
  * mode drives its prompts off the TTY stdin, so `--input -` (read JSON from
  * stdin) is unusable and is treated as no supplied input. Throws on invalid
- * `--input` JSON so the caller can fail fast before prompting.
+ * `--input` JSON — including a non-object top-level payload (array/scalar/null) —
+ * so the caller can fail fast before prompting. The interactive path builds an
+ * input OBJECT from the workflow's fields, so a non-object `--input` is a usage
+ * error, not something to silently drop.
  *
  * @param {Record<string, any> | undefined} options - the command's parsed options (`c.options`)
  * @returns {Record<string, unknown>}
@@ -748,7 +815,13 @@ export function normalizeSuppliedInput(options) {
         : (o.prompt !== undefined ? JSON.stringify({ prompt: o.prompt }) : undefined);
     if (raw === undefined || raw === "-") return {};
     const parsed = parseJsonArgument(raw, "input");
-    if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        const kind = parsed === null ? "null" : Array.isArray(parsed) ? "an array" : `a ${typeof parsed}`;
+        throw new Error(
+            `--input must be a JSON object, but got ${kind}. Interactive mode builds the input object from the ` +
+            `workflow's fields, so pass an object (e.g. '{"prompt":"…"}') or use --prompt.`,
+        );
+    }
     return /** @type {Record<string, unknown>} */ (parsed);
 }
 
@@ -781,7 +854,9 @@ async function askWorkflowInputs(workflow) {
     for (const field of fields) {
         const value = await promptForField(field);
         if (isCancel(value)) return null;
-        if (value !== undefined) inputs[field.name] = value;
+        // Skip blank optional text (undefined) and explicitly-skipped optional
+        // enum/boolean (OMIT_FIELD) so absent input stays absent.
+        if (includeFieldValue(value)) inputs[field.name] = value;
     }
     return inputs;
 }
@@ -961,7 +1036,12 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     // Run the workflow as a detached background process so its agent output
     // streams to a log file and never collides with the live card.
     const indexPath = fileURLToPath(new URL("./index.js", import.meta.url));
-    const logFile = resolve(dirname(workflow.entryFile), `${runId}.log`);
+    // Honor --log-dir the same way `up` does (index.js resolves the child's log
+    // file from `options.logDir ?? dirname(resolvedWorkflowPath)`, and
+    // buildDetachedUpArgs forwards --log-dir to the child), so the launcher's
+    // "logs → …" path points at the SAME file the run writes to.
+    const logDir = (c.options && typeof c.options.logDir === "string" && c.options.logDir) || dirname(workflow.entryFile);
+    const logFile = resolve(logDir, `${runId}.log`);
     let child;
     try {
         const fd = openSync(logFile, "a");

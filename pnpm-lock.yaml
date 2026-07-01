@@ -1539,6 +1539,12 @@ importers:
       '@smithers-orchestrator/gateway-react':
         specifier: workspace:*
         version: link:../gateway-react
+      react:
+        specifier: ^19.2.5
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.2.5
+        version: 19.2.5(react@19.2.5)
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -1549,12 +1555,6 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.14)
-      react:
-        specifier: ^19.2.5
-        version: 19.2.5
-      react-dom:
-        specifier: ^19.2.5
-        version: 19.2.5(react@19.2.5)
       typescript:
         specifier: ~5.9.3
         version: 5.9.3

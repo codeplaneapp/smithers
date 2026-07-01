@@ -1,8 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { SyntaxStyle } from "@opentui/core";
-import { useGatewayActions, useGatewayNodeOutput } from "@smithers-orchestrator/gateway-react";
-import { useRunTree, useApprovals, useRunEvents, useNodeDiff } from "../data.ts";
+import { useRunTree, useApprovals, useRunEvents, useNodeDiff, useNodeOutput, useActions } from "../data.ts";
 import type { GatewayEventFrame } from "../data.ts";
 import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import { normalizeFrame, nodeLogEvents } from "./eventFrame.ts";
@@ -293,7 +292,7 @@ function NodeInspector({
   activeTab: TabId;
 }) {
   const { events } = useRunEvents(runId);
-  const { data: outputData } = useGatewayNodeOutput({ runId, nodeId: node?.id, iteration: node?.iteration });
+  const { data: outputData } = useNodeOutput({ runId, nodeId: node?.id, iteration: node?.iteration });
   // Only the Diff tab needs the (potentially expensive) node diff; gate the RPC
   // on it so switching nodes/tabs doesn't fetch diffs nobody is looking at.
   const { data: diffData, loading: diffLoading } = useNodeDiff({
@@ -410,7 +409,7 @@ export function TreeMode({
 }) {
   const { root, nodes, isLoading, error } = useRunTree(runId);
   const { data: approvalsData, refetch: refetchApprovals } = useApprovals(runId);
-  const actions = useGatewayActions();
+  const actions = useActions();
   const { width } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
 
