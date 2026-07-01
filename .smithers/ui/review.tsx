@@ -40,12 +40,13 @@ function runIdFromUrl(): string | undefined {
 
 export type VerdictState = "approved" | "blocked" | "pending" | "missing";
 
-// Terminal = a known run status that is not one of the active/suspended states
-// (running, waiting-approval, waiting-event, waiting-timer). Mirrors the server's
-// terminal set (finished, failed, cancelled, continued) via the negative
-// definition, so a newly-added terminal status is handled too.
+// Terminal = a known run status that is not active or suspended. The active set
+// is `running` plus every `waiting-*` state (waiting-approval, waiting-event,
+// waiting-timer, waiting-quota, and any future waiting-*), so this leaves the
+// terminal set as finished, failed, cancelled, and continued. Using the negative
+// `waiting-` prefix keeps it correct as new suspending statuses are added.
 export function isRunTerminal(status: string | undefined | null): boolean {
-  return status != null && !["running", "waiting-approval", "waiting-event", "waiting-timer"].includes(status);
+  return status != null && status !== "running" && !status.startsWith("waiting-");
 }
 
 // The synthesized moderator verdict is the ONLY source of truth (never inferred
