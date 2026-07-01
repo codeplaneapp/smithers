@@ -3,8 +3,8 @@ import { verdictStateFor, isRunTerminal, issuesEmptyMessageFor } from "../../../
 
 test("isRunTerminal treats active/suspended as non-terminal, else terminal", () => {
   // Active/suspended: running + any waiting status. Includes the bare "waiting"
-  // that the gateway stream reducer emits for paused frames, plus waiting-quota.
-  for (const s of ["running", "waiting", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"]) {
+  // that the gateway stream reducer emits for paused frames.
+  for (const s of ["running", "waiting", "waiting-approval", "waiting-event", "waiting-timer"]) {
     expect(isRunTerminal(s)).toBe(false);
   }
   // Terminal: finished, failed, cancelled, continued.

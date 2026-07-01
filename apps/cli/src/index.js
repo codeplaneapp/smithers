@@ -292,8 +292,7 @@ function formatStatusExitCode(status) {
         return 0;
     if (status === "waiting-approval" ||
         status === "waiting-event" ||
-        status === "waiting-timer" ||
-        status === "waiting-quota") {
+        status === "waiting-timer") {
         return 3;
     }
     if (status === "cancelled")
@@ -344,8 +343,7 @@ function summarizeRunResult(result) {
 function isWaitingStatus(status) {
     return (status === "waiting-approval" ||
         status === "waiting-event" ||
-        status === "waiting-timer" ||
-        status === "waiting-quota");
+        status === "waiting-timer");
 }
 /**
  * CTAs shown when `up` ends in a paused (waiting-*) state, so exit code 3 reads

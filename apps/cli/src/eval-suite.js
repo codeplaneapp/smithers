@@ -11,7 +11,6 @@ export const EVAL_CASE_STATUSES = [
     "waiting-approval",
     "waiting-event",
     "waiting-timer",
-    "waiting-quota",
 ];
 
 const RUN_ID_MAX_LENGTH = 64;

@@ -128,7 +128,6 @@ function toRunStatus(state: string | undefined): string {
     case "waiting-approval":
     case "waiting-event":
     case "waiting-timer":
-    case "waiting-quota":
     case "waiting":
     case "blocked":
       return "waiting";

@@ -1254,7 +1254,7 @@ function renderRunDetail() {
 }
 
 function render() {
-  const activeRuns = state.runs.filter((run) => ["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"].includes(run.status)).length;
+  const activeRuns = state.runs.filter((run) => ["running", "waiting-approval", "waiting-event", "waiting-timer"].includes(run.status)).length;
   root.innerHTML = `
     <div class="shell">
       <aside class="nav">

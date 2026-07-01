@@ -182,7 +182,6 @@ describe("snapshotToGatewayRunNode", () => {
       ["canceled", "cancelled"],
       ["waiting-event", "waiting"],
       ["waiting-timer", "waiting"],
-      ["waiting-quota", "waiting"],
       ["waiting", "waiting"],
       ["blocked", "waiting"],
       ["mystery", "queued"],
