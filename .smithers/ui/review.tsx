@@ -374,7 +374,7 @@ function App() {
                 ))}
                 {visibleIssues.length === 0 ? (
                   <div className="empty" data-testid="review-issues-empty">
-                    {verdictState === "missing"
+                    {verdictState === "missing" && reviews.length === 0
                       ? "No review output was produced."
                       : allIssues.length === 0
                         ? "No issues raised — the reviewers found nothing to flag."
