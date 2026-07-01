@@ -64,7 +64,7 @@ SmithersGatewayClient({
 | `useGatewayNodeDiff` (via `getNodeDiff` RPC) | `gateway-react` | NodeInspector Diff tab (gated on the tab being active) |
 | `useGatewayActions()` | `gateway-react` | Only `submitApproval` (approve/deny a gate in TREE). The monitor does NOT cancel/resume/rewind from actions - those are CLI-driven; HIJACK shells out to `bunx smithers-orchestrator hijack`. |
 
-The `useGatewayRun` hook drives the header and is polled via the collection's built-in live-stream (no polling interval needed). `useGatewayRunEvents` drives both the LOGS stream and the TIMELINE scrubber; the DevTools frame protocol (`packages/protocol/src/devtools`) parses `DevToolsSnapshot` and `DevToolsDelta` payloads from `FrameCommitted` events to reconstruct the node tree at each frame.
+The `useGatewayRun` hook drives the header and is polled via the collection's built-in live-stream (no polling interval needed). `useGatewayRunEvents` feeds the run-*events* surfaces (the LOGS transcript and the TIMELINE scrubber), not the tree. The **tree** comes from a separate hook, `useGatewayRunTree(runId)`, a live query over the per-run `nodes` collection; that collection is kept fresh by the gateway's `streamDevTools` stream (each devtools frame triggers a `getDevToolsSnapshot` refetch + reconcile), so the tree stays current without the TUI parsing any frame payloads itself.
 
 ---
 
@@ -141,7 +141,7 @@ Fields, left to right:
   - Chevron: `▾` expanded, `▸` collapsed, `·` leaf.
   - Glyph: `✓` finished, `●` running, `⏸` waiting, `○` pending, `✗` failed.
   - j/k / arrow keys move cursor; `space` folds/unfolds; `⏎` selects node → updates right pane.
-  - Data: `useGatewayRunEvents` + DevTools snapshot/delta reconstruction.
+  - Data: `useGatewayRunTree(runId)` - a live query over the per-run `nodes` collection, kept fresh via the gateway's `streamDevTools` stream (refetch + reconcile of `getDevToolsSnapshot`). The TUI does not reconstruct the tree from raw event frames.
 
 - **Right pane** (`NodeInspector`): tabbed panel for the selected node.
   - Tabs: **Output** / **Logs** / **Diff** / **Props**. (There is no Tools tab: the gateway exposes no per-node tool-call stream to the monitor; tool calls live only in the durable store and are surfaced by `bunx smithers-orchestrator node`, so an always-empty tab would be dishonest.)
@@ -348,4 +348,4 @@ packages/tui/
 
 4. **Gateway autostart** - resolved: `index.tsx` probes the local gateway and, when unpinned and unreachable, spawns the resolved CLI's `gateway` subcommand directly (via `cliEntry.ts`); a pinned-but-unreachable gateway errors out instead of autostarting.
 
-5. **Run-tree reconstruction** - resolved: the tree comes from the shared `useGatewayRunTree` hook (a live query over the per-run `nodes` collection reconciled from the devtools snapshot/delta stream), keyed by `runNodeKey`. `packages/tui` does not implement its own delta-merge.
+5. **Run-tree reconstruction** - resolved: the tree comes from the shared `useGatewayRunTree` hook (a live query over the per-run `nodes` collection, kept fresh by the gateway's `streamDevTools` stream, each frame driving a `getDevToolsSnapshot` refetch + reconcile), keyed by `runNodeKey`. Run *events* (`useGatewayRunEvents`) feed the logs/timeline surfaces, not the tree; `packages/tui` does not implement its own delta-merge.
