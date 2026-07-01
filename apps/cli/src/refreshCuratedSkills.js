@@ -177,32 +177,38 @@ export function refreshCuratedSkills(opts = {}) {
   };
 
   for (const target of skillTargets(homeDir)) {
-    if (deselected.has(target.id)) continue;
     const skillsDir = target.skillsDir;
-    const dest = join(skillsDir, CURATED_SKILL_NAME);
-    const installedMd = readSkillMdMaybe(dest);
 
-    if (installedMd !== null) {
-      // A current-name install exists. Repair if it is the retired skill in
-      // disguise, or simply stale relative to the bundled version.
-      if (isRetiredCuratedSkill(installedMd)) {
-        writeSkill(dest, target.displayName, "retired-in-place");
-      } else {
-        let destHash = null;
-        try {
-          destHash = sha256File(join(dest, "SKILL.md"));
-        } catch {
-          /* fall through to rewrite */
-        }
-        if (destHash === sourceHash && existsSync(join(dest, "llms-full.txt"))) {
-          result.fresh.push({ agent: target.displayName, path: dest });
+    // A deselected agent skips (re)install of the current skill, but MUST still
+    // get the harmful retired skill removed below — deselection means "no
+    // smithers curated skill here", which includes not leaving the retired
+    // `smithers-orchestrator` skill (with its stale plan-mode guidance) behind.
+    if (!deselected.has(target.id)) {
+      const dest = join(skillsDir, CURATED_SKILL_NAME);
+      const installedMd = readSkillMdMaybe(dest);
+
+      if (installedMd !== null) {
+        // A current-name install exists. Repair if it is the retired skill in
+        // disguise, or simply stale relative to the bundled version.
+        if (isRetiredCuratedSkill(installedMd)) {
+          writeSkill(dest, target.displayName, "retired-in-place");
         } else {
-          writeSkill(dest, target.displayName, "stale");
+          let destHash = null;
+          try {
+            destHash = sha256File(join(dest, "SKILL.md"));
+          } catch {
+            /* fall through to rewrite */
+          }
+          if (destHash === sourceHash && existsSync(join(dest, "llms-full.txt"))) {
+            result.fresh.push({ agent: target.displayName, path: dest });
+          } else {
+            writeSkill(dest, target.displayName, "stale");
+          }
         }
+      } else if (agentPresent(target.id, target.base, detections)) {
+        // Agent is present but has no curated skill yet — install it.
+        writeSkill(dest, target.displayName, "installed");
       }
-    } else if (agentPresent(target.id, target.base, detections)) {
-      // Agent is present but has no curated skill yet — install it.
-      writeSkill(dest, target.displayName, "installed");
     }
 
     // Remove retired skills regardless of folder name (e.g. a

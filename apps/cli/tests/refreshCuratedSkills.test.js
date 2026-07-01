@@ -187,3 +187,20 @@ test("refreshCuratedSkills installs to agents NOT in the deselection list", () =
   expect(result.updated.some((u) => u.agent === "Claude Code")).toBe(true);
   expect(existsSync(f.claudeSkill("smithers"))).toBe(true);
 });
+
+test("a deselected agent still has its harmful retired skill removed (deselection ≠ keep retired)", () => {
+  const f = fixture();
+  // Claude is deselected, and it carries the legacy retired skill.
+  saveSkillDeselections(f.homeDir, ["claude"]);
+  writeSkillDir(f.claudeSkill("smithers-orchestrator"), RETIRED_SKILL);
+
+  const result = refresh(f);
+
+  // The harmful retired skill must be removed even for a deselected agent —
+  // deselection means "no smithers curated skill here", not "keep the retired one".
+  expect(existsSync(f.claudeSkill("smithers-orchestrator"))).toBe(false);
+  expect(result.legacyRemoved.some((r) => r.path.endsWith("smithers-orchestrator"))).toBe(true);
+  // ...but the current skill must NOT be (re)installed on the deselected agent.
+  expect(existsSync(f.claudeSkill("smithers"))).toBe(false);
+  expect(result.updated).toHaveLength(0);
+});

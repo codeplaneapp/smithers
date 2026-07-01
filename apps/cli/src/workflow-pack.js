@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { accountsRoot } from "@smithers-orchestrator/accounts";
 import { generateAgentsTs } from "./agent-detection.js";
 import { buildComponentImporterMap, componentBaseName } from "./initPackUpdates.js";
-import { installCuratedSkill, saveSkillDeselections, skillTargets } from "./installCuratedSkill.js";
+import { installCuratedSkill, loadSkillDeselections, saveSkillDeselections, skillTargets } from "./installCuratedSkill.js";
 import { noteWorkflowPreferenceInAgentDocs } from "./noteWorkflowPreferenceInAgentDocs.js";
 import { WORKFLOW_UI_SOURCES } from "./workflowUiSources.js";
 // Seeded workflows authored as canonical files in .smithers/ and emitted by
@@ -4778,19 +4778,32 @@ export function initWorkflowPack(options = {}) {
     // direct callers and tests default to off so they don't write to ~/.
     let skill;
     if (options.installSkill && !options.agentsOnly) {
+        const env = options.env ?? process.env;
+        const homeDir = options.skillOptions?.homeDir ?? env.HOME ?? homedir();
+        // Non-interactive callers (selectedSkillTargets === undefined, e.g.
+        // `init --yes` / CI) install to all detected agents, but must still HONOR
+        // a persisted deselection — otherwise a re-run silently re-adds a skill
+        // the user opted out of, which refreshCuratedSkills then freezes as stale
+        // (marker says opted-out, so it is never refreshed). Filtering by the
+        // marker keeps disk and marker consistent; an empty marker = install all.
+        let targets = options.selectedSkillTargets;
+        if (targets === undefined) {
+            const optedOut = new Set(loadSkillDeselections(homeDir));
+            if (optedOut.size > 0) {
+                targets = skillTargets(homeDir).map((t) => t.id).filter((id) => !optedOut.has(id));
+            }
+        }
         const skillOpts = {
             ...options.skillOptions,
-            ...(options.selectedSkillTargets ? { targets: options.selectedSkillTargets } : {}),
+            ...(targets ? { targets } : {}),
         };
         skill = installCuratedSkill(skillOpts);
         options.reporter?.skillInstalled?.(skill);
         // Persist which agents the user deselected so refreshCuratedSkills does
         // not re-add them on upgrade. Only write the marker when the caller
-        // passed an explicit selection (undefined = non-interactive = install all,
-        // no deselection record needed).
+        // passed an explicit selection (undefined = non-interactive, which honors
+        // the existing marker above rather than rewriting it).
         if (options.selectedSkillTargets !== undefined) {
-            const env = options.env ?? process.env;
-            const homeDir = options.skillOptions?.homeDir ?? env.HOME ?? homedir();
             const allIds = skillTargets(homeDir).map((t) => t.id);
             const deselectedIds = allIds.filter((id) => !options.selectedSkillTargets.includes(id));
             try {
