@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import {
+    buildDetachedUpArgs,
     buildWorkflowPickerOptions,
     childFailurePromise,
     displayNode,
@@ -67,6 +68,80 @@ describe("tui helpers", () => {
 
         expect(option.label.length).toBe(1);
         expect(option.hint).toBeUndefined();
+    });
+
+    test("buildDetachedUpArgs starts with a minimal up invocation", () => {
+        expect(buildDetachedUpArgs("/cli/index.js", "/wf/hello.tsx", "run-1", {})).toEqual([
+            "/cli/index.js",
+            "up",
+            "/wf/hello.tsx",
+            "--run-id",
+            "run-1",
+        ]);
+    });
+
+    test("buildDetachedUpArgs serializes prompted inputs as JSON", () => {
+        const args = buildDetachedUpArgs("/cli/index.js", "/wf/hello.tsx", "run-1", { name: "will", n: 3 });
+        const i = args.indexOf("--input");
+        expect(i).toBeGreaterThan(-1);
+        expect(JSON.parse(args[i + 1])).toEqual({ name: "will", n: 3 });
+    });
+
+    test("buildDetachedUpArgs threads sandbox/execution/logging options from c.options", () => {
+        const args = buildDetachedUpArgs("/cli/index.js", "/wf/hello.tsx", "run-1", {}, {
+            maxConcurrency: 8,
+            root: "/sandbox",
+            log: false,
+            logDir: "/logs",
+            allowNetwork: true,
+            maxOutputBytes: 1024,
+            toolTimeoutMs: 5000,
+            hot: true,
+            annotations: '{"env":"ci"}',
+            backend: "pglite",
+        });
+        expect(args).toEqual([
+            "/cli/index.js",
+            "up",
+            "/wf/hello.tsx",
+            "--run-id",
+            "run-1",
+            "--max-concurrency",
+            "8",
+            "--root",
+            "/sandbox",
+            "--no-log",
+            "--log-dir",
+            "/logs",
+            "--allow-network",
+            "--max-output-bytes",
+            "1024",
+            "--tool-timeout-ms",
+            "5000",
+            "--hot",
+            "--annotations",
+            '{"env":"ci"}',
+            "--backend",
+            "pglite",
+        ]);
+    });
+
+    test("buildDetachedUpArgs excludes detach/serve/interactive-only options", () => {
+        const args = buildDetachedUpArgs("/cli/index.js", "/wf/hello.tsx", "run-1", {}, {
+            detach: true,
+            interactive: true,
+            serve: true,
+            supervise: true,
+            port: 9999,
+            host: "0.0.0.0",
+            authToken: "secret",
+            metrics: false,
+            insecure: true,
+            log: true,
+        });
+        expect(args).toEqual(["/cli/index.js", "up", "/wf/hello.tsx", "--run-id", "run-1"]);
+        // --log default (true) must NOT emit a flag; only --no-log does.
+        expect(args).not.toContain("--no-log");
     });
 
     test("truncate handles empty and very small budgets", () => {

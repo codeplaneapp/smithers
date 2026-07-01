@@ -760,6 +760,46 @@ async function launchTuiMonitor(tuiEntry, runId, cliIndexPath, gatewayUrl) {
 }
 
 /**
+ * Serialize the launch options a user passed to `up`/`workflow run --interactive`
+ * into the argv for the detached child `up` run the monitor watches, so the
+ * interactive path honors the same sandbox/execution/logging flags as a normal
+ * `up` instead of silently dropping them.
+ *
+ * Options that only make sense for a one-shot/foreground/server run are
+ * intentionally excluded: `--detach` (the interactive path always detaches its
+ * own child), `--interactive`, the `--serve`/`--supervise*`/`--host`/`--port`/
+ * `--metrics`/`--auth-token`/`--insecure` HTTP-server family (the TUI provides
+ * monitoring through its own gateway), and the internal durable resume-claim
+ * flags. Workflow inputs are threaded via the already-prompted `inputs` object,
+ * so the CLI `--input`/`--prompt` are handled there, not here.
+ *
+ * @param {string} indexPath - absolute path to apps/cli/src/index.js
+ * @param {string} entryFile - workflow entry file to run
+ * @param {string} runId - resolved run id
+ * @param {Record<string, unknown> | null | undefined} inputs - prompted workflow inputs
+ * @param {Record<string, any>} [options] - the command's parsed options (`c.options`)
+ * @returns {string[]} argv after the `bun` executable (starting with `indexPath`)
+ */
+export function buildDetachedUpArgs(indexPath, entryFile, runId, inputs, options = {}) {
+    const args = [indexPath, "up", entryFile, "--run-id", runId];
+    if (inputs && Object.keys(inputs).length > 0) {
+        args.push("--input", JSON.stringify(inputs));
+    }
+    const o = options ?? {};
+    if (o.maxConcurrency) args.push("--max-concurrency", String(o.maxConcurrency));
+    if (o.root) args.push("--root", String(o.root));
+    if (o.log === false) args.push("--no-log");
+    if (o.logDir) args.push("--log-dir", String(o.logDir));
+    if (o.allowNetwork) args.push("--allow-network");
+    if (o.maxOutputBytes) args.push("--max-output-bytes", String(o.maxOutputBytes));
+    if (o.toolTimeoutMs) args.push("--tool-timeout-ms", String(o.toolTimeoutMs));
+    if (o.hot) args.push("--hot");
+    if (o.annotations) args.push("--annotations", String(o.annotations));
+    if (o.backend) args.push("--backend", String(o.backend));
+    return args;
+}
+
+/**
  * The interactive run flow (`up --interactive` / `workflow run --interactive`):
  * optionally pick a workflow, start a real run, and live-render its status card
  * until the run finishes or pauses for approval.
@@ -768,7 +808,7 @@ async function launchTuiMonitor(tuiEntry, runId, cliIndexPath, gatewayUrl) {
  * passed a workflow ID or file path), so the picker is skipped and we go
  * straight to prompting for inputs.
  *
- * @param {{ ok: (...args: any[]) => any; error?: (...args: any[]) => any }} c
+ * @param {{ ok: (...args: any[]) => any; error?: (...args: any[]) => any; options?: Record<string, any> }} c
  * @param {(opts: { code: string; message: string; exitCode?: number; [key: string]: unknown }) => any} fail
  * @param {{ preselect?: { entryFile: string; id?: string; displayName?: string; description?: string } }} [opts]
  */
@@ -813,7 +853,9 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
         return c.ok({ ran: false, reason: "cancelled" });
     }
 
-    const runId = `run-${Date.now().toString(36)}`;
+    // Honor a user-supplied `--run-id`; otherwise generate one so the detached
+    // child and the monitor agree on which run to watch.
+    const runId = (c.options && typeof c.options.runId === "string" && c.options.runId) || `run-${Date.now().toString(36)}`;
     const name = workflow.displayName ?? workflow.id;
     const promptText = workflow.description ?? name;
 
@@ -828,10 +870,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     try {
         const fd = openSync(logFile, "a");
         try {
-            const upArgs = [indexPath, "up", workflow.entryFile, "--run-id", runId];
-            if (inputs && Object.keys(inputs).length > 0) {
-                upArgs.push("--input", JSON.stringify(inputs));
-            }
+            const upArgs = buildDetachedUpArgs(indexPath, workflow.entryFile, runId, inputs, c.options);
             child = spawn("bun", upArgs, {
                 detached: true,
                 stdio: ["ignore", fd, fd],
