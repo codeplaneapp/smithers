@@ -95,6 +95,180 @@ function metadataValue(source, key) {
     return source.match(new RegExp(`^//\\s*smithers-${key}:\\s*(.+)$`, "m"))?.[1]?.trim();
 }
 /**
+ * Parse a leading Smithers frontmatter block. Modeled on eliza skills' YAML
+ * frontmatter so a workflow can declare metadata + capability gating in one
+ * block instead of scattered `// smithers-key:` lines. The block is a comment so
+ * the file stays valid TSX:
+ *
+ *   /* smithers
+ *   name: close-issues
+ *   description: Fix + review + land every open GitHub issue.
+ *   tags: [github, maintenance]
+ *   required-bins: [jj, gh]
+ *   required-env: [GITHUB_TOKEN]
+ *   disable-model-invocation: false
+ *   *\/
+ *
+ * A minimal YAML subset is supported: `key: value` scalars, inline `[a, b]`
+ * lists, and `- item` block lists. Values win over legacy `// smithers-key:`
+ * comments. Returns an empty map when no block is present.
+ *
+ * @param {string} source
+ * @returns {Record<string, string | string[]>}
+ */
+function parseWorkflowFrontmatter(source) {
+    // Only honor a block that appears before any executable statement so it is
+    // unambiguously frontmatter (JSX pragma comments above it are fine).
+    const match = source.match(/\/\*\s*smithers\b[^\n]*\n([\s\S]*?)\*\//);
+    if (!match)
+        return {};
+    /** @type {Record<string, string | string[]>} */
+    const out = {};
+    const lines = match[1].split("\n");
+    /** @type {string | undefined} */
+    let listKey;
+    for (const rawLine of lines) {
+        const line = rawLine.replace(/\s+$/, "");
+        if (!line.trim())
+            continue;
+        const listItem = line.match(/^\s*-\s+(.*)$/);
+        if (listItem && listKey) {
+            const arr = /** @type {string[]} */ (out[listKey] ??= []);
+            arr.push(unquoteYaml(listItem[1]));
+            continue;
+        }
+        const kv = line.match(/^\s*([A-Za-z0-9_-]+):\s*(.*)$/);
+        if (!kv)
+            continue;
+        const key = kv[1];
+        const value = kv[2].trim();
+        if (value === "") {
+            // `key:` alone begins a block list gathered from following `- item`s.
+            listKey = key;
+            out[key] ??= [];
+            continue;
+        }
+        listKey = undefined;
+        const inlineList = value.match(/^\[(.*)\]$/);
+        out[key] = inlineList
+            ? inlineList[1].split(",").map((entry) => unquoteYaml(entry.trim())).filter(Boolean)
+            : unquoteYaml(value);
+    }
+    return out;
+}
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function unquoteYaml(value) {
+    const trimmed = value.trim();
+    if ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+        (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+        return trimmed.slice(1, -1);
+    }
+    return trimmed;
+}
+/**
+ * Resolve a metadata field, preferring frontmatter over legacy line comments.
+ *
+ * @param {Record<string, string | string[]>} frontmatter
+ * @param {string} source
+ * @param {string} key
+ * @returns {string | undefined}
+ */
+function fieldValue(frontmatter, source, key) {
+    const fm = frontmatter[key];
+    if (Array.isArray(fm))
+        return fm.join(", ");
+    if (typeof fm === "string")
+        return fm;
+    return metadataValue(source, key);
+}
+/**
+ * Resolve a list-valued metadata field (frontmatter list, inline CSV, or legacy
+ * comma-separated `// smithers-key:` comment).
+ *
+ * @param {Record<string, string | string[]>} frontmatter
+ * @param {string} source
+ * @param {string} key
+ * @returns {string[]}
+ */
+function fieldList(frontmatter, source, key) {
+    const fm = frontmatter[key];
+    if (Array.isArray(fm))
+        return fm.slice();
+    if (typeof fm === "string")
+        return parseCsvMetadata(fm);
+    return parseCsvMetadata(metadataValue(source, key));
+}
+/**
+ * @param {Record<string, string | string[]>} frontmatter
+ * @param {string} source
+ * @param {string} key
+ * @returns {boolean}
+ */
+function fieldBool(frontmatter, source, key) {
+    return fieldValue(frontmatter, source, key)?.toLowerCase() === "true";
+}
+/**
+ * Evaluate capability gating (mirrors eliza skills' required-os/bins/env). A
+ * workflow whose prerequisites are unmet is still discovered and listed, but
+ * flagged `eligible: false` with human-readable reasons — surfaced by callers
+ * rather than silently hidden.
+ *
+ * @param {{ requiredOs: string[]; requiredBins: string[]; requiredEnv: string[] }} gating
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {{ eligible: boolean; ineligibleReasons: string[] }}
+ */
+function evaluateEligibility(gating, env) {
+    /** @type {string[]} */
+    const reasons = [];
+    if (gating.requiredOs.length > 0 && !gating.requiredOs.includes(process.platform)) {
+        reasons.push(`requires OS ${gating.requiredOs.join(" or ")} (running on ${process.platform})`);
+    }
+    for (const bin of gating.requiredBins) {
+        if (!binaryOnPath(bin, env))
+            reasons.push(`missing required binary: ${bin}`);
+    }
+    for (const key of gating.requiredEnv) {
+        if (!env[key])
+            reasons.push(`missing required env var: ${key}`);
+    }
+    return { eligible: reasons.length === 0, ineligibleReasons: reasons };
+}
+/**
+ * @param {string} bin
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {boolean}
+ */
+function binaryOnPath(bin, env) {
+    // Absolute/relative path form: check directly.
+    if (bin.includes("/")) {
+        try {
+            return statSync(bin).isFile();
+        }
+        catch {
+            return false;
+        }
+    }
+    const pathValue = env.PATH ?? "";
+    const pathExts = process.platform === "win32" ? (env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";") : [""];
+    for (const dir of pathValue.split(process.platform === "win32" ? ";" : ":")) {
+        if (!dir)
+            continue;
+        for (const ext of pathExts) {
+            try {
+                if (statSync(join(dir, bin + ext)).isFile())
+                    return true;
+            }
+            catch {
+                // keep scanning
+            }
+        }
+    }
+    return false;
+}
+/**
  * @param {string | undefined} raw
  * @returns {string[]}
  */
@@ -240,9 +414,11 @@ export function renderWorkflowInputSchemaMarkdown(inputSchema) {
 /**
  * @param {string} source
  * @param {string} id
+ * @param {NodeJS.ProcessEnv} [env]
  */
-function parseMetadata(source, id) {
-    const metadataVersion = metadataValue(source, "metadata-version") ?? String(WORKFLOW_METADATA_VERSION);
+function parseMetadata(source, id, env = process.env) {
+    const frontmatter = parseWorkflowFrontmatter(source);
+    const metadataVersion = fieldValue(frontmatter, source, "metadata-version") ?? String(WORKFLOW_METADATA_VERSION);
     if (metadataVersion !== String(WORKFLOW_METADATA_VERSION)) {
         throw new SmithersError("INVALID_WORKFLOW_METADATA", `Unsupported workflow metadata version: ${metadataVersion}`, {
             id,
@@ -250,28 +426,41 @@ function parseMetadata(source, id) {
             supportedVersion: WORKFLOW_METADATA_VERSION,
         });
     }
-    const sourceType = metadataText(metadataValue(source, "source"), "user");
-    const displayName = metadataText(metadataValue(source, "display-name"), id);
-    const description = metadataText(metadataValue(source, "description"), defaultDescription(id));
+    const sourceType = metadataText(fieldValue(frontmatter, source, "source"), "user");
+    const displayName = metadataText(fieldValue(frontmatter, source, "display-name") ?? fieldValue(frontmatter, source, "name"), id);
+    const description = metadataText(fieldValue(frontmatter, source, "description"), defaultDescription(id));
+    const requiredOs = fieldList(frontmatter, source, "required-os");
+    const requiredBins = fieldList(frontmatter, source, "required-bins");
+    const requiredEnv = fieldList(frontmatter, source, "required-env");
+    const { eligible, ineligibleReasons } = evaluateEligibility({ requiredOs, requiredBins, requiredEnv }, env);
     return {
         metadataVersion: WORKFLOW_METADATA_VERSION,
         sourceType,
         displayName,
         description,
-        tags: parseCsvMetadata(metadataValue(source, "tags")),
-        aliases: parseCsvMetadata(metadataValue(source, "aliases")),
+        tags: fieldList(frontmatter, source, "tags"),
+        aliases: fieldList(frontmatter, source, "aliases"),
+        requiredOs,
+        requiredBins,
+        requiredEnv,
+        disableModelInvocation: fieldBool(frontmatter, source, "disable-model-invocation"),
+        userInvocable: fieldValue(frontmatter, source, "user-invocable")?.toLowerCase() !== "false",
+        eligible,
+        ineligibleReasons,
     };
 }
 /**
- * @param {string} file
- * @param {string} packDir
- * @param {"local" | "global"} scope
+ * Build a DiscoveredWorkflow from a resolved entry file. Shared by flat-file,
+ * directory-form, and explicit-path discovery.
+ *
+ * @param {string} id
+ * @param {string} entryFile Absolute path to the workflow's `.tsx` entry.
+ * @param {DiscoveredWorkflow["scope"]} scope
+ * @param {NodeJS.ProcessEnv} [env]
  * @returns {DiscoveredWorkflow}
  */
-function workflowFromFile(file, packDir, scope) {
-    const id = file.replace(/\.tsx$/, "");
-    const entryFile = join(workflowsDirForPack(packDir), file);
-    const metadata = parseMetadata(readFileSync(entryFile, "utf8"), id);
+function buildWorkflow(id, entryFile, scope, env = process.env) {
+    const metadata = parseMetadata(readFileSync(entryFile, "utf8"), id, env);
     return {
         id,
         metadataVersion: metadata.metadataVersion,
@@ -281,9 +470,27 @@ function workflowFromFile(file, packDir, scope) {
         description: metadata.description,
         tags: metadata.tags,
         aliases: metadata.aliases,
+        requiredOs: metadata.requiredOs,
+        requiredBins: metadata.requiredBins,
+        requiredEnv: metadata.requiredEnv,
+        disableModelInvocation: metadata.disableModelInvocation,
+        userInvocable: metadata.userInvocable,
+        eligible: metadata.eligible,
+        ineligibleReasons: metadata.ineligibleReasons,
         entryFile,
         path: entryFile,
     };
+}
+/**
+ * @param {string} file
+ * @param {string} packDir
+ * @param {"local" | "global"} scope
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {DiscoveredWorkflow}
+ */
+function workflowFromFile(file, packDir, scope, env = process.env) {
+    const id = file.replace(/\.tsx$/, "");
+    return buildWorkflow(id, join(workflowsDirForPack(packDir), file), scope, env);
 }
 /**
  * @param {string} name
@@ -295,11 +502,77 @@ function displayNameFromWorkflowName(name) {
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
         .join(" ");
 }
+// Subdirectory of a pack's `workflows/` holding human- or agent-promoted
+// workflows that shadow the pack's plain ones (mirrors eliza skills'
+// `curated/active`). Reserved: not itself scanned as a directory-form workflow.
+const CURATED_SUBDIR = join("curated", "active");
 /**
- * Discover workflows visible from `from`, merging the nearest local `.smithers`
- * pack with the global `~/.smithers` pack. Local workflows take precedence: on an
- * id collision the local file wins and the global one is hidden. The result is
- * sorted by id; each entry carries its `scope`.
+ * Ordered list of workflow directories to scan, highest precedence first. Tiers
+ * (parallel to eliza skills' discovery precedence):
+ *
+ *   1. explicit  — `$SMITHERS_WORKFLOW_PATHS` (colon/`;`-separated dirs)
+ *   2. curated   — `<pack>/workflows/curated/active` (local pack, then global)
+ *   3. local     — nearest `.smithers/workflows`
+ *   4. global    — `~/.smithers/workflows`
+ *
+ * First occurrence of an id wins; later (lower-precedence) tiers are shadowed.
+ *
+ * @param {string} [from]
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {{ scope: DiscoveredWorkflow["scope"]; dir: string }[]}
+ */
+export function resolveWorkflowDirs(from = process.cwd(), env = process.env) {
+    /** @type {{ scope: DiscoveredWorkflow["scope"]; dir: string }[]} */
+    const dirs = [];
+    const explicit = env.SMITHERS_WORKFLOW_PATHS ?? "";
+    for (const raw of explicit.split(process.platform === "win32" ? ";" : ":")) {
+        const trimmed = raw.trim();
+        if (trimmed)
+            dirs.push({ scope: "explicit", dir: resolve(trimmed) });
+    }
+    for (const { scope, packDir } of resolvePackDirs(from, env)) {
+        dirs.push({ scope: "curated", dir: join(workflowsDirForPack(packDir), CURATED_SUBDIR) });
+    }
+    for (const { scope, packDir } of resolvePackDirs(from, env)) {
+        dirs.push({ scope, dir: workflowsDirForPack(packDir) });
+    }
+    return dirs;
+}
+/**
+ * Enumerate workflow entries in a single directory. Supports two on-disk forms
+ * (both parallel to eliza skills):
+ *   - flat file:      `<dir>/<id>.tsx`
+ *   - directory form: `<dir>/<id>/workflow.tsx` (may bundle README/UI/assets)
+ *
+ * @param {string} dir
+ * @returns {{ id: string; entryFile: string }[]}
+ */
+function enumerateWorkflowEntries(dir) {
+    /** @type {{ id: string; entryFile: string }[]} */
+    const entries = [];
+    for (const child of readdirSync(dir, { withFileTypes: true })) {
+        if (child.name.startsWith(".") || child.name === "node_modules")
+            continue;
+        const full = join(dir, child.name);
+        if (child.isFile() && child.name.endsWith(".tsx")) {
+            entries.push({ id: child.name.replace(/\.tsx$/, ""), entryFile: full });
+            continue;
+        }
+        if (child.isDirectory() && child.name !== "curated") {
+            const entryFile = join(full, "workflow.tsx");
+            if (existsSync(entryFile) && statSync(entryFile).isFile()) {
+                entries.push({ id: child.name, entryFile });
+            }
+        }
+    }
+    return entries.sort((a, b) => a.id.localeCompare(b.id));
+}
+/**
+ * Discover workflows visible from `from` across all tiers (explicit paths,
+ * curated, local `.smithers`, global `~/.smithers`). Higher-precedence tiers
+ * shadow lower ones on id collision. Both flat (`<id>.tsx`) and directory-form
+ * (`<id>/workflow.tsx`) workflows are found. The result is sorted by id; each
+ * entry carries its `scope` and capability-eligibility.
  *
  * @param {string} [from] Directory to search from (default: cwd).
  * @param {NodeJS.ProcessEnv} [env]
@@ -309,29 +582,23 @@ export function discoverWorkflows(from = process.cwd(), env = process.env) {
     /** @type {DiscoveredWorkflow[]} */
     const discovered = [];
     const seen = new Set();
-    for (const { scope, packDir } of resolvePackDirs(from, env)) {
-        const dir = workflowsDirForPack(packDir);
-        if (!existsSync(dir))
+    for (const { scope, dir } of resolveWorkflowDirs(from, env)) {
+        if (!existsSync(dir) || !statSync(dir).isDirectory())
             continue;
-        const files = readdirSync(dir)
-            .filter((file) => file.endsWith(".tsx"))
-            .filter((file) => statSync(join(dir, file)).isFile())
-            .sort();
-        for (const file of files) {
-            const id = file.replace(/\.tsx$/, "");
+        for (const { id, entryFile } of enumerateWorkflowEntries(dir)) {
             if (seen.has(id))
-                continue; // local pack shadows the global one
+                continue; // a higher-precedence tier already defined this id
             // One malformed or unsupported workflow file must not hide every
             // other valid workflow (or crash `workflow list` / the gateway's
             // workspace registration). Skip the offending file with a warning
             // and continue. `seen` is only marked on a successful parse, so a
-            // broken local file can still fall back to a valid global one.
+            // broken higher-precedence file can still fall back to a valid one.
             let entry;
             try {
-                entry = workflowFromFile(file, packDir, scope);
+                entry = buildWorkflow(id, entryFile, scope, env);
             }
             catch (err) {
-                process.stderr.write(`⚠ Skipping workflow ${join(dir, file)}: ${err instanceof Error ? err.message : String(err)}\n`);
+                process.stderr.write(`⚠ Skipping workflow ${entryFile}: ${err instanceof Error ? err.message : String(err)}\n`);
                 continue;
             }
             seen.add(id);
@@ -393,9 +660,17 @@ export function createWorkflowFile(name, from = process.cwd(), options = {}) {
         });
     }
     writeFileSync(entryFile, [
-        "// smithers-source: generated",
-        `// smithers-metadata-version: ${WORKFLOW_METADATA_VERSION}`,
-        `// smithers-display-name: ${displayNameFromWorkflowName(name)}`,
+        "/* smithers",
+        `name: ${name}`,
+        `display-name: ${displayNameFromWorkflowName(name)}`,
+        "source: generated",
+        `metadata-version: ${WORKFLOW_METADATA_VERSION}`,
+        "description: " + defaultDescription(name),
+        "tags: []",
+        "# Capability gating (optional) — omit or leave empty when unused:",
+        "# required-bins: [git]",
+        "# required-env: [GITHUB_TOKEN]",
+        "*/",
         "/** @jsxImportSource smithers-orchestrator */",
         'import { createSmithers, Workflow } from "smithers-orchestrator";',
         "",

@@ -158,6 +158,196 @@ describe("discoverWorkflows", () => {
     });
 });
 
+describe("discoverWorkflows — skill-parity spec", () => {
+    const dirs = [];
+    afterEach(() => {
+        for (const d of dirs) {
+            try {
+                rmSync(d, { recursive: true, force: true });
+            }
+            catch { }
+        }
+        dirs.length = 0;
+    });
+    function seed(files) {
+        const root = makeTempDir();
+        dirs.push(root);
+        const wfDir = join(root, ".smithers", "workflows");
+        mkdirSync(wfDir, { recursive: true });
+        for (const [rel, contents] of Object.entries(files)) {
+            const target = join(wfDir, rel);
+            mkdirSync(join(target, ".."), { recursive: true });
+            writeFileSync(target, contents);
+        }
+        return { root, wfDir };
+    }
+
+    test("parses YAML frontmatter block (name/description/tags/aliases)", () => {
+        const { root } = seed({
+            "ship.tsx": [
+                "/* smithers",
+                "name: ship",
+                "display-name: Ship It",
+                "description: Ship a polished change.",
+                "tags: [coding, release]",
+                "aliases: [ship-it, release]",
+                "*/",
+                "export default {};",
+            ].join("\n"),
+        });
+        const wf = discoverWorkflows(root)[0];
+        expect(wf.displayName).toBe("Ship It");
+        expect(wf.description).toBe("Ship a polished change.");
+        expect(wf.tags).toEqual(["coding", "release"]);
+        expect(wf.aliases).toEqual(["ship-it", "release"]);
+    });
+
+    test("frontmatter supports block list form and overrides legacy line comments", () => {
+        const { root } = seed({
+            "wf.tsx": [
+                "// smithers-tags: legacy",
+                "/* smithers",
+                "description: From frontmatter.",
+                "tags:",
+                "  - alpha",
+                "  - beta",
+                "*/",
+                "export default {};",
+            ].join("\n"),
+        });
+        const wf = discoverWorkflows(root)[0];
+        expect(wf.description).toBe("From frontmatter.");
+        expect(wf.tags).toEqual(["alpha", "beta"]);
+    });
+
+    test("legacy // smithers-key comments still work with no frontmatter", () => {
+        const { root } = seed({
+            "legacy.tsx": "// smithers-description: Old style.\nexport default {};",
+        });
+        expect(discoverWorkflows(root)[0].description).toBe("Old style.");
+    });
+
+    test("capability gating: unmet required-env marks ineligible but still lists", () => {
+        const { root } = seed({
+            "gated.tsx": [
+                "/* smithers",
+                "description: Needs a token.",
+                "required-env: [SMITHERS_TEST_MISSING_VAR]",
+                "*/",
+                "export default {};",
+            ].join("\n"),
+        });
+        const env = { ...process.env };
+        delete env.SMITHERS_TEST_MISSING_VAR;
+        const wf = discoverWorkflows(root, env)[0];
+        expect(wf.eligible).toBe(false);
+        expect(wf.ineligibleReasons.join(" ")).toContain("SMITHERS_TEST_MISSING_VAR");
+        expect(wf.requiredEnv).toEqual(["SMITHERS_TEST_MISSING_VAR"]);
+    });
+
+    test("capability gating: met required-env is eligible", () => {
+        const { root } = seed({
+            "gated.tsx": [
+                "/* smithers",
+                "required-env: [SMITHERS_TEST_PRESENT_VAR]",
+                "*/",
+                "export default {};",
+            ].join("\n"),
+        });
+        const wf = discoverWorkflows(root, { ...process.env, SMITHERS_TEST_PRESENT_VAR: "1" })[0];
+        expect(wf.eligible).toBe(true);
+        expect(wf.ineligibleReasons).toEqual([]);
+    });
+
+    test("required-bins missing binary is flagged ineligible", () => {
+        const { root } = seed({
+            "needs-bin.tsx": [
+                "/* smithers",
+                "required-bins: [definitely-not-a-real-binary-xyz]",
+                "*/",
+                "export default {};",
+            ].join("\n"),
+        });
+        const wf = discoverWorkflows(root)[0];
+        expect(wf.eligible).toBe(false);
+        expect(wf.ineligibleReasons.join(" ")).toContain("definitely-not-a-real-binary-xyz");
+    });
+
+    test("disable-model-invocation and user-invocable flags parse", () => {
+        const { root } = seed({
+            "flags.tsx": [
+                "/* smithers",
+                "disable-model-invocation: true",
+                "user-invocable: false",
+                "*/",
+                "export default {};",
+            ].join("\n"),
+        });
+        const wf = discoverWorkflows(root)[0];
+        expect(wf.disableModelInvocation).toBe(true);
+        expect(wf.userInvocable).toBe(false);
+    });
+
+    test("defaults: eligible, invocable, no gating when unspecified", () => {
+        const { root } = seed({ "plain.tsx": "export default {};" });
+        const wf = discoverWorkflows(root)[0];
+        expect(wf.eligible).toBe(true);
+        expect(wf.disableModelInvocation).toBe(false);
+        expect(wf.userInvocable).toBe(true);
+        expect(wf.requiredBins).toEqual([]);
+        expect(wf.requiredEnv).toEqual([]);
+        expect(wf.requiredOs).toEqual([]);
+    });
+
+    test("directory-form workflow: <id>/workflow.tsx is discovered", () => {
+        const { root } = seed({
+            "bundled/workflow.tsx": [
+                "/* smithers",
+                "description: A bundled workflow.",
+                "*/",
+                "export default {};",
+            ].join("\n"),
+            "bundled/README.md": "# docs",
+        });
+        const ids = discoverWorkflows(root).map((w) => w.id);
+        expect(ids).toContain("bundled");
+        const wf = discoverWorkflows(root).find((w) => w.id === "bundled");
+        expect(wf.entryFile.endsWith(join("bundled", "workflow.tsx"))).toBe(true);
+        expect(wf.description).toBe("A bundled workflow.");
+    });
+
+    test("directory without workflow.tsx is ignored", () => {
+        const { root, wfDir } = seed({ "real.tsx": "export default {};" });
+        mkdirSync(join(wfDir, "not-a-workflow"), { recursive: true });
+        writeFileSync(join(wfDir, "not-a-workflow", "notes.md"), "hi");
+        expect(discoverWorkflows(root).map((w) => w.id)).toEqual(["real"]);
+    });
+
+    test("curated/active tier shadows the plain pack workflow", () => {
+        const { root, wfDir } = seed({
+            "dup.tsx": "// smithers-description: plain version.\nexport default {};",
+        });
+        const curated = join(wfDir, "curated", "active");
+        mkdirSync(curated, { recursive: true });
+        writeFileSync(join(curated, "dup.tsx"), "// smithers-description: curated version.\nexport default {};");
+        const wf = discoverWorkflows(root).find((w) => w.id === "dup");
+        expect(wf.description).toBe("curated version.");
+        expect(wf.scope).toBe("curated");
+    });
+
+    test("explicit SMITHERS_WORKFLOW_PATHS tier has highest precedence", () => {
+        const { root } = seed({
+            "dup.tsx": "// smithers-description: local version.\nexport default {};",
+        });
+        const extraRoot = makeTempDir();
+        dirs.push(extraRoot);
+        writeFileSync(join(extraRoot, "dup.tsx"), "// smithers-description: explicit version.\nexport default {};");
+        const wf = discoverWorkflows(root, { ...process.env, SMITHERS_WORKFLOW_PATHS: extraRoot }).find((w) => w.id === "dup");
+        expect(wf.description).toBe("explicit version.");
+        expect(wf.scope).toBe("explicit");
+    });
+});
+
 describe("workflow skill docs", () => {
     const dirs = [];
     afterEach(() => {
@@ -421,8 +611,12 @@ describe("createWorkflowFile", () => {
         dirs.push(root);
         const result = createWorkflowFile("hello-world", root);
         const contents = readFileSync(result.path, "utf8");
-        expect(contents).toContain("smithers-source: generated");
-        expect(contents).toContain("smithers-display-name: Hello World");
+        expect(contents).toContain("source: generated");
+        expect(contents).toContain("display-name: Hello World");
+        // Scaffolds the new frontmatter block, and it round-trips through discovery.
+        expect(contents).toContain("/* smithers");
+        expect(result.sourceType).toBe("generated");
+        expect(result.displayName).toBe("Hello World");
     });
     test("throws if workflow already exists", () => {
         const root = makeTempDir();
@@ -456,7 +650,7 @@ describe("createWorkflowFile", () => {
         dirs.push(root);
         const result = createWorkflowFile("multi-word-name", root);
         const contents = readFileSync(result.path, "utf8");
-        expect(contents).toContain("smithers-display-name: Multi Word Name");
+        expect(contents).toContain("display-name: Multi Word Name");
     });
     test("file contains JSX import source", () => {
         const root = makeTempDir();
