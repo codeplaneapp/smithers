@@ -50,6 +50,7 @@ const CORE_PAGES = [
   // The two anchor pages
   "tour.mdx",
   "how-it-works.mdx",
+  "guides/custom-agent-authoring.mdx",
   "guides/context-engineering.mdx",
   "guides/agent-operating-playbook.mdx",
   // JSX surface (single page now — installation + quickstart are stubs)

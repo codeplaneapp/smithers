@@ -1016,6 +1016,265 @@ The full list, with the fix for each, is in [Common Footguns](/guides/common-foo
 
 ---
 
+## Custom Agent Authoring
+
+> Author a custom agent as a directory of files (instructions.md, tools/*.ts, skills/, subagents/) that compiles to a smithers AgentLike. Same format for SDK agents and CLI harness adapters.
+
+Smithers lets you author a custom agent as a **directory of files** that compiles
+to a `AgentLike`. The format is borrowed from Vercel eve's filesystem conventions
+and adapted to run on smithers' durable engine. Instructions, tools, skills, and
+subagents each live in a predictable file location; there is no registration step.
+
+## Directory layout
+
+```
+.smithers/agents/researcher/
+  agent.ts            defineAgent config -- compiled to AgentLike
+  instructions.md     system prompt
+  tools/
+    search_web.ts     one defineTool export per file; filename is the tool name
+    read_page.ts
+  skills/
+    deep-search.md    on-demand playbook injected when requested
+  subagents/
+    summarizer/       nested agent dir, same conventions recursively
+      agent.ts
+      instructions.md
+```
+
+Each `agent/` directory is an independent unit. `tools/`, `skills/`, and
+`subagents/` are optional. `instructions.md` alone is a valid agent.
+
+## `defineAgent` -- the entry point
+
+`agent.ts` exports a default `defineAgent` call that compiles the directory to an
+`AgentLike`:
+
+```ts
+// .smithers/agents/researcher/agent.ts
+import { defineAgent } from "smithers-orchestrator";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+});
+```
+
+Model strings resolve via `resolveSdkModel` in `packages/agents`. The compiled
+`AgentLike` runs inside a `<Task>` node on smithers' engine, so it inherits
+durability, snapshots, time-travel, and approval gates automatically.
+
+### Use the agent in a workflow
+
+```tsx
+import researcher from "../agents/researcher/agent";
+
+<Task id="research" output={schema} agent={researcher}>
+  <Prompt>Find recent papers on transformer attention mechanisms.</Prompt>
+</Task>
+```
+
+## `instructions.md` -- the system prompt
+
+Place the agent's system prompt in `instructions.md` next to `agent.ts`. The
+loader reads it at compile time and attaches it to the underlying `ToolLoopAgent`.
+
+```markdown
+You are a research assistant. When searching, prefer peer-reviewed sources.
+Cite your results inline.
+```
+
+## `tools/*.ts` -- per-file tools
+
+Each `.ts` file under `tools/` exports a single default `defineTool`. The
+filename (minus the `.ts` extension) becomes the tool name -- no registration
+needed.
+
+```ts
+// .smithers/agents/researcher/tools/search_web.ts
+import { defineTool } from "smithers-orchestrator";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Search the web and return top results.",
+  inputSchema: z.object({ query: z.string() }),
+  async execute(input, ctx) {
+    return await ctx.tools.webSearch(input.query);
+  },
+});
+```
+
+`defineTool` re-exports smithers' existing `defineTool` from
+`smithers-orchestrator`, so authored tools get ambient tool-context (smithers run
+context, idempotency keys) for free. The signature matches the AI SDK `tool()`
+shape.
+
+## `skills/*.md` -- on-demand playbooks
+
+Files under `skills/` are markdown playbooks loaded into the agent's context on
+demand. They follow the same mechanism as `.smithers/skills/*.md` used by the CLI
+harness adapters. A skill is injected when the agent determines it needs that
+playbook for the current turn.
+
+```markdown
+<!-- .smithers/agents/researcher/skills/deep-search.md -->
+# Deep Search Playbook
+
+When a query requires exhaustive research:
+1. Search at least five distinct source types.
+2. Cross-check claims across two independent sources before including.
+3. Flag any claim found in only one source.
+```
+
+## `subagents/*` -- nested agents
+
+A directory under `subagents/` follows the same `agent/` layout recursively. The
+loader compiles it to an `AgentLike` and exposes it to the parent agent as a
+delegated tool. The parent calls the subagent by name.
+
+```
+researcher/
+  agent.ts
+  subagents/
+    summarizer/
+      agent.ts
+      instructions.md
+```
+
+```ts
+// researcher/agent.ts
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  // summarizer subagent auto-discovered and available as a tool
+});
+```
+
+## Harness agents through the same API
+
+CLI harness adapters (`ClaudeCodeAgent`, `CodexAgent`, ...) declare through the
+same `defineAgent` surface using a `harness` discriminator:
+
+```ts
+// SDK / custom agent (default)
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+});
+
+// Claude Code harness agent
+export default defineAgent({
+  harness: "claude-code",
+  model: "claude-fable-5",
+  options: { skipGitRepoCheck: true },
+});
+
+// Codex harness agent
+export default defineAgent({
+  harness: "codex",
+  model: "gpt-5.5",
+  options: { skipGitRepoCheck: true },
+});
+```
+
+`harness` maps to the existing adapter class (`ClaudeCodeAgent`, `CodexAgent`,
+etc.) in `packages/agents/src/`. Both forms return an `AgentLike` so they compose
+identically in a workflow.
+
+For harness agents, `instructions.md` becomes the harness system prompt where the
+CLI supports it, and `tools/*.ts` are exposed as MCP tools via `createMcpToolset`
+(CLI harnesses consume tools over MCP rather than the SDK tool loop).
+
+### Provider pools stay supported
+
+An array of `defineAgent` results is a failover pool, exactly as today:
+
+```ts
+export const agents = {
+  research: [
+    defineAgent({ harness: "claude-code", model: "claude-fable-5" }),
+    defineAgent({ harness: "codex", model: "gpt-5.5" }),
+  ],
+} as const satisfies Record<string, AgentLike[]>;
+```
+
+Old-style `new SmithersClaudeCodeAgent(...)` constructors remain valid and mix
+with `defineAgent` results in the same pool.
+
+## Concept-to-smithers mapping
+
+| Eve concept | Smithers target |
+|---|---|
+| `instructions.md` | System prompt on the `ToolLoopAgent`-backed `AgentLike` |
+| `tools/*.ts` `defineTool` | `smithers-orchestrator` `defineTool` (wraps AI SDK `tool()`) |
+| `skills/*.md` | On-demand context injection, existing skills mechanism |
+| `subagents/*` | Delegated `AgentLike`, exposed to parent as a tool |
+| `model` string | `resolveSdkModel` in `packages/agents` |
+| `harness` discriminator | Maps to existing `BaseCliAgent` subclass |
+
+## Runtime: smithers, not Vercel
+
+Eve sessions run on Vercel Workflows with Vercel Sandbox and AI Gateway. Smithers
+drops all of that. The compiled `AgentLike` runs inside a `<Task>` node, so it
+gets:
+
+- Durable execution with snapshots and time-travel
+- Approval gates via `<HumanTask>`
+- Sandbox isolation via `packages/sandbox` (Freestyle VMs)
+- Fork and rewind on any node output
+
+No Vercel runtime dependency is required or installed.
+
+## Project layout: agents alongside workflows
+
+The `.smithers/` directory holds both:
+
+```
+.smithers/
+  agents/
+    researcher/      custom agent directory
+      agent.ts
+      instructions.md
+      tools/
+      skills/
+  workflows/
+    research.tsx     workflow that drives the researcher agent
+  agents.ts          provider pool (unchanged, still valid)
+```
+
+`workflows/*.tsx` follow the existing smithers CLI conventions unchanged. Agents
+in `.smithers/agents/<name>/` resolve by import and by a directory-name lookup
+so workflows can reference them without repeating the path.
+
+## `bunx smithers-orchestrator init` scaffolding
+
+`bunx smithers-orchestrator init` scaffolds an example custom agent directory alongside the seeded
+`hello` workflow:
+
+```
+.smithers/
+  agents/
+    example/
+      agent.ts         starter defineAgent config
+      instructions.md  placeholder system prompt
+      tools/
+        hello.ts       starter defineTool
+  workflows/
+    hello.mdx
+```
+
+## Compatibility
+
+- Existing `.smithers/agents.ts` provider pools keep working. `defineAgent`
+  output is assignable to `AgentLike`, so old and new mix in the same pool.
+- Existing `workflows/*.tsx` are untouched.
+- All behavior changes are additive; nothing existing changes.
+
+## See also
+
+- [CLI Agents](/integrations/cli-agents): how harness adapters work
+- [Custom Workflow UI](/guides/custom-workflow-ui): wire a UI to a workflow
+- [Tool Use](/jsx/overview): `<Task>`, `defineTool`, and the tool loop
+
+---
+
 ## Context Engineering
 
 > The layered control system behind a reliable agent workflow, the three execution levers, and how Smithers does it for you.
