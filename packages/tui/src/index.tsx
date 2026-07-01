@@ -8,13 +8,13 @@ import {
   createGatewayCollections,
 } from "@smithers-orchestrator/gateway-react";
 import { spawn } from "node:child_process";
+import { resolveGatewayConfig } from "./gatewayConfig.ts";
 import { resolveCliEntry } from "./cliEntry.ts";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
 import { Keybindings } from "./Keybindings.tsx";
 import { RendererProvider } from "./RendererContext.tsx";
 import { App } from "./App.tsx";
 
-const DEFAULT_GATEWAY_PORT = 7331;
 const USAGE = "Usage: smithers-mon <runId> [--gateway <url>] [--port <n>]\n";
 
 // The TUI drives the terminal in raw mode and reads keystrokes via useKeyboard,
@@ -74,36 +74,14 @@ if (!runId) {
   process.exit(1);
 }
 
-/**
- * Resolve the gateway base URL + port from (in priority order) the --gateway/--port
- * args, the SMITHERS_GATEWAY_URL / SMITHERS_GATEWAY_PORT env vars, then the local
- * default. apps/cli forwards SMITHERS_GATEWAY_URL when it knows the real address.
- *
- * `autoStartAllowed` is true ONLY for the implicit/default local path: the user
- * did not pin a gateway via --gateway or SMITHERS_GATEWAY_URL. When the user
- * points us at an explicit gateway that is unreachable, autostarting a detached
- * LOCAL gateway would spawn a process the monitor never connects to — so we must
- * not. In that case we surface a clear "unreachable" error instead.
- */
-function resolveGatewayConfig(): { base: string; port: number; autoStartAllowed: boolean } {
-  const fromArgOrEnv = gatewayUrlArg ?? process.env.SMITHERS_GATEWAY_URL;
-  if (fromArgOrEnv) {
-    const base = fromArgOrEnv.replace(/\/+$/, "");
-    let port = portArg;
-    if (port === undefined) {
-      try {
-        port = Number(new URL(base).port) || DEFAULT_GATEWAY_PORT;
-      } catch {
-        port = DEFAULT_GATEWAY_PORT;
-      }
-    }
-    return { base, port, autoStartAllowed: false };
-  }
-  const port = portArg ?? (Number(process.env.SMITHERS_GATEWAY_PORT) || DEFAULT_GATEWAY_PORT);
-  return { base: `http://127.0.0.1:${port}`, port, autoStartAllowed: true };
-}
-
-const { base: GATEWAY_BASE, port: GATEWAY_PORT, autoStartAllowed: AUTOSTART_ALLOWED } = resolveGatewayConfig();
+// apps/cli forwards SMITHERS_GATEWAY_URL when it knows the real address. An
+// explicit --port is applied to a pinned --gateway/SMITHERS_GATEWAY_URL so the
+// probe/client hit the requested port (see resolveGatewayConfig).
+const { base: GATEWAY_BASE, port: GATEWAY_PORT, autoStartAllowed: AUTOSTART_ALLOWED } = resolveGatewayConfig({
+  gatewayUrlArg,
+  portArg,
+  env: process.env,
+});
 
 async function probeGateway(): Promise<boolean> {
   return fetch(`${GATEWAY_BASE}/health`).then((r) => r.ok, () => false);
