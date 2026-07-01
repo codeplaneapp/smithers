@@ -31,10 +31,13 @@ export async function editFileTool(path, patch) {
   return "ok";
 }
 
+const editSchema = z.object({ path: z.string(), patch: z.string() });
+
+/** @type {import("../tools.js").DefinedTool<typeof editSchema, "ok">} */
 export const edit = defineTool({
   name: "edit",
   description: "Apply a unified diff patch to a file",
-  schema: z.object({ path: z.string(), patch: z.string() }),
+  schema: editSchema,
   sideEffect: true,
   idempotent: false,
   execute: async ({ path, patch }, _ctx) => editFileTool(path, patch),

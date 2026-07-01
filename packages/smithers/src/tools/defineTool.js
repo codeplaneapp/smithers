@@ -38,9 +38,13 @@ export function getDefinedToolMetadata(value) {
 }
 
 /**
- * @returns {import("ai").Tool} the ai-sdk tool, tagged with smithers metadata.
- *   Annotated explicitly so the emitted declaration stays portable under
- *   TypeScript 6 (avoids TS2883 references to internal @ai-sdk/provider types).
+ * @template {import("zod").ZodTypeAny} Schema
+ * @template Result
+ * @param {import("../tools.js").DefineToolOptions<Schema, Result>} options
+ * @returns {import("../tools.js").DefinedTool<Schema, Result>} the ai-sdk tool,
+ *   tagged with smithers metadata. Annotated explicitly so the emitted
+ *   declaration stays portable under TypeScript 6 and preserves the narrowed
+ *   schema/output contract.
  */
 export function defineTool(options) {
   const sideEffect = options.sideEffect ?? false;
@@ -50,7 +54,7 @@ export function defineTool(options) {
     warnMissingContextParam(options.name);
   }
 
-  const wrapped = tool({
+  const wrapped = /** @type {import("../tools.js").DefinedTool<Schema, Result> & Record<symbol, unknown>} */ (tool({
     description: options.description ?? options.name,
     inputSchema: zodSchema(options.schema),
     execute: async (args) => {
@@ -78,7 +82,7 @@ export function defineTool(options) {
       }
       return result;
     },
-  });
+  }));
 
   wrapped[smithersToolMetadata] = {
     name: options.name,
