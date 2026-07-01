@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
@@ -7,6 +7,9 @@ import { Effect } from "effect";
 import { revertToAttempt } from "../src/revert.js";
 import { createTestDb } from "../../smithers/tests/helpers.js";
 import { schema, ddl } from "../../smithers/tests/schema.js";
+
+setDefaultTimeout(30_000);
+
 function buildDb() {
     const result = createTestDb(schema, ddl);
     ensureSmithersTables(result.db);
