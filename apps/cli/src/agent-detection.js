@@ -1204,7 +1204,17 @@ export function generateAgentsTs(env = process.env, options = {}) {
         const tierAccounts = registeredAccounts
             .filter((account) => tierFamilies.has(ACCOUNT_PROVIDER_POOL[account.provider]))
             .map((account) => labelToCamel(account.label));
-        const merged = [...resolved, ...tierAccounts];
+        // The synthetic OpenRouter default (DEFAULT_PROVIDER_ID) is a keyless,
+        // last-resort fallback whose generate() throws until OPENROUTER_API_KEY
+        // is set. It must never LEAD a tier when a real detection or account can
+        // serve it — otherwise a machine first initialized with no agents (which
+        // preserves openrouter as active) that later runs `agent add` would put
+        // the throwing default at attempt 1 ahead of the real paid account.
+        // Demote it to the end so it is genuine failover, not the hot path.
+        let merged = [...resolved, ...tierAccounts];
+        if (merged.includes(DEFAULT_PROVIDER_ID) && merged.some((id) => id !== DEFAULT_PROVIDER_ID)) {
+            merged = [...merged.filter((id) => id !== DEFAULT_PROVIDER_ID), DEFAULT_PROVIDER_ID];
+        }
         const commented = order.filter((id) => !allProviderIds.has(id));
         return {
             tier,

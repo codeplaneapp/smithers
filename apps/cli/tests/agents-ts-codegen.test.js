@@ -153,6 +153,41 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(regenerated).toContain("codexProd: new SmithersCodexAgent(");
     });
 
+    test("preserved OpenRouter default is demoted below a real account added later (never the hot path)", () => {
+        const env = newSmithersHome();
+        const binDir = createExecutableDir(); // no agent binaries → nothing detected
+        // First init on a machine with no agents: the keyless OpenRouter default
+        // is the active provider and gets preserved.
+        const initial = generateAgentsTs({ ...env, PATH: `${binDir}:/usr/bin:/bin` });
+        expect(initial).toContain("openrouter: createOpenRouterAgent()");
+        expect([...extractGeneratedDetectionProviderIds(initial)]).toEqual(["openrouter"]);
+
+        // Later the user adds a real subscription account and regenerates
+        // (the `smithers agent add` path forwards the preserved ids).
+        addAccount(
+            { label: "claude-main", provider: "claude-code", configDir: `${env.HOME}/.smithers/accounts/claude-main` },
+            { env },
+        );
+        const regenerated = generateAgentsTs(
+            { ...env, PATH: `${binDir}:/usr/bin:/bin` },
+            { preserveProviderIds: extractGeneratedDetectionProviderIds(initial) },
+        );
+
+        // In every pool that has both, the real account must precede the keyless
+        // OpenRouter default (which throws until OPENROUTER_API_KEY is set), so
+        // attempt 1 hits the paid account, not a guaranteed throw.
+        for (const pool of ["smart", "smartTool", "cheapFast"]) {
+            const match = regenerated.match(new RegExp(`${pool}:\\s*\\[([^\\]]*)\\]`));
+            expect(match).toBeTruthy();
+            const members = match[1];
+            const idxAccount = members.indexOf("providers.claudeMain");
+            const idxDefault = members.indexOf("providers.openrouter");
+            if (idxAccount >= 0 && idxDefault >= 0) {
+                expect(idxDefault).toBeGreaterThan(idxAccount);
+            }
+        }
+    });
+
     test("does not preserve account labels that collide with generated provider ids", () => {
         const env = newSmithersHome();
         addAccount({ label: "codex", provider: "codex", configDir: `${env.HOME}/.smithers/accounts/codex` }, { env });
