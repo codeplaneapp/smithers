@@ -107,12 +107,6 @@
         ]
       },
       {
-        "group": "Author Custom Agents",
-        "pages": [
-          "guides/custom-agent-authoring"
-        ]
-      },
-      {
         "group": "Run and Operate",
         "pages": [
           "cli/quickstart",
