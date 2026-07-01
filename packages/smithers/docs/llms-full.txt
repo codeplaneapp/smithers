@@ -2726,7 +2726,7 @@ commands[80]:
 - **DevTools commands**: `tree`, `diff`, `output`, and `rewind` intentionally use command-scoped `--json`/`-j` and return exit code `1` for parser/user errors.
 - **Account commands**: `agents add|list|remove|test` manage `~/.smithers/accounts.json`; subscription providers use CLI config directories, API providers use API keys.
 - **Output format**: all commands honour `--format toon|json|yaml|md|jsonl`; `--filter-output <key.path>` extracts a nested field from JSON output.
-- **Removed command**: `bunx smithers-orchestrator tui` was removed in 0.20.2. Use `ps`, `events`, `chat`, `inspect`, `node`, `tree`, `diff`, `output`, or `rewind` instead. See `tui.mdx` for migration details.
+- **Removed command**: `bunx smithers-orchestrator tui` was removed in 0.20.2. Use `ps`, `events`, `chat`, `inspect`, `node`, `tree`, `diff`, `output`, or `rewind` instead. See `/guides/tui` for migration details.
 
 ---
 
