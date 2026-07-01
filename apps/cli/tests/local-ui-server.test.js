@@ -3,7 +3,11 @@ import { createServer } from "node:http";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { checkLocalWorkspaceReadiness, startLocalUiServer } from "../src/localUiServer.js";
+import {
+  checkLocalWorkspaceReadiness,
+  hasConciergeCredential,
+  startLocalUiServer,
+} from "../src/localUiServer.js";
 
 const cleanups = [];
 
@@ -89,6 +93,15 @@ describe("localUiServer workspace readiness", () => {
     expect(body.ok).toBe(true);
     expect(body.readiness.status).toBe("ready");
     expect(body.readiness.workspaceRoot).toBe(await realpath(workspace));
+  });
+
+  test("detects a concierge chat credential from any supported env var", () => {
+    expect(hasConciergeCredential({})).toBe(false);
+    expect(hasConciergeCredential({ OPENAI_API_KEY: "  " })).toBe(false);
+    expect(hasConciergeCredential({ CEREBRAS_API_KEY: "csk-1" })).toBe(true);
+    expect(hasConciergeCredential({ CODEX_ACCESS_TOKEN: "t" })).toBe(true);
+    expect(hasConciergeCredential({ CODEX_REFRESH_TOKEN: "r" })).toBe(true);
+    expect(hasConciergeCredential({ OPENAI_API_KEY: "sk-1" })).toBe(true);
   });
 
   test("reports missing local setup before treating a workspace as ready", async () => {

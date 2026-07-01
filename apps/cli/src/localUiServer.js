@@ -100,11 +100,52 @@ function safeReaddir(dir) {
   }
 }
 
+/**
+ * The concierge chat backend needs exactly one upstream chat credential. Mirror
+ * the check in apps/smithers/concierge/server.ts so `smithers ui --app` can fail
+ * fast with a readable message instead of starting an app whose chat returns 500.
+ */
+export function hasConciergeCredential(env) {
+  return Boolean(
+    env.CEREBRAS_API_KEY?.trim() ||
+      env.CODEX_ACCESS_TOKEN?.trim() ||
+      env.CODEX_REFRESH_TOKEN?.trim() ||
+      env.OPENAI_API_KEY?.trim(),
+  );
+}
+
+const MISSING_CREDENTIAL_MESSAGE = [
+  "The local Smithers UI needs a chat credential for its concierge, and none is set.",
+  "",
+  "Set ONE of these before running `smithers ui --app`:",
+  "  • CEREBRAS_API_KEY   — https://cloud.cerebras.ai (fast, recommended)",
+  "  • OPENAI_API_KEY     — https://platform.openai.com/api-keys",
+  "  • CODEX_ACCESS_TOKEN — your Codex/ChatGPT subscription token",
+  "",
+  "Example:  CEREBRAS_API_KEY=csk-... smithers ui --app",
+].join("\n");
+
+/** The concierge is a Bun.serve process, so `bun` must be on PATH to run it. */
+export function hasBunOnPath() {
+  try {
+    return spawnSync("bun", ["--version"], { stdio: "ignore" }).status === 0;
+  } catch {
+    return false;
+  }
+}
+
+const MISSING_BUN_MESSAGE = [
+  "The local Smithers UI chat backend runs on Bun, and `bun` is not on your PATH.",
+  "",
+  "Install it, then rerun `smithers ui --app`:",
+  "  curl -fsSL https://bun.sh/install | bash",
+].join("\n");
+
 /** Build the bundle with the app's own vite. Returns true on success. */
 function buildBundle(appDir, viteBin) {
   if (!viteBin || !existsSync(viteBin)) {
     process.stderr.write(
-      `[smithers] Cannot build the UI: vite is not installed in ${appDir}. Run \`pnpm install\` in the repo, or ship a prebuilt bundle at apps/cli/ui-dist.\n`,
+      `[smithers] Cannot build the UI: vite is not installed in ${appDir}. Run \`pnpm install\` in the repo, then \`pnpm -C apps/cli build:ui\` to stage a prebuilt bundle at apps/cli/ui-dist.\n`,
     );
     return false;
   }
@@ -1238,8 +1279,21 @@ export async function serveLocalUi({ gatewayBase, port, rebuild = false }) {
   // best-effort: a missing concierge just leaves /api/chat unproxied.
   let concierge = null;
   let conciergePort;
-  const conciergeEntry = appDir ? join(appDir, "concierge", "server.ts") : null;
-  if (conciergeEntry && existsSync(conciergeEntry)) {
+  // The concierge (chat backend) runs from source in the repo, or from the
+  // bundled `concierge.js` staged next to a prebuilt bundle. Either way it uses
+  // Bun.serve, so it needs `bun` on PATH.
+  const conciergeEntry = appDir
+    ? join(appDir, "concierge", "server.ts")
+    : join(distDir, "concierge.js");
+  if (existsSync(conciergeEntry)) {
+    // Block before we bind a port: an app whose chat can't work is worse than a
+    // clear up-front error telling the user which env var to set.
+    if (!hasConciergeCredential(process.env)) {
+      throw new Error(MISSING_CREDENTIAL_MESSAGE);
+    }
+    if (!hasBunOnPath()) {
+      throw new Error(MISSING_BUN_MESSAGE);
+    }
     conciergePort = Number(process.env.SMITHERS_CONCIERGE_PORT ?? "5179");
     concierge = spawn("bun", [conciergeEntry], {
       stdio: "ignore",

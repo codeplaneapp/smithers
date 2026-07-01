@@ -54,7 +54,7 @@ const packageThresholdOverrides = new Map([
 ]);
 
 const coverageUnsupported = new Map([
-  ["apps/smithers", "Retired product-UI POC; it remains covered by normal test/typecheck jobs, not coverage thresholds."],
+  ["apps/smithers", "The local Smithers UI (served by `smithers ui --app`); covered by normal test/typecheck/e2e jobs, not coverage thresholds."],
   ["e2e", "Bun coverage can fail while instrumenting the full fault matrix; run e2e through normal test/fault jobs."],
 ]);
 
