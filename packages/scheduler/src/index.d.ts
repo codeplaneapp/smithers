@@ -297,6 +297,7 @@ type SmithersAlertPolicy$1 = {
 type SmithersWorkflowOptions$1 = {
     alertPolicy?: SmithersAlertPolicy$1;
     cache?: boolean;
+    output?: unknown;
     workflowHash?: string;
 };
 

@@ -2192,6 +2192,48 @@ function resolveTaskOutputs(tasks, workflow) {
     }
 }
 /**
+ * @param {SmithersWorkflow} workflow
+ * @param {Record<string, unknown>} schema
+ * @returns {unknown | undefined}
+ */
+function resolveWorkflowOutputTable(workflow, schema) {
+    const target = workflow.opts?.output;
+    if (target === undefined) {
+        return schema.output;
+    }
+    if (target && typeof target === "object" && workflow.zodToKeyName) {
+        const keyName = workflow.zodToKeyName.get(target);
+        if (keyName && workflow.schemaRegistry) {
+            const entry = workflow.schemaRegistry.get(keyName);
+            if (entry) {
+                return entry.table;
+            }
+        }
+        if (workflow.ambiguousZodSchemas?.has(target)) {
+            throw new SmithersError("UNKNOWN_OUTPUT_SCHEMA", "Workflow output is registered under multiple keys. Use createSmithers(...).outputs.<key> or a string output key instead of the shared raw Zod object.");
+        }
+    }
+    if (typeof target === "string") {
+        const entry = workflow.schemaRegistry?.get(target);
+        if (entry) {
+            return entry.table;
+        }
+        if (schema[target]) {
+            return schema[target];
+        }
+    }
+    if (target && typeof target === "object") {
+        try {
+            getTableName(/** @type {any} */ (target));
+            return target;
+        }
+        catch { }
+    }
+    throw new SmithersError("UNKNOWN_OUTPUT_SCHEMA", "Workflow output target is not registered in createSmithers().", {
+        output: typeof target === "string" ? target : undefined,
+    });
+}
+/**
  * @param {XmlNode} xml
  * @returns {string}
  */
@@ -5515,7 +5557,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             ...(failedChildren > 0 ? { failedChildren } : {}),
         }, "engine:run");
         await annotateRunSpan({ status: "finished", ...(failedChildren > 0 ? { failedChildren } : {}) });
-        const outputTable = schema.output;
+        const outputTable = resolveWorkflowOutputTable(workflowRef, schema);
         let output = undefined;
         if (outputTable) {
             output = await Effect.runPromise(loadRunOutputRowsEffect(db, outputTable, runId));

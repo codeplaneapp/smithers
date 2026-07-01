@@ -39,5 +39,7 @@ export type SmithersAlertPolicy = {
 export type SmithersWorkflowOptions = {
   alertPolicy?: SmithersAlertPolicy;
   cache?: boolean;
+  /** Explicit workflow-level output table/schema used for RunResult.output. */
+  output?: unknown;
   workflowHash?: string;
 };
