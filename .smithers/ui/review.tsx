@@ -232,6 +232,21 @@ function App() {
     return acc;
   }, {} as Record<Severity, number>);
   const visibleIssues = sevFilter === "all" ? allIssues : allIssues.filter((it) => it.severity === sevFilter);
+  // Copy for the empty issues panel. Only the APPROVED verdict may reassure that
+  // nothing was flagged; pending/missing/blocked with no visible issues must not
+  // read as a clean review, since there is no positive synthesized verdict.
+  const issuesEmptyMessage =
+    allIssues.length > 0
+      ? "No " + sevFilter + " issues."
+      : verdictState === "approved"
+        ? "No issues raised — the reviewers found nothing to flag."
+        : verdictState === "blocked"
+          ? "No structured issues listed — see the verdict feedback above."
+          : verdictState === "pending"
+            ? "No issues yet — awaiting the synthesized verdict."
+            : reviews.length === 0
+              ? "No review output was produced."
+              : "No structured issues in the panelist output (no synthesized verdict).";
 
   async function refresh() {
     await Promise.all([runsQuery.refetch(), activeRunDetail.refetch(), moderator.refetch(), ...nodeQueries.map((q) => q.refetch())]);
@@ -374,13 +389,7 @@ function App() {
                 ))}
                 {visibleIssues.length === 0 ? (
                   <div className="empty" data-testid="review-issues-empty">
-                    {verdictState === "missing" && reviews.length === 0
-                      ? "No review output was produced."
-                      : allIssues.length === 0
-                        ? verdictState === "blocked"
-                          ? "No structured issues listed — see the verdict feedback above."
-                          : "No issues raised — the reviewers found nothing to flag."
-                        : "No " + sevFilter + " issues."}
+                    {issuesEmptyMessage}
                   </div>
                 ) : null}
               </div>
