@@ -635,7 +635,7 @@ async function collectTelegramUpdates(input: NormalizedInput): Promise<{ updates
 }
 
 async function collectMessages(input: NormalizedInput): Promise<CollectOutput> {
-  const source =
+  const source: Exclude<NormalizedInput["source"], "auto"> =
     input.source !== "auto"
       ? input.source
       : input.transcript
@@ -673,7 +673,7 @@ async function collectMessages(input: NormalizedInput): Promise<CollectOutput> {
   const range = rangeFor(trimmed.messages);
 
   return {
-    source: source === "auto" ? "none" : source,
+    source,
     messageCount: trimmed.messages.length,
     from: range.from,
     to: range.to,
@@ -747,6 +747,7 @@ function stringArray(value: unknown): string[] {
 
 function normalizeDigestJson(value: unknown, collect: CollectOutput): DigestOutput {
   const record = isRecord(value) ? value : {};
+  const rawNotableLinks = record.notableLinks ?? record.notable_links;
   const topics = Array.isArray(record.topics)
     ? record.topics
         .filter(isRecord)
@@ -766,8 +767,8 @@ function normalizeDigestJson(value: unknown, collect: CollectOutput): DigestOutp
           followUps: stringArray(topic.followUps ?? topic.follow_ups),
         }))
     : [];
-  const notableLinks = Array.isArray(record.notableLinks ?? record.notable_links)
-    ? (record.notableLinks ?? record.notable_links)
+  const notableLinks = Array.isArray(rawNotableLinks)
+    ? rawNotableLinks
         .filter(isRecord)
         .slice(0, 10)
         .map((link) => ({
