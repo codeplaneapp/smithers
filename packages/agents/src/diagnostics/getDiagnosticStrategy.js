@@ -74,7 +74,7 @@ const claudeApiKeyCheck = {
             const status = spawnSync("claude", ["auth", "status"], {
                 env: ctx.env,
                 stdio: ["ignore", "pipe", "pipe"],
-                timeout: 3_000,
+                timeout: 15_000,
                 encoding: "utf8",
             });
             const output = [status.stdout, status.stderr].filter(Boolean).join("\n").trim();
@@ -138,8 +138,28 @@ const claudeApiKeyCheck = {
  */
 function readClaudeCliCredentials(env) {
     const configDir = env.CLAUDE_CONFIG_DIR?.trim() || join(env.HOME?.trim() || homedir(), ".claude");
+    let raw;
     try {
-        const parsed = JSON.parse(readFileSync(join(configDir, ".credentials.json"), "utf8"));
+        raw = readFileSync(join(configDir, ".credentials.json"), "utf8");
+    }
+    catch {
+        // macOS Claude Code stores OAuth credentials in the Keychain, not on disk.
+        if (process.platform === "darwin") {
+            const keychain = spawnSync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], {
+                stdio: ["ignore", "pipe", "pipe"],
+                timeout: 5_000,
+                encoding: "utf8",
+            });
+            if (keychain.status === 0 && keychain.stdout?.trim()) {
+                raw = keychain.stdout;
+            }
+        }
+    }
+    if (raw === undefined) {
+        return { valid: false, reason: "Claude Code credentials are missing or unreadable" };
+    }
+    try {
+        const parsed = JSON.parse(raw);
         const oauth = parsed?.claudeAiOauth;
         const accessToken = oauth?.accessToken;
         if (typeof accessToken !== "string" || !accessToken.trim()) {
