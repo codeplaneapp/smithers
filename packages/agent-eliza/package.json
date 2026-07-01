@@ -10,6 +10,11 @@
       "import": "./src/index.js",
       "default": "./src/index.js"
     },
+    "./conventions": {
+      "types": "./src/conventions/index.d.ts",
+      "import": "./src/conventions/index.js",
+      "default": "./src/conventions/index.js"
+    },
     "./*": {
       "types": "./src/index.d.ts",
       "import": "./src/*.js",
