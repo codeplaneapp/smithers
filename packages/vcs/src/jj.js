@@ -21,6 +21,7 @@ import { vcsDuration } from "@smithers-orchestrator/observability/metrics";
 import { resolveJjBinary } from "./resolveJjBinary.js";
 
 const JJ_POINTER_TIMEOUT_MS = 1_500;
+const JJ_REPO_TIMEOUT_MS = 1_500;
 const WORKSPACE_SNAPSHOT_TIMEOUT_MS = 1_500;
 /**
  * @param {Stream.Stream<Uint8Array, unknown, never>} stream
@@ -190,7 +191,15 @@ export function revertToJjPointer(pointer, cwd) {
 export function isJjRepo(cwd) {
     return runJj(["log", "-r", "@", "-n", "1", "--no-graph"], {
         cwd,
-    }).pipe(Effect.map((res) => res.code === 0), Effect.annotateLogs({ cwd: cwd ?? "" }), Effect.withLogSpan("vcs:jj-is-repo"));
+    }).pipe(Effect.timeoutTo({
+        duration: Duration.millis(JJ_REPO_TIMEOUT_MS),
+        onSuccess: (res) => res,
+        onTimeout: () => ({
+            code: 124,
+            stdout: "",
+            stderr: `jj repo check timed out after ${JJ_REPO_TIMEOUT_MS}ms`,
+        }),
+    }), Effect.map((res) => res.code === 0), Effect.annotateLogs({ cwd: cwd ?? "" }), Effect.withLogSpan("vcs:jj-is-repo"));
 }
 /**
  * Create a new JJ workspace at `path` with a friendly `name`.
