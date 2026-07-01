@@ -25,13 +25,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@effect/cluster": "^0.58.0",
+    "@effect/cluster": "^0.59.0",
     "@effect/experimental": "^0.60.0",
-    "@effect/platform-bun": "^0.89.0",
-    "@effect/rpc": "^0.75.0",
-    "@effect/sql": "^0.51.0",
+    "@effect/platform-bun": "^0.90.0",
+    "@effect/rpc": "^0.75.1",
+    "@effect/sql": "^0.51.1",
     "@effect/sql-sqlite-bun": "^0.52.0",
-    "@effect/workflow": "^0.18.0",
+    "@effect/workflow": "^0.18.2",
     "@smithers-orchestrator/agents": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
@@ -48,15 +48,15 @@
     "@smithers-orchestrator/vcs": "workspace:*",
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",
-    "effect": "^3.21.1",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5",
-    "zod": "^4.3.6"
+    "effect": "3.21.4",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "zod": "^4.4.3"
   },
   "optionalDependencies": {
     "@electric-sql/pglite": "0.5.1",
     "@electric-sql/pglite-socket": "0.2.1",
-    "pg": "^8.13.1"
+    "pg": "^8.22.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

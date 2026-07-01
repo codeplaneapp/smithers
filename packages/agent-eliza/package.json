@@ -38,8 +38,8 @@
     "@smithers-orchestrator/agents": "workspace:*",
     "ai": "^7.0.9",
     "smithers-orchestrator": "workspace:*",
-    "yaml": "^2.8.1",
-    "zod": "^4.3.6"
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bun": "latest",

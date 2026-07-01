@@ -25,7 +25,7 @@
     "build": "rm -f src/index.d.ts && node ../../node_modules/tsup/dist/cli-default.js --dts-only"
   },
   "dependencies": {
-    "@effect/workflow": "^0.18.0",
+    "@effect/workflow": "^0.18.2",
     "@smithers-orchestrator/accounts": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
@@ -38,18 +38,18 @@
     "@smithers-orchestrator/protocol": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
-    "cron-parser": "^5.5.0",
+    "cron-parser": "^5.6.1",
     "drizzle-orm": "^0.45.2",
-    "effect": "^3.21.1",
-    "hono": "^4.12.14",
-    "ws": "^8.20.0"
+    "effect": "3.21.4",
+    "hono": "^4.12.27",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
-    "@happy-dom/global-registrator": "^20.9.0",
+    "@happy-dom/global-registrator": "^20.10.6",
     "@smithers-orchestrator/graph": "workspace:*",
     "@types/bun": "latest",
-    "react": "^19.2.5",
+    "react": "^19.2.7",
     "typescript": "~5.9.3",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   }
 }

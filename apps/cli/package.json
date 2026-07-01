@@ -30,16 +30,15 @@
     "prepack": "node scripts/build-ui.mjs"
   },
   "dependencies": {
-    "@mdx-js/esbuild": "^3.1.1",
-    "@effect/workflow": "^0.18.0",
     "@clack/core": "^0.4.2",
     "@clack/prompts": "^0.10.1",
+    "@effect/workflow": "^0.18.2",
+    "@mdx-js/esbuild": "^3.1.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@opentui/core": "^0.4.2",
     "@opentui/react": "^0.4.2",
-    "@modelcontextprotocol/sdk": "^1.29.0",
     "@smithers-orchestrator/accounts": "workspace:*",
     "@smithers-orchestrator/agents": "workspace:*",
-    "@smithers-orchestrator/usage": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/devtools": "workspace:*",
@@ -54,20 +53,21 @@
     "@smithers-orchestrator/server": "workspace:*",
     "@smithers-orchestrator/time-travel": "workspace:*",
     "@smithers-orchestrator/tui": "workspace:*",
+    "@smithers-orchestrator/usage": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
-    "smithers-orchestrator": "workspace:*",
-    "cron-parser": "^5.5.0",
+    "cron-parser": "^5.6.1",
     "drizzle-orm": "^0.45.2",
-    "effect": "^3.21.1",
+    "effect": "3.21.4",
     "incur": "^0.4.1",
     "picocolors": "^1.1.1",
-    "react": "^19.2.5",
-    "yaml": "^2.8.3",
-    "zod": "^4.3.6"
+    "react": "^19.2.7",
+    "smithers-orchestrator": "workspace:*",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "playwright": "^1.60.0",
+    "playwright": "^1.61.1",
     "typescript": "~5.9.3"
   }
 }

@@ -24,19 +24,19 @@
     "@smithers-orchestrator/scorers": "workspace:*",
     "@xyflow/react": "^12.10.2",
     "dagre": "^0.8.5",
-    "effect": "^3.21.1",
-    "react": "^19.2.5",
+    "effect": "3.21.4",
+    "react": "^19.2.7",
     "smithers-orchestrator": "workspace:*",
     "twitter-api-v2": "^1.29.0",
-    "zod": "4.3.6"
+    "zod": "4.4.3"
   },
   "optionalDependencies": {
-    "playwright": "^1.60.0"
+    "playwright": "^1.61.1"
   },
   "devDependencies": {
-    "@types/mdx": "2.0.13",
+    "@types/mdx": "2.0.14",
     "@types/node": "25.6.0",
-    "@types/react": "19.2.14",
+    "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "typescript": "5.9.3"
   }

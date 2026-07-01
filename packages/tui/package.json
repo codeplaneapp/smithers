@@ -19,12 +19,12 @@
     "@opentui/react": "^0.4.2",
     "@smithers-orchestrator/gateway-client": "workspace:*",
     "@smithers-orchestrator/gateway-react": "workspace:*",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/react": "^19.2.14",
+    "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "typescript": "~5.9.3"
   }

@@ -25,12 +25,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@effect/platform": "^0.96.0",
+    "@effect/platform": "^0.96.2",
     "@smithers-orchestrator/observability": "workspace:*",
-    "effect": "^3.21.1"
+    "effect": "3.21.4"
   },
   "devDependencies": {
-    "@effect/platform-bun": "^0.89.0",
+    "@effect/platform-bun": "^0.90.0",
     "@types/bun": "latest",
     "typescript": "~5.9.3"
   },

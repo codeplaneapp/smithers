@@ -23,11 +23,11 @@
     "@smithers-orchestrator/time-travel": "workspace:*",
     "better-sqlite3": "^11.5.0",
     "drizzle-orm": "^0.45.2",
-    "effect": "^3.21.1",
-    "react": "^19.2.5",
+    "effect": "3.21.4",
+    "react": "^19.2.7",
     "smithers-orchestrator": "workspace:*",
-    "ws": "^8.18.0",
-    "zod": "^4.3.6"
+    "ws": "^8.21.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
