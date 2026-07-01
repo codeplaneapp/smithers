@@ -395,7 +395,16 @@ export async function resolveSmithersBackendChoice(opts = {}) {
         ...(pgliteStore.runCount > 0 ? [{ backend: /** @type {"pglite"} */ ("pglite"), location: pgliteStore.dataDir, runCount: pgliteStore.runCount, schemaVersion: pgliteStore.schemaVersion }] : []),
         ...(postgresStore.runCount > 0 ? [{ backend: /** @type {"postgres"} */ ("postgres"), location: postgresStore.connectionString === "set" ? "postgres connection" : "postgres", runCount: postgresStore.runCount, schemaVersion: postgresStore.schemaVersion }] : []),
     ];
-    if (!marker && !reverseMarker && populated.length > 1) {
+    // An explicit sqlite pin (--backend / SMITHERS_BACKEND / backend:"sqlite" in
+    // smithers.config.ts) IS the disambiguation the conflict guard demands: the
+    // user has chosen to keep the legacy sqlite store, which is authoritative and
+    // never hidden. Suppress the multi-store conflict for that (safe) direction
+    // only. Pinning toward pglite/postgres beside a populated sqlite store still
+    // falls through to the migration/conflict guards below so legacy history is
+    // never silently hidden.
+    const explicitSqliteOverride = backend === "sqlite"
+        && (explicitBackend === "sqlite" || envBackend === "sqlite" || configBackend === "sqlite");
+    if (!marker && !reverseMarker && !explicitSqliteOverride && populated.length > 1) {
         throw backendConflictError({ populated });
     }
     if (reverseMarker) {
@@ -409,7 +418,6 @@ export async function resolveSmithersBackendChoice(opts = {}) {
     const migratedTargetBackend = marker && (migratedMarker.backend ?? markerBackend) !== "sqlite"
         ? /** @type {"pglite" | "postgres" | undefined} */ (migratedMarker.backend ?? markerBackend)
         : undefined;
-    const explicitSqliteOverride = backend === "sqlite" && (explicitBackend === "sqlite" || envBackend === "sqlite");
     if (migratedTargetBackend && !explicitSqliteOverride) {
         const unexpectedPopulated = populated.filter((store) => store.backend !== migratedTargetBackend && store.backend !== "sqlite");
         if (unexpectedPopulated.length > 0) {

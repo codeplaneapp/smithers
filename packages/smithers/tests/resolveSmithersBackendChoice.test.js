@@ -207,6 +207,47 @@ describe("resolveSmithersBackendChoice", () => {
     });
   });
 
+  test("explicit sqlite pin (config/env/option) keeps the legacy store instead of conflicting with a stray pglite store", async () => {
+    // Regression: a workspace that pins backend:"sqlite" to keep its legacy run
+    // history must NOT trip the multi-store conflict guard just because a stray
+    // pglite store also exists. Pinning sqlite IS the disambiguation the guard
+    // asks for; it keeps the authoritative history visible (the opposite of the
+    // dangerous pin-toward-pglite direction, which still conflicts above).
+    const pins = [
+      { label: "config", seed: (cwd) => writeFileSync(join(cwd, ".smithers", "smithers.config.ts"), 'export default { backend: "sqlite" };\n'), opts: (cwd) => ({ cwd, env: {} }), source: "config" },
+      { label: "env", seed: () => {}, opts: (cwd) => ({ cwd, env: { SMITHERS_BACKEND: "sqlite" } }), source: "env" },
+      { label: "option", seed: () => {}, opts: (cwd) => ({ cwd, backend: "sqlite", env: {} }), source: "options" },
+    ];
+    for (const pin of pins) {
+      const cwd = makeWorkspace(`resolver-explicit-sqlite-${pin.label}`);
+      seedSqliteRuns(cwd);
+      await seedPgliteRuns(cwd);
+      pin.seed(cwd);
+
+      const choice = await resolveSmithersBackendChoice(pin.opts(cwd));
+      expect(choice).toMatchObject({
+        backend: "sqlite",
+        source: pin.source,
+        sqlite: { runCount: 1 },
+        pglite: { runCount: 1 },
+      });
+    }
+  });
+
+  test("explicit pglite pin via config still conflicts with a populated sqlite store", async () => {
+    // The relaxation above is ONE-directional: pinning toward pglite/postgres
+    // when a populated sqlite store exists must still fail loud so legacy run
+    // history is never silently hidden.
+    const cwd = makeWorkspace("resolver-config-pglite-conflict");
+    seedSqliteRuns(cwd);
+    await seedPgliteRuns(cwd);
+    writeFileSync(join(cwd, ".smithers", "smithers.config.ts"), 'export default { backend: "pglite" };\n');
+
+    await expect(resolveSmithersBackendChoice({ cwd, env: {} })).rejects.toMatchObject({
+      code: "SMITHERS_BACKEND_CONFLICT",
+    });
+  });
+
   test("migrated.json target selects migrated backend when backend.json is absent and sqlite was kept", async () => {
     const cwd = makeWorkspace("resolver-migrated-marker");
     seedSqliteRuns(cwd);
