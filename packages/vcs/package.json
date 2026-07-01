@@ -32,7 +32,7 @@
   "devDependencies": {
     "@effect/platform-bun": "^0.90.0",
     "@types/bun": "latest",
-    "typescript": "~5.9.3"
+    "typescript": "~6.0.3"
   },
   "optionalDependencies": {
     "@smithers-orchestrator/jj-darwin-arm64": "workspace:*",

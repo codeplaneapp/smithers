@@ -69,7 +69,7 @@
         "smithers-orchestrator": "workspace:*",
         "tsup": "^8.5.1",
         "twitter-api-v2": "^1.29.0",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
         "yaml": "^2.9.0",
         "zod": "^4.4.3",
       },
@@ -92,7 +92,7 @@
         "@types/node": "26.1.0",
         "@types/react": "19.2.17",
         "@types/react-dom": "19.2.3",
-        "typescript": "5.9.3",
+        "typescript": "6.0.3",
       },
       "optionalDependencies": {
         "playwright": "^1.61.1",
@@ -140,7 +140,7 @@
       "devDependencies": {
         "@types/bun": "latest",
         "playwright": "^1.61.1",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "apps/observability": {
@@ -154,7 +154,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "apps/review": {
@@ -179,7 +179,7 @@
         "bun-types": "^1.3.14",
         "react": "19.2.7",
         "react-dom": "19.2.7",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "apps/smithers": {
@@ -215,7 +215,7 @@
         "@vitejs/plugin-react": "^6.0.2",
         "bun-types": "^1.3.14",
         "smithers-orchestrator": "workspace:*",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
         "vite": "^8.1.2",
         "zod": "4.4.3",
       },
@@ -228,7 +228,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/agent-eliza": {
@@ -244,7 +244,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/agents": {
@@ -264,7 +264,7 @@
       "devDependencies": {
         "@types/bun": "latest",
         "react": "^19.2.7",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/components": {
@@ -290,7 +290,7 @@
         "@types/bun": "latest",
         "drizzle-orm": "^0.45.2",
         "effect": "3.21.4",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/control-plane": {
@@ -301,7 +301,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/db": {
@@ -324,7 +324,7 @@
         "@electric-sql/pglite-socket": "0.2.1",
         "@types/bun": "latest",
         "pg": "^8.22.0",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/devtools": {
@@ -332,7 +332,7 @@
       "version": "0.26.1",
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/driver": {
@@ -349,7 +349,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/electric-proxy": {
@@ -363,7 +363,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/engine": {
@@ -400,7 +400,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
       "optionalDependencies": {
         "@electric-sql/pglite": "0.5.1",
@@ -416,7 +416,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/gateway": {
@@ -424,7 +424,7 @@
       "version": "0.26.1",
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/gateway-client": {
@@ -437,7 +437,7 @@
       "devDependencies": {
         "@electric-sql/client": "^1.5.15",
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
       "optionalDependencies": {
         "@electric-sql/client": "^1.5.22",
@@ -460,7 +460,7 @@
         "@types/react-dom": "^19.2.3",
         "react": "^19.2.7",
         "react-dom": "^19.2.7",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
       "peerDependencies": {
         "react": "^19.0.0",
@@ -481,7 +481,7 @@
         "@types/react-dom": "^19.2.3",
         "react": "^19.2.7",
         "react-dom": "^19.2.7",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
       "peerDependencies": {
         "react": "^19.0.0",
@@ -498,7 +498,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/jj-darwin-arm64": {
@@ -536,7 +536,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/openapi": {
@@ -553,7 +553,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/pi-plugin": {
@@ -574,7 +574,7 @@
       "devDependencies": {
         "@types/bun": "latest",
         "@types/ws": "^8.18.1",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/protocol": {
@@ -582,7 +582,7 @@
       "version": "0.26.1",
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/react-reconciler": {
@@ -600,7 +600,7 @@
       "devDependencies": {
         "@types/bun": "latest",
         "effect": "3.21.4",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
         "zod": "^4.4.3",
       },
     },
@@ -619,7 +619,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/scheduler": {
@@ -632,7 +632,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/scorers": {
@@ -651,7 +651,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/server": {
@@ -682,7 +682,7 @@
         "@smithers-orchestrator/graph": "workspace:*",
         "@types/bun": "latest",
         "react": "^19.2.7",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
         "zod": "^4.4.3",
       },
     },
@@ -727,7 +727,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
       "optionalDependencies": {
         "@electric-sql/pglite": "0.5.1",
@@ -753,7 +753,7 @@
       "devDependencies": {
         "@types/bun": "latest",
         "react": "^19.2.7",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/tool-context": {
@@ -761,7 +761,7 @@
       "version": "0.26.1",
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/tui": {
@@ -782,7 +782,7 @@
         "@types/bun": "latest",
         "@types/react": "^19.2.17",
         "@types/react-dom": "^19.2.3",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/usage": {
@@ -793,7 +793,7 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
     },
     "packages/vcs": {
@@ -807,7 +807,7 @@
       "devDependencies": {
         "@effect/platform-bun": "^0.90.0",
         "@types/bun": "latest",
-        "typescript": "~5.9.3",
+        "typescript": "~6.0.3",
       },
       "optionalDependencies": {
         "@smithers-orchestrator/jj-darwin-arm64": "workspace:*",
@@ -3251,7 +3251,7 @@
 
     "typed-array-buffer": ["typed-array-buffer@1.0.3", "", { "dependencies": { "call-bound": "^1.0.3", "es-errors": "^1.3.0", "is-typed-array": "^1.1.14" } }, "sha512-nAYYwfY3qnzX30IkA6AQZjVbtK6duGontcQm1WSG1MD94YLqK0515GNApXkoxKOWMusVssAHWLh9SeaoefYFGw=="],
 
-    "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+    "typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 
     "ufo": ["ufo@1.6.4", "", {}, "sha512-JFNbkD1Svwe0KvGi8GOeLcP4kAWQ609twvCdcHxq1oSL8svv39ZuSvajcD8B+5D0eL4+s1Is2D/O6KN3qcTeRA=="],
 

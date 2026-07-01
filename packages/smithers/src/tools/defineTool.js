@@ -37,6 +37,11 @@ export function getDefinedToolMetadata(value) {
     : null;
 }
 
+/**
+ * @returns {import("ai").Tool} the ai-sdk tool, tagged with smithers metadata.
+ *   Annotated explicitly so the emitted declaration stays portable under
+ *   TypeScript 6 (avoids TS2883 references to internal @ai-sdk/provider types).
+ */
 export function defineTool(options) {
   const sideEffect = options.sideEffect ?? false;
   const idempotent = options.idempotent ?? !sideEffect;

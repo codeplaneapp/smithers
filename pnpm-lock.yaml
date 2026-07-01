@@ -13,7 +13,7 @@ importers:
     dependencies:
       '@milkdown/crepe':
         specifier: 7.21.2
-        version: 7.21.2(prosemirror-model@1.25.9)(prosemirror-state@1.4.4)(prosemirror-view@1.41.9)(typescript@5.9.3)
+        version: 7.21.2(prosemirror-model@1.25.9)(prosemirror-state@1.4.4)(prosemirror-view@1.41.9)(typescript@6.0.3)
       '@xyflow/react':
         specifier: ^12.10.2
         version: 12.11.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -194,13 +194,13 @@ importers:
         version: link:packages/smithers
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.16)(tsx@4.22.4)(typescript@5.9.3)(yaml@2.9.0)
+        version: 8.5.1(postcss@8.5.16)(tsx@4.22.4)(typescript@6.0.3)(yaml@2.9.0)
       twitter-api-v2:
         specifier: ^1.29.0
         version: 1.29.0
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -212,7 +212,7 @@ importers:
     dependencies:
       '@milkdown/crepe':
         specifier: 7.21.2
-        version: 7.21.2(prosemirror-model@1.25.9)(prosemirror-state@1.4.4)(prosemirror-view@1.41.9)(typescript@5.9.3)
+        version: 7.21.2(prosemirror-model@1.25.9)(prosemirror-state@1.4.4)(prosemirror-view@1.41.9)(typescript@6.0.3)
       '@smithers-orchestrator/scorers':
         specifier: workspace:*
         version: link:../packages/scorers
@@ -251,8 +251,8 @@ importers:
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.17)
       typescript:
-        specifier: 5.9.3
-        version: 5.9.3
+        specifier: 6.0.3
+        version: 6.0.3
     optionalDependencies:
       playwright:
         specifier: ^1.61.1
@@ -277,10 +277,10 @@ importers:
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3)
       '@opentui/core':
         specifier: ^0.4.2
-        version: 0.4.2(typescript@5.9.3)(web-tree-sitter@0.25.10)
+        version: 0.4.2(typescript@6.0.3)(web-tree-sitter@0.25.10)
       '@opentui/react':
         specifier: ^0.4.2
-        version: 0.4.2(react-devtools-core@7.0.1)(react@19.2.7)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.21.0)
+        version: 0.4.2(react-devtools-core@7.0.1)(react@19.2.7)(typescript@6.0.3)(web-tree-sitter@0.25.10)(ws@8.21.0)
       '@smithers-orchestrator/accounts':
         specifier: workspace:*
         version: link:../../packages/accounts
@@ -370,8 +370,8 @@ importers:
         specifier: ^1.61.1
         version: 1.61.1
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   apps/observability:
     dependencies:
@@ -392,8 +392,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   apps/review:
     dependencies:
@@ -438,8 +438,8 @@ importers:
         specifier: 19.2.7
         version: 19.2.7(react@19.2.7)
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   apps/smithers:
     dependencies:
@@ -469,10 +469,10 @@ importers:
         version: 0.13.0(@tanstack/ai-client@0.16.3(@opentelemetry/api@1.9.0))(@tanstack/ai@0.27.0(@opentelemetry/api@1.9.0))(ws@8.21.0)(zod@4.4.3)
       '@tanstack/db':
         specifier: ^0.6.8
-        version: 0.6.8(typescript@5.9.3)
+        version: 0.6.8(typescript@6.0.3)
       '@tanstack/react-db':
         specifier: ^0.1.86
-        version: 0.1.86(react@19.2.7)(typescript@5.9.3)
+        version: 0.1.86(react@19.2.7)(typescript@6.0.3)
       '@tanstack/react-router':
         specifier: ^1.135.5
         version: 1.170.16(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -526,8 +526,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/smithers
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
       vite:
         specifier: ^8.1.2
         version: 8.1.2(@types/node@26.1.0)(esbuild@0.28.1)(tsx@4.22.4)(yaml@2.9.0)
@@ -599,8 +599,8 @@ importers:
         specifier: ^8.18.1
         version: 8.18.1
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/accounts:
     dependencies:
@@ -612,8 +612,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/agent-eliza:
     dependencies:
@@ -640,8 +640,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/agents:
     dependencies:
@@ -680,8 +680,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/components:
     dependencies:
@@ -738,8 +738,8 @@ importers:
         specifier: 3.21.4
         version: 3.21.4
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/control-plane:
     dependencies:
@@ -751,8 +751,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/db:
     dependencies:
@@ -800,8 +800,8 @@ importers:
         specifier: ^8.22.0
         version: 8.22.0
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/devtools:
     devDependencies:
@@ -809,8 +809,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/driver:
     dependencies:
@@ -840,8 +840,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/electric-proxy:
     dependencies:
@@ -853,8 +853,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/engine:
     dependencies:
@@ -944,8 +944,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
     optionalDependencies:
       '@electric-sql/pglite':
         specifier: 0.5.1
@@ -967,8 +967,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/gateway:
     devDependencies:
@@ -976,8 +976,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/gateway-client:
     dependencies:
@@ -986,14 +986,14 @@ importers:
         version: link:../gateway
       '@tanstack/db':
         specifier: 0.6.8
-        version: 0.6.8(typescript@5.9.3)
+        version: 0.6.8(typescript@6.0.3)
     devDependencies:
       '@types/bun':
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
     optionalDependencies:
       '@electric-sql/client':
         specifier: ^1.5.22
@@ -1009,7 +1009,7 @@ importers:
         version: link:../gateway-client
       '@tanstack/react-db':
         specifier: 0.1.86
-        version: 0.1.86(react@19.2.7)(typescript@5.9.3)
+        version: 0.1.86(react@19.2.7)(typescript@6.0.3)
     devDependencies:
       '@happy-dom/global-registrator':
         specifier: ^20.10.6
@@ -1036,8 +1036,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/gateway-ui:
     dependencies:
@@ -1067,8 +1067,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/graph:
     dependencies:
@@ -1086,8 +1086,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/jj-darwin-arm64: {}
 
@@ -1130,8 +1130,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/openapi:
     dependencies:
@@ -1161,8 +1161,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/pi-plugin:
     dependencies:
@@ -1204,8 +1204,8 @@ importers:
         specifier: ^8.18.1
         version: 8.18.1
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/protocol:
     devDependencies:
@@ -1213,8 +1213,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/react-reconciler:
     dependencies:
@@ -1247,8 +1247,8 @@ importers:
         specifier: 3.21.4
         version: 3.21.4
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1284,8 +1284,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/scheduler:
     dependencies:
@@ -1303,8 +1303,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/scorers:
     dependencies:
@@ -1340,8 +1340,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/server:
     dependencies:
@@ -1413,8 +1413,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1519,8 +1519,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
     optionalDependencies:
       '@electric-sql/pglite':
         specifier: 0.5.1
@@ -1572,8 +1572,8 @@ importers:
         specifier: ^19.2.7
         version: 19.2.7
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/tool-context:
     devDependencies:
@@ -1581,17 +1581,17 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/tui:
     dependencies:
       '@opentui/core':
         specifier: ^0.4.2
-        version: 0.4.2(typescript@5.9.3)(web-tree-sitter@0.25.10)
+        version: 0.4.2(typescript@6.0.3)(web-tree-sitter@0.25.10)
       '@opentui/react':
         specifier: ^0.4.2
-        version: 0.4.2(react-devtools-core@7.0.1)(react@19.2.7)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.21.0)
+        version: 0.4.2(react-devtools-core@7.0.1)(react@19.2.7)(typescript@6.0.3)(web-tree-sitter@0.25.10)(ws@8.21.0)
       '@smithers-orchestrator/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
@@ -1615,8 +1615,8 @@ importers:
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.17)
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/usage:
     dependencies:
@@ -1628,8 +1628,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
 
   packages/vcs:
     dependencies:
@@ -1650,8 +1650,8 @@ importers:
         specifier: latest
         version: 1.3.14
       typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
+        specifier: ~6.0.3
+        version: 6.0.3
     optionalDependencies:
       '@smithers-orchestrator/jj-darwin-arm64':
         specifier: workspace:*
@@ -7585,8 +7585,8 @@ packages:
     resolution: {integrity: sha512-nAYYwfY3qnzX30IkA6AQZjVbtK6duGontcQm1WSG1MD94YLqK0515GNApXkoxKOWMusVssAHWLh9SeaoefYFGw==}
     engines: {node: '>= 0.4'}
 
-  typescript@5.9.3:
-    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+  typescript@6.0.3:
+    resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
     engines: {node: '>=14.17'}
     hasBin: true
 
@@ -9871,7 +9871,7 @@ snapshots:
   '@microsoft/fetch-event-source@2.0.1':
     optional: true
 
-  '@milkdown/components@7.21.2(@codemirror/language@6.12.4)(@codemirror/state@6.7.0)(@codemirror/view@6.43.4)(typescript@5.9.3)':
+  '@milkdown/components@7.21.2(@codemirror/language@6.12.4)(@codemirror/state@6.7.0)(@codemirror/view@6.43.4)(typescript@6.0.3)':
     dependencies:
       '@codemirror/language': 6.12.4
       '@codemirror/state': 6.7.0
@@ -9893,7 +9893,7 @@ snapshots:
       lodash-es: 4.18.1
       nanoid: 5.1.16
       unist-util-visit: 5.1.0
-      vue: 3.5.39(typescript@5.9.3)
+      vue: 3.5.39(typescript@6.0.3)
     transitivePeerDependencies:
       - supports-color
       - typescript
@@ -9910,7 +9910,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@milkdown/crepe@7.21.2(prosemirror-model@1.25.9)(prosemirror-state@1.4.4)(prosemirror-view@1.41.9)(typescript@5.9.3)':
+  '@milkdown/crepe@7.21.2(prosemirror-model@1.25.9)(prosemirror-state@1.4.4)(prosemirror-view@1.41.9)(typescript@6.0.3)':
     dependencies:
       '@codemirror/commands': 6.10.4
       '@codemirror/language': 6.12.4
@@ -9918,7 +9918,7 @@ snapshots:
       '@codemirror/state': 6.7.0
       '@codemirror/theme-one-dark': 6.1.3
       '@codemirror/view': 6.43.4
-      '@milkdown/kit': 7.21.2(@codemirror/language@6.12.4)(@codemirror/state@6.7.0)(@codemirror/view@6.43.4)(typescript@5.9.3)
+      '@milkdown/kit': 7.21.2(@codemirror/language@6.12.4)(@codemirror/state@6.7.0)(@codemirror/view@6.43.4)(typescript@6.0.3)
       '@types/lodash-es': 4.17.12
       clsx: 2.1.1
       codemirror: 6.0.2
@@ -9928,7 +9928,7 @@ snapshots:
       prosemirror-virtual-cursor: 0.4.2(prosemirror-model@1.25.9)(prosemirror-state@1.4.4)(prosemirror-view@1.41.9)
       remark-math: 6.0.0
       unist-util-visit: 5.1.0
-      vue: 3.5.39(typescript@5.9.3)
+      vue: 3.5.39(typescript@6.0.3)
     transitivePeerDependencies:
       - prosemirror-model
       - prosemirror-state
@@ -9942,9 +9942,9 @@ snapshots:
 
   '@milkdown/exception@7.21.2': {}
 
-  '@milkdown/kit@7.21.2(@codemirror/language@6.12.4)(@codemirror/state@6.7.0)(@codemirror/view@6.43.4)(typescript@5.9.3)':
+  '@milkdown/kit@7.21.2(@codemirror/language@6.12.4)(@codemirror/state@6.7.0)(@codemirror/view@6.43.4)(typescript@6.0.3)':
     dependencies:
-      '@milkdown/components': 7.21.2(@codemirror/language@6.12.4)(@codemirror/state@6.7.0)(@codemirror/view@6.43.4)(typescript@5.9.3)
+      '@milkdown/components': 7.21.2(@codemirror/language@6.12.4)(@codemirror/state@6.7.0)(@codemirror/view@6.43.4)(typescript@6.0.3)
       '@milkdown/core': 7.21.2
       '@milkdown/ctx': 7.21.2
       '@milkdown/exception': 7.21.2
@@ -10419,9 +10419,9 @@ snapshots:
   '@opentui/core-win32-x64@0.4.2':
     optional: true
 
-  '@opentui/core@0.4.2(typescript@5.9.3)(web-tree-sitter@0.25.10)':
+  '@opentui/core@0.4.2(typescript@6.0.3)(web-tree-sitter@0.25.10)':
     dependencies:
-      bun-ffi-structs: 0.2.3(typescript@5.9.3)
+      bun-ffi-structs: 0.2.3(typescript@6.0.3)
       diff: 9.0.0
       marked: 17.0.1
       string-width: 7.2.0
@@ -10439,9 +10439,9 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  '@opentui/react@0.4.2(react-devtools-core@7.0.1)(react@19.2.7)(typescript@5.9.3)(web-tree-sitter@0.25.10)(ws@8.21.0)':
+  '@opentui/react@0.4.2(react-devtools-core@7.0.1)(react@19.2.7)(typescript@6.0.3)(web-tree-sitter@0.25.10)(ws@8.21.0)':
     dependencies:
-      '@opentui/core': 0.4.2(typescript@5.9.3)(web-tree-sitter@0.25.10)
+      '@opentui/core': 0.4.2(typescript@6.0.3)(web-tree-sitter@0.25.10)
       react: 19.2.7
       react-devtools-core: 7.0.1
       react-reconciler: 0.33.0(react@19.2.7)
@@ -11204,18 +11204,18 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
 
-  '@tanstack/db-ivm@0.1.18(typescript@5.9.3)':
+  '@tanstack/db-ivm@0.1.18(typescript@6.0.3)':
     dependencies:
       fractional-indexing: 3.2.0
       sorted-btree: 1.8.1
-      typescript: 5.9.3
+      typescript: 6.0.3
 
-  '@tanstack/db@0.6.8(typescript@5.9.3)':
+  '@tanstack/db@0.6.8(typescript@6.0.3)':
     dependencies:
       '@standard-schema/spec': 1.1.0
-      '@tanstack/db-ivm': 0.1.18(typescript@5.9.3)
+      '@tanstack/db-ivm': 0.1.18(typescript@6.0.3)
       '@tanstack/pacer-lite': 0.2.2
-      typescript: 5.9.3
+      typescript: 6.0.3
 
   '@tanstack/devtools-event-client@0.4.4': {}
 
@@ -11234,9 +11234,9 @@ snapshots:
 
   '@tanstack/query-core@5.101.2': {}
 
-  '@tanstack/react-db@0.1.86(react@19.2.7)(typescript@5.9.3)':
+  '@tanstack/react-db@0.1.86(react@19.2.7)(typescript@6.0.3)':
     dependencies:
-      '@tanstack/db': 0.6.8(typescript@5.9.3)
+      '@tanstack/db': 0.6.8(typescript@6.0.3)
       react: 19.2.7
       use-sync-external-store: 1.6.0(react@19.2.7)
     transitivePeerDependencies:
@@ -11561,11 +11561,11 @@ snapshots:
       '@vue/shared': 3.5.39
       csstype: 3.2.3
 
-  '@vue/server-renderer@3.5.39(vue@3.5.39(typescript@5.9.3))':
+  '@vue/server-renderer@3.5.39(vue@3.5.39(typescript@6.0.3))':
     dependencies:
       '@vue/compiler-ssr': 3.5.39
       '@vue/shared': 3.5.39
-      vue: 3.5.39(typescript@5.9.3)
+      vue: 3.5.39(typescript@6.0.3)
 
   '@vue/shared@3.5.39': {}
 
@@ -11849,9 +11849,9 @@ snapshots:
       base64-js: 1.5.1
       ieee754: 1.2.1
 
-  bun-ffi-structs@0.2.3(typescript@5.9.3):
+  bun-ffi-structs@0.2.3(typescript@6.0.3):
     dependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
 
   bun-types@1.3.14:
     dependencies:
@@ -14959,7 +14959,7 @@ snapshots:
 
   tslib@2.8.1: {}
 
-  tsup@8.5.1(postcss@8.5.16)(tsx@4.22.4)(typescript@5.9.3)(yaml@2.9.0):
+  tsup@8.5.1(postcss@8.5.16)(tsx@4.22.4)(typescript@6.0.3)(yaml@2.9.0):
     dependencies:
       bundle-require: 5.1.0(esbuild@0.27.7)
       cac: 6.7.14
@@ -14980,7 +14980,7 @@ snapshots:
       tree-kill: 1.2.2
     optionalDependencies:
       postcss: 8.5.16
-      typescript: 5.9.3
+      typescript: 6.0.3
     transitivePeerDependencies:
       - jiti
       - supports-color
@@ -15014,7 +15014,7 @@ snapshots:
       es-errors: 1.3.0
       is-typed-array: 1.1.15
 
-  typescript@5.9.3: {}
+  typescript@6.0.3: {}
 
   ufo@1.6.3: {}
 
@@ -15131,15 +15131,15 @@ snapshots:
       tsx: 4.22.4
       yaml: 2.9.0
 
-  vue@3.5.39(typescript@5.9.3):
+  vue@3.5.39(typescript@6.0.3):
     dependencies:
       '@vue/compiler-dom': 3.5.39
       '@vue/compiler-sfc': 3.5.39
       '@vue/runtime-dom': 3.5.39
-      '@vue/server-renderer': 3.5.39(vue@3.5.39(typescript@5.9.3))
+      '@vue/server-renderer': 3.5.39(vue@3.5.39(typescript@6.0.3))
       '@vue/shared': 3.5.39
     optionalDependencies:
-      typescript: 5.9.3
+      typescript: 6.0.3
 
   w3c-keyname@2.2.8: {}
 

@@ -623,7 +623,12 @@ export class DevToolsStore {
         seq: delta.baseSeq,
         root: undefined as unknown as DevToolsNode,
       };
-      this.liveSnapshot = applyDelta(base, delta) as SnapshotWithRunState;
+      // applyDelta's JSDoc snapshot type carries a narrower node `kind` union than
+      // protocol's DevToolsSnapshot; the assertion bridges that drift (TS6 flags it).
+      this.liveSnapshot = applyDelta(
+        base as Parameters<typeof applyDelta>[0],
+        delta as Parameters<typeof applyDelta>[1],
+      ) as SnapshotWithRunState;
       this.liveLatestFrameNo = Math.max(this.liveLatestFrameNo, this.liveSnapshot.frameNo, delta.seq);
       this.recordMountedFramesFromDelta(delta, this.liveLatestFrameNo);
       if (this.runId) {

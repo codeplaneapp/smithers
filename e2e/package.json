@@ -33,6 +33,6 @@
     "@types/better-sqlite3": "^7.6.11",
     "@types/bun": "latest",
     "@types/ws": "^8.18.1",
-    "typescript": "~5.9.3"
+    "typescript": "~6.0.3"
   }
 }

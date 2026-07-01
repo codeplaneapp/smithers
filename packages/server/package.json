@@ -49,7 +49,7 @@
     "@smithers-orchestrator/graph": "workspace:*",
     "@types/bun": "latest",
     "react": "^19.2.7",
-    "typescript": "~5.9.3",
+    "typescript": "~6.0.3",
     "zod": "^4.4.3"
   }
 }

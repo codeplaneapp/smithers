@@ -5,7 +5,6 @@ import { join } from "node:path";
 import React from "react";
 import { Effect } from "effect";
 import { z } from "zod";
-import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import {
   Approval,
   Sequence,
@@ -38,8 +37,10 @@ function queryClient(db: unknown) {
     ?? (db as { session?: { client?: unknown } }).session?.client;
 }
 
-function outputTable(table: unknown): SQLiteTable {
-  return table as SQLiteTable;
+// Returns `any` so the opaque output table is accepted by db.select().from()
+// regardless of which drizzle-orm peer-instance resolved its SQLiteTable type.
+function outputTable(table: unknown): any {
+  return table;
 }
 
 function createApprovalWorkflow(dbPath: string) {

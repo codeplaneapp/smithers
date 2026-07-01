@@ -9,7 +9,6 @@ import {
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { killProcess } from "../harness/killProcess.ts";
@@ -63,8 +62,10 @@ const RUNNER_SCRIPT = fileURLToPath(
   new URL("../harness/engineChildRunner.ts", import.meta.url),
 );
 
-function outputTable(table: unknown): SQLiteTable {
-  return table as SQLiteTable;
+// Returns `any` so the opaque output table is accepted by db.select().from()
+// regardless of which drizzle-orm peer-instance resolved its SQLiteTable type.
+function outputTable(table: unknown): any {
+  return table;
 }
 
 async function waitFor(

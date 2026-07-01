@@ -33,6 +33,6 @@
   "devDependencies": {
     "@electric-sql/client": "^1.5.15",
     "@types/bun": "latest",
-    "typescript": "~5.9.3"
+    "typescript": "~6.0.3"
   }
 }
