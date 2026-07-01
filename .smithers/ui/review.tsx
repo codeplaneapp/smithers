@@ -41,14 +41,12 @@ function runIdFromUrl(): string | undefined {
 export type VerdictState = "approved" | "blocked" | "pending" | "missing";
 
 // Terminal = a known run status that is not active or suspended. The active set
-// is `running` plus every `waiting-*` state (waiting-approval, waiting-event,
-// waiting-timer, waiting-quota, and any future waiting-*), so this leaves the
-// terminal set as finished, failed, cancelled, and continued. Using the negative
-// `waiting-` prefix keeps it correct as new suspending statuses are added.
+// is `running` plus every waiting status: the bare `waiting` that the gateway
+// stream reducer emits for run.paused frames, and every `waiting-*` state
+// (waiting-approval, waiting-event, waiting-timer, waiting-quota, and any future
+// waiting-*). Matching the `waiting` prefix (no hyphen) covers all of them, which
+// leaves the terminal set as finished, failed, cancelled, and continued.
 export function isRunTerminal(status: string | undefined | null): boolean {
-  // Active = "running" or any waiting status. The gateway's stream reducer maps
-  // paused frames to the bare "waiting" (not just "waiting-*"), so match the
-  // "waiting" prefix without the hyphen to cover both.
   return status != null && status !== "running" && !status.startsWith("waiting");
 }
 
