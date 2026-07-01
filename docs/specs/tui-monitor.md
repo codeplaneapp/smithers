@@ -63,7 +63,7 @@ SmithersGatewayClient({
 | `useGatewayRun(runId)` | `gateway-react` | Header status dot, workflow name, model, run state |
 | `useGatewayRunEvents(runId, { maxEvents: 2000 })` | `gateway-react` | LOGS mode transcript; TIMELINE tick strip (seq numbers → frame markers) |
 | `useGatewayNodeOutput({ runId, nodeId, iteration })` | `gateway-react` | NodeInspector Output tab (the selected node's formatted output) |
-| `useGatewayApprovals({ runId })` | `gateway-react` | Approval banner in TREE mode; gate markers in TIMELINE. Exposes `refetch`, called after a successful `submitApproval` so the resolved gate's banner clears. |
+| `useGatewayApprovals({ filter: { runId } })` | `gateway-react` | Approval banner in TREE mode; gate markers in TIMELINE. Exposes `refetch`, called after a successful `submitApproval` so the resolved gate's banner clears. |
 | `getNodeDiff` RPC (via `useGatewayRpc`) | `gateway-react` | NodeInspector Diff tab (gated on the tab being active) |
 | `useGatewayActions()` | `gateway-react` | Only `submitApproval` (approve/deny a gate in TREE). The monitor does NOT cancel/resume/rewind from actions - those are CLI-driven; HIJACK shells out to `bunx smithers-orchestrator hijack`. |
 
@@ -159,7 +159,7 @@ Fields, left to right:
   - **Props tab**: `<code filetype="json">` block with node metadata - `id`, `key` (the unique row key), `iteration`, `name`, `kind`, `status`, `agent`, `meta`, `cardLabel`, `parentId`, `childIds`. `key` + `iteration` distinguish repeated logical nodes (loop/retry attempts).
   - Tab switching: `1`–`4` (output/logs/diff/props) or left/right arrows when inspector is focused.
 
-- **Approval banner**: when the CURSORED node has a pending gate in `useGatewayApprovals({ runId }).data`, a bordered banner renders at the top of the inspector (right) pane, ABOVE the tab bar (not above the keybar). It shows `⏸  <title>  [<mode>]` plus a summary line and mode-appropriate controls: a plain gate shows `[a] approve   [d] deny`; a `select` lists its options and shows `[[/]] choose   [a] approve selected   [d] deny`; a `rank` shows `[a] approve (ranked as listed)   [d] deny`. Keys `a`/`d` (and `[`/`]` for a `select`) work whether focus is in the tree or the inspector, and call `actions.submitApproval`. A pending durable **HumanTask** renders a distinct variant instead (the gateway has no RPC to submit the typed answer), pointing the operator at `bunx smithers-orchestrator human inbox` rather than offering an approve/deny that would strand the run.
+- **Approval banner**: when the CURSORED node has a pending gate in `useGatewayApprovals({ filter: { runId } }).data`, a bordered banner renders at the top of the inspector (right) pane, ABOVE the tab bar (not above the keybar). It shows `⏸  <title>  [<mode>]` plus a summary line and mode-appropriate controls: a plain gate shows `[a] approve   [d] deny`; a `select` lists its options and shows `[[/]] choose   [a] approve selected   [d] deny`; a `rank` shows `[a] approve (ranked as listed)   [d] deny`. Keys `a`/`d` (and `[`/`]` for a `select`) work whether focus is in the tree or the inspector, and call `actions.submitApproval`. A pending durable **HumanTask** renders a distinct variant instead (the gateway has no RPC to submit the typed answer), pointing the operator at `bunx smithers-orchestrator human inbox` rather than offering an approve/deny that would strand the run.
 
 ### Mode 2: GRAPH
 
