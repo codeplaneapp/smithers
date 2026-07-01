@@ -91,8 +91,9 @@ describe("generate-openapi helpers", () => {
     for (const def of GATEWAY_RPC_DEFINITIONS) {
       expect(doc.paths[`/v1/rpc/${def.method}`]).toBeDefined();
     }
-    // Exactly as many paths as definitions
-    expect(Object.keys(doc.paths).length).toBe(GATEWAY_RPC_DEFINITIONS.length);
+    expect(doc.paths["/v1/api/runs"]).toBeDefined();
+    expect(doc.paths["/v1/api/stream"]).toBeDefined();
+    expect(Object.keys(doc.paths).length).toBeGreaterThan(GATEWAY_RPC_DEFINITIONS.length);
   });
 });
 

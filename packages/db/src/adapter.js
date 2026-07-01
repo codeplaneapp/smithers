@@ -585,6 +585,8 @@ export class SmithersDb {
     transactionOwnerThread = null;
     /** @type {Promise<unknown>} */
     transactionTail = Promise.resolve();
+    /** @type {string | null} */
+    lastCommittedTxid = null;
     /**
    * @param {BunSQLiteDatabase<Record<string, unknown>>} db
    */
@@ -861,6 +863,23 @@ export class SmithersDb {
                     yield* rollback("operation", operationExit.cause);
                     return yield* Effect.failCause(operationExit.cause);
                 }
+                let capturedTxid = null;
+                if (isPostgres) {
+                    const txidExit = yield* Effect.exit(Effect.tryPromise({
+                        try: async () => {
+                            const row = await self.internalStorage.queryOneRaw("SELECT pg_current_xact_id()::xid::text AS txid");
+                            const txid = typeof row?.txid === "string" ? row.txid : null;
+                            return txid && /^\d+$/.test(txid) ? txid : null;
+                        },
+                        catch: (cause) => toSmithersError(cause, "capture postgres txid", {
+                            code: "DB_QUERY_FAILED",
+                            details: { writeGroup, phase: "txid" },
+                        }),
+                    }));
+                    if (Exit.isSuccess(txidExit)) {
+                        capturedTxid = txidExit.value;
+                    }
+                }
                 const commitExit = yield* Effect.exit(Effect.tryPromise({
                     try: () => runControl("COMMIT"),
                     catch: (cause) => toSmithersError(cause, "commit sqlite transaction", {
@@ -871,6 +890,9 @@ export class SmithersDb {
                 if (Exit.isFailure(commitExit)) {
                     yield* rollback("commit", commitExit.cause);
                     return yield* Effect.failCause(commitExit.cause);
+                }
+                if (capturedTxid) {
+                    self.lastCommittedTxid = capturedTxid;
                 }
                 return operationExit.value;
             }).pipe(Effect.ensuring(Effect.gen(function* () {
@@ -2678,10 +2700,15 @@ export class SmithersDb {
    */
     listMemoryFacts(namespace = null) {
         const ns = namespace ?? null;
+        if (ns === null) {
+            return this.read("list memory facts", () => this.internalStorage.queryAll(`SELECT namespace, key, value_json, schema_sig, created_at_ms, updated_at_ms, ttl_ms
+         FROM _smithers_memory_facts
+         ORDER BY namespace, key`));
+        }
         return this.read("list memory facts", () => this.internalStorage.queryAll(`SELECT namespace, key, value_json, schema_sig, created_at_ms, updated_at_ms, ttl_ms
          FROM _smithers_memory_facts
-         WHERE (? IS NULL OR namespace = ?)
-         ORDER BY namespace, key`, [ns, ns]));
+         WHERE namespace = ?
+         ORDER BY namespace, key`, [ns]));
     }
     // ---------------------------------------------------------------------------
     // Docs (tickets / plans / specs / proposals)

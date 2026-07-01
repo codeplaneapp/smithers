@@ -16,6 +16,7 @@ export * from "./schema-signature.js";
 export * from "./snapshot.js";
 export * from "./sql-message-storage.js";
 export * from "./cache/nodeDiffCache.js";
+export * from "./captureTxid.js";
 export * from "./unwrapZodType.js";
 export * from "./write-retry.js";
 export * from "./zodToCreateTableSQL.js";
