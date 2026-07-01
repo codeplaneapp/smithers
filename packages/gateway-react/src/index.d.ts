@@ -118,10 +118,13 @@ declare function useGatewayRun(runId: string | undefined): GatewayAsyncState<Gat
 
 /**
  * Live run-event buffer over the bounded `runEvents` collection
- * (`streamRunEventsResilient` with afterSeq resume). Heartbeats are surfaced
- * separately via `lastHeartbeat` and never enter `events`; the events array is
- * capped to `maxEvents` (most-recent wins). Same return shape the streaming
- * hook had.
+ * (`streamRunEventsResilient` with afterSeq resume). Every `run.heartbeat`
+ * collapses to a single reserved-key row in the collection (see
+ * `RUN_HEARTBEAT_ROW_KEY`), so heartbeats never accumulate in — or evict real
+ * events from — the `maxEvents` ring. They are surfaced separately via
+ * `lastHeartbeat` and never enter `events`; the events array holds only real run
+ * events, capped to `maxEvents` (most-recent wins). Same return shape the
+ * streaming hook had.
  */
 declare function useGatewayRunEvents(runId: string | undefined, options?: {
     afterSeq?: number;
@@ -289,7 +292,13 @@ type GatewayCollections = {
     tickets(params?: ListTicketsRequest): Collection<GatewayTicketRow, string>;
     /** Flattened devtools run-node tree, reconciled per devtools frame. */
     nodes(runId: string): Collection<GatewayRunNode, string>;
-    /** Bounded append-only run-event ring, cached per `(runId, maxRows)` so different caps get their own correctly-sized ring. */
+    /**
+     * Bounded append-only run-event ring. `maxRows` sizes the ring (default 1024);
+     * pass the consumer's `maxEvents` so a reader asking for more history (e.g. the
+     * TUI's 2000) actually retains it instead of being silently clamped. The
+     * collection is cached per `(runId, maxRows)`, so consumers asking for
+     * different caps get their own correctly-sized ring — no first-caller-wins.
+     */
     runEvents(runId: string, maxRows?: number): Collection<GatewayRunEventRow, number>;
     /** Resolve (or create) the generic single-value query collection for `key`. */
     query<T>(key: SyncKey, fetcher: () => Promise<T>): GatewayQueryHandle<T>;

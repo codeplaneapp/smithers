@@ -944,6 +944,7 @@ declare class Gateway {
    * @param {RunStartAuthContext} auth
    */
     resumeRunIfNeeded(runId: string, workflowKey: string, adapter: SmithersDb$4, auth: RunStartAuthContext): Promise<void>;
+    resumeRunInBackground(runId: any, workflowKey: any, adapter: any, auth: any): void;
     /**
    * @param {WebSocket} ws
    * @param {IncomingMessage} req
@@ -1479,14 +1480,19 @@ declare function validateRequestedFrameNo(frameNo: unknown, latestFrameNo: numbe
 /**
  * @param {unknown} xml
  * @param {(warning: SnapshotSerializerWarning) => void} [onWarning]
+ * @param {Map<string, { iteration?: number; kind?: string }>} [taskIndex]
  * @returns {DevToolsNode}
  */
-declare function parseXmlToDevToolsRoot(xml: unknown, onWarning?: (warning: SnapshotSerializerWarning$1) => void): DevToolsNode;
+declare function parseXmlToDevToolsRoot(xml: unknown, onWarning?: (warning: SnapshotSerializerWarning$1) => void, taskIndex?: Map<string, {
+    iteration?: number;
+    kind?: string;
+}>): DevToolsNode;
 /**
  * @param {{
  *   runId: string;
  *   frameNo: number;
  *   xmlJson: string;
+ *   taskIndexJson?: string | null;
  *   onWarning?: (warning: SnapshotSerializerWarning) => void;
  * }} input
  * @returns {DevToolsSnapshot}
@@ -1495,6 +1501,7 @@ declare function snapshotFromFrameRow(input: {
     runId: string;
     frameNo: number;
     xmlJson: string;
+    taskIndexJson?: string | null;
     onWarning?: (warning: SnapshotSerializerWarning$1) => void;
 }): DevToolsSnapshot;
 /**

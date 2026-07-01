@@ -1,9 +1,24 @@
 import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+import { createExecutableDir, writeFakeCodexBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
 import { buildComponentImporterMap, componentBaseName, importsComponent, workflowId } from "../src/initPackUpdates.js";
 import { applyWorkflowPackUpdates, initWorkflowPack } from "../src/workflow-pack.js";
+
+function seededAgentEnv(homeDir) {
+  const binDir = createExecutableDir();
+  writeFakeCodexBinary(binDir);
+  return {
+    HOME: homeDir,
+    SMITHERS_HOME: join(homeDir, ".smithers-home"),
+    PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
+    OPENAI_API_KEY: "sk-test-openai-key",
+    ANTHROPIC_API_KEY: "",
+    GEMINI_API_KEY: "",
+    GOOGLE_API_KEY: "",
+  };
+}
 
 test("componentBaseName / workflowId classify pack paths", () => {
   expect(componentBaseName(".smithers/components/Review.tsx")).toBe("Review");
@@ -35,7 +50,7 @@ test("buildComponentImporterMap reverse-maps components to importing workflows",
 
 test("init reports drifted pack files; applyWorkflowPackUpdates writes them", () => {
   const dir = mkdtempSync(join(tmpdir(), "smithers-init-upd-"));
-  const opts = { rootDir: dir, skipInstall: true, installSkill: false };
+  const opts = { rootDir: dir, skipInstall: true, installSkill: false, env: seededAgentEnv(dir) };
 
   const first = initWorkflowPack(opts);
   expect(first.writtenFiles.length).toBeGreaterThan(0);

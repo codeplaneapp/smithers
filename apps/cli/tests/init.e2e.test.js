@@ -97,6 +97,7 @@ function writeWorkflowPackTypecheckHarness(repo) {
         compilerOptions: {
             strict: false,
             noImplicitAny: false,
+            ignoreDeprecations: "6.0",
             types: ["node", "react", "react-dom", "mdx"],
             paths: {
                 "~/*": ["./*"],

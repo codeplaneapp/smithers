@@ -1,6 +1,6 @@
 import { A as AgentGenerateOptions$2$1, B as BaseCliAgent, a as BaseCliAgentOptions$2, C as CliOutputInterpreter$2$1, b as CodexConfigOverrides$2, c as BaseCliAgentOptions$1, d as CliOutputInterpreter$b, P as PiExtensionUiRequest$2, e as PiExtensionUiResponse$2, f as AgentCliEvent$1 } from './index-D8q0eaIv.js';
 import * as ai from 'ai';
-import { ToolLoopAgent, ToolSet, ToolLoopAgentSettings, Tool as Tool$1, LanguageModel } from 'ai';
+import { ToolLoopAgent, ToolSet, ToolLoopAgentSettings, LanguageModel, Tool as Tool$1 } from 'ai';
 import * as zod_v4_core from 'zod/v4/core';
 import '@smithers-orchestrator/errors/SmithersError';
 import 'effect';

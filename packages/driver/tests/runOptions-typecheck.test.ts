@@ -44,6 +44,7 @@ describe("RunOptions public type", () => {
       join(dir, "tsconfig.json"),
       JSON.stringify({
         compilerOptions: {
+          ignoreDeprecations: "6.0",
           strict: true,
           noEmit: true,
           target: "ESNext",

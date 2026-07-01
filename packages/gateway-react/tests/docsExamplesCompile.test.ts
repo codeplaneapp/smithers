@@ -38,6 +38,7 @@ function compile(opts: {
   writeFileSync(join(dir, opts.fileName), opts.source);
   const tsconfig = {
     compilerOptions: {
+      ignoreDeprecations: "6.0",
       target: "ES2022",
       module: "ESNext",
       moduleResolution: "bundler",

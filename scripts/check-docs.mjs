@@ -2644,6 +2644,10 @@ function normalizeCliManifestCommand(command) {
     .replace(/\s+/g, ".");
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function camelToKebab(value) {
   return value.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
 }
@@ -2764,6 +2768,8 @@ function checkCliOverviewCommandCatalogMatchesCli() {
   const mcpHelp = runCli(["mcp", "--help"]);
   const skillsHelp = runCli(["skills", "--help"]);
   const completionsHelp = runCli(["completions", "--help"]);
+  const helpHasCommand = (help, command) =>
+    new RegExp(`^\\s{2}${escapeRegExp(command)}\\s{2,}`, "m").test(help);
   const cliCommands =
     llms.status === 0
       ? [...llms.stdout.matchAll(/\| `smithers ([^`]+)` \|/g)].map((match) =>
@@ -2773,10 +2779,10 @@ function checkCliOverviewCommandCatalogMatchesCli() {
   const documentedSet = new Set(documented);
   const missingCliCommands = cliCommands.filter((command) => !documentedSet.has(command));
   const integrationEvidence = [
-    ["completions", topLevelHelp.stdout.includes("completions") && completionsHelp.stdout.includes("Usage: smithers completions")],
-    ["mcp.add", topLevelHelp.stdout.includes("mcp add") && mcpHelp.stdout.includes("add  Register as MCP server")],
-    ["skills.add", topLevelHelp.stdout.includes("skills") && skillsHelp.stdout.includes("add   Sync skill files to agents")],
-    ["skills.list", topLevelHelp.stdout.includes("skills") && skillsHelp.stdout.includes("list  List skills")],
+    ["completions", helpHasCommand(topLevelHelp.stdout, "completions") && completionsHelp.stdout.includes("Usage: smithers completions")],
+    ["mcp.add", topLevelHelp.stdout.includes("mcp add") && helpHasCommand(mcpHelp.stdout, "add")],
+    ["skills.add", helpHasCommand(topLevelHelp.stdout, "skills") && helpHasCommand(skillsHelp.stdout, "add")],
+    ["skills.list", helpHasCommand(topLevelHelp.stdout, "skills") && helpHasCommand(skillsHelp.stdout, "list")],
   ];
   const missingIntegrationDocs = integrationEvidence
     .filter(([command, backedByCli]) => backedByCli && !documentedSet.has(command))

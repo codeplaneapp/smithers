@@ -10,6 +10,7 @@
     "moduleResolution": "bundler",
     "moduleDetection": "force",
     "jsx": "react-jsx",
+    "ignoreDeprecations": "6.0",
     "strict": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
