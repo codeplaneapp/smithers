@@ -46,7 +46,10 @@ export type VerdictState = "approved" | "blocked" | "pending" | "missing";
 // terminal set as finished, failed, cancelled, and continued. Using the negative
 // `waiting-` prefix keeps it correct as new suspending statuses are added.
 export function isRunTerminal(status: string | undefined | null): boolean {
-  return status != null && status !== "running" && !status.startsWith("waiting-");
+  // Active = "running" or any waiting status. The gateway's stream reducer maps
+  // paused frames to the bare "waiting" (not just "waiting-*"), so match the
+  // "waiting" prefix without the hyphen to cover both.
+  return status != null && status !== "running" && !status.startsWith("waiting");
 }
 
 // The synthesized moderator verdict is the ONLY source of truth (never inferred
@@ -118,7 +121,10 @@ function extractSynthesis(value: unknown): Synthesis | null {
 }
 
 function statusClass(status: string | undefined) {
-  if (status === "running" || status === "continued") return "running";
+  // "continued" is terminal (the run continued into another record), so it is not
+  // styled as active; active/suspended runs (running + waiting*) show the amber
+  // running badge.
+  if (status === "running" || (status != null && status.startsWith("waiting"))) return "running";
   if (status === "finished") return "finished";
   if (status === "failed" || status === "cancelled") return "failed";
   return "";
@@ -312,7 +318,7 @@ function App() {
             placeholder="What should be reviewed?"
           />
           <button className="button" data-testid="review-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
-          {activeRun && statusClass(activeRun.status) === "running" ? (
+          {activeRun && !runTerminal ? (
             <button className="button danger" data-testid="review-cancel" onClick={() => void cancel()} disabled={busy}>Cancel</button>
           ) : null}
           <button className="button primary" data-testid="review-launch" onClick={() => void launch()} disabled={busy}>Launch Review</button>

@@ -2,7 +2,7 @@ import * as _smithers_orchestrator_components_SmithersWorkflow from '@smithers-o
 import { SmithersWorkflow as SmithersWorkflow$2 } from '@smithers-orchestrator/components/SmithersWorkflow';
 import * as _smithers_orchestrator_scheduler_SmithersWorkflowOptions from '@smithers-orchestrator/scheduler/SmithersWorkflowOptions';
 import * as effect from 'effect';
-import { Schema, Effect, Layer, Context, Exit, Scope } from 'effect';
+import { Effect, Exit, Schema, Scope, Layer, Context } from 'effect';
 import * as _smithers_orchestrator_errors_SmithersError from '@smithers-orchestrator/errors/SmithersError';
 import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
 import * as _smithers_orchestrator_driver_RunResult from '@smithers-orchestrator/driver/RunResult';
@@ -2541,7 +2541,7 @@ type SignalPayload$1 = {
     sentBy?: string;
 };
 
-type RunStatusSchema$1 = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "finished" | "continued" | "failed" | "cancelled";
+type RunStatusSchema$1 = "running" | "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota" | "finished" | "continued" | "failed" | "cancelled";
 
 type RunSummary$1 = {
     runId: string;
@@ -2601,7 +2601,7 @@ type ApprovalPayload$1 = {
 };
 
 type RunStatusSchema = RunStatusSchema$1;
-declare const RunStatusSchema: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+declare const RunStatusSchema: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota", "finished", "continued", "failed", "cancelled"]>;
 declare const ApprovalPayloadSchema: Schema.Struct<{
     runId: typeof Schema.String;
     nodeId: typeof Schema.String;
@@ -2637,7 +2637,7 @@ declare const SignalResultSchema: Schema.Struct<{
 }>;
 declare const ListRunsPayloadSchema: Schema.Struct<{
     limit: Schema.optional<typeof Schema.Number>;
-    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>>;
+    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota", "finished", "continued", "failed", "cancelled"]>>;
 }>;
 declare const RunSummarySchema: Schema.Struct<{
     runId: typeof Schema.String;
@@ -2645,7 +2645,7 @@ declare const RunSummarySchema: Schema.Struct<{
     workflowName: typeof Schema.String;
     workflowPath: Schema.NullOr<typeof Schema.String>;
     workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota", "finished", "continued", "failed", "cancelled"]>;
     createdAtMs: typeof Schema.Number;
     startedAtMs: Schema.NullOr<typeof Schema.Number>;
     finishedAtMs: Schema.NullOr<typeof Schema.Number>;
@@ -2669,7 +2669,7 @@ declare const GetRunResultSchema: Schema.NullOr<Schema.Struct<{
     workflowName: typeof Schema.String;
     workflowPath: Schema.NullOr<typeof Schema.String>;
     workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota", "finished", "continued", "failed", "cancelled"]>;
     createdAtMs: typeof Schema.Number;
     startedAtMs: Schema.NullOr<typeof Schema.Number>;
     finishedAtMs: Schema.NullOr<typeof Schema.Number>;
@@ -2716,14 +2716,14 @@ declare const signal: Rpc.Rpc<"signal", Schema.Struct<{
 }>, typeof Schema.Never, never>;
 declare const listRuns: Rpc.Rpc<"listRuns", Schema.Struct<{
     limit: Schema.optional<typeof Schema.Number>;
-    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>>;
+    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota", "finished", "continued", "failed", "cancelled"]>>;
 }>, Schema.Array$<Schema.Struct<{
     runId: typeof Schema.String;
     parentRunId: Schema.NullOr<typeof Schema.String>;
     workflowName: typeof Schema.String;
     workflowPath: Schema.NullOr<typeof Schema.String>;
     workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota", "finished", "continued", "failed", "cancelled"]>;
     createdAtMs: typeof Schema.Number;
     startedAtMs: Schema.NullOr<typeof Schema.Number>;
     finishedAtMs: Schema.NullOr<typeof Schema.Number>;
@@ -2746,7 +2746,7 @@ declare const getRun: Rpc.Rpc<"getRun", Schema.Struct<{
     workflowName: typeof Schema.String;
     workflowPath: Schema.NullOr<typeof Schema.String>;
     workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota", "finished", "continued", "failed", "cancelled"]>;
     createdAtMs: typeof Schema.Number;
     startedAtMs: Schema.NullOr<typeof Schema.Number>;
     finishedAtMs: Schema.NullOr<typeof Schema.Number>;
@@ -2790,14 +2790,14 @@ declare const SmithersRpcGroup: RpcGroup.RpcGroup<Rpc.Rpc<"approve", Schema.Stru
     status: Schema.Literal<["signalled", "ignored"]>;
 }>, typeof Schema.Never, never> | Rpc.Rpc<"listRuns", Schema.Struct<{
     limit: Schema.optional<typeof Schema.Number>;
-    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>>;
+    status: Schema.optional<Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota", "finished", "continued", "failed", "cancelled"]>>;
 }>, Schema.Array$<Schema.Struct<{
     runId: typeof Schema.String;
     parentRunId: Schema.NullOr<typeof Schema.String>;
     workflowName: typeof Schema.String;
     workflowPath: Schema.NullOr<typeof Schema.String>;
     workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota", "finished", "continued", "failed", "cancelled"]>;
     createdAtMs: typeof Schema.Number;
     startedAtMs: Schema.NullOr<typeof Schema.Number>;
     finishedAtMs: Schema.NullOr<typeof Schema.Number>;
@@ -2819,7 +2819,7 @@ declare const SmithersRpcGroup: RpcGroup.RpcGroup<Rpc.Rpc<"approve", Schema.Stru
     workflowName: typeof Schema.String;
     workflowPath: Schema.NullOr<typeof Schema.String>;
     workflowHash: Schema.NullOr<typeof Schema.String>;
-    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "finished", "continued", "failed", "cancelled"]>;
+    status: Schema.Literal<["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota", "finished", "continued", "failed", "cancelled"]>;
     createdAtMs: typeof Schema.Number;
     startedAtMs: Schema.NullOr<typeof Schema.Number>;
     finishedAtMs: Schema.NullOr<typeof Schema.Number>;

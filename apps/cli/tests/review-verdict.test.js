@@ -2,8 +2,9 @@ import { test, expect } from "bun:test";
 import { verdictStateFor, isRunTerminal, issuesEmptyMessageFor } from "../../../.smithers/ui/review.tsx";
 
 test("isRunTerminal treats active/suspended as non-terminal, else terminal", () => {
-  // Active/suspended: running + every waiting-* status (incl. waiting-quota).
-  for (const s of ["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"]) {
+  // Active/suspended: running + any waiting status. Includes the bare "waiting"
+  // that the gateway stream reducer emits for paused frames, plus waiting-quota.
+  for (const s of ["running", "waiting", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"]) {
     expect(isRunTerminal(s)).toBe(false);
   }
   // Terminal: finished, failed, cancelled, continued.
