@@ -4,6 +4,7 @@ import {
   createGatewayReactRoot,
   useGatewayActions,
   useGatewayNodeOutput,
+  useGatewayRun,
   useGatewayRunEvents,
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
@@ -173,7 +174,11 @@ function App() {
     [runsQuery.data],
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? reviewRuns[0]?.runId;
-  const activeRun = reviewRuns.find((r) => r.runId === activeRunId);
+  // Authoritative run record fetched by id (not limited to the recent-runs list),
+  // so a deep ?runId= link or an older run still resolves its real status.
+  const activeRunDetail = useGatewayRun(activeRunId);
+  const activeRun =
+    (activeRunDetail.data as RunSummary | undefined) ?? reviewRuns.find((r) => r.runId === activeRunId);
   const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
   const eventCount = (stream.events ?? []).length;
 
