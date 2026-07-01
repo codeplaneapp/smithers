@@ -217,9 +217,11 @@ function App() {
     : runTerminal
       ? "missing"
       : "pending";
-  const verdictPending = verdictState === "pending";
   const verdictApproved = verdictState === "approved";
-  const hasContent = reviews.length > 0 || synthesis !== null;
+  // Render the verdict card whenever there is panelist/moderator output OR the run
+  // is terminal without a verdict (so the "missing verdict" state is shown instead
+  // of the empty "waiting" placeholder).
+  const hasContent = reviews.length > 0 || synthesis !== null || verdictState === "missing";
   // Prefer the moderator's consolidated issues once synthesized; the panelist
   // union can differ (the moderator may merge, escalate, or drop issues).
   const allIssues = synthesis
@@ -232,7 +234,7 @@ function App() {
   const visibleIssues = sevFilter === "all" ? allIssues : allIssues.filter((it) => it.severity === sevFilter);
 
   async function refresh() {
-    await Promise.all([runsQuery.refetch(), moderator.refetch(), ...nodeQueries.map((q) => q.refetch())]);
+    await Promise.all([runsQuery.refetch(), activeRunDetail.refetch(), moderator.refetch(), ...nodeQueries.map((q) => q.refetch())]);
   }
   async function launch() {
     setBusy(true);
