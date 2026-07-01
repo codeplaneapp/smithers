@@ -922,15 +922,77 @@ export function buildTuiMonitorEnv(baseEnv, { cliIndexPath, gatewayUrl, backend,
  *   as SMITHERS_BACKEND so the TUI's autostarted gateway opens the SAME store the
  *   detached run writes to instead of the default sqlite one.
  * @param {string} [authToken] - explicit `--auth-token`; forwarded as SMITHERS_TOKEN.
- * @returns {Promise<{ code: number | null; signal: NodeJS.Signals | null }>}
+ * @returns {{ exit: Promise<{ code: number | null; signal: NodeJS.Signals | null }>; terminate: () => void }}
+ *   `exit` resolves when the monitor child exits (or rejects if it fails to spawn);
+ *   `terminate` hard-stops the monitor (used when the detached run dies out from
+ *   under it) and is a no-op once it has already exited.
  */
-async function launchTuiMonitor(tuiEntry, runId, cliIndexPath, gatewayUrl, backend, authToken) {
-    return new Promise((resolve, reject) => {
-        const env = buildTuiMonitorEnv(process.env, { cliIndexPath, gatewayUrl, backend, authToken });
-        const child = spawn("bun", [tuiEntry, runId], { stdio: "inherit", env });
+function launchTuiMonitor(tuiEntry, runId, cliIndexPath, gatewayUrl, backend, authToken) {
+    const env = buildTuiMonitorEnv(process.env, { cliIndexPath, gatewayUrl, backend, authToken });
+    const child = spawn("bun", [tuiEntry, runId], { stdio: "inherit", env });
+    const exit = new Promise((resolve, reject) => {
         child.once("error", (err) => reject(err));
         child.once("exit", (code, signal) => resolve({ code, signal }));
     });
+    return {
+        exit,
+        terminate() {
+            if (child.exitCode !== null || child.signalCode !== null) return;
+            try {
+                child.kill("SIGTERM");
+            } catch { }
+        },
+    };
+}
+
+/**
+ * Keep supervising the detached run child while the full-screen monitor is up.
+ *
+ * The monitor only reflects the last live gateway state; it does not itself know
+ * whether the detached run *process* is still alive. So while it runs we also
+ * watch `childFailure`. Whichever settles first decides the outcome:
+ *
+ * - The monitor exits first (a normal user quit / interrupt): return its exit so
+ *   the caller applies the usual `isCleanMonitorExit` handling.
+ * - The detached child dies first: re-read the run row. If the run is already in
+ *   a stop state (terminal / waiting-approval / stale / orphaned — `STOP_STATES`),
+ *   the run legitimately ended, so leave the monitor up for the user to inspect
+ *   the final state and return its eventual exit. Otherwise the child died
+ *   prematurely, so terminate the monitor and return the failure error.
+ *
+ * `childFailure` never rejects (see `childFailurePromise`), so the race adds no
+ * unhandled rejections; the losing branch is simply abandoned.
+ *
+ * @param {{ exit: Promise<{ code: number | null; signal: NodeJS.Signals | null }>; terminate: () => void }} monitor
+ * @param {Promise<Error>} childFailure
+ * @param {{ getRun: (runId: string) => Promise<unknown> }} adapter
+ * @param {string} runId
+ * @returns {Promise<{ exit?: { code: number | null; signal: NodeJS.Signals | null }; error?: Error }>}
+ */
+export async function superviseTuiMonitor(monitor, childFailure, adapter, runId) {
+    const outcome = await Promise.race([
+        monitor.exit.then((exit) => ({ kind: "exit", exit })),
+        childFailure.then((error) => ({ kind: "child", error })),
+    ]);
+    if (outcome.kind === "exit") {
+        return { exit: outcome.exit };
+    }
+    // The detached run child exited while the monitor was up. Re-read the run
+    // state to tell a legitimate end from a premature death.
+    const run = await adapter.getRun(runId).catch(() => null);
+    let state;
+    if (run) {
+        const view = await computeRunStateFromRow(adapter, run).catch(() => ({ state: run.status }));
+        state = view.state;
+    }
+    if (state && STOP_STATES.has(state)) {
+        // Run legitimately reached a stop state; keep the monitor up until the
+        // user quits, then hand its exit back to the caller unchanged.
+        return { exit: await monitor.exit };
+    }
+    // Child died with the run still in flight — tear the monitor down and fail.
+    monitor.terminate();
+    return { error: outcome.error };
 }
 
 /**
@@ -1296,7 +1358,22 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
             }
             // Hand off to the full-screen TUI monitor. The TUI handles all views
             // (tree, logs, timeline, approvals) and exits when the user presses q/Q.
-            const { code, signal } = await launchTuiMonitor(tuiEntry, runId, indexPath, process.env.SMITHERS_GATEWAY_URL, backend, authToken);
+            // Keep supervising the detached run child while it runs: if that child
+            // dies out from under the monitor while the run is still in flight, the
+            // monitor would otherwise keep showing the last live state and a quit
+            // would wrongly report success. superviseTuiMonitor races the two.
+            const monitor = launchTuiMonitor(tuiEntry, runId, indexPath, process.env.SMITHERS_GATEWAY_URL, backend, authToken);
+            const supervised = await superviseTuiMonitor(monitor, childFailure, db.adapter, runId);
+            if (supervised.error) {
+                return fail({
+                    code: "TUI_RUN_EXITED",
+                    message: `${supervised.error.message} See ${logFile}.`,
+                    exitCode: 1,
+                    runId,
+                    logFile,
+                });
+            }
+            const { code, signal } = supervised.exit;
             // A clean quit is code 0, an interrupt teardown code (the monitor traps
             // Ctrl-C / kill / terminal close and exits 129/130/143 after cleanup),
             // or an expected interrupt signal. A CRASH signal (SIGSEGV/SIGABRT/…)

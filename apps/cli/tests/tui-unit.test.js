@@ -19,6 +19,7 @@ import {
     resolveMonitorGatewayBase,
     resolveMonitorToken,
     streamRun,
+    superviseTuiMonitor,
     truncate,
     validateGatewayServesRun,
     waitForRunRow,
@@ -529,7 +530,71 @@ describe("tui helpers", () => {
         expect(res.message).toContain("does not serve run run-x");
         expect(res.message).toContain("--gateway");
     });
+
+    test("superviseTuiMonitor returns the monitor exit on a clean user quit", async () => {
+        // The user quit the monitor while the detached run kept running (its
+        // failure promise never settles); the monitor exit is passed through and
+        // the monitor is not force-terminated.
+        const monitor = fakeMonitor(Promise.resolve({ code: 0, signal: null }));
+        const result = await superviseTuiMonitor(
+            monitor,
+            new Promise(() => {}),
+            adapterForStatuses(["running"]),
+            "run-terminal",
+        );
+        expect(result).toEqual({ exit: { code: 0, signal: null } });
+        expect(monitor.terminated).toBe(false);
+    });
+
+    test("superviseTuiMonitor fails when the detached child dies with the run still in flight", async () => {
+        // Monitor stays up; the detached run process dies while the run is still
+        // "running" — a premature death. The monitor is terminated and the error
+        // is returned so the caller reports TUI_RUN_EXITED instead of success.
+        const monitor = fakeMonitor(new Promise(() => {}));
+        const result = await superviseTuiMonitor(
+            monitor,
+            Promise.resolve(new Error("Run process exited (exit 1).")),
+            adapterForStatuses(["running"]),
+            "run-terminal",
+        );
+        expect(result.error?.message).toContain("exit 1");
+        expect(monitor.terminated).toBe(true);
+    });
+
+    test("superviseTuiMonitor keeps the monitor up when the child exits after a terminal run state", async () => {
+        // The detached child exits first (its failure promise wins the race), but
+        // the run already recorded a terminal state — a legitimate end. The monitor
+        // is left up until the user quits, and its exit is returned unchanged.
+        const monitor = fakeMonitor(new Promise((resolve) => setTimeout(() => resolve({ code: 0, signal: null }), 5)));
+        const result = await superviseTuiMonitor(
+            monitor,
+            Promise.resolve(new Error("Run process exited (exit 0).")),
+            adapterForStatuses(["finished"]),
+            "run-terminal",
+        );
+        expect(result).toEqual({ exit: { code: 0, signal: null } });
+        expect(monitor.terminated).toBe(false);
+    });
 });
+
+/**
+ * A stand-in for the object launchTuiMonitor returns: an `exit` promise plus a
+ * `terminate` that records whether it was called, so supervision tests can assert
+ * the monitor is (or is not) force-stopped without spawning a real child.
+ * @param {Promise<{ code: number | null; signal: NodeJS.Signals | null }>} exit
+ */
+function fakeMonitor(exit) {
+    let terminated = false;
+    return {
+        exit,
+        terminate() {
+            terminated = true;
+        },
+        get terminated() {
+            return terminated;
+        },
+    };
+}
 
 function workflow(overrides = {}) {
     return {
