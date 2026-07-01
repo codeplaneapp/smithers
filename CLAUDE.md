@@ -99,3 +99,20 @@ Product code and e2e tests must use real backends/data — no `mockGateway`, no
 Fixtures may be real servers seeded with deterministic data; deliberate
 failure-injection against a real fault path is acceptable (see `e2e/faults/*`).
 An e2e test that mocks the thing it claims to exercise is not an e2e test.
+
+<!-- smithers:prefer-workflows START -->
+## Smithers workflows
+
+Use your best judgment, weighing speed, quality, and token usage, to decide
+whether a request should run as a [smithers.sh](https://smithers.sh) workflow
+or with regular subagents. Prefer a smithers workflow for multi-step plans and
+for work that benefits from retries, approvals, review, or replay; reach for
+plain subagents when a request is a quick one-off.
+
+The `smithers` skill is installed: run `smithers workflow list` to see the
+available workflows and `smithers workflow run <id>` to launch one.
+
+When a session ends successfully and the work could have been a smithers
+workflow, offer to turn the session into a reusable smithers workflow for next
+time.
+<!-- smithers:prefer-workflows END -->
