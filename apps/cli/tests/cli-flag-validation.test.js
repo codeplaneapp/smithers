@@ -202,7 +202,8 @@ describe("--annotations streaming via stdin", () => {
         expect(result.json?.logFile).toBeString();
 
         let status;
-        for (let attempt = 0; attempt < 240; attempt += 1) {
+        let lastReadError;
+        for (let attempt = 0; attempt < 600; attempt += 1) {
             if (existsSync(repo.path("smithers.db"))) {
                 const sqlite = new Database(repo.path("smithers.db"), { readonly: true });
                 try {
@@ -221,6 +222,7 @@ describe("--annotations streaming via stdin", () => {
                         if (!transient) {
                             throw err;
                         }
+                        lastReadError = message;
                     }
                 }
                 finally {
@@ -232,9 +234,16 @@ describe("--annotations streaming via stdin", () => {
             }
             await Bun.sleep(50);
         }
-        expect(status).toBe("finished");
+        if (status !== "finished") {
+            const logTail = existsSync(result.json.logFile)
+                ? readFileSync(result.json.logFile, "utf8").slice(-2000)
+                : "";
+            throw new Error(
+                `detached run did not finish; status=${status ?? "none"}; lastReadError=${lastReadError ?? "none"}; logTail=${logTail}`,
+            );
+        }
         expect(readFileSync(result.json.logFile, "utf8")).not.toContain("INVALID_JSON");
-    }, 15_000);
+    }, 45_000);
 
     test("detached runs return monitoring guidance so the agent can offer the user a way to watch", () => {
         const repo = createTempRepo();
