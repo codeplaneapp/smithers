@@ -32,7 +32,7 @@ import {
   type ApprovalDecision,
   type ApprovalKeyAction,
 } from "./approvalUtils.ts";
-import { isHumanTaskNode, buildHumanRequestUi, type HumanRequestUiState } from "./humanUtils.ts";
+import { buildHumanRequestUi, type HumanRequestUiState } from "./humanUtils.ts";
 import { toNodeDiffView, type NodeDiffView } from "./diffUtils.ts";
 
 /**

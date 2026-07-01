@@ -946,8 +946,26 @@ export function resolveMonitorGatewayBase(env) {
         ? env.SMITHERS_GATEWAY_URL.replace(/\/+$/, "")
         : undefined;
     if (pinned) return pinned;
-    const port = Number(env.SMITHERS_GATEWAY_PORT) || 7331;
+    const port = parseMonitorGatewayPort(env.SMITHERS_GATEWAY_PORT);
     return `http://127.0.0.1:${port}`;
+}
+
+/**
+ * Parse SMITHERS_GATEWAY_PORT for the parent-side monitor check, mirroring the
+ * TUI's own validation (@smithers-orchestrator/tui `isValidGatewayPort`): a legal
+ * TCP port is an integer in 1..65535. Unset/blank falls back to the 7331 default;
+ * a set-but-invalid value throws a clear error instead of yielding an unreachable
+ * http://127.0.0.1:70000 the monitor's health probe can never connect to.
+ * @param {string | undefined} raw
+ * @returns {number}
+ */
+export function parseMonitorGatewayPort(raw) {
+    if (raw === undefined || raw.trim() === "") return 7331;
+    const port = Number(raw);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new Error(`invalid SMITHERS_GATEWAY_PORT "${raw}" (expected an integer 1-65535)`);
+    }
+    return port;
 }
 
 /**

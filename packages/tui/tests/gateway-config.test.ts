@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_GATEWAY_PORT, resolveGatewayConfig } from "../src/gatewayConfig.ts";
+import {
+  DEFAULT_GATEWAY_PORT,
+  GatewayConfigError,
+  isValidGatewayPort,
+  parseGatewayPortEnv,
+  resolveGatewayConfig,
+} from "../src/gatewayConfig.ts";
 
 describe("resolveGatewayConfig", () => {
   test("defaults to the local gateway with autostart allowed", () => {
@@ -24,6 +30,21 @@ describe("resolveGatewayConfig", () => {
       port: 8123,
       autoStartAllowed: true,
     });
+  });
+
+  test("rejects a set-but-invalid SMITHERS_GATEWAY_PORT instead of a bad URL", () => {
+    // 70000 is out of the 1..65535 TCP range; without validation this built an
+    // unreachable http://127.0.0.1:70000. It must fail loudly instead.
+    for (const bad of ["70000", "0", "-1", "8.5", "abc"]) {
+      expect(() => resolveGatewayConfig({ env: { SMITHERS_GATEWAY_PORT: bad } })).toThrow(
+        GatewayConfigError,
+      );
+    }
+  });
+
+  test("blank/unset SMITHERS_GATEWAY_PORT falls back to the default", () => {
+    expect(resolveGatewayConfig({ env: { SMITHERS_GATEWAY_PORT: "" } }).port).toBe(DEFAULT_GATEWAY_PORT);
+    expect(resolveGatewayConfig({ env: {} }).port).toBe(DEFAULT_GATEWAY_PORT);
   });
 
   test("pinned --gateway disables autostart and derives the port from the URL", () => {
@@ -116,5 +137,31 @@ describe("resolveGatewayConfig", () => {
       autoStartAllowed: false,
       token: "key",
     });
+  });
+});
+
+describe("isValidGatewayPort / parseGatewayPortEnv", () => {
+  test("isValidGatewayPort accepts only integers in 1..65535", () => {
+    expect(isValidGatewayPort(1)).toBe(true);
+    expect(isValidGatewayPort(7331)).toBe(true);
+    expect(isValidGatewayPort(65535)).toBe(true);
+    expect(isValidGatewayPort(0)).toBe(false);
+    expect(isValidGatewayPort(65536)).toBe(false);
+    expect(isValidGatewayPort(-1)).toBe(false);
+    expect(isValidGatewayPort(8.5)).toBe(false);
+    expect(isValidGatewayPort(Number.NaN)).toBe(false);
+  });
+
+  test("parseGatewayPortEnv returns undefined for unset/blank, the port for valid", () => {
+    expect(parseGatewayPortEnv(undefined)).toBeUndefined();
+    expect(parseGatewayPortEnv("")).toBeUndefined();
+    expect(parseGatewayPortEnv("   ")).toBeUndefined();
+    expect(parseGatewayPortEnv("8123")).toBe(8123);
+  });
+
+  test("parseGatewayPortEnv throws GatewayConfigError for a set-but-invalid value", () => {
+    expect(() => parseGatewayPortEnv("70000")).toThrow(GatewayConfigError);
+    expect(() => parseGatewayPortEnv("0")).toThrow(GatewayConfigError);
+    expect(() => parseGatewayPortEnv("nope")).toThrow(GatewayConfigError);
   });
 });

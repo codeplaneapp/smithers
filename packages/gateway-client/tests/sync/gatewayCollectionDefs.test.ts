@@ -42,20 +42,25 @@ const cronRows: GatewayCronRow[] = [
   },
 ];
 
-/** A real `getDevToolsSnapshot` payload: a `{ root }` tree, not an array. */
+/**
+ * A real `getDevToolsSnapshot` payload: a `{ root }` tree (not an array) whose
+ * structural tag lands on `type` as a LOWERCASE `DevToolsNodeType` (matching what
+ * the server's getDevToolsSnapshot route emits), with the semantic `task.kind` on
+ * logical task nodes.
+ */
 const snapshot = {
   root: {
     id: 1,
     name: "Workflow",
-    type: "Workflow",
+    type: "workflow",
     children: [
       {
         id: 2,
-        name: "Sequence",
-        type: "Sequence",
+        name: "sequence",
+        type: "sequence",
         children: [
-          { id: 3, name: "PlanTask", type: "Task", task: { nodeId: "plan", label: "Plan" }, children: [] },
-          { id: 4, name: "Gate", type: "Approval", task: { nodeId: "approve" }, children: [] },
+          { id: 3, name: "PlanTask", type: "task", task: { nodeId: "plan", kind: "agent", label: "Plan" }, children: [] },
+          { id: 4, name: "Gate", type: "approval", task: { nodeId: "approve", kind: "static" }, children: [] },
         ],
       },
     ],

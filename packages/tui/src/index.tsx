@@ -8,7 +8,7 @@ import {
   createGatewayCollections,
 } from "@smithers-orchestrator/gateway-react";
 import { spawn } from "node:child_process";
-import { resolveGatewayConfig } from "./gatewayConfig.ts";
+import { resolveGatewayConfig, isValidGatewayPort, GatewayConfigError } from "./gatewayConfig.ts";
 import { resolveCliEntry } from "./cliEntry.ts";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
 import { Keybindings } from "./Keybindings.tsx";
@@ -72,7 +72,7 @@ for (let i = 0; i < args.length; i++) {
 // A NaN/out-of-range port would silently fall back or build a bad URL; reject it
 // before any probe/spawn so the user gets a clear usage error, not a mystery
 // "gateway unreachable".
-if (portArg !== undefined && (!Number.isInteger(portArg) || portArg < 1 || portArg > 65535)) {
+if (portArg !== undefined && !isValidGatewayPort(portArg)) {
   process.stderr.write(`smithers-mon: invalid --port (expected 1-65535)\n${USAGE}`);
   process.exit(1);
 }
@@ -86,12 +86,24 @@ if (!runId) {
 // apps/cli forwards SMITHERS_GATEWAY_URL when it knows the real address. An
 // explicit --port is applied to a pinned --gateway/SMITHERS_GATEWAY_URL so the
 // probe/client hit the requested port (see resolveGatewayConfig).
-const { base: GATEWAY_BASE, port: GATEWAY_PORT, autoStartAllowed: AUTOSTART_ALLOWED, token: GATEWAY_TOKEN } = resolveGatewayConfig({
-  gatewayUrlArg,
-  portArg,
-  tokenArg,
-  env: process.env,
-});
+let resolvedConfig;
+try {
+  resolvedConfig = resolveGatewayConfig({
+    gatewayUrlArg,
+    portArg,
+    tokenArg,
+    env: process.env,
+  });
+} catch (err) {
+  // A set-but-invalid SMITHERS_GATEWAY_PORT would otherwise build an unreachable
+  // base URL; surface the config error as a clear usage failure up front.
+  if (err instanceof GatewayConfigError) {
+    process.stderr.write(`smithers-mon: ${err.message}\n${USAGE}`);
+    process.exit(1);
+  }
+  throw err;
+}
+const { base: GATEWAY_BASE, port: GATEWAY_PORT, autoStartAllowed: AUTOSTART_ALLOWED, token: GATEWAY_TOKEN } = resolvedConfig;
 
 // When a token is configured, send it on the /health probe too so the probe
 // authenticates the same way the RPC/WS client will — a gateway that gates

@@ -2,33 +2,37 @@ import { describe, expect, test } from "bun:test";
 import { snapshotToGatewayRunNode } from "../../src/sync/snapshotToGatewayRunNode.ts";
 
 /**
- * A realistic `getDevToolsSnapshot` payload: a `{ root }` tree (not an array),
- * mixing structural container nodes (no `task` identity) with logical task nodes
- * that carry `task.nodeId`. The blocked node is the one a paused run waits on.
+ * A realistic `getDevToolsSnapshot` payload, matching what the server's
+ * `getDevToolsSnapshot` route actually emits: a `{ root }` tree (not an array)
+ * whose structural tag lands on `type` as a LOWERCASE `DevToolsNodeType`
+ * (`"workflow"`, `"sequence"`, `"task"`, `"approval"`), NOT a capitalized
+ * component name. Container nodes carry no `task` identity; logical task nodes
+ * carry `task.nodeId` and a semantic `task.kind`. The blocked node is the one a
+ * paused run waits on.
  */
 const snapshot = {
   root: {
     id: 1,
     name: "Workflow",
-    type: "Workflow",
+    type: "workflow",
     children: [
       {
         id: 2,
-        name: "Sequence",
-        type: "Sequence",
+        name: "sequence",
+        type: "sequence",
         children: [
           {
             id: 3,
             name: "PlanTask",
-            type: "Task",
-            task: { nodeId: "plan", label: "Plan the work", iteration: 0 },
+            type: "task",
+            task: { nodeId: "plan", kind: "agent", label: "Plan the work", iteration: 0 },
             children: [],
           },
           {
             id: 4,
             name: "Gate",
-            type: "Approval",
-            task: { nodeId: "approve" },
+            type: "approval",
+            task: { nodeId: "approve", kind: "static" },
             children: [],
           },
         ],
@@ -41,11 +45,11 @@ const snapshot = {
 describe("snapshotToGatewayRunNode", () => {
   test("maps a real snapshot tree into a GatewayRunNode tree", () => {
     const tree = snapshotToGatewayRunNode(snapshot);
-    // Root: a structural Workflow node keyed on its numeric id, mirroring the run.
+    // Root: a structural `workflow` node keyed on its numeric id, mirroring the run.
     expect(tree).toMatchObject({
       id: "1",
       name: "Workflow",
-      kind: "compute",
+      kind: "workflow",
       status: "waiting",
     });
     const sequence = tree?.children?.[0];
@@ -66,16 +70,44 @@ describe("snapshotToGatewayRunNode", () => {
       root: {
         id: 1,
         name: "Loop",
-        type: "Loop",
+        type: "loop",
         children: [
-          { id: 3, name: "Plan", type: "Task", task: { nodeId: "plan", iteration: 0 }, children: [] },
-          { id: 4, name: "Plan", type: "Task", task: { nodeId: "plan", iteration: 1 }, children: [] },
+          { id: 3, name: "Plan", type: "task", task: { nodeId: "plan", kind: "agent", iteration: 0 }, children: [] },
+          { id: 4, name: "Plan", type: "task", task: { nodeId: "plan", kind: "agent", iteration: 1 }, children: [] },
         ],
       },
     });
     const [a, b] = tree?.children ?? [];
     expect(a).toMatchObject({ key: "3", id: "plan", iteration: 0 });
     expect(b).toMatchObject({ key: "4", id: "plan", iteration: 1 });
+  });
+
+  test("maps a durable HumanTask (task tagged __smithersKind: human) to the human kind", () => {
+    // The gateway renders `<HumanTask>` as a `task` element whose serialized
+    // props carry `__smithersKind: "human"` (the task descriptor flattens the
+    // human kind down to "static", so props.__smithersKind is the honest signal).
+    // Mapping it to "human" is what lets the monitor surface CLI guidance instead
+    // of approve/deny controls that would strand the run on a durable input gate.
+    const tree = snapshotToGatewayRunNode({
+      root: {
+        id: 1,
+        name: "workflow",
+        type: "workflow",
+        children: [
+          {
+            id: 2,
+            name: "human:review",
+            type: "task",
+            props: { __smithersKind: "human", label: "human:review" },
+            task: { nodeId: "review", kind: "static", label: "human:review" },
+            children: [],
+          },
+        ],
+      },
+      runState: { state: "waiting-approval", blocked: { nodeId: "review" } },
+    });
+    const human = tree?.children?.[0];
+    expect(human).toMatchObject({ id: "review", kind: "human", status: "waiting" });
   });
 
   test("returns null for the gateway empty-root placeholder", () => {
@@ -86,46 +118,54 @@ describe("snapshotToGatewayRunNode", () => {
 
   test("marks every node ok once the run has finished", () => {
     const done = snapshotToGatewayRunNode({
-      root: { id: 1, name: "Workflow", type: "Workflow", children: [{ id: 2, name: "Task", type: "Task", task: { nodeId: "a" }, children: [] }] },
+      root: { id: 1, name: "Workflow", type: "workflow", children: [{ id: 2, name: "Task", type: "task", task: { nodeId: "a", kind: "agent" }, children: [] }] },
       runState: { state: "succeeded" },
     });
     expect(done?.status).toBe("ok");
     expect(done?.children?.[0]?.status).toBe("ok");
   });
 
-  test("maps every structural tag onto the graph palette (default compute)", () => {
-    const cases: Array<[string | undefined, string]> = [
-      ["Approval", "approval"],
-      ["Signal", "signal"],
-      ["WaitForEvent", "signal"],
-      ["Human", "human"],
-      ["HumanTask", "human"],
-      ["Loop", "loop"],
-      ["ForEach", "loop"],
-      ["Task", "agent"],
-      ["Agent", "agent"],
-      ["SomethingElse", "compute"],
-      [undefined, "compute"],
+  test("maps every real lowercase node type onto the graph palette (default compute)", () => {
+    // The cases mirror the LOWERCASE `DevToolsNodeType` values the server emits.
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ type: "approval" }, "approval"],
+      [{ type: "wait-for-event" }, "signal"],
+      [{ type: "timer" }, "signal"],
+      // A durable human gate is a `task` tagged __smithersKind: "human".
+      [{ type: "task", props: { __smithersKind: "human" } }, "human"],
+      [{ type: "loop" }, "loop"],
+      [{ type: "parallel" }, "parallel"],
+      [{ type: "saga" }, "saga"],
+      [{ type: "try-catch" }, "try-catch"],
+      [{ type: "workflow" }, "workflow"],
+      // Agent vs compute tasks are distinguished by the task descriptor's kind.
+      [{ type: "task", task: { nodeId: "n", kind: "agent" } }, "agent"],
+      [{ type: "task", task: { nodeId: "n", kind: "compute" } }, "compute"],
+      [{ type: "task", props: { __smithersKind: "compute" } }, "compute"],
+      // A task with no semantic kind defaults to the agent tone.
+      [{ type: "task", task: { nodeId: "n", kind: "static" } }, "agent"],
+      [{ type: "unknown" }, "compute"],
+      [{}, "compute"],
     ];
-    for (const [type, kind] of cases) {
+    for (const [overrides, kind] of cases) {
       const tree = snapshotToGatewayRunNode({
-        root: { id: 1, name: "n", type, task: { nodeId: "n" }, children: [] },
+        root: { id: 1, name: "n", task: { nodeId: "n" }, children: [], ...overrides },
       });
-      expect(tree?.kind, `type ${String(type)} -> ${kind}`).toBe(kind);
+      expect(tree?.kind, `${JSON.stringify(overrides)} -> ${kind}`).toBe(kind);
     }
   });
 
   test("nodeName falls back label -> props.label -> props.name -> task.nodeId -> node.name", () => {
     // task.label wins over everything.
-    expect(snapshotToGatewayRunNode({ root: { id: 1, name: "struct", type: "Task", task: { nodeId: "n", label: "L" }, props: { label: "P", name: "Q" }, children: [] } })?.name).toBe("L");
+    expect(snapshotToGatewayRunNode({ root: { id: 1, name: "struct", type: "task", task: { nodeId: "n", label: "L" }, props: { label: "P", name: "Q" }, children: [] } })?.name).toBe("L");
     // No task.label -> props.label.
-    expect(snapshotToGatewayRunNode({ root: { id: 1, name: "struct", type: "Task", task: { nodeId: "n" }, props: { label: "P", name: "Q" }, children: [] } })?.name).toBe("P");
+    expect(snapshotToGatewayRunNode({ root: { id: 1, name: "struct", type: "task", task: { nodeId: "n" }, props: { label: "P", name: "Q" }, children: [] } })?.name).toBe("P");
     // No labels -> props.name.
-    expect(snapshotToGatewayRunNode({ root: { id: 1, name: "struct", type: "Task", task: { nodeId: "n" }, props: { name: "Q" }, children: [] } })?.name).toBe("Q");
+    expect(snapshotToGatewayRunNode({ root: { id: 1, name: "struct", type: "task", task: { nodeId: "n" }, props: { name: "Q" }, children: [] } })?.name).toBe("Q");
     // No props labels -> task.nodeId.
-    expect(snapshotToGatewayRunNode({ root: { id: 1, name: "struct", type: "Task", task: { nodeId: "n" }, children: [] } })?.name).toBe("n");
+    expect(snapshotToGatewayRunNode({ root: { id: 1, name: "struct", type: "task", task: { nodeId: "n" }, children: [] } })?.name).toBe("n");
     // No task at all -> structural node.name.
-    expect(snapshotToGatewayRunNode({ root: { id: 7, name: "struct", type: "Sequence", children: [] } })?.name).toBe("struct");
+    expect(snapshotToGatewayRunNode({ root: { id: 7, name: "struct", type: "sequence", children: [] } })?.name).toBe("struct");
   });
 
   test("toRunStatus collapses lifecycle states onto the UI tones at the root", () => {
@@ -149,7 +189,7 @@ describe("snapshotToGatewayRunNode", () => {
     ];
     for (const [state, status] of cases) {
       const tree = snapshotToGatewayRunNode({
-        root: { id: 1, name: "Workflow", type: "Workflow", task: { nodeId: "r" }, children: [] },
+        root: { id: 1, name: "Workflow", type: "workflow", task: { nodeId: "r" }, children: [] },
         runState: state === undefined ? {} : { state },
       });
       expect(tree?.status, `state ${String(state)} -> ${status}`).toBe(status);
@@ -165,8 +205,8 @@ describe("snapshotToGatewayRunNode", () => {
       root: {
         id: 1,
         name: "Workflow",
-        type: "Workflow",
-        children: [{ id: 2, name: "Task", type: "Task", task: { nodeId: "a" }, children: [] }],
+        type: "workflow",
+        children: [{ id: 2, name: "Task", type: "task", task: { nodeId: "a", kind: "agent" }, children: [] }],
       },
       runState: { state: "cancelled" },
     });

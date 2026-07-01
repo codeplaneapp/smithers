@@ -5,13 +5,27 @@ import { asRecord } from "../objectGuards.ts";
  * A node in a `getDevToolsSnapshot` payload. The gateway builds this tree from a
  * run's execution frames, so a run with no frames yet returns the sentinel empty
  * root (`id: 0`, `name: "(empty)"`).
+ *
+ * The shape mirrors `DevToolsNode` from `getDevToolsSnapshot` on the server: the
+ * structural tag lands on `type` as a LOWERCASE `DevToolsNodeType`
+ * (`"task"`, `"approval"`, `"loop"`, `"wait-for-event"`, …) — NOT a capitalized
+ * component name — and the logical task descriptor carries the semantic `kind`
+ * (`"agent" | "compute" | "static"`). Durable human-input gates render as a
+ * `task` element whose serialized `props.__smithersKind` is `"human"` (see
+ * `components/HumanTask`), which is the ONLY reliable human signal (the task
+ * descriptor collapses `"human"` down to `"static"`).
  */
 export type DevToolsSnapshotNode = {
   id: number | string;
   name: string;
   type?: string;
   props?: Record<string, unknown>;
-  task?: { nodeId?: string; label?: string; iteration?: number };
+  task?: {
+    nodeId?: string;
+    kind?: string;
+    label?: string;
+    iteration?: number;
+  };
   children?: DevToolsSnapshotNode[];
 };
 
@@ -40,23 +54,50 @@ function nodeName(node: DevToolsSnapshotNode): string {
   return label ?? node.task?.nodeId ?? node.name;
 }
 
-/** Map the structural tag onto the graph palette; default neutral `compute`. */
+/**
+ * Map the real `getDevToolsSnapshot` node onto the graph/tree palette. The
+ * gateway emits LOWERCASE `DevToolsNodeType` tags, so switch on those — the
+ * capitalized component names never appear on real data.
+ *
+ * Durable human-input gates are checked FIRST: they render as a `task` element
+ * carrying `props.__smithersKind === "human"` (the task descriptor's `kind`
+ * flattens `"human"` to `"static"`, so `props.__smithersKind` is the honest
+ * signal). Mapping them to `"human"` is what lets `humanUtils.isHumanTaskNode`
+ * surface CLI guidance instead of approve/deny controls that would strand the
+ * run. Container tags keep their own kind (helping `treeUtils`'
+ * `CONTAINER_KINDS` detection); everything unrecognized falls back to the
+ * neutral `compute`.
+ */
 function nodeKind(node: DevToolsSnapshotNode): string {
+  const props = node.props ?? {};
+  const smithersKind =
+    typeof props.__smithersKind === "string" ? props.__smithersKind : undefined;
+  if (smithersKind === "human") {
+    return "human";
+  }
   switch (node.type) {
-    case "Approval":
+    case "approval":
       return "approval";
-    case "Signal":
-    case "WaitForEvent":
+    case "wait-for-event":
+    case "timer":
       return "signal";
-    case "Human":
-    case "HumanTask":
-      return "human";
-    case "Loop":
-    case "ForEach":
+    case "loop":
       return "loop";
-    case "Task":
-    case "Agent":
+    case "parallel":
+      return "parallel";
+    case "saga":
+      return "saga";
+    case "try-catch":
+      return "try-catch";
+    case "workflow":
+      return "workflow";
+    case "task": {
+      const taskKind = node.task?.kind;
+      if (taskKind === "compute" || smithersKind === "compute") {
+        return "compute";
+      }
       return "agent";
+    }
     default:
       return "compute";
   }

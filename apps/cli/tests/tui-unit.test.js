@@ -13,6 +13,7 @@ import {
     normalizeStreamText,
     normalizeSuppliedInput,
     OMIT_FIELD,
+    parseMonitorGatewayPort,
     pickerMaxItems,
     promptForField,
     resolveMonitorGatewayBase,
@@ -459,6 +460,25 @@ describe("tui helpers", () => {
         expect(resolveMonitorGatewayBase({ SMITHERS_GATEWAY_URL: "http://host:9000/" })).toBe("http://host:9000");
         expect(resolveMonitorGatewayBase({ SMITHERS_GATEWAY_PORT: "8080" })).toBe("http://127.0.0.1:8080");
         expect(resolveMonitorGatewayBase({})).toBe("http://127.0.0.1:7331");
+    });
+
+    test("resolveMonitorGatewayBase rejects an out-of-range SMITHERS_GATEWAY_PORT", () => {
+        // Without validation this built an unreachable http://127.0.0.1:70000 that
+        // the health probe could never connect to. It must fail loudly instead.
+        for (const bad of ["70000", "0", "-1", "8.5", "abc"]) {
+            expect(() => resolveMonitorGatewayBase({ SMITHERS_GATEWAY_PORT: bad })).toThrow();
+        }
+        // A pinned URL bypasses the port parse entirely, so it stays valid.
+        expect(resolveMonitorGatewayBase({ SMITHERS_GATEWAY_URL: "http://host:70000", SMITHERS_GATEWAY_PORT: "70000" })).toBe("http://host:70000");
+    });
+
+    test("parseMonitorGatewayPort mirrors the 1..65535 validation", () => {
+        expect(parseMonitorGatewayPort(undefined)).toBe(7331);
+        expect(parseMonitorGatewayPort("")).toBe(7331);
+        expect(parseMonitorGatewayPort("8080")).toBe(8080);
+        expect(() => parseMonitorGatewayPort("70000")).toThrow();
+        expect(() => parseMonitorGatewayPort("0")).toThrow();
+        expect(() => parseMonitorGatewayPort("nope")).toThrow();
     });
 
     test("resolveMonitorToken mirrors the TUI precedence: --auth-token, then env", () => {

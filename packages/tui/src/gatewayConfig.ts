@@ -17,6 +17,43 @@
 
 export const DEFAULT_GATEWAY_PORT = 7331;
 
+/**
+ * True when `value` is a legal TCP port to CONNECT to: an integer in 1..65535.
+ * Port 0 ("let the OS pick") is meaningless for a client dialing a fixed
+ * gateway, so it is rejected alongside NaN, fractions, and out-of-range values.
+ * Shared by the `--port` arg check and the `SMITHERS_GATEWAY_PORT` env parse so
+ * both paths agree on what a valid port is.
+ */
+export function isValidGatewayPort(value: number): boolean {
+  return Number.isInteger(value) && value >= 1 && value <= 65535;
+}
+
+/** Thrown by `resolveGatewayConfig` for a set-but-invalid `SMITHERS_GATEWAY_PORT`. */
+export class GatewayConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GatewayConfigError";
+  }
+}
+
+/**
+ * Parse `SMITHERS_GATEWAY_PORT`: `undefined` when unset/blank (caller falls back
+ * to `DEFAULT_GATEWAY_PORT`), the integer when it is a legal port, and a thrown
+ * `GatewayConfigError` otherwise — so `SMITHERS_GATEWAY_PORT=70000` fails loudly
+ * instead of building an unreachable `http://127.0.0.1:70000` the monitor can
+ * never connect to.
+ */
+export function parseGatewayPortEnv(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const port = Number(raw);
+  if (!isValidGatewayPort(port)) {
+    throw new GatewayConfigError(
+      `invalid SMITHERS_GATEWAY_PORT "${raw}" (expected an integer 1-65535)`,
+    );
+  }
+  return port;
+}
+
 export interface ResolveGatewayConfigInput {
   gatewayUrlArg?: string | undefined;
   portArg?: number | undefined;
@@ -83,6 +120,6 @@ export function resolveGatewayConfig({
     }
     return { base, port, autoStartAllowed: false, token };
   }
-  const port = portArg ?? (Number(env.SMITHERS_GATEWAY_PORT) || DEFAULT_GATEWAY_PORT);
+  const port = portArg ?? parseGatewayPortEnv(env.SMITHERS_GATEWAY_PORT) ?? DEFAULT_GATEWAY_PORT;
   return { base: `http://127.0.0.1:${port}`, port, autoStartAllowed: true, token };
 }
