@@ -248,13 +248,17 @@ function initWorkflowPack() {
   writeFakeAgentBinaries(binDir);
   writeBunxShim(binDir);
   repo.write(".claude/.credentials.json", "{}\n");
-  repo.write(".codex/auth.json", "{}\n");
+  repo.write(".codex/auth.json", JSON.stringify({
+    auth_mode: "chatgpt",
+    OPENAI_API_KEY: null,
+    tokens: { access_token: "fake-access-token", account_id: "acct_test" },
+  }) + "\n");
   repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
   const env = {
     HOME: repo.dir,
     PATH: `${binDir}:${process.env.PATH ?? ""}`,
     ANTHROPIC_API_KEY: "",
-    OPENAI_API_KEY: "sk-test-openai-key",
+    OPENAI_API_KEY: "",
     GEMINI_API_KEY: "",
     GOOGLE_API_KEY: "",
     SMITHERS_FAKE_AGENT_RESPONSE: AGENT_RESPONSE,
