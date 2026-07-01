@@ -995,7 +995,10 @@ export async function superviseTuiMonitor(monitor, childFailure, adapter, runId)
     }
     // The detached run child exited while the monitor was up. Re-read the run
     // state to tell a legitimate end from a premature death.
-    const run = await adapter.getRun(runId).catch(() => null);
+    let run = null;
+    try {
+        run = await adapter.getRun(runId);
+    } catch { }
     let state;
     if (run) {
         const view = await computeRunStateFromRow(adapter, run).catch(() => ({ state: run.status }));

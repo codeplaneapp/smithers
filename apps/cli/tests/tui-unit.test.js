@@ -777,6 +777,29 @@ describe("tui helpers", () => {
         expect(result).toEqual({ exit: { code: 0, signal: null } });
         expect(monitor.terminated).toBe(false);
     });
+
+    test("superviseTuiMonitor accepts thenable DB reads without Promise catch", async () => {
+        // SmithersDb read methods are awaitable Effects. They implement `then`,
+        // but they are not native Promises and do not provide `.catch()`.
+        const monitor = fakeMonitor(new Promise((resolve) => setTimeout(() => resolve({ code: 0, signal: null }), 5)));
+        const adapter = {
+            getRun() {
+                return {
+                    then(resolve) {
+                        resolve(runRow("finished"));
+                    },
+                };
+            },
+        };
+        const result = await superviseTuiMonitor(
+            monitor,
+            Promise.resolve(new Error("Run process exited (exit 0).")),
+            adapter,
+            "run-terminal",
+        );
+        expect(result).toEqual({ exit: { code: 0, signal: null } });
+        expect(monitor.terminated).toBe(false);
+    });
 });
 
 /**
