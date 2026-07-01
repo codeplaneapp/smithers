@@ -71,13 +71,14 @@ createGatewayReactRoot (react-dom) or the OPFS sqlite persistence (navigator.*).
 Connect to the local Gateway (default http://127.0.0.1:7331), autostarting one
 if absent, exactly like \`smithers ui\`.
 
-Header (persistent every mode): status dot (green running / yellow waiting /
-red failed / dim done), workflow name, short run id, model, ticking elapsed,
-live|paused indicator.
+Header (persistent every mode): status dot (cyan running / amber waiting /
+red failed / green done / grey cancelled), workflow name, short run id, model,
+ticking elapsed, live|paused indicator.
 
 Five modes share the header + a bottom keybar:
-  (1) TREE  — left: collapsible <scrollbox> node tree (chevron ▾/▸/·, glyph
-      ✓ ● ⏸ ○ ✗, right-aligned elapsed/meta); right: NodeInspector with tabs
+  (1) TREE  — left: collapsible <scrollbox> node tree (indent + chevron ▾/▸/·,
+      glyph ✓ ● ⏸ ○ ⊘ ✗, label + inline meta — NO per-node elapsed); right:
+      NodeInspector with tabs
       Output/Logs/Diff/Props (NO Tools tab — the gateway exposes no per-node
       tool-call stream to the monitor), auto-defaulting per node kind (Output if
       it has output, Logs while running, Props for containers). Diff tab renders
@@ -163,7 +164,10 @@ const approvalSchema = z.object({
 const scaffoldSchema = z.looseObject({
   summary: z.string(),
   filesWritten: z.array(z.string()).default([]),
-  binCommand: z.string().default("smithers mon").describe("How the monitor is invoked."),
+  binCommand: z
+    .string()
+    .default("smithers-mon <runId>")
+    .describe("How the monitor bin is invoked directly; the user entrypoint is `smithers up --interactive`."),
 });
 
 // 3 — One row per implemented mode (keyed by node id `mode-<id>`).
@@ -373,10 +377,11 @@ missing:
   not a workflow.
 - src/index.tsx entry (#!/usr/bin/env bun): assert TTY, parse a runId arg,
   createCliRenderer({ exitOnCtrlC:false }), createRoot(renderer), and mount the
-  provider stack: ErrorBoundary > Theme > Keybindings > SmithersGatewayProvider
-  (inject the Bun global WebSocket; connect to the local Gateway, autostarting
-  one if none is reachable, like \`smithers ui\`; use an in-memory sync backend —
-  do NOT import createGatewayReactRoot or the OPFS persistence) > the App shell.
+  provider stack: ErrorBoundary > RendererProvider > Keybindings >
+  SmithersGatewayProvider (inject the Bun global WebSocket; connect to the local
+  Gateway, autostarting one if none is reachable, like \`smithers ui\`; use an
+  in-memory sync backend — do NOT import createGatewayReactRoot or the OPFS
+  persistence) > SyncProvider > the App shell. (There is NO Theme provider.)
 - The App shell: persistent header (useGatewayRun), a mode router that swaps the
   body between the five modes, a bottom keybar, a global useKeyboard handler
   bound to a keymap context, and useTerminalDimensions-driven compact mode.
@@ -440,7 +445,9 @@ today's append-only stream (apps/cli/src/tui.js): after a run is started or
 attached, hand off to the monitor for that runId. \`smithers up --interactive\` with no
 workflow must still pick a workflow interactively, then monitor the run it
 starts. Preserve detached/non-interactive behavior unchanged. Keep the existing
-streaming code path available as a fallback for non-TTY contexts.
+append-only streaming code path available as a fallback for when the
+@smithers-orchestrator/tui package isn't installed (e.g. a slim install);
+interactive mode itself requires a TTY.
 
 Update --help text accordingly. Keep typecheck green. Do NOT push.
 Report a summary and the files changed.`}
