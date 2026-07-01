@@ -103,7 +103,13 @@ try {
   }
   throw err;
 }
-const { base: GATEWAY_BASE, port: GATEWAY_PORT, autoStartAllowed: AUTOSTART_ALLOWED, token: GATEWAY_TOKEN } = resolvedConfig;
+// base/port are `let`: a reachable gateway on the default port may serve a
+// DIFFERENT workspace/store (e.g. a stray seed/test gateway). When that happens
+// and we're allowed to autostart, we rebind to a free port and start our own
+// (workspace-bound) gateway instead of showing an empty monitor.
+let GATEWAY_BASE = resolvedConfig.base;
+let GATEWAY_PORT = resolvedConfig.port;
+const { autoStartAllowed: AUTOSTART_ALLOWED, token: GATEWAY_TOKEN } = resolvedConfig;
 
 // When a token is configured, send it on the /health probe too so the probe
 // authenticates the same way the RPC/WS client will — a gateway that gates
@@ -155,7 +161,63 @@ async function autoStartGateway(): Promise<boolean> {
   return false;
 }
 
+/**
+ * Does the gateway at GATEWAY_BASE actually serve THIS run? A healthy `/health`
+ * only means "a gateway is listening" — a stray gateway from another workspace
+ * would answer /health but not have this run, giving an empty monitor. Confirm
+ * via getRun before trusting a reused gateway. Any error / not-found ⇒ "no".
+ */
+async function gatewayServesRun(id: string): Promise<boolean> {
+  try {
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (GATEWAY_TOKEN) headers.authorization = `Bearer ${GATEWAY_TOKEN}`;
+    const res = await fetch(`${GATEWAY_BASE}/v1/rpc/getRun`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ runId: id }),
+      signal: AbortSignal.timeout(PROBE_REQUEST_TIMEOUT_MS),
+    });
+    if (!res.ok) return false;
+    const frame = (await res.json().catch(() => null)) as { type?: string; ok?: boolean; payload?: unknown } | null;
+    return Boolean(frame && frame.type === "res" && frame.ok && frame.payload);
+  } catch {
+    return false;
+  }
+}
+
+/** An OS-assigned free port (bind :0, read the port, release it). */
+async function findFreePort(): Promise<number> {
+  const server = Bun.serve({ port: 0, fetch: () => new Response("") });
+  const port = server.port;
+  server.stop(true);
+  if (typeof port !== "number") throw new Error("could not allocate a free gateway port");
+  return port;
+}
+
 let reachable = await probeGateway();
+
+// A reachable gateway may serve a DIFFERENT workspace/store than the run lives in.
+// Trusting it would render an empty "(no nodes)" monitor. Validate it serves this
+// run; if not, autostart our own workspace-bound gateway on a free port (default
+// mode), or fail loudly when the user pinned an explicit --gateway.
+if (reachable && runId && !(await gatewayServesRun(runId))) {
+  if (AUTOSTART_ALLOWED) {
+    process.stderr.write(
+      `[smithers-mon] Gateway at ${GATEWAY_BASE} does not serve run ${runId} ` +
+        `(it serves a different workspace/store); starting a dedicated one…\n`,
+    );
+    GATEWAY_PORT = await findFreePort();
+    GATEWAY_BASE = `http://127.0.0.1:${GATEWAY_PORT}`;
+    reachable = await autoStartGateway();
+  } else {
+    process.stderr.write(
+      `[smithers-mon] Gateway at ${GATEWAY_BASE} does not serve run ${runId}.\n` +
+        `  It may be a different workspace/store. Check --gateway/--port or the run id.\n`,
+    );
+    process.exit(1);
+  }
+}
+
 if (!reachable) {
   if (!AUTOSTART_ALLOWED) {
     // The user pinned an explicit gateway (--gateway / SMITHERS_GATEWAY_URL).
