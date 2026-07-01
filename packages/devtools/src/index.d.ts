@@ -11,7 +11,7 @@ type DevToolsNode$7 = {
     /** Task-specific fields extracted from renderer raw props */
     task?: {
         nodeId: string;
-        kind: "agent" | "compute" | "static";
+        kind: "agent" | "compute" | "static" | "human" | "approval";
         agent?: string;
         label?: string;
         outputTableName?: string;
