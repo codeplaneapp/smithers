@@ -3089,6 +3089,23 @@ export class Gateway {
             return;
         }
     }
+    resumeRunInBackground(runId, workflowKey, adapter, auth) {
+        void this.resumeRunIfNeeded(runId, workflowKey, adapter, auth).catch((error) => {
+            emitGatewayEffect(Effect.all([
+                incrementMetric(gatewayErrorsTotal, {
+                    kind: "run",
+                    workflow: workflowKey,
+                    code: gatewayErrorCode(error),
+                }),
+                Effect.logError("Gateway background resume failed").pipe(Effect.annotateLogs({
+                    workflow: workflowKey,
+                    runId,
+                    source: gatewayTriggerSource(auth.triggeredBy),
+                    ...gatewayErrorAnnotations(error),
+                }), Effect.withLogSpan("gateway:run")),
+            ], { discard: true }));
+        });
+    }
     /**
    * @param {WebSocket} ws
    * @param {IncomingMessage} req
@@ -5258,7 +5275,7 @@ export class Gateway {
                 else {
                     await Effect.runPromise(denyNode(resolved.adapter, runId, nodeId, iteration, note, connection.userId ?? undefined, decision));
                 }
-                await this.resumeRunIfNeeded(runId, resolved.workflowKey, resolved.adapter, {
+                this.resumeRunInBackground(runId, resolved.workflowKey, resolved.adapter, {
                     triggeredBy: connection.userId ?? "gateway",
                     scopes: [...connection.scopes],
                     role: connection.role ?? "operator",

@@ -1222,6 +1222,72 @@ describe("Gateway", () => {
         await blocked.close();
         await approver.close();
     });
+    test("approval decisions respond after persisting even when resume is still running", async () => {
+        const dbPath = makeDbPath("approval-background-resume");
+        dbPaths.push(dbPath);
+        const approval = createApprovalWorkflow(dbPath);
+        gateway = new Gateway({
+            protocol: 1,
+            features: ["approvals", "runs"],
+            heartbeatMs: 100,
+            auth: {
+                mode: "token",
+                tokens: {
+                    "operator-token": {
+                        role: "operator",
+                        scopes: ["*"],
+                        userId: "user:operator",
+                    },
+                    "approver-token": {
+                        role: "approver",
+                        scopes: ["approve", "approvals.list", "runs.get"],
+                        userId: "user:will",
+                    },
+                },
+            },
+        });
+        gateway.register("approval", approval.workflow);
+        server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+        const port = getPort(server);
+        const { client: operator } = await connectGateway(port, "operator-token");
+        const create = await operator.request("runs.create", {
+            workflow: "approval",
+            input: {},
+        });
+        expect(create.ok).toBe(true);
+        const runId = create.payload.runId;
+        await operator.waitFor((message) => message.type === "event" &&
+            message.event === "approval.requested" &&
+            message.payload.runId === runId);
+        let resumeCalled = false;
+        gateway.resumeRunIfNeeded = async () => {
+            resumeCalled = true;
+            await new Promise(() => {});
+        };
+        const { client: approver } = await connectGateway(port, "approver-token");
+        const decided = await Promise.race([
+            approver.request("approvals.decide", {
+                runId,
+                nodeId: "pick-plan",
+                iteration: 0,
+                approved: true,
+                decision: {
+                    selected: "balanced",
+                    notes: "best fit",
+                },
+            }),
+            sleep(500).then(() => "timeout"),
+        ]);
+        expect(decided).not.toBe("timeout");
+        expect(decided.ok).toBe(true);
+        expect(resumeCalled).toBe(true);
+        const adapter = new SmithersDb(approval.db);
+        const approvalRow = await adapter.getApproval(runId, "pick-plan", 0);
+        expect(approvalRow?.status).toBe("approved");
+        expect(approvalRow?.decisionJson).toEqual(JSON.stringify({ selected: "balanced", notes: "best fit" }));
+        await operator.close();
+        await approver.close();
+    });
     test("rejects non-boolean approvals.decide approved values", async () => {
         const dbPath = makeDbPath("approval-invalid-approved");
         dbPaths.push(dbPath);
