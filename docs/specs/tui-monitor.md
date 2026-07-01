@@ -1,6 +1,6 @@
 # Single-Run Monitor TUI - Engineering Spec
 
-**Status**: Draft
+**Status**: Implemented
 
 **Date**: 2026-06-30
 

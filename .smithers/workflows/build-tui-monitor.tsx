@@ -358,12 +358,16 @@ The package is already scaffolded and passing typecheck — do NOT rewrite worki
 files. Confirm these foundation pieces exist and match the spec; add only what is
 missing:
 
-- package.json: name "@smithers-orchestrator/tui" (private), bin "smithers-mon"
-  -> dist/index.tsx (or src entry under Bun), deps "@opentui/core" and
-  "@opentui/react" (latest), "smithers-orchestrator" (workspace:*), "react" and
-  "react-dom" peers as required by @opentui/react, "zod". Match this repo's
-  workspace + build conventions (look at a sibling package's package.json/
-  tsconfig). Wire its "test"/"typecheck" scripts like siblings.
+- package.json: name "@smithers-orchestrator/tui" (publishable, NOT private —
+  it ships the runnable "smithers-mon" bin), bin "smithers-mon" -> "./src/index.tsx"
+  (run directly under Bun). Runtime deps: "@opentui/core", "@opentui/react",
+  "@smithers-orchestrator/gateway-client" (workspace:*),
+  "@smithers-orchestrator/gateway-react" (workspace:*), and "react" + "react-dom"
+  (real dependencies — the bin loads react-dom/client via gateway-react, so a
+  standalone install must resolve them; do NOT make them peers or add "zod" /
+  "smithers-orchestrator"). Match this repo's workspace + build conventions (look
+  at a sibling package's package.json/tsconfig). Wire its "test"/"typecheck"
+  scripts like siblings.
 - tsconfig.json: STANDARD react JSX (jsx "react-jsx", jsxImportSource
   "@opentui/react"). NOT smithers-orchestrator. This is an OpenTUI React app,
   not a workflow.
