@@ -44,8 +44,11 @@ The TUI uses the same gateway hooks as the web UI. There is no DB adapter depend
 SmithersGatewayClient({
   baseUrl: "http://127.0.0.1:7331",    // default; overridable via env / CLI flag
   WebSocket: globalThis.WebSocket,      // Bun exposes WebSocket globally - inject it
+  token: process.env.SMITHERS_API_KEY,  // bearer for HTTP + WS; see auth note below
 })
 ```
+
+**Auth token (as built)**: the gateway enables token auth whenever `SMITHERS_API_KEY` (or a `--auth-token`) is set, after which it rejects unauthenticated RPC/WS calls (though `/health` still answers). So `gatewayConfig.ts` resolves a bearer token (in priority order: `--token` arg, then `SMITHERS_TOKEN`, then `SMITHERS_API_KEY`) and `index.tsx` threads it consistently through: the `SmithersGatewayClient` (`token` → HTTP `Authorization` header + WS `auth.token`), the `/health` probe, and - when it autostarts a local gateway - the spawned `gateway --auth-token <token>`. When no token is configured, a loopback gateway with no auth stays token-free.
 
 **No OPFS / navigator persistence.** `createGatewayPersistence` calls `navigator.*` APIs that do not exist in Bun. Pass no `persistence` option to `createGatewayCollections`. The in-memory sync backend (no-persistence path) works correctly headless.
 
@@ -59,7 +62,7 @@ SmithersGatewayClient({
 |---|---|---|
 | `useGatewayRun(runId)` | `gateway-react` | Header status dot, workflow name, model, run state |
 | `useGatewayRunEvents(runId, { maxEvents: 2000 })` | `gateway-react` | LOGS mode transcript; TIMELINE tick strip (seq numbers → frame markers) |
-| `useGatewayNodeOutput({ runId, nodeId, iteration })` | `gateway-react` | NodeInspector Output tab; TREE node metadata/elapsed |
+| `useGatewayNodeOutput({ runId, nodeId, iteration })` | `gateway-react` | NodeInspector Output tab (the selected node's formatted output) |
 | `useGatewayApprovals({ runId })` | `gateway-react` | Approval banner in TREE mode; gate markers in TIMELINE. Exposes `refetch`, called after a successful `submitApproval` so the resolved gate's banner clears. |
 | `getNodeDiff` RPC (via `useGatewayRpc`) | `gateway-react` | NodeInspector Diff tab (gated on the tab being active) |
 | `useGatewayActions()` | `gateway-react` | Only `submitApproval` (approve/deny a gate in TREE). The monitor does NOT cancel/resume/rewind from actions - those are CLI-driven; HIJACK shells out to `bunx smithers-orchestrator hijack`. |
@@ -120,7 +123,7 @@ fed by the gateway-connected `Header` (pulls `useGatewayRun`, ticks a 1s clock
 while the run is live). Pure helpers live in `packages/tui/src/headerUtils.ts`.
 
 Fields, left to right:
-- **Status dot** - `●` colored by `statusDotColor`: cyan = running/recovering, amber = waiting-approval/event/timer, red = failed/cancelled, green = succeeded/finished, dim = unknown.
+- **Status dot** - `●` colored by `statusDotColor`: cyan = running/recovering, amber = waiting-approval/event/timer, red = failed, green = succeeded/finished, grey = cancelled (terminal but not a failure, so dim rather than red), darker grey = unknown.
 - **Workflow name** - `useGatewayRun().data.workflowKey` (falls back to `(workflow)`).
 - **Short run id** - shown whole unless longer than 24 chars, then elided from the end.
 - **Model** - from the run row's `model` when present; **omitted** (never fabricated) when the row carries none.
@@ -136,26 +139,27 @@ Fields, left to right:
 
 **Layout**: horizontal split.
 
-- **Left pane** (`<scrollbox>`, ~40% width): collapsible node tree.
-  - Each row: `indent + chevron + glyph + label + right-aligned elapsed/meta`
+- **Left pane** (`<scrollbox>`, ~38% width): collapsible node tree.
+  - Each row: `indent + chevron + glyph + label + inline meta`. Rows do NOT render a per-node elapsed time (the snapshot node carries no readily-available per-node timing); the optional trailing `meta` is the node's own `meta` string, rendered inline and dim after the label (truncated to fit the pane).
   - Chevron: `▾` expanded, `▸` collapsed, `·` leaf.
-  - Glyph: `✓` finished, `●` running, `⏸` waiting, `○` pending, `✗` failed.
-  - j/k / arrow keys move cursor; `space` folds/unfolds; `⏎` selects node → updates right pane.
+  - Glyph: `✓` finished/ok, `●` running, `⏸` waiting, `○` pending/queued, `✗` failed, `·` other/unknown.
+  - j/k / arrow keys move the cursor (the right pane tracks the cursored node live); `space` folds/unfolds a node with children; `⏎` moves focus INTO the inspector (right) pane; `tab` toggles focus between the two panes.
   - Data: `useGatewayRunTree(runId)` - a live query over the per-run `nodes` collection, kept fresh via the gateway's `streamDevTools` stream (refetch + reconcile of `getDevToolsSnapshot`). The TUI does not reconstruct the tree from raw event frames.
 
 - **Right pane** (`NodeInspector`): tabbed panel for the selected node.
   - Tabs: **Output** / **Logs** / **Diff** / **Props**. (There is no Tools tab: the gateway exposes no per-node tool-call stream to the monitor; tool calls live only in the durable store and are surfaced by `bunx smithers-orchestrator node`, so an always-empty tab would be dishonest.)
-  - Auto-default per node kind:
-    - Has output → Output tab.
-    - Currently running → Logs tab.
-    - Container/parallel node → Props tab.
+  - Auto-default tab per node, in priority order:
+    - Container node (root/parallel/loop/saga/try/workflow/group) → Props tab.
+    - Otherwise currently running → Logs tab.
+    - Otherwise has output → Output tab.
+    - Otherwise → Props tab.
   - **Output tab**: `<code>` block with formatted node output from `useGatewayNodeOutput`.
   - **Logs tab**: scrollable `<scrollbox>` of agent transcript events filtered to this node from `useGatewayRunEvents`.
   - **Diff tab**: unified-diff **text** rendered in a `<code filetype="diff">` block (a summary line + the patch), fetched lazily via the `getNodeDiff` RPC only while this tab is active. It does **not** use an OpenTUI `<diff>` primitive. Falls back to a stat summary or an explicit empty/loading state.
   - **Props tab**: `<code filetype="json">` block with node metadata - `id`, `key` (the unique row key), `iteration`, `name`, `kind`, `status`, `agent`, `meta`, `cardLabel`, `parentId`, `childIds`. `key` + `iteration` distinguish repeated logical nodes (loop/retry attempts).
   - Tab switching: `1`–`4` (output/logs/diff/props) or left/right arrows when inspector is focused.
 
-- **Approval banner**: when `useGatewayApprovals({ runId }).data` has a pending item, a highlighted overlay row appears above the keybar: `[approval needed: <label>]  a approve  d deny`. Keys `a`/`d` call `actions.submitApproval`.
+- **Approval banner**: when the CURSORED node has a pending gate in `useGatewayApprovals({ runId }).data`, a bordered banner renders at the top of the inspector (right) pane, ABOVE the tab bar (not above the keybar). It shows `⏸  <title>  [<mode>]` plus a summary line and mode-appropriate controls: a plain gate shows `[a] approve   [d] deny`; a `select` lists its options and shows `[[/]] choose   [a] approve selected   [d] deny`; a `rank` shows `[a] approve (ranked as listed)   [d] deny`. Keys `a`/`d` (and `[`/`]` for a `select`) work whether focus is in the tree or the inspector, and call `actions.submitApproval`. A pending durable **HumanTask** renders a distinct variant instead (the gateway has no RPC to submit the typed answer), pointing the operator at `bunx smithers-orchestrator human inbox` rather than offering an approve/deny that would strand the run.
 
 ### Mode 2: GRAPH
 
@@ -180,9 +184,9 @@ Fields, left to right:
 
 ### Mode 4: TIMELINE
 
-**Layout**: horizontal split.
+**Layout**: vertical stack - a status bar, a fixed-height tick strip, a divider, then the node-snapshot body below.
 
-- **Top strip** (`<scrollbox>` horizontal): tick bar of run events. Notable frames (first agent event, gate raises) are marked; gate/approval frames stand out. The selected frame is highlighted.
+- **Tick strip**: a `frame n/total` + selected-event info row above a single row of tick marks, then a controls row. The tick row shows a window of frames centered on the selection (it is NOT a horizontally scrolling `<scrollbox>`; it slices `maxVisible` frames around the cursor). Notable frames (first agent event, gate raises) are marked; gate/approval frames stand out; the selected frame is highlighted.
 - **Body**: node state inspected as of the selected frame, reconstructed from the event history.
 - **Inspect-only**: this is an event timeline you *scrub* to read run history; it deliberately offers **no** fork/rewind/replay/jump mutations. Wiring a "rewind" here would either no-op or rewind to a guessed frame, so the timeline stays honest and points you at the durable command instead: rewind a run with `bunx smithers-orchestrator rewind` (fork with `bunx smithers-orchestrator fork`, replay with `bunx smithers-orchestrator replay`).
 - **Keys**: `j`/`k` (or `←`/`→`) scrub events; `L` returns to the live head.
@@ -190,10 +194,10 @@ Fields, left to right:
 
 ### Mode 5: HIJACK
 
-**Activation**: press `h` while a node is running (cursor on a running node in TREE mode).
+**Activation**: `h` is a global key (works from any mode) that switches to HIJACK mode. It does NOT depend on the tree cursor being on a running node - HIJACK resolves the hijackable nodes itself and lists them.
 
 **Flow (as built)**:
-1. A `<select>` overlay lists the hijackable (running) nodes - resolved from the run tree + live-session signal in the event stream. Pick one to confirm, or cancel.
+1. A `<select>` overlay lists the hijackable (running) nodes - resolved from the run tree + live-session signal in the event stream. Pick one to confirm, or press `Esc` to cancel back to TREE. When there are no running nodes, HIJACK shows a "no running nodes available" message instead of a picker.
 2. On confirm:
    a. The renderer is suspended, yielding the terminal back to raw stdio.
    b. The monitor shells out to `bunx smithers-orchestrator hijack RUN_ID --target NODE_ID` via the resolved CLI entry, inheriting stdio (the CLI spawns `claude --resume` / `codex resume` / etc.).
@@ -226,7 +230,7 @@ These are the keys actually wired in `App.tsx`. (There is intentionally no globa
 
 | Key | Mode | Action |
 |---|---|---|
-| `j`/`k` / `↑`/`↓` | TREE, GRAPH, TIMELINE | Move cursor / scrub |
+| `j`/`k` / arrows | TREE, GRAPH, TIMELINE | Move cursor / scrub (TREE + GRAPH use `↑`/`↓`; TIMELINE scrubs with `←`/`→`) |
 | `space` | TREE | Fold/unfold node |
 | `⏎` | TREE | Focus inspector pane · GRAPH: inspect node in Tree |
 | `tab` | TREE | Toggle focus between tree and inspector |
