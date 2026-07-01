@@ -1058,37 +1058,122 @@ export function resolveMonitorToken(authToken, env) {
 }
 
 /**
+ * Per-request timeout for the gateway health/RPC probes. Each individual fetch
+ * must settle well UNDER the overall 10s/30s startup budget: a process that binds
+ * the port but never writes a response would otherwise hang a single request
+ * (and the whole budget) indefinitely. On timeout the AbortSignal rejects the
+ * fetch, which the callers classify as a RETRYABLE miss so the outer poll keeps
+ * trying within the budget instead of blocking forever on one dead socket.
+ */
+const GATEWAY_REQUEST_TIMEOUT_MS = 3000;
+
+/**
+ * A gateway probe failure tagged with whether the caller should keep polling
+ * (`retryable: true`) through it or fail fast (`retryable: false`). Connection
+ * refused, startup-not-ready, timeout/abort, and 5xx are retryable; auth
+ * (401/403) and malformed/protocol responses and other 4xx are NOT — retrying
+ * those only stalls until the whole budget elapses and then reports a misleading
+ * backend/workspace mismatch instead of the real cause.
+ */
+export class GatewayProbeError extends Error {
+    /** @param {string} message @param {boolean} retryable */
+    constructor(message, retryable) {
+        super(message);
+        this.name = "GatewayProbeError";
+        this.retryable = retryable;
+    }
+}
+
+/**
  * Whether a Gateway answers its `/health` probe at `base` (i.e. one is already
  * listening there and the monitor would REUSE it rather than autostart its own).
+ * A per-request timeout means a bound-but-unresponsive port reports "not healthy"
+ * quickly (the caller then falls through to its retry/autostart path) instead of
+ * hanging the whole startup budget on one stuck socket.
  * @param {string} base
  * @param {string} [token]
+ * @param {{ fetchImpl?: typeof fetch; timeoutMs?: number }} [opts]
  */
-async function gatewayHealthy(base, token) {
+export async function gatewayHealthy(base, token, opts = {}) {
+    const fetchImpl = opts.fetchImpl ?? fetch;
+    const timeoutMs = opts.timeoutMs ?? GATEWAY_REQUEST_TIMEOUT_MS;
     const headers = token ? { authorization: `Bearer ${token}` } : undefined;
-    return fetch(`${base}/health`, { headers }).then((r) => r.ok, () => false);
+    return fetchImpl(`${base}/health`, { headers, signal: AbortSignal.timeout(timeoutMs) }).then((r) => r.ok, () => false);
 }
 
 /**
  * Fetch a run from a Gateway over its HTTP RPC (same wire shape as `smithers ui`).
- * Returns the run payload, `null` when the gateway does not serve it, and THROWS
- * on transport/protocol/auth errors so the caller can keep polling through a
- * transient blip instead of treating one as a definitive miss.
+ * Returns the run payload, `null` when the gateway does not (yet) serve it, and
+ * THROWS a {@link GatewayProbeError} otherwise — tagged `retryable` so the caller
+ * keeps polling through a transient blip (connection refused, startup-not-ready,
+ * timeout/abort, 5xx, run-not-found) but fails FAST on a definitive miss (auth
+ * 401/403, malformed/protocol frame, other 4xx) rather than stalling the budget.
+ *
+ * A per-request timeout (AbortSignal.timeout) guarantees a bound-but-hung port
+ * rejects promptly as a retryable miss instead of blocking the whole budget.
+ *
  * @param {string} base - gateway base URL
  * @param {string} runId
  * @param {string} [token] - bearer when the gateway requires auth
+ * @param {{ fetchImpl?: typeof fetch; timeoutMs?: number }} [opts]
  * @returns {Promise<unknown | null>}
  */
-async function gatewayGetRun(base, runId, token) {
+export async function gatewayGetRun(base, runId, token, opts = {}) {
+    const fetchImpl = opts.fetchImpl ?? fetch;
+    const timeoutMs = opts.timeoutMs ?? GATEWAY_REQUEST_TIMEOUT_MS;
     const headers = { "content-type": "application/json" };
     if (token) headers.authorization = `Bearer ${token}`;
-    const res = await fetch(`${base}/v1/rpc/getRun`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ runId }),
-    });
+    let res;
+    try {
+        res = await fetchImpl(`${base}/v1/rpc/getRun`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ runId }),
+            signal: AbortSignal.timeout(timeoutMs),
+        });
+    } catch (err) {
+        // No HTTP response at all: connection refused, DNS/socket reset, or our
+        // per-request timeout aborted the fetch. The gateway is still coming up or
+        // briefly unreachable — retryable so the poll keeps trying in-budget.
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new GatewayProbeError(`Gateway at ${base} is not reachable yet (${reason}).`, true);
+    }
+    // Auth is DEFINITIVE: a wrong/missing token never starts working by retrying,
+    // so fail fast with an accurate message instead of stalling the whole budget.
+    if (res.status === 401 || res.status === 403) {
+        throw new GatewayProbeError(
+            `Gateway at ${base} rejected auth (${res.status}) — check --token/SMITHERS_TOKEN/SMITHERS_API_KEY.`,
+            false,
+        );
+    }
+    // 5xx: the gateway is up but transiently erroring (still starting/restarting) —
+    // keep polling within the budget.
+    if (res.status >= 500) {
+        throw new GatewayProbeError(`Gateway at ${base} returned HTTP ${res.status} for getRun; still starting.`, true);
+    }
     const frame = await res.json().catch(() => null);
-    if (!frame || frame.type !== "res") throw new Error(`Gateway at ${base} returned an invalid RPC frame for getRun.`);
-    if (!frame.ok) throw new Error(frame.error?.message ?? "Gateway RPC getRun failed.");
+    if (!frame || frame.type !== "res") {
+        // A non-frame body on a non-5xx status is a protocol/routing mismatch (wrong
+        // server, a proxy error page): retrying will not turn it into a valid frame.
+        throw new GatewayProbeError(`Gateway at ${base} returned an invalid response for getRun.`, false);
+    }
+    if (!frame.ok) {
+        const code = frame.error?.code;
+        // Defense in depth if the gateway ever returns an auth error frame with a
+        // 200 status: still treat it as the fast-fail auth case.
+        if (code === "Unauthorized" || code === "Forbidden") {
+            throw new GatewayProbeError(
+                `Gateway at ${base} rejected auth (${code}) — check --token/SMITHERS_TOKEN/SMITHERS_API_KEY.`,
+                false,
+            );
+        }
+        // A run this gateway does not (yet) serve reports RunNotFound; treat it as a
+        // not-there-yet miss so the poll keeps trying and ultimately surfaces the
+        // backend/workspace-mismatch guidance. Any OTHER RPC error is a real
+        // protocol/backend fault — fail fast.
+        if (code === "RunNotFound" || res.status === 404) return null;
+        throw new GatewayProbeError(frame.error?.message ?? `Gateway at ${base} returned an RPC error for getRun.`, false);
+    }
     return frame.payload ?? null;
 }
 
@@ -1101,8 +1186,13 @@ async function gatewayGetRun(base, runId, token) {
  * while the monitor reads another, so the monitor shows a silently empty/wrong
  * run. Poll `getRun(runId)` against the connected Gateway within the startup
  * budget; if the run never appears, fail fast with a clear, actionable error
- * instead. Transport errors (a momentary blip) are swallowed and retried until
- * the timeout so a truly-serving gateway that is briefly slow still passes.
+ * instead. RETRYABLE blips (connection refused, startup-not-ready, timeout/abort,
+ * 5xx, run-not-found) are swallowed and retried until the timeout so a
+ * truly-serving gateway that is briefly slow still passes — but a DEFINITIVE
+ * failure (auth 401/403, malformed/protocol response, other 4xx; any thrown
+ * error whose `retryable` is explicitly `false`) fails IMMEDIATELY with its
+ * accurate message rather than waiting out the budget and then blaming a
+ * backend/workspace mismatch.
  *
  * Pure/injected: `getRunOnGateway`, `now`, and `sleep` are all supplied so the
  * poll is unit-testable with a fake clock and no real network.
@@ -1122,9 +1212,16 @@ export async function validateGatewayServesRun(getRunOnGateway, runId, gatewayUr
     while (true) {
         try {
             if (await getRunOnGateway(runId)) return { ok: true };
-        } catch {
-            // Transient gateway/RPC/auth blip while it settles; keep polling until
-            // the timeout rather than failing on the first miss.
+        } catch (err) {
+            // A DEFINITIVE failure (auth rejected, malformed/protocol response)
+            // never succeeds by retrying — surface it immediately with its accurate
+            // message instead of stalling the whole budget and then reporting a
+            // misleading backend/workspace mismatch. Everything else (connection
+            // refused, startup-not-ready, timeout/abort, 5xx, run-not-found) is a
+            // transient blip while the gateway settles; keep polling until timeout.
+            if (err && typeof err === "object" && /** @type {{ retryable?: unknown }} */ (err).retryable === false) {
+                return { ok: false, message: /** @type {{ message?: string }} */ (err).message ?? String(err) };
+            }
         }
         const elapsedMs = now() - startedAt;
         if (elapsedMs >= timeoutMs) {

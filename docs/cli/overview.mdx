@@ -118,7 +118,7 @@ commands[80]:
     purpose: Start or resume a workflow execution from a .tsx workflow file path (use `workflow run` to start from a discovered workflow id instead)
     args[1]{name,type,required,desc}:
       workflow,string,false,Workflow file path (omit with --interactive to pick one)
-    flags[30]{name,short,type,default,desc}:
+    flags[31]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -146,6 +146,7 @@ commands[80]:
       port,,number,7331,HTTP server port when --serve
       host,,string,127.0.0.1,HTTP bind address when --serve
       auth-token,,string,,Bearer token for HTTP auth or SMITHERS_API_KEY env
+      insecure,,boolean,false,Allow binding a non-loopback --host with NO auth (exposes unauthenticated approve/deny/cancel control of the run; dangerous)
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
       interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (falls back to inline streaming)
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)

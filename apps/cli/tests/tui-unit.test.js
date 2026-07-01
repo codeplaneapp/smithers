@@ -7,6 +7,8 @@ import {
     childFailurePromise,
     displayNode,
     formatStreamText,
+    gatewayGetRun,
+    gatewayHealthy,
     includeFieldValue,
     isCleanMonitorExit,
     mergeInteractiveInputs,
@@ -625,6 +627,91 @@ describe("tui helpers", () => {
         expect(res.ok).toBe(false);
         expect(res.message).toContain("does not serve run run-x");
         expect(res.message).toContain("--gateway");
+    });
+
+    test("validateGatewayServesRun fails FAST (no wait) on a non-retryable error", async () => {
+        let clock = 0;
+        let calls = 0;
+        // An auth rejection (retryable === false) must surface immediately with its
+        // own message, not stall until the timeout and then blame a backend mismatch.
+        const res = await validateGatewayServesRun(
+            async () => {
+                calls += 1;
+                const err = new Error("gateway rejected auth (401) — check --token/SMITHERS_TOKEN/SMITHERS_API_KEY.");
+                err.retryable = false;
+                throw err;
+            },
+            "run-x",
+            "http://127.0.0.1:7331",
+            { timeoutMs: 10_000, intervalMs: 250, now: () => clock, sleep: async (ms) => { clock += ms; } },
+        );
+        expect(res.ok).toBe(false);
+        expect(res.message).toContain("rejected auth (401)");
+        expect(res.message).not.toContain("does not serve run");
+        // Exactly one probe: it did not poll again or wait out the budget.
+        expect(calls).toBe(1);
+        expect(clock).toBe(0);
+    });
+
+    test("gatewayGetRun classifies a 401 as a non-retryable auth failure", async () => {
+        const fetchImpl = async () => new Response(JSON.stringify({ type: "res", ok: false, error: { code: "Unauthorized", message: "no" } }), { status: 401 });
+        let thrown;
+        try {
+            await gatewayGetRun("http://127.0.0.1:7331", "run-x", "bad-token", { fetchImpl });
+        } catch (err) {
+            thrown = err;
+        }
+        expect(thrown).toBeInstanceOf(Error);
+        expect(thrown.retryable).toBe(false);
+        expect(thrown.message).toContain("rejected auth (401)");
+    });
+
+    test("gatewayGetRun classifies a malformed (non-frame) body as non-retryable", async () => {
+        const fetchImpl = async () => new Response("<html>not a frame</html>", { status: 200 });
+        let thrown;
+        try {
+            await gatewayGetRun("http://127.0.0.1:7331", "run-x", undefined, { fetchImpl });
+        } catch (err) {
+            thrown = err;
+        }
+        expect(thrown).toBeInstanceOf(Error);
+        expect(thrown.retryable).toBe(false);
+        expect(thrown.message).toContain("invalid response");
+    });
+
+    test("gatewayGetRun treats RunNotFound as a not-there-yet miss (null, keep polling)", async () => {
+        const fetchImpl = async () => new Response(JSON.stringify({ type: "res", ok: false, error: { code: "RunNotFound", message: "no" } }), { status: 404 });
+        const res = await gatewayGetRun("http://127.0.0.1:7331", "run-x", undefined, { fetchImpl });
+        expect(res).toBeNull();
+    });
+
+    test("gatewayGetRun rejects (retryable) quickly when the gateway never responds", async () => {
+        // A process bound to the port but never answering: the per-request timeout
+        // must abort the fetch and surface a RETRYABLE miss quickly, not hang.
+        const fetchImpl = (_url, init) => new Promise((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")));
+        });
+        const startedAt = Date.now();
+        let thrown;
+        try {
+            await gatewayGetRun("http://127.0.0.1:7331", "run-x", undefined, { fetchImpl, timeoutMs: 20 });
+        } catch (err) {
+            thrown = err;
+        }
+        expect(thrown).toBeInstanceOf(Error);
+        expect(thrown.retryable).toBe(true);
+        // Resolved via the abort, not by hanging: comfortably under a real socket wait.
+        expect(Date.now() - startedAt).toBeLessThan(2000);
+    });
+
+    test("gatewayHealthy returns false (not hang) when the gateway never responds", async () => {
+        const fetchImpl = (_url, init) => new Promise((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")));
+        });
+        const startedAt = Date.now();
+        const healthy = await gatewayHealthy("http://127.0.0.1:7331", undefined, { fetchImpl, timeoutMs: 20 });
+        expect(healthy).toBe(false);
+        expect(Date.now() - startedAt).toBeLessThan(2000);
     });
 
     test("superviseTuiMonitor returns the monitor exit on a clean user quit", async () => {

@@ -111,8 +111,18 @@ const { base: GATEWAY_BASE, port: GATEWAY_PORT, autoStartAllowed: AUTOSTART_ALLO
 // while every later call is rejected.
 const PROBE_HEADERS = GATEWAY_TOKEN ? { authorization: `Bearer ${GATEWAY_TOKEN}` } : undefined;
 
+// Per-request timeout for the /health probe. A process bound to the port but not
+// answering would otherwise hang a single fetch (and the whole startup budget)
+// indefinitely; the AbortSignal caps each attempt well under the 30s autostart
+// budget so a stuck socket reports "not reachable" quickly and the retry/autostart
+// loop keeps polling instead of blocking forever.
+const PROBE_REQUEST_TIMEOUT_MS = 3000;
+
 async function probeGateway(): Promise<boolean> {
-  return fetch(`${GATEWAY_BASE}/health`, { headers: PROBE_HEADERS }).then((r) => r.ok, () => false);
+  return fetch(`${GATEWAY_BASE}/health`, {
+    headers: PROBE_HEADERS,
+    signal: AbortSignal.timeout(PROBE_REQUEST_TIMEOUT_MS),
+  }).then((r) => r.ok, () => false);
 }
 
 // Resolve the REAL CLI entry to autostart the gateway through. Never fall back
