@@ -19,7 +19,7 @@ export { formatStreamText } from "./tui-format.js";
 /**
  * @typedef {object} RunCardStep
  * @property {string} label
- * @property {"persisted" | "running" | "waiting" | "failed" | "pending"} status
+ * @property {"persisted" | "running" | "waiting" | "failed" | "cancelled" | "pending"} status
  */
 /**
  * @typedef {object} RunCardModel
@@ -38,6 +38,9 @@ const STEP = {
     running: { symbol: pc.blue("↻"), label: "RUNNING", color: pc.blue },
     waiting: { symbol: pc.yellow("⏸"), label: "WAITING", color: pc.yellow },
     failed: { symbol: pc.red("✗"), label: "FAILED", color: pc.red },
+    // A user-cancelled node is terminal but NOT a failure: dim/grey ⊘, never the
+    // red ✗, so a deliberate cancel doesn't read as an error (mirrors the TUI).
+    cancelled: { symbol: pc.dim("⊘"), label: "CANCELLED", color: pc.dim },
     pending: { symbol: pc.dim("○"), label: "PENDING", color: pc.dim },
 };
 
@@ -61,7 +64,7 @@ const NODE_STATUS = {
     done: "persisted",
     persisted: "persisted",
     failed: "failed",
-    cancelled: "failed",
+    cancelled: "cancelled",
     pending: "pending",
     "waiting-event": "waiting",
     "waiting-timer": "waiting",

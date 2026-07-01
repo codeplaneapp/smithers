@@ -24,6 +24,19 @@ describe("buildGatewayRunTree", () => {
     expect(buildGatewayRunTree(rows)?.children?.map((child) => child.id)).toEqual(["child"]);
   });
 
+  test("preserves a cancelled node's status (never collapses to failed/queued)", () => {
+    // A deliberately-cancelled run must stay `cancelled` through the tree rebuild
+    // so the UI renders it dim/grey, not as a red failure or a queued node.
+    const rows: GatewayRunNode[] = [
+      { id: "root", name: "Root", kind: "compute", status: "cancelled", childIds: ["child"] },
+      { id: "child", name: "Child", kind: "agent", status: "cancelled", parentId: "root", childIds: [] },
+    ];
+
+    const root = buildGatewayRunTree(rows);
+    expect(root?.status).toBe("cancelled");
+    expect(root?.children?.[0]?.status).toBe("cancelled");
+  });
+
   test("rebuilds loop/retry attempts that share a logical id as distinct children", () => {
     // Rows are linked by the unique `key`, so two attempts of `plan` survive as
     // separate children even though they share `id`.

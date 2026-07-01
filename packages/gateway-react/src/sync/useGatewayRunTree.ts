@@ -4,10 +4,10 @@ import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import { buildGatewayRunTree } from "./buildGatewayRunTree.ts";
 import { useSyncClient } from "./useSyncClient.ts";
 
-/** The five tones the run UI knows; mirrors `snapshotToGatewayRunNode`'s output. */
-export type NodeStatus = "ok" | "running" | "queued" | "failed" | "waiting";
+/** The six tones the run UI knows; mirrors `snapshotToGatewayRunNode`'s output. */
+export type NodeStatus = "ok" | "running" | "queued" | "failed" | "waiting" | "cancelled";
 
-const NODE_STATUSES: readonly NodeStatus[] = ["ok", "running", "queued", "failed", "waiting"];
+const NODE_STATUSES: readonly NodeStatus[] = ["ok", "running", "queued", "failed", "waiting", "cancelled"];
 
 /** Narrow a raw node status string to NodeStatus, defaulting to "queued". */
 function toNodeStatus(value: string | undefined): NodeStatus {

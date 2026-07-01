@@ -158,6 +158,15 @@ describe("extractNodeSnapshots", () => {
     expect(snap[0]!.status).toBe("failed");
   });
 
+  it("infers cancelled status from node.cancel event name", () => {
+    const events = [
+      frame(1, "node.start", { nodeId: "n-1" }),
+      frame(2, "node.cancel", { nodeId: "n-1" }),
+    ];
+    const snap = extractNodeSnapshots(events, 999);
+    expect(snap[0]!.status).toBe("cancelled");
+  });
+
   it("infers waiting status from approval.request event", () => {
     const events = [
       frame(1, "node.start", { nodeId: "n-1" }),
@@ -220,6 +229,11 @@ describe("nodeStatusGlyph", () => {
     expect(nodeStatusGlyph("failed")).toBe("✗");
   });
 
+  it("returns a distinct dim glyph for cancelled (not the red failure ✗)", () => {
+    expect(nodeStatusGlyph("cancelled")).toBe("⊘");
+    expect(nodeStatusGlyph("cancelled")).not.toBe(nodeStatusGlyph("failed"));
+  });
+
   it("falls back to pending glyph for unknown status", () => {
     expect(nodeStatusGlyph("unknown")).toBe("○");
     expect(nodeStatusGlyph("")).toBe("○");
@@ -234,6 +248,11 @@ describe("nodeStatusColor", () => {
     expect(nodeStatusColor("running")).toBe("#00d7ff");
     expect(nodeStatusColor("waiting")).toBe("#ffaf00");
     expect(nodeStatusColor("failed")).toBe("#ff5f5f");
+  });
+
+  it("returns dim grey for cancelled (never the red failure color)", () => {
+    expect(nodeStatusColor("cancelled")).toBe("#888888");
+    expect(nodeStatusColor("cancelled")).not.toBe(nodeStatusColor("failed"));
   });
 
   it("falls back to dim for unknown status", () => {

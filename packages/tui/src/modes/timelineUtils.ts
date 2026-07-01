@@ -94,6 +94,8 @@ export function extractNodeSnapshots(
       eventName.includes("node.finish")
     ) {
       inferredStatus = "done";
+    } else if (eventName.includes("node.cancel")) {
+      inferredStatus = "cancelled";
     } else if (eventName.includes("node.fail") || eventName.includes("node.error")) {
       inferredStatus = "failed";
     } else if (eventName.includes("approval") && eventName.includes("request")) {
@@ -123,6 +125,9 @@ export function nodeStatusGlyph(status: string): string {
   if (status === "done") return "✓";
   if (status === "running") return "●";
   if (status === "waiting") return "⏸";
+  // A user-cancelled node is terminal but NOT a failure: distinct dim ⊘, not the
+  // red ✗, mirroring the tree/header cancelled glyph.
+  if (status === "cancelled" || status === "canceled") return "⊘";
   if (status === "failed") return "✗";
   return "○";
 }
@@ -131,6 +136,9 @@ export function nodeStatusColor(status: string): string {
   if (status === "done") return "#00d787";
   if (status === "running") return "#00d7ff";
   if (status === "waiting") return "#ffaf00";
+  // Cancelled: dim grey (terminal but not a failure), never the red failure
+  // color, mirroring the header/tree cancelled dot.
+  if (status === "cancelled" || status === "canceled") return "#888888";
   if (status === "failed") return "#ff5f5f";
   return "#555555";
 }

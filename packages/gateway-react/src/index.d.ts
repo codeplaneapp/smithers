@@ -716,8 +716,8 @@ declare function useGatewayRunStream(runId: string | undefined, options?: {
     maxFrames?: number;
 }): UseSyncSubscriptionResult;
 
-/** The five tones the run UI knows; mirrors `snapshotToGatewayRunNode`'s output. */
-type NodeStatus = "ok" | "running" | "queued" | "failed" | "waiting";
+/** The six tones the run UI knows; mirrors `snapshotToGatewayRunNode`'s output. */
+type NodeStatus = "ok" | "running" | "queued" | "failed" | "waiting" | "cancelled";
 type UseGatewayRunTreeResult = {
     /** The run tree with `children` rebuilt from the flat collection, or null when empty. */
     root: GatewayRunNode | null;
