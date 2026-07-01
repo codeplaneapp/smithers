@@ -1,9 +1,31 @@
 import { createServer } from "node:http";
-import { connect as netConnect } from "node:net";
+import { connect as netConnect, isIP } from "node:net";
 import { request as httpRequest } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { resolve, dirname, extname, join, normalize } from "node:path";
+import {
+  closeSync,
+  existsSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  readSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { realpath, stat } from "node:fs/promises";
+import {
+  basename,
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  normalize,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -114,9 +136,897 @@ const MIME = {
 
 // Paths proxied to the gateway. Everything else is served from the bundle.
 const GATEWAY_PREFIXES = ["/v1/rpc", "/v1/", "/health", "/workflows"];
+const LOCAL_VCS_PATH = "/__smithers/vcs";
+const LOCAL_WORKSPACE_PREFIX = "/__smithers/local-workspace";
+const FILES_API_PREFIX = "/api/files";
+const FILE_PREVIEW_BYTES = 128 * 1024;
+const FILE_EDIT_BYTES = 512 * 1024;
+const FILE_TREE_LIMIT = 1_000;
 
 function isGatewayPath(pathname) {
   return GATEWAY_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
+}
+
+function parentDir(path) {
+  const parent = dirname(path);
+  return parent === path ? null : parent;
+}
+
+function detectLocalRepo(startPath) {
+  const workspacePath = resolve(startPath);
+  let cursor = workspacePath;
+  let gitRoot = null;
+  let jjRoot = null;
+  while (cursor) {
+    if (!jjRoot && existsSync(join(cursor, ".jj"))) jjRoot = cursor;
+    if (!gitRoot && existsSync(join(cursor, ".git"))) gitRoot = cursor;
+    if (gitRoot && jjRoot) break;
+    cursor = parentDir(cursor);
+  }
+  return {
+    workspacePath,
+    repoRoot: jjRoot ?? gitRoot,
+    primary: jjRoot ? "jj" : gitRoot ? "git" : null,
+    hasGit: gitRoot !== null,
+    hasJj: jjRoot !== null,
+  };
+}
+
+function runLocal(command, args, cwd) {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: "utf8",
+    timeout: 10_000,
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(
+      (result.stderr || result.stdout || `${command} exited ${result.status}`).trim(),
+    );
+  }
+  return result.stdout || "";
+}
+
+function gitCategory(code) {
+  if (code.includes("U") || code === "AA" || code === "DD") return "conflicted";
+  if (code === "??") return "untracked";
+  if (code.includes("R")) return "renamed";
+  if (code.includes("C")) return "copied";
+  if (code.includes("A")) return "added";
+  if (code.includes("D")) return "deleted";
+  if (code.includes("M") || code.includes("T")) return "modified";
+  return "unknown";
+}
+
+function parseGitStatus(output) {
+  const changes = [];
+  let current = null;
+  for (const rawLine of output.split(/\r?\n/)) {
+    const line = rawLine.trimEnd();
+    if (!line) continue;
+    if (line.startsWith("## ")) {
+      const branch = line.slice(3);
+      const noCommits = branch.match(/^No commits yet on (.+)$/);
+      current = noCommits
+        ? noCommits[1]
+        : branch.startsWith("HEAD ")
+          ? "detached"
+          : branch.split("...")[0].split(" [")[0].trim();
+      continue;
+    }
+    const status = line.slice(0, 2);
+    const rest = line.slice(3);
+    const rename = rest.match(/^(.*) -> (.*)$/);
+    changes.push({
+      status,
+      category: gitCategory(status),
+      path: rename ? rename[2] : rest,
+      ...(rename ? { oldPath: rename[1] } : {}),
+    });
+  }
+  return { current, changes, clean: changes.length === 0 };
+}
+
+function parseBranches(output) {
+  return [
+    ...new Set(
+      output
+        .split(/\r?\n/)
+        .map((line) => line.replace(/^\*\s*/, "").trim())
+        .filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
+}
+
+function unquoteJjPath(path) {
+  const trimmed = path.trim();
+  const quoted = trimmed.match(/^"(.+)"$/);
+  return quoted ? quoted[1] : trimmed;
+}
+
+function jjPath(line) {
+  const withoutKind = line
+    .replace(/^(Added|Modified|Deleted|Renamed|Copied|Untracked|Conflicted?|Conflict)\s+/i, "")
+    .replace(/^regular file\s+/i, "")
+    .replace(/^file\s+/i, "")
+    .trim();
+  return unquoteJjPath(withoutKind);
+}
+
+function jjCategory(value) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "a") return "added";
+  if (normalized === "m") return "modified";
+  if (normalized === "d") return "deleted";
+  if (normalized === "r") return "renamed";
+  if (normalized === "c") return "conflicted";
+  if (normalized === "?") return "untracked";
+  if (normalized.startsWith("added ")) return "added";
+  if (normalized.startsWith("modified ")) return "modified";
+  if (normalized.startsWith("deleted ")) return "deleted";
+  if (normalized.startsWith("renamed ")) return "renamed";
+  if (normalized.startsWith("copied ")) return "copied";
+  if (normalized.startsWith("conflict")) return "conflicted";
+  if (normalized.startsWith("untracked ")) return "untracked";
+  return "unknown";
+}
+
+function parseCompactJjChange(line) {
+  const match = line.match(/^([MADRC?])\s+(.+)$/);
+  if (!match) return null;
+  const status = match[1];
+  const rest = match[2].trim();
+  const rename = rest.match(/^(.*?)\s+(?:=>|->)\s+(.*)$/);
+  return {
+    status,
+    category: jjCategory(status),
+    path: unquoteJjPath(rename ? rename[2] : rest),
+    ...(rename ? { oldPath: unquoteJjPath(rename[1]) } : {}),
+  };
+}
+
+function parseJjStatus(output) {
+  const changes = [];
+  let current = null;
+  for (const rawLine of output.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const workingCopy = line.match(
+      /^Working copy(?:\s+\(([^)]+)\))?\s*:\s*([^\s]+)?/i,
+    );
+    if (workingCopy) {
+      current = workingCopy[1] || workingCopy[2] || null;
+      continue;
+    }
+    const compactChange = parseCompactJjChange(line);
+    if (compactChange) {
+      changes.push(compactChange);
+      continue;
+    }
+    if (
+      /^(Added|Modified|Deleted|Renamed|Copied|Untracked|Conflicted?|Conflict)\s+/i.test(
+        line,
+      )
+    ) {
+      changes.push({
+        status: line.split(/\s+/)[0] || "Unknown",
+        category: jjCategory(line),
+        path: jjPath(line),
+      });
+    }
+  }
+  return { current, changes, clean: changes.length === 0 };
+}
+
+function parseJjBookmarks(output) {
+  return [
+    ...new Set(
+      output
+        .split(/\r?\n/)
+        .filter((line) => line.trim() === line)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .filter((line) => !line.startsWith("Hint:"))
+        .map((line) =>
+          line
+            .replace(/\s+\((?:conflicted|deleted)\):?.*$/i, "")
+            .split(":")[0]
+            .replace(/\*$/, "")
+            .trim(),
+        )
+        .filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
+}
+
+function unavailable(kind, error) {
+  return {
+    kind,
+    available: false,
+    repoRoot: null,
+    current: null,
+    bookmarks: [],
+    changes: [],
+    clean: false,
+    error: error?.message ?? String(error),
+  };
+}
+
+function readLocalVcsSnapshot(workspacePath) {
+  const detection = detectLocalRepo(workspacePath);
+  const snapshot = {
+    workspacePath: detection.workspacePath,
+    repoRoot: detection.repoRoot,
+    primary: detection.primary,
+    detected: { git: detection.hasGit, jj: detection.hasJj },
+    git: null,
+    jj: null,
+    generatedAtMs: Date.now(),
+  };
+  if (!detection.repoRoot) return snapshot;
+  if (detection.hasGit) {
+    try {
+      const parsed = parseGitStatus(
+        runLocal("git", ["status", "--porcelain=v1", "--branch"], detection.repoRoot),
+      );
+      snapshot.git = {
+        kind: "git",
+        available: true,
+        repoRoot: detection.repoRoot,
+        current: parsed.current,
+        bookmarks: parseBranches(
+          runLocal("git", ["branch", "--format=%(refname:short)"], detection.repoRoot),
+        ),
+        changes: parsed.changes,
+        clean: parsed.clean,
+        error: null,
+      };
+    } catch (error) {
+      snapshot.git = unavailable("git", error);
+    }
+  }
+  if (detection.hasJj) {
+    try {
+      const repoRoot =
+        runLocal("jj", ["--no-pager", "root"], detection.repoRoot).trim() ||
+        detection.repoRoot;
+      const parsed = parseJjStatus(
+        runLocal("jj", ["--no-pager", "--color=never", "status"], detection.repoRoot),
+      );
+      snapshot.jj = {
+        kind: "jj",
+        available: true,
+        repoRoot,
+        current: parsed.current,
+        bookmarks: parseJjBookmarks(
+          runLocal(
+            "jj",
+            ["--no-pager", "--color=never", "bookmark", "list", "--template", 'name ++ "\\n"'],
+            detection.repoRoot,
+          ),
+        ),
+        changes: parsed.changes,
+        clean: parsed.clean,
+        error: null,
+      };
+    } catch (error) {
+      snapshot.jj = unavailable("jj", error);
+    }
+  }
+  return snapshot;
+}
+
+function json(res, status, payload) {
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(payload));
+}
+
+function fileApiError(res, status, code, message) {
+  json(res, status, { error: { code, message } });
+}
+
+function parseHttpHost(hostHeader) {
+  if (typeof hostHeader !== "string" || hostHeader.trim() === "") return null;
+  try {
+    return new URL(`http://${hostHeader}`);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeHostname(hostname) {
+  return hostname.toLowerCase().replace(/^\[(.*)\]$/, "$1");
+}
+
+function isLoopbackHostname(hostname) {
+  const normalized = normalizeHostname(hostname);
+  if (normalized === "localhost" || normalized === "::1") return true;
+  if (isIP(normalized) === 4)
+    return normalized === "127.0.0.1" || normalized.startsWith("127.");
+  return false;
+}
+
+function originMatchesHost(originHeader, hostHeader, localPort) {
+  if (typeof originHeader !== "string" || originHeader.trim() === "") {
+    return false;
+  }
+  const requestHost = parseHttpHost(hostHeader);
+  if (!requestHost || !isLoopbackHostname(requestHost.hostname)) {
+    return false;
+  }
+  const requestPort = Number(requestHost.port || "80");
+  if (localPort && requestPort !== localPort) {
+    return false;
+  }
+
+  let origin;
+  try {
+    origin = new URL(originHeader);
+  } catch {
+    return false;
+  }
+  if (origin.protocol !== "http:" && origin.protocol !== "https:") {
+    return false;
+  }
+  if (!isLoopbackHostname(origin.hostname)) {
+    return false;
+  }
+  if (
+    normalizeHostname(origin.hostname) !==
+    normalizeHostname(requestHost.hostname)
+  ) {
+    return false;
+  }
+  return (
+    Number(origin.port || (origin.protocol === "https:" ? "443" : "80")) ===
+    requestPort
+  );
+}
+
+function enforceFilesWriteSameOrigin(req, res) {
+  if (
+    originMatchesHost(
+      req.headers.origin,
+      req.headers.host,
+      req.socket.localPort,
+    )
+  ) {
+    return true;
+  }
+  fileApiError(
+    res,
+    403,
+    "FORBIDDEN_ORIGIN",
+    "File write requests must come from the same local Smithers UI origin.",
+  );
+  return false;
+}
+
+function realpathOrResolve(path) {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+function isInsideRoot(root, target) {
+  return (
+    target === root ||
+    target.startsWith(root.endsWith(sep) ? root : `${root}${sep}`)
+  );
+}
+
+function toWorkspaceRelative(root, target) {
+  const rel = relative(root, target).split(sep).join("/");
+  return rel === "" ? "" : rel;
+}
+
+export function resolveWorkspaceFilePath(
+  workspaceRoot,
+  inputPath,
+  { mustExist = true } = {},
+) {
+  if (typeof inputPath !== "string") {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_PATH",
+      message: "Path must be a string.",
+    };
+  }
+  if (inputPath.includes("\0")) {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_PATH",
+      message: "Path cannot contain NUL bytes.",
+    };
+  }
+
+  const root = realpathOrResolve(workspaceRoot);
+  const candidate = isAbsolute(inputPath)
+    ? resolve(inputPath)
+    : resolve(root, inputPath || ".");
+  if (!isInsideRoot(root, candidate)) {
+    return {
+      ok: false,
+      status: 403,
+      code: "PATH_OUTSIDE_ROOT",
+      message: "Path is outside the workspace root.",
+    };
+  }
+
+  if (candidate !== root) {
+    const parent = dirname(candidate);
+    const parentReal = realpathOrResolve(parent);
+    if (!isInsideRoot(root, parentReal)) {
+      return {
+        ok: false,
+        status: 403,
+        code: "PATH_OUTSIDE_ROOT",
+        message: "Path parent is outside the workspace root.",
+      };
+    }
+  }
+
+  if (!existsSync(candidate)) {
+    if (mustExist) {
+      return {
+        ok: false,
+        status: 404,
+        code: "PATH_NOT_FOUND",
+        message: "Path was not found.",
+      };
+    }
+    return {
+      ok: true,
+      root,
+      absolutePath: candidate,
+      realPath: candidate,
+      relativePath: toWorkspaceRelative(root, candidate),
+    };
+  }
+
+  const realPath = realpathOrResolve(candidate);
+  if (!isInsideRoot(root, realPath)) {
+    return {
+      ok: false,
+      status: 403,
+      code: "PATH_OUTSIDE_ROOT",
+      message: "Path resolves outside the workspace root.",
+    };
+  }
+  return {
+    ok: true,
+    root,
+    absolutePath: candidate,
+    realPath,
+    relativePath: toWorkspaceRelative(root, realPath),
+  };
+}
+
+function detectBinary(buffer) {
+  if (buffer.length === 0) return false;
+  let suspicious = 0;
+  for (const byte of buffer) {
+    if (byte === 0) return true;
+    if (byte < 7 || (byte > 13 && byte < 32)) suspicious += 1;
+  }
+  return suspicious / buffer.length > 0.08;
+}
+
+function readPrefix(path, bytes) {
+  const fd = openSync(path, "r");
+  try {
+    const buffer = Buffer.alloc(bytes);
+    const read = readSync(fd, buffer, 0, bytes, 0);
+    return buffer.subarray(0, read);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function previewFlagsForFile(path, fileStat) {
+  const sample = readPrefix(path, Math.min(FILE_PREVIEW_BYTES, fileStat.size));
+  const binary = detectBinary(sample);
+  return {
+    binary,
+    previewable: !binary,
+    editable: !binary && fileStat.size <= FILE_EDIT_BYTES,
+    truncated: !binary && fileStat.size > FILE_EDIT_BYTES,
+    maxPreviewBytes: FILE_PREVIEW_BYTES,
+    maxEditBytes: FILE_EDIT_BYTES,
+  };
+}
+
+function entryForPath(root, childPath, name) {
+  const lst = lstatSync(childPath);
+  const rel = toWorkspaceRelative(root, childPath);
+  const base = {
+    name,
+    path: rel,
+    size: lst.size,
+    mtimeMs: lst.mtimeMs,
+    symlink: lst.isSymbolicLink(),
+  };
+
+  if (lst.isSymbolicLink()) {
+    let real;
+    try {
+      real = realpathSync.native(childPath);
+    } catch {
+      return {
+        ...base,
+        type: "symlink",
+        safe: false,
+        previewable: false,
+        editable: false,
+      };
+    }
+    if (!isInsideRoot(root, real)) {
+      return {
+        ...base,
+        type: "symlink",
+        safe: false,
+        previewable: false,
+        editable: false,
+      };
+    }
+    const st = statSync(real);
+    return {
+      ...base,
+      type: st.isDirectory() ? "directory" : st.isFile() ? "file" : "other",
+      size: st.size,
+      mtimeMs: st.mtimeMs,
+      safe: true,
+      ...(!st.isDirectory() && st.isFile()
+        ? previewFlagsForFile(real, st)
+        : { previewable: false, editable: false }),
+    };
+  }
+
+  if (lst.isDirectory()) {
+    return {
+      ...base,
+      type: "directory",
+      safe: true,
+      previewable: false,
+      editable: false,
+    };
+  }
+  if (lst.isFile()) {
+    return {
+      ...base,
+      type: "file",
+      safe: true,
+      ...previewFlagsForFile(childPath, lst),
+    };
+  }
+  return {
+    ...base,
+    type: "other",
+    safe: true,
+    previewable: false,
+    editable: false,
+  };
+}
+
+function listWorkspaceTree(workspaceRoot, inputPath) {
+  const resolved = resolveWorkspaceFilePath(workspaceRoot, inputPath);
+  if (!resolved.ok) return resolved;
+  const st = statSync(resolved.realPath);
+  if (!st.isDirectory()) {
+    return {
+      ok: false,
+      status: 400,
+      code: "NOT_DIRECTORY",
+      message: "Path is not a directory.",
+    };
+  }
+  const allNames = readdirSync(resolved.realPath);
+  const names = allNames.slice(0, FILE_TREE_LIMIT);
+  const entries = names
+    .map((name) => {
+      try {
+        return entryForPath(resolved.root, join(resolved.realPath, name), name);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.type === "directory" && b.type !== "directory") return -1;
+      if (a.type !== "directory" && b.type === "directory") return 1;
+      return a.name.localeCompare(b.name);
+    });
+  return {
+    ok: true,
+    root: basename(resolved.root),
+    path: resolved.relativePath,
+    entries,
+    truncated: allNames.length > FILE_TREE_LIMIT,
+  };
+}
+
+function readWorkspaceFile(workspaceRoot, inputPath) {
+  const resolved = resolveWorkspaceFilePath(workspaceRoot, inputPath);
+  if (!resolved.ok) return resolved;
+  const st = statSync(resolved.realPath);
+  if (!st.isFile()) {
+    return {
+      ok: false,
+      status: 400,
+      code: "NOT_FILE",
+      message: "Path is not a file.",
+    };
+  }
+  const flags = previewFlagsForFile(resolved.realPath, st);
+  if (flags.binary) {
+    return {
+      ok: true,
+      file: {
+        path: resolved.relativePath,
+        name: basename(resolved.realPath),
+        size: st.size,
+        mtimeMs: st.mtimeMs,
+        kind: "binary",
+        editable: false,
+        previewText: null,
+        content: null,
+        truncated: false,
+        reason: "Binary files are not previewed in the editor.",
+      },
+    };
+  }
+
+  const fullRead = st.size <= FILE_EDIT_BYTES;
+  const bytes = fullRead
+    ? readFileSync(resolved.realPath)
+    : readPrefix(resolved.realPath, FILE_PREVIEW_BYTES);
+  const text = bytes.toString("utf8");
+  return {
+    ok: true,
+    file: {
+      path: resolved.relativePath,
+      name: basename(resolved.realPath),
+      size: st.size,
+      mtimeMs: st.mtimeMs,
+      kind: "text",
+      editable: fullRead,
+      previewText: text,
+      content: fullRead ? text : null,
+      truncated: !fullRead,
+      reason: fullRead
+        ? null
+        : `Files larger than ${FILE_EDIT_BYTES} bytes open as read-only previews.`,
+    },
+  };
+}
+
+async function readJsonBody(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > FILE_EDIT_BYTES + 64 * 1024) {
+      throw new Error("Request body is too large.");
+    }
+    chunks.push(chunk);
+  }
+  if (chunks.length === 0) return {};
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+function writeWorkspaceFile(workspaceRoot, inputPath, content) {
+  if (typeof content !== "string") {
+    return {
+      ok: false,
+      status: 400,
+      code: "INVALID_CONTENT",
+      message: "Content must be a string.",
+    };
+  }
+  if (Buffer.byteLength(content, "utf8") > FILE_EDIT_BYTES) {
+    return {
+      ok: false,
+      status: 413,
+      code: "FILE_TOO_LARGE",
+      message: "Content exceeds the editable file limit.",
+    };
+  }
+  const resolved = resolveWorkspaceFilePath(workspaceRoot, inputPath);
+  if (!resolved.ok) return resolved;
+  const st = statSync(resolved.realPath);
+  if (!st.isFile()) {
+    return {
+      ok: false,
+      status: 400,
+      code: "NOT_FILE",
+      message: "Path is not a file.",
+    };
+  }
+  const flags = previewFlagsForFile(resolved.realPath, st);
+  if (!flags.editable) {
+    return {
+      ok: false,
+      status: 415,
+      code: "NOT_EDITABLE",
+      message: "This file is not editable through the local UI.",
+    };
+  }
+  writeFileSync(resolved.realPath, content, "utf8");
+  return readWorkspaceFile(workspaceRoot, resolved.relativePath);
+}
+
+async function handleFilesApi(req, res, url, workspaceRoot) {
+  try {
+    if (url.pathname === "/api/files/tree" && req.method === "GET") {
+      const result = listWorkspaceTree(
+        workspaceRoot,
+        url.searchParams.get("path") ?? "",
+      );
+      if (!result.ok)
+        fileApiError(res, result.status, result.code, result.message);
+      else json(res, 200, result);
+      return true;
+    }
+    if (url.pathname === "/api/files/read" && req.method === "GET") {
+      const result = readWorkspaceFile(
+        workspaceRoot,
+        url.searchParams.get("path") ?? "",
+      );
+      if (!result.ok)
+        fileApiError(res, result.status, result.code, result.message);
+      else json(res, 200, result);
+      return true;
+    }
+    if (url.pathname === "/api/files/write" && req.method === "POST") {
+      if (!enforceFilesWriteSameOrigin(req, res)) return true;
+      try {
+        const body = await readJsonBody(req);
+        const result = writeWorkspaceFile(
+          workspaceRoot,
+          body.path,
+          body.content,
+        );
+        if (!result.ok)
+          fileApiError(res, result.status, result.code, result.message);
+        else json(res, 200, result);
+      } catch (err) {
+        fileApiError(res, 400, "INVALID_REQUEST", err?.message ?? String(err));
+      }
+      return true;
+    }
+    if (url.pathname.startsWith(FILES_API_PREFIX)) {
+      fileApiError(res, 404, "NOT_FOUND", "Unknown files API endpoint.");
+      return true;
+    }
+    return false;
+  } catch (err) {
+    fileApiError(res, 500, "FILES_API_FAILED", err?.message ?? String(err));
+    return true;
+  }
+}
+
+async function realpathIfPossible(path) {
+  try {
+    return await realpath(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+async function gatewayHealth(gatewayBase) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1500);
+  try {
+    const res = await fetch(`${gatewayBase.replace(/\/+$/, "")}/health`, {
+      signal: controller.signal,
+    });
+    return { reachable: res.ok, status: res.status };
+  } catch (error) {
+    return { reachable: false, error: error?.message ?? String(error) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Check whether a local workspace root is usable by this local UI server.
+ * The static UI can only safely proxy one Gateway, so readiness is explicit
+ * about both local setup and whether the proxied Gateway is scoped to the
+ * selected root.
+ */
+export async function checkLocalWorkspaceReadiness({
+  workspaceRoot,
+  serverWorkspaceRoot = process.cwd(),
+  gatewayBase,
+}) {
+  const input = typeof workspaceRoot === "string" ? workspaceRoot.trim() : "";
+  const resolvedRoot = input ? resolve(input) : "";
+  const resolvedServerRoot = resolve(serverWorkspaceRoot);
+  const base = gatewayBase?.replace(/\/+$/, "") ?? "";
+
+  if (!input) {
+    return {
+      status: "invalid-path",
+      workspaceRoot: "",
+      serverWorkspaceRoot: resolvedServerRoot,
+      gatewayBase: base,
+      gatewayReachable: false,
+      missing: ["workspace root"],
+      message: "Enter a local workspace root.",
+    };
+  }
+
+  let rootStat;
+  try {
+    rootStat = await stat(resolvedRoot);
+  } catch {
+    return {
+      status: "invalid-path",
+      workspaceRoot: resolvedRoot,
+      serverWorkspaceRoot: resolvedServerRoot,
+      gatewayBase: base,
+      gatewayReachable: false,
+      missing: ["workspace directory"],
+      message: `No local directory exists at ${resolvedRoot}.`,
+    };
+  }
+
+  if (!rootStat.isDirectory()) {
+    return {
+      status: "invalid-path",
+      workspaceRoot: resolvedRoot,
+      serverWorkspaceRoot: resolvedServerRoot,
+      gatewayBase: base,
+      gatewayReachable: false,
+      missing: ["workspace directory"],
+      message: `${resolvedRoot} is not a directory.`,
+    };
+  }
+
+  const [canonicalRoot, canonicalServerRoot] = await Promise.all([
+    realpathIfPossible(resolvedRoot),
+    realpathIfPossible(resolvedServerRoot),
+  ]);
+  const missing = [];
+  try {
+    const pack = await stat(join(canonicalRoot, ".smithers"));
+    if (!pack.isDirectory()) missing.push(".smithers/");
+  } catch {
+    missing.push(".smithers/");
+  }
+
+  const health = await gatewayHealth(base);
+  const scopedToSelectedRoot = canonicalRoot === canonicalServerRoot;
+  let status = "ready";
+  let message = "Local workspace is ready.";
+
+  if (missing.length > 0) {
+    status = "missing-setup";
+    message = `Missing local Smithers setup: ${missing.join(", ")}. Run smithers init in this workspace.`;
+  } else if (!health.reachable) {
+    status = "gateway-unavailable";
+    message = `No local Gateway is reachable at ${base}. Start smithers gateway for this workspace.`;
+  } else if (!scopedToSelectedRoot) {
+    status = "gateway-mismatch";
+    message = `The local UI server is proxying a Gateway for ${canonicalServerRoot}, not ${canonicalRoot}. Start smithers ui --app from the selected workspace or choose ${canonicalServerRoot}.`;
+  }
+
+  return {
+    status,
+    workspaceRoot: canonicalRoot,
+    serverWorkspaceRoot: canonicalServerRoot,
+    gatewayBase: base,
+    gatewayReachable: health.reachable,
+    gatewayStatus: health.status ?? null,
+    scopedToSelectedRoot,
+    missing,
+    message,
+  };
 }
 
 /** Resolve a request path to a file inside dist, guarding against traversal. */
@@ -132,7 +1042,14 @@ function resolveStaticFile(distDir, pathname) {
  * Serve the bundle and reverse-proxy gateway traffic. Returns the listening
  * server. `gatewayBase` is e.g. `http://127.0.0.1:7331`.
  */
-export function startLocalUiServer({ distDir, gatewayBase, port, host = "127.0.0.1", conciergePort }) {
+export function startLocalUiServer({
+  distDir,
+  gatewayBase,
+  port,
+  host = "127.0.0.1",
+  conciergePort,
+  workspaceRoot = process.cwd(),
+}) {
   const gw = new URL(gatewayBase);
   const gatewayHost = gw.hostname;
   const gatewayPort = Number(gw.port || (gw.protocol === "https:" ? 443 : 80));
@@ -142,7 +1059,13 @@ export function startLocalUiServer({ distDir, gatewayBase, port, host = "127.0.0
     const headers = { ...req.headers, host: `${targetHost}:${targetPort}` };
     if (headers.origin) headers.origin = `http://${targetHost}:${targetPort}`;
     const proxyReq = httpRequest(
-      { host: targetHost, port: targetPort, method: req.method, path: req.url, headers },
+      {
+        host: targetHost,
+        port: targetPort,
+        method: req.method,
+        path: req.url,
+        headers,
+      },
       (proxyRes) => {
         res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
         proxyRes.pipe(res);
@@ -154,6 +1077,59 @@ export function startLocalUiServer({ distDir, gatewayBase, port, host = "127.0.0
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${host}`);
+    if (url.pathname === LOCAL_VCS_PATH) {
+      const workspacePath = process.env.SMITHERS_WORKSPACE_ROOT ?? workspaceRoot;
+      const snapshot = readLocalVcsSnapshot(workspacePath);
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(snapshot));
+      return;
+    }
+    if (url.pathname.startsWith(FILES_API_PREFIX)) {
+      void handleFilesApi(req, res, url, workspaceRoot);
+      return;
+    }
+    if (url.pathname === LOCAL_WORKSPACE_PREFIX && req.method === "GET") {
+      void checkLocalWorkspaceReadiness({
+        workspaceRoot,
+        serverWorkspaceRoot: workspaceRoot,
+        gatewayBase,
+      })
+        .then((readiness) =>
+          json(res, 200, {
+            ok: true,
+            defaultWorkspaceRoot: readiness.serverWorkspaceRoot,
+            readiness,
+          }),
+        )
+        .catch((error) =>
+          json(res, 500, {
+            ok: false,
+            error: error?.message ?? String(error),
+          }),
+        );
+      return;
+    }
+    if (
+      url.pathname === `${LOCAL_WORKSPACE_PREFIX}/readiness` &&
+      req.method === "POST"
+    ) {
+      void readJsonBody(req)
+        .then((body) =>
+          checkLocalWorkspaceReadiness({
+            workspaceRoot: body?.workspaceRoot,
+            serverWorkspaceRoot: workspaceRoot,
+            gatewayBase,
+          }),
+        )
+        .then((readiness) => json(res, 200, { ok: true, readiness }))
+        .catch((error) =>
+          json(res, 400, {
+            ok: false,
+            error: error?.message ?? String(error),
+          }),
+        );
+      return;
+    }
     // The local concierge owns /api/chat (the chat backend).
     if (conciergePort && url.pathname.startsWith("/api/")) {
       proxyTo(req, res, "127.0.0.1", conciergePort, () => {
@@ -166,7 +1142,8 @@ export function startLocalUiServer({ distDir, gatewayBase, port, host = "127.0.0
       // Reverse-proxy to the gateway, rewriting Host/Origin so the gateway sees
       // a same-origin loopback request (it may reject cross-origin upgrades).
       const headers = { ...req.headers, host: `${gatewayHost}:${gatewayPort}` };
-      if (headers.origin) headers.origin = `http://${gatewayHost}:${gatewayPort}`;
+      if (headers.origin)
+        headers.origin = `http://${gatewayHost}:${gatewayPort}`;
       const proxyReq = httpRequest(
         {
           host: gatewayHost,
@@ -275,7 +1252,13 @@ export async function serveLocalUi({ gatewayBase, port, rebuild = false }) {
     concierge.on("error", () => {});
   }
 
-  const server = await startLocalUiServer({ distDir, gatewayBase, port, conciergePort });
+  const server = await startLocalUiServer({
+    distDir,
+    gatewayBase,
+    port,
+    conciergePort,
+    workspaceRoot: process.cwd(),
+  });
   const addr = server.address();
   const actualPort = typeof addr === "object" && addr ? addr.port : port;
   // Tear the concierge down with the server.

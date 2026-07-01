@@ -1,0 +1,105 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { createServer } from "node:http";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { checkLocalWorkspaceReadiness, startLocalUiServer } from "../src/localUiServer.js";
+
+const cleanups = [];
+
+afterEach(async () => {
+  while (cleanups.length > 0) {
+    await cleanups.pop()();
+  }
+});
+
+async function listen(server) {
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address !== "object") throw new Error("server did not bind");
+  cleanups.push(() => new Promise((resolve) => server.close(resolve)));
+  return `http://127.0.0.1:${address.port}`;
+}
+
+async function tempWorkspace({ smithers = true } = {}) {
+  const root = await mkdtemp(join(tmpdir(), "smithers-local-ui-"));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  if (smithers) await mkdir(join(root, ".smithers"));
+  return root;
+}
+
+async function tempDist() {
+  const root = await mkdtemp(join(tmpdir(), "smithers-ui-dist-"));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, "index.html"), "<!doctype html><title>Smithers</title>");
+  return root;
+}
+
+describe("localUiServer workspace readiness", () => {
+  test("reports a ready local workspace scoped to the proxied gateway", async () => {
+    const workspace = await tempWorkspace();
+    const gatewayBase = await listen(
+      createServer((req, res) => {
+        if (req.url === "/health") {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+        res.writeHead(404);
+        res.end();
+      }),
+    );
+
+    const readiness = await checkLocalWorkspaceReadiness({
+      workspaceRoot: workspace,
+      serverWorkspaceRoot: workspace,
+      gatewayBase,
+    });
+
+    expect(readiness.status).toBe("ready");
+    expect(readiness.gatewayReachable).toBe(true);
+    expect(readiness.scopedToSelectedRoot).toBe(true);
+  });
+
+  test("serves readiness over the local-only UI API", async () => {
+    const workspace = await tempWorkspace();
+    const distDir = await tempDist();
+    const gatewayBase = await listen(
+      createServer((req, res) => {
+        res.writeHead(req.url === "/health" ? 200 : 404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: req.url === "/health" }));
+      }),
+    );
+    const uiServer = await startLocalUiServer({ distDir, gatewayBase, port: 0, workspaceRoot: workspace });
+    cleanups.push(() => new Promise((resolve) => uiServer.close(resolve)));
+    const address = uiServer.address();
+    if (!address || typeof address !== "object") throw new Error("UI server did not bind");
+
+    const res = await fetch(`http://127.0.0.1:${address.port}/__smithers/local-workspace/readiness`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceRoot: workspace }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.readiness.status).toBe("ready");
+    expect(body.readiness.workspaceRoot).toBe(await realpath(workspace));
+  });
+
+  test("reports missing local setup before treating a workspace as ready", async () => {
+    const workspace = await tempWorkspace({ smithers: false });
+    const readiness = await checkLocalWorkspaceReadiness({
+      workspaceRoot: workspace,
+      serverWorkspaceRoot: workspace,
+      gatewayBase: "http://127.0.0.1:1",
+    });
+
+    expect(readiness.status).toBe("missing-setup");
+    expect(readiness.missing).toContain(".smithers/");
+  });
+});
