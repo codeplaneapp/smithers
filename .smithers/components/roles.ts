@@ -25,12 +25,12 @@ import {
 } from "smithers-orchestrator";
 
 // The implementer model. Sonnet is the strong default for the implementation
-// tier. NOTE (verified 2026-06-30 against the live Anthropic Models API): there
-// is NO `claude-sonnet-5` yet — every candidate id 404s; the newest real Sonnet
-// is `claude-sonnet-4-6`. When a genuine Sonnet 5 ships, set
-// SMITHERS_IMPLEMENTER_MODEL (or flip this default) and nothing else changes.
+// tier. Claude Sonnet 5 (`claude-sonnet-5`) shipped 2026-06-29 and is now the
+// newest Sonnet (verified against the live Anthropic Models API: id
+// `claude-sonnet-5`, created_at 2026-06-29, 1M context), so it is the default
+// implementer. Override with SMITHERS_IMPLEMENTER_MODEL to pin another model.
 export const IMPLEMENTER_MODEL =
-  process.env.SMITHERS_IMPLEMENTER_MODEL?.trim() || "claude-sonnet-4-6";
+  process.env.SMITHERS_IMPLEMENTER_MODEL?.trim() || "claude-sonnet-5";
 
 // Gemini is reached through Antigravity's `agy` CLI (the legacy `gemini` CLI is
 // sunset in Smithers and only throws), so we probe for `agy`, not `gemini`.

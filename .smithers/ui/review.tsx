@@ -377,7 +377,9 @@ function App() {
                     {verdictState === "missing" && reviews.length === 0
                       ? "No review output was produced."
                       : allIssues.length === 0
-                        ? "No issues raised — the reviewers found nothing to flag."
+                        ? verdictState === "blocked"
+                          ? "No structured issues listed — see the verdict feedback above."
+                          : "No issues raised — the reviewers found nothing to flag."
                         : "No " + sevFilter + " issues."}
                   </div>
                 ) : null}
