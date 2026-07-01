@@ -6,7 +6,10 @@ import {
     childFailurePromise,
     displayNode,
     formatStreamText,
+    isCleanMonitorExit,
+    mergeInteractiveInputs,
     normalizeStreamText,
+    normalizeSuppliedInput,
     pickerMaxItems,
     streamRun,
     truncate,
@@ -311,6 +314,55 @@ describe("tui helpers", () => {
 
         expect(result).toEqual({ state: "succeeded" });
         expect(rendered).toEqual(["running", "succeeded"]);
+    });
+
+    test("isCleanMonitorExit treats interrupt teardown codes and signals as clean", () => {
+        // Clean user quit / startup success.
+        expect(isCleanMonitorExit(0, null)).toBe(true);
+        // The TUI monitor's `128 + signo` teardown codes (SIGHUP/SIGINT/SIGTERM).
+        expect(isCleanMonitorExit(129, null)).toBe(true);
+        expect(isCleanMonitorExit(130, null)).toBe(true);
+        expect(isCleanMonitorExit(143, null)).toBe(true);
+        // Killed directly by an interrupt/terminate/hangup signal (no teardown code).
+        expect(isCleanMonitorExit(null, "SIGINT")).toBe(true);
+        expect(isCleanMonitorExit(null, "SIGTERM")).toBe(true);
+        expect(isCleanMonitorExit(null, "SIGHUP")).toBe(true);
+    });
+
+    test("isCleanMonitorExit flags startup failures and crash signals", () => {
+        // A non-zero, non-teardown exit code == the monitor failed to start.
+        expect(isCleanMonitorExit(1, null)).toBe(false);
+        expect(isCleanMonitorExit(2, null)).toBe(false);
+        // Hard-kill / crash signals must remain failures.
+        expect(isCleanMonitorExit(null, "SIGKILL")).toBe(false);
+        expect(isCleanMonitorExit(null, "SIGSEGV")).toBe(false);
+        expect(isCleanMonitorExit(null, "SIGABRT")).toBe(false);
+    });
+
+    test("normalizeSuppliedInput parses --input JSON and maps --prompt", () => {
+        expect(normalizeSuppliedInput({ input: '{"name":"will","n":3}' })).toEqual({ name: "will", n: 3 });
+        expect(normalizeSuppliedInput({ prompt: "hello" })).toEqual({ prompt: "hello" });
+        // --input wins over --prompt, mirroring normalizeWorkflowRunOptions.
+        expect(normalizeSuppliedInput({ input: '{"a":1}', prompt: "ignored" })).toEqual({ a: 1 });
+        // No supplied input, non-object payloads, and stdin `-` all normalize to {}.
+        expect(normalizeSuppliedInput({})).toEqual({});
+        expect(normalizeSuppliedInput(undefined)).toEqual({});
+        expect(normalizeSuppliedInput({ input: "-" })).toEqual({});
+        expect(normalizeSuppliedInput({ input: "[1,2,3]" })).toEqual({});
+    });
+
+    test("normalizeSuppliedInput throws on invalid --input JSON", () => {
+        expect(() => normalizeSuppliedInput({ input: "{not json" })).toThrow();
+    });
+
+    test("mergeInteractiveInputs preserves supplied input when no prompts run", () => {
+        expect(mergeInteractiveInputs({ a: 1, b: 2 }, {})).toEqual({ a: 1, b: 2 });
+        expect(mergeInteractiveInputs({ a: 1 }, null)).toEqual({ a: 1 });
+    });
+
+    test("mergeInteractiveInputs merges prompted values over supplied, keeping uncovered keys", () => {
+        // Prompted `b` overrides supplied `b`; supplied `a` (no prompt) is kept.
+        expect(mergeInteractiveInputs({ a: 1, b: 2 }, { b: 3 })).toEqual({ a: 1, b: 3 });
     });
 });
 

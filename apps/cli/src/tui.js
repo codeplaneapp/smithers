@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { discoverWorkflows, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
 import { mdxPlugin } from "./mdx-plugin.js";
 import { openSmithersStore } from "smithers-orchestrator/openSmithersStore";
+import { parseJsonArgument } from "./json-args.js";
 import { parseAgentEvent, parseNodeOutputEvent } from "./chat.js";
 import { formatStreamText } from "./tui-format.js";
 import { fuzzySelect } from "./fuzzy-select.js";
@@ -409,6 +410,34 @@ const CLEAN_EXIT_SIGNALS = new Set(
 );
 
 /**
+ * The TUI monitor traps external SIGINT/SIGTERM/SIGHUP, runs its terminal cleanup,
+ * then exits with the conventional `128 + signo` code (SIGHUP 129, SIGINT 130,
+ * SIGTERM 143 — see packages/tui/src/index.tsx). So a clean interrupt reaches the
+ * parent as one of these EXIT CODES, not as a signal. Treat them as a clean quit,
+ * mirroring CLEAN_EXIT_SIGNALS, so a Ctrl-C / terminal close is not misreported as
+ * TUI_MONITOR_FAILED.
+ * @type {ReadonlySet<number>}
+ */
+const CLEAN_EXIT_CODES = new Set([129, 130, 143]);
+
+/**
+ * Whether the TUI monitor child exited cleanly (user quit / interrupt / terminal
+ * close) rather than failing to start or crashing. A genuine crash — a non-zero
+ * exit code that is not one of the interrupt teardown codes, or a hard-kill signal
+ * (SIGSEGV/SIGABRT/SIGKILL/…) — is NOT clean and must surface as a failure.
+ * @param {number | null} code
+ * @param {NodeJS.Signals | null} signal
+ */
+export function isCleanMonitorExit(code, signal) {
+    if (code === null) {
+        // Killed by a signal without running our teardown: clean only if it is an
+        // interrupt/terminate/hangup, never a crash signal.
+        return signal ? CLEAN_EXIT_SIGNALS.has(signal) : true;
+    }
+    return code === 0 || CLEAN_EXIT_CODES.has(code);
+}
+
+/**
  * @param {number | null} code
  * @param {NodeJS.Signals | null} signal
  */
@@ -453,20 +482,25 @@ export function childFailurePromise(child) {
  * Wait for the workspace DB to exist, but stop immediately if the detached run
  * process exits first.
  *
+ * The `backend` must match the one the detached child `up` run writes to (the
+ * user's `--backend`), otherwise the launcher would poll a different store than
+ * the run and time out (or watch the wrong one).
+ *
  * @param {string} from
- * @param {{ timeoutMs?: number; intervalMs?: number }} opts
+ * @param {{ timeoutMs?: number; intervalMs?: number; backend?: string }} opts
  * @param {Promise<Error>} childFailure
  * @returns {Promise<{ db?: Awaited<ReturnType<typeof openSmithersStore>>; error?: Error }>}
  */
 async function waitForOpenDbOrChild(from, opts, childFailure) {
     const timeoutMs = Math.max(0, opts.timeoutMs ?? 0);
     const intervalMs = Math.max(1, opts.intervalMs ?? 100);
+    const backend = opts.backend || undefined;
     const startedAt = Date.now();
     let lastMissing;
 
     while (true) {
         try {
-            const db = await openSmithersStore({ cwd: from, mode: "read", wait: { timeoutMs: 0, intervalMs } });
+            const db = await openSmithersStore({ cwd: from, backend, mode: "read", wait: { timeoutMs: 0, intervalMs } });
             return { db };
         } catch (err) {
             if (err?.code !== "CLI_DB_NOT_FOUND") {
@@ -482,7 +516,7 @@ async function waitForOpenDbOrChild(from, opts, childFailure) {
         const waited = await sleepOrChildFailure(Math.min(intervalMs, timeoutMs - elapsedMs), childFailure);
         if (waited?.error) {
             try {
-                const db = await openSmithersStore({ cwd: from, mode: "read", wait: { timeoutMs: 0, intervalMs } });
+                const db = await openSmithersStore({ cwd: from, backend, mode: "read", wait: { timeoutMs: 0, intervalMs } });
                 return { db };
             } catch { }
             return waited;
@@ -697,6 +731,43 @@ export async function promptForField(field) {
 }
 
 /**
+ * Normalize the user-supplied CLI input for the interactive path into a plain
+ * object, mirroring how `up`/`workflow run` resolve `--input`/`--prompt`
+ * (`--input` JSON wins; otherwise `--prompt` maps to `{ prompt }`). Interactive
+ * mode drives its prompts off the TTY stdin, so `--input -` (read JSON from
+ * stdin) is unusable and is treated as no supplied input. Throws on invalid
+ * `--input` JSON so the caller can fail fast before prompting.
+ *
+ * @param {Record<string, any> | undefined} options - the command's parsed options (`c.options`)
+ * @returns {Record<string, unknown>}
+ */
+export function normalizeSuppliedInput(options) {
+    const o = options ?? {};
+    const raw = typeof o.input === "string" && o.input.length > 0
+        ? o.input
+        : (o.prompt !== undefined ? JSON.stringify({ prompt: o.prompt }) : undefined);
+    if (raw === undefined || raw === "-") return {};
+    const parsed = parseJsonArgument(raw, "input");
+    if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return /** @type {Record<string, unknown>} */ (parsed);
+}
+
+/**
+ * Merge the CLI-supplied `--input`/`--prompt` values with the values collected by
+ * the interactive prompts. Precedence: an explicit prompt answer OVERRIDES the
+ * matching supplied key, and supplied keys that no prompt covered are PRESERVED
+ * (so a supplied `--input` is never silently dropped just because a workflow has
+ * no — or only some — input fields).
+ *
+ * @param {Record<string, unknown>} supplied - normalized CLI input
+ * @param {Record<string, unknown> | null | undefined} prompted - values from the interactive prompts
+ * @returns {Record<string, unknown>}
+ */
+export function mergeInteractiveInputs(supplied, prompted) {
+    return { ...(supplied ?? {}), ...(prompted ?? {}) };
+}
+
+/**
  * Ask for a workflow's inputs before launching it. Returns the input object, or
  * null if the user cancelled mid-prompt.
  * @param {{ entryFile: string }} workflow
@@ -747,12 +818,16 @@ export function resolveTuiEntry() {
  * @param {string} cliIndexPath - absolute path to apps/cli/src/index.js (passed as
  *   SMITHERS_CLI so the TUI can start the Gateway via the real CLI entry point)
  * @param {string} [gatewayUrl] - gateway base URL the TUI should connect to
+ * @param {string} [backend] - storage backend the run uses (`--backend`); forwarded
+ *   as SMITHERS_BACKEND so the TUI's autostarted gateway opens the SAME store the
+ *   detached run writes to instead of the default sqlite one.
  * @returns {Promise<{ code: number | null; signal: NodeJS.Signals | null }>}
  */
-async function launchTuiMonitor(tuiEntry, runId, cliIndexPath, gatewayUrl) {
+async function launchTuiMonitor(tuiEntry, runId, cliIndexPath, gatewayUrl, backend) {
     return new Promise((resolve, reject) => {
         const env = { ...process.env, SMITHERS_CLI: cliIndexPath };
         if (gatewayUrl) env.SMITHERS_GATEWAY_URL = gatewayUrl;
+        if (backend) env.SMITHERS_BACKEND = backend;
         const child = spawn("bun", [tuiEntry, runId], { stdio: "inherit", env });
         child.once("error", (err) => reject(err));
         child.once("exit", (code, signal) => resolve({ code, signal }));
@@ -847,11 +922,32 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
         }
     }
 
-    const inputs = await askWorkflowInputs(workflow);
-    if (inputs === null) {
+    // Parse any user-supplied `--input`/`--prompt` BEFORE prompting so an invalid
+    // payload fails fast (before making the user answer prompts), and so it can be
+    // merged into — never dropped by — the prompted values below.
+    let suppliedInput;
+    try {
+        suppliedInput = normalizeSuppliedInput(c.options);
+    } catch (err) {
+        return fail({
+            code: "TUI_INVALID_INPUT",
+            message: err?.message ?? String(err),
+            exitCode: 4,
+        });
+    }
+
+    const prompted = await askWorkflowInputs(workflow);
+    if (prompted === null) {
         cancel("Cancelled.");
         return c.ok({ ran: false, reason: "cancelled" });
     }
+    // Prompted answers override the matching supplied keys; supplied keys no
+    // prompt covered are preserved.
+    const inputs = mergeInteractiveInputs(suppliedInput, prompted);
+
+    // The detached child, the launcher's store poll, and the monitor's gateway
+    // must all target the SAME backend the user selected with `--backend`.
+    const backend = (c.options && typeof c.options.backend === "string" && c.options.backend) || undefined;
 
     // Honor a user-supplied `--run-id`; otherwise generate one so the detached
     // child and the monitor agree on which run to watch.
@@ -894,7 +990,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
 
     let db;
     try {
-        const dbResult = await waitForOpenDbOrChild(process.cwd(), { timeoutMs: 20_000, intervalMs: 150 }, childFailure);
+        const dbResult = await waitForOpenDbOrChild(process.cwd(), { timeoutMs: 20_000, intervalMs: 150, backend }, childFailure);
         if (dbResult.error) {
             throw dbResult.error;
         }
@@ -935,26 +1031,26 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
         if (tuiEntry) {
             // Hand off to the full-screen TUI monitor. The TUI handles all views
             // (tree, logs, timeline, approvals) and exits when the user presses q/Q.
-            const { code, signal } = await launchTuiMonitor(tuiEntry, runId, indexPath, process.env.SMITHERS_GATEWAY_URL);
-            // A clean quit is code 0 or an expected interrupt/terminal signal
-            // (Ctrl-C / kill / terminal close). A non-zero exit code means the
-            // monitor failed to start, and a CRASH signal (SIGSEGV/SIGABRT/…)
-            // means it died abnormally — surface both as failures rather than
-            // reporting success.
-            if (code !== null && code !== 0) {
+            const { code, signal } = await launchTuiMonitor(tuiEntry, runId, indexPath, process.env.SMITHERS_GATEWAY_URL, backend);
+            // A clean quit is code 0, an interrupt teardown code (the monitor traps
+            // Ctrl-C / kill / terminal close and exits 129/130/143 after cleanup),
+            // or an expected interrupt signal. A CRASH signal (SIGSEGV/SIGABRT/…)
+            // means it died abnormally, and any other non-zero code means it failed
+            // to start — surface both as failures rather than reporting success.
+            if (!isCleanMonitorExit(code, signal)) {
+                if (code === null && signal) {
+                    return fail({
+                        code: "TUI_MONITOR_CRASHED",
+                        message: `The run monitor was killed by ${signal}. Run started — see ${logFile}.`,
+                        exitCode: 1,
+                        runId,
+                        logFile,
+                    });
+                }
                 return fail({
                     code: "TUI_MONITOR_FAILED",
                     message: `The run monitor exited with code ${code}. Run started — see ${logFile}.`,
-                    exitCode: code,
-                    runId,
-                    logFile,
-                });
-            }
-            if (code === null && signal && !CLEAN_EXIT_SIGNALS.has(signal)) {
-                return fail({
-                    code: "TUI_MONITOR_CRASHED",
-                    message: `The run monitor was killed by ${signal}. Run started — see ${logFile}.`,
-                    exitCode: 1,
+                    exitCode: code ?? 1,
                     runId,
                     logFile,
                 });
