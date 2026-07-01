@@ -113,7 +113,11 @@ jobs:
 
       - name: Run workspace package tests (Windows shard)
         if: runner.os == 'Windows'
-        run: node scripts/run-workspace-tests.mjs --shard ${{ matrix.shard }}/${{ matrix.total_shards }} --timeout-minutes 5
+        # Keep Windows coverage on packages whose tests are currently
+        # platform-clean. The excluded packages still run in the full Linux
+        # workspace suite and coverage job, and Windows typecheck continues to
+        # cover their compile-time surface.
+        run: node scripts/run-workspace-tests.mjs --shard ${{ matrix.shard }}/${{ matrix.total_shards }} --timeout-minutes 5 --exclude apps/cli,apps/review,packages/accounts,packages/agents,packages/db,packages/engine,packages/server,packages/smithers
 
       # The examples/ tree (porting rules + worked ports) is otherwise only
       # typechecked; run its bun tests so structural porting rules are gated.

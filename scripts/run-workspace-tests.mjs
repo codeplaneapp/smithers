@@ -7,7 +7,7 @@ const root = process.cwd();
 
 function usage() {
   console.error(
-    "Usage: node scripts/run-workspace-tests.mjs [--shard N/TOTAL] [--timeout-minutes MINUTES] [--list]",
+    "Usage: node scripts/run-workspace-tests.mjs [--shard N/TOTAL] [--timeout-minutes MINUTES] [--exclude DIR[,DIR...]] [--list]",
   );
 }
 
@@ -16,6 +16,7 @@ function parseArgs(argv) {
     shard: 1,
     totalShards: 1,
     timeoutMinutes: 5,
+    exclude: new Set(),
     listOnly: false,
   };
 
@@ -32,6 +33,18 @@ function parseArgs(argv) {
       options.totalShards = Number(match[2]);
     } else if (arg === "--timeout-minutes") {
       options.timeoutMinutes = Number(argv[++index]);
+    } else if (arg === "--exclude") {
+      const value = argv[++index];
+      if (value === undefined) {
+        usage();
+        process.exit(2);
+      }
+      options.exclude = new Set(
+        value
+          .split(",")
+          .map((part) => part.trim())
+          .filter(Boolean),
+      );
     } else if (arg === "--list") {
       options.listOnly = true;
     } else {
@@ -235,7 +248,9 @@ function runPackageTest(pkg, timeoutMinutes) {
 }
 
 const options = parseArgs(process.argv.slice(2));
-const packages = readWorkspaceTestPackages();
+const packages = readWorkspaceTestPackages().filter(
+  (pkg) => !options.exclude.has(pkg.directory),
+);
 const shards = shardPackages(packages, options.totalShards);
 const selectedPackages = shards[options.shard - 1].packages;
 
