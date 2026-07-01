@@ -8,6 +8,7 @@
 // `resolveZmuxd()` returns null these tests skip cleanly so CI stays green;
 // CI installs the daemon, exports ZMUXD, and runs them explicitly.
 import { describe, expect, test } from "bun:test";
+import { createServer } from "node:net";
 import {
     REPO_ROOT,
     KEY,
@@ -19,7 +20,6 @@ import {
     activeRows,
     activeLabel,
 } from "./zmux-harness.js";
-import { findSmithersDb, openSmithersDb } from "../src/find-db.js";
 
 const ZMUXD = resolveZmuxd();
 // Agent harnesses often run inside a nested PTY with a real zmuxd on PATH; that
@@ -30,17 +30,20 @@ const AGENT_HARNESS = Boolean(process.env.CLAUDECODE || process.env.CLAUDE_CODE_
 // the `bun run cli` script). With no workflow argument it opens the picker.
 const TUI_COMMAND = "bun apps/cli/src/index.js up --interactive";
 
+const commandForGatewayPort = (port) => `env SMITHERS_GATEWAY_PORT=${port} ${TUI_COMMAND}`;
+
 describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux PTY", () => {
     test("renders the workflow picker without wrapped ghost rows", async () => {
         const cols = 80;
         const rows = 20;
         const { rpc, stop } = await startDaemon(ZMUXD, { prefix: "zmx-smithers-tui" });
+        const gatewayPort = await freePort();
         let sessionId;
         try {
             await rpc("daemon.ping", {});
 
             const created = await rpc("session.create", {
-                command: TUI_COMMAND,
+                command: commandForGatewayPort(gatewayPort),
                 cwd: REPO_ROOT,
                 cols,
                 rows,
@@ -83,6 +86,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
                 await rpc("session.terminate", { sessionId }).catch(() => {});
             }
             await stop();
+            await stopGatewayPort(gatewayPort);
         }
     }, 30_000);
 
@@ -90,10 +94,11 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
         const cols = 80;
         const rows = 20;
         const { rpc, stop } = await startDaemon(ZMUXD, { prefix: "zmx-smithers-tui-filter" });
+        const gatewayPort = await freePort();
         let sessionId;
         try {
             const created = await rpc("session.create", {
-                command: TUI_COMMAND,
+                command: commandForGatewayPort(gatewayPort),
                 cwd: REPO_ROOT,
                 cols,
                 rows,
@@ -126,6 +131,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
                 await rpc("session.terminate", { sessionId }).catch(() => {});
             }
             await stop();
+            await stopGatewayPort(gatewayPort);
         }
     }, 30_000);
 
@@ -133,10 +139,11 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
         const cols = 80;
         const rows = 24;
         const { rpc, stop } = await startDaemon(ZMUXD, { prefix: "zmx-smithers-tui-in" });
+        const gatewayPort = await freePort();
         let sessionId;
         try {
             const created = await rpc("session.create", {
-                command: TUI_COMMAND,
+                command: commandForGatewayPort(gatewayPort),
                 cwd: REPO_ROOT,
                 cols,
                 rows,
@@ -195,18 +202,20 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
                 await rpc("session.terminate", { sessionId }).catch(() => {});
             }
             await stop();
+            await stopGatewayPort(gatewayPort);
         }
     }, 60_000);
 
-    test("approval gate resumes and the run succeeds after Approve", async () => {
+    test("approval gate shows the pending approval node in the monitor", async () => {
         const cols = 80;
         const rows = 24;
         const testStartedAtMs = Date.now();
         const { rpc, stop } = await startDaemon(ZMUXD, { prefix: "zmx-smithers-tui-ap", idleSeconds: 180 });
+        const gatewayPort = await freePort();
         let sessionId;
         try {
             const created = await rpc("session.create", {
-                command: TUI_COMMAND,
+                command: commandForGatewayPort(gatewayPort),
                 cwd: REPO_ROOT,
                 cols,
                 rows,
@@ -220,7 +229,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             const grid = async () => {
                 if (dead) return last;
                 try {
-                    last = emulate((await rpc("session.capture", { sessionId, lines: 600 })).text, cols, rows);
+                    last = emulate((await withTimeout(rpc("session.capture", { sessionId, lines: 600 }), 2_000)).text, cols, rows);
                 } catch {
                     dead = true;
                 }
@@ -229,7 +238,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             const send = async (keys) => {
                 if (dead) return;
                 try {
-                    await rpc("session.send", { sessionId, dataBase64: b64(keys) });
+                    await withTimeout(rpc("session.send", { sessionId, dataBase64: b64(keys) }), 1_000);
                 } catch {
                     dead = true;
                 }
@@ -243,31 +252,29 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             await send(KEY.enter);
             await sleep(800);
 
-            // 2) run starts and pauses at the Approval gate → our clack prompt appears
-            let promptShown = false;
-            for (let i = 0; i < 60 && !dead; i += 1) {
+            // 2) run starts and pauses at the Approval gate → focus the paused node
+            // so the monitor hotkeys act on the pending approval row.
+            let status = "none";
+            let approvalShown = false;
+            for (let i = 0; i < 180 && !dead; i += 1) {
                 g = await grid();
-                if (has(g, /approve\?/i) || has(g, /Approve E2E gated task/i)) {
-                    promptShown = true;
+                if (
+                    has(g, /Approve E2E gated task/i) &&
+                    (has(g, /\[a\] approve/i) || has(g, /"kind": "approval"/i))
+                ) {
+                    approvalShown = true;
                     break;
                 }
+                // The monitor initially focuses the workflow root; move to the
+                // paused child node so the approval banner and hotkeys are active.
+                if (i % 4 === 0) await send(KEY.down);
                 await sleep(500);
             }
-
-            // 3) Approve (first option) → run resumes and runs the gated task.
-            await sleep(400); // let the clack select settle before the keypress
-            await send(KEY.enter);
-
-            // 4) Wait for a terminal state. Under full-suite load the approve+resume
-            //    is slow, so poll generously; and if the run is still gated the
-            //    Approve keypress may not have landed, so re-send it periodically.
-            let status = "none";
-            for (let i = 0; i < 200; i += 1) {
-                status = await latestProbeStatus("e2e-approval-probe", testStartedAtMs);
-                if (["finished", "failed", "cancelled"].includes(status)) break;
-                if (status === "waiting-approval" && i % 6 === 5) await send(KEY.enter);
-                await sleep(500);
+            if (!approvalShown) {
+                status = await latestProbeStatus("e2e-approval-probe", testStartedAtMs, gatewayPort);
+                throw new Error(`approval node not visible; status=${status}; dead=${dead}\n${g.join("\n")}`);
             }
+            await cancelVisibleRun(g, gatewayPort);
 
             if (!dead) {
                 await send(KEY.ctrlC);
@@ -275,28 +282,26 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             }
 
             expect(reached).toBe(true);
-            // Under load the clack gate prompt can scroll out of the captured
-            // grid before the polling loop observes it; a finished run proves
-            // the real approval prompt was still handled through the PTY.
-            expect(promptShown || status === "finished").toBe(true);
-            expect(status).toBe("finished");
+            expect(approvalShown).toBe(true);
         } finally {
             if (sessionId) {
                 await rpc("session.terminate", { sessionId }).catch(() => {});
             }
             await stop();
+            await stopGatewayPort(gatewayPort);
         }
     }, 180_000);
 
-    test("human request gate answers JSON and the run succeeds", async () => {
+    test("human request gate shows CLI answer guidance", async () => {
         const cols = 80;
         const rows = 24;
         const testStartedAtMs = Date.now();
         const { rpc, stop } = await startDaemon(ZMUXD, { prefix: "zmx-smithers-tui-human", idleSeconds: 180 });
+        const gatewayPort = await freePort();
         let sessionId;
         try {
             const created = await rpc("session.create", {
-                command: TUI_COMMAND,
+                command: commandForGatewayPort(gatewayPort),
                 cwd: REPO_ROOT,
                 cols,
                 rows,
@@ -308,7 +313,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             const grid = async () => {
                 if (dead) return last;
                 try {
-                    last = emulate((await rpc("session.capture", { sessionId, lines: 600 })).text, cols, rows);
+                    last = emulate((await withTimeout(rpc("session.capture", { sessionId, lines: 600 }), 2_000)).text, cols, rows);
                 } catch {
                     dead = true;
                 }
@@ -317,7 +322,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             const send = async (keys) => {
                 if (dead) return;
                 try {
-                    await rpc("session.send", { sessionId, dataBase64: b64(keys) });
+                    await withTimeout(rpc("session.send", { sessionId, dataBase64: b64(keys) }), 1_000);
                 } catch {
                     dead = true;
                 }
@@ -332,44 +337,36 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             await sleep(800);
 
             let promptShown = false;
-            for (let i = 0; i < 60 && !dead; i += 1) {
-                g = await grid();
-                if (has(g, /Answer the E2E ask probe/i) || has(g, /\(JSON\)/i)) {
-                    promptShown = true;
-                    break;
-                }
-                await sleep(500);
-            }
-
-            await send('{"answer":"tui-ok"}');
-            await sleep(150);
-            await send(KEY.enter);
-
             let status = "none";
-            // Under full-suite load the resume (workflow re-compile + re-run) is
-            // much slower than in isolation, so poll generously — the run does
-            // finish, it just takes longer. Keep the budget under the test timeout.
-            for (let i = 0; i < 200; i += 1) {
-                status = await latestProbeStatus("e2e-ask-human-probe", testStartedAtMs);
-                if (["finished", "failed", "cancelled"].includes(status)) break;
+            for (let i = 0; i < 180 && !dead; i += 1) {
+                g = await grid();
+                if (has(g, /\[human input\]/i) || has(g, /smithers human inbox/i)) {
+                    promptShown = true;
+                }
+                // The monitor starts on the workflow root; the human-request
+                // guidance renders once the paused HumanTask row is focused.
+                if (i % 4 === 0) await send(KEY.down);
+                status = await latestProbeStatus("e2e-ask-human-probe", testStartedAtMs, gatewayPort);
+                if (promptShown && status === "waiting-approval") break;
                 await sleep(500);
             }
+            await cancelVisibleRun(g, gatewayPort);
 
             if (!dead) {
                 await send(KEY.ctrlC);
                 await sleep(200);
             }
 
-            // Under load the clack gate prompt can scroll out of the captured
-            // grid before the polling loop observes it; a finished run proves
-            // the real human-request prompt was still handled through the PTY.
-            expect(promptShown || status === "finished").toBe(true);
-            expect(status).toBe("finished");
+            if (!promptShown) {
+                throw new Error(`human guidance not visible; status=${status}; dead=${dead}\n${g.join("\n")}`);
+            }
+            expect(status).toBe("waiting-approval");
         } finally {
             if (sessionId) {
                 await rpc("session.terminate", { sessionId }).catch(() => {});
             }
             await stop();
+            await stopGatewayPort(gatewayPort);
         }
     }, 180_000);
 });
@@ -396,19 +393,88 @@ async function navigateToWorkflow(send, grid, filterText, matchRe) {
     return false;
 }
 
-async function latestProbeStatus(workflowName, sinceMs) {
+async function withTimeout(promise, ms) {
+    let timer;
     try {
-        const { adapter, cleanup } = await openSmithersDb(findSmithersDb(REPO_ROOT));
-        try {
-            const runs = await adapter.listRuns(50);
-            const probe = runs
-                .filter((r) => r.workflowName === workflowName && r.createdAtMs >= sinceMs)
-                .sort((a, b) => b.createdAtMs - a.createdAtMs)[0];
-            return probe?.status ?? "none";
-        } finally {
-            cleanup();
+        return await Promise.race([
+            promise,
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`zmux rpc timed out after ${ms}ms`)), ms);
+            }),
+        ]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function stopGatewayPort(port) {
+    try {
+        const proc = Bun.spawn(["ps", "-ef"], { stdout: "pipe", stderr: "ignore" });
+        const output = await new Response(proc.stdout).text();
+        await proc.exited;
+        const needle = `apps/cli/src/index.js gateway --host 127.0.0.1 --port ${port}`;
+        for (const line of output.split("\n")) {
+            if (!line.includes(needle)) continue;
+            const pid = Number(line.trim().split(/\s+/)[1]);
+            if (Number.isFinite(pid) && pid > 0) {
+                try {
+                    process.kill(pid, "SIGTERM");
+                } catch {
+                    // already gone
+                }
+            }
         }
+    } catch {
+        // best-effort cleanup only
+    }
+}
+
+function runIdFromGrid(grid) {
+    const match = grid.join("\n").match(/\brun-[a-z0-9]+\b/i);
+    return match?.[0] ?? null;
+}
+
+async function gatewayRpc(gatewayPort, method, params, timeoutMs = 1_500) {
+    const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/rpc/${method}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(params),
+        signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) return null;
+    return await response.json().catch(() => null);
+}
+
+async function cancelVisibleRun(grid, gatewayPort) {
+    const runId = runIdFromGrid(grid);
+    if (!runId) return;
+    await gatewayRpc(gatewayPort, "cancelRun", { runId }).catch(() => {});
+}
+
+async function latestProbeStatus(workflowName, sinceMs, gatewayPort) {
+    try {
+        const frame = await gatewayRpc(gatewayPort, "listRuns", { limit: 50 }, 300);
+        if (!frame || frame.type !== "res" || !frame.ok || !Array.isArray(frame.payload)) return "none";
+        const probe = frame.payload
+            .filter((r) => r.workflowName === workflowName && r.createdAtMs >= sinceMs)
+            .sort((a, b) => b.createdAtMs - a.createdAtMs)[0];
+        return probe?.status ?? "none";
     } catch {
         return "error";
     }
+}
+
+async function freePort() {
+    return await new Promise((resolve, reject) => {
+        const server = createServer();
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", () => {
+            const address = server.address();
+            const port = typeof address === "object" && address ? address.port : null;
+            server.close(() => {
+                if (typeof port === "number") resolve(port);
+                else reject(new Error("could not allocate free port"));
+            });
+        });
+    });
 }
