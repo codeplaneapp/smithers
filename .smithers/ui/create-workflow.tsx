@@ -79,7 +79,7 @@ function toRunRows(data: unknown): RunSummary[] {
       status: asString(row.status),
       createdAtMs: asNumber(row.createdAtMs),
     }))
-    .filter((row): row is RunSummary => row.runId.length > 0);
+    .filter((row) => row.runId.length > 0);
 }
 function statusClass(status: string | undefined): string {
   const normalized = (status ?? "").toLowerCase();

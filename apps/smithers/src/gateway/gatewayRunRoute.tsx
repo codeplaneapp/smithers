@@ -109,7 +109,7 @@ function GatewayRunDiffPage() {
           {workflowKey} · {runId} · {nodeId}:{iteration}
         </span>
       </header>
-      {diff.isLoading ? (
+      {diff.loading ? (
         <div className="surface-empty">Loading diff from gateway...</div>
       ) : diff.error ? (
         <div className="surface-empty" role="alert">

@@ -5,6 +5,7 @@ import {
   useGatewayWorkflows,
 } from "@smithers-orchestrator/gateway-react";
 import { gatewayKeys } from "@smithers-orchestrator/gateway-client";
+import { openSurface } from "../app/navigation";
 import { StatusPill } from "../cards/StatusPill";
 import { findNode } from "../runs/Run";
 import { RunTree } from "../runs/RunTree";
