@@ -81,6 +81,9 @@ button {
 .command-pill:focus-visible,
 .command-option:focus-visible,
 .project-option:focus-visible,
+.workspace-picker button:focus-visible,
+.workspace-picker input:focus-visible,
+.nav-workspace button:focus-visible,
 .ghost-pill:focus-visible,
 .mic-button:focus-visible,
 .store-card:focus-visible,
@@ -1710,6 +1713,295 @@ button {
   flex-direction: row;
   height: 100vh;
   overflow: hidden;
+}
+
+.nav-rail {
+  display: flex;
+  flex: 0 0 220px;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  padding: 12px;
+  border-right: 1px solid var(--border);
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+}
+
+.nav-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 12px;
+}
+
+.nav-brand-text {
+  font-size: 0.95rem;
+  font-weight: 750;
+}
+
+.nav-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  margin-bottom: 12px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.nav-workspace span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.nav-workspace strong {
+  min-width: 0;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-workspace button {
+  width: fit-content;
+  margin-top: 4px;
+  padding: 4px 7px;
+  border: 1px solid var(--border-solid);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.nav-workspace button:hover {
+  background: var(--hover);
+}
+
+.nav-links {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.nav-link:hover,
+.nav-link.is-active {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.nav-foot {
+  flex: none;
+  padding-top: 12px;
+}
+
+.workspace-picker-page {
+  display: grid;
+  min-height: 100vh;
+  padding: 24px;
+  place-items: center;
+  background: var(--bg);
+}
+
+.workspace-picker {
+  display: flex;
+  width: min(100%, 620px);
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 18px 50px rgb(var(--shadow-rgb) / 0.1);
+}
+
+.workspace-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workspace-picker-head h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  line-height: 1.2;
+}
+
+.workspace-picker-head p {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.workspace-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workspace-form label,
+.recent-workspaces h2 {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.workspace-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.workspace-input-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  padding: 0 11px;
+  border: 1px solid var(--border-solid);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.86rem;
+}
+
+.workspace-input-row button,
+.recent-workspace-list button {
+  border: 1px solid var(--border-solid);
+  border-radius: 8px;
+  background: var(--inverse-bg);
+  color: var(--inverse-text);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.workspace-input-row button {
+  flex: none;
+  min-width: 82px;
+  height: 40px;
+  padding: 0 14px;
+}
+
+.workspace-input-row button:disabled,
+.recent-workspace-list button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.workspace-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--hover-subtle);
+}
+
+.workspace-status span {
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.workspace-status p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.workspace-status code {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: var(--inline-code-bg);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+}
+
+.workspace-status[data-status="ready"] span {
+  color: var(--success);
+}
+
+.workspace-status[data-status="invalid-path"] span,
+.workspace-status[data-status="missing-setup"] span,
+.workspace-status[data-status="gateway-unavailable"] span,
+.workspace-status[data-status="gateway-mismatch"] span,
+.workspace-status[data-status="error"] span {
+  color: var(--danger);
+}
+
+.recent-workspaces {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recent-workspace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.recent-workspace-list button {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+}
+
+.recent-workspace-list button:hover {
+  background: var(--hover);
+}
+
+.recent-workspace-list span {
+  min-width: 0;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-workspace-list small {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
 }
 
 .chat-rail {

@@ -209,9 +209,24 @@ function RunRow({ run }: { run: RunSummary }) {
         <button
           className="btn"
           type="button"
-          onClick={() => openSurface({ kind: "logs", runId: run.runId })}
+          onClick={() => {
+            const workflowKey =
+              run.workflowKey && run.workflowKey.trim() !== "" ? run.workflowKey : run.runId;
+            openSurface({ kind: "gatewayRun", workflowKey, runId: run.runId, view: "logs" });
+          }}
         >
           Logs
+        </button>
+        <button
+          className="btn"
+          type="button"
+          onClick={() => {
+            const workflowKey =
+              run.workflowKey && run.workflowKey.trim() !== "" ? run.workflowKey : run.runId;
+            openSurface({ kind: "gatewayRun", workflowKey, runId: run.runId, view: "timeline" });
+          }}
+        >
+          Timeline
         </button>
         {!terminal ? (
           <button className="btn" type="button" onClick={() => rerun(run.runId)}>

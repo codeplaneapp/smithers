@@ -12,9 +12,11 @@ export type AppId =
   | "approvals"
   | "agents"
   | "memory"
+  | "files"
   | "prompts"
   | "scores"
   | "crons"
+  | "vcs"
   | "store";
 
 /** Where opening an app navigates: most apps open a canvas surface; a few are

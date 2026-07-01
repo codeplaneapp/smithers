@@ -17,8 +17,100 @@ const ORDER: Record<View, number> = {
  */
 export function goToView(view: View): void {
   const current = useRouteStore.getState().view;
-  useUiStore.getState().setNavDir(ORDER[view] >= ORDER[current] ? "forward" : "back");
+  useUiStore
+    .getState()
+    .setNavDir(ORDER[view] >= ORDER[current] ? "forward" : "back");
   void router.navigate({ to: view === "store" ? "/store" : "/" });
+}
+
+type SurfaceRoute =
+  | { to: "/tickets"; params?: undefined }
+  | { to: "/runs"; params?: undefined }
+  | { to: "/approvals"; params?: undefined }
+  | { to: "/agents"; params?: undefined }
+  | { to: "/memory"; params?: undefined }
+  | { to: "/files"; params?: undefined }
+  | { to: "/prompts"; params?: undefined }
+  | { to: "/scores"; params?: undefined }
+  | { to: "/crons"; params?: undefined }
+  | { to: "/vcs"; params?: undefined }
+  | { to: "/workflow/$id"; params: { id: string } }
+  | { to: "/palette"; params?: undefined }
+  | { to: "/gw/$workflowKey/$runId"; params: { workflowKey: string; runId: string } }
+  | { to: "/gw/$workflowKey/$runId/logs"; params: { workflowKey: string; runId: string } }
+  | { to: "/gw/$workflowKey/$runId/diff/$diffId"; params: { workflowKey: string; runId: string; diffId: string } }
+  | { to: "/gw/$workflowKey/$runId/tickets"; params: { workflowKey: string; runId: string } }
+  | { to: "/gw/$workflowKey/$runId/timeline"; params: { workflowKey: string; runId: string } };
+
+function fallbackWorkflowKey(runId: string): string {
+  return runId;
+}
+
+function gatewayRunRoute(
+  workflowKey: string,
+  runId: string,
+  view: Surface["kind"] | NonNullable<Extract<Surface, { kind: "gatewayRun" }>["view"]>,
+  diffId?: string,
+): SurfaceRoute {
+  switch (view) {
+    case "logs":
+      return { to: "/gw/$workflowKey/$runId/logs", params: { workflowKey, runId } };
+    case "diff":
+      return {
+        to: "/gw/$workflowKey/$runId/diff/$diffId",
+        params: { workflowKey, runId, diffId: diffId ?? "root" },
+      };
+    case "tickets":
+      return { to: "/gw/$workflowKey/$runId/tickets", params: { workflowKey, runId } };
+    case "timeline":
+      return { to: "/gw/$workflowKey/$runId/timeline", params: { workflowKey, runId } };
+    default:
+      return { to: "/gw/$workflowKey/$runId", params: { workflowKey, runId } };
+  }
+}
+
+export function surfaceToRoute(surface: Surface): SurfaceRoute {
+  switch (surface.kind) {
+    case "inspector":
+      return gatewayRunRoute(fallbackWorkflowKey(surface.runId), surface.runId, "inspector");
+    case "logs":
+      return gatewayRunRoute(fallbackWorkflowKey(surface.runId), surface.runId, "logs");
+    case "diff":
+      return gatewayRunRoute(fallbackWorkflowKey(surface.runId), surface.runId, "diff", surface.diffId);
+    case "timeline":
+      return gatewayRunRoute(fallbackWorkflowKey(surface.runId), surface.runId, "timeline");
+    case "gatewayRun":
+      return gatewayRunRoute(
+        surface.workflowKey,
+        surface.runId,
+        surface.view ?? "inspector",
+        surface.diffId,
+      );
+    case "tickets":
+      return { to: "/tickets" };
+    case "runs":
+      return { to: "/runs" };
+    case "approvals":
+      return { to: "/approvals" };
+    case "agents":
+      return { to: "/agents" };
+    case "memory":
+      return { to: "/memory" };
+    case "files":
+      return { to: "/files" };
+    case "prompts":
+      return { to: "/prompts" };
+    case "scores":
+      return { to: "/scores" };
+    case "crons":
+      return { to: "/crons" };
+    case "vcs":
+      return { to: "/vcs" };
+    case "workflowEditor":
+      return { to: "/workflow/$id", params: { id: surface.id } };
+    case "palette":
+      return { to: "/palette" };
+  }
 }
 
 /**
@@ -27,59 +119,7 @@ export function goToView(view: View): void {
  * preference.
  */
 export function openSurface(surface: Surface): void {
-  switch (surface.kind) {
-    case "inspector":
-      void router.navigate({ to: "/runs/$runId", params: { runId: surface.runId } });
-      return;
-    case "logs":
-      void router.navigate({ to: "/runs/$runId/logs", params: { runId: surface.runId } });
-      return;
-    case "diff":
-      void router.navigate({
-        to: "/runs/$runId/diff/$diffId",
-        params: { runId: surface.runId, diffId: surface.diffId },
-      });
-      return;
-    case "timeline":
-      void router.navigate({ to: "/runs/$runId/timeline", params: { runId: surface.runId } });
-      return;
-    case "tickets":
-      void router.navigate({ to: "/tickets" });
-      return;
-    case "runs":
-      void router.navigate({ to: "/runs" });
-      return;
-    case "approvals":
-      void router.navigate({ to: "/approvals" });
-      return;
-    case "agents":
-      void router.navigate({ to: "/agents" });
-      return;
-    case "memory":
-      void router.navigate({ to: "/memory" });
-      return;
-    case "prompts":
-      void router.navigate({ to: "/prompts" });
-      return;
-    case "scores":
-      void router.navigate({ to: "/scores" });
-      return;
-    case "crons":
-      void router.navigate({ to: "/crons" });
-      return;
-    case "workflowEditor":
-      void router.navigate({ to: "/workflow/$id", params: { id: surface.id } });
-      return;
-    case "palette":
-      void router.navigate({ to: "/palette" });
-      return;
-    case "gatewayRun":
-      void router.navigate({
-        to: "/gw/$workflowKey/$runId",
-        params: { workflowKey: surface.workflowKey, runId: surface.runId },
-      });
-      return;
-  }
+  void router.navigate(surfaceToRoute(surface));
 }
 
 /** Close the canvas surface, returning to the dashboard. */
@@ -91,4 +131,13 @@ export function closeSurface(): void {
 export function setProject(project: string): void {
   const search = router.state.location.search as Record<string, unknown>;
   void router.navigate({ to: ".", search: { ...search, project } });
+}
+
+/** Select a local workspace root, carried as a retained root search param. */
+export function setWorkspaceRootSearchParam(workspaceRoot: string): void {
+  const search = router.state.location.search as Record<string, unknown>;
+  void router.navigate({
+    to: ".",
+    search: { ...search, workspace: workspaceRoot },
+  });
 }

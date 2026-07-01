@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import { SmithersGatewayProvider, SyncProvider } from "@smithers-orchestrator/gateway-react";
@@ -15,6 +15,7 @@ import { ScoresBridge } from "./scores/ScoresBridge";
 import { TicketsBridge } from "./tickets/TicketsBridge";
 import { startApprovalWatcher } from "./runs/watchApprovals";
 import { appGatewayCollections } from "./sync/appGatewayCollections";
+import { useWorkspaceStore } from "./app/workspaceStore";
 import "./styles.css";
 
 // Wire the router into the route store and the dock before the first paint, so
@@ -43,13 +44,26 @@ function GatewayBridges() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
+function LocalWorkspaceRuntime() {
+  const initialize = useWorkspaceStore((state) => state.initialize);
+  const ready = useWorkspaceStore((state) => state.status === "ready");
+
+  useEffect(() => {
+    void initialize();
+  }, [initialize]);
+
+  return (
     <SmithersGatewayProvider client={getGatewayClient()}>
       <SyncProvider client={appGatewayCollections}>
-        <GatewayBridges />
+        {ready ? <GatewayBridges /> : null}
         <RouterProvider router={router} />
       </SyncProvider>
     </SmithersGatewayProvider>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <LocalWorkspaceRuntime />
   </StrictMode>,
 );

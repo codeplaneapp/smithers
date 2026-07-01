@@ -11,17 +11,16 @@ import { ControlRing } from "../control/ControlRing";
 import { ControlRequestDialog } from "../control/ControlRequestDialog";
 import { ComposerBar } from "./ComposerBar";
 import { CornerLogo } from "./CornerLogo";
+import { WorkspacePicker } from "./WorkspacePicker";
 import { deriveAppShellDecision } from "./appShellDecision";
 import { usePreferencesStore } from "./preferencesStore";
 import { useRouteStore } from "./routeStore";
 import { useUiStore } from "./uiStore";
+import { useWorkspaceStore } from "./workspaceStore";
 
 /**
- * The application shell. This is the chat-first surface of the cloud app, ported
- * to talk only to a local gateway: the composer + transcript rail (or the
- * centered composer in "normal" layout) drive a local concierge that answers and
- * backgrounds Smithers workflows; the canvas hosts the active surface through
- * <Outlet/>. No cloud chrome (no auth, no Pair, no onboarding gate).
+ * The application shell for the local UI. It gates the app on a usable local
+ * workspace, then hosts the local gateway-backed surfaces and concierge chat.
  */
 export function AppShell() {
   const layout = usePreferencesStore((state) => state.layout);
@@ -30,6 +29,9 @@ export function AppShell() {
   const surface = useRouteStore((state) => state.surface);
   const messagesCount = useChatStore((state) => state.messages.length);
   const navDir = useUiStore((state) => state.navDir);
+  const selectedWorkspaceRoot = useWorkspaceStore((state) => state.selectedWorkspaceRoot);
+  const ready = useWorkspaceStore((state) => state.status === "ready");
+  const clearSelectedWorkspace = useWorkspaceStore((state) => state.clearSelectedWorkspace);
   const rail = useRailStore();
 
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -43,6 +45,10 @@ export function AppShell() {
   });
 
   const { effectiveLayout, mode, showTranscript, canvasKey } = frame;
+
+  if (!ready) {
+    return <WorkspacePicker />;
+  }
 
   return (
     <main className={rail.resizing ? "app-shell is-resizing" : "app-shell"} data-mode={mode}>
@@ -75,6 +81,15 @@ export function AppShell() {
                 </button>
               ) : null}
             </header>
+            {selectedWorkspaceRoot ? (
+              <div className="nav-workspace" title={selectedWorkspaceRoot}>
+                <span>Workspace</span>
+                <strong>{selectedWorkspaceRoot}</strong>
+                <button type="button" onClick={clearSelectedWorkspace}>
+                  Change
+                </button>
+              </div>
+            ) : null}
             <ChatTranscript />
             <div className="composer-dock">
               <ComposingCard />

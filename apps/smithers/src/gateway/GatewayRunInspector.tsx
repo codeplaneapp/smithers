@@ -128,6 +128,13 @@ export function GatewayRunInspector({
           >
             Inspector
           </button>
+          <button
+            type="button"
+            data-testid="gateway-view-timeline"
+            onClick={() => openSurface({ kind: "gatewayRun", workflowKey, runId, view: "timeline" })}
+          >
+            Timeline
+          </button>
         </div>
       </header>
 

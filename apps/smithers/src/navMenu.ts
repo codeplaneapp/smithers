@@ -18,6 +18,8 @@ export const NAV_LINKS: NavLink[] = [
   { id: "approvals", label: "Approvals", surface: { kind: "approvals" } },
   { id: "agents", label: "Agents", surface: { kind: "agents" } },
   { id: "memory", label: "Memory", surface: { kind: "memory" } },
+  { id: "files", label: "Files", surface: { kind: "files" } },
+  { id: "vcs", label: "VCS", surface: { kind: "vcs" } },
   { id: "prompts", label: "Prompts", surface: { kind: "prompts" } },
   { id: "scores", label: "Scores", surface: { kind: "scores" } },
   { id: "crons", label: "Crons", surface: { kind: "crons" } },

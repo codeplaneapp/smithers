@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { readLocalVcsSnapshot } from "./src/vcs/localAdapter";
 
 /**
  * Local-only Smithers UI build.
@@ -18,6 +19,37 @@ import { defineConfig } from "vite";
 const gatewayTarget = process.env.SMITHERS_GATEWAY_PROXY_TARGET ?? "http://127.0.0.1:7331";
 // The local concierge server owns `/api/chat` (the chat backend).
 const conciergeTarget = process.env.SMITHERS_CONCIERGE_PROXY_TARGET ?? "http://127.0.0.1:5179";
+const workspaceRoot = process.env.SMITHERS_WORKSPACE_ROOT ?? process.cwd();
+
+function localVcsMiddleware() {
+  return async (
+    req: { url?: string },
+    res: {
+      statusCode: number;
+      setHeader: (name: string, value: string) => void;
+      end: (body: string) => void;
+    },
+    next: () => void,
+  ) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname !== "/__smithers/vcs") {
+      next();
+      return;
+    }
+    try {
+      const snapshot = await readLocalVcsSnapshot(workspaceRoot);
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json; charset=utf-8");
+      res.end(JSON.stringify(snapshot));
+    } catch (error) {
+      res.statusCode = 500;
+      res.setHeader("content-type", "application/json; charset=utf-8");
+      res.end(
+        JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+      );
+    }
+  };
+}
 
 // One instance of each of these must exist across the app AND the linked
 // gateway packages, or `useLiveQuery` subscribes to a different module's
@@ -32,7 +64,18 @@ const dedupe = [
 ];
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: "smithers-local-vcs",
+      configureServer(server) {
+        server.middlewares.use(localVcsMiddleware());
+      },
+      configurePreviewServer(server) {
+        server.middlewares.use(localVcsMiddleware());
+      },
+    },
+  ],
   resolve: { dedupe },
   server: {
     host: "127.0.0.1",

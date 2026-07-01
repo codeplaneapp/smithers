@@ -56,6 +56,14 @@ export const APPS: App[] = [
     workflowIds: ["research", "workflow-skill"],
   },
   {
+    id: "files",
+    name: "Files",
+    icon: "▤",
+    color: "#7a6a2a",
+    target: { kind: "surface", surface: { kind: "files" } },
+    workflowIds: ["implement", "review"],
+  },
+  {
     id: "prompts",
     name: "Prompts",
     icon: "❝",
@@ -80,6 +88,14 @@ export const APPS: App[] = [
     workflowIds: ["ralph", "mission"],
   },
   {
+    id: "vcs",
+    name: "VCS",
+    icon: "⌁",
+    color: "#6f6a4f",
+    target: { kind: "surface", surface: { kind: "vcs" } },
+    workflowIds: ["implement", "review"],
+  },
+  {
     id: "store",
     name: "Store",
     icon: "▦",
@@ -100,14 +116,21 @@ export function getApp(id: AppId): App | undefined {
  * (home, askme, a run surface, a utility surface). Surface apps match by kind;
  * the store app matches the `store` view.
  */
-export function activeAppId(route: { view: View; surface: Surface | null }): AppId | null {
+export function activeAppId(route: {
+  view: View;
+  surface: Surface | null;
+}): AppId | null {
   if (route.surface) {
     const match = APPS.find(
-      (app) => app.target.kind === "surface" && app.target.surface.kind === route.surface!.kind,
+      (app) =>
+        app.target.kind === "surface" &&
+        app.target.surface.kind === route.surface!.kind,
     );
     return match?.id ?? null;
   }
-  const match = APPS.find((app) => app.target.kind === "view" && app.target.view === route.view);
+  const match = APPS.find(
+    (app) => app.target.kind === "view" && app.target.view === route.view,
+  );
   return match?.id ?? null;
 }
 

@@ -475,7 +475,7 @@ function RunsTab({ doc }: { doc: WorkflowDoc }) {
             key={run.id}
             type="button"
             className="wfe-runs-row"
-            onClick={() => openSurface({ kind: "inspector", runId: run.id })}
+            onClick={() => openSurface({ kind: "gatewayRun", workflowKey: doc.id, runId: run.id })}
             data-testid="wfe-runs-row"
           >
             <span className={`rev-dot ${toneForRunStatus(run.status)}`} />

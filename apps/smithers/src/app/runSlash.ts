@@ -1,5 +1,5 @@
 import { useChatStore } from "../chat/chatStore";
-import { useRunsStore } from "../runs/runsStore";
+import { useRunsListStore } from "../runs/runsListStore";
 import { startWorkflowRun } from "../gateway/startWorkflowRun";
 import { openSurface } from "./navigation";
 
@@ -22,12 +22,12 @@ export function composeThenLaunchRun(
 /**
  * Route a feature slash command to a canvas surface or a gateway action. Returns
  * false for anything it does not own. Local-only: the cloud-only slashes (vcs,
- * files, terminal, issues, landings, onboarding) are gone; everything else opens
+ * terminal, issues, landings, onboarding) are gone; everything else opens
  * the matching gateway-backed surface.
  */
 export function runSlash(name: string, arg: string): boolean {
-  const runs = useRunsStore.getState().runs;
-  const latest = runs[runs.length - 1]?.id;
+  const runs = useRunsListStore.getState().runs;
+  const latest = runs[0];
   const chat = useChatStore.getState();
   switch (name) {
     case "run":
@@ -39,7 +39,12 @@ export function runSlash(name: string, arg: string): boolean {
       return true;
     case "logs":
       if (latest) {
-        openSurface({ kind: "logs", runId: latest });
+        openSurface({
+          kind: "gatewayRun",
+          workflowKey: latest.workflowKey || latest.runId,
+          runId: latest.runId,
+          view: "logs",
+        });
       } else {
         chat.say("No run selected. Start a workflow first.");
       }
@@ -47,7 +52,12 @@ export function runSlash(name: string, arg: string): boolean {
     case "timeline":
     case "fork":
       if (latest) {
-        openSurface({ kind: "timeline", runId: latest });
+        openSurface({
+          kind: "gatewayRun",
+          workflowKey: latest.workflowKey || latest.runId,
+          runId: latest.runId,
+          view: "timeline",
+        });
       } else {
         chat.say("No run selected yet.");
       }
@@ -65,6 +75,9 @@ export function runSlash(name: string, arg: string): boolean {
       return true;
     case "memory":
       openSurface({ kind: "memory" });
+      return true;
+    case "files":
+      openSurface({ kind: "files" });
       return true;
     case "eval":
     case "scores":

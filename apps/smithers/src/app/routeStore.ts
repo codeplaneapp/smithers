@@ -6,10 +6,12 @@ export type View = "home" | "store" | "notFound";
 
 export type RouteState = {
   view: View;
-  /** The focused canvas surface, when a `/runs/...` route is active. */
+  /** The focused canvas surface, when a detail or top-level surface route is active. */
   surface: Surface | null;
   /** The selected project, carried as a root search param. */
   project: string | undefined;
+  /** The selected local workspace root, carried as a root search param. */
+  workspaceRoot: string | undefined;
 };
 
 /**
@@ -22,4 +24,5 @@ export const useRouteStore = create<RouteState>(() => ({
   view: "home",
   surface: null,
   project: undefined,
+  workspaceRoot: undefined,
 }));
