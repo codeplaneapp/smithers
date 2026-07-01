@@ -179,12 +179,13 @@ export function routeApprovalKey(
   ctx: { hasApproval: boolean; isHumanRequest: boolean; mode: ApprovalMode; busy: boolean },
 ): ApprovalKeyAction | null {
   if (!ctx.hasApproval || ctx.isHumanRequest) return null;
-  if ((key === "[" || key === "]") && ctx.mode === "select") {
-    return { kind: "cycle", dir: key === "]" ? 1 : -1 };
+  const normalizedKey = key.length === 1 ? key.toLowerCase() : key;
+  if ((normalizedKey === "[" || normalizedKey === "]") && ctx.mode === "select") {
+    return { kind: "cycle", dir: normalizedKey === "]" ? 1 : -1 };
   }
   if (ctx.busy) return null;
-  if (key === "a") return { kind: "approve" };
-  if (key === "d") return { kind: "deny" };
+  if (normalizedKey === "a") return { kind: "approve" };
+  if (normalizedKey === "d") return { kind: "deny" };
   return null;
 }
 

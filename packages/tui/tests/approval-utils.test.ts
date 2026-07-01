@@ -270,6 +270,11 @@ describe("routeApprovalKey (pane-independent banner controls)", () => {
     expect(routeApprovalKey("d", ctx)).toEqual({ kind: "deny" });
   });
 
+  it("normalizes single-character approval keys from terminal input", () => {
+    expect(routeApprovalKey("A", ctx)).toEqual({ kind: "approve" });
+    expect(routeApprovalKey("D", ctx)).toEqual({ kind: "deny" });
+  });
+
   it("routes `[`/`]` to option cycling only in select mode", () => {
     const select = { ...ctx, mode: "select" as const };
     expect(routeApprovalKey("]", select)).toEqual({ kind: "cycle", dir: 1 });
