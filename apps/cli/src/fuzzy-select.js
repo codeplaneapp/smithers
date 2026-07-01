@@ -144,6 +144,26 @@ function terminalRows() {
 }
 
 /**
+ * Some readline implementations keep DEL/BS bytes in `line` for synthetic TTYs.
+ * Treat them as editing commands before filtering so tests and Bun-backed
+ * interactive sessions stay aligned.
+ *
+ * @param {string} input
+ * @returns {string}
+ */
+function normalizeBackspaces(input) {
+    const chars = [];
+    for (const char of String(input ?? "")) {
+        if (char === "\b" || char === "\x7f") {
+            chars.pop();
+        } else {
+            chars.push(char);
+        }
+    }
+    return chars.join("");
+}
+
+/**
  * A type-to-filter picker built on clack's `Prompt` base class. We subclass
  * `Prompt` directly (NOT `SelectPrompt`) with `trackValue=true` so the base
  * pipes readline and keeps `this.value` in sync with the typed query — letters
@@ -196,7 +216,15 @@ class FuzzySelectPrompt extends Prompt {
         // Re-filter on every keystroke. Typing AND backspace both edit rl.line,
         // so the base re-emits "userInput" for both — this covers backspace free.
         this.on("userInput", () => {
-            this.query = this.userInput ?? "";
+            const query = normalizeBackspaces(this.userInput ?? "");
+            if (query !== this.userInput) {
+                this.userInput = query;
+                if (this.rl) {
+                    this.rl.line = query;
+                    this.rl.cursor = query.length;
+                }
+            }
+            this.query = query;
             this.filtered = fuzzyFilter(this.query, this.allOptions);
             if (this._cursor > this.filtered.length - 1) {
                 this._cursor = Math.max(0, this.filtered.length - 1);
