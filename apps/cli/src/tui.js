@@ -49,6 +49,7 @@ const STATE_BADGE = {
     "waiting-approval": pc.yellow,
     "waiting-event": pc.yellow,
     "waiting-timer": pc.yellow,
+    "waiting-quota": pc.yellow,
     recovering: pc.cyan,
     failed: pc.red,
     succeeded: pc.green,

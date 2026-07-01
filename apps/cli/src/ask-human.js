@@ -14,6 +14,7 @@ export const ACTIVE_RUN_STATUSES = new Set([
     "waiting-approval",
     "waiting-event",
     "waiting-timer",
+    "waiting-quota",
 ]);
 
 /**
