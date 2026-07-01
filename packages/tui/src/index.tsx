@@ -119,15 +119,17 @@ const PROBE_HEADERS = GATEWAY_TOKEN ? { authorization: `Bearer ${GATEWAY_TOKEN}`
 
 // Per-request timeout for the /health probe. A process bound to the port but not
 // answering would otherwise hang a single fetch (and the whole startup budget)
-// indefinitely; the AbortSignal caps each attempt well under the 30s autostart
+// indefinitely; the AbortSignal caps each attempt well under the autostart
 // budget so a stuck socket reports "not reachable" quickly and the retry/autostart
 // loop keeps polling instead of blocking forever.
 const PROBE_REQUEST_TIMEOUT_MS = 3000;
+const AUTOSTART_TIMEOUT_MS = 90_000;
+const AUTOSTART_PROBE_TIMEOUT_MS = 1000;
 
-async function probeGateway(): Promise<boolean> {
+async function probeGateway(timeoutMs = PROBE_REQUEST_TIMEOUT_MS): Promise<boolean> {
   return fetch(`${GATEWAY_BASE}/health`, {
     headers: PROBE_HEADERS,
-    signal: AbortSignal.timeout(PROBE_REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   }).then((r) => r.ok, () => false);
 }
 
@@ -154,9 +156,11 @@ async function autoStartGateway(): Promise<boolean> {
   } catch {
     return false;
   }
-  for (let i = 0; i < 60; i++) {
+  const deadline = Date.now() + AUTOSTART_TIMEOUT_MS;
+  while (Date.now() < deadline) {
     await Bun.sleep(500);
-    if (await probeGateway()) return true;
+    const remainingMs = Math.max(250, deadline - Date.now());
+    if (await probeGateway(Math.min(AUTOSTART_PROBE_TIMEOUT_MS, remainingMs))) return true;
   }
   return false;
 }
