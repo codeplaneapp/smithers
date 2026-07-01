@@ -43,6 +43,21 @@ function snapshotRows(payload: unknown): GatewayRunNode[] {
   );
 }
 
+/**
+ * Reserved row key for the single latest `run.heartbeat`. Heartbeat frames carry
+ * a CONNECTION seq (not a per-run event seq — see `SyncTransport`), so keying
+ * them by `seq` like real events (a) mixes two sequence domains in one collection
+ * and (b) lets every heartbeat land as its OWN row, consuming the bounded
+ * `runEvents` ring and evicting real events (defeating callers that asked for
+ * `maxEvents` history). Instead every heartbeat maps to THIS one reserved key, so
+ * they collapse to a single latest-heartbeat row in a separate keyspace: it never
+ * accumulates, and — being the maximum possible numeric key — it always sorts to
+ * the end of the ring's eviction order, so it is never among the evicted low keys
+ * and can never push a real event out. `Number.MAX_SAFE_INTEGER` is safely above
+ * any real per-run event seq, so the keyspaces never collide.
+ */
+export const RUN_HEARTBEAT_ROW_KEY = Number.MAX_SAFE_INTEGER;
+
 export function eventRows(frame: { key: readonly unknown[]; seq?: number; event: string; payload: unknown }): GatewayRunEventRow[] {
   if (typeof frame.seq !== "number") return [];
   return [{
@@ -196,12 +211,21 @@ export const gatewayCollectionDefs = {
     // Thread the effective cap into the key so different caps resolve to
     // different collections (each sized to its own `maxRows` ring below).
     key: gatewayKeys.runEvents(runId, maxRows),
-    getKey: (row: GatewayRunEventRow) => row.seq,
+    // Real run events key by their per-run `seq`; every `run.heartbeat` collapses
+    // to the reserved `RUN_HEARTBEAT_ROW_KEY` so heartbeats occupy a single,
+    // non-evicting slot instead of flooding the ring and evicting real events
+    // (and so the connection-seq heartbeat domain never collides with event seqs).
+    getKey: (row: GatewayRunEventRow) =>
+      row.event === "run.heartbeat" ? RUN_HEARTBEAT_ROW_KEY : row.seq,
     stream: {
       scope: "streamRunEvents",
       params: { runId },
       frameToRows: eventRows,
-      maxRows,
+      // Size the ring to `maxRows` REAL events plus one reserved slot for the
+      // pinned `RUN_HEARTBEAT_ROW_KEY` heartbeat row, so a caller asking for
+      // `maxRows` events always retains that many real events even while the
+      // latest heartbeat is present (the heartbeat never steals an event slot).
+      maxRows: maxRows + 1,
     },
   }),
 } as const;

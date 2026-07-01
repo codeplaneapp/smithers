@@ -1,7 +1,7 @@
 import { createCollection } from "@tanstack/db";
 import { describe, expect, test } from "bun:test";
 import { createGatewayCollection } from "../../src/sync/createGatewayCollection.ts";
-import { gatewayCollectionDefs } from "../../src/sync/gatewayCollectionDefs.ts";
+import { RUN_HEARTBEAT_ROW_KEY, gatewayCollectionDefs } from "../../src/sync/gatewayCollectionDefs.ts";
 import { gatewayKeys } from "../../src/sync/gatewayKeys.ts";
 import type { GatewayRunEventRow } from "../../src/sync/GatewayRunEventRow.ts";
 import type { SyncStreamFrame, SyncTransport } from "../../src/sync/SyncTransport.ts";
@@ -224,6 +224,54 @@ describe("createGatewayCollection", () => {
 
     await waitFor(() => collection.size === 3 && collection.has(5));
     expect(Array.from(collection.keys())).toEqual([3, 4, 5]);
+  });
+
+  test("heartbeats collapse to one reserved-key row and never evict real events under the cap", async () => {
+    const stream = controllableStreamTransport(() => Promise.resolve([]));
+    // Drive the REAL runEvents def (its heartbeat-aware getKey + `eventRows`
+    // mapper + reserved-slot ring), asking for a cap of 3 real events.
+    const def = gatewayCollectionDefs.runEvents("run-1", 3);
+    const collection = createCollection<GatewayRunEventRow, number>(
+      createGatewayCollection<GatewayRunEventRow, number>({
+        key: def.key,
+        client: stream.transport,
+        getKey: def.getKey,
+        stream: def.stream,
+      }),
+    );
+
+    await collection.preload();
+
+    // Real events 1..3, then a burst of heartbeats (each with a DISTINCT
+    // connection seq — the domain that would otherwise flood the ring), then
+    // more real events, interleaved with more heartbeats.
+    const pushEvent = (seq: number) =>
+      stream.push({ key: gatewayKeys.runEvents("run-1"), seq, event: "run.event", payload: { seq } });
+    const pushHeartbeat = (seq: number) =>
+      stream.push({ key: gatewayKeys.runEvents("run-1"), seq, event: "run.heartbeat", payload: { at: seq } });
+
+    pushEvent(1);
+    pushEvent(2);
+    pushEvent(3);
+    for (let hb = 100; hb <= 110; hb += 1) pushHeartbeat(hb);
+    pushEvent(4);
+    pushEvent(5);
+    pushEvent(6);
+    pushHeartbeat(111);
+
+    // The three most-recent REAL events survive in full despite 12 heartbeats —
+    // heartbeats never stole a real-event slot. Wait until the LATEST heartbeat
+    // (payload.at === 111) has drained so the assertions see the settled ring.
+    await waitFor(() =>
+      collection.has(6) &&
+      (collection.get(RUN_HEARTBEAT_ROW_KEY)?.payload as { at?: number } | undefined)?.at === 111,
+    );
+    const eventKeys = Array.from(collection.keys()).filter((k) => k !== RUN_HEARTBEAT_ROW_KEY).sort((a, b) => a - b);
+    expect(eventKeys).toEqual([4, 5, 6]);
+    // Exactly ONE heartbeat row (the latest), not one per heartbeat frame.
+    const heartbeatRows = Array.from(collection.values()).filter((row) => row.event === "run.heartbeat");
+    expect(heartbeatRows).toHaveLength(1);
+    expect(heartbeatRows[0]?.payload).toEqual({ at: 111 });
   });
 
   test("routes auth failures to onAuthError without creating blob collections", async () => {

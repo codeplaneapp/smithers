@@ -931,28 +931,41 @@ describe("useGatewayRunEvents over the runEvents collection", () => {
           event: "run.event",
           payload: { seq },
         });
+        // A BURST of heartbeats (distinct connection seqs) around each event: none
+        // of them may occupy an `events` slot or displace a real event — they all
+        // collapse to the single reserved heartbeat row, surfaced only via
+        // `lastHeartbeat`.
         if (seq === 3) {
-          stream.push("streamRunEvents", "run-1", {
-            key: gatewayKeys.runEvents("run-1"),
-            seq: 103,
-            event: "run.heartbeat",
-            payload: {},
-          });
+          for (const hbSeq of [101, 102, 103]) {
+            stream.push("streamRunEvents", "run-1", {
+              key: gatewayKeys.runEvents("run-1"),
+              seq: hbSeq,
+              event: "run.heartbeat",
+              payload: { at: hbSeq },
+            });
+          }
         }
         if (seq === 6) {
-          stream.push("streamRunEvents", "run-1", {
-            key: gatewayKeys.runEvents("run-1"),
-            seq: 106,
-            event: "run.heartbeat",
-            payload: {},
-          });
+          for (const hbSeq of [104, 105, 106]) {
+            stream.push("streamRunEvents", "run-1", {
+              key: gatewayKeys.runEvents("run-1"),
+              seq: hbSeq,
+              event: "run.heartbeat",
+              payload: { at: hbSeq },
+            });
+          }
         }
       }
     });
 
     await waitFor(() => snapshot?.events.length === 5 && snapshot?.lastHeartbeat?.seq === 106);
     expect(snapshot?.events.every((f) => f.event !== "run.heartbeat")).toBe(true);
+    // All 8 real events retained under the cap (last 5 shown); the 6 heartbeats
+    // did not evict or crowd out any real event.
     expect(snapshot?.events.map((f) => f.seq)).toEqual([4, 5, 6, 7, 8]);
+    // `lastHeartbeat` reflects the most recent heartbeat frame.
+    expect(snapshot?.lastHeartbeat?.event).toBe("run.heartbeat");
+    expect(snapshot?.lastHeartbeat?.payload).toEqual({ at: 106 });
     expect(snapshot?.streaming).toBe(true);
 
     await harness.unmount();

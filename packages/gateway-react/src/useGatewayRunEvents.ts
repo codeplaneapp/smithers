@@ -18,10 +18,13 @@ function toFrame(row: GatewayRunEventRow): GatewayEventFrame {
 
 /**
  * Live run-event buffer over the bounded `runEvents` collection
- * (`streamRunEventsResilient` with afterSeq resume). Heartbeats are surfaced
- * separately via `lastHeartbeat` and never enter `events`; the events array is
- * capped to `maxEvents` (most-recent wins). Same return shape the streaming
- * hook had.
+ * (`streamRunEventsResilient` with afterSeq resume). Every `run.heartbeat`
+ * collapses to a single reserved-key row in the collection (see
+ * `RUN_HEARTBEAT_ROW_KEY`), so heartbeats never accumulate in — or evict real
+ * events from — the `maxEvents` ring. They are surfaced separately via
+ * `lastHeartbeat` and never enter `events`; the events array holds only real run
+ * events, capped to `maxEvents` (most-recent wins). Same return shape the
+ * streaming hook had.
  */
 export function useGatewayRunEvents(
   runId: string | undefined,

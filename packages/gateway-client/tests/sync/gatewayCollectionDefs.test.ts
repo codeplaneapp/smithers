@@ -2,6 +2,7 @@ import { createCollection } from "@tanstack/db";
 import { describe, expect, test } from "bun:test";
 import { createGatewayCollection } from "../../src/sync/createGatewayCollection.ts";
 import {
+  RUN_HEARTBEAT_ROW_KEY,
   eventRows,
   gatewayCollectionDefs,
   runRowsFromFrame,
@@ -185,11 +186,18 @@ describe("gatewayCollectionDefs", () => {
     expect(runEvents).toMatchObject({
       // The cap is part of the key so different caps resolve to distinct collections.
       key: ["gateway:streamRunEvents", { runId: "run-1", maxRows: 2 }],
-      stream: { scope: "streamRunEvents", params: { runId: "run-1" }, maxRows: 2 },
+      // The ring reserves one extra slot for the pinned heartbeat row, so the
+      // requested cap (2) still retains 2 REAL events alongside the heartbeat.
+      stream: { scope: "streamRunEvents", params: { runId: "run-1" }, maxRows: 3 },
     });
     // A larger cap yields a DIFFERENT key (no first-subscriber-wins collision).
     expect(gatewayCollectionDefs.runEvents("run-1", 2000).key).not.toEqual(runEvents.key);
+    // Real events key by their per-run `seq`.
     expect(runEvents.getKey({ key: ["gateway:streamRunEvents", { runId: "run-1" }], seq: 12, event: "event", payload: {} })).toBe(12);
+    // Every heartbeat collapses to the single reserved key (a separate keyspace
+    // from event seqs), so heartbeats never accumulate or collide with events.
+    expect(runEvents.getKey({ key: ["gateway:streamRunEvents", { runId: "run-1" }], seq: 999, event: "run.heartbeat", payload: {} })).toBe(RUN_HEARTBEAT_ROW_KEY);
+    expect(RUN_HEARTBEAT_ROW_KEY).toBeGreaterThan(2000);
   });
 });
 
