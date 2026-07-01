@@ -1,8 +1,8 @@
 /**
  * Format a list of WorkflowDefinitions as a human-readable prompt string.
  *
- * Mirrors the pattern elizaOS uses to inject skill lists into system prompts,
- * so an LLM can read the available workflows and invoke them by name.
+ * Mirrors the pattern elizaOS uses to inject skill lists into system prompts.
+ * Workflows with `disableModelInvocation: true` are omitted from the output.
  *
  * @module
  */
@@ -10,31 +10,19 @@
 import type { WorkflowDefinition } from "./types.js";
 
 export interface FormatWorkflowsOptions {
-  /**
-   * Heading to inject above the list.
-   * Defaults to "## Available Workflows".
-   */
+  /** Heading to inject above the list. Defaults to "## Available Workflows". */
   heading?: string;
-  /**
-   * Whether to include tags in the formatted output.
-   * Defaults to `true`.
-   */
+  /** Whether to include tags in the formatted output. Defaults to `true`. */
   includeTags?: boolean;
-  /**
-   * Whether to include aliases in the formatted output.
-   * Defaults to `true`.
-   */
+  /** Whether to include aliases in the formatted output. Defaults to `true`. */
   includeAliases?: boolean;
 }
 
 /**
  * Render a list of WorkflowDefinitions as a Markdown-ish prompt section.
  *
- * @example
- * ```ts
- * const section = formatWorkflowsForPrompt(workflows);
- * // "## Available Workflows\n\n- **close-issues**: Fix open GitHub issues.\n..."
- * ```
+ * Workflows with `disableModelInvocation: true` are excluded so the LLM cannot
+ * invoke them (matching elizaOS `formatSkillsForPrompt` behavior).
  */
 export function formatWorkflowsForPrompt(
   workflows: WorkflowDefinition[],
@@ -46,13 +34,15 @@ export function formatWorkflowsForPrompt(
     includeAliases = true,
   } = options;
 
-  if (workflows.length === 0) {
+  const visible = workflows.filter((w) => !w.disableModelInvocation);
+
+  if (visible.length === 0) {
     return `${heading}\n\n(none)`;
   }
 
   const lines: string[] = [heading, ""];
 
-  for (const w of workflows) {
+  for (const w of visible) {
     const parts: string[] = [`- **${w.name}**: ${w.description || "(no description)"}`];
 
     if (includeTags && w.tags && w.tags.length > 0) {

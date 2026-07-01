@@ -19,14 +19,18 @@ export type {
   LoadWorkflowsResult,
   LoadWorkflowsOptions,
   WorkflowPlugin,
+  ElizaSkill,
 } from "./types.js";
 
 export {
   parseWorkflowFrontmatter,
+  stripFrontmatter,
+  serializeWorkflowFile,
   serializeWorkflowFrontmatter,
 } from "./frontmatter.js";
 
 export { defineWorkflow, defineWorkflowPlugin } from "./define.js";
+export type { DefineWorkflowInput } from "./define.js";
 
 export { loadWorkflowsFromDir, loadWorkflows } from "./loader.js";
 
@@ -38,4 +42,4 @@ export {
   toSkill,
   pluginToElizaPlugin,
 } from "./register.js";
-export type { WorkflowRegistry, ElizaAction } from "./register.js";
+export type { WorkflowRegistry } from "./register.js";

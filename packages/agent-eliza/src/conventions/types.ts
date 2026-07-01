@@ -5,9 +5,11 @@
  * can author, load, and register Smithers workflows with familiar patterns.
  */
 
+import type { SmithersWorkflow } from "smithers-orchestrator";
+
 /**
  * The parsed frontmatter block from a workflow file.
- * Matches the `/* smithers ... *\/` block format that Smithers uses.
+ * Uses `---`-fenced YAML blocks, matching the elizaOS Skill frontmatter convention.
  */
 export interface WorkflowFrontmatter {
   name?: string;
@@ -42,12 +44,9 @@ export interface WorkflowDefinition {
   baseDir?: string;
   /** Raw source text of the workflow file. */
   source?: string;
-  /**
-   * The actual Smithers WorkflowDefinition (the object with `.build` and `.opts`).
-   * Typed `unknown` here so this package does not need a hard dep on
-   * `@smithers-orchestrator/driver`.
-   */
-  workflow: unknown;
+  /** The actual Smithers workflow (the object with `.build` and `.opts`). */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  workflow: SmithersWorkflow<any>;
 }
 
 /** One entry emitted by the loader — pairs a resolved definition with raw metadata. */
@@ -99,4 +98,15 @@ export interface WorkflowPlugin {
   name: string;
   description: string;
   workflows: WorkflowDefinition[];
+}
+
+/**
+ * Minimal elizaOS Skill shape.
+ * Used by `toSkill` as the return type when @elizaos/core does not export Skill.
+ */
+export interface ElizaSkill {
+  name: string;
+  description: string;
+  tags?: string[];
+  aliases?: string[];
 }

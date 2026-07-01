@@ -1,18 +1,19 @@
 /**
  * Workflow loaders — discover and load workflow files from the filesystem.
  *
- * `loadWorkflowsFromDir` walks a directory for `.ts`/`.tsx`/`.js`/`.jsx` files,
- * dynamic-imports each one, reads its frontmatter, and builds `WorkflowDefinition`
- * objects.
+ * `loadWorkflowsFromDir` walks a directory, dynamic-imports each workflow file,
+ * reads its `---` YAML frontmatter, and builds `WorkflowDefinition` objects.
  *
- * `loadWorkflows` aggregates across multiple sources (explicit paths, dirs)
- * and deduplicates by name (emitting collision diagnostics for conflicts).
+ * `loadWorkflows` aggregates across multiple sources with precedence ordering:
+ * bundled < managed < project. Later sources override earlier ones on name
+ * collision, and a `collision` diagnostic is emitted for each override.
  *
  * @module
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, extname, basename } from "node:path";
+import { homedir } from "node:os";
 import { readFile } from "node:fs/promises";
 import { parseWorkflowFrontmatter } from "./frontmatter.js";
 import type {
@@ -20,37 +21,37 @@ import type {
   WorkflowDiagnostic,
   LoadWorkflowsResult,
   LoadWorkflowsOptions,
+  WorkflowFrontmatter,
 } from "./types.js";
 
 const WORKFLOW_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
 
-/**
- * Dynamic-import a single workflow file and extract its `WorkflowDefinition`.
- *
- * The file must export a default export that is the Smithers workflow object
- * (the object with `.build` and `.opts`), or an object shaped like a
- * `WorkflowDefinition` (with a `.workflow` key holding the smithers object).
- *
- * Returns `null` if the file cannot be loaded or has no recognizable export.
- */
+/** Dynamic-import a workflow file. Returns null on failure — caller emits the diagnostic. */
 async function importWorkflowFile(
   filePath: string
 ): Promise<{ exported: unknown; source: string } | null> {
   try {
-    const source = await readFile(filePath, "utf8");
     const mod = await import(filePath);
     const exported = mod.default ?? mod;
+    // Read a companion .md file for frontmatter, falling back to the source file itself.
+    const companionMd = filePath.replace(/\.(ts|tsx|js|jsx)$/, ".md");
+    let source = "";
+    try {
+      source = await readFile(companionMd, "utf8");
+    } catch {
+      try {
+        source = await readFile(filePath, "utf8");
+      } catch {
+        // ignore
+      }
+    }
     return { exported, source };
   } catch {
     return null;
   }
 }
 
-/**
- * Derive a workflow slug name from a filename.
- * `close-issues.workflow.ts` → `close-issues`
- * `DeployProd.ts` → `deployprod`
- */
+/** Derive a workflow slug name from a filename. */
 function nameFromFile(filePath: string): string {
   return basename(filePath)
     .replace(/\.(workflow|skill)\.(ts|tsx|js|jsx)$/, "")
@@ -58,18 +59,16 @@ function nameFromFile(filePath: string): string {
     .toLowerCase();
 }
 
-/**
- * Build a `WorkflowDefinition` from an imported module value and its source.
- */
+/** Build a WorkflowDefinition from an imported module and its source. */
 function buildDefinition(
   filePath: string,
   baseDir: string,
   exported: unknown,
-  source: string
+  source: string,
+  fm?: WorkflowFrontmatter
 ): WorkflowDefinition | null {
-  const frontmatter = parseWorkflowFrontmatter(source);
+  const { frontmatter } = fm !== undefined ? { frontmatter: fm } : parseWorkflowFrontmatter(source);
 
-  // If the export itself looks like a WorkflowDefinition (has .workflow), use it.
   if (
     exported !== null &&
     typeof exported === "object" &&
@@ -83,9 +82,7 @@ function buildDefinition(
         nameFromFile(filePath),
       description:
         raw.description ??
-        (typeof frontmatter.description === "string"
-          ? frontmatter.description
-          : undefined) ??
+        (typeof frontmatter.description === "string" ? frontmatter.description : undefined) ??
         "",
       tags: raw.tags ?? (frontmatter.tags as string[] | undefined),
       aliases: raw.aliases ?? (frontmatter.aliases as string[] | undefined),
@@ -97,20 +94,18 @@ function buildDefinition(
       filePath,
       baseDir,
       source,
-      workflow: raw.workflow,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      workflow: raw.workflow as any,
     };
   }
 
-  // Otherwise treat the default export as the raw smithers workflow object.
   if (exported !== null && typeof exported === "object") {
     return {
       name:
         (typeof frontmatter.name === "string" ? frontmatter.name : undefined) ??
         nameFromFile(filePath),
       description:
-        (typeof frontmatter.description === "string"
-          ? frontmatter.description
-          : undefined) ?? "",
+        (typeof frontmatter.description === "string" ? frontmatter.description : undefined) ?? "",
       tags: frontmatter.tags as string[] | undefined,
       aliases: frontmatter.aliases as string[] | undefined,
       disableModelInvocation:
@@ -120,7 +115,8 @@ function buildDefinition(
       filePath,
       baseDir,
       source,
-      workflow: exported,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      workflow: exported as any,
     };
   }
 
@@ -130,13 +126,16 @@ function buildDefinition(
 /**
  * Load all workflows from a single directory.
  *
- * Walks the immediate children of `dir` (non-recursive), imports files with a
- * recognised extension, and returns the successfully loaded workflows plus any
- * diagnostics.
+ * @param options.dir - Absolute path to the directory to scan.
+ * @param options.source - Human-readable source label for diagnostics (e.g. "project", "bundled").
  */
-export async function loadWorkflowsFromDir(
-  dir: string
-): Promise<LoadWorkflowsResult> {
+export async function loadWorkflowsFromDir({
+  dir,
+  source = "unknown",
+}: {
+  dir: string;
+  source?: string;
+}): Promise<LoadWorkflowsResult> {
   const workflows: WorkflowDefinition[] = [];
   const diagnostics: WorkflowDiagnostic[] = [];
 
@@ -158,8 +157,8 @@ export async function loadWorkflowsFromDir(
     const result = await importWorkflowFile(filePath);
     if (!result) {
       diagnostics.push({
-        type: "warning",
-        message: `Could not import workflow file: ${filePath}`,
+        type: "error",
+        message: `Could not import workflow file (${source}): ${filePath}`,
         path: filePath,
       });
       continue;
@@ -168,8 +167,8 @@ export async function loadWorkflowsFromDir(
     const def = buildDefinition(filePath, dir, result.exported, result.source);
     if (!def) {
       diagnostics.push({
-        type: "warning",
-        message: `Workflow file has no recognizable export: ${filePath}`,
+        type: "error",
+        message: `Workflow file has no recognizable export (${source}): ${filePath}`,
         path: filePath,
       });
       continue;
@@ -182,38 +181,60 @@ export async function loadWorkflowsFromDir(
 }
 
 /**
- * Load workflows from multiple sources, deduplicating by name.
+ * Load workflows from multiple sources, deduplicating by name with precedence ordering.
  *
- * Sources are processed in order. When two workflows share a name, the first
- * wins and a `collision` diagnostic is emitted for the second.
+ * Sources are processed lowest-to-highest precedence:
+ *   bundledDir < managedDir (~/.smithers/workflows) < <cwd>/.smithers/workflows
+ *
+ * When two workflows share a name, the higher-precedence (later) source wins and
+ * a `collision` diagnostic is emitted.
  */
 export async function loadWorkflows(
   options: LoadWorkflowsOptions = {}
 ): Promise<LoadWorkflowsResult> {
-  const { cwd = process.cwd(), workflowPaths = [], bundledDir, managedDir } =
-    options;
+  const {
+    cwd = process.cwd(),
+    workflowPaths = [],
+    includeDefaults = true,
+    bundledDir,
+    managedDir,
+  } = options;
 
-  const allWorkflows: WorkflowDefinition[] = [];
+  /** name → definition map; later sources overwrite earlier. */
+  const byName = new Map<string, WorkflowDefinition>();
   const allDiagnostics: WorkflowDiagnostic[] = [];
 
-  // Helper to merge results into accumulators.
-  function merge(result: LoadWorkflowsResult) {
-    allDiagnostics.push(...result.diagnostics);
-    for (const incoming of result.workflows) {
-      const existing = allWorkflows.find((w) => w.name === incoming.name);
-      if (existing) {
-        allDiagnostics.push({
-          type: "collision",
-          message: `Workflow name collision: "${incoming.name}" (${existing.filePath ?? "in-memory"} vs ${incoming.filePath ?? "in-memory"})`,
-          collision: { existing, incoming },
-        });
-      } else {
-        allWorkflows.push(incoming);
-      }
+  function mergeIn(incoming: WorkflowDefinition) {
+    const existing = byName.get(incoming.name);
+    if (existing) {
+      allDiagnostics.push({
+        type: "collision",
+        message: `Workflow name collision: "${incoming.name}" — ${incoming.filePath ?? "in-memory"} overrides ${existing.filePath ?? "in-memory"}`,
+        collision: { existing, incoming },
+      });
     }
+    byName.set(incoming.name, incoming);
   }
 
-  // Load from explicit file paths.
+  async function loadDir(dir: string, source: string) {
+    const result = await loadWorkflowsFromDir({ dir, source });
+    allDiagnostics.push(...result.diagnostics);
+    for (const w of result.workflows) mergeIn(w);
+  }
+
+  // Lowest precedence: bundled defaults.
+  if (bundledDir) await loadDir(resolve(cwd, bundledDir), "bundled");
+
+  // Middle precedence: standard managed dir (~/.smithers/workflows).
+  if (includeDefaults) {
+    const defaultManaged = join(homedir(), ".smithers", "workflows");
+    const managed = managedDir ? resolve(cwd, managedDir) : defaultManaged;
+    if (existsSync(managed)) await loadDir(managed, "managed");
+  } else if (managedDir) {
+    await loadDir(resolve(cwd, managedDir), "managed");
+  }
+
+  // Explicit workflowPaths — processed before project dir but after managed.
   for (const rawPath of workflowPaths) {
     const filePath = resolve(cwd, rawPath);
     const result = await importWorkflowFile(filePath);
@@ -225,37 +246,23 @@ export async function loadWorkflows(
       });
       continue;
     }
-    const def = buildDefinition(
-      filePath,
-      resolve(filePath, ".."),
-      result.exported,
-      result.source
-    );
+    const def = buildDefinition(filePath, resolve(filePath, ".."), result.exported, result.source);
     if (!def) {
       allDiagnostics.push({
-        type: "warning",
+        type: "error",
         message: `Workflow file has no recognizable export: ${filePath}`,
         path: filePath,
       });
       continue;
     }
-    const existing = allWorkflows.find((w) => w.name === def.name);
-    if (existing) {
-      allDiagnostics.push({
-        type: "collision",
-        message: `Workflow name collision: "${def.name}"`,
-        collision: { existing, incoming: def },
-      });
-    } else {
-      allWorkflows.push(def);
-    }
+    mergeIn(def);
   }
 
-  // Load from bundledDir.
-  if (bundledDir) merge(await loadWorkflowsFromDir(resolve(cwd, bundledDir)));
+  // Highest precedence: project .smithers/workflows.
+  if (includeDefaults) {
+    const projectDir = join(cwd, ".smithers", "workflows");
+    if (existsSync(projectDir)) await loadDir(projectDir, "project");
+  }
 
-  // Load from managedDir.
-  if (managedDir) merge(await loadWorkflowsFromDir(resolve(cwd, managedDir)));
-
-  return { workflows: allWorkflows, diagnostics: allDiagnostics };
+  return { workflows: Array.from(byName.values()), diagnostics: allDiagnostics };
 }

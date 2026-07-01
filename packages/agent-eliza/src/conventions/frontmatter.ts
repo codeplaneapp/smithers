@@ -1,110 +1,81 @@
 /**
- * Parse the `/* smithers ... *\/` frontmatter block from a workflow source file.
+ * Parse and serialize `---`-fenced YAML frontmatter blocks.
  *
- * This matches the format used by the Smithers CLI (apps/cli/src/workflows.js)
- * and the elizaOS Skill YAML frontmatter convention, adapted for JS/TS comment
- * syntax so the file stays valid TSX.
- *
- * Supports:
- *   - `key: scalar value` lines
- *   - `key: [a, b, c]` inline lists
- *   - Block lists:
- *       key:
- *       - item1
- *       - item2
- *   - Quoted values (single or double quotes stripped)
+ * Matches the elizaOS Skill frontmatter convention:
+ * a leading `---\n...\n---\n` block containing YAML key-value pairs.
  *
  * @module
  */
 
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { WorkflowFrontmatter } from "./types.js";
 
+/** Regex that matches a leading `---` YAML frontmatter block. */
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/;
+
 /**
- * Parse the leading `/* smithers ... *\/` frontmatter block from `source`.
- * Returns an empty object when no block is present.
+ * Parse the `---`-fenced YAML frontmatter block from `source`.
+ *
+ * Returns `{ frontmatter, body }` where `body` is the remainder of the file
+ * after the closing `---`. When no frontmatter block is present, `frontmatter`
+ * is an empty object and `body` equals `source`.
  */
-export function parseWorkflowFrontmatter(source: string): WorkflowFrontmatter {
-  const match = source.match(/\/\*\s*smithers\b[^\n]*\n([\s\S]*?)\*\//);
-  if (!match) return {};
-
-  const out: Record<string, unknown> = {};
-  const lines = match[1].split("\n");
-  let listKey: string | undefined;
-
-  for (const rawLine of lines) {
-    const line = rawLine.replace(/\s+$/, "");
-    if (!line.trim()) continue;
-
-    // Block list item: `- value`
-    const listItem = line.match(/^\s*-\s+(.*)$/);
-    if (listItem && listKey) {
-      const arr = (out[listKey] ??= []) as string[];
-      arr.push(unquoteYaml(listItem[1]));
-      continue;
-    }
-
-    // Key-value pair
-    const kv = line.match(/^\s*([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (!kv) continue;
-
-    const key = kv[1];
-    const value = kv[2].trim();
-
-    if (value === "") {
-      // `key:` with no value begins a block list
-      listKey = key;
-      out[key] ??= [];
-      continue;
-    }
-
-    listKey = undefined;
-
-    const inlineList = value.match(/^\[(.*)\]$/);
-    if (inlineList) {
-      out[key] = inlineList[1]
-        .split(",")
-        .map((entry) => unquoteYaml(entry.trim()))
-        .filter(Boolean);
-    } else if (value.toLowerCase() === "true") {
-      out[key] = true;
-    } else if (value.toLowerCase() === "false") {
-      out[key] = false;
-    } else {
-      out[key] = unquoteYaml(value);
-    }
+export function parseWorkflowFrontmatter(source: string): {
+  frontmatter: WorkflowFrontmatter;
+  body: string;
+} {
+  const match = source.match(FRONTMATTER_RE);
+  if (!match) {
+    return { frontmatter: {}, body: source };
   }
 
-  return out as WorkflowFrontmatter;
-}
+  const yamlBlock = match[1] ?? "";
+  const body = match[2] ?? "";
 
-/** Strip surrounding single or double quotes from a YAML scalar value. */
-function unquoteYaml(value: string): string {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
+  let frontmatter: WorkflowFrontmatter = {};
+  try {
+    const parsed = parseYaml(yamlBlock);
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      frontmatter = parsed as WorkflowFrontmatter;
+    }
+  } catch {
+    // Malformed YAML — return empty frontmatter with the body intact.
   }
-  return trimmed;
+
+  return { frontmatter, body };
 }
 
 /**
- * Generate a `/* smithers ... *\/` frontmatter block string from a plain object.
- * Useful for scaffolding new workflow files.
+ * Return `source` with the leading `---` YAML frontmatter block stripped.
+ * When no frontmatter block is present, `source` is returned unchanged.
+ */
+export function stripFrontmatter(source: string): string {
+  return parseWorkflowFrontmatter(source).body;
+}
+
+/**
+ * Serialize `frontmatter` as a `---`-fenced YAML block and concatenate `body`.
+ * Produces a complete workflow file string.
+ *
+ * @example
+ * ```ts
+ * const file = serializeWorkflowFile({ name: "close-issues", description: "Fix issues" }, tsxSource);
+ * // "---\nname: close-issues\n...\n---\n<TSX content>"
+ * ```
+ */
+export function serializeWorkflowFile(
+  frontmatter: WorkflowFrontmatter,
+  body: string
+): string {
+  return `---\n${stringifyYaml(frontmatter)}---\n${body}`;
+}
+
+/**
+ * Generate a `---`-fenced YAML frontmatter block string from a plain object.
+ * Useful for scaffolding new workflow file headers.
  */
 export function serializeWorkflowFrontmatter(
   fields: WorkflowFrontmatter
 ): string {
-  const lines: string[] = ["/* smithers"];
-  for (const [key, value] of Object.entries(fields)) {
-    if (value === undefined || value === null) continue;
-    if (Array.isArray(value)) {
-      lines.push(`${key}: [${value.join(", ")}]`);
-    } else {
-      lines.push(`${key}: ${String(value)}`);
-    }
-  }
-  lines.push("*/");
-  return lines.join("\n") + "\n";
+  return `---\n${stringifyYaml(fields)}---\n`;
 }
