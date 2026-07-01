@@ -25,9 +25,9 @@ Describe the finished thing; your agent owns the route. You say what "done" look
 
 Add a stopping condition and a one-shot becomes a loop. Say "don't stop until X" and your agent iterates against persisted state until X holds (tests pass, a reviewer signs off, a score clears a bar) or it hits an iteration cap.
 
-> **"Add account-level rate limiting, and keep iterating until the tests pass and a reviewer approves."**
+> **"Add account-level rate limiting, and keep iterating until the tests pass and the review approves."**
 
-Each pass: write code, run tests, send the diff to a reviewer. It exits when tests are green *and* the reviewer signs off, or burns the cap and reports back.
+Each pass: write code, run tests, send the diff to a review panel. It exits when tests are green *and* the synthesized review signs off, or burns the cap and reports back.
 
 <Note>
 The cap matters. "Keep iterating until X" always carries a ceiling so a stubborn condition can't loop forever. If the loop hits the cap without satisfying X, the run stops and surfaces what's still failing, durable and inspectable, never silently spinning.

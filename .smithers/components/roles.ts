@@ -75,10 +75,18 @@ const detectedPanel: AgentLike[] = [
 export const panelists: AgentLike[] =
   detectedPanel.length >= 2 ? detectedPanel.slice(0, 2) : [opus, codex];
 
-// The panel moderator / synthesizer failover chain — usually Codex, with Opus
-// as the always-present final fallback. A chain (not a single agent) so the
-// panel still yields a synthesized verdict when the Codex CLI is missing or its
-// auth has gone stale at run time: a moderator that hard-fails because one CLI
-// is misconfigured would make every plan/review panel fragile. Codex stays first
-// so it remains the usual synthesizer whenever it is healthy.
+// The panel moderator / synthesizer — usually Codex, with Opus as the
+// always-present fallback. This is a failover chain (not a single agent), but be
+// precise about HOW the fallback engages: the engine advances a failover chain
+// across retry attempts, and a preflight/auth failure is non-retryable, so the
+// chain does NOT by itself walk from Codex to Opus on a moderator-only Codex auth
+// failure. What actually makes the shipped panels resilient is the engine's
+// per-run circuit breaker combined with the invariant below: `panelists` always
+// includes the SAME Codex instance, so when Codex auth is stale a panelist fails
+// preflight first and disables that instance run-wide; the moderator (which runs
+// after the panelists) then finds Codex disabled and selects Opus on its first
+// attempt. Keeping Opus in the chain guarantees a healthy fallback exists for
+// that path. Custom panels that use a Codex moderator WITHOUT Codex among the
+// panelists are not covered by this and can still fail to produce a verdict —
+// the review UI surfaces that terminal no-verdict state explicitly.
 export const synthesizer: AgentLike[] = [...(hasCodex ? [codex] : []), opus];
