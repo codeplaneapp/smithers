@@ -61,7 +61,7 @@ SmithersGatewayClient({
 | `useGatewayRunEvents(runId, { maxEvents: 2000 })` | `gateway-react` | LOGS mode transcript; TIMELINE tick strip (seq numbers → frame markers) |
 | `useGatewayNodeOutput({ runId, nodeId, iteration })` | `gateway-react` | NodeInspector Output tab; TREE node metadata/elapsed |
 | `useGatewayApprovals({ runId })` | `gateway-react` | Approval banner in TREE mode; gate markers in TIMELINE. Exposes `refetch`, called after a successful `submitApproval` so the resolved gate's banner clears. |
-| `useGatewayNodeDiff` (via `getNodeDiff` RPC) | `gateway-react` | NodeInspector Diff tab (gated on the tab being active) |
+| `getNodeDiff` RPC (via `useGatewayRpc`) | `gateway-react` | NodeInspector Diff tab (gated on the tab being active) |
 | `useGatewayActions()` | `gateway-react` | Only `submitApproval` (approve/deny a gate in TREE). The monitor does NOT cancel/resume/rewind from actions - those are CLI-driven; HIJACK shells out to `bunx smithers-orchestrator hijack`. |
 
 The `useGatewayRun` hook drives the header and is polled via the collection's built-in live-stream (no polling interval needed). `useGatewayRunEvents` feeds the run-*events* surfaces (the LOGS transcript and the TIMELINE scrubber), not the tree. The **tree** comes from a separate hook, `useGatewayRunTree(runId)`, a live query over the per-run `nodes` collection; that collection is kept fresh by the gateway's `streamDevTools` stream (each devtools frame triggers a `getDevToolsSnapshot` refetch + reconcile), so the tree stays current without the TUI parsing any frame payloads itself.
@@ -174,7 +174,7 @@ Fields, left to right:
 
 - Live agent transcript - the mapped run events from `useGatewayRunEvents`, interleaved in seq order.
 - Each line: `seq [nodeId] │ event text`. (No side-effect badges: the gateway maps no tool-call events into the run-event stream, so a read/write/shell badge would never fire on a real run.)
-- **Follow mode**: on by default. Scrollbox auto-scrolls to bottom as new events arrive. `f` toggles follow; the `[live]`/`[paused]` indicator in the header reflects this.
+- **Follow mode**: on by default. Scrollbox auto-scrolls to bottom as new events arrive. `f` toggles follow; a `[live]`/`[paused]` indicator in the LOGS mode status row reflects this.
 - `[`/`]` walk backward/forward across node attempts (filters events to the selected attempt).
 - Data: `useGatewayRunEvents` with `maxEvents: 2000`.
 
@@ -239,16 +239,17 @@ These are the keys actually wired in `App.tsx`. (There is intentionally no globa
 
 ### Responsive / compact behavior
 
-`useTerminalDimensions()` (from `@opentui/core`) is polled on resize. When terminal width falls below **100 columns**:
+Each layout-aware module reads `useTerminalDimensions()` (from `@opentui/react`)
+and compares the width against the constant `COMPACT_WIDTH`, declared locally in
+`packages/tui/src/App.tsx` and the width-adapting mode files under
+`packages/tui/src/modes/`. Below that threshold the modes switch to a compact
+layout; the exact ratios and truncation lengths live in the code and are not
+pinned here (to keep the spec from drifting on volatile constants):
 
-- TREE: left and right panes stack **vertically** (node tree above, inspector below). Inspector height is capped to `floor((height - headerRows - keybarRows) * 0.45)`.
-- GRAPH: card labels truncated to 12 chars; arrows reduced to `→`.
-- LOGS: tag prefix truncated to 8 chars.
-- TIMELINE: tick strip compressed to show every Nth frame label.
-
-Width threshold is the constant `COMPACT_WIDTH = 100`, declared locally in each
-layout-aware module (`packages/tui/src/App.tsx` and the mode files under
-`packages/tui/src/modes/` that adapt to width).
+- TREE: the side-by-side tree/inspector split collapses to a **vertical** stack (node tree above, inspector below).
+- GRAPH: card labels are truncated and the connector arrows are shortened.
+- LOGS: the per-line node tag prefix is truncated more aggressively.
+- TIMELINE: the tick strip is compressed to fit the narrower width.
 
 ---
 
@@ -270,7 +271,7 @@ Keyboard interactions are driven via the test renderer's `mockInput.pressKey(...
 - No agent CLI and no browser - every test is prop-injection against the real components or pure helpers; nothing spawns a gateway, agent, or PTY.
 - No real TTY - the headless `testRender` supplies a fake terminal of a fixed width/height.
 
-**Test file layout (actual):**
+**Test file layout (representative, under `packages/tui/tests/` - the pure-util `*-mode`/`*-utils`/`*-config` tests plus the `*-render` view tests; not an exhaustive listing):**
 ```
 packages/tui/tests/
   renderHelpers.tsx          # act-wrapped testRender helper
@@ -282,9 +283,12 @@ packages/tui/tests/
   timeline-render.test.tsx   # TimelineView: scrub, inspect-only honesty
   graph-mode.test.ts         # graph column layout
   hijack-mode.test.ts        # hijackable-node filter + exit message
+  header-utils.test.ts       # status-dot color + elapsed formatting
   approval-utils.test.ts     # decision shaping + runApprovalSubmit ordering
+  human-utils.test.ts        # human-request banner shaping
   diff-utils.test.ts         # node diff → view
   event-frame.test.ts        # gateway frame unwrap/normalize
+  gateway-config.test.ts     # gateway base/port/autostart arg+env precedence
 ```
 
 ---
@@ -293,24 +297,29 @@ packages/tui/tests/
 
 ### New package: `packages/tui`
 
-As built - a flat module layout (no `components/`, `hooks/`, `devtools/`, `bootstrap.tsx`, `ensureGateway.ts`, `layout.ts`; the gateway tree/elapsed/frame logic lives in the shared `gateway-react` hooks, and each mode keeps its presentational view + a thin gateway wrapper in one file):
+As built - a flat module layout (no `hooks/`, `devtools/`, `bootstrap.tsx`, `ensureGateway.ts`, `layout.ts`; the gateway tree/elapsed/frame logic lives in the shared `gateway-react` hooks, and each mode keeps its presentational view + a thin gateway wrapper in one file). The tree below is representative of the key modules, not an exhaustive file listing:
 
 ```
 packages/tui/
   package.json          # name: "@smithers-orchestrator/tui", bin "smithers-mon"
-                        # deps: @opentui/core, @opentui/react, react,
-                        #       smithers-orchestrator (workspace:*), zod
+                        # deps: @opentui/core, @opentui/react,
+                        #       @smithers-orchestrator/gateway-client (workspace:*),
+                        #       @smithers-orchestrator/gateway-react (workspace:*)
+                        # peer/dev: react, react-dom (19); no zod, no smithers-orchestrator dep
   tsconfig.json         # jsxImportSource "@opentui/react"
   src/
     index.tsx           # smithers-mon BIN entry: argv + gateway autostart + createRoot + providers
+    gatewayConfig.ts    # pure gateway base/port/autostart resolution (arg/env precedence)
     App.tsx             # root: header + mode router + keybar + global keymap
+    Header.tsx          # gateway-connected header + presentational RunHeaderView
+    headerUtils.ts      # pure header helpers (status dot color, elapsed formatting)
     ErrorBoundary.tsx   # in-terminal render-error fallback
     Keybindings.tsx     # keymap context shared by all modes
     RendererContext.tsx # OpenTUI renderer context (for HIJACK PTY hand-off)
     cliEntry.ts         # resolve the real smithers CLI (gateway autostart / hijack)
     data.ts             # typed selectors over the gateway-react hooks
     modes/
-      TreeMode.tsx      # TREE: tree panel + NodeInspector (Output/Logs/Diff/Props) + approval banner
+      TreeMode.tsx      # TREE: tree panel + NodeInspector (Output/Logs/Diff/Props) + approval/human banner
       GraphMode.tsx     # GRAPH: DAG card layout
       LogMode.tsx       # LOGS: scrollbox + follow + attempt filter
       TimelineMode.tsx  # TIMELINE: tick strip + node-snapshot panel (inspect-only)
@@ -322,6 +331,7 @@ packages/tui/
       hijackUtils.ts    # running-node filter + hijack exit message
       eventFrame.ts     # gateway frame unwrap/normalize + per-node log filter
       approvalUtils.ts  # approval mode/options/decision + runApprovalSubmit
+      humanUtils.ts     # human-request banner shaping (ask-human gates in TREE)
       diffUtils.ts      # getNodeDiff payload → NodeDiffView
   tests/                # Bun tests (see §7)
 ```
