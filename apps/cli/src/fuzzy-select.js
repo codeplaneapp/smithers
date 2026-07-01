@@ -163,40 +163,43 @@ function terminalRows() {
  */
 class FuzzySelectPrompt extends Prompt {
     constructor(opts) {
-        // No second arg → trackValue defaults to true (TextPrompt behavior).
-        // We intentionally do NOT forward `initialValue`: with trackValue the base
+        // Second arg `true` → trackValue (TextPrompt behavior): @clack/core v1
+        // defaults it to false when omitted, so we pass it explicitly. With it
+        // the base tracks typed input into `userInput` and emits "cursor" for
+        // arrow keys. We intentionally do NOT forward `initialValue`: the base
         // would type it into the query box. We start the query empty and use
         // initialValue only to position the initial cursor (below).
-        super({
-            render: opts.render,
-            signal: opts.signal,
-            input: opts.input,
-            output: opts.output,
-        });
+        // `validate` is passed via options because v1 made `opts` private.
+        super(
+            {
+                render: opts.render,
+                signal: opts.signal,
+                input: opts.input,
+                output: opts.output,
+                validate: () => (this.filtered.length === 0 ? "No matches." : undefined),
+            },
+            true,
+        );
 
         this.allOptions = Array.isArray(opts.options) ? opts.options : [];
         this.maxItems = opts.maxItems;
         this.query = "";
         this.filtered = fuzzyFilter("", this.allOptions);
-        this.opts.validate = () => {
-            if (this.filtered.length === 0) return "No matches.";
-            return undefined;
-        };
 
         // Position the cursor on the option matching initialValue (default 0).
-        this.cursor = 0;
+        this._cursor = 0;
         if (opts.initialValue !== undefined) {
             const i = this.filtered.findIndex((o) => o.value === opts.initialValue);
-            if (i >= 0) this.cursor = i;
+            if (i >= 0) this._cursor = i;
         }
 
         // Re-filter on every keystroke. Typing AND backspace both edit rl.line,
-        // so the base re-emits "value" for both — this covers backspace for free.
-        this.on("value", () => {
-            this.query = this.value ?? "";
+        // so the base re-emits "userInput" for both — this covers backspace free.
+        this.on("userInput", () => {
+            this.query = this.userInput ?? "";
             this.filtered = fuzzyFilter(this.query, this.allOptions);
-            if (this.cursor > this.filtered.length - 1) {
-                this.cursor = Math.max(0, this.filtered.length - 1);
+            if (this._cursor > this.filtered.length - 1) {
+                this._cursor = Math.max(0, this.filtered.length - 1);
             }
         });
 
@@ -207,11 +210,11 @@ class FuzzySelectPrompt extends Prompt {
             switch (key) {
                 case "up":
                 case "left":
-                    this.cursor = this.cursor === 0 ? this.filtered.length - 1 : this.cursor - 1;
+                    this._cursor = this._cursor === 0 ? this.filtered.length - 1 : this._cursor - 1;
                     break;
                 case "down":
                 case "right":
-                    this.cursor = this.cursor === this.filtered.length - 1 ? 0 : this.cursor + 1;
+                    this._cursor = this._cursor === this.filtered.length - 1 ? 0 : this._cursor + 1;
                     break;
             }
         });
@@ -222,7 +225,7 @@ class FuzzySelectPrompt extends Prompt {
         // value so the caller receives the selection, not the query string.
         this.on("finalize", () => {
             if (this.state === "submit") {
-                const selected = this.filtered[this.cursor];
+                const selected = this.filtered[this._cursor];
                 this.value = selected ? selected.value : undefined;
             }
         });
@@ -254,7 +257,7 @@ function styleOption(option, active) {
  */
 function renderPrompt(self, message) {
     const header = `${pc.gray(S_BAR)}\n${symbol(self.state)}  ${message}\n`;
-    const selectedLabel = self.filtered[self.cursor]?.label;
+    const selectedLabel = self.filtered[self._cursor]?.label;
 
     switch (self.state) {
         case "submit":
@@ -277,7 +280,7 @@ function renderPrompt(self, message) {
                 lines.push(`${gutter}  ${pc.dim("No matches")}`);
             } else {
                 const windowed = limitOptions({
-                    cursor: self.cursor,
+                    cursor: self._cursor,
                     options: self.filtered,
                     maxItems: self.maxItems,
                     rows: terminalRows(),
