@@ -309,7 +309,8 @@ ${DESIGN_CONTRACT}
 The spec must include, in order:
 1. Goal + how it ships (replaces \`smithers up --interactive\`).
 2. Runtime & stack (Bun, OpenTUI core + @opentui/react, React 19; the package
-   uses standard react JSX, not the smithers jsx-runtime).
+   uses the OpenTUI React JSX runtime (jsxImportSource "@opentui/react"), not the
+   smithers jsx-runtime).
 3. The data layer: reusing gateway-react hooks via <SmithersGatewayProvider>
    with an injected Bun WebSocket + in-memory sync backend; connecting to the
    local Gateway (autostart like \`smithers ui\`). List every hook used and what

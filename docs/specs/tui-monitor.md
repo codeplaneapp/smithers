@@ -15,7 +15,7 @@ The single-run monitor TUI is a full-screen terminal UI launched from the `bunx 
 - `bunx smithers-orchestrator up --interactive <workflow>` - existing flag (no short alias; `-i` is `--input`); picks/starts a run, then hands off to the monitor.
 - `bunx smithers-orchestrator up --interactive` with no workflow argument - shows the fuzzy workflow picker (reusing existing `fuzzySelect` + `buildWorkflowPickerOptions` logic from `tui.js`), then monitors the selected run.
 
-**How it ships (as built):** `runTuiCommand` is retained; it still owns the pre-fullscreen picker/input prompts and starting the run. After the run starts it spawns the monitor as a child process via the `smithers-mon` bin (the `@smithers-orchestrator/tui` package's `bin`, resolved by `resolveTuiEntry()`), passing the `runId` and forwarding `SMITHERS_CLI` / `SMITHERS_GATEWAY_URL`. The monitor (`packages/tui/src/index.tsx`) is a bin entry script, **not** an exported `runTuiMonitor(runId, opts)` function. When the `smithers-mon` bin can't be resolved (e.g. a slim install), `runTuiCommand` falls back to the inline `streamRun` append-only path so the run is still observable. There is no `up --run-id` attach mode.
+**How it ships (as built):** `runTuiCommand` is retained; it still owns the pre-fullscreen picker/input prompts and starting the run. After the run starts it spawns the monitor as a child process via the `smithers-mon` bin (the `@smithers-orchestrator/tui` package's `bin`, resolved by `resolveTuiEntry()`), passing the `runId` and forwarding `SMITHERS_CLI` / `SMITHERS_GATEWAY_URL` / `SMITHERS_BACKEND` / `SMITHERS_TOKEN`. The monitor (`packages/tui/src/index.tsx`) is a bin entry script, **not** an exported `runTuiMonitor(runId, opts)` function. When the `smithers-mon` bin can't be resolved (e.g. a slim install), `runTuiCommand` falls back to the inline `streamRun` append-only path so the run is still observable. There is no `up --run-id` attach mode.
 
 ---
 
@@ -23,7 +23,7 @@ The single-run monitor TUI is a full-screen terminal UI launched from the `bunx 
 
 | Layer | Package | Notes |
 |---|---|---|
-| Runtime | Bun (>=1.1) | All IO, child process, WebSocket global |
+| Runtime | Bun (>=1.3.0) | All IO, child process, WebSocket global |
 | TUI renderer | `@opentui/core` | Zig-native core via Bun FFI; `createCliRenderer` |
 | React reconciler | `@opentui/react` | `createRoot(renderer).render(...)` |
 | React | `react` 19 (runtime dep) | Standard reconciler; `packages/tui` ships `react`/`react-dom` 19 as runtime dependencies |
