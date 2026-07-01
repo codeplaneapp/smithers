@@ -19,6 +19,8 @@ describe("published TaskDescriptor declarations", () => {
 
 		expect(sourceTaskDescriptor).toContain("forkSource?: string;");
 		expect(publishedTaskDescriptor).toContain("forkSource?: string;");
+		expect(sourceTaskDescriptor).toContain('kind?: "agent" | "compute" | "static" | "human";');
+		expect(publishedTaskDescriptor).toContain('kind?: "agent" | "compute" | "static" | "human";');
 		expect(publishedTaskDescriptor.indexOf("needs?: Record<string, string>;")).toBeLessThan(
 			publishedTaskDescriptor.indexOf("forkSource?: string;"),
 		);

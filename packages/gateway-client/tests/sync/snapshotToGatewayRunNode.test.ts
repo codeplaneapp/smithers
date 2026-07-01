@@ -84,10 +84,10 @@ describe("snapshotToGatewayRunNode", () => {
 
   test("maps a durable HumanTask (task tagged __smithersKind: human) to the human kind", () => {
     // The gateway renders `<HumanTask>` as a `task` element whose serialized
-    // props carry `__smithersKind: "human"` (the task descriptor flattens the
-    // human kind down to "static", so props.__smithersKind is the honest signal).
-    // Mapping it to "human" is what lets the monitor surface CLI guidance instead
-    // of approve/deny controls that would strand the run on a durable input gate.
+    // props carry `__smithersKind: "human"`; newer snapshots also carry
+    // `task.kind: "human"`. Mapping either to "human" is what lets the monitor
+    // surface CLI guidance instead of approve/deny controls that would strand
+    // the run on a durable input gate.
     const tree = snapshotToGatewayRunNode({
       root: {
         id: 1,
@@ -133,6 +133,10 @@ describe("snapshotToGatewayRunNode", () => {
       [{ type: "timer" }, "signal"],
       // A durable human gate is a `task` tagged __smithersKind: "human".
       [{ type: "task", props: { __smithersKind: "human" } }, "human"],
+      // Newer gateway snapshots preserve the same semantic on task.kind too.
+      [{ type: "task", task: { nodeId: "n", kind: "human" } }, "human"],
+      // Approval gates are still structural task nodes, but task.kind carries the gate semantic.
+      [{ type: "task", task: { nodeId: "n", kind: "approval" } }, "approval"],
       [{ type: "loop" }, "loop"],
       [{ type: "parallel" }, "parallel"],
       [{ type: "saga" }, "saga"],

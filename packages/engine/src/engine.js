@@ -2831,7 +2831,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
         }
     };
     const attemptMeta = {
-        kind: desc.agent ? "agent" : desc.computeFn ? "compute" : "static",
+        kind: desc.kind ?? (desc.agent ? "agent" : desc.computeFn ? "compute" : "static"),
         prompt: desc.prompt ?? null,
         staticPayload: desc.staticPayload ?? null,
         label: desc.label ?? null,
@@ -5284,6 +5284,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 nodeId: task.nodeId,
                 ordinal: task.ordinal,
                 iteration: task.iteration,
+                kind: task.kind,
             }))),
             note: "react-driver",
         };

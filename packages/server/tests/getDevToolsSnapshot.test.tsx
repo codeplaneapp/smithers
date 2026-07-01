@@ -182,6 +182,142 @@ describe("getDevToolsSnapshotRoute", () => {
     sqlite.close();
   });
 
+  test("preserves durable human task kind from frame props", async () => {
+    const { adapter, sqlite } = createAdapter();
+    const runId = "run-human-kind";
+    await adapter.insertRun({
+      runId,
+      workflowName: "wf",
+      status: "waiting-approval",
+      createdAtMs: now(),
+    });
+    await adapter.insertFrame({
+      runId,
+      frameNo: 0,
+      createdAtMs: now(),
+      xmlJson: canonicalizeXml({
+        kind: "element",
+        tag: "smithers:workflow",
+        props: { name: "human-kind" },
+        children: [
+          {
+            kind: "element",
+            tag: "smithers:task",
+            props: { id: "review::0", __smithersKind: "human", label: "human:review" },
+            children: [],
+          },
+        ],
+      }),
+      xmlHash: "hash-human-kind",
+      mountedTaskIdsJson: "[]",
+      taskIndexJson: "[]",
+      note: "human-kind",
+    });
+
+    const snapshot = await getDevToolsSnapshotRoute({ adapter, runId, frameNo: 0 });
+    expect(snapshot.root.children[0]?.task).toMatchObject({
+      nodeId: "review",
+      kind: "human",
+      label: "human:review",
+      iteration: 0,
+    });
+    sqlite.close();
+  });
+
+  test("uses task index metadata for approval task iteration", async () => {
+    const { adapter, sqlite } = createAdapter();
+    const runId = "run-approval-index";
+    await adapter.insertRun({
+      runId,
+      workflowName: "wf",
+      status: "waiting-approval",
+      createdAtMs: now(),
+    });
+    await adapter.insertFrame({
+      runId,
+      frameNo: 0,
+      createdAtMs: now(),
+      xmlJson: canonicalizeXml({
+        kind: "element",
+        tag: "smithers:workflow",
+        props: { name: "approval-index" },
+        children: [
+          {
+            kind: "element",
+            tag: "smithers:task",
+            props: {
+              id: "approve-probe",
+              label: "Approve E2E gated task",
+              needsApproval: "true",
+              approvalMode: "decision",
+            },
+            children: [],
+          },
+        ],
+      }),
+      xmlHash: "hash-approval-index",
+      mountedTaskIdsJson: "[]",
+      taskIndexJson: JSON.stringify([{ nodeId: "approve-probe", ordinal: 0, iteration: 0 }]),
+      note: "approval-index",
+    });
+
+    const snapshot = await getDevToolsSnapshotRoute({ adapter, runId, frameNo: 0 });
+    expect(snapshot.root.children[0]?.task).toMatchObject({
+      nodeId: "approve-probe",
+      kind: "approval",
+      label: "Approve E2E gated task",
+      iteration: 0,
+    });
+    sqlite.close();
+  });
+
+  test("uses task index metadata for human task kind", async () => {
+    const { adapter, sqlite } = createAdapter();
+    const runId = "run-human-index";
+    await adapter.insertRun({
+      runId,
+      workflowName: "wf",
+      status: "waiting-approval",
+      createdAtMs: now(),
+    });
+    await adapter.insertFrame({
+      runId,
+      frameNo: 0,
+      createdAtMs: now(),
+      xmlJson: canonicalizeXml({
+        kind: "element",
+        tag: "smithers:workflow",
+        props: { name: "human-index" },
+        children: [
+          {
+            kind: "element",
+            tag: "smithers:task",
+            props: {
+              id: "ask-probe",
+              label: "human:ask-probe",
+              needsApproval: "true",
+              approvalMode: "decision",
+            },
+            children: [],
+          },
+        ],
+      }),
+      xmlHash: "hash-human-index",
+      mountedTaskIdsJson: "[]",
+      taskIndexJson: JSON.stringify([{ nodeId: "ask-probe", ordinal: 0, iteration: 0, kind: "human" }]),
+      note: "human-index",
+    });
+
+    const snapshot = await getDevToolsSnapshotRoute({ adapter, runId, frameNo: 0 });
+    expect(snapshot.root.children[0]?.task).toMatchObject({
+      nodeId: "ask-probe",
+      kind: "human",
+      label: "human:ask-probe",
+      iteration: 0,
+    });
+    sqlite.close();
+  });
+
   test("validates runId boundary cases and missing runs", async () => {
     const { adapter, sqlite } = createAdapter();
     for (const runId of ["", "x".repeat(65), "../etc/passwd", "run-😀"]) {

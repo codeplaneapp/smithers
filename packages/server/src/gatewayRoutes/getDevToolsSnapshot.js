@@ -50,6 +50,47 @@ function asObject(value) {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function boolProp(value) {
+    return value === true || value === "true" || value === "1";
+}
+
+/**
+ * @param {string | null | undefined} raw
+ * @returns {Map<string, { iteration?: number; kind?: string }>}
+ */
+function parseTaskIndex(raw) {
+    const map = new Map();
+    if (typeof raw !== "string" || raw.length === 0) {
+        return map;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch {
+        return map;
+    }
+    if (!Array.isArray(parsed)) {
+        return map;
+    }
+    for (const entry of parsed) {
+        if (!asObject(entry) || typeof entry.nodeId !== "string") {
+            continue;
+        }
+        map.set(entry.nodeId, {
+            iteration: typeof entry.iteration === "number" && Number.isFinite(entry.iteration)
+                ? entry.iteration
+                : undefined,
+            kind: typeof entry.kind === "string" ? entry.kind : undefined,
+        });
+    }
+    return map;
+}
+
 export const DEVTOOLS_EMPTY_ROOT_ID = 0;
 
 /**
@@ -91,9 +132,10 @@ export function validateRequestedFrameNo(frameNo, latestFrameNo) {
 
 /**
  * @param {Record<string, unknown>} props
+ * @param {Map<string, { iteration?: number; kind?: string }>} taskIndex
  * @returns {DevToolsNode["task"] | undefined}
  */
-function extractTaskInfo(props) {
+function extractTaskInfo(props, taskIndex) {
     const rawNodeId = typeof props.id === "string"
         ? props.id
         : typeof props.nodeId === "string"
@@ -111,9 +153,18 @@ function extractTaskInfo(props) {
             iteration = Number(match[2]);
         }
     }
-    const kind = props.__smithersKind === "agent" || props.kind === "agent"
+    const indexedTask = taskIndex.get(nodeId);
+    if (iteration === undefined) {
+        iteration = indexedTask?.iteration;
+    }
+    const indexedKind = indexedTask?.kind;
+    const kind = props.__smithersKind === "human" || props.kind === "human" || indexedKind === "human"
+        ? "human"
+        : boolProp(props.needsApproval)
+            ? "approval"
+        : props.__smithersKind === "agent" || props.kind === "agent" || indexedKind === "agent"
         ? "agent"
-        : props.__smithersKind === "compute" || props.kind === "compute"
+        : props.__smithersKind === "compute" || props.kind === "compute" || indexedKind === "compute"
             ? "compute"
             : "static";
     return {
@@ -204,9 +255,10 @@ function nodeIdentityFragment(element) {
 /**
  * @param {unknown} xml
  * @param {(warning: SnapshotSerializerWarning) => void} [onWarning]
+ * @param {Map<string, { iteration?: number; kind?: string }>} [taskIndex]
  * @returns {DevToolsNode}
  */
-export function parseXmlToDevToolsRoot(xml, onWarning) {
+export function parseXmlToDevToolsRoot(xml, onWarning, taskIndex = new Map()) {
     if (!asObject(xml) || xml.kind !== "element") {
         return emptyDevToolsRoot();
     }
@@ -257,7 +309,7 @@ export function parseXmlToDevToolsRoot(xml, onWarning) {
             type: /** @type {DevToolsNodeType} */ (nodeType),
             name: displayName || "unknown",
             props: serializedProps,
-            task: nodeType === "task" ? extractTaskInfo(serializedProps) : undefined,
+            task: nodeType === "task" ? extractTaskInfo(serializedProps, taskIndex) : undefined,
             children: [],
             depth,
         };
@@ -317,6 +369,7 @@ export function parseXmlToDevToolsRoot(xml, onWarning) {
  *   runId: string;
  *   frameNo: number;
  *   xmlJson: string;
+ *   taskIndexJson?: string | null;
  *   onWarning?: (warning: SnapshotSerializerWarning) => void;
  * }} input
  * @returns {DevToolsSnapshot}
@@ -329,7 +382,7 @@ export function snapshotFromFrameRow(input) {
     catch {
         xml = null;
     }
-    const root = parseXmlToDevToolsRoot(xml, input.onWarning);
+    const root = parseXmlToDevToolsRoot(xml, input.onWarning, parseTaskIndex(input.taskIndexJson));
     return {
         version: 1,
         runId: input.runId,
@@ -419,6 +472,7 @@ export async function getDevToolsSnapshotRoute(input) {
         runId,
         frameNo: requestedFrameNo,
         xmlJson: String(frame.xmlJson ?? "null"),
+        taskIndexJson: frame.taskIndexJson,
         onWarning: input.onWarning,
     });
     return runState ? { ...snapshot, runState } : snapshot;

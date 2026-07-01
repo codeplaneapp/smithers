@@ -5,6 +5,7 @@ import {
   nodeGlyphColor,
   nodeChevron,
   defaultTab,
+  eventKeyName,
   ALL_TABS,
 } from "../src/modes/treeUtils.ts";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
@@ -184,6 +185,20 @@ describe("treeUtils", () => {
   describe("ALL_TABS", () => {
     it("contains the inspector tabs (Tools removed — no real source)", () => {
       expect(ALL_TABS).toEqual(["output", "logs", "diff", "props"]);
+    });
+  });
+
+  describe("eventKeyName", () => {
+    it("uses the normalized name when present", () => {
+      expect(eventKeyName({ name: "down", raw: "\u001b[B" })).toBe("down");
+    });
+
+    it("falls back to raw printable input", () => {
+      expect(eventKeyName({ name: "", raw: "a", sequence: "" })).toBe("a");
+    });
+
+    it("falls back to sequence when name and raw are unavailable", () => {
+      expect(eventKeyName({ sequence: "a" })).toBe("a");
     });
   });
 });

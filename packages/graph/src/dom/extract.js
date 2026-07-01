@@ -796,6 +796,7 @@ export function extractFromHost(root, opts) {
                     `Check that bunfig.toml has a top-level preload (not under [run]) and mdxPlugin() is registered.`);
             }
             const isCompute = (kind === "compute" || kind === "human") && typeof raw.__smithersComputeFn === "function";
+            const taskKind = kind === "human" && isCompute ? "human" : isAgent ? "agent" : isCompute ? "compute" : "static";
             const computeFn = isCompute ? /** @type {() => unknown} */ (raw.__smithersComputeFn) : undefined;
             const staticPayload = isAgent || isCompute
                 ? undefined
@@ -812,6 +813,7 @@ export function extractFromHost(root, opts) {
                 nodeId,
                 ordinal: ordinal++,
                 iteration,
+                kind: /** @type {TaskDescriptor["kind"]} */ (taskKind),
                 ralphId,
                 worktreeId: topWorktree?.id,
                 worktreePath: topWorktree?.path,

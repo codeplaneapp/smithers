@@ -125,6 +125,7 @@ type TaskDescriptor$1 = {
     nodeId: string;
     ordinal: number;
     iteration: number;
+    kind?: "agent" | "compute" | "static" | "human";
     ralphId?: string;
     dependsOn?: string[];
     needs?: Record<string, string>;

@@ -71,6 +71,7 @@ describe("extractFromHost", () => {
             __smithersComputeFn: fn,
         });
         const task = extractFromHost(root).tasks[0];
+        expect(task.kind).toBe("human");
         expect(task.computeFn).toBe(fn);
         expect(task.staticPayload).toBeUndefined();
     });

@@ -625,6 +625,7 @@ export function extractGraph(root, opts) {
             const isAgent = kind === "agent" || Boolean(raw.agent);
             const { retries, retryPolicy } = resolveRetryConfig(raw, isAgent);
             const isCompute = (kind === "compute" || kind === "human") && typeof raw.__smithersComputeFn === "function";
+            const taskKind = kind === "human" && isCompute ? "human" : isAgent ? "agent" : isCompute ? "compute" : "static";
             const parsedHeartbeatTimeoutMs = parseHeartbeatTimeoutMs(raw);
             const heartbeatTimeoutMs = parsedHeartbeatTimeoutMs ??
                 (isAgent ? DEFAULT_LOCAL_TASK_HEARTBEAT_TIMEOUT_MS : null);
@@ -635,6 +636,7 @@ export function extractGraph(root, opts) {
             addDescriptor(nodeId, "Task", {
                 ...common,
                 ...output,
+                kind: /** @type {TaskDescriptor["kind"]} */ (taskKind),
                 forkSource: typeof raw.fork === "string" && raw.fork ? raw.fork : undefined,
                 needsApproval: Boolean(raw.needsApproval),
                 waitAsync: Boolean(raw.waitAsync),

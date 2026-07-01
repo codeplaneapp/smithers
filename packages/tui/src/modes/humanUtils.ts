@@ -27,19 +27,19 @@ export function isHumanTaskNode(node: GatewayRunNode | null | undefined): boolea
 }
 
 /**
- * Build the human-request banner state for a focused HumanTask node that has a
- * pending approval row. Returns null when the node is not a HumanTask or has no
- * pending request — callers fall back to the normal approval flow.
+ * Build the human-request banner state for a focused waiting HumanTask node.
+ * Request rows can arrive after the run tree snapshot, so the row enriches the
+ * banner when present but is not required to show the safe CLI guidance.
  */
 export function buildHumanRequestUi(
   node: GatewayRunNode | null | undefined,
   approval: GatewayApprovalRow | undefined,
   runId: string,
 ): HumanRequestUiState | null {
-  if (!isHumanTaskNode(node) || !approval) return null;
+  if (!node || !isHumanTaskNode(node) || node.status !== "waiting") return null;
   return {
-    title: approval.requestTitle ?? node?.name ?? "Human input required",
-    prompt: approval.requestSummary,
+    title: approval?.requestTitle ?? node?.name ?? "Human input required",
+    prompt: approval?.requestSummary,
     runId,
   };
 }

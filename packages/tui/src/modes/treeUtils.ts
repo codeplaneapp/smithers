@@ -11,6 +11,16 @@ export type TabId = "output" | "logs" | "diff" | "props";
 
 export const ALL_TABS: readonly TabId[] = ["output", "logs", "diff", "props"];
 
+export function eventKeyName(event: unknown): string {
+  if (typeof event === "string") return event;
+  if (!event || typeof event !== "object") return "";
+  const record = event as Record<string, unknown>;
+  if (typeof record.name === "string" && record.name.length > 0) return record.name;
+  if (typeof record.raw === "string" && record.raw.length > 0) return record.raw;
+  if (typeof record.sequence === "string" && record.sequence.length > 0) return record.sequence;
+  return "";
+}
+
 export function flattenTree(
   nodes: ReadonlyArray<GatewayRunNode>,
   root: GatewayRunNode | null,

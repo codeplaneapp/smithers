@@ -108,6 +108,7 @@ describe("composite component expansion coverage", () => {
 
         expect(result.tasks).toHaveLength(1);
         expect(result.tasks[0].nodeId).toBe("human-answer");
+        expect(result.tasks[0].kind).toBe("human");
         expect(result.tasks[0].needsApproval).toBe(true);
         expect(result.tasks[0].waitAsync).toBe(true);
         expect(result.tasks[0].retries).toBe(3);

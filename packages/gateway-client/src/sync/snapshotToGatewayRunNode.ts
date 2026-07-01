@@ -10,10 +10,10 @@ import { asRecord } from "../objectGuards.ts";
  * structural tag lands on `type` as a LOWERCASE `DevToolsNodeType`
  * (`"task"`, `"approval"`, `"loop"`, `"wait-for-event"`, …) — NOT a capitalized
  * component name — and the logical task descriptor carries the semantic `kind`
- * (`"agent" | "compute" | "static"`). Durable human-input gates render as a
- * `task` element whose serialized `props.__smithersKind` is `"human"` (see
- * `components/HumanTask`), which is the ONLY reliable human signal (the task
- * descriptor collapses `"human"` down to `"static"`).
+ * (`"agent" | "compute" | "static" | "human"`). Durable human-input gates
+ * render as a `task` element whose serialized `props.__smithersKind` is
+ * `"human"` (see `components/HumanTask`); newer snapshots also preserve the same
+ * semantic on `task.kind`.
  */
 export type DevToolsSnapshotNode = {
   id: number | string;
@@ -59,12 +59,11 @@ function nodeName(node: DevToolsSnapshotNode): string {
  * gateway emits LOWERCASE `DevToolsNodeType` tags, so switch on those — the
  * capitalized component names never appear on real data.
  *
- * Durable human-input gates are checked FIRST: they render as a `task` element
- * carrying `props.__smithersKind === "human"` (the task descriptor's `kind`
- * flattens `"human"` to `"static"`, so `props.__smithersKind` is the honest
- * signal). Mapping them to `"human"` is what lets `humanUtils.isHumanTaskNode`
- * surface CLI guidance instead of approve/deny controls that would strand the
- * run. Container tags keep their own kind (helping `treeUtils`'
+ * Durable human-input gates are checked FIRST: older snapshots render a `task`
+ * element carrying `props.__smithersKind === "human"`, while newer snapshots
+ * also surface `task.kind === "human"`. Mapping either signal to `"human"` is
+ * what lets `humanUtils.isHumanTaskNode` surface CLI guidance instead of
+ * approve/deny controls that would strand the run. Container tags keep their own kind (helping `treeUtils`'
  * `CONTAINER_KINDS` detection); everything unrecognized falls back to the
  * neutral `compute`.
  */
@@ -93,6 +92,12 @@ function nodeKind(node: DevToolsSnapshotNode): string {
       return "workflow";
     case "task": {
       const taskKind = node.task?.kind;
+      if (taskKind === "human") {
+        return "human";
+      }
+      if (taskKind === "approval") {
+        return "approval";
+      }
       if (taskKind === "compute" || smithersKind === "compute") {
         return "compute";
       }

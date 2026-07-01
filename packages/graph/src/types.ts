@@ -147,6 +147,7 @@ export type TaskDescriptor = {
   nodeId: string;
   ordinal: number;
   iteration: number;
+  kind?: "agent" | "compute" | "static" | "human";
   ralphId?: string;
   dependsOn?: string[];
   needs?: Record<string, string>;

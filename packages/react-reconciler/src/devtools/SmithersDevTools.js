@@ -97,7 +97,9 @@ function extractTaskInfo(fiber) {
     const nodeId = raw.id;
     if (typeof nodeId !== "string")
         return undefined;
-    const kind = raw.__smithersKind === "agent"
+    const kind = raw.__smithersKind === "human"
+        ? "human"
+        : raw.__smithersKind === "agent"
         ? "agent"
         : raw.__smithersKind === "compute"
             ? "compute"

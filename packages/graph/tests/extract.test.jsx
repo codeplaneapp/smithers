@@ -173,6 +173,7 @@ describe("extractGraph", () => {
 				__smithersComputeFn: fn,
 			});
 			const task = extractGraph(root).tasks[0];
+			expect(task.kind).toBe("compute");
 			expect(task.computeFn).toBe(fn);
 			expect(task.staticPayload).toBeUndefined();
 		});
@@ -186,6 +187,7 @@ describe("extractGraph", () => {
 				__smithersComputeFn: fn,
 			});
 			const task = extractGraph(root).tasks[0];
+			expect(task.kind).toBe("human");
 			expect(task.computeFn).toBe(fn);
 			expect(task.staticPayload).toBeUndefined();
 		});

@@ -42,8 +42,13 @@ describe("buildHumanRequestUi", () => {
     expect(buildHumanRequestUi(node({ kind: "approval" }), approval(), "run-1")).toBeNull();
   });
 
-  it("returns null when there is no pending approval/request", () => {
-    expect(buildHumanRequestUi(node(), undefined, "run-1")).toBeNull();
+  it("falls back to node metadata while the request row is still loading", () => {
+    const ui = buildHumanRequestUi(node({ name: "collect-input" }), undefined, "run-1");
+    expect(ui).toEqual({ title: "collect-input", prompt: undefined, runId: "run-1" });
+  });
+
+  it("returns null when the human node is no longer waiting", () => {
+    expect(buildHumanRequestUi(node({ status: "done" }), approval(), "run-1")).toBeNull();
   });
 
   it("falls back the title to the node name when the request has no title", () => {

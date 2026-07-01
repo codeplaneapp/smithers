@@ -11,6 +11,7 @@ import {
   nodeGlyphColor,
   nodeChevron,
   defaultTab,
+  eventKeyName,
   ALL_TABS,
   type FlatNode,
   type TabId,
@@ -467,6 +468,30 @@ export function TreeMode({
 
   const nodeApproval = selectNodeApproval(approvals, focusedNode, resolvedKeys);
 
+  useEffect(() => {
+    const waitsOnApproval =
+      focusedNode?.status === "waiting" &&
+      (focusedNode.kind === "approval" || focusedNode.kind === "human");
+    if (!waitsOnApproval || nodeApproval) return;
+    let cancelled = false;
+    const refetch = () => {
+      if (!cancelled) void refetchApprovals().catch(() => {});
+    };
+    refetch();
+    const interval = setInterval(refetch, 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [
+    focusedNode?.id,
+    focusedNode?.iteration,
+    focusedNode?.kind,
+    focusedNode?.status,
+    nodeApproval,
+    refetchApprovals,
+  ]);
+
   // Decode the approval's mode + options so we render mode-appropriate controls
   // and submit the right decision shape (gate vs select vs rank) — submitting a
   // bare `{ approved }` for a select/rank request would be rejected by the
@@ -610,7 +635,7 @@ export function TreeMode({
     : null;
 
   useKeyboard((e) => {
-    const key = e.name;
+    const key = eventKeyName(e);
 
     if (key === "tab") {
       setFocusPane((p) => (p === "tree" ? "inspector" : "tree"));

@@ -7,7 +7,7 @@ export type DevToolsNode = {
   props: Record<string, unknown>;
   task?: {
     nodeId: string;
-    kind: "agent" | "compute" | "static";
+    kind: "agent" | "compute" | "static" | "human" | "approval";
     agent?: string;
     label?: string;
     outputTableName?: string;
