@@ -28,7 +28,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@types/node": "25.6.0",
+    "@types/node": "26.1.0",
     "alchemy": "^0.93.11",
     "bun-types": "^1.3.14",
     "react": "19.2.7",
