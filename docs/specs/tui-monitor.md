@@ -26,7 +26,7 @@ The single-run monitor TUI is a full-screen terminal UI launched from the `bunx 
 | Runtime | Bun (>=1.1) | All IO, child process, WebSocket global |
 | TUI renderer | `@opentui/core` | Zig-native core via Bun FFI; `createCliRenderer` |
 | React reconciler | `@opentui/react` | `createRoot(renderer).render(...)` |
-| React | `react` 19 (peer) | Standard reconciler; `react-dom` is a peer of `@opentui/react` |
+| React | `react` 19 (runtime dep) | Standard reconciler; `packages/tui` ships `react`/`react-dom` 19 as runtime dependencies |
 | JSX | **`jsxImportSource: "@opentui/react"`** | The OpenTUI React JSX runtime, **NOT** plain `react` and **NOT** `smithers-orchestrator`'s jsx-runtime. OpenTUI's runtime supplies the intrinsic element types (`box`/`text`/`select`/`scrollbox`/`code`/`diff`…) so the TUI's JSX type-checks. The smithers jsx-runtime is only for workflow definition files. |
 | Data | `smithers-orchestrator/gateway-react` | `SmithersGatewayProvider` + gateway hooks |
 
@@ -142,7 +142,7 @@ Fields, left to right:
 - **Left pane** (`<scrollbox>`, ~38% width): collapsible node tree.
   - Each row: `indent + chevron + glyph + label + inline meta`. Rows do NOT render a per-node elapsed time (the snapshot node carries no readily-available per-node timing); the optional trailing `meta` is the node's own `meta` string, rendered inline and dim after the label (truncated to fit the pane).
   - Chevron: `▾` expanded, `▸` collapsed, `·` leaf.
-  - Glyph: `✓` finished/ok, `●` running, `⏸` waiting, `○` pending/queued, `✗` failed, `·` other/unknown.
+  - Glyph: `✓` finished/ok, `●` running, `⏸` waiting, `○` pending/queued, `⊘` cancelled (dim/grey, terminal but not a failure), `✗` failed, `·` other/unknown.
   - j/k / arrow keys move the cursor (the right pane tracks the cursored node live); `space` folds/unfolds a node with children; `⏎` moves focus INTO the inspector (right) pane; `tab` toggles focus between the two panes.
   - Data: `useGatewayRunTree(runId)` - a live query over the per-run `nodes` collection, kept fresh via the gateway's `streamDevTools` stream (refetch + reconcile of `getDevToolsSnapshot`). The TUI does not reconstruct the tree from raw event frames.
 
@@ -309,7 +309,8 @@ packages/tui/
                         # deps: @opentui/core, @opentui/react,
                         #       @smithers-orchestrator/gateway-client (workspace:*),
                         #       @smithers-orchestrator/gateway-react (workspace:*)
-                        # peer/dev: react, react-dom (19); no zod, no smithers-orchestrator dep
+                        #       react, react-dom (19, runtime deps)
+                        # dev: @types/react, @types/react-dom; no zod, no smithers-orchestrator dep
   tsconfig.json         # jsxImportSource "@opentui/react"
   src/
     index.tsx           # smithers-mon BIN entry: argv + gateway autostart + createRoot + providers
@@ -342,7 +343,7 @@ packages/tui/
 
 ### CLI wiring (`apps/cli/src/`), as built
 
-- `apps/cli/src/tui.js` - **`runTuiCommand` is retained.** It owns the pre-fullscreen flow (fuzzy picker + input prompts), starts the run as a detached background process, then hands off to the monitor. The handoff is a **child-process spawn of the `smithers-mon` bin** (`launchTuiMonitor()` → `spawn("bun", [tuiEntry, runId], { stdio: "inherit", env: { SMITHERS_CLI, SMITHERS_GATEWAY_URL } })`), where `tuiEntry` is resolved by `resolveTuiEntry()` from the `@smithers-orchestrator/tui` package `bin`. The CLI distinguishes a clean monitor quit (exit 0, or an expected interrupt signal SIGINT/SIGTERM/SIGHUP) from a startup failure (non-zero exit) or a crash (other terminating signals → reported as `TUI_MONITOR_CRASHED`).
+- `apps/cli/src/tui.js` - **`runTuiCommand` is retained.** It owns the pre-fullscreen flow (fuzzy picker + input prompts), starts the run as a detached background process, then hands off to the monitor. The handoff is a **child-process spawn of the `smithers-mon` bin** (`launchTuiMonitor()` → `spawn("bun", [tuiEntry, runId], { stdio: "inherit", env })`), where the env is built by `buildTuiMonitorEnv()` and forwards `SMITHERS_CLI` (the real CLI entry, always set), plus `SMITHERS_GATEWAY_URL`, `SMITHERS_BACKEND`, and `SMITHERS_TOKEN` when present (the last so an explicit `--auth-token` reaches the monitor's gateway client). `tuiEntry` is resolved by `resolveTuiEntry()` from the `@smithers-orchestrator/tui` package `bin`. The CLI distinguishes a clean monitor quit (exit 0, or an expected interrupt signal SIGINT/SIGTERM/SIGHUP) from a startup failure (non-zero exit) or a crash (other terminating signals → reported as `TUI_MONITOR_CRASHED`).
 
 - **Fallback stream path:** when `resolveTuiEntry()` returns null (e.g. a slim install without the TUI package), `runTuiCommand` calls the inline `streamRun(...)` append-only loop instead, so the run stays observable without the full-screen monitor.
 
