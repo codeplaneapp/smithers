@@ -100,6 +100,11 @@ describe("treeUtils", () => {
       expect(nodeGlyph("idle")).toBe("○");
     });
 
+    it("returns a distinct dim glyph for cancelled (not the red failure ✗)", () => {
+      expect(nodeGlyph("cancelled")).toBe("⊘");
+      expect(nodeGlyph("canceled")).toBe("⊘");
+    });
+
     it("returns ✗ for failed/error", () => {
       expect(nodeGlyph("failed")).toBe("✗");
       expect(nodeGlyph("error")).toBe("✗");
@@ -122,6 +127,12 @@ describe("treeUtils", () => {
 
     it("returns yellow for waiting", () => {
       expect(nodeGlyphColor("waiting")).toBe("#ffaf00");
+    });
+
+    it("returns dim grey for cancelled (never the red failure color)", () => {
+      expect(nodeGlyphColor("cancelled")).toBe("#888888");
+      expect(nodeGlyphColor("canceled")).toBe("#888888");
+      expect(nodeGlyphColor("cancelled")).not.toBe("#ff5f5f");
     });
 
     it("returns red for failed", () => {

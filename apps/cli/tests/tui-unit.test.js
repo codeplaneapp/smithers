@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import {
     buildDetachedUpArgs,
+    buildTuiMonitorEnv,
     buildWorkflowPickerOptions,
     childFailurePromise,
     displayNode,
@@ -14,8 +15,11 @@ import {
     OMIT_FIELD,
     pickerMaxItems,
     promptForField,
+    resolveMonitorGatewayBase,
+    resolveMonitorToken,
     streamRun,
     truncate,
+    validateGatewayServesRun,
     waitForRunRow,
     wrapText,
 } from "../src/tui.js";
@@ -427,6 +431,83 @@ describe("tui helpers", () => {
     test("mergeInteractiveInputs merges prompted values over supplied, keeping uncovered keys", () => {
         // Prompted `b` overrides supplied `b`; supplied `a` (no prompt) is kept.
         expect(mergeInteractiveInputs({ a: 1, b: 2 }, { b: 3 })).toEqual({ a: 1, b: 3 });
+    });
+
+    test("buildTuiMonitorEnv forwards an explicit --auth-token as SMITHERS_TOKEN", () => {
+        const env = buildTuiMonitorEnv(
+            { PATH: "/bin" },
+            { cliIndexPath: "/cli/index.js", gatewayUrl: "http://gw:1", backend: "pglite", authToken: "secret" },
+        );
+        expect(env.SMITHERS_CLI).toBe("/cli/index.js");
+        expect(env.SMITHERS_GATEWAY_URL).toBe("http://gw:1");
+        expect(env.SMITHERS_BACKEND).toBe("pglite");
+        // The TUI resolves its bearer from --token/SMITHERS_TOKEN/SMITHERS_API_KEY,
+        // so an explicit CLI --auth-token must land as SMITHERS_TOKEN or it's dropped.
+        expect(env.SMITHERS_TOKEN).toBe("secret");
+        expect(env.PATH).toBe("/bin");
+    });
+
+    test("buildTuiMonitorEnv omits optional vars when absent", () => {
+        const env = buildTuiMonitorEnv({}, { cliIndexPath: "/cli/index.js" });
+        expect(env.SMITHERS_CLI).toBe("/cli/index.js");
+        expect("SMITHERS_GATEWAY_URL" in env).toBe(false);
+        expect("SMITHERS_BACKEND" in env).toBe(false);
+        expect("SMITHERS_TOKEN" in env).toBe(false);
+    });
+
+    test("resolveMonitorGatewayBase prefers a pinned URL, else the local default", () => {
+        expect(resolveMonitorGatewayBase({ SMITHERS_GATEWAY_URL: "http://host:9000/" })).toBe("http://host:9000");
+        expect(resolveMonitorGatewayBase({ SMITHERS_GATEWAY_PORT: "8080" })).toBe("http://127.0.0.1:8080");
+        expect(resolveMonitorGatewayBase({})).toBe("http://127.0.0.1:7331");
+    });
+
+    test("resolveMonitorToken mirrors the TUI precedence: --auth-token, then env", () => {
+        expect(resolveMonitorToken("cli-tok", { SMITHERS_TOKEN: "env-tok", SMITHERS_API_KEY: "key" })).toBe("cli-tok");
+        expect(resolveMonitorToken(undefined, { SMITHERS_TOKEN: "env-tok", SMITHERS_API_KEY: "key" })).toBe("env-tok");
+        expect(resolveMonitorToken(undefined, { SMITHERS_API_KEY: "key" })).toBe("key");
+        expect(resolveMonitorToken(undefined, {})).toBeUndefined();
+    });
+
+    test("validateGatewayServesRun passes once the connected gateway serves the run", async () => {
+        const res = await validateGatewayServesRun(
+            async (id) => ({ runId: id }),
+            "run-x",
+            "http://127.0.0.1:7331",
+        );
+        expect(res).toEqual({ ok: true });
+    });
+
+    test("validateGatewayServesRun keeps polling through a transient error, then passes", async () => {
+        let calls = 0;
+        let clock = 0;
+        const res = await validateGatewayServesRun(
+            async () => {
+                calls += 1;
+                if (calls < 3) throw new Error("connection refused");
+                return { runId: "r" };
+            },
+            "r",
+            "http://127.0.0.1:7331",
+            { timeoutMs: 10_000, intervalMs: 100, now: () => clock, sleep: async (ms) => { clock += ms; } },
+        );
+        expect(res).toEqual({ ok: true });
+        expect(calls).toBe(3);
+    });
+
+    test("validateGatewayServesRun fails fast with a clear mismatch message", async () => {
+        let clock = 0;
+        // A reused gateway on a different backend/workspace: getRun never sees this
+        // run, so the poll times out and surfaces an actionable error instead of a
+        // silently empty monitor.
+        const res = await validateGatewayServesRun(
+            async () => null,
+            "run-x",
+            "http://127.0.0.1:7331",
+            { timeoutMs: 1000, intervalMs: 250, now: () => clock, sleep: async (ms) => { clock += ms; } },
+        );
+        expect(res.ok).toBe(false);
+        expect(res.message).toContain("does not serve run run-x");
+        expect(res.message).toContain("--gateway");
     });
 });
 

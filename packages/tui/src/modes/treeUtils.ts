@@ -68,6 +68,11 @@ export function nodeGlyph(status: string): string {
     case "pending":
     case "idle":
       return "○";
+    // A user-cancelled node is terminal but NOT a failure: distinct dim glyph, not
+    // the red ✗, so a deliberate cancel doesn't read as an error.
+    case "cancelled":
+    case "canceled":
+      return "⊘";
     case "failed":
     case "error":
       return "✗";
@@ -90,6 +95,11 @@ export function nodeGlyphColor(status: string): string {
     case "blocked":
     case "waiting_approval":
       return "#ffaf00";
+    // Cancelled: dim grey (terminal but not a failure), mirroring the header's
+    // cancelled status dot — never the red failure color.
+    case "cancelled":
+    case "canceled":
+      return "#888888";
     case "failed":
     case "error":
       return "#ff5f5f";

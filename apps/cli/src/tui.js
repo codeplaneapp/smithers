@@ -883,6 +883,29 @@ export function resolveTuiEntry() {
 }
 
 /**
+ * Build the child environment for the TUI monitor: point it at the real CLI
+ * entry (SMITHERS_CLI, for gateway autostart/hijack), and forward the gateway
+ * URL, storage backend, and auth token.
+ *
+ * The auth token is threaded as SMITHERS_TOKEN because the monitor resolves its
+ * bearer from `--token`/`SMITHERS_TOKEN`/`SMITHERS_API_KEY`. Without this an
+ * explicit CLI `--auth-token` would be dropped, leaving the monitor's gateway
+ * client unauthenticated while the gateway (which enables auth once a token is
+ * set) rejects every RPC/WS call.
+ *
+ * @param {NodeJS.ProcessEnv} baseEnv - env to extend (usually `process.env`)
+ * @param {{ cliIndexPath: string; gatewayUrl?: string; backend?: string; authToken?: string }} opts
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function buildTuiMonitorEnv(baseEnv, { cliIndexPath, gatewayUrl, backend, authToken }) {
+    const env = { ...baseEnv, SMITHERS_CLI: cliIndexPath };
+    if (gatewayUrl) env.SMITHERS_GATEWAY_URL = gatewayUrl;
+    if (backend) env.SMITHERS_BACKEND = backend;
+    if (authToken) env.SMITHERS_TOKEN = authToken;
+    return env;
+}
+
+/**
  * Spawn the full-screen TUI monitor as a foreground child process.
  * Inherits the current TTY (stdio: "inherit") and resolves when the child exits,
  * carrying its exit code/signal so the caller can distinguish a clean user quit
@@ -896,17 +919,127 @@ export function resolveTuiEntry() {
  * @param {string} [backend] - storage backend the run uses (`--backend`); forwarded
  *   as SMITHERS_BACKEND so the TUI's autostarted gateway opens the SAME store the
  *   detached run writes to instead of the default sqlite one.
+ * @param {string} [authToken] - explicit `--auth-token`; forwarded as SMITHERS_TOKEN.
  * @returns {Promise<{ code: number | null; signal: NodeJS.Signals | null }>}
  */
-async function launchTuiMonitor(tuiEntry, runId, cliIndexPath, gatewayUrl, backend) {
+async function launchTuiMonitor(tuiEntry, runId, cliIndexPath, gatewayUrl, backend, authToken) {
     return new Promise((resolve, reject) => {
-        const env = { ...process.env, SMITHERS_CLI: cliIndexPath };
-        if (gatewayUrl) env.SMITHERS_GATEWAY_URL = gatewayUrl;
-        if (backend) env.SMITHERS_BACKEND = backend;
+        const env = buildTuiMonitorEnv(process.env, { cliIndexPath, gatewayUrl, backend, authToken });
         const child = spawn("bun", [tuiEntry, runId], { stdio: "inherit", env });
         child.once("error", (err) => reject(err));
         child.once("exit", (code, signal) => resolve({ code, signal }));
     });
+}
+
+/**
+ * Resolve the gateway base URL the monitor will READ from, mirroring the TUI's
+ * own resolution (SMITHERS_GATEWAY_URL, else the local default on
+ * SMITHERS_GATEWAY_PORT/7331). Used for the parent-side run-visibility check
+ * only — the pinned URL, not this computed default, is what gets forwarded as
+ * SMITHERS_GATEWAY_URL (so an unpinned monitor still autostarts its own).
+ * @param {NodeJS.ProcessEnv} env
+ */
+export function resolveMonitorGatewayBase(env) {
+    const pinned = typeof env.SMITHERS_GATEWAY_URL === "string" && env.SMITHERS_GATEWAY_URL.length > 0
+        ? env.SMITHERS_GATEWAY_URL.replace(/\/+$/, "")
+        : undefined;
+    if (pinned) return pinned;
+    const port = Number(env.SMITHERS_GATEWAY_PORT) || 7331;
+    return `http://127.0.0.1:${port}`;
+}
+
+/**
+ * Resolve the bearer token the monitor authenticates with, mirroring the TUI:
+ * explicit `--auth-token`, then SMITHERS_TOKEN, then SMITHERS_API_KEY.
+ * @param {string | undefined} authToken
+ * @param {NodeJS.ProcessEnv} env
+ */
+export function resolveMonitorToken(authToken, env) {
+    const token = authToken || env.SMITHERS_TOKEN || env.SMITHERS_API_KEY;
+    return token && token.length > 0 ? token : undefined;
+}
+
+/**
+ * Whether a Gateway answers its `/health` probe at `base` (i.e. one is already
+ * listening there and the monitor would REUSE it rather than autostart its own).
+ * @param {string} base
+ * @param {string} [token]
+ */
+async function gatewayHealthy(base, token) {
+    const headers = token ? { authorization: `Bearer ${token}` } : undefined;
+    return fetch(`${base}/health`, { headers }).then((r) => r.ok, () => false);
+}
+
+/**
+ * Fetch a run from a Gateway over its HTTP RPC (same wire shape as `smithers ui`).
+ * Returns the run payload, `null` when the gateway does not serve it, and THROWS
+ * on transport/protocol/auth errors so the caller can keep polling through a
+ * transient blip instead of treating one as a definitive miss.
+ * @param {string} base - gateway base URL
+ * @param {string} runId
+ * @param {string} [token] - bearer when the gateway requires auth
+ * @returns {Promise<unknown | null>}
+ */
+async function gatewayGetRun(base, runId, token) {
+    const headers = { "content-type": "application/json" };
+    if (token) headers.authorization = `Bearer ${token}`;
+    const res = await fetch(`${base}/v1/rpc/getRun`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ runId }),
+    });
+    const frame = await res.json().catch(() => null);
+    if (!frame || frame.type !== "res") throw new Error(`Gateway at ${base} returned an invalid RPC frame for getRun.`);
+    if (!frame.ok) throw new Error(frame.error?.message ?? "Gateway RPC getRun failed.");
+    return frame.payload ?? null;
+}
+
+/**
+ * Validate that the Gateway the monitor will READ from actually serves this run.
+ *
+ * The monitor reuses any healthy Gateway at the default address before
+ * autostarting its own — but a stray Gateway already listening there may be bound
+ * to a DIFFERENT backend/workspace. The detached run then writes to one store
+ * while the monitor reads another, so the monitor shows a silently empty/wrong
+ * run. Poll `getRun(runId)` against the connected Gateway within the startup
+ * budget; if the run never appears, fail fast with a clear, actionable error
+ * instead. Transport errors (a momentary blip) are swallowed and retried until
+ * the timeout so a truly-serving gateway that is briefly slow still passes.
+ *
+ * Pure/injected: `getRunOnGateway`, `now`, and `sleep` are all supplied so the
+ * poll is unit-testable with a fake clock and no real network.
+ *
+ * @param {(runId: string) => Promise<unknown>} getRunOnGateway - fetch the run via the gateway
+ * @param {string} runId
+ * @param {string} gatewayUrl - gateway base the monitor connects to (for the message)
+ * @param {{ timeoutMs?: number; intervalMs?: number; now?: () => number; sleep?: (ms: number) => Promise<void> }} [opts]
+ * @returns {Promise<{ ok: true } | { ok: false; message: string }>}
+ */
+export async function validateGatewayServesRun(getRunOnGateway, runId, gatewayUrl, opts = {}) {
+    const timeoutMs = Math.max(0, opts.timeoutMs ?? 10_000);
+    const intervalMs = Math.max(1, opts.intervalMs ?? 250);
+    const now = opts.now ?? Date.now;
+    const sleepFn = opts.sleep ?? sleep;
+    const startedAt = now();
+    while (true) {
+        try {
+            if (await getRunOnGateway(runId)) return { ok: true };
+        } catch {
+            // Transient gateway/RPC/auth blip while it settles; keep polling until
+            // the timeout rather than failing on the first miss.
+        }
+        const elapsedMs = now() - startedAt;
+        if (elapsedMs >= timeoutMs) {
+            return {
+                ok: false,
+                message:
+                    `Gateway at ${gatewayUrl} does not serve run ${runId}; it may be on a ` +
+                    `different backend/workspace. Point the monitor at the right one with ` +
+                    `--gateway <url>, or stop the stray gateway so the monitor can start its own.`,
+            };
+        }
+        await sleepFn(Math.min(intervalMs, timeoutMs - elapsedMs));
+    }
 }
 
 /**
@@ -1106,12 +1239,44 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     }
     s.stop(`Run ${pc.dim(runId)} started ${pc.dim("·")} logs → ${pc.dim(logFile)}`);
 
+    // An explicit `--auth-token` must reach the monitor's gateway client
+    // (forwarded as SMITHERS_TOKEN); the TUI only reads --token/SMITHERS_TOKEN/
+    // SMITHERS_API_KEY, so without this an auth-gated gateway rejects every call.
+    const authToken = (c.options && typeof c.options.authToken === "string" && c.options.authToken) || undefined;
+
     const tuiEntry = resolveTuiEntry();
     try {
         if (tuiEntry) {
+            // Guard against a stray REUSED gateway on a different backend/workspace.
+            // The monitor reuses any healthy gateway at the default address before
+            // autostarting its own; if that one serves a different store, the
+            // detached run writes here while the monitor reads there — a silently
+            // empty monitor. Only a REUSED (already-listening) gateway can mismatch;
+            // an autostarted one inherits the forwarded backend, so we validate only
+            // when a gateway is already up.
+            const monitorBase = resolveMonitorGatewayBase(process.env);
+            const monitorToken = resolveMonitorToken(authToken, process.env);
+            if (await gatewayHealthy(monitorBase, monitorToken)) {
+                const check = await validateGatewayServesRun(
+                    (id) => gatewayGetRun(monitorBase, id, monitorToken),
+                    runId,
+                    monitorBase,
+                    { timeoutMs: 10_000, intervalMs: 250 },
+                );
+                if (!check.ok) {
+                    terminateDetachedChild(child);
+                    return fail({
+                        code: "TUI_GATEWAY_RUN_MISMATCH",
+                        message: `${check.message} See ${logFile}.`,
+                        exitCode: 1,
+                        runId,
+                        logFile,
+                    });
+                }
+            }
             // Hand off to the full-screen TUI monitor. The TUI handles all views
             // (tree, logs, timeline, approvals) and exits when the user presses q/Q.
-            const { code, signal } = await launchTuiMonitor(tuiEntry, runId, indexPath, process.env.SMITHERS_GATEWAY_URL, backend);
+            const { code, signal } = await launchTuiMonitor(tuiEntry, runId, indexPath, process.env.SMITHERS_GATEWAY_URL, backend, authToken);
             // A clean quit is code 0, an interrupt teardown code (the monitor traps
             // Ctrl-C / kill / terminal close and exits 129/130/143 after cleanup),
             // or an expected interrupt signal. A CRASH signal (SIGSEGV/SIGABRT/…)

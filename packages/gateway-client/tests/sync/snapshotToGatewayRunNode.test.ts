@@ -128,7 +128,7 @@ describe("snapshotToGatewayRunNode", () => {
     expect(snapshotToGatewayRunNode({ root: { id: 7, name: "struct", type: "Sequence", children: [] } })?.name).toBe("struct");
   });
 
-  test("toRunStatus collapses lifecycle states onto the five UI tones at the root", () => {
+  test("toRunStatus collapses lifecycle states onto the UI tones at the root", () => {
     const cases: Array<[string | undefined, string]> = [
       ["running", "running"],
       ["finished", "ok"],
@@ -136,8 +136,10 @@ describe("snapshotToGatewayRunNode", () => {
       ["ok", "ok"],
       ["failed", "failed"],
       ["errored", "failed"],
-      ["cancelled", "failed"],
-      ["canceled", "failed"],
+      // Cancelled is preserved as its OWN tone (not collapsed to failed) so a
+      // deliberate cancel renders dim/grey rather than as a red error.
+      ["cancelled", "cancelled"],
+      ["canceled", "cancelled"],
       ["waiting-event", "waiting"],
       ["waiting-timer", "waiting"],
       ["waiting", "waiting"],
@@ -152,5 +154,23 @@ describe("snapshotToGatewayRunNode", () => {
       });
       expect(tree?.status, `state ${String(state)} -> ${status}`).toBe(status);
     }
+  });
+
+  test("carries cancelled through the node status model instead of a red failure", () => {
+    // A cancelled run: the root mirrors the run's `cancelled` tone (so the tree
+    // and graph render it dim/grey, not the red failure ✗). Non-root nodes stay
+    // neutral `queued` (the snapshot carries no per-node lifecycle), exactly as a
+    // failed run leaves them — cancelled is never coerced to `failed`.
+    const tree = snapshotToGatewayRunNode({
+      root: {
+        id: 1,
+        name: "Workflow",
+        type: "Workflow",
+        children: [{ id: 2, name: "Task", type: "Task", task: { nodeId: "a" }, children: [] }],
+      },
+      runState: { state: "cancelled" },
+    });
+    expect(tree?.status).toBe("cancelled");
+    expect(tree?.children?.[0]?.status).toBe("queued");
   });
 });

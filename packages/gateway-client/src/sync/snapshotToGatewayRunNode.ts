@@ -63,9 +63,11 @@ function nodeKind(node: DevToolsSnapshotNode): string {
 }
 
 /**
- * Collapse a gateway run/lifecycle state onto the five tones the run UI knows.
+ * Collapse a gateway run/lifecycle state onto the tones the run UI knows.
  * Mirrors `apps/smithers`'s `toNodeStatus`; unknown/empty falls back to the
- * neutral `queued`.
+ * neutral `queued`. `cancelled` is preserved as its OWN tone (not collapsed to
+ * `failed`) so a deliberate cancel renders dim/grey rather than as a red error —
+ * matching `runStatusFromFrame` and the header's cancelled status dot.
  */
 function toRunStatus(state: string | undefined): string {
   switch (state) {
@@ -76,10 +78,11 @@ function toRunStatus(state: string | undefined): string {
     case "completed":
     case "ok":
       return "ok";
-    case "failed":
-    case "errored":
     case "cancelled":
     case "canceled":
+      return "cancelled";
+    case "failed":
+    case "errored":
       return "failed";
     case "waiting-approval":
     case "waiting-event":
