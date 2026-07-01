@@ -1624,21 +1624,17 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
             const monitor = launchTuiMonitor(tuiEntry, runId, indexPath, process.env.SMITHERS_GATEWAY_URL, backend, authToken);
             const supervised = await superviseTuiMonitor(monitor, childFailure, db.adapter, runId);
             if (supervised.monitorError) {
-                // The monitor failed to START after the run already launched. Don't
-                // strand the (still-running) detached run: fall back to the inline
-                // stream loop so it stays observable, mirroring the no-TUI path.
-                log.warn(`The run monitor failed to start (${supervised.monitorError.message}); streaming inline instead.`);
-                const result = await streamRun(db.adapter, runId, name, promptText, { childFailure });
-                if (result.error) {
-                    return fail({
-                        code: "TUI_RUN_EXITED",
-                        message: `${result.error.message} See ${logFile}.`,
-                        exitCode: 1,
-                        runId,
-                        logFile,
-                    });
-                }
-                return c.ok({ ran: true, runId });
+                // No silent fallback: if the monitor can't start, fail loudly instead
+                // of reverting to the old inline stream. The detached run is still
+                // running — reattach with `smithers-mon <runId>` or read the log file.
+                terminateDetachedChild(child);
+                return fail({
+                    code: "TUI_MONITOR_FAILED",
+                    message: `The run monitor failed to start: ${supervised.monitorError.message}. Run started — reattach with \`smithers-mon ${runId}\` or see ${logFile}.`,
+                    exitCode: 1,
+                    runId,
+                    logFile,
+                });
             }
             if (supervised.error) {
                 return fail({
@@ -1674,21 +1670,17 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
                 });
             }
         } else {
-            // The TUI package isn't available (e.g. a slim install) — fall back to
-            // the inline append-only stream loop so the run is still observable.
-            // streamRun returns `{ error }` when the detached process dies before the
-            // run reaches a terminal/pause state; surface that as a failure instead of
-            // reporting success, mirroring the old inline path's TUI_RUN_EXITED.
-            const result = await streamRun(db.adapter, runId, name, promptText, { childFailure });
-            if (result.error) {
-                return fail({
-                    code: "TUI_RUN_EXITED",
-                    message: `${result.error.message} See ${logFile}.`,
-                    exitCode: 1,
-                    runId,
-                    logFile,
-                });
-            }
+            // No silent fallback: the full-screen monitor is the interactive
+            // experience. If its package (@smithers-orchestrator/tui) can't be
+            // resolved, fail loudly instead of quietly running the old inline stream.
+            terminateDetachedChild(child);
+            return fail({
+                code: "TUI_MONITOR_UNAVAILABLE",
+                message: `The run monitor package (@smithers-orchestrator/tui) could not be resolved, so the full-screen monitor can't launch. Run started — reattach with \`smithers-mon ${runId}\` or see ${logFile}.`,
+                exitCode: 1,
+                runId,
+                logFile,
+            });
         }
     } finally {
         db.cleanup();
