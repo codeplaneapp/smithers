@@ -6,7 +6,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { $ } from "bun";
 import { existsSync } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { open, readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { HumanTask, createSmithers } from "smithers-orchestrator";
@@ -26,6 +26,22 @@ const MAX_SESSION_MESSAGES = 30;
 const MONITOR_MAX_ITERATIONS = 12; // 12 × 5 min = 1 h ceiling
 
 // ─── Session reader helpers ───────────────────────────────────────────────────
+
+/**
+ * Read at most `maxBytes` from the START of a file without materializing the
+ * whole thing in memory. Session JSONL files (esp. Codex history.jsonl) can be
+ * many MB; reading them whole then slicing risks OOM (see bug-audit #65).
+ */
+async function readHead(file: string, maxBytes: number): Promise<string> {
+  const fh = await open(file, "r");
+  try {
+    const buf = Buffer.alloc(maxBytes);
+    const { bytesRead } = await fh.read(buf, 0, maxBytes, 0);
+    return buf.toString("utf8", 0, bytesRead);
+  } finally {
+    await fh.close();
+  }
+}
 
 async function listJsonlFiles(dir: string): Promise<string[]> {
   try {
@@ -179,8 +195,8 @@ async function readExternalSessions() {
     for (const file of recent) {
       fileCount++;
       try {
-        const raw = await readFile(file, "utf8");
-        const lines = raw.slice(0, MAX_BYTES_PER_FILE).split(/\r?\n/).filter(Boolean);
+        const raw = await readHead(file, MAX_BYTES_PER_FILE);
+        const lines = raw.split(/\r?\n/).filter(Boolean);
         for (const line of lines) {
           if (messages.length >= MAX_SESSION_MESSAGES) break;
           try {
@@ -206,8 +222,8 @@ async function readExternalSessions() {
     if (!agentTypes.includes(label)) agentTypes.push(label);
     fileCount++;
     try {
-      const raw = await readFile(file, "utf8");
-      const lines = raw.slice(0, MAX_BYTES_PER_FILE).split(/\r?\n/).filter(Boolean);
+      const raw = await readHead(file, MAX_BYTES_PER_FILE);
+      const lines = raw.split(/\r?\n/).filter(Boolean);
       for (const line of lines) {
         if (messages.length >= MAX_SESSION_MESSAGES) break;
         try {
