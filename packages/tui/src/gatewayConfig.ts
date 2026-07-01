@@ -20,6 +20,7 @@ export const DEFAULT_GATEWAY_PORT = 7331;
 export interface ResolveGatewayConfigInput {
   gatewayUrlArg?: string | undefined;
   portArg?: number | undefined;
+  tokenArg?: string | undefined;
   env?: Record<string, string | undefined>;
 }
 
@@ -27,13 +28,36 @@ export interface GatewayConfig {
   base: string;
   port: number;
   autoStartAllowed: boolean;
+  /**
+   * Bearer token for HTTP + WS auth, resolved (in priority order) from the
+   * `--token` arg, then `SMITHERS_TOKEN`, then `SMITHERS_API_KEY` (the same env
+   * var the gateway itself reads to require auth). `undefined` when none is set,
+   * so a loopback gateway with no auth stays token-free.
+   */
+  token?: string;
+}
+
+/**
+ * Resolve the bearer token the monitor authenticates with. `SMITHERS_API_KEY`
+ * is the env var the gateway reads to enable token auth, so when it is set the
+ * client MUST send the same token or every RPC/WS call is rejected while
+ * `/health` (unauthenticated) still passes.
+ */
+function resolveToken(
+  tokenArg: string | undefined,
+  env: Record<string, string | undefined>,
+): string | undefined {
+  const token = tokenArg ?? env.SMITHERS_TOKEN ?? env.SMITHERS_API_KEY;
+  return token && token.length > 0 ? token : undefined;
 }
 
 export function resolveGatewayConfig({
   gatewayUrlArg,
   portArg,
+  tokenArg,
   env = {},
 }: ResolveGatewayConfigInput): GatewayConfig {
+  const token = resolveToken(tokenArg, env);
   const fromArgOrEnv = gatewayUrlArg ?? env.SMITHERS_GATEWAY_URL;
   if (fromArgOrEnv) {
     let base = fromArgOrEnv.replace(/\/+$/, "");
@@ -57,8 +81,8 @@ export function resolveGatewayConfig({
         // it untouched and fall back to the requested port for the probe.
       }
     }
-    return { base, port, autoStartAllowed: false };
+    return { base, port, autoStartAllowed: false, token };
   }
   const port = portArg ?? (Number(env.SMITHERS_GATEWAY_PORT) || DEFAULT_GATEWAY_PORT);
-  return { base: `http://127.0.0.1:${port}`, port, autoStartAllowed: true };
+  return { base: `http://127.0.0.1:${port}`, port, autoStartAllowed: true, token };
 }

@@ -215,7 +215,7 @@ describe("gateway run stream frame mappers", () => {
     expect(runStatusFromFrame({ payload: { event: "run.completed", payload: { state: "ok" } } })).toBe("ok");
     expect(runStatusFromFrame({ payload: { event: "run.completed", payload: { status: "succeeded" } } })).toBe("succeeded");
     expect(runStatusFromFrame({ payload: { event: "run.completed", payload: { state: "failed" } } })).toBe("failed");
-    expect(runStatusFromFrame({ payload: { event: "run.completed", payload: { state: "cancelled" } } })).toBe("failed");
+    expect(runStatusFromFrame({ payload: { event: "run.completed", payload: { state: "cancelled" } } })).toBe("cancelled");
     expect(runStatusFromFrame({ payload: { event: "run.completed", payload: {} } })).toBe("ok");
     expect(runStatusFromFrame({ payload: { event: "node.started", payload: {} } })).toBeUndefined();
     expect(runStatusFromFrame({ payload: null })).toBeUndefined();

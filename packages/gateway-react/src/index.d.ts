@@ -721,7 +721,7 @@ type NodeStatus = "ok" | "running" | "queued" | "failed" | "waiting";
 type UseGatewayRunTreeResult = {
     /** The run tree with `children` rebuilt from the flat collection, or null when empty. */
     root: GatewayRunNode | null;
-    /** Every flattened node row, keyed by id in the collection. */
+    /** Every flattened node row, keyed by `runNodeKey` (the row `key`, `id` fallback) in the collection. */
     nodes: ReadonlyArray<GatewayRunNode>;
     /** The run-level status (the root node's status). */
     status: NodeStatus;

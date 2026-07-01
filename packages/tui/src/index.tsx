@@ -15,7 +15,7 @@ import { Keybindings } from "./Keybindings.tsx";
 import { RendererProvider } from "./RendererContext.tsx";
 import { App } from "./App.tsx";
 
-const USAGE = "Usage: smithers-mon <runId> [--gateway <url>] [--port <n>]\n";
+const USAGE = "Usage: smithers-mon <runId> [--gateway <url>] [--port <n>] [--token <token>]\n";
 
 // The TUI drives the terminal in raw mode and reads keystrokes via useKeyboard,
 // so it needs BOTH an interactive stdout (to render frames) and an interactive
@@ -35,6 +35,7 @@ if (!process.stdin.isTTY) {
 const args = process.argv.slice(2);
 let gatewayUrlArg: string | undefined;
 let portArg: number | undefined;
+let tokenArg: string | undefined;
 const positionals: string[] = [];
 for (let i = 0; i < args.length; i++) {
   const a = args[i]!;
@@ -46,6 +47,14 @@ for (let i = 0; i < args.length; i++) {
     }
   } else if (a.startsWith("--gateway=")) {
     gatewayUrlArg = a.slice("--gateway=".length);
+  } else if (a === "--token") {
+    tokenArg = args[++i];
+    if (tokenArg === undefined) {
+      process.stderr.write("smithers-mon: --token requires a value\n" + USAGE);
+      process.exit(1);
+    }
+  } else if (a.startsWith("--token=")) {
+    tokenArg = a.slice("--token=".length);
   } else if (a === "--port") {
     const raw = args[++i];
     if (raw === undefined) {
@@ -77,14 +86,21 @@ if (!runId) {
 // apps/cli forwards SMITHERS_GATEWAY_URL when it knows the real address. An
 // explicit --port is applied to a pinned --gateway/SMITHERS_GATEWAY_URL so the
 // probe/client hit the requested port (see resolveGatewayConfig).
-const { base: GATEWAY_BASE, port: GATEWAY_PORT, autoStartAllowed: AUTOSTART_ALLOWED } = resolveGatewayConfig({
+const { base: GATEWAY_BASE, port: GATEWAY_PORT, autoStartAllowed: AUTOSTART_ALLOWED, token: GATEWAY_TOKEN } = resolveGatewayConfig({
   gatewayUrlArg,
   portArg,
+  tokenArg,
   env: process.env,
 });
 
+// When a token is configured, send it on the /health probe too so the probe
+// authenticates the same way the RPC/WS client will — a gateway that gates
+// /health behind auth then answers consistently instead of the probe passing
+// while every later call is rejected.
+const PROBE_HEADERS = GATEWAY_TOKEN ? { authorization: `Bearer ${GATEWAY_TOKEN}` } : undefined;
+
 async function probeGateway(): Promise<boolean> {
-  return fetch(`${GATEWAY_BASE}/health`).then((r) => r.ok, () => false);
+  return fetch(`${GATEWAY_BASE}/health`, { headers: PROBE_HEADERS }).then((r) => r.ok, () => false);
 }
 
 // Resolve the REAL CLI entry to autostart the gateway through. Never fall back
@@ -95,7 +111,13 @@ const cliEntry = resolveCliEntry();
 async function autoStartGateway(): Promise<boolean> {
   if (!cliEntry) return false;
   try {
-    const child = spawn(process.argv[0]!, [cliEntry, "gateway", "--host", "127.0.0.1", "--port", String(GATEWAY_PORT)], {
+    // Pass the resolved token through as --auth-token so the autostarted
+    // gateway requires the SAME token the client sends. The env (SMITHERS_API_KEY)
+    // is inherited too, but a token from --token/SMITHERS_TOKEN would otherwise
+    // leave the spawned gateway open while the client sends a bearer it rejects.
+    const gatewayArgs = [cliEntry, "gateway", "--host", "127.0.0.1", "--port", String(GATEWAY_PORT)];
+    if (GATEWAY_TOKEN) gatewayArgs.push("--auth-token", GATEWAY_TOKEN);
+    const child = spawn(process.argv[0]!, gatewayArgs, {
       stdio: "ignore",
       detached: true,
     });
@@ -193,6 +215,9 @@ for (const signal of TEARDOWN_SIGNALS) process.on(signal, onSignal);
 const client = new SmithersGatewayClient({
   baseUrl: GATEWAY_BASE,
   WebSocket: globalThis.WebSocket,
+  // Authenticate RPC + WS when a token is configured; the gateway rejects
+  // unauthenticated calls whenever SMITHERS_API_KEY (or --token) is set.
+  token: GATEWAY_TOKEN,
 });
 
 const collections = createGatewayCollections({

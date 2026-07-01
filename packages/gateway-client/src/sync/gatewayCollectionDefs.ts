@@ -60,7 +60,11 @@ export function runStatusFromFrame(frame: { payload: unknown }): string | undefi
   const innerPayload = asRecord(payload.payload);
   if (innerEvent === "run.completed") {
     const state = asString(innerPayload.state) ?? asString(innerPayload.status);
-    if (state === "failed" || state === "cancelled") return "failed";
+    // Preserve `cancelled` as its own terminal status: a user-cancelled run is
+    // not a failure, and collapsing it to `failed` would make every consumer
+    // (TUI header, gateway-react, web) mislabel a deliberate cancel as an error.
+    if (state === "failed") return "failed";
+    if (state === "cancelled") return "cancelled";
     return state ?? "ok";
   }
   if (innerEvent === "run.started" || innerEvent === "run.resumed") return "running";

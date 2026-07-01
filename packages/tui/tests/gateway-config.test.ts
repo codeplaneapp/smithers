@@ -82,4 +82,39 @@ describe("resolveGatewayConfig", () => {
       autoStartAllowed: false,
     });
   });
+
+  test("leaves token undefined when no auth is configured", () => {
+    expect(resolveGatewayConfig({ env: {} }).token).toBeUndefined();
+    expect(resolveGatewayConfig({ env: { SMITHERS_API_KEY: "" } }).token).toBeUndefined();
+  });
+
+  test("resolves the token from SMITHERS_API_KEY (the var the gateway reads)", () => {
+    expect(resolveGatewayConfig({ env: { SMITHERS_API_KEY: "secret-key" } }).token).toBe("secret-key");
+  });
+
+  test("SMITHERS_TOKEN overrides SMITHERS_API_KEY", () => {
+    expect(
+      resolveGatewayConfig({ env: { SMITHERS_TOKEN: "tok", SMITHERS_API_KEY: "key" } }).token,
+    ).toBe("tok");
+  });
+
+  test("--token arg wins over both env tokens", () => {
+    expect(
+      resolveGatewayConfig({
+        tokenArg: "arg-token",
+        env: { SMITHERS_TOKEN: "tok", SMITHERS_API_KEY: "key" },
+      }).token,
+    ).toBe("arg-token");
+  });
+
+  test("carries the token onto a pinned gateway too", () => {
+    expect(
+      resolveGatewayConfig({ gatewayUrlArg: "http://host:5555", env: { SMITHERS_API_KEY: "key" } }),
+    ).toEqual({
+      base: "http://host:5555",
+      port: 5555,
+      autoStartAllowed: false,
+      token: "key",
+    });
+  });
 });

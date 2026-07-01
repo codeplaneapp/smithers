@@ -28,6 +28,11 @@ describe("statusDotColor", () => {
     expect(statusDotColor("succeeded")).toBe("#00d787");
     expect(statusDotColor("mystery")).toBe("#555555");
   });
+  it("shows cancelled dim/grey, not red-as-failed", () => {
+    expect(statusDotColor("cancelled")).toBe("#888888");
+    expect(statusDotColor("canceled")).toBe("#888888");
+    expect(statusDotColor("cancelled")).not.toBe(statusDotColor("failed"));
+  });
 });
 
 describe("runLiveLabel", () => {
@@ -35,6 +40,7 @@ describe("runLiveLabel", () => {
     expect(runLiveLabel("running").text).toBe("live");
     expect(runLiveLabel("waiting-approval").text).toBe("paused");
     expect(runLiveLabel("succeeded").text).toBe("succeeded");
+    expect(runLiveLabel("cancelled").text).toBe("cancelled");
   });
 });
 

@@ -14,19 +14,27 @@ const PAUSED_STATES = new Set([
   "blocked",
   "paused",
 ]);
-const FAILED_STATES = new Set(["failed", "cancelled", "canceled", "errored", "error", "stale", "orphaned"]);
+const FAILED_STATES = new Set(["failed", "errored", "error", "stale", "orphaned"]);
+/**
+ * User-cancelled runs are terminal but NOT failures: they are shown dim/grey, not
+ * red, so a deliberate cancel doesn't read as an error. Kept out of FAILED_STATES.
+ */
+const CANCELLED_STATES = new Set(["cancelled", "canceled"]);
 const DONE_STATES = new Set(["succeeded", "finished", "completed", "ok", "continued"]);
 
 export function isRunningStatus(status: string): boolean {
   return RUNNING_STATES.has(status);
 }
 
-/** Status-dot color, sharing the run UI's five-tone palette. */
+/** Status-dot color, sharing the run UI's palette. */
 export function statusDotColor(status: string): string {
   if (RUNNING_STATES.has(status)) return "#00d7ff";
   if (PAUSED_STATES.has(status)) return "#ffaf00";
   if (FAILED_STATES.has(status)) return "#ff5f5f";
   if (DONE_STATES.has(status)) return "#00d787";
+  // Cancelled: dim grey (terminal but not a failure). Distinct from the darker
+  // `#555555` used for genuinely unknown states.
+  if (CANCELLED_STATES.has(status)) return "#888888";
   return "#555555";
 }
 
