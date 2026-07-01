@@ -38,6 +38,44 @@ function runIdFromUrl(): string | undefined {
   return new URLSearchParams(location.search).get("runId") ?? undefined;
 }
 
+export type VerdictState = "approved" | "blocked" | "pending" | "missing";
+
+// Terminal = a known run status that is not one of the active/suspended states
+// (running, waiting-approval, waiting-event, waiting-timer). Mirrors the server's
+// terminal set (finished, failed, cancelled, continued) via the negative
+// definition, so a newly-added terminal status is handled too.
+export function isRunTerminal(status: string | undefined | null): boolean {
+  return status != null && !["running", "waiting-approval", "waiting-event", "waiting-timer"].includes(status);
+}
+
+// The synthesized moderator verdict is the ONLY source of truth (never inferred
+// from panelist consensus). `approved === null` means "no verdict yet": while the
+// run is still active that is genuinely PENDING, but once the run is terminal a
+// missing verdict means the (continueOnFail) moderator failed/produced nothing.
+export function verdictStateFor(approved: boolean | null, runTerminal: boolean): VerdictState {
+  if (approved === true) return "approved";
+  if (approved === false) return "blocked";
+  return runTerminal ? "missing" : "pending";
+}
+
+// Copy for the empty issues panel. Only the APPROVED verdict may reassure that
+// nothing was flagged; pending/missing/blocked with no visible issues must not
+// read as a clean review, since there is no positive synthesized verdict.
+export function issuesEmptyMessageFor(args: {
+  verdictState: VerdictState;
+  allIssuesCount: number;
+  reviewsCount: number;
+  sevFilter: string;
+}): string {
+  const { verdictState, allIssuesCount, reviewsCount, sevFilter } = args;
+  if (allIssuesCount > 0) return "No " + sevFilter + " issues.";
+  if (verdictState === "approved") return "No issues raised — the reviewers found nothing to flag.";
+  if (verdictState === "blocked") return "No structured issues listed — see the verdict feedback above.";
+  if (verdictState === "pending") return "No issues yet — awaiting the synthesized verdict.";
+  if (reviewsCount === 0) return "No review output was produced.";
+  return "No structured issues in the panelist output (no synthesized verdict).";
+}
+
 function asSeverity(value: unknown): Severity {
   return value === "critical" || value === "major" || value === "minor" || value === "nit" ? value : "nit";
 }
@@ -205,18 +243,8 @@ function App() {
   }, [n0.data, n1.data, n2.data, n3.data, n4.data, n5.data]);
 
   const approvedCount = reviews.filter((r) => r.approved).length;
-  // The synthesized moderator verdict is the ONLY source of truth (never inferred
-  // from panelist consensus). The moderator task is continueOnFail, so a run can
-  // finish with panelist output but no synthesis. Distinguish the two no-verdict
-  // cases: while the run is still active it is genuinely PENDING, but once the run
-  // is terminal a missing verdict means the moderator failed/produced nothing, so
-  // surface that as an error instead of an indefinite "awaiting".
-  const runTerminal = ["finished", "failed", "cancelled"].includes(activeRun?.status ?? "");
-  const verdictState: "approved" | "blocked" | "pending" | "missing" = synthesis
-    ? (synthesis.approved ? "approved" : "blocked")
-    : runTerminal
-      ? "missing"
-      : "pending";
+  const runTerminal = isRunTerminal(activeRun?.status);
+  const verdictState = verdictStateFor(synthesis ? synthesis.approved : null, runTerminal);
   const verdictApproved = verdictState === "approved";
   // Render the verdict card whenever there is panelist/moderator output OR the run
   // is terminal without a verdict (so the "missing verdict" state is shown instead
@@ -232,21 +260,12 @@ function App() {
     return acc;
   }, {} as Record<Severity, number>);
   const visibleIssues = sevFilter === "all" ? allIssues : allIssues.filter((it) => it.severity === sevFilter);
-  // Copy for the empty issues panel. Only the APPROVED verdict may reassure that
-  // nothing was flagged; pending/missing/blocked with no visible issues must not
-  // read as a clean review, since there is no positive synthesized verdict.
-  const issuesEmptyMessage =
-    allIssues.length > 0
-      ? "No " + sevFilter + " issues."
-      : verdictState === "approved"
-        ? "No issues raised — the reviewers found nothing to flag."
-        : verdictState === "blocked"
-          ? "No structured issues listed — see the verdict feedback above."
-          : verdictState === "pending"
-            ? "No issues yet — awaiting the synthesized verdict."
-            : reviews.length === 0
-              ? "No review output was produced."
-              : "No structured issues in the panelist output (no synthesized verdict).";
+  const issuesEmptyMessage = issuesEmptyMessageFor({
+    verdictState,
+    allIssuesCount: allIssues.length,
+    reviewsCount: reviews.length,
+    sevFilter,
+  });
 
   async function refresh() {
     await Promise.all([runsQuery.refetch(), activeRunDetail.refetch(), moderator.refetch(), ...nodeQueries.map((q) => q.refetch())]);
@@ -438,4 +457,8 @@ function App() {
   );
 }
 
-createGatewayReactRoot(<App />);
+// Guard the mount so this module can be imported by unit tests (which exercise
+// the exported pure helpers); in the browser `document` is defined and it mounts.
+if (typeof document !== "undefined") {
+  createGatewayReactRoot(<App />);
+}
