@@ -961,21 +961,37 @@ function launchTuiMonitor(tuiEntry, runId, cliIndexPath, gatewayUrl, backend, au
  *   prematurely, so terminate the monitor and return the failure error.
  *
  * `childFailure` never rejects (see `childFailurePromise`), so the race adds no
- * unhandled rejections; the losing branch is simply abandoned.
+ * unhandled rejections; the losing branch is simply abandoned. `monitor.exit`
+ * CAN reject (a spawn/startup failure — `launchTuiMonitor` rejects on the child's
+ * `error` event), so its race arm has an explicit rejection handler: rather than
+ * letting a startup failure throw out of the structured failure path (as an
+ * unhandled rejection) after the run already launched, it is folded into a
+ * `{ monitorError }` outcome the caller can recover from (fall back to
+ * `streamRun` so the still-running detached run stays observable).
  *
  * @param {{ exit: Promise<{ code: number | null; signal: NodeJS.Signals | null }>; terminate: () => void }} monitor
  * @param {Promise<Error>} childFailure
  * @param {{ getRun: (runId: string) => Promise<unknown> }} adapter
  * @param {string} runId
- * @returns {Promise<{ exit?: { code: number | null; signal: NodeJS.Signals | null }; error?: Error }>}
+ * @returns {Promise<{ exit?: { code: number | null; signal: NodeJS.Signals | null }; error?: Error; monitorError?: Error }>}
  */
 export async function superviseTuiMonitor(monitor, childFailure, adapter, runId) {
     const outcome = await Promise.race([
-        monitor.exit.then((exit) => ({ kind: "exit", exit })),
+        monitor.exit.then(
+            (exit) => ({ kind: "exit", exit }),
+            (error) => ({ kind: "monitor-error", error }),
+        ),
         childFailure.then((error) => ({ kind: "child", error })),
     ]);
     if (outcome.kind === "exit") {
         return { exit: outcome.exit };
+    }
+    if (outcome.kind === "monitor-error") {
+        // The monitor process failed to START (e.g. `bun` missing / spawn error)
+        // AFTER the run already launched. Surface it as a recoverable monitor
+        // error — no unhandled rejection, single return path — so the caller can
+        // fall back to streamRun() and keep the running detached run observable.
+        return { monitorError: outcome.error };
     }
     // The detached run child exited while the monitor was up. Re-read the run
     // state to tell a legitimate end from a premature death.
@@ -1159,9 +1175,129 @@ export function buildDetachedUpArgs(indexPath, entryFile, runId, inputs, options
     if (o.maxOutputBytes) args.push("--max-output-bytes", String(o.maxOutputBytes));
     if (o.toolTimeoutMs) args.push("--tool-timeout-ms", String(o.toolTimeoutMs));
     if (o.hot) args.push("--hot");
-    if (o.annotations) args.push("--annotations", String(o.annotations));
+    // Annotations must be RESOLVED before this point (see
+    // resolveInteractiveAnnotations): the stdin `-` sentinel is rejected in the
+    // interactive parent because the detached child's stdin is `ignore`d, so a raw
+    // `-` would make it read empty stdin and fail. Defense-in-depth: never forward
+    // a bare `-` even if a caller bypassed the parent validation.
+    if (o.annotations && o.annotations !== "-") args.push("--annotations", String(o.annotations));
     if (o.backend) args.push("--backend", String(o.backend));
     return args;
+}
+
+/**
+ * Interactive-mode option-compatibility audit. `up`/`workflow run --interactive`
+ * ALWAYS starts a fresh run detached and watches it in the full-screen TUI, so a
+ * whole class of `up` options is meaningless — or actively wrong — here. Rather
+ * than silently DROPPING them (which stranded users who passed
+ * `--resume`/`--serve`/etc. and got a surprising fresh run or a no-op), reject
+ * them up front with a clear message.
+ *
+ * Disposition of EVERY `up` option in interactive mode (keep in sync with
+ * `upRunOptions` in index.js):
+ *   FORWARD to the detached child (buildDetachedUpArgs): `--run-id`, `--root`,
+ *     `--backend`, `--max-concurrency`, `--log`/`--no-log`, `--log-dir`,
+ *     `--allow-network`, `--max-output-bytes`, `--tool-timeout-ms`, `--hot`.
+ *   RESOLVE in the parent, never forwarded raw: `--input`/`--prompt` (parsed into
+ *     the prompted inputs object; the `-` stdin sentinel is treated as no input),
+ *     `--annotations` (validated by resolveInteractiveAnnotations; `-` rejected
+ *     because the prompts own the TTY), `--auth-token` (consumed as the monitor's
+ *     gateway bearer via SMITHERS_TOKEN, not forwarded to the child).
+ *   REJECT (this function): `--detach` (interactive already detaches), `--resume`
+ *     / `--force` (interactive always starts a NEW run), the internal durable
+ *     resume-claim flags, and the whole HTTP-server family (`--serve`,
+ *     `--supervise*`, `--host`, `--port`, `--metrics`, `--insecure`) — the TUI
+ *     serves monitoring through its own gateway.
+ *
+ * @param {Record<string, any> | undefined} options - the command's parsed options (`c.options`)
+ * @returns {{ code: string; message: string; exitCode: number } | null} a reject
+ *   descriptor when an incompatible option was passed, else null
+ */
+export function rejectIncompatibleInteractiveOptions(options) {
+    const o = options ?? {};
+    /** @type {string[]} */
+    const messages = [];
+    if (o.detach) {
+        messages.push(
+            "--detach is redundant with --interactive: the interactive monitor already runs the workflow detached and watches it.",
+        );
+    }
+    if (o.resume !== undefined && o.resume !== false) {
+        messages.push(
+            "--resume is not supported with --interactive, which always STARTS a new run. Resume non-interactively: smithers up <workflow> --resume <run-id>.",
+        );
+    }
+    if (o.force) {
+        messages.push(
+            "--force only applies when resuming, which --interactive never does (it always starts a new run).",
+        );
+    }
+    // The HTTP-server family only makes sense with a served run. Compare against
+    // each option's default so an unset flag (default present after parsing) is
+    // not mistaken for an explicit, incompatible value.
+    /** @type {string[]} */
+    const serve = [];
+    if (o.serve) serve.push("--serve");
+    if (o.supervise) serve.push("--supervise");
+    if (o.superviseDryRun) serve.push("--supervise-dry-run");
+    if (o.superviseInterval !== undefined && o.superviseInterval !== "10s") serve.push("--supervise-interval");
+    if (o.superviseStaleThreshold !== undefined && o.superviseStaleThreshold !== "30s") serve.push("--supervise-stale-threshold");
+    if (o.superviseMaxConcurrent !== undefined && o.superviseMaxConcurrent !== 3) serve.push("--supervise-max-concurrent");
+    if (o.host !== undefined && o.host !== "127.0.0.1") serve.push("--host");
+    if (o.port !== undefined && o.port !== 7331) serve.push("--port");
+    if (o.metrics === false) serve.push("--no-metrics");
+    if (o.insecure) serve.push("--insecure");
+    if (serve.length > 0) {
+        messages.push(
+            `The HTTP-server options ${serve.join(", ")} are not supported with --interactive; the TUI provides monitoring through its own gateway. Serve a run non-interactively with -d --serve.`,
+        );
+    }
+    /** @type {string[]} */
+    const claim = [];
+    if (o.resumeClaimOwner) claim.push("--resume-claim-owner");
+    if (o.resumeClaimHeartbeat) claim.push("--resume-claim-heartbeat");
+    if (o.resumeRestoreOwner) claim.push("--resume-restore-owner");
+    if (o.resumeRestoreHeartbeat) claim.push("--resume-restore-heartbeat");
+    if (claim.length > 0) {
+        messages.push(`The internal durable resume-claim options ${claim.join(", ")} are not valid with --interactive.`);
+    }
+    if (messages.length === 0) return null;
+    return { code: "TUI_INCOMPATIBLE_OPTION", message: messages.join(" "), exitCode: 4 };
+}
+
+/**
+ * Validate `--annotations` for the interactive path and return the JSON string to
+ * forward to the detached child, or undefined when none was given.
+ *
+ * Interactive prompts drive off the TTY stdin, so `--annotations -` (read JSON
+ * from stdin) is unusable — and forwarding a raw `-` to the stdin-`ignore`d
+ * detached child would make it read empty stdin and fail AFTER the user finished
+ * the interactive prompts. Reject `-` here, mirroring `--input -` (which
+ * interactive treats as no input). Otherwise validate the SAME shape `up`
+ * enforces — a flat JSON object of string/number/boolean — so an invalid payload
+ * fails fast BEFORE prompting instead of after.
+ *
+ * @param {Record<string, any> | undefined} options - the command's parsed options (`c.options`)
+ * @returns {string | undefined} the validated annotations JSON string, or undefined
+ */
+export function resolveInteractiveAnnotations(options) {
+    const raw = options?.annotations;
+    if (raw === undefined) return undefined;
+    if (raw === "-") {
+        throw new Error(
+            "--annotations - (read from stdin) is not supported with --interactive; interactive prompts already own the terminal. Pass the annotations inline as a JSON string.",
+        );
+    }
+    const parsed = parseJsonArgument(raw, "annotations");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Run annotations must be a flat JSON object of string/number/boolean values");
+    }
+    for (const [key, value] of Object.entries(parsed)) {
+        if (!["string", "number", "boolean"].includes(typeof value)) {
+            throw new Error(`Run annotation ${key} must be a string, number, or boolean`);
+        }
+    }
+    return raw;
 }
 
 /**
@@ -1179,6 +1315,28 @@ export function buildDetachedUpArgs(indexPath, entryFile, runId, inputs, options
  */
 export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok({ ran: false, reason: opts.code }), opts = {}) {
     intro(`${pc.bgCyan(pc.black(" smithers "))} ${pc.dim("interactive")}`);
+
+    // Option-compatibility audit: reject `up` options that are meaningless with
+    // the interactive picker + detached monitor BEFORE the user invests in the
+    // picker/prompts. rejectIncompatibleInteractiveOptions carries the full
+    // per-option disposition (forward / resolve / reject) for future readers.
+    const incompatible = rejectIncompatibleInteractiveOptions(c.options);
+    if (incompatible) {
+        return fail(incompatible);
+    }
+    // Resolve --annotations up front: reject the stdin `-` sentinel (the prompts
+    // own the terminal) and validate the JSON so it fails fast BEFORE prompting
+    // and never reaches the stdin-less detached child as a raw `-`.
+    let resolvedAnnotations;
+    try {
+        resolvedAnnotations = resolveInteractiveAnnotations(c.options);
+    } catch (err) {
+        return fail({
+            code: "TUI_INVALID_ANNOTATIONS",
+            message: err?.message ?? String(err),
+            exitCode: 4,
+        });
+    }
 
     let workflow = opts.preselect ?? null;
     if (!workflow) {
@@ -1261,7 +1419,11 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     try {
         const fd = openSync(logFile, "a");
         try {
-            const upArgs = buildDetachedUpArgs(indexPath, workflow.entryFile, runId, inputs, c.options);
+            // Pass the RESOLVED annotations (validated, never a raw stdin `-`)
+            // rather than the raw c.options so the stdin-less child can't be handed
+            // a `-` it would fail on.
+            const childOptions = { ...c.options, annotations: resolvedAnnotations };
+            const upArgs = buildDetachedUpArgs(indexPath, workflow.entryFile, runId, inputs, childOptions);
             child = spawn("bun", upArgs, {
                 detached: true,
                 stdio: ["ignore", fd, fd],
@@ -1364,6 +1526,23 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
             // would wrongly report success. superviseTuiMonitor races the two.
             const monitor = launchTuiMonitor(tuiEntry, runId, indexPath, process.env.SMITHERS_GATEWAY_URL, backend, authToken);
             const supervised = await superviseTuiMonitor(monitor, childFailure, db.adapter, runId);
+            if (supervised.monitorError) {
+                // The monitor failed to START after the run already launched. Don't
+                // strand the (still-running) detached run: fall back to the inline
+                // stream loop so it stays observable, mirroring the no-TUI path.
+                log.warn(`The run monitor failed to start (${supervised.monitorError.message}); streaming inline instead.`);
+                const result = await streamRun(db.adapter, runId, name, promptText, { childFailure });
+                if (result.error) {
+                    return fail({
+                        code: "TUI_RUN_EXITED",
+                        message: `${result.error.message} See ${logFile}.`,
+                        exitCode: 1,
+                        runId,
+                        logFile,
+                    });
+                }
+                return c.ok({ ran: true, runId });
+            }
             if (supervised.error) {
                 return fail({
                     code: "TUI_RUN_EXITED",

@@ -16,6 +16,8 @@ import {
     parseMonitorGatewayPort,
     pickerMaxItems,
     promptForField,
+    rejectIncompatibleInteractiveOptions,
+    resolveInteractiveAnnotations,
     resolveMonitorGatewayBase,
     resolveMonitorToken,
     streamRun,
@@ -154,6 +156,100 @@ describe("tui helpers", () => {
         expect(args).toEqual(["/cli/index.js", "up", "/wf/hello.tsx", "--run-id", "run-1"]);
         // --log default (true) must NOT emit a flag; only --no-log does.
         expect(args).not.toContain("--no-log");
+    });
+
+    test("buildDetachedUpArgs never forwards a raw --annotations stdin sentinel", () => {
+        // Defense-in-depth: even if the parent's resolution were bypassed, a bare
+        // `-` (stdin) must never reach the stdin-`ignore`d child.
+        const args = buildDetachedUpArgs("/cli/index.js", "/wf/hello.tsx", "run-1", {}, { annotations: "-" });
+        expect(args).toEqual(["/cli/index.js", "up", "/wf/hello.tsx", "--run-id", "run-1"]);
+    });
+
+    test("rejectIncompatibleInteractiveOptions passes clean/forwarded/resolved options", () => {
+        // All-defaults (nothing explicitly set) and the FORWARD/RESOLVE options are
+        // fine — only genuinely incompatible flags are rejected.
+        expect(rejectIncompatibleInteractiveOptions(undefined)).toBeNull();
+        expect(rejectIncompatibleInteractiveOptions({})).toBeNull();
+        expect(
+            rejectIncompatibleInteractiveOptions({
+                detach: false,
+                resume: false,
+                force: false,
+                serve: false,
+                supervise: false,
+                superviseDryRun: false,
+                superviseInterval: "10s",
+                superviseStaleThreshold: "30s",
+                superviseMaxConcurrent: 3,
+                host: "127.0.0.1",
+                port: 7331,
+                metrics: true,
+                insecure: false,
+                // Forwarded / resolved options must not trip the audit.
+                runId: "run-1",
+                root: "/sandbox",
+                backend: "pglite",
+                maxConcurrency: 8,
+                log: false,
+                logDir: "/logs",
+                allowNetwork: true,
+                maxOutputBytes: 1024,
+                toolTimeoutMs: 5000,
+                hot: true,
+                input: '{"a":1}',
+                annotations: '{"env":"ci"}',
+                authToken: "secret",
+            }),
+        ).toBeNull();
+    });
+
+    test("rejectIncompatibleInteractiveOptions rejects --resume and --force", () => {
+        // Interactive mode always starts a NEW run, so resume/force are rejected
+        // rather than silently dropped (which would surprise the user with a fresh run).
+        const resumeBool = rejectIncompatibleInteractiveOptions({ resume: true });
+        expect(resumeBool?.code).toBe("TUI_INCOMPATIBLE_OPTION");
+        expect(resumeBool?.exitCode).toBe(4);
+        expect(resumeBool?.message).toContain("--resume");
+        expect(rejectIncompatibleInteractiveOptions({ resume: "run-42" })?.message).toContain("--resume");
+        expect(rejectIncompatibleInteractiveOptions({ force: true })?.message).toContain("--force");
+    });
+
+    test("rejectIncompatibleInteractiveOptions rejects --detach and the HTTP-server family", () => {
+        expect(rejectIncompatibleInteractiveOptions({ detach: true })?.message).toContain("--detach");
+        expect(rejectIncompatibleInteractiveOptions({ serve: true })?.message).toContain("--serve");
+        expect(rejectIncompatibleInteractiveOptions({ supervise: true })?.message).toContain("--supervise");
+        expect(rejectIncompatibleInteractiveOptions({ superviseDryRun: true })?.message).toContain("--supervise-dry-run");
+        expect(rejectIncompatibleInteractiveOptions({ superviseInterval: "5s" })?.message).toContain("--supervise-interval");
+        expect(rejectIncompatibleInteractiveOptions({ superviseStaleThreshold: "1m" })?.message).toContain("--supervise-stale-threshold");
+        expect(rejectIncompatibleInteractiveOptions({ superviseMaxConcurrent: 5 })?.message).toContain("--supervise-max-concurrent");
+        expect(rejectIncompatibleInteractiveOptions({ host: "0.0.0.0" })?.message).toContain("--host");
+        expect(rejectIncompatibleInteractiveOptions({ port: 8080 })?.message).toContain("--port");
+        expect(rejectIncompatibleInteractiveOptions({ metrics: false })?.message).toContain("--no-metrics");
+        expect(rejectIncompatibleInteractiveOptions({ insecure: true })?.message).toContain("--insecure");
+    });
+
+    test("rejectIncompatibleInteractiveOptions rejects the internal resume-claim flags", () => {
+        expect(rejectIncompatibleInteractiveOptions({ resumeClaimOwner: "o" })?.message).toContain("--resume-claim-owner");
+        expect(rejectIncompatibleInteractiveOptions({ resumeClaimHeartbeat: 5 })?.message).toContain("--resume-claim-heartbeat");
+        expect(rejectIncompatibleInteractiveOptions({ resumeRestoreOwner: "o" })?.message).toContain("--resume-restore-owner");
+        expect(rejectIncompatibleInteractiveOptions({ resumeRestoreHeartbeat: 5 })?.message).toContain("--resume-restore-heartbeat");
+    });
+
+    test("resolveInteractiveAnnotations validates and returns the JSON string", () => {
+        expect(resolveInteractiveAnnotations({})).toBeUndefined();
+        expect(resolveInteractiveAnnotations({ annotations: '{"env":"ci","n":3,"ok":true}' })).toBe('{"env":"ci","n":3,"ok":true}');
+    });
+
+    test("resolveInteractiveAnnotations rejects the stdin `-` sentinel", () => {
+        // Prompts own the terminal, and the detached child's stdin is ignored, so
+        // `-` cannot be honored — reject instead of forwarding a raw `-`.
+        expect(() => resolveInteractiveAnnotations({ annotations: "-" })).toThrow(/stdin/);
+    });
+
+    test("resolveInteractiveAnnotations rejects invalid/non-flat annotations", () => {
+        expect(() => resolveInteractiveAnnotations({ annotations: "{not json" })).toThrow();
+        expect(() => resolveInteractiveAnnotations({ annotations: "[1,2,3]" })).toThrow(/flat JSON object/);
+        expect(() => resolveInteractiveAnnotations({ annotations: '{"a":{"nested":1}}' })).toThrow(/must be a string, number, or boolean/);
     });
 
     test("truncate handles empty and very small budgets", () => {
@@ -559,6 +655,25 @@ describe("tui helpers", () => {
         );
         expect(result.error?.message).toContain("exit 1");
         expect(monitor.terminated).toBe(true);
+    });
+
+    test("superviseTuiMonitor folds a monitor spawn failure into a recoverable monitorError", async () => {
+        // The monitor's exit promise REJECTS (spawn/startup failure) while the
+        // detached run keeps running. The race must not throw an unhandled
+        // rejection: it returns { monitorError } so the caller can fall back to
+        // streamRun and keep the run observable.
+        const monitor = fakeMonitor(Promise.reject(new Error("spawn bun ENOENT")));
+        const result = await superviseTuiMonitor(
+            monitor,
+            new Promise(() => {}),
+            adapterForStatuses(["running"]),
+            "run-terminal",
+        );
+        expect(result.monitorError?.message).toContain("ENOENT");
+        expect(result.exit).toBeUndefined();
+        expect(result.error).toBeUndefined();
+        // The run is still alive, so the monitor is not force-terminated here.
+        expect(monitor.terminated).toBe(false);
     });
 
     test("superviseTuiMonitor keeps the monitor up when the child exits after a terminal run state", async () => {
