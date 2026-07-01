@@ -1,5 +1,4 @@
-import type { openai } from "@ai-sdk/openai";
-import type { ToolSet } from "ai";
+import type { LanguageModel, ToolSet } from "ai";
 import type { SdkAgentOptions } from "./SdkAgentOptions";
 
 /**
@@ -14,7 +13,7 @@ export type HermesAgentOptions<
   CALL_OPTIONS = never,
   TOOLS extends ToolSet = {},
 > = Omit<
-  SdkAgentOptions<CALL_OPTIONS, TOOLS, ReturnType<typeof openai>>,
+  SdkAgentOptions<CALL_OPTIONS, TOOLS, LanguageModel>,
   "model"
 > & {
   /**

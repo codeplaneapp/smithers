@@ -17,7 +17,8 @@ export async function streamResultToGenerateResult(stream, onStdout) {
     /** @type {unknown} */
     let streamError;
     if (onStdout) {
-        for await (const part of stream.fullStream) {
+        const eventStream = stream.stream ?? stream.fullStream;
+        for await (const part of eventStream) {
             if (part.type === "error") {
                 if (streamError === undefined)
                     streamError = part.error;
@@ -93,7 +94,6 @@ export async function streamResultToGenerateResult(stream, onStdout) {
         response,
         providerMetadata,
         steps,
-        experimental_output: output,
         output,
     };
 }

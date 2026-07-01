@@ -1,12 +1,11 @@
-import type { openai } from "@ai-sdk/openai";
-import type { ToolSet } from "ai";
+import type { LanguageModel, ToolSet } from "ai";
 import type { SdkAgentOptions } from "./SdkAgentOptions";
 
 type OpenAIAgentCommonOptions<
   CALL_OPTIONS,
   TOOLS extends ToolSet,
 > = Omit<
-  SdkAgentOptions<CALL_OPTIONS, TOOLS, ReturnType<typeof openai>>,
+  SdkAgentOptions<CALL_OPTIONS, TOOLS, LanguageModel>,
   "model"
 > & {
   /**
@@ -29,7 +28,7 @@ type OpenAIAgentStringModelOptions = {
 };
 
 type OpenAIAgentPrebuiltModelOptions = {
-  model: ReturnType<typeof openai>;
+  model: LanguageModel;
   baseURL?: never;
   apiKey?: never;
 };

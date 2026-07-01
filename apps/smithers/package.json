@@ -16,10 +16,9 @@
     "dev:full": "bun concierge/server.ts & vite --host 127.0.0.1 --port 5180"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.71",
+    "@ai-sdk/anthropic": "^4.0.4",
     "@pierre/diffs": "^1.2.11",
     "@pierre/trees": "1.0.0-beta.4",
-    "ai": "^6.0.168",
     "@smithers-orchestrator/gateway-client": "workspace:*",
     "@smithers-orchestrator/gateway-react": "workspace:*",
     "@smithers-orchestrator/gateway-ui": "workspace:*",
@@ -30,6 +29,7 @@
     "@tanstack/react-router": "^1.135.5",
     "@tanstack/react-virtual": "^3.14.3",
     "@xyflow/react": "^12.10.2",
+    "ai": "^7.0.9",
     "dagre": "^0.8.5",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",

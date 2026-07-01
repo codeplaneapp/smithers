@@ -133,10 +133,11 @@ describe("MAX_SCHEMA_RETRIES (3) - schema-retry mechanism", () => {
             tools: {},
             generate: async (args) => {
                 totalCalls.value += 1;
-                // The engine's main generate() call passes outputSchema/onStepFinish/
+                // The engine's main generate() call passes outputSchema/onStepEnd/
                 // onEvent. The schema-retry generate() omits all of those.
                 const isFreshAttempt =
                     "outputSchema" in (args ?? {}) ||
+                    "onStepEnd" in (args ?? {}) ||
                     "onStepFinish" in (args ?? {}) ||
                     "onEvent" in (args ?? {});
                 if (isFreshAttempt) {

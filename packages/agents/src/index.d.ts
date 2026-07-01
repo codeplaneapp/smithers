@@ -1,8 +1,6 @@
 import { A as AgentGenerateOptions$2$1, B as BaseCliAgent, a as BaseCliAgentOptions$2, C as CliOutputInterpreter$2$1, b as CodexConfigOverrides$2, c as BaseCliAgentOptions$1, d as CliOutputInterpreter$b, P as PiExtensionUiRequest$2, e as PiExtensionUiResponse$2, f as AgentCliEvent$1 } from './index-D8q0eaIv.js';
-import { openai } from '@ai-sdk/openai';
 import * as ai from 'ai';
-import { ToolLoopAgent, ToolSet, ToolLoopAgentSettings, Tool as Tool$1 } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
+import { ToolLoopAgent, ToolSet, ToolLoopAgentSettings, Tool as Tool$1, LanguageModel } from 'ai';
 import * as zod_v4_core from 'zod/v4/core';
 import '@smithers-orchestrator/errors/SmithersError';
 import 'effect';
@@ -275,7 +273,7 @@ type HermesCliAgentOptions$2 = BaseCliAgentOptions$2 & {
     continueSession?: string | boolean;
 };
 
-type SdkAgentOptions<CALL_OPTIONS = never, TOOLS extends ToolSet = {}, MODEL = any> = Omit<ToolLoopAgentSettings<CALL_OPTIONS, TOOLS>, "model"> & {
+type SdkAgentOptions<CALL_OPTIONS = never, TOOLS extends ToolSet = {}, MODEL = any> = Omit<ToolLoopAgentSettings<CALL_OPTIONS, TOOLS, any, never>, "model"> & {
     /**
      * Either a provider model id string or a preconstructed AI SDK language model.
      * Passing a model instance is mainly useful for tests and advanced provider setup.
@@ -291,7 +289,7 @@ type SdkAgentOptions<CALL_OPTIONS = never, TOOLS extends ToolSet = {}, MODEL = a
  * OpenAI-compatible endpoint: point `baseURL` at the Hermes server. These mirror
  * the string-model form of `OpenAIAgentOptions`.
  */
-type HermesAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, ReturnType<typeof openai>>, "model"> & {
+type HermesAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, LanguageModel>, "model"> & {
     /**
      * Model name exposed by your Hermes server. Defaults to `"hermes"`; override
      * with whatever model id the server advertises.
@@ -315,7 +313,7 @@ type HermesAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = Om
     nativeStructuredOutput?: boolean;
 };
 
-type OpenAIAgentCommonOptions<CALL_OPTIONS, TOOLS extends ToolSet> = Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, ReturnType<typeof openai>>, "model"> & {
+type OpenAIAgentCommonOptions<CALL_OPTIONS, TOOLS extends ToolSet> = Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, LanguageModel>, "model"> & {
     /**
      * Disable AI SDK native structured output and let Smithers use prompt-based JSON extraction.
      * Useful for OpenAI-compatible local servers that do not honor JSON schema response formats.
@@ -334,13 +332,13 @@ type OpenAIAgentStringModelOptions = {
     apiKey?: string;
 };
 type OpenAIAgentPrebuiltModelOptions = {
-    model: ReturnType<typeof openai>;
+    model: LanguageModel;
     baseURL?: never;
     apiKey?: never;
 };
 type OpenAIAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = OpenAIAgentCommonOptions<CALL_OPTIONS, TOOLS> & (OpenAIAgentStringModelOptions | OpenAIAgentPrebuiltModelOptions);
 
-type AnthropicAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = SdkAgentOptions<CALL_OPTIONS, TOOLS, ReturnType<typeof anthropic>>;
+type AnthropicAgentOptions$2<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = SdkAgentOptions<CALL_OPTIONS, TOOLS, LanguageModel>;
 
 /**
  * Represents an entity capable of generating responses or actions based on prompts.

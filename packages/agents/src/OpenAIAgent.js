@@ -16,6 +16,11 @@ import { streamResultToGenerateResult } from "./streamResultToGenerateResult.js"
  * @typedef {import("./OpenAIAgentOptions.ts").OpenAIAgentOptions<CALL_OPTIONS, TOOLS>} OpenAIAgentOptions
  */
 
+/**
+ * @template [CALL_OPTIONS=never]
+ * @template [TOOLS=import("ai").ToolSet]
+ * @extends {ToolLoopAgent<CALL_OPTIONS, TOOLS, any, never>}
+ */
 export class OpenAIAgent extends ToolLoopAgent {
     hijackEngine = "openai-sdk";
     /**
@@ -53,6 +58,7 @@ export class OpenAIAgent extends ToolLoopAgent {
         const outputArgs = this.supportsNativeStructuredOutput && args.outputSchema
             ? { output: Output.object({ schema: args.outputSchema }) }
             : {};
+        const onStepEnd = args.onStepEnd ?? args.onStepFinish;
         if (!args.onStdout) {
             return super.generate({
                 options: args.options,
@@ -60,7 +66,7 @@ export class OpenAIAgent extends ToolLoopAgent {
                 ...promptArgs,
                 ...outputArgs,
                 timeout: args.timeout,
-                onStepFinish: args.onStepFinish,
+                onStepEnd,
             });
         }
         return super.stream({
@@ -69,7 +75,7 @@ export class OpenAIAgent extends ToolLoopAgent {
             ...promptArgs,
             ...outputArgs,
             timeout: args.timeout,
-            onStepFinish: args.onStepFinish,
+            onStepEnd,
         }).then((stream) => streamResultToGenerateResult(stream, args.onStdout));
     }
 }

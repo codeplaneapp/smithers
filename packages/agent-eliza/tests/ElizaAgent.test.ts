@@ -223,7 +223,7 @@ describe("ElizaAgent", () => {
             });
             expect(result.text).toBe(JSON.stringify({ count: 42 }));
             expect((result as any).output).toMatchObject({ count: 42 });
-            expect((result as any).experimental_output).toMatchObject({ count: 42 });
+            expect((result as any).output).toMatchObject({ count: 42 });
         });
 
         test("with outputSchema: throws when text is not valid JSON", async () => {

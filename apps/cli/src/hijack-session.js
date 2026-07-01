@@ -161,6 +161,14 @@ export async function launchConversationHijackSession(adapter, candidate) {
             try {
                 const stepMessages = [];
                 let streamedAny = false;
+                const onStepEnd = (step) => {
+                    const responseMessages = Array.isArray(step?.response?.messages)
+                        ? (cloneJsonValue(step.response.messages) ?? step.response.messages)
+                        : [];
+                    if (responseMessages.length > 0) {
+                        stepMessages.push(...responseMessages);
+                    }
+                };
                 const result = await agent.generate({
                     options: undefined,
                     messages: nextMessages,
@@ -169,14 +177,8 @@ export async function launchConversationHijackSession(adapter, candidate) {
                         stdout.write(chunk);
                     },
                     onStderr: (chunk) => stderr.write(chunk),
-                    onStepFinish: (step) => {
-                        const responseMessages = Array.isArray(step?.response?.messages)
-                            ? (cloneJsonValue(step.response.messages) ?? step.response.messages)
-                            : [];
-                        if (responseMessages.length > 0) {
-                            stepMessages.push(...responseMessages);
-                        }
-                    },
+                    onStepEnd,
+                    onStepFinish: onStepEnd,
                 });
                 if (!streamedAny && typeof result?.text === "string" && result.text) {
                     stdout.write(result.text);

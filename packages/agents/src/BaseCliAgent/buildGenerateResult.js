@@ -51,7 +51,6 @@ export function buildGenerateResult(text, output, modelId, usage) {
         },
         providerMetadata: undefined,
         steps: [],
-        experimental_output: output,
         output: output,
     };
 }

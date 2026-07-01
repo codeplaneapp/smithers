@@ -31,7 +31,7 @@ test("a hijacked conversation-mode agent can be resumed by Smithers on the next 
             if (callCount === 1) {
                 resolveStarted();
                 await stepFinishGate;
-                await args.onStepFinish?.({
+                await (args.onStepEnd ?? args.onStepFinish)?.({
                     response: {
                         messages: [{ role: "assistant", content: "I have inspected the repo." }],
                     },

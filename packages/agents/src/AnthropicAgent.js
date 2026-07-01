@@ -15,6 +15,11 @@ import { streamResultToGenerateResult } from "./streamResultToGenerateResult.js"
  */
 /** @typedef {import("ai").GenerateTextResult} GenerateTextResult */
 
+/**
+ * @template [CALL_OPTIONS=never]
+ * @template [TOOLS=import("ai").ToolSet]
+ * @extends {ToolLoopAgent<CALL_OPTIONS, TOOLS, any, never>}
+ */
 export class AnthropicAgent extends ToolLoopAgent {
     hijackEngine = "anthropic-sdk";
     supportsNativeStructuredOutput = true;
@@ -39,6 +44,7 @@ export class AnthropicAgent extends ToolLoopAgent {
         const outputArgs = args.outputSchema
             ? { output: Output.object({ schema: args.outputSchema }) }
             : {};
+        const onStepEnd = args.onStepEnd ?? args.onStepFinish;
         if (!args.onStdout) {
             return super.generate({
                 options: args.options,
@@ -46,7 +52,7 @@ export class AnthropicAgent extends ToolLoopAgent {
                 ...promptArgs,
                 ...outputArgs,
                 timeout: args.timeout,
-                onStepFinish: args.onStepFinish,
+                onStepEnd,
             });
         }
         return super.stream({
@@ -55,7 +61,7 @@ export class AnthropicAgent extends ToolLoopAgent {
             ...promptArgs,
             ...outputArgs,
             timeout: args.timeout,
-            onStepFinish: args.onStepFinish,
+            onStepEnd,
         }).then((stream) => streamResultToGenerateResult(stream, args.onStdout));
     }
 }

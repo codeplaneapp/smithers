@@ -134,7 +134,7 @@ describe("hijack e2e", () => {
                 if (callCount === 1) {
                     resolveStarted();
                     await stepFinishGate;
-                    await args.onStepFinish?.({
+                    await (args.onStepEnd ?? args.onStepFinish)?.({
                         response: {
                             messages: [{ role: "assistant", content: "I have inspected the repo." }],
                         },

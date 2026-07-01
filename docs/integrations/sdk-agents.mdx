@@ -106,7 +106,7 @@ because many local Hermes servers do not honor JSON-schema response formats.
 
 Constructors forward standard AI SDK `ToolLoopAgent` settings: `instructions`, `tools`, `stopWhen`, `maxOutputTokens`, `temperature`, `providerOptions`, `prepareCall`. The wrappers add provider model resolution on top.
 
-- `AnthropicAgentOptions` is `ToolLoopAgentSettings` without `model`, plus required `model: string | anthropic(...)`.
+- `AnthropicAgentOptions` is `ToolLoopAgentSettings` without `model`, plus required `model: string | LanguageModel`.
 - `OpenAIAgentOptions` adds `nativeStructuredOutput?: boolean` and has two model forms: a string model may include `baseURL` and `apiKey`; a prebuilt OpenAI provider model must not include `baseURL` or `apiKey`.
 - `HermesAgentOptions` makes `model` optional, allows `baseURL` and `apiKey`, and defaults `nativeStructuredOutput` to `false`. A runtime `baseURL` or `HERMES_BASE_URL` is required.
 
@@ -240,7 +240,7 @@ SDK agents do not reopen a provider-native CLI. Smithers persists the agent conv
 
 Live-run behavior:
 
-- Smithers captures response history after each step via `onStepFinish`.
+- Smithers captures response history after each step via `onStepEnd`.
 - `bunx smithers-orchestrator hijack` waits until history is durable, aborts the current agent task (handing it off to the REPL), and opens the REPL.
 - On clean REPL exit, Smithers writes updated message history back and resumes the workflow automatically.
 

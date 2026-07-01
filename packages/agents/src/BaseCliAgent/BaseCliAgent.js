@@ -512,6 +512,7 @@ function buildStreamResult(result) {
         response: Promise.resolve(response),
         providerMetadata: Promise.resolve(result.providerMetadata),
         textStream: textStream,
+        stream: fullStream,
         fullStream: fullStream,
     };
 }
@@ -531,7 +532,7 @@ function usageFromCompletedEvent(completedEvent) {
         outputTokens: num(u.output_tokens) ?? num(u.outputTokens),
         cacheReadTokens: num(u.cache_read_input_tokens) ?? num(u.cacheReadTokens),
         cacheWriteTokens: num(u.cache_creation_input_tokens) ?? num(u.cacheWriteTokens),
-        reasoningTokens: num(u.reasoning_tokens) ?? num(u.reasoningTokens),
+        reasoningTokens: num(u.reasoning_tokens) ?? num(u.reasoningTokens) ?? num(u.outputTokenDetails?.reasoningTokens),
         totalTokens: num(u.total_tokens) ?? num(u.totalTokens),
     };
     return Object.values(usage).some((value) => value !== undefined) ? usage : undefined;
@@ -640,10 +641,10 @@ export function extractUsageFromOutput(raw) {
                                 u.cached_input_tokens ??
                                 0);
                 }
-                if (u.reasoning_tokens ?? u.reasoningTokens) {
+                if (u.reasoning_tokens ?? u.reasoningTokens ?? u.outputTokenDetails?.reasoningTokens) {
                     usage.reasoningTokens =
                         (usage.reasoningTokens ?? 0) +
-                            (u.reasoning_tokens ?? u.reasoningTokens ?? 0);
+                            (u.reasoning_tokens ?? u.reasoningTokens ?? u.outputTokenDetails?.reasoningTokens ?? 0);
                 }
                 found = true;
                 continue;

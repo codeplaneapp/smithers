@@ -81,8 +81,7 @@ and let callers pass plugins straight through.
      completion, or composing a message + the runtime's message handling, then
      read back the produced text). Stream partial text to \`onStdout\` when
      available. If \`outputSchema\` is provided, parse/validate the text into the
-     structured object and set it as both \`output\` and
-     \`experimental_output\` via \`buildGenerateResult\`.
+     structured object and set it as \`output\` via \`buildGenerateResult\`.
    - Set \`supportsNativeStructuredOutput\` correctly (likely \`false\` unless you
      wire a native structured path).
    - Clean up / allow \`stop()\` of the runtime; ensure no leaked timers/sockets.

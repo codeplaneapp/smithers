@@ -206,7 +206,7 @@ describe("SDK agents", () => {
         const steps = [];
         const result = await agent.generate({
             messages: [{ role: "user", content: "continue from history" }],
-            onStepFinish: (step) => {
+            onStepEnd: (step) => {
                 steps.push(step);
             },
         });
@@ -227,7 +227,7 @@ describe("SDK agents", () => {
         const steps = [];
         const result = await agent.generate({
             messages: [{ role: "user", content: "resume this thread" }],
-            onStepFinish: (step) => {
+            onStepEnd: (step) => {
                 steps.push(step);
             },
         });

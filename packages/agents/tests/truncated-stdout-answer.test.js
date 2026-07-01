@@ -67,7 +67,7 @@ describe("issue #277 — answers survive captured-stdout truncation", () => {
         const agent = new ClaudeCodeAgent({ model: "claude-test", maxOutputBytes: 10_000 });
         const result = await agent.generate({ prompt: "investigate" });
         expect(result.text).toBe(answer);
-        expect(result.experimental_output ?? result.output ?? null).toBeTruthy();
+        expect(result.output ?? null).toBeTruthy();
     }, 30_000);
 
     test("answer survives even when the result line itself exceeds the cap (streamed interpreter answer wins)", async () => {

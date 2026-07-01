@@ -115,7 +115,6 @@ describe("streamResultToGenerateResult", () => {
         expect(result.steps).toEqual([]);
         expect(result.warnings).toEqual([]);
         expect(result.output).toBeUndefined();
-        expect(result.experimental_output).toBeUndefined();
     });
     // Regression: a provider 404 ("model not found") must surface as the real
     // AI_APICallError, not the SDK's masking NoOutputGeneratedError (which the

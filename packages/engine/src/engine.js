@@ -3633,6 +3633,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                                     },
                                     onEvent: handleAgentEvent,
                                     onStepFinish: handleSdkStepFinish,
+                                    onStepEnd: handleSdkStepFinish,
                                     outputSchema: desc.outputSchema,
                                 });
                                 return toolCtx ? runWithToolContext(toolCtx, doGenerate) : doGenerate();

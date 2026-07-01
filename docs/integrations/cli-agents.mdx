@@ -150,7 +150,7 @@ completion, and is bounded by `timeout` and `abortSignal`.
 
 `generate()` resolves to an AI SDK `GenerateTextResult`. Read the full text from
 `.text`; when the response is valid JSON, Smithers parses it into `.output`
-(also `.experimental_output`).
+using the AI SDK 7 structured-output field.
 
 ### Claude Code (subscription, no API key)
 

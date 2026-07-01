@@ -354,23 +354,23 @@ type AgentLike = {
 };
 
 type SdkAgentOptions<CALL_OPTIONS = never, TOOLS extends import("ai").ToolSet = {}, MODEL = any> =
-  Omit<import("ai").ToolLoopAgentSettings<CALL_OPTIONS, TOOLS>, "model"> & {
+  Omit<import("ai").ToolLoopAgentSettings<CALL_OPTIONS, TOOLS, any, never>, "model"> & {
     model: string | MODEL;
   };
 
 type AnthropicAgentOptions<CALL_OPTIONS = never, TOOLS extends import("ai").ToolSet = {}> =
-  SdkAgentOptions<CALL_OPTIONS, TOOLS, ReturnType<typeof import("@ai-sdk/anthropic").anthropic>>;
+  SdkAgentOptions<CALL_OPTIONS, TOOLS, import("ai").LanguageModel>;
 
 type OpenAIAgentOptions<CALL_OPTIONS = never, TOOLS extends import("ai").ToolSet = {}> =
-  Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, ReturnType<typeof import("@ai-sdk/openai").openai>>, "model"> & {
+  Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, import("ai").LanguageModel>, "model"> & {
     nativeStructuredOutput?: boolean;
   } & (
     | { model: string; baseURL?: string; apiKey?: string }
-    | { model: ReturnType<typeof import("@ai-sdk/openai").openai>; baseURL?: never; apiKey?: never }
+    | { model: import("ai").LanguageModel; baseURL?: never; apiKey?: never }
   );
 
 type HermesAgentOptions<CALL_OPTIONS = never, TOOLS extends import("ai").ToolSet = {}> =
-  Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, ReturnType<typeof import("@ai-sdk/openai").openai>>, "model"> & {
+  Omit<SdkAgentOptions<CALL_OPTIONS, TOOLS, import("ai").LanguageModel>, "model"> & {
     model?: string;                 // default "hermes"
     baseURL?: string;               // falls back to HERMES_BASE_URL; required at runtime
     apiKey?: string;                // falls back to HERMES_API_KEY, then "hermes"
