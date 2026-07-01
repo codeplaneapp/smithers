@@ -10,12 +10,25 @@ function sleep(ms) {
     return new Promise((resolveFn) => setTimeout(resolveFn, ms));
 }
 
-async function openSqliteStore(dbPath) {
+async function openSqliteStore(dbPath, opts = {}) {
     const { Database } = await import("bun:sqlite");
     const { drizzle } = await import("drizzle-orm/bun-sqlite");
     const sqlite = new Database(dbPath);
     const db = drizzle(sqlite);
     ensureSmithersTables(db);
+    if (opts.read) {
+        // Transient CLI readers (inspect/ps/tui/logs) must NOT disturb the WAL that a
+        // concurrent `smithers up` writer depends on. They can't use {readonly:true}
+        // (SQLite can't read a WAL db read-only — it needs write access to the -shm
+        // wal-index to register as a reader, so a read-only handle would miss all
+        // un-checkpointed WAL data). Instead, disable THIS connection's auto- and
+        // close-time checkpointing so it never truncates the shared WAL/-shm out from
+        // under the live writer (the writer owns checkpointing). This is what curbs
+        // the SQLITE_IOERR_VNODE churn on macOS without breaking WAL visibility.
+        // busy_timeout lets a brief writer lock clear instead of erroring immediately.
+        sqlite.run("PRAGMA busy_timeout = 30000");
+        sqlite.run("PRAGMA wal_autocheckpoint = 0");
+    }
     return {
         adapter: new SmithersDb(db),
         db,
@@ -189,7 +202,7 @@ export async function openSmithersStore(opts = {}) {
             if (mode === "read" && !(await sqliteHasRunsTable(choice.dbPath))) {
                 throw new SmithersError("CLI_DB_NOT_FOUND", `No Smithers run history found at ${choice.dbPath}. Run 'smithers up <workflow>' to start a run first.`);
             }
-            const opened = await openSqliteStore(choice.dbPath);
+            const opened = await openSqliteStore(choice.dbPath, { read: mode === "read" });
             return {
                 choice,
                 adapter: opened.adapter,
