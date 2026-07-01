@@ -11,7 +11,6 @@ import { parseJsonArgument } from "./json-args.js";
 import { parseAgentEvent, parseNodeOutputEvent } from "./chat.js";
 import { formatStreamText } from "./tui-format.js";
 import { fuzzySelect } from "./fuzzy-select.js";
-import { renderRunOutputs } from "./pretty.js";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
 
 export { formatStreamText } from "./tui-format.js";
@@ -1306,7 +1305,19 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
         } else {
             // The TUI package isn't available (e.g. a slim install) — fall back to
             // the inline append-only stream loop so the run is still observable.
-            await streamRun(db.adapter, runId, name, promptText, { childFailure });
+            // streamRun returns `{ error }` when the detached process dies before the
+            // run reaches a terminal/pause state; surface that as a failure instead of
+            // reporting success, mirroring the old inline path's TUI_RUN_EXITED.
+            const result = await streamRun(db.adapter, runId, name, promptText, { childFailure });
+            if (result.error) {
+                return fail({
+                    code: "TUI_RUN_EXITED",
+                    message: `${result.error.message} See ${logFile}.`,
+                    exitCode: 1,
+                    runId,
+                    logFile,
+                });
+            }
         }
     } finally {
         db.cleanup();
