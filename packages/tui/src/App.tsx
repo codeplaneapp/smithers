@@ -15,19 +15,19 @@ const COMPACT_WIDTH = 100;
 function ModeBody({
   runId,
   mode,
-  treeSelectedNodeId,
-  onSelectNode,
+  treeSelectedNodeKey,
+  onSelectNodeKey,
   onBack,
 }: {
   runId: string;
   mode: Mode;
-  treeSelectedNodeId: string | null;
-  onSelectNode: (nodeId: string) => void;
+  treeSelectedNodeKey: string | null;
+  onSelectNodeKey: (nodeId: string) => void;
   onBack: () => void;
 }) {
   switch (mode) {
-    case 1: return <TreeMode runId={runId} initialSelectedNodeId={treeSelectedNodeId} />;
-    case 2: return <GraphMode runId={runId} onSelectNode={onSelectNode} />;
+    case 1: return <TreeMode runId={runId} initialSelectedNodeKey={treeSelectedNodeKey} />;
+    case 2: return <GraphMode runId={runId} onSelectNodeKey={onSelectNodeKey} />;
     case 3: return <LogMode runId={runId} />;
     case 4: return <TimelineMode runId={runId} />;
     case 5: return <HijackMode runId={runId} onBack={onBack} />;
@@ -103,7 +103,7 @@ function HelpOverlay({ mode }: { mode: Mode }) {
 
 export function App({ runId, onExit }: { runId: string; onExit: (code: number) => void }) {
   const [mode, setMode] = useState<Mode>(1);
-  const [treeSelectedNodeId, setTreeSelectedNodeId] = useState<string | null>(null);
+  const [treeSelectedNodeKey, setTreeSelectedNodeKey] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const { width } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
@@ -138,8 +138,8 @@ export function App({ runId, onExit }: { runId: string; onExit: (code: number) =
     else if (e.name === "q" || e.name === "Q") onExit(0);
   });
 
-  function handleSelectNode(nodeId: string) {
-    setTreeSelectedNodeId(nodeId);
+  function handleSelectNodeKey(nodeId: string) {
+    setTreeSelectedNodeKey(nodeId);
     setMode(1);
   }
 
@@ -153,8 +153,8 @@ export function App({ runId, onExit }: { runId: string; onExit: (code: number) =
           <ModeBody
             runId={runId}
             mode={mode}
-            treeSelectedNodeId={treeSelectedNodeId}
-            onSelectNode={handleSelectNode}
+            treeSelectedNodeKey={treeSelectedNodeKey}
+            onSelectNodeKey={handleSelectNodeKey}
             onBack={() => setMode(1)}
           />
         )}

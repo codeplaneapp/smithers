@@ -402,10 +402,10 @@ function TreePanel({
 
 export function TreeMode({
   runId,
-  initialSelectedNodeId,
+  initialSelectedNodeKey,
 }: {
   runId: string;
-  initialSelectedNodeId?: string | null;
+  initialSelectedNodeKey?: string | null;
 }) {
   const { root, nodes, isLoading, error } = useRunTree(runId);
   const { data: approvalsData, refetch: refetchApprovals } = useApprovals(runId);
@@ -426,15 +426,15 @@ export function TreeMode({
   // updates from yanking focus back off the user's manual j/k navigation.
   const focusedSelectionRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!initialSelectedNodeId) return;
-    if (focusedSelectionRef.current === initialSelectedNodeId) return;
+    if (!initialSelectedNodeKey) return;
+    if (focusedSelectionRef.current === initialSelectedNodeKey) return;
     // Graph mode hands us a row `key` (unique per attempt), so match on `key`.
-    const idx = flat.findIndex((f) => runNodeKey(f.node) === initialSelectedNodeId);
+    const idx = flat.findIndex((f) => runNodeKey(f.node) === initialSelectedNodeKey);
     if (idx >= 0) {
       setFocusIdx(idx);
-      focusedSelectionRef.current = initialSelectedNodeId;
+      focusedSelectionRef.current = initialSelectedNodeKey;
     }
-  }, [initialSelectedNodeId, flat]);
+  }, [initialSelectedNodeKey, flat]);
 
   const safeIdx = flat.length > 0 ? Math.min(focusIdx, flat.length - 1) : 0;
   const focusedNode = flat[safeIdx]?.node ?? null;

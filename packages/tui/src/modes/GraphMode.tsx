@@ -106,10 +106,10 @@ function ConnectorColumn({
 
 export function GraphMode({
   runId,
-  onSelectNode,
+  onSelectNodeKey,
 }: {
   runId: string;
-  onSelectNode?: (nodeId: string) => void;
+  onSelectNodeKey?: (nodeId: string) => void;
 }) {
   const { nodes, root, isLoading, error } = useRunTree(runId);
   const { width } = useTerminalDimensions();
@@ -123,24 +123,24 @@ export function GraphMode({
   );
 
   // Flat navigation order: column-major (all of col 0, then col 1, ...)
-  const flatNodeIds = useMemo(
+  const flatNodeKeys = useMemo(
     () => layout.colGroups.flatMap((g) => g),
     [layout.colGroups],
   );
 
   const [selectedIdx, setSelectedIdx] = useState(0);
   const safeIdx =
-    flatNodeIds.length > 0 ? Math.min(selectedIdx, flatNodeIds.length - 1) : 0;
-  const selectedNodeId = flatNodeIds[safeIdx] ?? null;
+    flatNodeKeys.length > 0 ? Math.min(selectedIdx, flatNodeKeys.length - 1) : 0;
+  const selectedNodeKey = flatNodeKeys[safeIdx] ?? null;
 
   useKeyboard((e) => {
     const key = e.name;
     if (key === "j" || key === "down") {
-      setSelectedIdx((i) => Math.min(i + 1, Math.max(0, flatNodeIds.length - 1)));
+      setSelectedIdx((i) => Math.min(i + 1, Math.max(0, flatNodeKeys.length - 1)));
     } else if (key === "k" || key === "up") {
       setSelectedIdx((i) => Math.max(i - 1, 0));
-    } else if (key === "return" && selectedNodeId) {
-      onSelectNode?.(selectedNodeId);
+    } else if (key === "return" && selectedNodeKey) {
+      onSelectNodeKey?.(selectedNodeKey);
     }
   });
 
@@ -202,7 +202,7 @@ export function GraphMode({
             <box key={nodeKey} flexDirection="column" flexShrink={0}>
               <NodeCard
                 node={node}
-                isSelected={nodeKey === selectedNodeId}
+                isSelected={nodeKey === selectedNodeKey}
                 cardWidth={cardWidth}
               />
               {slotIdx < numSlots - 1 ? (
