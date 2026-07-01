@@ -143,6 +143,18 @@ function terminalRows() {
     return process.stdout.rows || 24;
 }
 
+function normalizeQueryValue(value) {
+    let query = "";
+    for (const char of String(value ?? "")) {
+        if (char === "\x7f" || char === "\b") {
+            query = query.slice(0, -1);
+            continue;
+        }
+        query += char;
+    }
+    return query;
+}
+
 /**
  * A type-to-filter picker built on clack's `Prompt` base class. We subclass
  * `Prompt` directly (NOT `SelectPrompt`) with `trackValue=true` so the base
@@ -193,7 +205,7 @@ class FuzzySelectPrompt extends Prompt {
         // Re-filter on every keystroke. Typing AND backspace both edit rl.line,
         // so the base re-emits "value" for both — this covers backspace for free.
         this.on("value", () => {
-            this.query = this.value ?? "";
+            this.query = normalizeQueryValue(this.value);
             this.filtered = fuzzyFilter(this.query, this.allOptions);
             if (this.cursor > this.filtered.length - 1) {
                 this.cursor = Math.max(0, this.filtered.length - 1);
