@@ -17,6 +17,8 @@ export const useClockStore = create<ClockState>(() => ({
 
 // Tick for the life of the page. A stopped run reads `Date.now()` directly in
 // `useElapsed`, so a frozen card never depends on this subscription.
-window.setInterval(() => {
-  useClockStore.setState({ nowMs: Date.now() });
-}, 1000);
+if (typeof window !== "undefined") {
+  window.setInterval(() => {
+    useClockStore.setState({ nowMs: Date.now() });
+  }, 1000);
+}

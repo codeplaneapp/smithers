@@ -521,7 +521,7 @@ export default smithers((ctx) => {
             maxAttempts={5}
             prompt={
               <PickPrompt
-                candidates={JSON.stringify(recommend.candidates, null, 2)}
+                candidates={JSON.stringify(Array.isArray(recommend.candidates) ? recommend.candidates : [], null, 2)}
                 summary={recommend.summary}
               />
             }

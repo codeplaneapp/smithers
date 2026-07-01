@@ -72,6 +72,13 @@ export const workflowSummarySchema = z.object({
     description: z.string(),
     tags: z.array(z.string()),
     aliases: z.array(z.string()),
+    requiredOs: z.array(z.string()).optional(),
+    requiredBins: z.array(z.string()).optional(),
+    requiredEnv: z.array(z.string()).optional(),
+    disableModelInvocation: z.boolean().optional(),
+    userInvocable: z.boolean().optional(),
+    eligible: z.boolean().optional(),
+    ineligibleReasons: z.array(z.string()).optional(),
 });
 const timerSchema = z.object({
     nodeId: z.string(),

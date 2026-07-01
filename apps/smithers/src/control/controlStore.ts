@@ -99,10 +99,12 @@ export const useControlStore = create<ControlState>((set, get) => ({
 
 // Ambient styling hook without an effect: reflect the controller on <html> so
 // CSS can tint the shell while the agent drives (module-load store.subscribe).
-document.documentElement.dataset.controller = useControlStore.getState().controller;
-useControlStore.subscribe((state) => {
-  document.documentElement.dataset.controller = state.controller;
-});
+if (typeof document !== "undefined") {
+  document.documentElement.dataset.controller = useControlStore.getState().controller;
+  useControlStore.subscribe((state) => {
+    document.documentElement.dataset.controller = state.controller;
+  });
+}
 
 // The bridge: when a reply finishes streaming, lift any action block out of the
 // assistant bubble and process it. This rides chatStore's stream lifecycle so

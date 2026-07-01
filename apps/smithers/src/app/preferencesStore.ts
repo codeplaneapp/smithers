@@ -14,6 +14,7 @@ type PreferencesState = {
 
 /** The OS preference, used as the default before the user picks a theme. */
 function systemTheme(): Theme {
+  if (typeof window === "undefined") return "light";
   return window.matchMedia("(prefers-color-scheme: dark)").matches
     ? "dark"
     : "light";
@@ -44,6 +45,7 @@ export const usePreferencesStore = create<PreferencesState>()(
 // DOM sync without an effect: write data-theme now and on every change. The
 // index.html observer mirrors data-theme onto the mobile theme-color meta.
 function applyTheme(theme: Theme): void {
+  if (typeof document === "undefined") return;
   document.documentElement.dataset.theme = theme;
 }
 applyTheme(usePreferencesStore.getState().theme);

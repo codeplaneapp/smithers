@@ -1,6 +1,7 @@
 import {
   createBrowserHistory,
   createHashHistory,
+  createMemoryHistory,
   type RouterHistory,
 } from "@tanstack/react-router";
 
@@ -29,4 +30,6 @@ function isDesktopWebview(): boolean {
  */
 export const appHistory: RouterHistory = isDesktopWebview()
   ? createHashHistory()
-  : createBrowserHistory();
+  : typeof window === "undefined"
+    ? createMemoryHistory()
+    : createBrowserHistory();
