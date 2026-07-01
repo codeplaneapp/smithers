@@ -69,24 +69,31 @@ export const implementer: AgentLike[] = [
 // CLIs) so panel structure and graph-rendering never break.
 const detectedPanel: AgentLike[] = [
   ...(hasClaude ? [opus] : []),
-  ...(hasCodex ? [codex] : []),
   ...(hasGemini ? [gemini] : []),
+  ...(hasCodex ? [codex] : []),
 ];
 export const panelists: AgentLike[] =
   detectedPanel.length >= 2 ? detectedPanel.slice(0, 2) : [opus, codex];
 
-// The panel moderator / synthesizer — usually Codex, with Opus as the
-// always-present fallback. This is a failover chain (not a single agent), but be
-// precise about HOW the fallback engages: the engine advances a failover chain
-// across retry attempts, and a preflight/auth failure is non-retryable, so the
-// chain does NOT by itself walk from Codex to Opus on a moderator-only Codex auth
-// failure. What actually makes the shipped panels resilient is the engine's
-// per-run circuit breaker combined with the invariant below: `panelists` always
-// includes the SAME Codex instance, so when Codex auth is stale a panelist fails
-// preflight first and disables that instance run-wide; the moderator (which runs
-// after the panelists) then finds Codex disabled and selects Opus on its first
-// attempt. Keeping Opus in the chain guarantees a healthy fallback exists for
-// that path. Custom panels that use a Codex moderator WITHOUT Codex among the
-// panelists are not covered by this and can still fail to produce a verdict —
-// the review UI surfaces that terminal no-verdict state explicitly.
-export const synthesizer: AgentLike[] = [...(hasCodex ? [codex] : []), opus];
+// The panel moderator / synthesizer — prefer another detected subscription CLI
+// (Gemini, then Codex) before falling back to Opus, so a stray/fake
+// OPENAI_API_KEY does not make Codex preflight fail when another CLI can do the
+// job. Opus is the always-present fallback. This is a failover chain (not a
+// single agent), but be precise about HOW the fallback engages: the engine
+// advances a failover chain across retry attempts, and a preflight/auth failure
+// is non-retryable, so the chain does NOT by itself walk from Codex to Opus on a
+// moderator-only Codex auth failure. What actually makes the shipped panels
+// resilient is the engine's per-run circuit breaker combined with the invariant
+// below: `panelists` always includes the SAME Codex instance, so when Codex auth
+// is stale a panelist fails preflight first and disables that instance run-wide;
+// the moderator (which runs after the panelists) then finds Codex disabled and
+// selects the next healthy agent on its first attempt. Keeping Opus in the chain
+// guarantees a healthy fallback exists for that path. Custom panels that use a
+// Codex moderator WITHOUT Codex among the panelists are not covered by this and
+// can still fail to produce a verdict — the review UI surfaces that terminal
+// no-verdict state explicitly.
+export const synthesizer: AgentLike[] = [
+  ...(hasGemini ? [gemini] : []),
+  ...(hasCodex ? [codex] : []),
+  opus,
+];

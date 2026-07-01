@@ -12063,7 +12063,7 @@ On clean exit the workflow resumes in detached mode. Vibe and OpenCode stream ca
 
 > Provider-backed AI SDK agent wrappers for Anthropic, OpenAI, and Hermes that work like first-class Smithers agents.
 
-`AnthropicAgent`, `OpenAIAgent`, and `HermesAgent` are provider-backed AI SDK agents with class-style ergonomics matching the CLI agents. `AnthropicAgent` and `OpenAIAgent` wrap `ToolLoopAgent` directly; `HermesAgent` extends the OpenAI-compatible path with Hermes defaults.
+`AnthropicAgent`, `OpenAIAgent`, and `HermesAgent` are provider-backed AI SDK agents with class-style ergonomics matching the CLI agents. `AnthropicAgent` and `OpenAIAgent` wrap `ToolLoopAgent` directly; `HermesAgent` extends the OpenAI-compatible path with Hermes defaults. `ElizaAgent` adapts an Eliza runtime/character into the same Smithers agent interface when you need an in-process ElizaOS-backed agent.
 
 <Note>API reference: Agents lists every agent class, its options, and links to source and tests.</Note>
 

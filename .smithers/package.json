@@ -20,7 +20,10 @@
     "test:open-code-review": "bun test ./tests/open-code-review.test.ts ./tests/open-code-review-ui.e2e.test.ts"
   },
   "dependencies": {
+    "@milkdown/crepe": "7.21.2",
     "@smithers-orchestrator/scorers": "workspace:*",
+    "@xyflow/react": "^12.10.2",
+    "dagre": "^0.8.5",
     "effect": "^3.21.1",
     "react": "^19.2.5",
     "smithers-orchestrator": "workspace:*",
