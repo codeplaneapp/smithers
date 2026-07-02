@@ -1,0 +1,21 @@
+{
+  "name": "@smithers/openclaw-plugin",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Native OpenClaw plugin for driving and improving Smithers workflows.",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "skills",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "openclaw": ">=2026.3.24-beta.2"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}

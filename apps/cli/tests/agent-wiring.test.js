@@ -10,6 +10,7 @@ import { parseAgentWiringArgv } from "../src/agent-wiring/parseAgentWiringArgv.j
 import { registerHermesMcp } from "../src/agent-wiring/registerHermesMcp.js";
 import { registerHermesPlugin } from "../src/agent-wiring/registerHermesPlugin.js";
 import { registerOpenClawMcp } from "../src/agent-wiring/registerOpenClawMcp.js";
+import { registerOpenClawPlugin } from "../src/agent-wiring/registerOpenClawPlugin.js";
 import { wireExtraAgents } from "../src/agent-wiring/wireExtraAgents.js";
 
 /** @type {string[]} */
@@ -181,6 +182,79 @@ describe("registerOpenClawMcp", () => {
   });
 });
 
+describe("registerOpenClawPlugin", () => {
+  test("skips when OpenClaw is not installed", () => {
+    const home = tempHome();
+    const result = registerOpenClawPlugin({ homeDir: home });
+    expect(result).toMatchObject({ agent: "OpenClaw", installedPlugin: false, reason: "not-detected" });
+  });
+
+  test("installs the plugin tree and enables it", () => {
+    const home = tempHome();
+    mkdirSync(join(home, ".openclaw"), { recursive: true });
+    const result = registerOpenClawPlugin({ homeDir: home });
+    expect(result.installedPlugin).toBe(true);
+    expect(result.enabled).toBe(true);
+    expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "package.json"))).toBe(true);
+    expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "openclaw.plugin.json"))).toBe(true);
+    expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "dist", "index.js"))).toBe(true);
+    expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "skills", "orchestrate", "SKILL.md"))).toBe(true);
+    const config = JSON.parse(readFileSync(join(home, ".openclaw", "openclaw.json"), "utf8"));
+    expect(config.plugins.entries.smithers.enabled).toBe(true);
+  });
+
+  test("preserves config, allows smithers when an allow-list exists, and drops deny entries", () => {
+    const home = tempHome();
+    mkdirSync(join(home, ".openclaw"), { recursive: true });
+    writeFileSync(
+      join(home, ".openclaw", "openclaw.json"),
+      JSON.stringify({
+        models: { default: "local" },
+        plugins: {
+          allow: ["other"],
+          block: ["smithers"],
+          disabled: ["smithers"],
+          entries: {
+            other: { enabled: true },
+            smithers: { config: { existing: true }, enabled: false },
+          },
+        },
+      }),
+    );
+    registerOpenClawPlugin({ homeDir: home });
+    const config = JSON.parse(readFileSync(join(home, ".openclaw", "openclaw.json"), "utf8"));
+    expect(config.models.default).toBe("local");
+    expect(config.plugins.entries.other.enabled).toBe(true);
+    expect(config.plugins.entries.smithers.config).toEqual({ existing: true });
+    expect(config.plugins.entries.smithers.enabled).toBe(true);
+    expect(config.plugins.allow).toEqual(["other", "smithers"]);
+    expect(config.plugins.block).not.toContain("smithers");
+    expect(config.plugins.disabled).not.toContain("smithers");
+  });
+
+  test("does not clobber an unparseable config", () => {
+    const home = tempHome();
+    mkdirSync(join(home, ".openclaw"), { recursive: true });
+    const path = join(home, ".openclaw", "openclaw.json");
+    writeFileSync(path, "{ /* json5 comment */ plugins: {} }");
+    const result = registerOpenClawPlugin({ homeDir: home });
+    expect(result).toMatchObject({ installedPlugin: false, reason: "unparseable-config", enabled: false });
+    expect(readFileSync(path, "utf8")).toContain("json5 comment");
+    expect(existsSync(join(home, ".openclaw", "extensions", "smithers"))).toBe(false);
+  });
+
+  test("is idempotent and replaces stale plugin files", () => {
+    const home = tempHome();
+    mkdirSync(join(home, ".openclaw", "extensions", "smithers"), { recursive: true });
+    const stale = join(home, ".openclaw", "extensions", "smithers", "stale.js");
+    writeFileSync(stale, "// stale\n");
+    registerOpenClawPlugin({ homeDir: home });
+    registerOpenClawPlugin({ homeDir: home });
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "openclaw.plugin.json"))).toBe(true);
+  });
+});
+
 describe("linkPiSkills", () => {
   test("skips when Pi is not installed", () => {
     const home = tempHome();
@@ -208,6 +282,8 @@ describe("wireExtraAgents", () => {
     const results = wireExtraAgents({ kind: "mcp", homeDir: home });
     const wired = results.filter((r) => r.registered).map((r) => r.agent).sort();
     expect(wired).toEqual(["Hermes", "OpenClaw"]);
+    const plugins = results.filter((r) => r.installedPlugin).map((r) => r.agent).sort();
+    expect(plugins).toEqual(["Hermes", "OpenClaw"]);
   });
 
   test("--agent filter limits which agents are wired", () => {
@@ -219,6 +295,17 @@ describe("wireExtraAgents", () => {
     expect(results.map((r) => r.agent)).toEqual(["Hermes", "Hermes"]);
     expect(results.some((r) => r.registered)).toBe(true);
     expect(results.some((r) => r.installedPlugin)).toBe(true);
+  });
+
+  test("--agent filter can target only OpenClaw", () => {
+    const home = tempHome();
+    mkdirSync(join(home, ".hermes"), { recursive: true });
+    mkdirSync(join(home, ".openclaw"), { recursive: true });
+    const results = wireExtraAgents({ kind: "mcp", agents: ["openclaw"], homeDir: home });
+    expect(results.map((r) => r.agent)).toEqual(["OpenClaw", "OpenClaw"]);
+    expect(results.some((r) => r.registered)).toBe(true);
+    expect(results.some((r) => r.installedPlugin)).toBe(true);
+    expect(existsSync(join(home, ".hermes", "plugins", "smithers"))).toBe(false);
   });
 
   test("skills kind wires Pi", () => {

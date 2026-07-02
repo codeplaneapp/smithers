@@ -4,6 +4,7 @@ import { linkPiSkills } from "./linkPiSkills.js";
 import { registerHermesMcp } from "./registerHermesMcp.js";
 import { registerHermesPlugin } from "./registerHermesPlugin.js";
 import { registerOpenClawMcp } from "./registerOpenClawMcp.js";
+import { registerOpenClawPlugin } from "./registerOpenClawPlugin.js";
 
 /** Agent ids handled here that the underlying `mcp add` / `skills add` does not reach. */
 export const EXTRA_MCP_AGENTS = ["hermes", "openclaw"];
@@ -26,9 +27,9 @@ function detectRunner() {
 }
 
 /**
- * Wires Smithers into agents the underlying skill/MCP framework does not cover —
- * Hermes and OpenClaw (native MCP config) and Pi (skills directory). Run as a
- * supplementary step after `mcp add` / `skills add`.
+ * Wires Smithers into agents the underlying skill/MCP framework does not cover:
+ * Hermes/OpenClaw (native MCP config plus native plugin surfaces) and Pi (skills
+ * directory). Run as a supplementary step after `mcp add` / `skills add`.
  *
  * @param {object} opts
  * @param {"mcp" | "skills"} opts.kind Which install ran.
@@ -62,7 +63,10 @@ export function wireExtraAgents({
       results.push(registerHermesMcp({ name, command, args, homeDir }));
       results.push(registerHermesPlugin({ homeDir }));
     }
-    if (wants("openclaw")) results.push(registerOpenClawMcp({ name, command, args, homeDir }));
+    if (wants("openclaw")) {
+      results.push(registerOpenClawMcp({ name, command, args, homeDir }));
+      results.push(registerOpenClawPlugin({ homeDir }));
+    }
   } else if (kind === "skills") {
     if (wants("pi")) results.push(linkPiSkills({ global, cwd, homeDir }));
   }
