@@ -1,0 +1,44 @@
+{
+  "name": "@smithers-orchestrator/integrations",
+  "version": "0.26.1",
+  "description": "External service integrations (webhook + polling event sources) for Smithers workflows",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./*": {
+      "types": "./src/index.d.ts",
+      "import": "./src/*.js",
+      "default": "./src/*.js"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "rm -f src/index.d.ts && tsup --dts-only"
+  },
+  "dependencies": {
+    "@smithers-orchestrator/components": "workspace:*",
+    "@smithers-orchestrator/db": "workspace:*",
+    "@smithers-orchestrator/engine": "workspace:*",
+    "@smithers-orchestrator/errors": "workspace:*",
+    "@smithers-orchestrator/observability": "workspace:*",
+    "@smithers-orchestrator/react-reconciler": "workspace:*",
+    "@smithers-orchestrator/scheduler": "workspace:*",
+    "effect": "3.21.4",
+    "react": "^19.2.7",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "drizzle-orm": "^0.45.2",
+    "typescript": "~6.0.3"
+  }
+}

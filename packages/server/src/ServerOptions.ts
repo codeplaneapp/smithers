@@ -1,5 +1,13 @@
+import type { IntegrationsConfig } from "./IntegrationsConfig.js";
+
 export type ServerOptions = {
   port?: number;
+  /**
+   * External integrations served by this process: generic HMAC-verified
+   * webhook sources exposed at `POST /v1/webhooks/:sourceId` and delivered
+   * to waiting runs through the integration runtime. Requires `db`.
+   */
+  integrations?: IntegrationsConfig;
   /**
    * Network interface to bind. Defaults to the loopback address 127.0.0.1.
    * Binding a non-loopback host (e.g. 0.0.0.0) requires an authToken unless

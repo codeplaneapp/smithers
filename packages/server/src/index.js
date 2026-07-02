@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { isIntegrationError, makeIntegrationRuntime, readJsonPath, verifySignature, } from "@smithers-orchestrator/integrations";
 import { pathToFileURL } from "node:url";
 import { resolve, dirname, sep, basename } from "node:path";
 import { Effect } from "effect";
@@ -40,6 +41,7 @@ export * from "./gatewayRoutes/streamDevTools.js";
 // Type-only stubs reachable via `./*` that are NOT already transitively
 // re-exported through the JS modules above.
 export * from "./ServerOptions.js";
+export * from "./IntegrationsConfig.js";
 
 const runs = new Map();
 const SERVER_LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"]);
@@ -154,6 +156,98 @@ async function readBody(req, maxBytes, maxDepth) {
         throw error;
     }
     return parsed;
+}
+/**
+ * Read the raw (unparsed) request body — webhook signature verification must
+ * run over the exact bytes the provider signed, before any JSON parse.
+ * @param {IncomingMessage} req
+ * @param {number} maxBytes
+ * @returns {Promise<string>}
+ */
+async function readRawBody(req, maxBytes) {
+    const chunks = [];
+    let total = 0;
+    for await (const chunk of req) {
+        const buf = Buffer.from(chunk);
+        total += buf.length;
+        if (total > maxBytes) {
+            throw new HttpError(413, "PAYLOAD_TOO_LARGE", `Request body exceeds ${maxBytes} bytes`, { maxBytes });
+        }
+        chunks.push(buf);
+    }
+    return Buffer.concat(chunks).toString("utf8");
+}
+/**
+ * Build the integration-runtime webhook source configs from
+ * `ServerOptions.integrations.webhooks`: HMAC verification over the raw body
+ * plus a config-driven decode (event name, correlation-id/payload/dedupe-key
+ * dot-paths) into ONE ExternalEvent per delivery.
+ * @param {import("./IntegrationsConfig.js").IntegrationsConfig} integrations
+ * @returns {import("@smithers-orchestrator/integrations/core/EventSource").MakeWebhookSourceOptions[]}
+ */
+function buildIntegrationWebhookSources(integrations) {
+    return (integrations.webhooks ?? []).map((config) => {
+        const signatureHeader = (config.signatureHeader ?? "x-hub-signature-256").toLowerCase();
+        return {
+            id: config.id,
+            capacity: config.capacity,
+            verify: (request) => {
+                const header = request.headers[signatureHeader];
+                const signature = Array.isArray(header) ? header[0] : header;
+                return verifySignature({
+                    payload: request.rawBody,
+                    secret: config.secret,
+                    signature,
+                    ...(config.signaturePrefix !== undefined
+                        ? { prefix: config.signaturePrefix }
+                        : {}),
+                });
+            },
+            decode: (request) => {
+                const payload = JSON.parse(request.rawBody);
+                const correlationValue = readJsonPath(payload, config.correlationIdPath);
+                const correlationId = typeof correlationValue === "string" || typeof correlationValue === "number"
+                    ? String(correlationValue)
+                    : null;
+                const dedupeValue = config.dedupeKeyPath !== undefined
+                    ? readJsonPath(payload, config.dedupeKeyPath)
+                    : undefined;
+                const dedupeKey = typeof dedupeValue === "string" || typeof dedupeValue === "number"
+                    ? String(dedupeValue)
+                    : createHash("sha256").update(request.rawBody).digest("hex");
+                return {
+                    source: config.id,
+                    eventName: config.event,
+                    correlationId,
+                    payload: config.payloadPath !== undefined
+                        ? (readJsonPath(payload, config.payloadPath) ?? null)
+                        : payload,
+                    dedupeKey,
+                    receivedAtMs: nowMs(),
+                };
+            },
+        };
+    });
+}
+/**
+ * Map an integration-runtime failure to the webhook route's HTTP status.
+ * @param {unknown} error
+ * @returns {HttpError}
+ */
+function webhookHttpError(error) {
+    if (isIntegrationError(error)) {
+        const reason = /** @type {{ details?: { reason?: unknown } }} */ (error).details?.reason;
+        if (reason === "unknown-source") {
+            return new HttpError(404, "NOT_FOUND", "Unknown webhook source");
+        }
+        if (reason === "invalid-signature") {
+            return new HttpError(401, "UNAUTHORIZED", "Webhook signature verification failed");
+        }
+        if (reason === "decode-failed") {
+            return new HttpError(400, "INVALID_REQUEST", "Webhook payload decode failed");
+        }
+    }
+    return new HttpError(500, "SERVER_ERROR", error instanceof Error ? error.message : "Webhook handling failed");
 }
 /**
  * @param {string} absPath
@@ -296,6 +390,9 @@ function normalizeHttpMetricRoute(pathname) {
     }
     if (/^\/v1\/runs\/[^/]+\/signals\/[^/]+$/.test(pathname)) {
         return "/v1/runs/:runId/signals/:signalName";
+    }
+    if (/^\/v1\/webhooks\/[^/]+$/.test(pathname)) {
+        return "/v1/webhooks/:sourceId";
     }
     if (/^\/signal\/[^/]+\/[^/]+$/.test(pathname)) {
         return "/signal/:runId/:signalName";
@@ -664,6 +761,20 @@ function startServerInternal(opts = {}) {
         ensureSmithersTables(serverDb);
     }
     const serverAdapter = serverDb ? new SmithersDb(serverDb) : null;
+    const integrationWebhookSources = opts.integrations
+        ? buildIntegrationWebhookSources(opts.integrations)
+        : [];
+    /** @type {import("@smithers-orchestrator/integrations/core/IntegrationRuntime").IntegrationRuntime | null} */
+    let integrationRuntime = null;
+    if (integrationWebhookSources.length > 0) {
+        if (!serverAdapter) {
+            throw new SmithersError("SERVER_INTEGRATIONS_REQUIRE_DB", "ServerOptions.integrations requires ServerOptions.db: integration events are deduped and matched against the server database.", {});
+        }
+        integrationRuntime = makeIntegrationRuntime({
+            adapter: serverAdapter,
+            webhookSources: integrationWebhookSources,
+        });
+    }
     logInfo("starting smithers server", {
         port,
         host,
@@ -676,10 +787,31 @@ function startServerInternal(opts = {}) {
         const requestMethod = req.method ?? "GET";
         let requestPathname = (req.url ?? "/").split("?")[0] ?? "/";
         try {
-            assertAuth(req, authToken);
             const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
             const method = requestMethod;
             requestPathname = url.pathname;
+            const webhookMatch = url.pathname.match(/^\/v1\/webhooks\/([^/]+)$/);
+            if (method === "POST" && webhookMatch) {
+                // No bearer auth here: webhook providers cannot send the API
+                // token — the per-source HMAC signature IS the authentication.
+                const sourceId = decodeURIComponent(webhookMatch[1]);
+                if (!integrationRuntime ||
+                    !integrationRuntime.hasWebhookSource(sourceId)) {
+                    throw new HttpError(404, "NOT_FOUND", `Unknown webhook source: ${sourceId}`);
+                }
+                const rawBody = await readRawBody(req, maxBodyBytes);
+                try {
+                    await integrationRuntime.handleWebhook(sourceId, {
+                        headers: req.headers,
+                        rawBody,
+                    });
+                }
+                catch (error) {
+                    throw webhookHttpError(error);
+                }
+                return sendJson(res, 202, { accepted: true });
+            }
+            assertAuth(req, authToken);
             if (method === "GET" && url.pathname === "/metrics") {
                 return sendText(res, 200, renderPrometheusMetrics(), prometheusContentType);
             }
@@ -1229,6 +1361,13 @@ function startServerInternal(opts = {}) {
         logInfo("stopping smithers server", {
             activeRuns: runs.size,
         }, "server:stop");
+        if (integrationRuntime) {
+            void integrationRuntime.shutdown().catch((error) => {
+                logWarning("integration runtime shutdown failed", {
+                    error: error instanceof Error ? error.message : String(error),
+                }, "server:stop");
+            });
+        }
         for (const [runId, record] of runs) {
             try {
                 record.abort.abort();

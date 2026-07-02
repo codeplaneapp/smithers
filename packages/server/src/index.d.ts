@@ -19,8 +19,59 @@ import { selectOutputRow } from '@smithers-orchestrator/db/output';
 import * as _smithers_orchestrator_time_travel_jumpToFrame from '@smithers-orchestrator/time-travel/jumpToFrame';
 export { JumpToFrameError } from '@smithers-orchestrator/time-travel/jumpToFrame';
 
+/**
+ * A generic HMAC-verified webhook event source served at
+ * `POST /v1/webhooks/:id`. Each verified delivery becomes ONE external event
+ * (signal name = `event`) fanned out to runs parked on
+ * `WaitForEvent(event, correlationId)` via the integration runtime.
+ */
+type IntegrationsWebhookSourceConfig = {
+    /** Source id — the `:sourceId` path segment of `POST /v1/webhooks/:sourceId`. */
+    id: string;
+    /** HMAC-SHA256 shared secret used to verify deliveries. */
+    secret: string;
+    /**
+     * Header carrying the signature.
+     * @default "x-hub-signature-256"
+     */
+    signatureHeader?: string;
+    /**
+     * Required signature prefix (e.g. GitHub's `sha256=`). When omitted, a
+     * leading `sha256=` is stripped if present and plain hex/base64 digests
+     * are accepted.
+     */
+    signaturePrefix?: string;
+    /** Signal name to deliver (e.g. `integration:test:ping`). */
+    event: string;
+    /** Dot-path into the JSON payload for the correlation id (e.g. `issue.key`). */
+    correlationIdPath?: string;
+    /** Dot-path selecting the signal payload; defaults to the whole body. */
+    payloadPath?: string;
+    /**
+     * Dot-path for a provider-stable delivery id used for redelivery dedupe;
+     * defaults to `sha256(rawBody)`.
+     */
+    dedupeKeyPath?: string;
+    /** Bounded ingress queue capacity. @default 256 */
+    capacity?: number;
+};
+/**
+ * Server-level integrations config (`ServerOptions.integrations`). Requires
+ * `ServerOptions.db` — delivered events are deduped and matched against the
+ * server database.
+ */
+type IntegrationsConfig = {
+    webhooks?: IntegrationsWebhookSourceConfig[];
+};
+
 type ServerOptions$1 = {
     port?: number;
+    /**
+     * External integrations served by this process: generic HMAC-verified
+     * webhook sources exposed at `POST /v1/webhooks/:sourceId` and delivered
+     * to waiting runs through the integration runtime. Requires `db`.
+     */
+    integrations?: IntegrationsConfig;
     /**
      * Network interface to bind. Defaults to the loopback address 127.0.0.1.
      * Binding a non-loopback host (e.g. 0.0.0.0) requires an authToken unless
@@ -283,6 +334,8 @@ type GatewayRegisterOptions$1 = {
     schedule?: string;
     webhook?: GatewayWebhookConfig$1;
     ui?: GatewayUiConfig$1;
+    /** Internal plumbing workflow (e.g. init): excluded from default `listWorkflows` results unless the caller opts in via `filter.includeSystem`. */
+    system?: boolean;
 };
 
 type EventFrame$1 = {
@@ -657,16 +710,19 @@ declare class Gateway {
     workflowSummary(key: string, entry: RegisteredWorkflow): {
         hasUi: boolean;
         uiPath: string | null;
+        system: boolean;
         description?: string | undefined;
         readableName?: string | undefined;
         key: string;
     };
     /**
    * @param {boolean | undefined} hasUi
+   * @param {boolean | undefined} [includeSystem] System (internal plumbing) workflows are hidden unless true.
    */
-    listWorkflowSummaries(hasUi: boolean | undefined): {
+    listWorkflowSummaries(hasUi: boolean | undefined, includeSystem?: boolean | undefined): {
         hasUi: boolean;
         uiPath: string | null;
+        system: boolean;
         description?: string | undefined;
         readableName?: string | undefined;
         key: string;
@@ -1392,6 +1448,7 @@ type RegisteredWorkflow = {
     schedule?: string;
     webhook?: GatewayWebhookConfig;
     ui?: ResolvedGatewayUiConfig | null;
+    system?: boolean;
 };
 type ResolvedRun = {
     runId: string;
@@ -1796,4 +1853,4 @@ type RunRow = _smithers_orchestrator_db_adapter_RunRow.RunRow;
 type ServerResponse = node_http.ServerResponse;
 type ServerOptions = ServerOptions$1;
 
-export { type AttemptRow, type ConnectRequest, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResponseFrame, type RunEventStreamState, type RunRow, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, assertGatewayInputDepthWithinBounds, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };
+export { type AttemptRow, type ConnectRequest, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type IntegrationsConfig, type IntegrationsWebhookSourceConfig, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResponseFrame, type RunEventStreamState, type RunRow, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, assertGatewayInputDepthWithinBounds, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };

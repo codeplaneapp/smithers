@@ -96,6 +96,9 @@ importers:
       '@smithers-orchestrator/graph':
         specifier: workspace:*
         version: link:packages/graph
+      '@smithers-orchestrator/integrations':
+        specifier: workspace:*
+        version: link:packages/integrations
       '@smithers-orchestrator/memory':
         specifier: workspace:*
         version: link:packages/memory
@@ -1221,6 +1224,49 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
 
+  packages/integrations:
+    dependencies:
+      '@smithers-orchestrator/components':
+        specifier: workspace:*
+        version: link:../components
+      '@smithers-orchestrator/db':
+        specifier: workspace:*
+        version: link:../db
+      '@smithers-orchestrator/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@smithers-orchestrator/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@smithers-orchestrator/observability':
+        specifier: workspace:*
+        version: link:../../apps/observability
+      '@smithers-orchestrator/react-reconciler':
+        specifier: workspace:*
+        version: link:../react-reconciler
+      '@smithers-orchestrator/scheduler':
+        specifier: workspace:*
+        version: link:../scheduler
+      effect:
+        specifier: 3.21.4
+        version: 3.21.4
+      react:
+        specifier: ^19.2.7
+        version: 19.2.7
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/bun':
+        specifier: latest
+        version: 1.3.14
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@cloudflare/workers-types@4.20260701.1)(@electric-sql/pglite@0.5.3)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)(bun-types@1.3.14)(pg@8.22.0)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
   packages/jj-darwin-arm64: {}
 
   packages/jj-darwin-x64: {}
@@ -1504,6 +1550,9 @@ importers:
       '@smithers-orchestrator/gateway':
         specifier: workspace:*
         version: link:../gateway
+      '@smithers-orchestrator/integrations':
+        specifier: workspace:*
+        version: link:../integrations
       '@smithers-orchestrator/observability':
         specifier: workspace:*
         version: link:../../apps/observability
