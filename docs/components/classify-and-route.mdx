@@ -144,9 +144,12 @@ import React from "react";
 export function Sequence(props) {
     if (props.skipIf)
         return null;
-    // Sequence carries no host props of its own; pass an empty bag (align with
+    // Sequence carries only a display label; pass a sanitized bag (align with
     // the sanitizing structural components) so control props don't leak through.
-    return React.createElement("smithers:sequence", {}, props.children);
+    // `label` names the phase group in run views (graph, the Claude /workflows
+    // mirror) and is preserved in the persisted frame XML.
+    const next = props.label === undefined ? {} : { label: props.label };
+    return React.createElement("smithers:sequence", next, props.children);
 }
 ```
 
@@ -160,10 +163,12 @@ import React from "react";
 export function Parallel(props) {
     if (props.skipIf)
         return null;
-    // Align prop sanitization with other structural components
+    // Align prop sanitization with other structural components. `label` names
+    // the phase group in run views (graph, the Claude /workflows mirror).
     const next = {
         maxConcurrency: props.maxConcurrency,
         id: props.id,
+        ...(props.label === undefined ? {} : { label: props.label }),
     };
     return React.createElement("smithers:parallel", next, props.children);
 }
