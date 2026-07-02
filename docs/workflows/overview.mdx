@@ -49,7 +49,7 @@ Most prompt-driven workflows accept `--prompt` as shorthand for `--input '{"prom
 | [`monitor-smithers`](/workflows/monitor-smithers) | Watch the Smithers fleet for stuck, blocked, failed, or over-budget runs. |
 | [`monitor`](/workflows/monitor) | Watch, diagnose, optionally self-fix, and report on one running workflow. |
 | [`eval-author`](/workflows/eval-author) | Turn acceptance criteria into eval fixtures and a rubric for `bunx smithers-orchestrator eval`. |
-| [`init`](/workflows/init) | System workflow behind `smithers init`: durable pack install/refresh (hidden from default listings). |
+| [`init`](/workflows/init) | System workflow behind `bunx smithers-orchestrator init`: durable pack install/refresh (hidden from default listings). |
 
 ## Operational Notes
 
@@ -57,5 +57,5 @@ Most prompt-driven workflows accept `--prompt` as shorthand for `--input '{"prom
 - Agent pools are defined in `.smithers/agents.ts`; edit that file to change which models each workflow uses.
 - Run `bunx smithers-orchestrator workflow list` to see the workflows in the current repo, `bunx smithers-orchestrator workflow inspect WORKFLOW_ID` to see metadata and the workflow input schema, and `bunx smithers-orchestrator workflow skills` to generate agent-facing docs under `.smithers/skills/`.
 - Workflows can carry optional metadata comments (`smithers-display-name`, `smithers-description`, `smithers-tags`, `smithers-aliases`) that `bunx smithers-orchestrator workflow list` and `workflow-skill` use for display and discovery.
-- Workflows marked `system: true` (or `// smithers-system: true`) are internal plumbing — Smithers uses them for its own durable processes (for example the seeded `init` workflow that installs/refreshes the pack). They are hidden from `workflow list`, the interactive picker, MCP `list_workflows`, and gateway `listWorkflows` by default; pass `--system` (CLI), `includeSystem: true` (MCP), or `filter.includeSystem` (gateway RPC) to see them, and run them explicitly with `workflow run <id>`.
+- Workflows marked `system: true` (or `// smithers-system: true`) are internal plumbing: Smithers uses them for its own durable processes (for example the seeded `init` workflow that installs/refreshes the pack). They are hidden from `workflow list`, the interactive picker, MCP `list_workflows`, and gateway `listWorkflows` by default; pass `--system` (CLI), `includeSystem: true` (MCP), or `filter.includeSystem` (gateway RPC) to see them, and run them explicitly with `workflow run <id>`.
 - Inspect and resume runs with the normal CLI: `inspect`, `logs`, `chat`, `events`, `why`, `approve`, and `up --resume`.
