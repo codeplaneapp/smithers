@@ -3,13 +3,11 @@
 // Central role registry for the plan-implement family. Defines WHO plays each
 // role so the workflows stay declarative:
 //
-//   - implementer  — the heavy implementation tier. Prefers Gemini when its CLI
-//                    is installed, otherwise the latest Sonnet, with Codex as a
-//                    final fallback. This is where "use Sonnet more often" lives.
-//   - panelists    — the model-diverse pair for the PLAN and REVIEW panels
-//                    (Claude + Codex by default, or whatever 2 CLIs are present).
-//                    Deliberately NOT Sonnet: planning and reviewing stay on the
-//                    stronger Opus/Codex tier.
+//   - implementer  — the heavy implementation tier: Codex first, Sonnet as the
+//                    guaranteed fallback (the middle of the fable sandwich).
+//   - panelists    — the model-diverse pair for the PLAN and REVIEW panels,
+//                    led by Fable 5 (Fable + Codex by default). Planning and
+//                    reviewing stay on the strongest tier.
 //   - synthesizer  — the panel MODERATOR that merges panelist outputs. Usually
 //                    Codex.
 //
@@ -51,29 +49,34 @@ const hasClaude = commandExists("claude");
 
 const sonnet = new ClaudeCodeAgent({ model: IMPLEMENTER_MODEL });
 const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
+// Fable 5: the planning/review tier of the fable sandwich (subscription access
+// verified 2026-07-02). Fable plans and reviews; Codex implements.
+const fable = new ClaudeCodeAgent({ model: "claude-fable-5" });
 const codex = new CodexAgent({ model: "gpt-5.5", skipGitRepoCheck: true });
 const gemini = new AntigravityAgent({ model: GEMINI_MODEL });
 
-// Implementer failover chain: prefer Gemini if available, then Sonnet, then
-// Codex. Sonnet always stays in the chain as the guaranteed strong fallback so
-// the implementer works even with no Gemini/Codex CLI installed.
+// Implementer failover chain (the middle of the fable sandwich): Codex leads
+// when its CLI is installed, Sonnet is the guaranteed strong fallback so the
+// implementer works even with no Codex/Gemini CLI installed.
 export const implementer: AgentLike[] = [
-  ...(hasGemini ? [gemini] : []),
-  sonnet,
   ...(hasCodex ? [codex] : []),
+  sonnet,
+  ...(hasGemini ? [gemini] : []),
 ];
 
 // Plan & review panel: a model-diverse pair. Claude (Opus) + Codex by default,
 // or whatever 2 CLIs are installed (never Sonnet). Falls back to the static
 // Opus+Codex pair when fewer than 2 CLIs are detected (e.g. CI without agent
 // CLIs) so panel structure and graph-rendering never break.
+// Fable leads the panel (the bread of the fable sandwich); the second seat
+// goes to a model-diverse CLI (Codex, then Gemini).
 const detectedPanel: AgentLike[] = [
-  ...(hasClaude ? [opus] : []),
-  ...(hasGemini ? [gemini] : []),
+  ...(hasClaude ? [fable] : []),
   ...(hasCodex ? [codex] : []),
+  ...(hasGemini ? [gemini] : []),
 ];
 export const panelists: AgentLike[] =
-  detectedPanel.length >= 2 ? detectedPanel.slice(0, 2) : [opus, codex];
+  detectedPanel.length >= 2 ? detectedPanel.slice(0, 2) : [fable, codex];
 
 // The panel moderator / synthesizer — prefer another detected subscription CLI
 // (Gemini, then Codex) before falling back to Opus, so a stray/fake
@@ -97,3 +100,8 @@ export const synthesizer: AgentLike[] = [
   ...(hasCodex ? [codex] : []),
   opus,
 ];
+
+// The end-of-feature polish reviewer: Fable reviews the WHOLE implemented
+// feature once it is complete (the closing slice of the fable sandwich).
+// Opus stays in the chain as the always-present fallback.
+export const polishReviewer: AgentLike[] = [fable, opus];

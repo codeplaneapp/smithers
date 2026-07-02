@@ -36,6 +36,10 @@ export type ShipTicketsAgents = {
   smart: AgentLike[];
   smartTool: AgentLike[];
   cheapFast: AgentLike[];
+  /** Codex-led implementation tier (the middle of the fable sandwich). */
+  implement: AgentLike[];
+  /** Fable-led review tier (the bread of the fable sandwich). */
+  review: AgentLike[];
 };
 
 /** Pull a human title from a ticket's frontmatter or first H1, falling back to the slug. */
@@ -165,9 +169,9 @@ function renderTicket(
           <ValidationLoop
             idPrefix={slug}
             prompt={implementPrompt}
-            implementAgents={agents.smart}
+            implementAgents={agents.implement}
             validateAgents={agents.cheapFast}
-            reviewAgents={agents.smart}
+            reviewAgents={agents.review}
             feedback={feedback}
             done={done}
             maxIterations={3}

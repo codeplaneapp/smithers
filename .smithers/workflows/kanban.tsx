@@ -133,9 +133,9 @@ export default smithers((ctx) => {
                   <ValidationLoop
                     idPrefix={ticket.slug}
                     prompt={`Implement the ticket below in this worktree, then make it pass.\n\nTICKET FILE: .smithers/tickets/${ticket.id}\n\n${ticket.content}\n\n--- When the work is complete and green ---\n- COMMIT your changes to THIS worktree branch with one atomic emoji+conventional commit. Local commits only; the workflow lands them on main itself.\n- NEVER push, force-push, or run gh pr create; never switch branches or touch main/origin. An agent push corrupts shared main; the workflow owns all merging.`}
-                    implementAgents={agents.smart}
+                    implementAgents={agents.implement}
                     validateAgents={agents.smart}
-                    reviewAgents={agents.smart}
+                    reviewAgents={agents.review}
                     feedback={feedback}
                     done={done}
                     maxIterations={3}

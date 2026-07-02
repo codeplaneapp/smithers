@@ -28,15 +28,22 @@ export const providers = {
 // fatal (the engine fails the run instead of failing over), so an expired
 // kimi OAuth in a failover chain kills runs. Re-add deliberately if needed.
 //
-// providers.claude (claude-fable-5) is ALSO kept out of the pools as of
-// 2026-06-18: this subscription has no Fable Mythos access, so every call
-// returns "Claude Fable 5 is currently unavailable" tagged error:"rate_limit".
-// Smithers treats rate_limit as transient/retryable (see #324), so leaving it
-// in the chain burns task retries hammering a dead primary before failover and
-// spends real rate budget. Lead with claudeSonnet; re-add providers.claude once
-// Fable 5 access lands.
+// Fable 5 subscription access verified 2026-07-02 (`claude --model
+// claude-fable-5 -p` succeeds with ANTHROPIC_API_KEY unset), so
+// providers.claude is back in the pools (excluded 2026-06-18 while every call
+// failed as a retryable rate_limit and burned retries, see #324).
+//
+// Default delegation is the FABLE SANDWICH: Fable plans and reviews at the
+// ends (planning/review pools), Codex implements the middle (implement pool),
+// and Fable runs the final whole-feature polish review (review pool again).
 export const agents = {
   cheapFast: [providers.claudeSonnet, providers.codex],
-  smart: [providers.claudeSonnet, providers.codex, providers.codex1, providers.antigravity1],
-  smartTool: [providers.claudeSonnet, providers.codex, providers.codex1, providers.antigravity1],
+  smart: [providers.claude, providers.claudeSonnet, providers.codex, providers.codex1, providers.antigravity1],
+  smartTool: [providers.claude, providers.claudeSonnet, providers.codex, providers.codex1, providers.antigravity1],
+  // Fable-led: plan-shaping, architecture, anything judgment-heavy.
+  planning: [providers.claude, providers.claudeOpus, providers.claudeSonnet],
+  // Fable-led: reviews, verdicts, and the end-of-feature polish pass.
+  review: [providers.claude, providers.claudeOpus, providers.claudeSonnet],
+  // Codex-led: the implementation middle of the sandwich.
+  implement: [providers.codex, providers.codex1, providers.claudeSonnet],
 } as const satisfies Record<string, AgentLike[]>;

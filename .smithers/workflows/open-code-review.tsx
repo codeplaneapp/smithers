@@ -28,7 +28,7 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
   summary: workflowSummarySchema,
 });
 
-export function createOpenCodeReviewWorkflow(reviewAgents: AgentLike[] = agents.smart) {
+export function createOpenCodeReviewWorkflow(reviewAgents: AgentLike[] = agents.review) {
   return smithers((ctx) => {
     const input = normalizeOpenCodeReviewInput(ctx.input);
     const prepared = ctx.outputMaybe(outputs.reviewPrompt, { nodeId: "prepare-review" });

@@ -315,9 +315,9 @@ export default smithers((ctx) => {
                     <ValidationLoop
                       idPrefix={idPrefix}
                       prompt={itemPrompt(item)}
-                      implementAgents={agents.smart}
+                      implementAgents={agents.implement}
                       validateAgents={agents.cheapFast}
-                      reviewAgents={agents.smart}
+                      reviewAgents={agents.review}
                       feedback={feedback}
                       done={done}
                       maxIterations={maxItemIterations}

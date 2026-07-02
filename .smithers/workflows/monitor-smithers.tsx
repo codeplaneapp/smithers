@@ -1,25 +1,43 @@
 // smithers-source: seeded
 // smithers-metadata-version: 1
 // smithers-display-name: Monitor Smithers
-// smithers-description: Watchdog over Smithers runs: detect stuck, blocked, failed, or over-budget runs and escalate.
+// smithers-description: Continuous watchdog over ALL Smithers runs across every project on this machine: detect stuck, blocked, failed, or over-budget runs and escalate.
 // smithers-tags: ops, monitoring
 /** @jsxImportSource smithers-orchestrator */
 import { $ } from "bun";
-import { createSmithers } from "smithers-orchestrator";
+import { readdirSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+import { createSmithers, Ralph, Timer } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import ClassifyPrompt from "../prompts/monitor-smithers-classify.mdx";
 import TriagePrompt from "../prompts/monitor-smithers-triage.mdx";
 
 const inputSchema = z.object({
+  projects: z
+    .array(z.string())
+    .nullable()
+    .default(null)
+    .describe("Project directories to poll. Null auto-discovers every ~/<dir> with a .smithers store."),
   staleMinutes: z
     .number()
     .default(15)
     .describe("A run with no recent activity past this many minutes is treated as stale/stuck."),
+  intervalMinutes: z
+    .number()
+    .default(5)
+    .describe("Minutes between watchdog sweeps when iterations > 1."),
+  iterations: z
+    .number()
+    .default(1)
+    .describe("How many sweeps to run. 1 = one-shot; raise it to keep watching."),
 });
 
-// 1. The raw snapshot of currently-known runs, gathered by shelling out to `ps`.
+// 1. The raw snapshot of currently-known runs, gathered by shelling out to `ps`
+//    in every project directory that has a .smithers store.
 const runSchema = z.looseObject({
+  project: z.string().default(""),
   runId: z.string(),
   status: z.string(),
   ageMinutes: z.number().default(0),
@@ -27,6 +45,7 @@ const runSchema = z.looseObject({
 });
 
 const pollSchema = z.looseObject({
+  projects: z.array(z.string()).default([]),
   runs: z.array(runSchema).default([]),
   summary: z.string(),
 });
@@ -48,6 +67,7 @@ const triageSchema = z.looseObject({
   actions: z
     .array(
       z.object({
+        project: z.string().default(""),
         runId: z.string(),
         problem: z.string(),
         recommendedAction: z.string(),
@@ -57,11 +77,11 @@ const triageSchema = z.looseObject({
   digest: z.string(),
 });
 
-// 4. The concise, human-meaningful watchdog verdict that becomes the run's
-// printed output: a one-word health verdict plus the counts and best summary
-// gathered from the steps above.
+// 4. The concise, human-meaningful watchdog verdict per sweep.
 const outputSchema = z.object({
   verdict: z.string().describe("healthy when nothing needs escalation, otherwise problems detected"),
+  sweep: z.number().describe("1-based sweep number"),
+  projectsSeen: z.number(),
   runsSeen: z.number(),
   staleThresholdMinutes: z.number(),
   healthyRuns: z.number(),
@@ -78,20 +98,39 @@ const { Workflow, Task, Sequence, Branch, smithers, outputs } = createSmithers({
   output: outputSchema,
 });
 
-// Pull the live run table from the CLI. Deterministic, no agent: shell out, parse
-// JSON, and normalise into the watchdog's run shape. Any failure (CLI missing,
-// non-zero exit, bad JSON) degrades to an empty list rather than throwing.
-async function pollRuns(staleMinutes: number) {
-  const res = await $`bunx smithers-orchestrator ps --format json --all`.nothrow().quiet();
-  if (res.exitCode !== 0) {
-    return { runs: [], summary: "Could not read runs from `smithers ps` (non-zero exit)." };
+/** Every ~/<dir> holding a .smithers store, plus the current project. */
+function discoverProjects(): string[] {
+  const home = homedir();
+  const found = new Set<string>([process.cwd()]);
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(home);
+  } catch {
+    return [...found];
   }
+  for (const entry of entries) {
+    if (entry.startsWith(".")) continue;
+    const dir = path.join(home, entry);
+    const store = path.join(dir, ".smithers");
+    try {
+      if (existsSync(store)) found.add(dir);
+    } catch {
+      // unreadable dir: skip
+    }
+  }
+  return [...found].sort();
+}
+
+/** Poll one project's run table via the CLI. Failures degrade to []. */
+async function pollProject(dir: string) {
+  const res = await $`bunx smithers-orchestrator ps --format json --all`.cwd(dir).nothrow().quiet();
+  if (res.exitCode !== 0) return [];
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(res.stdout.toString());
   } catch {
-    return { runs: [], summary: "Could not parse `smithers ps --format json` output." };
+    return [];
   }
 
   const rawList = Array.isArray(parsed)
@@ -100,7 +139,7 @@ async function pollRuns(staleMinutes: number) {
       ? (parsed as { runs: unknown[] }).runs
       : [];
 
-  const runs = rawList.map((row) => {
+  return rawList.map((row) => {
     const r = row as Record<string, unknown>;
     const runId = String(r.id ?? r.runId ?? "unknown");
     const status = String(r.status ?? r.dbStatus ?? r.state ?? "unknown");
@@ -114,28 +153,41 @@ async function pollRuns(staleMinutes: number) {
     }
     const step = r.step ?? r.lastEvent;
     const lastEvent = step != null && String(step) !== "—" ? String(step) : null;
-    return { runId, status, ageMinutes, lastEvent };
+    return { project: path.basename(dir), runId, status, ageMinutes, lastEvent };
   });
+}
 
-  const staleCount = runs.filter((run) => run.ageMinutes >= staleMinutes).length;
+/** Pull the live run tables from every project. Deterministic, no agent. */
+async function pollFleet(projects: string[] | null, staleMinutes: number) {
+  const dirs = projects && projects.length > 0 ? projects : discoverProjects();
+  const perProject = await Promise.all(dirs.map((dir) => pollProject(dir)));
+  const runs = perProject.flat();
+  const active = runs.filter((run) => run.status === "running" || run.status === "continued");
+  const staleCount = active.filter((run) => run.ageMinutes >= staleMinutes).length;
   return {
+    projects: dirs.map((dir) => path.basename(dir)),
     runs,
-    summary: `${runs.length} run(s) seen; ${staleCount} past the ${staleMinutes}m stale threshold.`,
+    summary: `${dirs.length} project(s), ${runs.length} run(s) seen (${active.length} active); ${staleCount} active past the ${staleMinutes}m stale threshold.`,
   };
 }
 
 /**
- * A watchdog over Smithers itself. It polls the live run table, has a cheap agent
- * sort runs into health buckets, and — only when something is wrong — has a smart
- * agent produce concrete escalation actions (which gate to clear, which run to
- * triage). Healthy fleets short-circuit before the expensive triage step.
+ * A watchdog over Smithers itself, fleet-wide. Each sweep polls the live run
+ * table of EVERY project with a .smithers store, has a cheap agent sort runs
+ * into health buckets, and — only when something is wrong — has a review-grade
+ * agent produce concrete escalation actions. With iterations > 1 it keeps
+ * sweeping on an interval; each sweep is a durable loop iteration.
  */
 export default smithers((ctx) => {
   const staleMinutes = ctx.input.staleMinutes ?? 15;
+  const intervalMinutes = ctx.input.intervalMinutes ?? 5;
+  const iterations = Math.max(1, ctx.input.iterations ?? 1);
+  const projects = ctx.input.projects ?? null;
 
-  const poll = ctx.outputMaybe("poll", { nodeId: "poll" });
-  const classify = ctx.outputMaybe("classify", { nodeId: "classify" });
-  const triage = ctx.outputMaybe("triage", { nodeId: "triage" });
+  const poll = ctx.latest(outputs.poll, "poll");
+  const classify = ctx.latest(outputs.classify, "classify");
+  const triage = ctx.latest(outputs.triage, "triage");
+  const sweepsDone = ctx.outputs.output.length;
 
   // Anything not in the `healthy` bucket needs escalation.
   const buckets = classify?.buckets;
@@ -146,47 +198,55 @@ export default smithers((ctx) => {
 
   return (
     <Workflow name="monitor-smithers">
-      <Sequence>
-        {/* 1 — Deterministically read the live run table from the CLI. */}
-        <Task id="poll" output={outputs.poll}>
-          {async () => await pollRuns(staleMinutes)}
-        </Task>
-
-        {/* 2 — Sort the runs into health buckets. Cheap/fast: pure classification. */}
-        {poll ? (
-          <Task id="classify" output={outputs.classify} agent={agents.cheapFast}>
-            <ClassifyPrompt runs={poll.runs} summary={poll.summary} staleMinutes={staleMinutes} />
+      <Ralph id="watch" until={sweepsDone >= iterations} maxIterations={iterations}>
+        <Sequence>
+          {/* 1 — Deterministically read every project's live run table. */}
+          <Task id="poll" output={outputs.poll}>
+            {async () => await pollFleet(projects, staleMinutes)}
           </Task>
-        ) : null}
 
-        {/* 3 — Only escalate when something is actually wrong. */}
-        <Branch
-          if={classify !== undefined && hasProblems}
-          then={
-            <Task id="triage" output={outputs.triage} agent={agents.smart}>
-              <TriagePrompt buckets={classify?.buckets} runs={poll?.runs ?? []} summary={classify?.summary} />
+          {/* 2 — Sort the runs into health buckets. Cheap/fast: pure classification. */}
+          {poll ? (
+            <Task id="classify" output={outputs.classify} agent={agents.cheapFast}>
+              <ClassifyPrompt runs={poll.runs} summary={poll.summary} staleMinutes={staleMinutes} />
             </Task>
-          }
-          else={null}
-        />
+          ) : null}
 
-        {/* 4 — Aggregate the run's terminal verdict so `smithers output` prints
-            something useful. Gated on classify, which is always produced once
-            the fleet is polled; triage fields are folded in when present. */}
-        {classify ? (
-          <Task id="output" output={outputs.output}>
-            {() => ({
-              verdict: hasProblems ? "problems detected" : "healthy",
-              runsSeen: poll?.runs.length ?? 0,
-              staleThresholdMinutes: staleMinutes,
-              healthyRuns: classify.buckets.healthy.length,
-              unhealthyRuns: unhealthy.length,
-              escalations: triage?.actions.length ?? 0,
-              summary: triage?.digest ?? classify.summary,
-            })}
-          </Task>
-        ) : null}
-      </Sequence>
+          {/* 3 — Only escalate when something is actually wrong. */}
+          <Branch
+            if={classify !== undefined && hasProblems}
+            then={
+              <Task id="triage" output={outputs.triage} agent={agents.review}>
+                <TriagePrompt buckets={classify?.buckets} runs={poll?.runs ?? []} summary={classify?.summary} />
+              </Task>
+            }
+            else={null}
+          />
+
+          {/* 4 — Aggregate this sweep's verdict so `smithers output` prints
+              something useful and the UI has one stable row per sweep. */}
+          {classify ? (
+            <Task id="output" output={outputs.output}>
+              {() => ({
+                verdict: hasProblems ? "problems detected" : "healthy",
+                sweep: sweepsDone + 1,
+                projectsSeen: poll?.projects.length ?? 0,
+                runsSeen: poll?.runs.length ?? 0,
+                staleThresholdMinutes: staleMinutes,
+                healthyRuns: classify.buckets.healthy.length,
+                unhealthyRuns: unhealthy.length,
+                escalations: triage?.actions.length ?? 0,
+                summary: triage?.digest ?? classify.summary,
+              })}
+            </Task>
+          ) : null}
+
+          {/* 5 — Wait out the sweep interval before the next iteration. */}
+          {iterations > 1 && sweepsDone + 1 < iterations ? (
+            <Timer id="tick" duration={`${intervalMinutes}m`} />
+          ) : null}
+        </Sequence>
+      </Ralph>
     </Workflow>
   );
 });

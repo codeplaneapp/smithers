@@ -23,9 +23,9 @@ export default smithers((ctx) => (
     <ValidationLoop
       idPrefix="debug"
       prompt={ctx.input.prompt}
-      implementAgents={agents.smart}
+      implementAgents={agents.implement}
       validateAgents={agents.cheapFast}
-      reviewAgents={agents.smart}
+      reviewAgents={agents.review}
     />
   </Workflow>
 ));
