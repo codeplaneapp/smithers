@@ -1,0 +1,146 @@
+import { describe, expect, test } from "bun:test";
+import type { BugWorkerEnv } from "../src/worker.ts";
+import { createBugWorker } from "../src/worker.ts";
+import { memoryKv } from "./helpers/memoryKv.ts";
+
+const ADMIN = "test-admin-secret";
+
+function makeEnv(now?: () => number): BugWorkerEnv & { BUGS: ReturnType<typeof memoryKv> } {
+  return {
+    BUGS: memoryKv(now),
+    BUG_ADMIN_TOKEN: ADMIN,
+    PUBLIC_BASE_URL: "https://bug.smithers.sh",
+  };
+}
+
+function postBug(body: unknown, ip = "203.0.113.7"): Request {
+  return new Request("https://bug.smithers.sh/api/bugs", {
+    method: "POST",
+    headers: { "content-type": "application/json", "cf-connecting-ip": ip },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+}
+
+describe("bug worker", () => {
+  test("healthz", async () => {
+    const worker = createBugWorker();
+    const res = await worker.fetch(new Request("https://bug.smithers.sh/healthz"), makeEnv());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  test("valid post returns id + url and stores the report in KV", async () => {
+    const worker = createBugWorker();
+    const env = makeEnv();
+    const res = await worker.fetch(
+      postBug({
+        title: "engine crashed on resume",
+        body: "stack trace here",
+        smithersVersion: "0.26.1",
+        platform: { os: "darwin", arch: "arm64" },
+        run: { runId: "r-123", status: "failed" },
+        extraLooseField: true,
+      }),
+      env,
+    );
+    expect(res.status).toBe(201);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    const { id, url } = (await res.json()) as { id: string; url: string };
+    expect(id.length).toBeGreaterThan(10);
+    expect(url).toBe(`https://bug.smithers.sh/api/bugs/${id}`);
+
+    const stored = await env.BUGS.get(`bug:${id}`);
+    expect(stored).not.toBeNull();
+    const record = JSON.parse(stored!);
+    expect(record.report.title).toBe("engine crashed on resume");
+    expect(record.report.run.runId).toBe("r-123");
+    expect(record.report.extraLooseField).toBe(true);
+  });
+
+  test("invalid payload (missing title) rejected 400", async () => {
+    const worker = createBugWorker();
+    const res = await worker.fetch(postBug({ body: "no title" }), makeEnv());
+    expect(res.status).toBe(400);
+  });
+
+  test("non-JSON body rejected 400", async () => {
+    const worker = createBugWorker();
+    const res = await worker.fetch(postBug("not json {{{"), makeEnv());
+    expect(res.status).toBe(400);
+  });
+
+  test("oversized payload rejected 413", async () => {
+    const worker = createBugWorker();
+    const res = await worker.fetch(
+      postBug({ title: "big", body: "x".repeat(256 * 1024 + 1) }),
+      makeEnv(),
+    );
+    expect(res.status).toBe(413);
+  });
+
+  test("rate limit trips at 21 posts from one IP within the hour", async () => {
+    let clock = Date.parse("2026-07-02T10:00:00Z");
+    const worker = createBugWorker({ now: () => clock });
+    const env = makeEnv(() => clock);
+    for (let i = 0; i < 20; i++) {
+      const res = await worker.fetch(postBug({ title: `bug ${i}` }), env);
+      expect(res.status).toBe(201);
+    }
+    const blocked = await worker.fetch(postBug({ title: "bug 21" }), env);
+    expect(blocked.status).toBe(429);
+
+    // Different IP is unaffected.
+    const otherIp = await worker.fetch(postBug({ title: "other" }, "198.51.100.9"), env);
+    expect(otherIp.status).toBe(201);
+
+    // Next hour bucket resets the counter.
+    clock += 61 * 60 * 1000;
+    const nextHour = await worker.fetch(postBug({ title: "next hour" }), env);
+    expect(nextHour.status).toBe(201);
+  });
+
+  test("admin GET requires x-bug-admin and returns the stored record", async () => {
+    const worker = createBugWorker();
+    const env = makeEnv();
+    const posted = await worker.fetch(postBug({ title: "gated" }), env);
+    const { id } = (await posted.json()) as { id: string };
+
+    const noHeader = await worker.fetch(new Request(`https://bug.smithers.sh/api/bugs/${id}`), env);
+    expect(noHeader.status).toBe(401);
+
+    const wrong = await worker.fetch(
+      new Request(`https://bug.smithers.sh/api/bugs/${id}`, { headers: { "x-bug-admin": "nope" } }),
+      env,
+    );
+    expect(wrong.status).toBe(401);
+
+    const ok = await worker.fetch(
+      new Request(`https://bug.smithers.sh/api/bugs/${id}`, { headers: { "x-bug-admin": ADMIN } }),
+      env,
+    );
+    expect(ok.status).toBe(200);
+    const record = (await ok.json()) as { id: string; report: { title: string } };
+    expect(record.id).toBe(id);
+    expect(record.report.title).toBe("gated");
+  });
+
+  test("admin GET 404s for an unknown id", async () => {
+    const worker = createBugWorker();
+    const res = await worker.fetch(
+      new Request("https://bug.smithers.sh/api/bugs/doesnotexist", { headers: { "x-bug-admin": ADMIN } }),
+      makeEnv(),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("OPTIONS preflight allows POST from anywhere", async () => {
+    const worker = createBugWorker();
+    const res = await worker.fetch(
+      new Request("https://bug.smithers.sh/api/bugs", { method: "OPTIONS" }),
+      makeEnv(),
+    );
+    expect(res.status).toBe(204);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect(res.headers.get("access-control-allow-methods")).toContain("POST");
+  });
+});
