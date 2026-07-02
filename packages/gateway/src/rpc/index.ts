@@ -190,6 +190,7 @@ export type ListRunsRequest = {
   filter?: {
     status?: string;
     limit?: number;
+    workflow?: string;
   };
 };
 
@@ -741,10 +742,10 @@ export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
     maturity: "stable",
     transport: "http+websocket",
     requiredScope: "run:read",
-    requestSchema: objectSchema({ filter: objectSchema({ status: stringSchema("Optional run status filter."), limit: integerSchema("Maximum number of runs.", 1) }) }),
+    requestSchema: objectSchema({ filter: objectSchema({ status: stringSchema("Optional run status filter."), limit: integerSchema("Maximum number of runs.", 1), workflow: stringSchema("Optional workflow key filter.") }) }),
     responseSchema: arraySchema(runSummary, "Run summaries."),
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "Internal"],
-    exampleRequest: { filter: { status: "finished", limit: 20 } },
+    exampleRequest: { filter: { status: "finished", limit: 20, workflow: "deploy" } },
     exampleResponse: [{ runId: "run_01", workflowKey: "deploy", status: "finished", createdAtMs: 1710000000000 }],
   },
   {

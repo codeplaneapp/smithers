@@ -1197,7 +1197,8 @@ function startServerInternal(opts = {}) {
                 }
                 const limit = parsePositiveInt(url.searchParams.get("limit"), 50);
                 const status = url.searchParams.get("status") ?? undefined;
-                const runs = await serverAdapter.listRuns(limit, status);
+                const workflow = url.searchParams.get("workflow") ?? undefined;
+                const runs = await serverAdapter.listRuns(limit, status, workflow);
                 return sendJson(res, 200, await Promise.all(runs.map((run) => withRunState(serverAdapter, run))));
             }
             sendJson(res, 404, {

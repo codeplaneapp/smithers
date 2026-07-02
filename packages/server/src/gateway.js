@@ -3830,8 +3830,9 @@ export class Gateway {
     }
     /**
    * @param {string} [status]
+   * @param {string} [workflow]
    */
-    async listRunsAcrossWorkflows(limit = 50, status) {
+    async listRunsAcrossWorkflows(limit = 50, status, workflow) {
         const registeredKeys = new Set(this.workflows.keys());
         const seenAdapters = new Set();
         const byRunId = new Map();
@@ -3843,14 +3844,18 @@ export class Gateway {
                 continue;
             }
             seenAdapters.add(adapter);
-            const rows = await adapter.listRuns(limit, status);
+            const rows = await adapter.listRuns(limit, status, workflow);
             for (const row of rows) {
                 if (byRunId.has(row.runId)) {
                     continue;
                 }
+                const workflowKey = this.resolveRunWorkflowKey(row, registeredKeys, entry.key);
+                if (workflow && workflowKey !== workflow) {
+                    continue;
+                }
                 byRunId.set(row.runId, {
                     ...row,
-                    workflowKey: this.resolveRunWorkflowKey(row, registeredKeys, entry.key),
+                    workflowKey,
                 });
             }
         }
@@ -4607,7 +4612,8 @@ export class Gateway {
                 const filter = asObject(params.filter) ?? {};
                 const limit = asOptionalPositiveInt(params.limit ?? filter.limit, "limit") ?? 50;
                 const status = asString(params.status) ?? asString(filter.status);
-                return responseOk(frame.id, await this.listRunsAcrossWorkflows(limit, status));
+                const workflow = asString(params.workflow) ?? asString(filter.workflow);
+                return responseOk(frame.id, await this.listRunsAcrossWorkflows(limit, status, workflow));
             }
             case "getSchemaSignature": {
                 const firstEntry = this.workflows.values().next().value;

@@ -7,8 +7,7 @@
  * }} options
  */
 export async function authorizeGatewayUiRequest(options) {
-    const isBuiltinOperator = options.match.config.config.builtin === "operator";
-    if (!isBuiltinOperator || options.authMode === "none") {
+    if (options.authMode === "none") {
         return null;
     }
     const authResult = await options.authenticate(options.token);

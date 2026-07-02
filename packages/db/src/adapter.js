@@ -354,6 +354,15 @@ function validateRunPatch(patch) {
     validateOptionalPositiveTimestamp(p, "cancelRequestedAtMs");
     validateOptionalPositiveTimestamp(p, "hijackRequestedAtMs");
 }
+
+/**
+ * @param {string} workflow
+ * @returns {string}
+ */
+function gatewayWorkflowKeyNeedle(workflow) {
+    return `"gatewayWorkflowKey":${JSON.stringify(workflow)}`;
+}
+
 /**
  * @param {AlertRow} row
  */
@@ -1060,9 +1069,10 @@ export class SmithersDb {
     }
     /**
    * @param {string} [status]
+   * @param {string} [workflow]
    * @returns {RunnableEffect<RunRow[], SmithersError>}
    */
-    listRuns(limit = 50, status) {
+    listRuns(limit = 50, status, workflow) {
         return this.read(`list runs ${status ?? "all"}`, async () => {
             const clauses = [];
             const params = [];
@@ -1073,6 +1083,13 @@ export class SmithersDb {
             else if (status) {
                 clauses.push("status = ?");
                 params.push(status);
+            }
+            if (workflow) {
+                const configContainsGatewayKey = this.internalStorage.dialect === POSTGRES
+                    ? "POSITION(? IN config_json) > 0"
+                    : "instr(config_json, ?) > 0";
+                clauses.push(`(workflow_name = ? OR ${configContainsGatewayKey})`);
+                params.push(workflow, gatewayWorkflowKeyNeedle(workflow));
             }
             const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
             const rows = await this.internalStorage.queryAll(`SELECT *
@@ -2901,10 +2918,11 @@ export class SmithersDb {
     }
     /**
    * @param {string} [status]
+   * @param {string} [workflow]
    * @returns {RunnableEffect<RunRow[], SmithersError>}
    */
-    listRunsEffect(limit = 50, status) {
-        return this.listRuns(limit, status);
+    listRunsEffect(limit = 50, status, workflow) {
+        return this.listRuns(limit, status, workflow);
     }
     /**
    * @param {number} staleBeforeMs

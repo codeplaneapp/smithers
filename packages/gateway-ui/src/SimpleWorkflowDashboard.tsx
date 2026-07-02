@@ -49,7 +49,7 @@ export function SimpleWorkflowDashboard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>();
-  const runsRaw = useGatewayRuns({ filter: { limit: runLimit } });
+  const runsRaw = useGatewayRuns({ filter: { workflow, limit: runLimit } });
   const actions = useGatewayActions();
   const runs = useMemo(
     () => ((runsRaw.data ?? []) as SimpleWorkflowRun[]).filter((run) => !run.workflowKey || run.workflowKey === workflow),
