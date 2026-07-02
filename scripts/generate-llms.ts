@@ -155,6 +155,7 @@ const INTEGRATIONS_PAGES = [
   "integrations/ecosystem.mdx",
   "integrations/pi-integration.mdx",
   "integrations/hermes.mdx",
+  "examples/run-on-plue.mdx",
 ];
 
 // -----------------------------------------------------------------------------

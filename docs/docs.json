@@ -322,7 +322,8 @@
               "examples/generate-llms-txt",
               "examples/ci-workflow",
               "examples/agents-md",
-              "examples/freestyle-sandbox-provider"
+              "examples/freestyle-sandbox-provider",
+              "examples/run-on-plue"
             ]
           },
           {

@@ -59,6 +59,7 @@ const NON_STANDALONE_WORKFLOW_SNIPPETS = [
     "docs/components/review-loop.mdx#2",
     "docs/components/runbook.mdx#2",
     "docs/components/supervisor.mdx#2",
+    "docs/examples/run-on-plue.mdx#5",
     "docs/examples/worktree-feature-workflow.mdx#2",
     "docs/guides/alerting.mdx#2",
     "docs/recipes.mdx#7",
