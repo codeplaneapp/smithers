@@ -6,6 +6,7 @@
 [![CI](https://github.com/smithersai/smithers/actions/workflows/ci.yml/badge.svg)](https://github.com/smithersai/smithers/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-2563eb)](#license)
 [![Docs](https://img.shields.io/badge/docs-smithers.sh-2563eb)](https://smithers.sh)
+[![Awesome Smithers](https://img.shields.io/badge/awesome-smithers-2563eb)](https://github.com/smithersai/awesome-smithers)
 
 Tell your coding agent to do real, multi-step work, then Smithers runs it for minutes or
 days with crash recovery, retries, human approvals, and full observability. The same
@@ -332,6 +333,7 @@ runtime:
 ## Read next
 
 - [Install the agent skill](./skills/smithers): make your coding agent fluent in Smithers.
+- [Awesome Smithers](https://github.com/smithersai/awesome-smithers): community projects, workflow packs, examples, and integrations.
 - [Tour](https://smithers.sh/tour): a guided walk through a real run.
 - [How It Works](https://smithers.sh/how-it-works): the durable execution model.
 - [Components](https://smithers.sh/components/workflow): the full primitive set.
