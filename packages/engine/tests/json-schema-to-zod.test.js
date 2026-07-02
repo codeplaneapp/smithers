@@ -49,6 +49,46 @@ describe("engine jsonSchemaToZod", () => {
         expect(() => schema.parse({ name: "bob", age: 17, score: 11, enabled: true, tags: [], role: "guest" })).toThrow();
     });
 
+    // Regression test for the `smithers human answer` HUMAN_REQUEST_VALIDATION_FAILED
+    // bug: zod's `toJSONSchema()` lists a defaulted field (e.g. `autoAnswered:
+    // z.boolean().default(false)`) in the JSON Schema's `required` array (JSON
+    // Schema's "required" and zod's own optional-via-default semantics disagree),
+    // and `jsonSchemaToZod` previously dropped the `default` when reconstructing a
+    // BOOLEAN property (unlike string/number properties, whose builders already
+    // called `maybeDefault`). That produced a validator which rejected the
+    // documented `.smithers/prompts/smithering-answers.mdx` example payload
+    // (`{ answers, additionalContext }`, omitting `autoAnswered`).
+    test("a required boolean property with a JSON Schema default is optional and defaults when omitted", () => {
+        const schema = jsonSchemaToZod({
+            type: "object",
+            required: ["answers", "additionalContext", "autoAnswered"],
+            properties: {
+                answers: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: { id: { type: "string" }, answer: { type: "string" } },
+                    },
+                    default: [],
+                },
+                additionalContext: { anyOf: [{ type: "string" }, { type: "null" }], default: null },
+                autoAnswered: { type: "boolean", default: false },
+            },
+        });
+
+        const result = schema.safeParse({
+            answers: [{ id: "q1", answer: "42" }],
+            additionalContext: "none",
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.data).toEqual({
+            answers: [{ id: "q1", answer: "42" }],
+            additionalContext: "none",
+            autoAnswered: false,
+        });
+    });
+
     test("converts refs, escaped JSON pointers and circular references", () => {
         const schema = jsonSchemaToZod({
             type: "object",

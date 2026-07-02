@@ -64,7 +64,7 @@ function convertNode(node, root, visited) {
     if (type === "number" || type === "integer")
         return buildNumber(node);
     if (type === "boolean")
-        return maybeDescribe(z.boolean(), node);
+        return maybeDescribe(maybeDefault(z.boolean(), node), node);
     if (type === "array") {
         const items = convertNode(node.items, root, visited);
         return maybeDescribe(z.array(items), node);
