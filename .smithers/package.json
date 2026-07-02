@@ -36,10 +36,13 @@
     "playwright": "^1.61.1"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^20.10.6",
+    "@smithers-orchestrator/gateway-client": "workspace:*",
     "@types/mdx": "2.0.14",
     "@types/node": "26.1.0",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
+    "react-dom": "^19.2.7",
     "typescript": "6.0.3"
   }
 }
