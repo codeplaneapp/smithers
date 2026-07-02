@@ -29,6 +29,7 @@ export * from "./gateway.js";
 export * from "./GatewayExtensions.js";
 export * from "./serve.js";
 export * from "./smithersRuntime.js";
+export * from "./cronTick.js";
 export * from "./gatewayRoutes/NODE_OUTPUT_MAX_BYTES.js";
 export * from "./gatewayRoutes/NODE_OUTPUT_WARN_BYTES.js";
 export * from "./gatewayRoutes/NodeOutputRouteError.js";

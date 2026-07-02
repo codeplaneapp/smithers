@@ -1114,6 +1114,19 @@ declare class SmithersDb {
    */
     deleteCron(cronId: string): RunnableEffect<void, SmithersError$1>;
     /**
+   * @param {number} nowMs
+   * @param {number} leaseMs
+   * @param {string} workerId
+   * @param {number} [limit]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    claimDueCrons(nowMs: number, leaseMs: number, workerId: string, limit?: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
+    /**
+   * @param {string} cronId
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    releaseCronClaim(cronId: string): RunnableEffect<void, SmithersError$1>;
+    /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
@@ -1254,6 +1267,19 @@ declare class SmithersDb {
    * @returns {RunnableEffect<void, SmithersError>}
    */
     updateCronRunTimeEffect(cronId: string, lastRunAtMs: number, nextRunAtMs: number, errorJson?: string | null): RunnableEffect<void, SmithersError$1>;
+    /**
+   * @param {number} nowMs
+   * @param {number} leaseMs
+   * @param {string} workerId
+   * @param {number} [limit]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    claimDueCronsEffect(nowMs: number, leaseMs: number, workerId: string, limit?: number): RunnableEffect<Array<Record<string, unknown>>, SmithersError$1>;
+    /**
+   * @param {string} cronId
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    releaseCronClaimEffect(cronId: string): RunnableEffect<void, SmithersError$1>;
     /**
    * @param {string} runId
    * @param {string} [nodeId]

@@ -257,6 +257,8 @@ export const smithersCron = sqliteTable("_smithers_cron", {
     lastRunAtMs: integer("last_run_at_ms"),
     nextRunAtMs: integer("next_run_at_ms"),
     errorJson: text("error_json"),
+    claimedAtMs: integer("claimed_at_ms"),
+    claimedBy: text("claimed_by"),
 });
 export const smithersSchemaMigrations = sqliteTable("_smithers_schema_migrations", {
     id: text("id").primaryKey(),

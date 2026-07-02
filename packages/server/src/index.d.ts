@@ -1796,4 +1796,38 @@ type RunRow = _smithers_orchestrator_db_adapter_RunRow.RunRow;
 type ServerResponse = node_http.ServerResponse;
 type ServerOptions = ServerOptions$1;
 
-export { type AttemptRow, type ConnectRequest, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResponseFrame, type RunEventStreamState, type RunRow, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, assertGatewayInputDepthWithinBounds, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };
+type RunCronTickResult = {
+    claimedCount: number;
+    fired: Array<{
+        cronId: string;
+        workflowPath: string;
+        nextRunAtMs: number;
+    }>;
+    errors: Array<{
+        cronId: string;
+        error: string;
+    }>;
+    now: number;
+    workerId: string;
+};
+type RunCronTickOptions = {
+    now?: number;
+    leaseMs?: number;
+    workerId?: string;
+    limit?: number;
+    startWorkflowRun?: (job: Record<string, unknown>, ctx: {
+        now: number;
+    }) => Promise<unknown>;
+};
+/**
+ * @param {SmithersDb} db
+ * @param {RunCronTickOptions} [opts]
+ */
+declare function runCronTick(db: SmithersDb, opts?: RunCronTickOptions): Promise<RunCronTickResult>;
+/**
+ * @param {string} pattern
+ * @param {number} now
+ */
+declare function computeNextRunAtMs(pattern: string, now: number): number;
+
+export { type AttemptRow, type ConnectRequest, type ConnectionState, DEVTOOLS_BACKPRESSURE_LIMIT, DEVTOOLS_EMPTY_ROOT_ID, DEVTOOLS_MAX_FRAME_NO, DEVTOOLS_POLL_INTERVAL_MS, DEVTOOLS_REBASELINE_INTERVAL, DEVTOOLS_RUN_ID_PATTERN, DEVTOOLS_TREE_MAX_DEPTH, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, DevToolsRouteError, type DiffSummary, EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_METHOD_PREFIX, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_METHOD_PREFIX, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, type EventFrame, GATEWAY_FRAME_ID_MAX_LENGTH, GATEWAY_METHOD_NAME_MAX_LENGTH, GATEWAY_RPC_INPUT_MAX_BYTES, GATEWAY_RPC_INPUT_MAX_DEPTH, GATEWAY_RPC_MAX_ARRAY_LENGTH, GATEWAY_RPC_MAX_DEPTH, GATEWAY_RPC_MAX_PAYLOAD_BYTES, GATEWAY_RPC_MAX_STRING_LENGTH, Gateway, type GatewayAuthConfig, type GatewayDefaults, type GatewayExtensionAction, type GatewayExtensionContext, type GatewayExtensionDefinition, type GatewayExtensionResource, type GatewayExtensionStream, type GatewayExtensionStreamContext, GatewayExtensions, type GatewayMetricLabels, type GatewayOperatorUiConfig, type GatewayOptions, type GatewayRegisterOptions, type GatewayRequestContext, type GatewayScope, type GatewayTokenGrant, type GatewayTransport, type GatewayUiConfig, type GatewayUiMount, type GatewayWebhookConfig, type GatewayWebhookRunConfig, type GatewayWebhookSignalConfig, type GetNodeDiffRouteResult, type HelloResponse, ITERATION_MAX, type IncomingMessage, type JumpResult, NODE_ID_PATTERN, NODE_OUTPUT_MAX_BYTES, NODE_OUTPUT_WARN_BYTES, type NodeOutputErrorCode, type NodeOutputResponse, NodeOutputRouteError, RUN_ID_PATTERN, type RegisteredWorkflow, type RequestFrame, type ResolvedExtension, type ResolvedGatewayUiConfig, type ResolvedRun, type ResponseFrame, type RunCronTickOptions, type RunCronTickResult, type RunEventStreamState, type RunRow, type RunStartAuthContext, type ServeOptions, type ServerOptions, type ServerResponse, type SmithersWorkflow, assertGatewayInputDepthWithinBounds, computeNextRunAtMs, createServeApp, emptyDevToolsRoot, extensionMethodName, getDevToolsSnapshotRoute, getGatewayInputDepth, getNodeDiffRoute, getNodeOutputRoute, isExtensionMethod, jumpToFrameRoute, parseGatewayRequestFrame, parseXmlToDevToolsRoot, runCronTick, runFork, runPromise, runSync, snapshotFromFrameRow, startServer, startServerEffect, statusForRpcError, streamDevToolsRoute, summarizeBundle, validateFrameNoInput, validateFromSeqInput, validateGatewayMethodName, validateRequestedFrameNo, validateRunId };

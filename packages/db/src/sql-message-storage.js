@@ -293,7 +293,9 @@ const CREATE_TABLE_STATEMENTS = [
     created_at_ms INTEGER NOT NULL,
     last_run_at_ms INTEGER,
     next_run_at_ms INTEGER,
-    error_json TEXT
+    error_json TEXT,
+    claimed_at_ms INTEGER,
+    claimed_by TEXT
   )`,
     `CREATE TABLE IF NOT EXISTS _smithers_snapshots (
     run_id TEXT NOT NULL,

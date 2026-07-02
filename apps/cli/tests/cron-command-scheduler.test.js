@@ -128,35 +128,68 @@ describe("smithers cron commands", () => {
     }, 30_000);
 });
 
+/**
+ * Builds a fake `SmithersDb`-shaped adapter backed by an in-memory cron row
+ * array, implementing just enough of the claim/lease surface (`claimDueCrons`,
+ * `updateCronRunTime`, `releaseCronClaim`) for `runCronTick` (and therefore
+ * `schedulerTickEffect`, which now delegates to it) to run against.
+ * @param {Array<Record<string, unknown>>} rows
+ */
+function makeFakeCronAdapter(rows) {
+    const updates = [];
+    return {
+        rows,
+        updates,
+        async claimDueCrons(nowMs, leaseMs, workerId) {
+            const claimed = [];
+            for (const row of rows) {
+                const due = typeof row.nextRunAtMs !== "number" || row.nextRunAtMs <= nowMs;
+                const leased = typeof row.claimedAtMs === "number" && row.claimedAtMs > nowMs - leaseMs;
+                if (row.enabled && due && !leased) {
+                    row.claimedAtMs = nowMs;
+                    row.claimedBy = workerId;
+                    claimed.push({ ...row });
+                }
+            }
+            return claimed;
+        },
+        async updateCronRunTime(cronId, lastRunAtMs, nextRunAtMs, errorJson) {
+            updates.push({ cronId, lastRunAtMs, nextRunAtMs, errorJson: errorJson ?? undefined });
+            const row = rows.find((r) => r.cronId === cronId);
+            if (row) {
+                row.nextRunAtMs = nextRunAtMs;
+                row.lastRunAtMs = lastRunAtMs;
+            }
+        },
+        async releaseCronClaim(cronId) {
+            const row = rows.find((r) => r.cronId === cronId);
+            if (row) {
+                row.claimedAtMs = null;
+                row.claimedBy = null;
+            }
+        },
+    };
+}
+
 describe("scheduler tick effects", () => {
     test("processes due cron jobs and skips future jobs", async () => {
         const now = Date.parse("2026-06-17T12:00:00.000Z");
-        const updates = [];
-        const adapter = {
-            listCronsEffect(enabledOnly) {
-                expect(enabledOnly).toBe(true);
-                return Effect.succeed([
-                    {
-                        cronId: "due-cron",
-                        pattern: "*/5 * * * *",
-                        workflowPath: "due.tsx",
-                        enabled: true,
-                        nextRunAtMs: now - 1,
-                    },
-                    {
-                        cronId: "future-cron",
-                        pattern: "*/5 * * * *",
-                        workflowPath: "future.tsx",
-                        enabled: true,
-                        nextRunAtMs: now + 60_000,
-                    },
-                ]);
+        const adapter = makeFakeCronAdapter([
+            {
+                cronId: "due-cron",
+                pattern: "*/5 * * * *",
+                workflowPath: "due.tsx",
+                enabled: true,
+                nextRunAtMs: now - 1,
             },
-            updateCronRunTimeEffect(cronId, lastRunAtMs, nextRunAtMs, errorJson) {
-                updates.push({ cronId, lastRunAtMs, nextRunAtMs, errorJson });
-                return Effect.void;
+            {
+                cronId: "future-cron",
+                pattern: "*/5 * * * *",
+                workflowPath: "future.tsx",
+                enabled: true,
+                nextRunAtMs: now + 60_000,
             },
-        };
+        ]);
         const originalNow = Date.now;
         Date.now = () => now;
         try {
@@ -177,33 +210,24 @@ describe("scheduler tick effects", () => {
                 },
             },
         ]);
-        expect(updates).toHaveLength(1);
-        expect(updates[0].cronId).toBe("due-cron");
-        expect(updates[0].lastRunAtMs).toBe(now);
-        expect(updates[0].nextRunAtMs).toBeGreaterThan(now);
-        expect(updates[0].errorJson).toBeUndefined();
+        expect(adapter.updates).toHaveLength(1);
+        expect(adapter.updates[0].cronId).toBe("due-cron");
+        expect(adapter.updates[0].lastRunAtMs).toBe(now);
+        expect(adapter.updates[0].nextRunAtMs).toBeGreaterThan(now);
+        expect(adapter.updates[0].errorJson).toBeUndefined();
     });
 
     test("records cron processing errors without failing the tick", async () => {
         const now = Date.parse("2026-06-17T12:00:00.000Z");
-        const updates = [];
-        const adapter = {
-            listCronsEffect() {
-                return Effect.succeed([
-                    {
-                        cronId: "bad-cron",
-                        pattern: "not a cron pattern",
-                        workflowPath: "bad.tsx",
-                        enabled: true,
-                        nextRunAtMs: now - 1,
-                    },
-                ]);
+        const adapter = makeFakeCronAdapter([
+            {
+                cronId: "bad-cron",
+                pattern: "not a cron pattern",
+                workflowPath: "bad.tsx",
+                enabled: true,
+                nextRunAtMs: now - 1,
             },
-            updateCronRunTimeEffect(cronId, lastRunAtMs, nextRunAtMs, errorJson) {
-                updates.push({ cronId, lastRunAtMs, nextRunAtMs, errorJson });
-                return Effect.void;
-            },
-        };
+        ]);
         const originalNow = Date.now;
         Date.now = () => now;
         try {
@@ -214,23 +238,20 @@ describe("scheduler tick effects", () => {
         }
 
         expect(spawnCalls).toHaveLength(1);
-        expect(updates).toEqual([
+        expect(adapter.updates).toEqual([
             {
                 cronId: "bad-cron",
                 lastRunAtMs: now,
                 nextRunAtMs: now - 1,
-                errorJson: expect.stringContaining("calculate next run for cron bad-cron"),
+                errorJson: expect.stringContaining("Invalid characters"),
             },
         ]);
     });
 
-    test("continues when listing crons fails", async () => {
+    test("continues when claiming crons fails", async () => {
         const adapter = {
-            listCronsEffect() {
-                return Effect.fail(new Error("db unavailable"));
-            },
-            updateCronRunTimeEffect() {
-                throw new Error("should not update when list fails");
+            async claimDueCrons() {
+                throw new Error("db unavailable");
             },
         };
 

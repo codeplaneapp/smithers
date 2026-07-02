@@ -2662,6 +2662,57 @@ export class SmithersDb {
     deleteCron(cronId) {
         return this.write(`delete cron ${cronId}`, () => this.internalStorage.deleteWhere("_smithers_cron", "cron_id = ?", [cronId]));
     }
+    /**
+   * Atomically claim due, unclaimed (or lease-expired) cron rows so two
+   * overlapping `runCronTick` calls (e.g. two overlapping serverless
+   * invocations) cannot both fire the same cron. Uses an `UPDATE ... WHERE
+   * ... RETURNING` statement, which is atomic per-row in both SQLite (3.35+)
+   * and PostgreSQL — no separate SELECT-then-UPDATE race window.
+   *
+   * A row is claimable when its lease is empty or has expired
+   * (`claimed_at_ms IS NULL OR claimed_at_ms <= nowMs - leaseMs`), and it is
+   * due (`next_run_at_ms <= nowMs` or never run) and enabled.
+   * @param {number} nowMs
+   * @param {number} leaseMs
+   * @param {string} workerId
+   * @param {number} [limit]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    claimDueCrons(nowMs, leaseMs, workerId, limit = 100) {
+        return this.write("claim due crons", async () => {
+            const candidates = await this.internalStorage.queryAll(`SELECT cron_id
+         FROM _smithers_cron
+         WHERE enabled = ?
+           AND (next_run_at_ms IS NULL OR next_run_at_ms <= ?)
+           AND (claimed_at_ms IS NULL OR claimed_at_ms <= ?)
+         ORDER BY next_run_at_ms ASC
+         LIMIT ?`, [true, nowMs, nowMs - leaseMs, limit], { booleanColumns: [] });
+            const claimed = [];
+            for (const candidate of candidates) {
+                const rows = await this.internalStorage.queryAll(`UPDATE _smithers_cron
+           SET claimed_at_ms = ?, claimed_by = ?
+           WHERE cron_id = ?
+             AND enabled = ?
+             AND (next_run_at_ms IS NULL OR next_run_at_ms <= ?)
+             AND (claimed_at_ms IS NULL OR claimed_at_ms <= ?)
+           RETURNING *`, [nowMs, workerId, candidate.cronId, true, nowMs, nowMs - leaseMs], { booleanColumns: ["enabled"] });
+                if (rows.length > 0) {
+                    claimed.push(rows[0]);
+                }
+            }
+            return claimed;
+        });
+    }
+    /**
+   * Release a cron's claim/lease. Called after a tick finishes processing a
+   * claimed cron (whether it succeeded or failed) so the lease doesn't block
+   * the next due run until it naturally expires.
+   * @param {string} cronId
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    releaseCronClaim(cronId) {
+        return this.write(`release cron claim ${cronId}`, () => this.internalStorage.updateWhere("_smithers_cron", { claimedAtMs: null, claimedBy: null }, "cron_id = ?", [cronId]));
+    }
     // ---------------------------------------------------------------------------
     // Memory facts
     // ---------------------------------------------------------------------------
@@ -2955,6 +3006,23 @@ export class SmithersDb {
    */
     updateCronRunTimeEffect(cronId, lastRunAtMs, nextRunAtMs, errorJson) {
         return this.updateCronRunTime(cronId, lastRunAtMs, nextRunAtMs, errorJson);
+    }
+    /**
+   * @param {number} nowMs
+   * @param {number} leaseMs
+   * @param {string} workerId
+   * @param {number} [limit]
+   * @returns {RunnableEffect<Array<Record<string, unknown>>, SmithersError>}
+   */
+    claimDueCronsEffect(nowMs, leaseMs, workerId, limit = 100) {
+        return this.claimDueCrons(nowMs, leaseMs, workerId, limit);
+    }
+    /**
+   * @param {string} cronId
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+    releaseCronClaimEffect(cronId) {
+        return this.releaseCronClaim(cronId);
     }
     /**
    * @param {string} runId

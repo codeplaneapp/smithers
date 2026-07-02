@@ -746,6 +746,59 @@ function buildMigrations(context) {
                 return { table: "_smithers_docs" };
             },
         },
+        {
+            id: "0019_add_cron_lease_columns",
+            name: "Add cron claim/lease columns for concurrency-safe tick claiming",
+            checksum: "packages/db/migrations/0019_add_cron_lease_columns.sql",
+            // Guard every step on the table existing: a store upgrading from a
+            // ledger that predates `_smithers_cron` itself (e.g. every earlier
+            // migration id recorded as already-applied but the table was never
+            // physically created, mirroring the `_smithers_docs` case in
+            // 0014/0018 above) must not fail with "no such table" — a later
+            // pass over the migration list (or a fresh `ensureSchema` on the
+            // now-current `CREATE_TABLE_STATEMENTS`) creates the table with
+            // these columns already present, so there is nothing to add here.
+            isApplied: (sqlite) => {
+                if (!tableExists(sqlite, "_smithers_cron")) {
+                    return true;
+                }
+                const columns = tableColumnNames(sqlite, "_smithers_cron");
+                return columns.has("claimed_at_ms") && columns.has("claimed_by");
+            },
+            isAppliedPostgres: async (pgConn) => {
+                if (!(await tableExistsPostgres(pgConn, "_smithers_cron"))) {
+                    return true;
+                }
+                const columns = await tableColumnNamesPostgres(pgConn, "_smithers_cron");
+                return columns.has("claimed_at_ms") && columns.has("claimed_by");
+            },
+            up: (sqlite) => {
+                if (!tableExists(sqlite, "_smithers_cron")) {
+                    return { table: "_smithers_cron", skipped: "table_absent" };
+                }
+                const addedColumns = [];
+                if (addColumnIfMissing(sqlite, "_smithers_cron", "claimed_at_ms", "claimed_at_ms INTEGER")) {
+                    addedColumns.push("claimed_at_ms");
+                }
+                if (addColumnIfMissing(sqlite, "_smithers_cron", "claimed_by", "claimed_by TEXT")) {
+                    addedColumns.push("claimed_by");
+                }
+                return { table: "_smithers_cron", addedColumns };
+            },
+            upPostgres: async (pgConn) => {
+                if (!(await tableExistsPostgres(pgConn, "_smithers_cron"))) {
+                    return { table: "_smithers_cron", skipped: "table_absent" };
+                }
+                const addedColumns = [];
+                if (await addColumnIfMissingPostgres(pgConn, "_smithers_cron", "claimed_at_ms", "claimed_at_ms INTEGER")) {
+                    addedColumns.push("claimed_at_ms");
+                }
+                if (await addColumnIfMissingPostgres(pgConn, "_smithers_cron", "claimed_by", "claimed_by TEXT")) {
+                    addedColumns.push("claimed_by");
+                }
+                return { table: "_smithers_cron", addedColumns };
+            },
+        },
     ];
 }
 

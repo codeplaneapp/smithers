@@ -1,11 +1,16 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { CronExpressionParser } from "cron-parser";
+import { randomUUID } from "node:crypto";
 import { Effect, Schedule } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
+import { runCronTick } from "@smithers-orchestrator/server";
 import { runPromise } from "./smithersRuntime.js";
 import { findAndOpenDb } from "./find-db.js";
 const CLI_ENTRYPOINT = fileURLToPath(new URL("./index.js", import.meta.url));
+// One workerId per scheduler process: leases claimed by `runCronTick` record
+// which worker holds them, which is useful when debugging a stuck lease
+// (e.g. telling this long-running loop apart from a serverless tick).
+const SCHEDULER_WORKER_ID = `cli-scheduler:${randomUUID()}`;
 /**
  * @param {unknown} error
  */
@@ -19,55 +24,50 @@ function acquireSchedulerDbEffect() {
     }), ({ cleanup }) => Effect.sync(() => cleanup()));
 }
 /**
- * @param {SmithersDb} adapter
- * @param {SchedulerCronRecord} job
- * @param {number} now
- * @returns {Effect.Effect<void, never>}
+ * Starts (or advances) a due workflow run by spawning `smithers up
+ * <workflowPath> -d` as a detached subprocess. This is the historical
+ * scheduler behavior, now shared with `runCronTick` (the SAME function a
+ * serverless `Vercel Cron -> route handler` calls) via dependency injection.
+ * @param {{ workflowPath: string }} job
+ * @returns {Promise<void>}
  */
-export function processCronEffect(adapter, job, now) {
-    return Effect.gen(function* () {
-        yield* Effect.logInfo(`[smithers-cron] Triggering due workflow: ${job.workflowPath} (Schedule: ${job.pattern})`);
-        yield* Effect.try({
-            try: () => {
-                const proc = spawn(process.execPath, [CLI_ENTRYPOINT, "up", job.workflowPath, "-d"], {
-                    cwd: process.cwd(),
-                    detached: true,
-                    stdio: "ignore",
-                });
-                proc.unref();
-            },
-            catch: (cause) => toSmithersError(cause, `spawn cron workflow ${job.cronId}`),
-        });
-        const nextRunAtMs = yield* Effect.try({
-            try: () => {
-                const interval = CronExpressionParser.parse(job.pattern);
-                return interval.next().getTime();
-            },
-            catch: (cause) => toSmithersError(cause, `calculate next run for cron ${job.cronId}`),
-        });
-        yield* adapter.updateCronRunTimeEffect(job.cronId, now, nextRunAtMs);
-    }).pipe(Effect.catchAll((error) => Effect.gen(function* () {
-        const errorMessage = formatError(error);
-        yield* Effect.logWarning(`[smithers-cron] Error processing job ${job.cronId}: ${errorMessage}`);
-        const failedAtMs = Date.now();
-        yield* adapter
-            .updateCronRunTimeEffect(job.cronId, failedAtMs, job.nextRunAtMs ?? failedAtMs + 60_000, errorMessage)
-            .pipe(Effect.catchAll((updateError) => Effect.logWarning(`[smithers-cron] Failed to record error for job ${job.cronId}: ${formatError(updateError)}`)));
-    })));
+function spawnCronWorkflow(job) {
+    return new Promise((resolvePromise, rejectPromise) => {
+        try {
+            const proc = spawn(process.execPath, [CLI_ENTRYPOINT, "up", job.workflowPath, "-d"], {
+                cwd: process.cwd(),
+                detached: true,
+                stdio: "ignore",
+            });
+            proc.on?.("error", rejectPromise);
+            proc.unref();
+            resolvePromise(undefined);
+        }
+        catch (cause) {
+            rejectPromise(cause);
+        }
+    });
 }
 /**
+ * One scheduler poll: delegates to the shared `runCronTick` (also the
+ * function a serverless `Vercel Cron -> route handler` calls) so there is
+ * exactly ONE implementation of "claim due crons, start their workflow runs,
+ * record the next run time" for both the long-running CLI loop and
+ * short-lived HTTP invocations.
  * @param {SmithersDb} adapter
  * @returns {Effect.Effect<void, never>}
  */
 export function schedulerTickEffect(adapter) {
     return Effect.withLogSpan("scheduler:poll")(Effect.gen(function* () {
-        const crons = yield* adapter.listCronsEffect(true).pipe(Effect.catchAll((error) => Effect.logWarning(`[smithers-cron] Tick failed: ${formatError(error)}`).pipe(Effect.as([]))));
-        const now = Date.now();
-        for (const job of crons) {
-            if (typeof job.nextRunAtMs === "number" && now < job.nextRunAtMs) {
-                continue;
-            }
-            yield* processCronEffect(adapter, job, now);
+        const result = yield* Effect.tryPromise({
+            try: () => runCronTick(adapter, { workerId: SCHEDULER_WORKER_ID, startWorkflowRun: spawnCronWorkflow }),
+            catch: (cause) => toSmithersError(cause, "scheduler tick"),
+        }).pipe(Effect.catchAll((error) => Effect.logWarning(`[smithers-cron] Tick failed: ${formatError(error)}`).pipe(Effect.as({ claimedCount: 0, fired: [], errors: [] }))));
+        if (result.claimedCount > 0) {
+            yield* Effect.logInfo(`[smithers-cron] Tick claimed ${result.claimedCount} due job(s): ${result.fired.length} fired, ${result.errors.length} failed.`);
+        }
+        for (const failure of result.errors) {
+            yield* Effect.logWarning(`[smithers-cron] Error processing job ${failure.cronId}: ${failure.error}`);
         }
     }));
 }
