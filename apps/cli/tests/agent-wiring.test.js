@@ -197,7 +197,7 @@ describe("registerOpenClawPlugin", () => {
     expect(result.enabled).toBe(true);
     expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "package.json"))).toBe(true);
     expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "openclaw.plugin.json"))).toBe(true);
-    expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "dist", "index.js"))).toBe(true);
+    expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "site", "index.html"))).toBe(true);
     expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "skills", "orchestrate", "SKILL.md"))).toBe(true);
     const config = JSON.parse(readFileSync(join(home, ".openclaw", "openclaw.json"), "utf8"));
     expect(config.plugins.entries.smithers.enabled).toBe(true);
