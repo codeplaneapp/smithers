@@ -43,6 +43,12 @@ const inputSchema = z.object({
 	keepWorkspace: z.boolean().optional(),
 	/** Path to the plue CLI binary (defaults to env PLUE_BIN or "plue"). */
 	plueBin: z.string().optional(),
+	/**
+	 * Reuse an existing (warm) plue workspace instead of creating one. Fresh
+	 * Freestyle boots are occasionally flaky; set this to a known-good workspace
+	 * id for deterministic runs. Never deleted on cleanup.
+	 */
+	existingWorkspaceId: z.string().optional(),
 });
 
 const plueRunOutputSchema = z.object({
@@ -77,8 +83,24 @@ export default smithers((ctx) => {
 	const repo = ctx.input.repo ?? "";
 	const keepWorkspace = ctx.input.keepWorkspace ?? false;
 	const plueBin = ctx.input.plueBin ?? undefined;
+	const existingWorkspaceId = ctx.input.existingWorkspaceId ?? undefined;
 
-	const provider = createPlueSandboxProvider({ repo, keepWorkspace, plueBin });
+	const provider = createPlueSandboxProvider({
+		repo,
+		keepWorkspace,
+		plueBin,
+		existingWorkspaceId,
+	});
+
+	// The engine only attaches a sandbox computeFn when a child `workflow` is
+	// present (attachSandboxComputeFns skips the task otherwise and it would
+	// execute as a static task with undefined output). The plue provider runs
+	// the shipped script remotely and never calls executeChildWorkflow, so
+	// this child is a formality — same shape as examples/freestyle.
+	const remoteChildWorkflow = {
+		build: () => <Workflow name="plue-remote-child" />,
+		opts: {},
+	};
 
 	return (
 		<Workflow name="run-on-plue">
@@ -86,6 +108,7 @@ export default smithers((ctx) => {
 				<Sandbox
 					id="plue-run"
 					provider={provider}
+					workflow={remoteChildWorkflow}
 					input={{ scriptSource, scriptName, childInput: ctx.input.input ?? null }}
 					reviewDiffs={false}
 					timeoutMs={30 * 60_000}

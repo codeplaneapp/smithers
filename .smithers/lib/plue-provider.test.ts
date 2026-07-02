@@ -6,6 +6,7 @@ import {
 	parseSshCommand,
 	REMOTE_AUTH_PREFIX,
 	sanitizeWorkspaceName,
+	toProviderResult,
 } from "./plue-provider.ts";
 
 describe("parseSshCommand", () => {
@@ -132,5 +133,38 @@ describe("mapRemoteRunResult", () => {
 		const outcome = mapRemoteRunResult(null, "no output produced");
 		expect(outcome.status).toBe("failed");
 		expect((outcome.output as { logTail: string }).logTail).toBe("no output produced");
+	});
+});
+
+describe("toProviderResult", () => {
+	// Regression: the Sandbox task output is validated against the workflow's
+	// declared schema, and packages/sandbox uses the provider result's `outputs`
+	// field as that task output. A result without an `outputs` envelope carrying
+	// `status` fails validation (observed live: ZodError on the status enum).
+	test("exposes a status-bearing envelope in outputs (success)", () => {
+		const result = toProviderResult(
+			{ status: "finished", output: { answer: "4" }, remoteRunId: "r1" },
+			"ws-1",
+		);
+		expect(result.status).toBe("finished");
+		expect(result.outputs).toEqual({
+			status: "finished",
+			output: { answer: "4" },
+			remoteRunId: "r1",
+			workspaceId: "ws-1",
+		});
+		expect(result.remoteRunId).toBe("r1");
+		expect(result.workspaceId).toBe("ws-1");
+	});
+
+	test("carries the failure envelope so the failed path still validates", () => {
+		const result = toProviderResult(
+			{ status: "failed", output: { error: "remote run failed" } },
+			"ws-2",
+		);
+		expect(result.status).toBe("failed");
+		expect(result.outputs.status).toBe("failed");
+		expect(result.outputs.workspaceId).toBe("ws-2");
+		expect(result.outputs.remoteRunId).toBeNull();
 	});
 });

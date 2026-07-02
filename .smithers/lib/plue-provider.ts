@@ -37,6 +37,14 @@ export type PlueSandboxProviderOptions = {
 	pollIntervalMs?: number;
 	/** How long to wait for the workspace to reach "running" with SSH ready. */
 	bootTimeoutMs?: number;
+	/**
+	 * Reuse an existing (already-running) workspace by id instead of creating a
+	 * fresh one. Fresh Freestyle VM boots are occasionally flaky (status→failed);
+	 * pointing at a known-good warm workspace makes e2e/demo runs deterministic.
+	 * When set, the workspace is never deleted on cleanup regardless of
+	 * keepWorkspace.
+	 */
+	existingWorkspaceId?: string;
 };
 
 export type PlueChildInput = {
@@ -184,6 +192,45 @@ type RemoteRunOutcome = {
 	output: unknown;
 	remoteRunId?: string;
 };
+
+/**
+ * The typed envelope this provider publishes as the Sandbox task's output. The
+ * engine validates the task output against the workflow's declared output
+ * schema, and `materializeProviderResult` (in packages/sandbox) treats the
+ * provider result's `outputs` field as that task output. So the provider MUST
+ * put this envelope in `outputs` — returning only `output` (the child's raw,
+ * schema-less output) makes the declared `{status,...}` schema fail to validate.
+ */
+export type PlueRunEnvelope = {
+	status: "finished" | "failed";
+	output: unknown;
+	remoteRunId: string | null;
+	workspaceId: string | null;
+};
+
+/** Wrap a remote-run outcome into the provider result the engine expects. */
+export function toProviderResult(
+	outcome: RemoteRunOutcome,
+	workspaceId: string | null,
+): {
+	status: "finished" | "failed";
+	outputs: PlueRunEnvelope;
+	remoteRunId?: string;
+	workspaceId?: string;
+} {
+	const envelope: PlueRunEnvelope = {
+		status: outcome.status,
+		output: outcome.output,
+		remoteRunId: outcome.remoteRunId ?? null,
+		workspaceId,
+	};
+	return {
+		status: outcome.status,
+		outputs: envelope,
+		...(outcome.remoteRunId ? { remoteRunId: outcome.remoteRunId } : {}),
+		...(workspaceId ? { workspaceId } : {}),
+	};
+}
 
 /** Map a `smithers inspect --format json` payload into the provider result shape. */
 export function mapRemoteRunResult(
@@ -446,9 +493,20 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 				`${request.runId}${randomUUID()}`,
 			);
 
-			request.heartbeat({ stage: "creating-workspace", name });
-			const workspaceId = await createWorkspace(name);
-			workspaceIdByKey.set(`${request.runId}:${request.sandboxId}`, workspaceId);
+			// Reuse a warm workspace when asked (flaky fresh boots); otherwise
+			// create one. A reused workspace is never deleted on cleanup.
+			const reusing = Boolean(options.existingWorkspaceId);
+			let workspaceId: string;
+			if (options.existingWorkspaceId) {
+				workspaceId = options.existingWorkspaceId;
+				request.heartbeat({ stage: "reusing-workspace", workspaceId });
+			} else {
+				request.heartbeat({ stage: "creating-workspace", name });
+				workspaceId = await createWorkspace(name);
+			}
+			if (!reusing) {
+				workspaceIdByKey.set(`${request.runId}:${request.sandboxId}`, workspaceId);
+			}
 
 			try {
 				const view = await waitForRunning(workspaceId, request);
@@ -495,7 +553,10 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 				}
 
 				if (runFailed) {
-					return { status: "failed", output: { error: "remote run failed", logTail }, workspaceId };
+					return toProviderResult(
+						{ status: "failed", output: { error: "remote run failed", logTail } },
+						workspaceId,
+					);
 				}
 
 				const { stdout: inspectStdout } = await runSsh(
@@ -512,9 +573,9 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 				}
 
 				const outcome = mapRemoteRunResult(inspectJson, logTail);
-				return { ...outcome, workspaceId };
+				return toProviderResult(outcome, workspaceId);
 			} finally {
-				if (!keepWorkspace) {
+				if (!reusing && !keepWorkspace) {
 					await execFileAsync(plueBin, [
 						"workspace",
 						"delete",
