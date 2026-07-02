@@ -13,6 +13,40 @@ import { expandResetSet } from "./_helpers.js";
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("../snapshot/Snapshot.ts").Snapshot} Snapshot */
 
+const DURABILITY_CONFIG_KEY = "__smithersDurability";
+const DURABILITY_METADATA_VERSION = 2;
+
+/**
+ * @param {string | null | undefined} configJson
+ * @param {string | null | undefined} entryWorkflowHash
+ * @returns {string | null}
+ */
+function patchDurabilityConfigJson(configJson, entryWorkflowHash) {
+    if (entryWorkflowHash === undefined) {
+        return configJson ?? null;
+    }
+    /** @type {Record<string, unknown>} */
+    let config = {};
+    if (configJson) {
+        try {
+            const parsed = JSON.parse(configJson);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                config = /** @type {Record<string, unknown>} */ (parsed);
+            }
+        }
+        catch {
+            config = {};
+        }
+    }
+    return JSON.stringify({
+        ...config,
+        [DURABILITY_CONFIG_KEY]: {
+            version: DURABILITY_METADATA_VERSION,
+            entryWorkflowHash: entryWorkflowHash ?? null,
+        },
+    });
+}
+
 /**
  * @param {SmithersDb} adapter
  * @param {ForkParams} params
@@ -75,6 +109,13 @@ export function forkRun(adapter, params) {
             nodesJson = JSON.stringify(updatedNodes);
         }
         // 4. Build rows for the child fork.
+        const childWorkflowHash = params.workflowHash !== undefined
+            ? params.workflowHash
+            : source.workflowHash;
+        const childWorkflowPath = params.workflowPath !== undefined
+            ? params.workflowPath
+            : parentRun?.workflowPath ?? null;
+        const childConfigJson = patchDurabilityConfigJson(parentRun?.configJson ?? null, params.entryWorkflowHash);
         const childSnapshot = {
             runId: childRunId,
             frameNo: 0,
@@ -83,7 +124,7 @@ export function forkRun(adapter, params) {
             ralphJson: source.ralphJson,
             inputJson,
             vcsPointer: source.vcsPointer,
-            workflowHash: source.workflowHash,
+            workflowHash: childWorkflowHash,
             contentHash: source.contentHash,
             createdAtMs: ts,
         };
@@ -92,8 +133,8 @@ export function forkRun(adapter, params) {
                 runId: childRunId,
                 parentRunId,
                 workflowName: parentRun.workflowName,
-                workflowPath: parentRun.workflowPath ?? null,
-                workflowHash: source.workflowHash ?? parentRun.workflowHash ?? null,
+                workflowPath: childWorkflowPath,
+                workflowHash: childWorkflowHash ?? parentRun.workflowHash ?? null,
                 status: parentRun.status === "running" ? "failed" : parentRun.status,
                 createdAtMs: ts,
                 startedAtMs: null,
@@ -107,7 +148,7 @@ export function forkRun(adapter, params) {
                 vcsRoot: parentRun.vcsRoot ?? null,
                 vcsRevision: source.vcsPointer ?? parentRun.vcsRevision ?? null,
                 errorJson: null,
-                configJson: parentRun.configJson ?? null,
+                configJson: childConfigJson,
             }
             : null;
         const branch = {

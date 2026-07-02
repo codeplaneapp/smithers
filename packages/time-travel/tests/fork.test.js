@@ -143,6 +143,61 @@ describe("forkRun", () => {
         expect(childRun?.runtimeOwnerId).toBeNull();
         expect(childRun?.heartbeatAtMs).toBeNull();
     });
+    test("can override workflow hashes so forked children resume current source", async () => {
+        const { adapter } = createTestDb();
+        await adapter.insertRun({
+            runId: "parent-run",
+            parentRunId: null,
+            workflowName: "time-travel-parent",
+            workflowPath: "/tmp/old-workflow.tsx",
+            workflowHash: "old-workflow-hash",
+            status: "failed",
+            createdAtMs: 1_000,
+            startedAtMs: 1_100,
+            finishedAtMs: 1_200,
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            cancelRequestedAtMs: null,
+            hijackRequestedAtMs: null,
+            hijackTarget: null,
+            vcsType: null,
+            vcsRoot: null,
+            vcsRevision: null,
+            errorJson: null,
+            configJson: JSON.stringify({
+                keep: "value",
+                __smithersDurability: {
+                    version: 2,
+                    entryWorkflowHash: "old-entry-hash",
+                },
+            }),
+        });
+        await captureSnapshot(adapter, "parent-run", 0, sampleData({
+            workflowHash: "old-workflow-hash",
+        }));
+
+        const result = await forkRun(adapter, {
+            parentRunId: "parent-run",
+            frameNo: 0,
+            workflowPath: "/tmp/new-workflow.tsx",
+            workflowHash: "new-workflow-hash",
+            entryWorkflowHash: "new-entry-hash",
+        });
+
+        const childRun = await adapter.getRun(result.runId);
+        expect(childRun).toMatchObject({
+            workflowPath: "/tmp/new-workflow.tsx",
+            workflowHash: "new-workflow-hash",
+        });
+        expect(JSON.parse(childRun?.configJson ?? "{}")).toEqual({
+            keep: "value",
+            __smithersDurability: {
+                version: 2,
+                entryWorkflowHash: "new-entry-hash",
+            },
+        });
+        expect(result.snapshot.workflowHash).toBe("new-workflow-hash");
+    });
     test("fails for non-existent snapshot", async () => {
         const { adapter } = createTestDb();
         await expect(forkRun(adapter, { parentRunId: "nonexistent", frameNo: 0 })).rejects.toThrow("No snapshot found");

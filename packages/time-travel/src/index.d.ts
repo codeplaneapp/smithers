@@ -269,6 +269,9 @@ type ForkParams$2 = {
     resetNodes?: string[];
     branchLabel?: string;
     forkDescription?: string;
+    workflowPath?: string | null;
+    workflowHash?: string | null;
+    entryWorkflowHash?: string | null;
 };
 
 /**

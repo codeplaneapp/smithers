@@ -8,4 +8,7 @@ export type ForkParams = {
   resetNodes?: string[];
   branchLabel?: string;
   forkDescription?: string;
+  workflowPath?: string | null;
+  workflowHash?: string | null;
+  entryWorkflowHash?: string | null;
 };
