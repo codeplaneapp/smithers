@@ -93,7 +93,7 @@ bunx smithers-orchestrator ui RUN_ID
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[82]:
+commands[85]:
   - name: init
     purpose: Install the local Smithers workflow pack into .smithers/. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
@@ -695,6 +695,33 @@ commands[82]:
     purpose: Inspect workflow discovery, preload files, bunfig, and detected agents
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID; omit for all
+  - name: claude.tick
+    purpose: One /workflows mirror frame for a run (Claude Code plugin protocol, contract v1); --wait blocks until a mirror-relevant event lands after --after-seq
+    args[1]{name,type,required,desc}:
+      runId,string,true,Run ID to mirror
+    flags[6]{name,short,type,default,desc}:
+      after-seq,,number,0,Event-log cursor from the previous tick's seq
+      wait,,boolean,false,Block until a mirror-relevant event lands after --after-seq (or timeout)
+      timeout-ms,,number,420000,Max wait in ms before returning timedOut true
+      interval-ms,,number,750,Wait poll interval in ms
+      max-output-chars,,number,2000,Truncate node outputs to this many chars
+      collapse-phases,,boolean,false,Collapse the phase plan to a single phase
+  - name: claude.node-wait
+    purpose: Block until one node reaches a terminal state, then print its final state and output (returns timedOut true on expiry; re-invoke to keep waiting)
+    args[1]{name,type,required,desc}:
+      nodeId,string,true,Node ID to wait on
+    flags[5]{name,short,type,default,desc}:
+      run-id,,string,,Run ID that owns the node
+      iteration,i,number,,Loop iteration (default latest)
+      timeout-ms,,number,480000,Max wait in ms before returning timedOut true
+      interval-ms,,number,1000,Poll interval in ms
+      max-output-chars,,number,2000,Truncate the node output to this many chars
+  - name: claude.monitor
+    purpose: Follow local runs and print one NDJSON line per notable transition (approval pending, human request, finished/failed/cancelled/continued, stalled); backs the plugin's background monitor
+    flags[3]{name,short,type,default,desc}:
+      interval-ms,,number,2000,Poll interval in ms
+      stalled-after-ms,,number,120000,Heartbeat age that flags a running run as stalled
+      ticks,,number,,Stop after N polls (default run until killed)
   - name: cron.start
     purpose: Start the background scheduler loop in the current terminal
   - name: cron.add

@@ -262,6 +262,7 @@
           "integrations/gateway",
           "integrations/custom-ui",
           "integrations/mcp-server",
+          "integrations/claude-code-plugin",
           "integrations/pi-integration",
           "integrations/hermes",
           "integrations/ecosystem"
