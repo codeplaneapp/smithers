@@ -33,6 +33,7 @@ import { buildAgentAskRequestRow, isHumanRequestPastTimeout, validateHumanReques
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { assertMaxBytes, assertMaxStringLength } from "@smithers-orchestrator/db/input-bounds";
 import { findAndOpenDb, findSmithersDb } from "./find-db.js";
+import { isDaemonDisabled } from "./isDaemonDisabled.js";
 import { assertGatewayRuntimeStateFileTrusted, canonicalWorkspacePath, claimGatewayAutostartLock, claimGatewayDaemonStartLock, clearGatewayRuntimeState, discoverWorkspaceGateway, gatewayRuntimePaths, isGatewayPidAlive, mintGatewayToken, probeGatewayHealthIdentity, readGatewayRuntimeState, resolveGatewayBearer, verifyGatewayHealthIdentity, waitForWorkspaceGateway, writeGatewayRuntimeState } from "./gateway-runtime.js";
 import { buildAskKindFields, buildAskPromptText, buildAskUniqueToken, formatAskHumanResolveHelp, parseChoices, resolveAskHumanContext, } from "./ask-human.js";
 import { chatAttemptKey, formatChatAttemptHeader, formatChatBlock, parseAgentEvent, parseChatAttemptMeta, parseNodeOutputEvent, selectChatAttempts, } from "./chat.js";
@@ -2554,7 +2555,12 @@ async function runUiCommand(c) {
             }
         }
     }
-    if (!reachable && c.options.autostart && workspace) {
+    // Daemon escape hatch (spec decision 18): --no-daemon / SMITHERS_NO_DAEMON
+    // suppresses autostart. For ui/gui the gateway is genuinely required (it
+    // serves the UI), so a disabled daemon with none already running fails
+    // loudly below rather than silently spawning one.
+    const daemonDisabled = isDaemonDisabled(c.options);
+    if (!reachable && c.options.autostart && workspace && !daemonDisabled) {
         process.stderr.write(`[smithers] No gateway for ${workspace}; starting one (smithers gateway)…\n`);
         autostartAttempted = true;
         const ensured = await ensureWorkspaceGateway(workspace, c.options.port);
@@ -2568,9 +2574,11 @@ async function runUiCommand(c) {
         }
     }
     if (!reachable) {
-        const detail = autostartAttempted && workspace
-            ? `\n\n${autostartFailureMessage ?? formatGatewayAutostartDiagnostics(workspace)}`
-            : "";
+        const detail = daemonDisabled
+            ? "\n\nGateway autostart is disabled (--no-daemon or SMITHERS_NO_DAEMON=1). Start one explicitly with `smithers gateway`, or unset the escape hatch."
+            : autostartAttempted && workspace
+                ? `\n\n${autostartFailureMessage ?? formatGatewayAutostartDiagnostics(workspace)}`
+                : "";
         return fail("GATEWAY_UNREACHABLE", `No Smithers Gateway reachable${base ? ` at ${base}` : " for this workspace"}. Start one with \`smithers gateway\` (it serves workspace UIs from .smithers/ui/), or pass --gateway <url> to point at a running one. Note: \`smithers up --serve\` is a per-run server, not a full Gateway.${detail}`);
     }
     // `--app`: serve the FULL local Smithers UI (apps/smithers) instead of a
@@ -7623,6 +7631,7 @@ const cli = Cli.create({
         workflow: z.string().optional().describe("Open this workflow's UI directly, skipping run lookup."),
         open: z.boolean().default(true).describe("Open a browser. Use --no-open to just print the URL."),
         autostart: z.boolean().default(true).describe("If no Gateway is reachable on the local port, start one automatically. Use --no-autostart to disable."),
+        daemon: z.boolean().default(true).describe("Allow a background gateway daemon. Use --no-daemon (or SMITHERS_NO_DAEMON=1) to force direct/embedded operation and never autostart one — for CI, sandboxes, and containers."),
     }),
     alias: { gateway: "g", workflow: "w" },
     async run(c) {
@@ -7666,6 +7675,7 @@ const cli = Cli.create({
         rebuild: z.boolean().default(false).describe("Force a rebuild of the full UI bundle before serving (with --app)."),
         open: z.boolean().default(true).describe("Open a browser. Use --no-open to just print the URL."),
         autostart: z.boolean().default(true).describe("If no Gateway is reachable on the local port, start one automatically. Use --no-autostart to disable."),
+        daemon: z.boolean().default(true).describe("Allow a background gateway daemon. Use --no-daemon (or SMITHERS_NO_DAEMON=1) to force direct/embedded operation and never autostart one — for CI, sandboxes, and containers."),
     }),
     alias: { gateway: "g", workflow: "w" },
     async run(c) {
