@@ -116,4 +116,20 @@ describe("describeSchemaShape", () => {
     expect(parsed.properties.testsWritten.items.type).toBe("string");
     expect(parsed.properties.allTestsPassing.type).toBe("boolean");
   });
+
+  test("falls back instead of throwing for schemas Zod cannot convert to JSON schema", () => {
+    const schemas = {
+      transform: z.object({ value: z.string().transform((value) => value.trim()) }),
+      date: z.object({ value: z.date() }),
+      map: z.object({ value: z.map(z.string(), z.string()) }),
+      set: z.object({ value: z.set(z.string()) }),
+    };
+
+    for (const schema of Object.values(schemas)) {
+      const description = describeSchemaShape(schema);
+      const parsed = JSON.parse(description);
+
+      expect(parsed).toHaveProperty("value");
+    }
+  });
 });

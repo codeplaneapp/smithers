@@ -1,4 +1,5 @@
 import { getAgentOutputSchema } from "./getAgentOutputSchema.js";
+import { z } from "zod";
 /** @typedef {import("drizzle-orm").Table} Table */
 
 /**
@@ -8,16 +9,14 @@ import { getAgentOutputSchema } from "./getAgentOutputSchema.js";
  */
 export function describeSchemaShape(tableOrSchema, zodSchema) {
     const schema = zodSchema ?? (isZodSchema(tableOrSchema) ? tableOrSchema : null);
-    if (schema && typeof schema.toJSONSchema === "function") {
-        const jsonSchema = schema.toJSONSchema();
-        return JSON.stringify(jsonSchema, null, 2);
-    }
+    const describedSchema = tryDescribeJsonSchema(schema);
+    if (describedSchema)
+        return describedSchema;
     if (!isZodSchema(tableOrSchema)) {
         const agentSchema = getAgentOutputSchema(tableOrSchema);
-        if (typeof agentSchema.toJSONSchema === "function") {
-            const jsonSchema = agentSchema.toJSONSchema();
-            return JSON.stringify(jsonSchema, null, 2);
-        }
+        const describedAgentSchema = tryDescribeJsonSchema(agentSchema);
+        if (describedAgentSchema)
+            return describedAgentSchema;
     }
     const target = schema ?? (isZodSchema(tableOrSchema) ? tableOrSchema : getAgentOutputSchema(tableOrSchema));
     const shape = target.shape;
@@ -34,6 +33,27 @@ export function describeSchemaShape(tableOrSchema, zodSchema) {
  */
 function isZodSchema(val) {
     return (!!val && typeof val === "object" && "shape" in val && typeof (/** @type {{ shape: unknown }} */ (val)).shape === "object");
+}
+/**
+ * @param {z.ZodType | null} schema
+ * @returns {string | null}
+ */
+function tryDescribeJsonSchema(schema) {
+    if (!schema)
+        return null;
+    if (typeof z.toJSONSchema === "function") {
+        try {
+            return JSON.stringify(z.toJSONSchema(schema, { io: "output" }), null, 2);
+        }
+        catch { }
+    }
+    if (typeof schema.toJSONSchema === "function") {
+        try {
+            return JSON.stringify(schema.toJSONSchema(), null, 2);
+        }
+        catch { }
+    }
+    return null;
 }
 /**
  * @param {z.ZodType} schema
