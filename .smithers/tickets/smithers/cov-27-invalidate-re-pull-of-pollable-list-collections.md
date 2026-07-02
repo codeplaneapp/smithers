@@ -1,16 +1,25 @@
-# invalidate() re-pull of pollable list collections via the pulser is untested
+# Retargeted: SSE invalidation re-pull of TanStack DB collections
 
 > Decomposed from #306 — test-coverage epic (`.smithers/tickets/.epics/0052-audit-test-coverage-gaps.md`)
 > Priority: P2
-> Target: `packages/gateway-react/src/sync/createGatewayCollections.ts:109-147,387-391; packages/gateway-react/tests/sync/sync.test.ts`
+> Status 2026-07-02: **retargeted**. The legacy pulser-backed
+> `createGatewayCollections` file was removed. Replacement coverage belongs on
+> canonical `/v1/api/stream` collection-name invalidation and TanStack DB
+> re-pull in `createSmithersCollections`.
+> Target: `packages/gateway-client/src/data/createSmithersCollections.ts`;
+> `packages/server/src/gateway.js`
 
 ## Task
 
 Add the missing test coverage described below, then make it pass.
 
-**Finding:** invalidate() re-pull of pollable list collections via the pulser is untested
+**Finding:** Retargeted SSE invalidation re-pull for pollable collections
 
-**Detail:** invalidate() re-pull of pollable list collections via the pulser is still entirely untested
+**Detail:** the pulser path no longer exists. The current requirement is that
+server-emitted canonical collection names (`runs`, `run_events`, `nodes`,
+`node_outputs`, `approvals`, `crons`, `tickets`, `docs`) invalidate only the
+matching TanStack DB collection prefixes, causing affected local-mode
+collections to re-pull without falling back to a root-wide refresh.
 
 ## Rules (non-negotiable — this repo's "No mocks" policy)
 

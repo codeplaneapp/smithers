@@ -2293,8 +2293,12 @@ paths:
                       type: integer
                       minimum: 0
                       description: "Node iteration."
+                    approved:
+                      type: boolean
+                      description: "Whether the approval is granted."
                     decision:
                       type: object
+                      description: "Approval decision payload."
                       properties:
                         approved:
                           type: boolean
@@ -2321,9 +2325,8 @@ paths:
                         note:
                           type: string
                           description: "Optional decision note."
-                      required:
-                        - approved
-                      additionalProperties: false
+                      required: []
+                      additionalProperties: true
                   required:
                     - runId
                     - nodeId
@@ -2335,8 +2338,8 @@ paths:
               params:
                 runId: run_01
                 nodeId: approve
+                approved: true
                 decision:
-                  approved: true
                   note: "ship it"
       responses:
         200:

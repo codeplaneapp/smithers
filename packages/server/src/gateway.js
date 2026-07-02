@@ -45,7 +45,7 @@ import { writeRewindAuditRow } from "@smithers-orchestrator/time-travel/writeRew
 import { recoverInProgressRewindAudits } from "@smithers-orchestrator/time-travel/recoverInProgressRewindAudits";
 import { GATEWAY_EVENT_WINDOW_DEFAULT, SMITHERS_API_VERSION, getRequiredScopeForGatewayMethod, } from "@smithers-orchestrator/gateway/rpc";
 import { hasGatewayScope } from "@smithers-orchestrator/gateway/auth/scopes";
-import { serializeAccountRow, serializeApprovalRow, serializeCronRow, serializeDocRow, serializeMemoryFactRow, serializePromptRow, serializeRunEventRow, serializeRunRow, serializeScoreRow, serializeTicketRow, serializeWorkflowRow, } from "@smithers-orchestrator/gateway/api";
+import { apiCollectionNames, serializeAccountRow, serializeApprovalRow, serializeCronRow, serializeDocRow, serializeMemoryFactRow, serializePromptRow, serializeRunEventRow, serializeRunRow, serializeScoreRow, serializeTicketRow, serializeWorkflowRow, } from "@smithers-orchestrator/gateway/api";
 import { listAccounts } from "@smithers-orchestrator/accounts/listAccounts";
 import { EXTENSION_BACKPRESSURE_DISCONNECT_CODE, EXTENSION_METHOD_NOT_FOUND_CODE, EXTENSION_PAYLOAD_MAX_BYTES, EXTENSION_STREAM_OUTBOUND_QUEUE_LIMIT, EXTENSION_WS_BUFFERED_HIGH_WATER_BYTES, GatewayExtensions, isExtensionMethod, } from "./GatewayExtensions.js";
 import { createGatewayUiApp } from "./gatewayUi/createGatewayUiApp.js";
@@ -160,6 +160,7 @@ const API_STREAM_REPLAY_LIMIT = 256;
 const API_STREAM_REPLAY_BYTES = 64 * 1024;
 const API_STREAM_OUTBOUND_QUEUE_LIMIT = 256;
 const API_STREAM_OUTBOUND_BYTES = 64 * 1024;
+const API_COLLECTION_NAME_SET = new Set(apiCollectionNames);
 const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "continued"]);
 export const GATEWAY_RPC_MAX_PAYLOAD_BYTES = DEFAULT_MAX_BODY_BYTES;
 export const GATEWAY_RPC_MAX_DEPTH = 32;
@@ -1410,27 +1411,36 @@ function serializeGatewayApiPayload(method, payload) {
  * @returns {string[]}
  */
 function apiMutationCollections(method) {
+    /** @param {string[]} names */
+    const collections = (...names) => {
+        for (const name of names) {
+            if (!API_COLLECTION_NAME_SET.has(name)) {
+                throw new Error(`Unknown Gateway API collection name: ${name}`);
+            }
+        }
+        return names;
+    };
     switch (method) {
         case "launchRun":
-            return ["runs", "run_events"];
+            return collections("runs", "run_events");
         case "resumeRun":
         case "cancelRun":
         case "rewindRun":
-            return ["runs", "run_events", "nodes", "node_outputs"];
+            return collections("runs", "run_events", "nodes", "node_outputs");
         case "submitApproval":
-            return ["approvals", "runs", "run_events", "nodes"];
+            return collections("approvals", "runs", "run_events", "nodes");
         case "submitSignal":
-            return ["runs", "run_events", "nodes"];
+            return collections("runs", "run_events", "nodes");
         case "cronCreate":
         case "cronDelete":
         case "cronRun":
-            return ["crons", "runs", "run_events"];
+            return collections("crons", "runs", "run_events");
         case "createTicket":
         case "updateTicket":
         case "deleteTicket":
-            return ["tickets", "docs"];
+            return collections("tickets", "docs");
         default:
-            return ["runs"];
+            return collections("runs");
     }
 }
 /**
@@ -1438,21 +1448,30 @@ function apiMutationCollections(method) {
  * @returns {string[]}
  */
 function apiCollectionsForGatewayEvent(event) {
+    /** @param {string[]} names */
+    const collections = (...names) => {
+        for (const name of names) {
+            if (!API_COLLECTION_NAME_SET.has(name)) {
+                throw new Error(`Unknown Gateway API collection name: ${name}`);
+            }
+        }
+        return names;
+    };
     if (event.startsWith("approval.")) {
-        return ["approvals", "runs", "run_events", "nodes"];
+        return collections("approvals", "runs", "run_events", "nodes");
     }
     if (event.startsWith("node.") || event.startsWith("task.") || event.startsWith("agent.")) {
         return event === "task.output"
-            ? ["run_events", "nodes", "node_outputs"]
-            : ["run_events", "nodes"];
+            ? collections("run_events", "nodes", "node_outputs")
+            : collections("run_events", "nodes");
     }
     if (event.startsWith("run.")) {
-        return ["runs", "run_events", "nodes"];
+        return collections("runs", "run_events", "nodes");
     }
     if (event.startsWith("cron.")) {
-        return ["crons", "runs"];
+        return collections("crons", "runs");
     }
-    return ["runs", "run_events"];
+    return collections("runs", "run_events");
 }
 /**
  * @param {string} event

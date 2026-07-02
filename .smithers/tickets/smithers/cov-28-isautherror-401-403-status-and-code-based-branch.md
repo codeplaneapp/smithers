@@ -1,16 +1,23 @@
-# isAuthError 401/403 status and code-based branches untested
+# Retargeted: SmithersDataClient auth-error SSE branches
 
 > Decomposed from #306 — test-coverage epic (`.smithers/tickets/.epics/0052-audit-test-coverage-gaps.md`)
 > Priority: P2
-> Target: `packages/gateway-react/src/sync/createGatewayCollections.ts:53-62`
+> Status 2026-07-02: **retargeted**. The cited React sync `isAuthError`
+> helper was removed with the legacy sync stack. Replacement coverage belongs
+> on the current `SmithersDataClient` HTTP/SSE auth handling and how
+> `createSmithersCollections` responds to authenticated local-mode failures.
+> Target: `packages/gateway-client/src/data/createSmithersDataClient.ts`;
+> `packages/gateway-client/src/data/createSmithersCollections.ts`
 
 ## Task
 
 Add the missing test coverage described below, then make it pass.
 
-**Finding:** isAuthError 401/403 status and code-based branches untested
+**Finding:** Retargeted auth-error handling for SmithersDataClient
 
-**Detail:** isAuthError status===401/403 and code-based branches untested; only message-regex hit indirectly
+**Detail:** do not add tests for the deleted `isAuthError` helper. Cover real
+401/403 and auth-code failures through the replacement `SmithersDataClient`
+request/stream paths and assert the resulting collection lifecycle behavior.
 
 ## Rules (non-negotiable — this repo's "No mocks" policy)
 

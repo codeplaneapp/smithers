@@ -1,16 +1,26 @@
-# Untested error/auth/reconnect branches in createGatewayCollection
+# Retargeted: SmithersDataClient SSE error/auth/reconnect branches
 
 > Decomposed from #306 — test-coverage epic (`.smithers/tickets/.epics/0052-audit-test-coverage-gaps.md`)
 > Priority: P2
-> Target: `packages/gateway-client/src/sync/createGatewayCollection.ts:281-309`
+> Status 2026-07-02: **retargeted**. The cited `createGatewayCollection`
+> sync stack was removed. Replacement coverage belongs on
+> `packages/gateway-client/src/data/createSmithersDataClient.ts` and
+> `packages/gateway-client/src/data/createSmithersCollections.ts`, covering
+> `/v1/api/stream` reconnect behavior, auth failures, reset frames, and
+> invalidation re-pull through TanStack DB collections.
+> Target: `packages/gateway-client/src/data/createSmithersDataClient.ts`;
+> `packages/gateway-client/src/data/createSmithersCollections.ts`
 
 ## Task
 
 Add the missing test coverage described below, then make it pass.
 
-**Finding:** Untested error/auth/reconnect branches in createGatewayCollection
+**Finding:** Retargeted SmithersDataClient SSE error/auth/reconnect branches
 
-**Detail:** onError non-auth path and error-driven reconnect branch still untested
+**Detail:** the deleted sync collection's onError/reconnect branches no longer
+exist. Keep this ticket open only for the replacement surface: real
+`SmithersDataClient` `/v1/api/stream` reconnect/auth handling and the resulting
+collection invalidation behavior.
 
 ## Rules (non-negotiable — this repo's "No mocks" policy)
 

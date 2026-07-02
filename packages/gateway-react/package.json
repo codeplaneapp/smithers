@@ -37,6 +37,7 @@
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.10.6",
+    "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/server": "workspace:*",
     "@sqlite.org/sqlite-wasm": "^3.53.0-build1",
     "@types/bun": "latest",

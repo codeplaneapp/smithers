@@ -16,33 +16,25 @@ type ElectricMutationHandlers<TRow extends object, TKey extends string | number>
 };
 
 let cachedElectricCollectionOptions: ElectricCollectionOptionsLoader | undefined;
+let cachedElectricCollectionOptionsPromise: Promise<ElectricCollectionOptionsLoader> | undefined;
 
-function runtimeRequire(): ((id: string) => unknown) | undefined {
-  const importMetaRequire = (import.meta as ImportMeta & { require?: (id: string) => unknown }).require;
-  if (typeof importMetaRequire === "function") return importMetaRequire;
-  const globalRequire = (globalThis as typeof globalThis & { require?: (id: string) => unknown }).require;
-  if (typeof globalRequire === "function") return globalRequire;
-  try {
-    const evaluated = (0, eval)("typeof require === 'function' ? require : undefined") as unknown;
-    return typeof evaluated === "function" ? evaluated as (id: string) => unknown : undefined;
-  } catch {
-    return undefined;
-  }
+async function loadElectricCollectionOptions(): Promise<ElectricCollectionOptionsLoader> {
+  if (cachedElectricCollectionOptions) return cachedElectricCollectionOptions;
+  cachedElectricCollectionOptionsPromise ??= import("@tanstack/electric-db-collection").then((mod) => {
+    const options = (mod as { electricCollectionOptions?: unknown }).electricCollectionOptions;
+    if (typeof options !== "function") {
+      throw new Error("@tanstack/electric-db-collection did not export electricCollectionOptions.");
+    }
+    cachedElectricCollectionOptions = options as ElectricCollectionOptionsLoader;
+    return cachedElectricCollectionOptions;
+  });
+  return cachedElectricCollectionOptionsPromise;
 }
 
-function loadElectricCollectionOptions(): ElectricCollectionOptionsLoader {
-  if (cachedElectricCollectionOptions) return cachedElectricCollectionOptions;
-  const maybeRequire = runtimeRequire();
-  if (typeof maybeRequire !== "function") {
-    throw new Error("Smithers multiplayer collections require a bundler/runtime that can load @tanstack/electric-db-collection.");
+function loadedElectricCollectionOptions(): ElectricCollectionOptionsLoader {
+  if (!cachedElectricCollectionOptions) {
+    throw new Error("Smithers multiplayer collections must preload @tanstack/electric-db-collection before creating collections.");
   }
-  const mod = maybeRequire("@tanstack/electric-db-collection") as {
-    electricCollectionOptions?: ElectricCollectionOptionsLoader;
-  };
-  if (typeof mod.electricCollectionOptions !== "function") {
-    throw new Error("@tanstack/electric-db-collection did not export electricCollectionOptions.");
-  }
-  cachedElectricCollectionOptions = mod.electricCollectionOptions;
   return cachedElectricCollectionOptions;
 }
 
@@ -60,7 +52,7 @@ function authHeaders(token: string | undefined): Record<string, string> | undefi
   return token ? { authorization: `Bearer ${token}` } : undefined;
 }
 
-export function smithersElectricCollectionOptions<
+function createSmithersElectricCollectionOptions<
   TRow extends Record<string, unknown>,
   TKey extends string | number = string | number,
 >(
@@ -79,7 +71,7 @@ export function smithersElectricCollectionOptions<
     shape: shape.name,
   };
   if (config.where) params.where = config.where;
-  const options = loadElectricCollectionOptions();
+  const options = loadedElectricCollectionOptions();
   return options<TRow>({
     id: config.id,
     getKey: config.getKey,
@@ -95,3 +87,8 @@ export function smithersElectricCollectionOptions<
     onDelete: config.onDelete,
   } as Record<string, unknown>) as unknown as CollectionConfig<TRow, TKey>;
 }
+
+export const smithersElectricCollectionOptions = Object.assign(
+  createSmithersElectricCollectionOptions,
+  { load: loadElectricCollectionOptions },
+);

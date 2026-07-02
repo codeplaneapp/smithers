@@ -1,4 +1,5 @@
 export { serializeAccountRow } from "./serializeAccountRow.ts";
+export { apiCollectionNames } from "./apiCollectionNames.ts";
 export { serializeApprovalRow } from "./serializeApprovalRow.ts";
 export { serializeCronRow } from "./serializeCronRow.ts";
 export { serializeDocRow } from "./serializeDocRow.ts";

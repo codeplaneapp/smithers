@@ -1989,12 +1989,13 @@
   },
   {
     "id": "gateway-sync-collections",
-    "name": "Declarative sync collections (TanStack DB)",
+    "name": "Smithers TanStack DB collections",
     "area": "gateway",
     "kind": "component",
-    "keyApi": "useSyncQuery, useSyncMutation, useSyncSubscription, createGatewayCollections, SyncProvider, createSmithersGatewayTransport",
-    "summary": "TanStack DB-backed declarative query/mutation/subscription API for runs, workflows, approvals, and events with multiplexing and GC.",
-    "slice": "observability-gateway-server"
+    "keyApi": "createSmithersCollections, WorkspaceMode, SmithersCollectionsProvider, useGatewayRunEvents",
+    "summary": "Current collection surface for Gateway UIs: createSmithersCollections over WorkspaceMode, /v1/api reads plus SSE invalidation in local mode, and electric-proxy multiplayer shapes.",
+    "slice": "observability-gateway-server",
+    "docPointer": "docs/guides/sync.mdx"
   },
   {
     "id": "gateway-extension-rpc",

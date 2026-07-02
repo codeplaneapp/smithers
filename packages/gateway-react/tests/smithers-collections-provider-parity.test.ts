@@ -19,9 +19,11 @@ import {
   createSmithersDataClient,
   type GatewayCronRow,
 } from "@smithers-orchestrator/gateway-client";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { Gateway } from "@smithers-orchestrator/server";
 import { createSmithers, createSmithersPostgres } from "smithers-orchestrator";
 import { SmithersGatewayProvider, useGatewayRun } from "../src/index.ts";
+import { runProviderParitySuite } from "./providerParitySuite.ts";
 
 setDefaultTimeout(120_000);
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -73,6 +75,7 @@ function makeDbPath(name: string) {
 async function createApi(backend: Backend) {
   const schemas = {
     result: z.object({ value: z.number() }),
+    selection: z.object({ selected: z.string(), notes: z.string().nullable() }),
   };
   if (backend === "sqlite") {
     const dbPath = makeDbPath("sqlite");
@@ -124,6 +127,39 @@ function createValueWorkflow(api: SmithersApi) {
   );
 }
 
+function createApprovalWorkflow(api: SmithersApi) {
+  return api.smithers((ctx: any) => {
+    const selection = ctx.outputMaybe("selection", { nodeId: "pick-plan" });
+    return React.createElement(
+      api.Workflow,
+      { name: "collections-approval" },
+      React.createElement(
+        api.Sequence,
+        null,
+        React.createElement(api.Approval, {
+          id: "pick-plan",
+          mode: "select",
+          output: api.outputs.selection,
+          request: { title: "Pick a plan", summary: "Choose the best option." },
+          options: [
+            { key: "light", label: "Light" },
+            { key: "balanced", label: "Balanced" },
+          ],
+          allowedScopes: ["approve"],
+          allowedUsers: ["user:operator"],
+        }),
+        selection
+          ? React.createElement(
+              api.Task,
+              { id: "record", output: api.outputs.result },
+              { value: selection.selected === "balanced" ? 2 : 1 },
+            )
+          : null,
+      ),
+    );
+  });
+}
+
 async function bootGateway(backend: Backend) {
   const api = await createApi(backend);
   const gateway = new Gateway({
@@ -135,9 +171,10 @@ async function bootGateway(backend: Backend) {
     },
   });
   gateway.register("value", createValueWorkflow(api));
+  gateway.register("approval", createApprovalWorkflow(api));
   const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
   cleanups.push(() => gateway.close());
-  return { baseUrl: `http://127.0.0.1:${getPort(server)}` };
+  return { api, baseUrl: `http://127.0.0.1:${getPort(server)}` };
 }
 
 async function launchRun(baseUrl: string, value: number) {
@@ -205,6 +242,11 @@ const backends: Backend[] = PG_URL ? ["sqlite", "pglite", "postgres"] : ["sqlite
 
 for (const backend of backends) {
   describe(`Smithers QueryCollection provider parity (${backend})`, () => {
+    test.skipIf(backend === "pglite" && process.platform === "win32")("shared provider parity passes over local mode", async () => {
+      const { baseUrl } = await bootGateway(backend);
+      await runProviderParitySuite({ kind: "local", apiBaseUrl: baseUrl, token: "operator-token" });
+    }, 120_000);
+
     test.skipIf(backend === "pglite" && process.platform === "win32")("reads and confirms optimistic cron insert/update/delete through SSE", async () => {
       const { baseUrl } = await bootGateway(backend);
       const queryClient = new QueryClient();
@@ -271,6 +313,48 @@ for (const backend of backends) {
       await expect(insert.isPersisted.promise).rejects.toThrow();
       await waitFor(() => crons.has("cron-rejected") === false);
     }, 90_000);
+
+    test.skipIf(backend === "pglite" && process.platform === "win32")("runEvents collection keeps the newest 1024 rows from a real gateway", async () => {
+      const { api, baseUrl } = await bootGateway(backend);
+      const adapter = new SmithersDb(api.db);
+      const runId = `events-ring-${backend}`;
+      const now = Date.now();
+      await adapter.insertRun({
+        runId,
+        workflowName: "value",
+        status: "running",
+        createdAtMs: now,
+        configJson: JSON.stringify({ gatewayWorkflowKey: "value" }),
+      });
+      for (let index = 0; index < 1_100; index += 1) {
+        await adapter.insertEventWithNextSeq({
+          runId,
+          timestampMs: now + index,
+          type: "test.event",
+          payloadJson: JSON.stringify({ index }),
+        });
+      }
+
+      const queryClient = new QueryClient();
+      const client = createSmithersDataClient({
+        mode: { kind: "local", apiBaseUrl: baseUrl, token: "operator-token" },
+      });
+      const collections = createSmithersCollections(client, queryClient);
+      collections.connect();
+      cleanups.push(() => {
+        collections.close();
+        client.close();
+        queryClient.clear();
+      });
+
+      const events = collections.runEvents(runId, 5_000);
+      await events.preload();
+      const seqs = events.toArray.map((row) => Number(row.seq)).sort((left, right) => left - right);
+      expect(events.size).toBeLessThanOrEqual(1_024);
+      expect(seqs).toHaveLength(1_024);
+      expect(seqs[0]).toBe(76);
+      expect(seqs.at(-1)).toBe(1_099);
+    }, 120_000);
 
     test.skipIf(backend === "pglite" && process.platform === "win32")("switching runId never renders the prior run row", async () => {
       const { baseUrl } = await bootGateway(backend);
