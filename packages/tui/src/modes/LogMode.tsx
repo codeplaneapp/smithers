@@ -9,6 +9,8 @@ import {
   splitAttemptKey,
 } from "./logUtils.ts";
 import { normalizeFrame } from "./eventFrame.ts";
+import { isModifiedKeyEvent } from "./treeUtils.ts";
+import { useOverlayOpen } from "../OverlayContext.tsx";
 
 const COMPACT_WIDTH = 100;
 
@@ -37,6 +39,7 @@ export function LogView({
 }) {
   const { width } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
+  const overlayOpen = useOverlayOpen();
   const [follow, setFollow] = useState(true);
   const [attemptIdx, setAttemptIdx] = useState(-1); // -1 = all attempts
 
@@ -62,6 +65,9 @@ export function LogView({
   }, [events, attempts, attemptIdx]);
 
   useKeyboard((e) => {
+    // Keys must not leak through an open help overlay, and ctrl/meta chords
+    // are not log-view bindings.
+    if (overlayOpen || isModifiedKeyEvent(e)) return;
     if (e.name === "f") {
       setFollow((prev) => !prev);
     } else if (e.name === "[") {

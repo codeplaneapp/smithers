@@ -2,16 +2,18 @@ import { describe, it, expect } from "bun:test";
 import { TUI_EVENT_CAP, tuiEventCap } from "../src/data.ts";
 
 /**
- * The gateway caches one `runEvents` collection per run and the FIRST caller's
- * `maxRows` sizes its ring (the collection key omits `maxRows`). Tree is the
- * initial mode, so before this fix it requested the small default while
- * Logs/Timeline/Hijack asked for more — pinning the ring small and dropping
- * later history. These tests prove every TUI consumer now requests ONE cap, so
- * the ring is created at the right size no matter which mode mounts first.
+ * Historically the gateway cached one `runEvents` collection per run and the
+ * FIRST caller's `maxRows` sized its ring (the collection key omitted
+ * `maxRows`), so Tree — the initial mode — pinning the ring small dropped later
+ * history for Logs/Timeline/Hijack. The collection key now INCLUDES `maxRows`
+ * (see gatewayCollectionDefs.runEvents / gatewayKeys), so different caps get
+ * separate rings; the shared TUI_EVENT_CAP still matters because it keeps every
+ * TUI consumer on ONE collection (and one stream) instead of fragmenting into a
+ * per-cap collection per mode.
  *
- * Models the relevant gateway behavior with a tiny fake: a per-run ring whose
- * size is fixed by the first caller (first-caller-wins), and the
- * `Math.max(maxEvents, 1024)` ring floor `useGatewayRunEvents` applies.
+ * The first-caller-wins fake below models the LEGACY keying to document what
+ * the shared cap protected against, and the shared-cap invariants keep the
+ * single-collection guarantee pinned today.
  */
 const COLLECTION_FLOOR = 1024;
 

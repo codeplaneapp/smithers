@@ -22,7 +22,9 @@ type State = { error: Error | null };
  */
 function ErrorFallback({ error, onExit }: { error: Error; onExit?: (code: number) => void }) {
   useKeyboard((e) => {
-    if (e.name === "q" || e.name === "Q" || (e.ctrl && e.name === "c")) {
+    // Shift+Q arrives as { name: "q", shift: true } — parseKeypress lowercases
+    // shifted letters, so a literal name "Q" never occurs.
+    if ((e.name === "q" && !e.ctrl && !e.meta) || (e.ctrl && e.name === "c")) {
       onExit?.(1);
     }
   });

@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import {
   approvalModeOf,
   approvalOptionsOf,
+  approvalOptionWindow,
   modeHasOptions,
   buildApprovalDecision,
   runApprovalSubmit,
@@ -56,6 +57,44 @@ describe("approvalOptionsOf", () => {
   it("returns empty for non-arrays", () => {
     expect(approvalOptionsOf(undefined)).toEqual([]);
     expect(approvalOptionsOf("nope")).toEqual([]);
+  });
+});
+
+describe("approvalOptionWindow", () => {
+  it("shows all options with no indicator when the list fits", () => {
+    expect(approvalOptionWindow(4, 2, 6)).toEqual({ start: 0, end: 4, hiddenCount: 0 });
+    expect(approvalOptionWindow(6, 5, 6)).toEqual({ start: 0, end: 6, hiddenCount: 0 });
+  });
+
+  it("reserves one row for the indicator and follows the highlight past the fold", () => {
+    // 8 options, 6 rows → 5 visible + indicator. Highlight on index 6 must be
+    // inside the window (it used to walk invisible past row 6).
+    const win = approvalOptionWindow(8, 6, 6);
+    expect(win).toEqual({ start: 2, end: 7, hiddenCount: 3 });
+    expect(6).toBeGreaterThanOrEqual(win.start);
+    expect(6).toBeLessThan(win.end);
+  });
+
+  it("keeps the very last option reachable", () => {
+    expect(approvalOptionWindow(8, 7, 6)).toEqual({ start: 3, end: 8, hiddenCount: 3 });
+  });
+
+  it("stays at the top while the highlight is inside the first window", () => {
+    expect(approvalOptionWindow(8, 0, 6)).toEqual({ start: 0, end: 5, hiddenCount: 3 });
+    expect(approvalOptionWindow(8, 4, 6)).toEqual({ start: 0, end: 5, hiddenCount: 3 });
+  });
+
+  it("always contains the selected index", () => {
+    for (let sel = 0; sel < 12; sel++) {
+      const { start, end } = approvalOptionWindow(12, sel, 6);
+      expect(sel).toBeGreaterThanOrEqual(start);
+      expect(sel).toBeLessThan(end);
+    }
+  });
+
+  it("clamps out-of-range selections instead of overshooting", () => {
+    expect(approvalOptionWindow(8, 99, 6)).toEqual({ start: 3, end: 8, hiddenCount: 3 });
+    expect(approvalOptionWindow(8, -1, 6)).toEqual({ start: 0, end: 5, hiddenCount: 3 });
   });
 });
 

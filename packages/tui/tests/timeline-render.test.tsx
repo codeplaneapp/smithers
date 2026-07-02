@@ -232,6 +232,92 @@ describe("TimelineMode – terminal rendering (CI-safe, no gateway)", () => {
     renderer.destroy();
   });
 
+  it("returns to live with Shift+L, exactly as the strip advertises", async () => {
+    // Raw uppercase "L" goes through the REAL parser as { name: "l", shift: true }
+    // (parseKeypress lowercases shifted letters), so a literal `name === "L"`
+    // comparison is dead code. This locks the working binding.
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
+      await renderForTest(<TimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
+    await waitForVisualIdle();
+
+    act(() => { mockInput.pressKey("k"); });
+    await flush();
+    await waitForVisualIdle();
+    expect(captureCharFrame()).not.toContain("[live]");
+
+    act(() => { mockInput.pressKey("L"); });
+    await flush();
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("[live]");
+
+    renderer.destroy();
+  });
+
+  it("Shift+L works even after scrubbing forward to the last frame", async () => {
+    // j to the last frame pins a NUMERIC index (not -1): before the fix there
+    // was no in-mode way back to [live] at all.
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
+      await renderForTest(<TimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
+    await waitForVisualIdle();
+
+    act(() => { mockInput.pressKey("k"); });
+    act(() => { mockInput.pressKey("j"); });
+    await flush();
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("[f8]");
+    expect(captureCharFrame()).not.toContain("[live]");
+
+    act(() => { mockInput.pressKey("L"); });
+    await flush();
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("[live]");
+
+    renderer.destroy();
+  });
+
+  it("ignores ctrl-modified chords (Ctrl-K must not scrub)", async () => {
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
+      await renderForTest(<TimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("[live]");
+
+    // Emits the raw control byte 0x0b, parsed as { name: "k", ctrl: true }.
+    act(() => { mockInput.pressKey("k", { ctrl: true }); });
+    await flush();
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("[live]");
+
+    renderer.destroy();
+  });
+
+  it("unwraps the gateway run.event envelope in the frame info row", async () => {
+    // The REAL wire shape: every live-streamed frame's outer event is the
+    // literal "run.event"; the engine event name is nested in the payload.
+    const wrapped: GatewayEventFrame = {
+      type: "event",
+      seq: 7,
+      event: "run.event",
+      payload: {
+        streamId: "stream-1",
+        runId: "run-1",
+        seq: 7,
+        event: "node.start",
+        payload: { nodeId: "node-alpha", name: "fetch-data" },
+      },
+      stateVersion: 7,
+    };
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
+      <TimelineView events={[wrapped]} />,
+      { width: 120, height: 30 },
+    );
+    await waitForVisualIdle();
+    const f = captureCharFrame();
+    expect(f).toContain("seq:7");
+    expect(f).toContain("node.start");
+    expect(f).not.toContain("run.event");
+    renderer.destroy();
+  });
+
   it("reconstructs partial node state when scrubbing to early frame", async () => {
     // Use a two-event set: only node-alpha starts at seq 1, node-beta starts at seq 2
     const twoNodeEvents = [

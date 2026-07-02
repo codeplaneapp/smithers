@@ -13,6 +13,7 @@ describe("resolveGatewayConfig", () => {
       base: `http://127.0.0.1:${DEFAULT_GATEWAY_PORT}`,
       port: DEFAULT_GATEWAY_PORT,
       autoStartAllowed: true,
+      portExplicit: false,
     });
   });
 
@@ -21,6 +22,7 @@ describe("resolveGatewayConfig", () => {
       base: "http://127.0.0.1:9000",
       port: 9000,
       autoStartAllowed: true,
+      portExplicit: true,
     });
   });
 
@@ -29,6 +31,7 @@ describe("resolveGatewayConfig", () => {
       base: "http://127.0.0.1:8123",
       port: 8123,
       autoStartAllowed: true,
+      portExplicit: true,
     });
   });
 
@@ -52,6 +55,7 @@ describe("resolveGatewayConfig", () => {
       base: "http://10.0.0.5:4444",
       port: 4444,
       autoStartAllowed: false,
+      portExplicit: false,
     });
   });
 
@@ -60,6 +64,7 @@ describe("resolveGatewayConfig", () => {
       base: "http://127.0.0.1:9000",
       port: 9000,
       autoStartAllowed: false,
+      portExplicit: true,
     });
   });
 
@@ -68,6 +73,7 @@ describe("resolveGatewayConfig", () => {
       base: "http://127.0.0.1:2222",
       port: 2222,
       autoStartAllowed: false,
+      portExplicit: true,
     });
   });
 
@@ -78,6 +84,7 @@ describe("resolveGatewayConfig", () => {
       base: "http://gw.internal:8080/base",
       port: 8080,
       autoStartAllowed: false,
+      portExplicit: true,
     });
   });
 
@@ -88,6 +95,7 @@ describe("resolveGatewayConfig", () => {
       base: "http://host:5555",
       port: 5555,
       autoStartAllowed: false,
+      portExplicit: false,
     });
   });
 
@@ -101,6 +109,7 @@ describe("resolveGatewayConfig", () => {
       base: "http://arg:6001",
       port: 6001,
       autoStartAllowed: false,
+      portExplicit: false,
     });
   });
 
@@ -135,6 +144,7 @@ describe("resolveGatewayConfig", () => {
       base: "http://host:5555",
       port: 5555,
       autoStartAllowed: false,
+      portExplicit: false,
       token: "key",
     });
   });

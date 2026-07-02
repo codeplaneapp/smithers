@@ -4,7 +4,10 @@ import { createRoot } from "@opentui/react";
 import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
 import { SmithersGatewayProvider } from "@smithers-orchestrator/gateway-react";
 import { spawn } from "node:child_process";
+import { connect } from "node:net";
 import { resolveGatewayConfig, isValidGatewayPort, GatewayConfigError } from "./gatewayConfig.ts";
+import { resolveGatewayForRun, type GatewayCandidate, type ServesRun } from "./startupGateway.ts";
+import { readWorkspaceGatewayState } from "./gatewayRuntimeState.ts";
 import { resolveCliEntry } from "./cliEntry.ts";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
 import { Keybindings } from "./Keybindings.tsx";
@@ -99,20 +102,6 @@ try {
   }
   throw err;
 }
-// base/port are `let`: a reachable gateway on the default port may serve a
-// DIFFERENT workspace/store (e.g. a stray seed/test gateway). When that happens
-// and we're allowed to autostart, we rebind to a free port and start our own
-// (workspace-bound) gateway instead of showing an empty monitor.
-let GATEWAY_BASE = resolvedConfig.base;
-let GATEWAY_PORT = resolvedConfig.port;
-const { autoStartAllowed: AUTOSTART_ALLOWED, token: GATEWAY_TOKEN } = resolvedConfig;
-
-// When a token is configured, send it on the /health probe too so the probe
-// authenticates the same way the RPC/WS client will — a gateway that gates
-// /health behind auth then answers consistently instead of the probe passing
-// while every later call is rejected.
-const PROBE_HEADERS = GATEWAY_TOKEN ? { authorization: `Bearer ${GATEWAY_TOKEN}` } : undefined;
-
 // Per-request timeout for the /health probe. A process bound to the port but not
 // answering would otherwise hang a single fetch (and the whole startup budget)
 // indefinitely; the AbortSignal caps each attempt well under the autostart
@@ -122,9 +111,17 @@ const PROBE_REQUEST_TIMEOUT_MS = 3000;
 const AUTOSTART_TIMEOUT_MS = 90_000;
 const AUTOSTART_PROBE_TIMEOUT_MS = 1000;
 
-async function probeGateway(timeoutMs = PROBE_REQUEST_TIMEOUT_MS): Promise<boolean> {
-  return fetch(`${GATEWAY_BASE}/health`, {
-    headers: PROBE_HEADERS,
+// When a token is configured, send it on the /health probe too so the probe
+// authenticates the same way the RPC/WS client will — a gateway that gates
+// /health behind auth then answers consistently instead of the probe passing
+// while every later call is rejected.
+function probeHeaders(candidate: GatewayCandidate): Record<string, string> | undefined {
+  return candidate.token ? { authorization: `Bearer ${candidate.token}` } : undefined;
+}
+
+async function probeGateway(candidate: GatewayCandidate, timeoutMs = PROBE_REQUEST_TIMEOUT_MS): Promise<boolean> {
+  return fetch(`${candidate.base}/health`, {
+    headers: probeHeaders(candidate),
     signal: AbortSignal.timeout(timeoutMs),
   }).then((r) => r.ok, () => false);
 }
@@ -134,21 +131,31 @@ async function probeGateway(timeoutMs = PROBE_REQUEST_TIMEOUT_MS): Promise<boole
 // launch another monitor instead of a gateway.
 const cliEntry = resolveCliEntry();
 
-async function autoStartGateway(): Promise<boolean> {
+async function autoStartGateway(candidate: GatewayCandidate): Promise<boolean> {
   if (!cliEntry) return false;
+  // `smithers gateway` enforces a per-workspace singleton: when one is already
+  // running it prints GATEWAY_ALREADY_RUNNING and exits immediately. Watch the
+  // child so that exit fails THIS autostart right away instead of silently
+  // burning the full 90s probe budget against a port nothing will ever bind.
+  let childExited = false;
   try {
     // Pass the resolved token through as --auth-token so the autostarted
     // gateway requires the SAME token the client sends. The env (SMITHERS_API_KEY)
     // is inherited too, but a token from --token/SMITHERS_TOKEN would otherwise
     // leave the spawned gateway open while the client sends a bearer it rejects.
-    const gatewayArgs = [cliEntry, "gateway", "--host", "127.0.0.1", "--port", String(GATEWAY_PORT)];
-    if (GATEWAY_TOKEN) gatewayArgs.push("--auth-token", GATEWAY_TOKEN);
+    const gatewayArgs = [cliEntry, "gateway", "--host", "127.0.0.1", "--port", String(candidate.port)];
+    if (candidate.token) gatewayArgs.push("--auth-token", candidate.token);
     const child = spawn(process.argv[0]!, gatewayArgs, {
       stdio: "ignore",
       detached: true,
     });
     child.unref();
-    child.on("error", () => {});
+    child.on("error", () => {
+      childExited = true;
+    });
+    child.on("exit", () => {
+      childExited = true;
+    });
   } catch {
     return false;
   }
@@ -156,32 +163,35 @@ async function autoStartGateway(): Promise<boolean> {
   while (Date.now() < deadline) {
     await Bun.sleep(500);
     const remainingMs = Math.max(250, deadline - Date.now());
-    if (await probeGateway(Math.min(AUTOSTART_PROBE_TIMEOUT_MS, remainingMs))) return true;
+    if (await probeGateway(candidate, Math.min(AUTOSTART_PROBE_TIMEOUT_MS, remainingMs))) return true;
+    if (childExited) return false;
   }
   return false;
 }
 
 /**
- * Does the gateway at GATEWAY_BASE actually serve THIS run? A healthy `/health`
- * only means "a gateway is listening" — a stray gateway from another workspace
- * would answer /health but not have this run, giving an empty monitor. Confirm
- * via getRun before trusting a reused gateway. Any error / not-found ⇒ "no".
+ * Does this gateway actually serve THIS run? A healthy `/health` only means "a
+ * gateway is listening" — a stray gateway from another workspace would answer
+ * /health but not have this run, giving an empty monitor. A 401/403 is reported
+ * as its own state: a rejected token must stop the startup with a token error,
+ * not masquerade as "different workspace" and trigger an autostart.
  */
-async function gatewayServesRun(id: string): Promise<boolean> {
+async function gatewayServesRun(candidate: GatewayCandidate, id: string): Promise<ServesRun> {
   try {
     const headers: Record<string, string> = { "content-type": "application/json" };
-    if (GATEWAY_TOKEN) headers.authorization = `Bearer ${GATEWAY_TOKEN}`;
-    const res = await fetch(`${GATEWAY_BASE}/v1/rpc/getRun`, {
+    if (candidate.token) headers.authorization = `Bearer ${candidate.token}`;
+    const res = await fetch(`${candidate.base}/v1/rpc/getRun`, {
       method: "POST",
       headers,
       body: JSON.stringify({ runId: id }),
       signal: AbortSignal.timeout(PROBE_REQUEST_TIMEOUT_MS),
     });
-    if (!res.ok) return false;
+    if (res.status === 401 || res.status === 403) return "unauthorized";
+    if (!res.ok) return "no";
     const frame = (await res.json().catch(() => null)) as { type?: string; ok?: boolean; payload?: unknown } | null;
-    return Boolean(frame && frame.type === "res" && frame.ok && frame.payload);
+    return frame && frame.type === "res" && frame.ok && frame.payload ? "yes" : "no";
   } catch {
-    return false;
+    return "no";
   }
 }
 
@@ -194,53 +204,66 @@ async function findFreePort(): Promise<number> {
   return port;
 }
 
-let reachable = await probeGateway();
-
-// A reachable gateway may serve a DIFFERENT workspace/store than the run lives in.
-// Trusting it would render an empty "(no nodes)" monitor. Validate it serves this
-// run; if not, autostart our own workspace-bound gateway on a free port (default
-// mode), or fail loudly when the user pinned an explicit --gateway.
-if (reachable && runId && !(await gatewayServesRun(runId))) {
-  if (AUTOSTART_ALLOWED) {
-    process.stderr.write(
-      `[smithers-mon] Gateway at ${GATEWAY_BASE} does not serve run ${runId} ` +
-        `(it serves a different workspace/store); starting a dedicated one…\n`,
-    );
-    GATEWAY_PORT = await findFreePort();
-    GATEWAY_BASE = `http://127.0.0.1:${GATEWAY_PORT}`;
-    reachable = await autoStartGateway();
-  } else {
-    process.stderr.write(
-      `[smithers-mon] Gateway at ${GATEWAY_BASE} does not serve run ${runId}.\n` +
-        `  It may be a different workspace/store. Check --gateway/--port or the run id.\n`,
-    );
-    process.exit(1);
-  }
+/** True when something ACCEPTS connections on the loopback port. */
+async function isPortBusy(port: number): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    const socket = connect({ host: "127.0.0.1", port });
+    const done = (busy: boolean) => {
+      socket.destroy();
+      resolvePromise(busy);
+    };
+    socket.once("connect", () => done(true));
+    socket.once("error", () => done(false));
+    socket.setTimeout(750, () => done(false));
+  });
 }
 
-if (!reachable) {
-  if (!AUTOSTART_ALLOWED) {
-    // The user pinned an explicit gateway (--gateway / SMITHERS_GATEWAY_URL).
-    // Never autostart a detached LOCAL gateway they didn't ask for and that the
-    // monitor wouldn't even connect to — just report the pinned one is down.
-    process.stderr.write(
-      `[smithers-mon] Gateway at ${GATEWAY_BASE} is unreachable.\n` +
-        `  Start it (or fix the address), then retry.\n`,
-    );
-  } else if (cliEntry) {
-    process.stderr.write(`[smithers-mon] No Gateway at ${GATEWAY_BASE}; starting one…\n`);
-    reachable = await autoStartGateway();
-  } else {
-    process.stderr.write(
-      `[smithers-mon] No Gateway at ${GATEWAY_BASE} and no smithers CLI entry to autostart one.\n` +
-        `  Start it with \`smithers gateway\` (or pass --gateway <url>), then retry.\n`,
-    );
-  }
-}
-if (!reachable) {
-  process.stderr.write(`[smithers-mon] Could not reach or start Gateway at ${GATEWAY_BASE}\n`);
+const startup = await resolveGatewayForRun({
+  runId,
+  base: resolvedConfig.base,
+  port: resolvedConfig.port,
+  token: resolvedConfig.token,
+  autoStartAllowed: resolvedConfig.autoStartAllowed,
+  hasCliEntry: cliEntry !== null,
+  probe: probeGateway,
+  servesRun: (candidate) => gatewayServesRun(candidate, runId),
+  autoStart: autoStartGateway,
+  findFreePort,
+  isPortBusy,
+  // The workspace singleton gateway (`smithers gateway`) records its url +
+  // token in a per-workspace runtime state file. Reusing it means the monitor
+  // attaches to the SAME gateway other tooling talks to — instead of trying an
+  // autostart the singleton guard would refuse anyway (GATEWAY_ALREADY_RUNNING).
+  // An explicit --port / SMITHERS_GATEWAY_PORT still wins when a gateway
+  // actually answers there; when it doesn't, using the live singleton beats a
+  // guaranteed-failing autostart — we just say so.
+  discoverWorkspaceGateway: async () => {
+    const state = readWorkspaceGatewayState(process.cwd());
+    if (!state) return null;
+    let port: number;
+    try {
+      port = Number(new URL(state.url).port) || 80;
+    } catch {
+      return null;
+    }
+    if (resolvedConfig.portExplicit && port !== resolvedConfig.port) {
+      process.stderr.write(
+        `[smithers-mon] Note: no gateway answered on the configured port ${resolvedConfig.port}; ` +
+          `checking the workspace gateway at ${state.url}…\n`,
+      );
+    }
+    return { base: state.url, port, token: state.token ?? resolvedConfig.token };
+  },
+  log: (message) => process.stderr.write(`[smithers-mon] ${message}\n`),
+});
+
+if (startup.kind === "error") {
+  process.stderr.write(`[smithers-mon] ${startup.message}\n`);
   process.exit(1);
 }
+
+const GATEWAY_BASE = startup.base;
+const GATEWAY_TOKEN = startup.token;
 
 const renderer = await createCliRenderer({ exitOnCtrlC: false });
 

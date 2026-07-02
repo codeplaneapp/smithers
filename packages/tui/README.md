@@ -38,9 +38,9 @@ and it's unreachable, it errors out instead of starting a local one.)
 | `1` | **Tree** | Node tree for the run; the right pane inspects the selected node across four tabs — Output, Logs, Diff, Props — with an inline approval banner when a node is waiting |
 | `2` / `g` | **Graph** | Directed graph of node dependencies; arrow-key navigation, press Enter to jump to that node in Tree |
 | `3` / `l` | **Logs**  | Filtered event stream (up to 2 000 events); per-attempt filter with `[` / `]`; `f` toggles follow mode |
-| `4` / `t` | **Timeline** | Horizontal event tick strip with snapshot table; arrow keys scrub through frames |
+| `4` / `t` | **Timeline** | Horizontal event tick strip with snapshot table; `j`/`k` or arrow keys scrub through frames, `Shift+L` returns to live |
 | `5` / `h` | **Hijack** | Hand off to `smithers hijack` for an active node — suspends the TUI, drops into the hijack shell, returns when done |
-| `q` / `Ctrl-C` | — | Quit the monitor |
+| `q` / `Ctrl-C` | — | Quit the monitor (works everywhere, including while the help overlay is open) |
 
 ### Switching modes
 
@@ -49,18 +49,31 @@ The number keys `1`-`5` switch modes globally **except in Tree mode**, where
 props). The letter aliases `g` (Graph), `l` (Logs), `t` (Timeline), and
 `h` (Hijack) are *always* available — including inside Tree — so use them to
 leave Tree. Press `1` from any other mode to return to Tree (`g` toggles
-between Graph and Tree). `?` opens a mode-aware help overlay.
+between Graph and Tree). `Shift+L` never switches modes — it is Timeline's
+"back to live" key. Ctrl/Alt-modified letters (`Ctrl-L`, `Ctrl-Q`, …) are
+deliberately ignored; only `Ctrl-C` is bound (quit).
+
+`?` opens a mode-aware help overlay **on top of** the active mode: the mode
+stays mounted (tree selection, scrub position, and log filters survive), its
+keys are swallowed while the overlay is up, and `?` or `Esc` closes it — `q`
+still quits, exactly as the overlay advertises.
 
 ## Architecture
 
 ```
 packages/tui/src/
   index.tsx          Entry point — probes / starts Gateway, mounts React tree
-  App.tsx            Root component — global keybindings, header, mode router, keybar
+  App.tsx            Root component — global keybindings (routeAppKey), header, mode router, help overlay, keybar
+  Header.tsx         Run header (status dot, workflow, run id, elapsed, live/paused)
+  headerUtils.ts     Header status/tone mapping and elapsed-time formatting
   Keybindings.tsx    Keymap context shared by all modes
+  OverlayContext.tsx Overlay-open context — modes mute their keys while help is up
   RendererContext.tsx OpenTUI renderer context (passed into Hijack for PTY hand-off)
   ErrorBoundary.tsx  Catches render errors and prints them in-terminal
   cliEntry.ts        Resolves the real smithers CLI entry (gateway autostart / hijack)
+  gatewayConfig.ts   Gateway URL/port resolution (--gateway / SMITHERS_GATEWAY_URL / --port)
+  gatewayRuntimeState.ts Reads the workspace singleton gateway's runtime state file (url + token)
+  startupGateway.ts  Startup state machine — reuse / discover / autostart the gateway serving the run
   data.ts            Gateway-react hooks (useRun, useRunTree, useRunEvents, …)
   modes/
     TreeMode.tsx      Node tree + tab panels (output/logs/diff/props)
@@ -69,7 +82,10 @@ packages/tui/src/
     TimelineMode.tsx  Tick strip + snapshot table
     HijackMode.tsx    Node-picker and PTY hand-off
     eventFrame.ts     Gateway event-frame unwrap/normalize helpers
-    treeUtils.ts      Tree flattening, glyph helpers
+    treeUtils.ts      Tree flattening, scroll window, glyph and key-event helpers
+    approvalUtils.ts  Approval decision shapes, key routing, option windowing, in-flight guards
+    humanUtils.ts     Human-request (HumanTask) banner state — CLI guidance, never approve/deny
+    diffUtils.ts      getNodeDiff payload → diff view model (patches, stat, errors, binary)
     graphUtils.ts     Column layout algorithm
     logUtils.ts       Event classification and filter helpers
     timelineUtils.ts  Frame classification and node snapshot helpers

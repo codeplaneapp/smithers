@@ -157,6 +157,29 @@ export function pruneResolvedKeys(
   return changed ? next : resolved;
 }
 
+/**
+ * Slice window for the approval banner's option list. The banner renders at
+ * most `maxRows` lines; cycling wraps through ALL options, so the rendered
+ * slice must follow the highlighted index or the selection walks off-screen
+ * (invisible pick submitted on [a]). When the list overflows, ONE of the
+ * `maxRows` lines is reserved for a "+N more" indicator (`hiddenCount` > 0)
+ * so hidden entries are announced for both select and rank.
+ */
+export function approvalOptionWindow(
+  count: number,
+  selectedIdx: number,
+  maxRows: number,
+): { start: number; end: number; hiddenCount: number } {
+  const rows = Math.max(2, maxRows);
+  if (count <= rows) return { start: 0, end: count, hiddenCount: 0 };
+  const visible = rows - 1; // reserve one line for the "+N more" indicator
+  const sel = Math.min(Math.max(selectedIdx, 0), count - 1);
+  let start = sel - visible + 1;
+  if (start < 0) start = 0;
+  if (start > count - visible) start = count - visible;
+  return { start, end: start + visible, hiddenCount: count - visible };
+}
+
 /** An approval-banner control action routed from a raw key. */
 export type ApprovalKeyAction =
   | { kind: "approve" }

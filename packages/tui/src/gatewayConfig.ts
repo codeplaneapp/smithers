@@ -66,6 +66,14 @@ export interface GatewayConfig {
   port: number;
   autoStartAllowed: boolean;
   /**
+   * True when the port came from an explicit `--port` or `SMITHERS_GATEWAY_PORT`
+   * (rather than the built-in default). An explicit port pins the monitor to
+   * that address end-to-end: it must probe/autostart THERE and never silently
+   * drift to the workspace singleton gateway on some other port — the launcher
+   * and tests that set the env expect the gateway on the port they chose.
+   */
+  portExplicit: boolean;
+  /**
    * Bearer token for HTTP + WS auth, resolved (in priority order) from the
    * `--token` arg, then `SMITHERS_TOKEN`, then `SMITHERS_API_KEY` (the same env
    * var the gateway itself reads to require auth). `undefined` when none is set,
@@ -84,8 +92,13 @@ function resolveToken(
   tokenArg: string | undefined,
   env: Record<string, string | undefined>,
 ): string | undefined {
-  const token = tokenArg ?? env.SMITHERS_TOKEN ?? env.SMITHERS_API_KEY;
-  return token && token.length > 0 ? token : undefined;
+  // Skip EMPTY values at each level (not just at the end): `--token=` or an
+  // empty SMITHERS_TOKEN must fall through to SMITHERS_API_KEY — the same way
+  // the CLI resolves auth — instead of masking a real key with "".
+  for (const candidate of [tokenArg, env.SMITHERS_TOKEN, env.SMITHERS_API_KEY]) {
+    if (candidate && candidate.length > 0) return candidate;
+  }
+  return undefined;
 }
 
 export function resolveGatewayConfig({
@@ -118,8 +131,15 @@ export function resolveGatewayConfig({
         // it untouched and fall back to the requested port for the probe.
       }
     }
-    return { base, port, autoStartAllowed: false, token };
+    return { base, port, autoStartAllowed: false, portExplicit: portArg !== undefined, token };
   }
-  const port = portArg ?? parseGatewayPortEnv(env.SMITHERS_GATEWAY_PORT) ?? DEFAULT_GATEWAY_PORT;
-  return { base: `http://127.0.0.1:${port}`, port, autoStartAllowed: true, token };
+  const envPort = parseGatewayPortEnv(env.SMITHERS_GATEWAY_PORT);
+  const port = portArg ?? envPort ?? DEFAULT_GATEWAY_PORT;
+  return {
+    base: `http://127.0.0.1:${port}`,
+    port,
+    autoStartAllowed: true,
+    portExplicit: portArg !== undefined || envPort !== undefined,
+    token,
+  };
 }

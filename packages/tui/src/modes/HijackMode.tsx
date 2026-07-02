@@ -3,7 +3,9 @@ import { useKeyboard } from "@opentui/react";
 import { spawn } from "node:child_process";
 import { useRunTree, useRunEvents, TUI_EVENT_CAP } from "../data.ts";
 import { useRenderer } from "../RendererContext.tsx";
+import { useOverlayOpen } from "../OverlayContext.tsx";
 import { resolveCliEntry } from "../cliEntry.ts";
+import { isModifiedKeyEvent } from "./treeUtils.ts";
 import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import {
   hijackCandidates,
@@ -40,8 +42,10 @@ function Selecting({
   onCancel: () => void;
 }) {
   const selectOptions = nodes.map(nodeSelectOption);
+  const overlayOpen = useOverlayOpen();
 
   useKeyboard((e) => {
+    if (overlayOpen || isModifiedKeyEvent(e)) return;
     if (e.name === "escape") onCancel();
   });
 
@@ -52,7 +56,10 @@ function Selecting({
         <text fg="#555555">  j/k or arrows to navigate  ↵ confirm  Esc cancel</text>
       </box>
       <select
-        focused={true}
+        // The renderer focus system routes keys straight to a focused select,
+        // bypassing useKeyboard — release focus while the help overlay is open
+        // so j/k can't move the picker underneath it.
+        focused={!overlayOpen}
         options={selectOptions}
         width="100%"
         flexGrow={1}
@@ -129,7 +136,9 @@ function Returned({
   exitCode: number | null;
   onDismiss: () => void;
 }) {
+  const overlayOpen = useOverlayOpen();
   useKeyboard((e) => {
+    if (overlayOpen || isModifiedKeyEvent(e)) return;
     if (e.name === "d" || e.name === "escape" || e.name === "return") onDismiss();
   });
 

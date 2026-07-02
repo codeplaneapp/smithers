@@ -1,4 +1,5 @@
 import { describe, it, expect } from "bun:test";
+import { parseKeypress } from "@opentui/core";
 import {
   flattenTree,
   nodeGlyph,
@@ -6,8 +7,14 @@ import {
   nodeChevron,
   defaultTab,
   eventKeyName,
+  isModifiedKeyEvent,
+  treeScrollWindow,
+  resolveFocusIdx,
   ALL_TABS,
+  type FlatNode,
 } from "../src/modes/treeUtils.ts";
+import { routeApprovalKey } from "../src/modes/approvalUtils.ts";
+import { deriveOutputText } from "../src/modes/TreeMode.tsx";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 
 function node(id: string, overrides: Partial<GatewayRunNode> = {}): GatewayRunNode {
@@ -177,8 +184,15 @@ describe("treeUtils", () => {
       expect(defaultTab(node("n", { kind: "task", status: "done", output: "hello" }))).toBe("output");
     });
 
-    it("returns props as fallback", () => {
-      expect(defaultTab(node("n", { kind: "task", status: "done" }))).toBe("props");
+    it("returns output for completed leaf nodes (real gateway rows carry no inline output)", () => {
+      expect(defaultTab(node("n", { kind: "task", status: "done" }))).toBe("output");
+      expect(defaultTab(node("n", { kind: "agent", status: "completed" }))).toBe("output");
+      expect(defaultTab(node("n", { kind: "task", status: "ok" }))).toBe("output");
+    });
+
+    it("returns props as fallback for non-terminal, non-running leaves", () => {
+      expect(defaultTab(node("n", { kind: "task", status: "queued" }))).toBe("props");
+      expect(defaultTab(node("n", { kind: "task", status: "failed" }))).toBe("props");
     });
   });
 
@@ -200,5 +214,177 @@ describe("treeUtils", () => {
     it("falls back to sequence when name and raw are unavailable", () => {
       expect(eventKeyName({ sequence: "a" })).toBe("a");
     });
+  });
+
+  describe("isModifiedKeyEvent (approval hotkey safety, real parser events)", () => {
+    const key = (raw: string) => {
+      const parsed = parseKeypress(Buffer.from(raw));
+      if (!parsed) throw new Error(`parseKeypress returned null for ${JSON.stringify(raw)}`);
+      return parsed;
+    };
+
+    it("flags Ctrl-D / Ctrl-A control bytes — parseKeypress reports the PLAIN letter name", () => {
+      const ctrlD = key("\x04");
+      expect(ctrlD.name).toBe("d");
+      expect(isModifiedKeyEvent(ctrlD)).toBe(true);
+      const ctrlA = key("\x01");
+      expect(ctrlA.name).toBe("a");
+      expect(isModifiedKeyEvent(ctrlA)).toBe(true);
+    });
+
+    it("flags Alt (Esc-prefixed) letters as meta-modified", () => {
+      const altD = key("\x1bd");
+      expect(altD.name).toBe("d");
+      expect(isModifiedKeyEvent(altD)).toBe(true);
+    });
+
+    it("passes plain and shifted letters through", () => {
+      expect(isModifiedKeyEvent(key("d"))).toBe(false);
+      expect(isModifiedKeyEvent(key("L"))).toBe(false);
+      expect(isModifiedKeyEvent(null)).toBe(false);
+      expect(isModifiedKeyEvent("d")).toBe(false);
+    });
+
+    it("keeps Ctrl-D from ever reaching approval routing while plain d still denies", () => {
+      const ctx = { hasApproval: true, isHumanRequest: false, mode: "gate" as const, busy: false };
+      // TreeMode's handler drops modified events BEFORE routing; compose the
+      // same guard here against the real parsed events.
+      const route = (raw: string) => {
+        const ev = key(raw);
+        if (isModifiedKeyEvent(ev)) return null;
+        return routeApprovalKey(eventKeyName(ev), ctx);
+      };
+      expect(route("\x04")).toBeNull(); // Ctrl-D must NOT deny
+      expect(route("\x01")).toBeNull(); // Ctrl-A must NOT approve
+      expect(route("\x1bd")).toBeNull(); // Alt-D must NOT deny
+      expect(route("d")).toEqual({ kind: "deny" });
+      expect(route("a")).toEqual({ kind: "approve" });
+    });
+  });
+
+  describe("treeScrollWindow", () => {
+    it("shows everything when the list fits", () => {
+      expect(treeScrollWindow(5, 10, 3)).toEqual({ start: 0, end: 5 });
+      expect(treeScrollWindow(10, 10, 9)).toEqual({ start: 0, end: 10 });
+    });
+
+    it("clamps flush at the top of the list", () => {
+      expect(treeScrollWindow(40, 10, 0)).toEqual({ start: 0, end: 10 });
+      expect(treeScrollWindow(40, 10, 4)).toEqual({ start: 0, end: 10 });
+    });
+
+    it("centers the focused row once past the fold", () => {
+      const { start, end } = treeScrollWindow(40, 10, 20);
+      expect(start).toBe(15);
+      expect(end).toBe(25);
+    });
+
+    it("clamps flush at the bottom (no blank tail, last row reachable)", () => {
+      expect(treeScrollWindow(40, 10, 39)).toEqual({ start: 30, end: 40 });
+      expect(treeScrollWindow(40, 10, 36)).toEqual({ start: 30, end: 40 });
+    });
+
+    it("always keeps the focused row inside the window", () => {
+      for (let focus = 0; focus < 40; focus++) {
+        const { start, end } = treeScrollWindow(40, 7, focus);
+        expect(focus).toBeGreaterThanOrEqual(start);
+        expect(focus).toBeLessThan(end);
+        expect(end - start).toBe(7);
+      }
+    });
+
+    it("tolerates degenerate pane sizes and out-of-range focus", () => {
+      expect(treeScrollWindow(5, 0, 2)).toEqual({ start: 2, end: 3 });
+      expect(treeScrollWindow(5, 3, 99)).toEqual({ start: 2, end: 5 });
+      expect(treeScrollWindow(5, 3, -1)).toEqual({ start: 0, end: 3 });
+      expect(treeScrollWindow(0, 3, 0)).toEqual({ start: 0, end: 0 });
+    });
+  });
+
+  describe("resolveFocusIdx (key-anchored selection survives live tree churn)", () => {
+    const row = (id: string): FlatNode => ({
+      node: { id, name: id, kind: "task", status: "running" },
+      depth: 0,
+      hasChildren: false,
+      isCollapsed: false,
+    });
+
+    it("re-derives the index when rows are inserted ABOVE the selection", () => {
+      const before = [row("a"), row("b"), row("c")];
+      expect(resolveFocusIdx(before, "c", 0)).toBe(2);
+      // A new loop attempt lands above: same node, new index.
+      const after = [row("a"), row("a2"), row("b"), row("c")];
+      expect(resolveFocusIdx(after, "c", 2)).toBe(3);
+    });
+
+    it("falls back to the clamped last index when the anchored node disappears", () => {
+      const shrunk = [row("a"), row("b")];
+      // lastIdx 5 is past the end — clamp so `k` responds immediately.
+      expect(resolveFocusIdx(shrunk, "ghost", 5)).toBe(1);
+      expect(resolveFocusIdx(shrunk, "ghost", 0)).toBe(0);
+    });
+
+    it("handles no selection and empty lists", () => {
+      expect(resolveFocusIdx([row("a")], null, 0)).toBe(0);
+      expect(resolveFocusIdx([], "a", 3)).toBe(0);
+      expect(resolveFocusIdx([row("a"), row("b")], null, -2)).toBe(0);
+    });
+  });
+});
+
+describe("deriveOutputText (getNodeOutput envelope unwrap)", () => {
+  const outNode = (overrides: Partial<GatewayRunNode> = {}): GatewayRunNode => ({
+    id: "n",
+    name: "n",
+    kind: "task",
+    status: "done",
+    ...overrides,
+  });
+
+  it("unwraps a produced envelope to the row's output string", () => {
+    // The real wire shape: { status, row, schema } (see server getNodeOutput).
+    const envelope = {
+      status: "produced",
+      row: { output: "# the agent's markdown" },
+      schema: { fields: [{ name: "output", type: "string" }] },
+    };
+    const text = deriveOutputText(envelope, outNode());
+    expect(text).toBe("# the agent's markdown");
+    expect(text).not.toContain("schema");
+  });
+
+  it("renders a structured produced row as JSON of the ROW only (no envelope)", () => {
+    const envelope = { status: "produced", row: { value: 42 }, schema: null };
+    const text = deriveOutputText(envelope, outNode());
+    expect(text).toContain("\"value\": 42");
+    expect(text).not.toContain("produced");
+    expect(text).not.toContain("schema");
+  });
+
+  it("maps a pending envelope to a readable placeholder, not raw JSON", () => {
+    expect(deriveOutputText({ status: "pending", row: null, schema: null }, outNode())).toBe(
+      "(no output yet)",
+    );
+  });
+
+  it("maps a failed envelope to a failure note, surfacing partial output", () => {
+    expect(deriveOutputText({ status: "failed", row: null, schema: null }, outNode())).toBe(
+      "(failed, no output)",
+    );
+    const withPartial = deriveOutputText(
+      { status: "failed", row: null, schema: null, partial: { step: "halfway" } },
+      outNode(),
+    );
+    expect(withPartial).toContain("(failed) partial output:");
+    expect(withPartial).toContain("halfway");
+  });
+
+  it("keeps the plain string-field fallbacks for non-envelope payloads", () => {
+    expect(deriveOutputText({ output: "plain" }, outNode())).toBe("plain");
+    expect(deriveOutputText({ text: "txt" }, outNode())).toBe("txt");
+    expect(deriveOutputText({ content: "c" }, outNode())).toBe("c");
+    expect(deriveOutputText({ other: 1 }, outNode())).toContain("\"other\": 1");
+    expect(deriveOutputText(undefined, outNode({ output: "inline" }))).toBe("inline");
+    expect(deriveOutputText(undefined, outNode())).toBe("(no output)");
   });
 });

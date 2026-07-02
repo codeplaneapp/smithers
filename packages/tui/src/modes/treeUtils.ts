@@ -21,6 +21,62 @@ export function eventKeyName(event: unknown): string {
   return "";
 }
 
+/**
+ * True when a key event carries a ctrl/meta modifier. OpenTUI's parseKeypress
+ * maps raw control bytes 0x01-0x1a to the PLAIN letter name with `ctrl: true`
+ * (Ctrl-D → `{ name: "d", ctrl: true }`) and Esc-prefixed letters to the name
+ * with `meta: true` — so any handler that routes on the bare name (approval
+ * a/d, mode letters, j/k) must drop modified chords first or a reflexive
+ * Ctrl-D/Ctrl-L fires an unintended (for approvals, irreversible) action.
+ */
+export function isModifiedKeyEvent(event: unknown): boolean {
+  if (!event || typeof event !== "object") return false;
+  const record = event as Record<string, unknown>;
+  return record.ctrl === true || record.meta === true;
+}
+
+/**
+ * Slice window for the tree pane so the focused row stays visible: the pane
+ * renders `total` rows into `paneRows` lines and this returns the half-open
+ * `[start, end)` range to render, keeping `focusIdx` centered where possible
+ * and clamped flush at both list ends (no blank tail, no overshoot).
+ */
+export function treeScrollWindow(
+  total: number,
+  paneRows: number,
+  focusIdx: number,
+): { start: number; end: number } {
+  const rows = Math.max(1, paneRows);
+  if (total <= rows) return { start: 0, end: total };
+  const focus = Math.min(Math.max(focusIdx, 0), total - 1);
+  let start = focus - Math.floor(rows / 2);
+  if (start < 0) start = 0;
+  if (start > total - rows) start = total - rows;
+  return { start, end: start + rows };
+}
+
+/**
+ * Derive the focused row index from a selection ANCHORED BY NODE KEY. The flat
+ * list is rebuilt live (rows insert/delete mid-run), so a bare index drifts:
+ * growth above the selection silently moves the highlight to a different node
+ * and shrink strands the index past the end (making `k` appear dead). Anchoring
+ * on `runNodeKey` keeps the same node focused across live mutations; when the
+ * anchored node disappears, fall back to the last known index clamped in range
+ * so navigation responds immediately.
+ */
+export function resolveFocusIdx(
+  flat: ReadonlyArray<FlatNode>,
+  selectedKey: string | null,
+  lastIdx: number,
+): number {
+  if (selectedKey !== null) {
+    const idx = flat.findIndex((f) => runNodeKey(f.node) === selectedKey);
+    if (idx >= 0) return idx;
+  }
+  if (flat.length === 0) return 0;
+  return Math.min(Math.max(lastIdx, 0), flat.length - 1);
+}
+
 export function flattenTree(
   nodes: ReadonlyArray<GatewayRunNode>,
   root: GatewayRunNode | null,
@@ -131,6 +187,10 @@ export function defaultTab(node: GatewayRunNode): TabId {
   const isContainer = CONTAINER_KINDS.some((k) => kind === k || kind.startsWith(k));
   if (isContainer) return "props";
   if (status === "running" || status === "active") return "logs";
+  // Completed leaf nodes open on their output. Keyed on status because real
+  // gateway tree rows never carry `output` inline (the output arrives via the
+  // getNodeOutput RPC) — the `node.output` check alone was dead in production.
+  if (status === "done" || status === "completed" || status === "ok") return "output";
   if (node.output) return "output";
   return "props";
 }

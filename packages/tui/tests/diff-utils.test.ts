@@ -62,4 +62,78 @@ describe("toNodeDiffView", () => {
     expect(toNodeDiffView("nope").kind).toBe("empty");
     expect(toNodeDiffView({}).kind).toBe("empty");
   });
+
+  it("surfaces an RPC error as a distinct error view, never as 'no diff'", () => {
+    // The gateway rejects oversized bundles (DiffTooLarge), dirty trees, etc. —
+    // useGatewayRpc catches the throw into `error` with `data` undefined, which
+    // used to render the factually wrong "No diff available for this node."
+    const view = toNodeDiffView(undefined, new Error("DiffTooLarge: bundle exceeds 50MB"));
+    expect(view.kind).toBe("error");
+    if (view.kind !== "error") throw new Error("expected error");
+    expect(view.message).toContain("DiffTooLarge");
+  });
+
+  it("the error takes precedence over any stale payload and blank messages get a fallback", () => {
+    const view = toNodeDiffView(
+      { patches: [{ path: "x", operation: "modify", diff: "@@ @@\n+a\n" }] },
+      new Error("gateway unreachable"),
+    );
+    expect(view.kind).toBe("error");
+    const blank = toNodeDiffView(undefined, new Error(""));
+    if (blank.kind !== "error") throw new Error("expected error");
+    expect(blank.message).toBe("diff request failed");
+    // No error → normal paths unaffected.
+    expect(toNodeDiffView(undefined, null).kind).toBe("empty");
+  });
+
+  it("collapses `git diff --binary` patches to a one-line marker (never raw base85)", () => {
+    const binaryDiff =
+      "diff --git a/logo.png b/logo.png\n" +
+      "index 0000000..1111111 100644\n" +
+      "GIT binary patch\n" +
+      "literal 5678\n" +
+      "zcmZ?wbhEHbRA^)@xW>>@|Ns9$#h)(1PA(|VU|?im^)N5&u<`$@%TFvXQ~lr$\n";
+    const view = toNodeDiffView({
+      patches: [
+        { path: "logo.png", operation: "add", diff: binaryDiff },
+        { path: "src/a.ts", operation: "modify", diff: "@@ -1 +1 @@\n-old\n+new\n" },
+      ],
+    });
+    if (view.kind !== "patch") throw new Error("expected patch");
+    expect(view.unified).toContain("# add logo.png\n(binary file changed)");
+    expect(view.unified).not.toContain("literal 5678");
+    expect(view.unified).not.toContain("zcmZ?");
+    // Text patches still render and binary files still count in the summary.
+    expect(view.unified).toContain("+new");
+    expect(view.summary).toBe("2 files changed");
+  });
+
+  it("detects the 'Binary files … differ' form and a binaryContent flag too", () => {
+    const differ = toNodeDiffView({
+      patches: [
+        {
+          path: "img.gif",
+          operation: "modify",
+          diff: "diff --git a/img.gif b/img.gif\nBinary files a/img.gif and b/img.gif differ\n",
+        },
+      ],
+    });
+    if (differ.kind !== "patch") throw new Error("expected patch");
+    expect(differ.unified).toContain("(binary file changed)");
+
+    const flagged = toNodeDiffView({
+      patches: [{ path: "img.gif", operation: "modify", diff: "anything", binaryContent: "aGk=" }],
+    });
+    if (flagged.kind !== "patch") throw new Error("expected patch");
+    expect(flagged.unified).toContain("(binary file changed)");
+    expect(flagged.unified).not.toContain("anything");
+  });
+
+  it("trims a trailing CRLF as well as a bare newline", () => {
+    const view = toNodeDiffView({
+      patches: [{ path: "x", operation: "modify", diff: "@@ @@\n+a\r\n" }],
+    });
+    if (view.kind !== "patch") throw new Error("expected patch");
+    expect(view.unified.endsWith("+a")).toBe(true);
+  });
 });

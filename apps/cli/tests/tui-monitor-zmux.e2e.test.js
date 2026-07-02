@@ -25,7 +25,8 @@ import {
     gatewayRpc,
     stopGatewayPort,
     runIdFromGrid,
-    cancelRunId,
+    cancelLatestRun,
+    isolatedGatewayEnv,
     navigateToWorkflow,
     paneDriver,
 } from "./zmux-harness.js";
@@ -35,7 +36,8 @@ const ZMUXD = resolveZmuxd();
 // environment is not stable enough for these real-terminal assertions.
 const AGENT_HARNESS = Boolean(process.env.CLAUDECODE || process.env.CLAUDE_CODE_ENTRYPOINT || process.env.CODEX_CI);
 
-const commandForGatewayPort = (port) => `env SMITHERS_GATEWAY_PORT=${port} bun apps/cli/src/index.js up --interactive`;
+// Each test gets an isolated singleton-gateway state dir (see isolatedGatewayEnv).
+const interactiveCommand = (iso) => `${iso.pane}bun apps/cli/src/index.js up --interactive`;
 
 /** Poll `grid()` until a line matches `re` (or tries run out). Returns the last grid. */
 async function until(grid, re, { tries = 60, delayMs = 400 } = {}) {
@@ -69,13 +71,15 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers monitor zmux PTY", () 
     test("walks every mode, the g toggle, the help overlay, and resize", async () => {
         const cols = 100;
         const rows = 30;
+        const testStartedAtMs = Date.now();
         const { rpc, stop } = await startDaemon(ZMUXD, { prefix: "zmx-mon-modes", idleSeconds: 240 });
         const gatewayPort = await freePort();
+        const iso = isolatedGatewayEnv(gatewayPort);
         let sessionId;
         let runId = null;
         try {
             const created = await rpc("session.create", {
-                command: commandForGatewayPort(gatewayPort),
+                command: interactiveCommand(iso),
                 cwd: REPO_ROOT,
                 cols,
                 rows,
@@ -103,9 +107,13 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers monitor zmux PTY", () 
             const backFromGraph = await until(pane.grid, /output\s+logs\s+diff\s+props/);
             expect(backFromGraph.ok).toBe(true);
 
-            // l → Logs.
+            // l → Logs. The run parked BEFORE the monitor attached, so any
+            // events here prove the gateway replays its buffered history to a
+            // late subscriber (the out-of-process bridge backfill + the
+            // client's afterSeq:0 replay request) — a monitor of a parked run
+            // used to show "0/0 events" forever.
             await pane.send("l");
-            const logs = await until(pane.grid, /LOGS \[live\]/);
+            const logs = await until(pane.grid, /LOGS \[live\]\s+[1-9]\d*\/\d+ events/, { tries: 30 });
             expect(logs.ok).toBe(true);
             expect(logs.grid.some((line) => /\[f\] follow/.test(line))).toBe(true);
 
@@ -137,10 +145,22 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers monitor zmux PTY", () 
             const help = await until(pane.grid, /Keybindings/);
             expect(help.ok).toBe(true);
             expect(help.grid.some((line) => /1-4 select an inspector tab in Tree/.test(line))).toBe(true);
+            // Esc closes it. The mode stays mounted under the overlay (the tab
+            // bar is visible the whole time), so poll for the overlay text to
+            // DISAPPEAR rather than for the mode to appear.
             await pane.send("\x1b");
-            const helpClosed = await until(pane.grid, /output\s+logs\s+diff\s+props/);
-            expect(helpClosed.ok).toBe(true);
-            expect(helpClosed.grid.some((line) => /Keybindings/.test(line))).toBe(false);
+            let overlayGone = false;
+            let closedGrid = [];
+            for (let i = 0; i < 25; i += 1) {
+                closedGrid = await pane.grid();
+                if (!closedGrid.some((line) => /Keybindings/.test(line))) {
+                    overlayGone = true;
+                    break;
+                }
+                await sleep(400);
+            }
+            expect(overlayGone).toBe(true);
+            expect(closedGrid.some((line) => /output\s+logs\s+diff\s+props/.test(line))).toBe(true);
 
             // Resize below the compact threshold (100 cols): the monitor
             // re-renders inside the new width with the compact keybar format.
@@ -161,25 +181,28 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers monitor zmux PTY", () 
             );
             expect(summary.ok).toBe(true);
         } finally {
-            if (runId) await cancelRunId(runId, gatewayPort);
+            await cancelLatestRun("e2e-approval-probe", testStartedAtMs, gatewayPort, iso.env);
             if (sessionId) {
                 await rpc("session.terminate", { sessionId }).catch(() => {});
             }
             await stop();
             await stopGatewayPort(gatewayPort);
+            iso.cleanup();
         }
     }, 240_000);
 
     test("tree inspector tabs 1-4 switch output/logs/diff/props", async () => {
         const cols = 100;
         const rows = 30;
+        const testStartedAtMs = Date.now();
         const { rpc, stop } = await startDaemon(ZMUXD, { prefix: "zmx-mon-tabs", idleSeconds: 240 });
         const gatewayPort = await freePort();
+        const iso = isolatedGatewayEnv(gatewayPort);
         let sessionId;
         let runId = null;
         try {
             const created = await rpc("session.create", {
-                command: commandForGatewayPort(gatewayPort),
+                command: interactiveCommand(iso),
                 cwd: REPO_ROOT,
                 cols,
                 rows,
@@ -205,11 +228,12 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers monitor zmux PTY", () 
             const logsTab = await until(pane.grid, /\(no log events for this node\)|^\s+\[\d+\] /);
             expect(logsTab.ok).toBe(true);
 
-            // 3 → diff. A static probe run makes no file changes.
+            // 3 → diff. A static probe run makes no file changes; an RPC error
+            // surfaces distinctly as "Diff unavailable: …".
             await pane.send("3");
             const diffTab = await until(
                 pane.grid,
-                /No diff available for this node|No file changes for this node iteration|Loading diff/,
+                /No diff available for this node|No file changes for this node iteration|Loading diff|Diff unavailable:/,
             );
             expect(diffTab.ok).toBe(true);
 
@@ -218,12 +242,13 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers monitor zmux PTY", () 
             const propsAgain = await until(pane.grid, /"childIds"/);
             expect(propsAgain.ok).toBe(true);
         } finally {
-            if (runId) await cancelRunId(runId, gatewayPort);
+            await cancelLatestRun("e2e-approval-probe", testStartedAtMs, gatewayPort, iso.env);
             if (sessionId) {
                 await rpc("session.terminate", { sessionId }).catch(() => {});
             }
             await stop();
             await stopGatewayPort(gatewayPort);
+            iso.cleanup();
         }
     }, 240_000);
 
@@ -233,11 +258,12 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers monitor zmux PTY", () 
         const testStartedAtMs = Date.now();
         const { rpc, stop } = await startDaemon(ZMUXD, { prefix: "zmx-mon-approve", idleSeconds: 300 });
         const gatewayPort = await freePort();
+        const iso = isolatedGatewayEnv(gatewayPort);
         let sessionId;
         let runId = null;
         try {
             const created = await rpc("session.create", {
-                command: commandForGatewayPort(gatewayPort),
+                command: interactiveCommand(iso),
                 cwd: REPO_ROOT,
                 cols,
                 rows,
@@ -266,29 +292,34 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers monitor zmux PTY", () 
 
             // The approval releases the gated task; the run must reach a real
             // terminal success in the workspace DB (not just banner dismissal).
+            // The run-row status for a successful run is "finished" (its state
+            // column is "succeeded"); listRuns reports the former.
             let status = "none";
             for (let i = 0; i < 180; i += 1) {
-                const frame = await gatewayRpc(gatewayPort, "listRuns", { limit: 50 }, 1_000);
+                // Generous RPC timeout: a workspace-scale gateway (dozens of
+                // registered workflows over a large store) can take >1s to
+                // answer listRuns; a short timeout reads as "none" forever.
+                const frame = await gatewayRpc(gatewayPort, "listRuns", { limit: 50 }, 8_000);
                 if (frame?.type === "res" && frame.ok && Array.isArray(frame.payload)) {
                     const probe = frame.payload
                         .filter((r) => r.workflowName === "e2e-approval-probe" && r.createdAtMs >= testStartedAtMs)
                         .sort((a, b) => b.createdAtMs - a.createdAtMs)[0];
                     status = probe?.status ?? "none";
-                    if (status === "succeeded") break;
-                    if (status === "failed" || status === "cancelled") break;
+                    if (status === "finished" || status === "failed" || status === "cancelled") break;
                 }
                 await pane.grid();
                 await sleep(1_000);
             }
-            expect(status).toBe("succeeded");
+            expect(status).toBe("finished");
             runId = null; // completed — nothing to cancel
         } finally {
-            if (runId) await cancelRunId(runId, gatewayPort);
+            await cancelLatestRun("e2e-approval-probe", testStartedAtMs, gatewayPort, iso.env);
             if (sessionId) {
                 await rpc("session.terminate", { sessionId }).catch(() => {});
             }
             await stop();
             await stopGatewayPort(gatewayPort);
+            iso.cleanup();
         }
     }, 300_000);
 });

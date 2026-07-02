@@ -365,9 +365,16 @@ export function buildNextStepsLines({ runId, workflowId, entryFile, uiExists }) 
     if (uiExists) {
         lines.push(`smithers ui ${runId}  (open this run in its custom UI)`);
     } else if (workflowId) {
-        lines.push(`smithers ui ${runId}  (open this run in the inspector; author .smithers/ui/${workflowId}.tsx for a custom UI)`);
+        // There is no generic run inspector behind `smithers ui <runId>`: the
+        // command fails NO_UI until a custom UI file exists. Lead with AUTHORING
+        // it, mirroring buildAgentNextSteps (agentNextSteps.js) so the two
+        // guidance surfaces cannot drift apart on this case again.
+        lines.push(`author .smithers/ui/${workflowId}.tsx with the smithers-orchestrator/gateway-react hooks, then open it with \`smithers ui ${runId}\``);
     } else {
-        lines.push(`smithers ui ${runId}  (open this run in the inspector)`);
+        // Without a workflow id we cannot name the UI file to author, and
+        // `smithers ui <runId>` would fail NO_UI — point at the full
+        // control-plane UI instead.
+        lines.push("smithers ui --app  (open the full Smithers control-plane UI)");
     }
     if (entryFile) lines.push(`smithers graph ${entryFile}  (visualize the workflow graph)`);
     lines.push(`smithers tree ${runId}  (inspect the run tree)`);
@@ -605,19 +612,72 @@ async function waitForOpenDbOrChild(from, opts, childFailure) {
     }
 }
 
-/** Poll until the run row exists (the detached run has begun writing). */
-export async function waitForRunRow(adapter, runId, timeoutMs, intervalMs, childFailure) {
+/**
+ * Poll until the run row exists (the detached run has begun writing).
+ *
+ * `spawnedAtMs` guards against a PRE-EXISTING row satisfying the wait: a
+ * user-supplied `--run-id` that collides with an old run makes the detached
+ * child die RUN_EXISTS (stderr goes only to the log file) while the stale row
+ * here would read as "started" — the launcher would then monitor the OLD run.
+ * When provided, a row only counts once its `createdAtMs` is at or after the
+ * child spawn time (same machine, same clock; the child inserts the row after
+ * it is spawned). Rows without a numeric `createdAtMs` are accepted as before:
+ * only a DEFINITELY stale timestamp is rejected.
+ */
+export async function waitForRunRow(adapter, runId, timeoutMs, intervalMs, childFailure, spawnedAtMs) {
+    const isFresh = (row) => {
+        if (!row) return false;
+        if (spawnedAtMs === undefined) return true;
+        const createdAtMs = /** @type {{ createdAtMs?: unknown }} */ (row).createdAtMs;
+        return typeof createdAtMs !== "number" || createdAtMs >= spawnedAtMs;
+    };
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
-        if (await adapter.getRun(runId)) return { appeared: true };
+        if (isFresh(await adapter.getRun(runId))) return { appeared: true };
         const elapsedMs = Date.now() - startedAt;
         const waited = await sleepOrChildFailure(Math.min(intervalMs, Math.max(0, timeoutMs - elapsedMs)), childFailure);
         if (waited?.error) {
-            if (await adapter.getRun(runId)) return { appeared: true };
+            if (isFresh(await adapter.getRun(runId))) return { appeared: true };
             return { appeared: false, error: waited.error };
         }
     }
     return { appeared: false };
+}
+
+/**
+ * Probe the workspace store for a run that already carries `runId`, so an
+ * interactive launch with an explicit `--run-id` can fail RUN_EXISTS up front
+ * (mirroring `up`'s own guard in index.js) instead of after spawning: the
+ * detached child's RUN_EXISTS death (exit 4) is visible only in the log file,
+ * while the pre-existing row would satisfy the run-row wait — without this
+ * probe the launcher declares the OLD run "started" and monitors it.
+ *
+ * Conservative on purpose: only a POSITIVE match blocks the launch. A missing
+ * store (fresh workspace, CLI_DB_NOT_FOUND) cannot collide, and any other
+ * probe failure defers to the existing spawn-path error handling rather than
+ * failing a launch the child might have survived.
+ *
+ * @param {string} runId
+ * @param {{ cwd?: string; backend?: string; openStore?: typeof openSmithersStore }} [opts] - `openStore` injectable for tests
+ * @returns {Promise<boolean>}
+ */
+export async function workspaceRunExists(runId, opts = {}) {
+    const openStore = opts.openStore ?? openSmithersStore;
+    let store;
+    try {
+        store = await openStore({ cwd: opts.cwd ?? process.cwd(), backend: opts.backend, mode: "read", wait: { timeoutMs: 0 } });
+    } catch {
+        return false;
+    }
+    try {
+        return Boolean(await store.adapter.getRun(runId));
+    } catch {
+        return false;
+    } finally {
+        try {
+            store.cleanup();
+        } catch { }
+    }
 }
 
 /**
@@ -634,6 +694,83 @@ function terminateDetachedChild(child) {
     try {
         child.kill("SIGTERM");
     } catch { }
+}
+
+/**
+ * Own user cancellation during the spawn→announcement window of the
+ * interactive launch, instead of leaving it to @clack/prompts.
+ *
+ * While the "Starting…" spinner runs, clack's block() holds stdin in RAW mode,
+ * so keyboard Ctrl-C never raises SIGINT: it arrives as a \x03 keypress that
+ * clack treats as a built-in cancel and answers with `process.exit(0)`. At
+ * that point the detached run child (own process group, unref'd) keeps
+ * executing — but the run id and log path have NOT been printed yet (they only
+ * render at the spinner's stop), so the cancel would strand a silently
+ * token-burning run discoverable only via `smithers ps`, while the launcher
+ * exits 0. An external `kill -INT`/`-TERM` misbehaves differently: clack's
+ * spinner handler prints "Canceled" and CONTINUES, opening the monitor moments
+ * later. So both delivery paths need explicit handling.
+ *
+ * Every failure path in this same window already tears the child down
+ * (terminateDetachedChild); these hooks make a user cancel honor the same
+ * contract:
+ *  - process "exit" (clack's raw-mode exit(0) delivers no signal): terminate
+ *    the child group synchronously and say what was stopped and where the
+ *    logs are, so the cancel is never silent.
+ *  - SIGINT/SIGTERM (external kills clack would swallow-and-continue past):
+ *    terminate, report, and exit with the conventional 130/143.
+ *
+ * `disarm()` removes every hook; the caller disarms once the launch leaves the
+ * window (the run is announced with its id + log path, or a failure branch
+ * already tore the child down), so a later cancel or monitor quit keeps the
+ * durable run alive as designed.
+ *
+ * The process/write/exit seams are injectable so tests can drive the hooks
+ * without killing the test runner.
+ *
+ * @param {{
+ *   runId: string;
+ *   logFile: string;
+ *   terminate: () => void;
+ *   write?: (line: string) => void;
+ *   exit?: (code: number) => void;
+ *   proc?: Pick<NodeJS.Process, "on" | "off">;
+ * }} opts
+ * @returns {{ disarm: () => void }}
+ */
+export function armLaunchCancellation({ runId, logFile, terminate, write, exit, proc }) {
+    const target = proc ?? process;
+    const writeLine = write ?? ((line) => process.stderr.write(line));
+    const exitWith = exit ?? ((code) => process.exit(code));
+    let armed = true;
+    // Disarm BEFORE terminating so re-entry (a signal handler exiting fires the
+    // "exit" hook too) can never double-kill or double-print.
+    const stop = () => {
+        if (!armed) return false;
+        disarm();
+        terminate();
+        writeLine(`\nRun ${runId} stopped · logs → ${logFile}\n`);
+        return true;
+    };
+    const onExit = () => {
+        stop();
+    };
+    const onSigint = () => {
+        if (stop()) exitWith(130);
+    };
+    const onSigterm = () => {
+        if (stop()) exitWith(143);
+    };
+    function disarm() {
+        armed = false;
+        target.off("exit", onExit);
+        target.off("SIGINT", onSigint);
+        target.off("SIGTERM", onSigterm);
+    }
+    target.on("exit", onExit);
+    target.on("SIGINT", onSigint);
+    target.on("SIGTERM", onSigterm);
+    return { disarm };
 }
 
 /**
@@ -825,11 +962,55 @@ export function includeFieldValue(value) {
 }
 
 /**
+ * Parse a free-text answer for an object/array-typed input field into its REAL
+ * value. The collected inputs are JSON.stringify'd into the detached child's
+ * `--input`, and the engine's run-input validation accepts strings for json
+ * columns — so a raw answer string would NOT be rejected anywhere downstream
+ * and would reach workflow code as the string '["a","b"]' instead of the array
+ * ["a","b"]: a mid-run TypeError (`.map` on a string) or garbage iteration
+ * (Object.entries over characters) with nothing pointing back at this prompt.
+ * Parsing at the prompt is the only place the mistake is visible and fixable.
+ *
+ * Shape-checks ONLY the unambiguous declarations (an array-only field must get
+ * an array, an object-only field a plain object); a union that also admits
+ * other types accepts any parsed JSON.
+ *
+ * @param {string} name - field name (for the re-prompt message)
+ * @param {string[]} types - the field's declared types (its `type` split on " | ")
+ * @param {string} rawText - the trimmed, non-empty prompt answer
+ * @returns {{ value: unknown } | { error: string }}
+ */
+export function parseJsonFieldValue(name, types, rawText) {
+    const wantsArray = types.includes("array");
+    const wantsObject = types.includes("object");
+    const example = wantsArray && !wantsObject ? '["a","b"]' : '{"key":"value"}';
+    let parsed;
+    try {
+        parsed = JSON.parse(rawText);
+    } catch {
+        // A union that ALSO admits a plain string keeps non-JSON text as-is —
+        // only pure object/array declarations demand JSON spelling.
+        if (types.includes("string")) return { value: rawText };
+        return { error: `Enter valid JSON for ${name} (e.g. ${example}).` };
+    }
+    const isPlainObject = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+    if (types.length === 1 && wantsArray && !Array.isArray(parsed)) {
+        return { error: `Enter a JSON array for ${name} (e.g. ${example}).` };
+    }
+    if (types.length === 1 && wantsObject && !isPlainObject) {
+        return { error: `Enter a JSON object for ${name} (e.g. ${example}).` };
+    }
+    return { value: parsed };
+}
+
+/**
  * Prompt for one input field with a clack control matched to its type, re-asking
  * (via clack's validate) until the value is valid. OPTIONAL enum/boolean fields
  * get a "(leave unset)" choice that returns {@link OMIT_FIELD} so absence stays
  * absence instead of being coerced (an optional enum forced to its first member,
- * an optional boolean forced to `false`).
+ * an optional boolean forced to `false`). Object/array fields are entered as
+ * JSON text and returned PARSED (see {@link parseJsonFieldValue}) so the value
+ * that reaches the workflow is real data, not its string spelling.
  *
  * @param {{ name: string; type: string; required: boolean; default?: unknown; enum?: unknown[]; description?: string }} field
  * @param {{ select: typeof select; confirm: typeof confirm; text: typeof text }} [prompts] - injectable clack controls (tests)
@@ -840,6 +1021,7 @@ export async function promptForField(field, prompts = { select, confirm, text })
     const isNumber = types.includes("number") || types.includes("integer");
     const isInteger = types.includes("integer");
     const isBoolean = types.includes("boolean");
+    const isJson = types.includes("object") || types.includes("array");
     const suffix = field.required ? "" : pc.dim(" (optional)");
     const message = `${field.name}${suffix}${field.description ? ` ${pc.dim(field.description)}` : ""}`;
     const skipOption = { value: OMIT_FIELD, label: pc.dim("(leave unset)") };
@@ -869,12 +1051,20 @@ export async function promptForField(field, prompts = { select, confirm, text })
     }
     const raw = await prompts.text({
         message,
-        placeholder: field.default !== undefined ? String(field.default) : undefined,
+        // A JSON-typed default must render as its JSON spelling — String({})
+        // would show the useless "[object Object]".
+        placeholder: field.default !== undefined
+            ? (isJson ? JSON.stringify(field.default) : String(field.default))
+            : undefined,
         validate: (value) => {
             const v = (value ?? "").trim();
             if (!v) {
                 if (field.required && field.default === undefined) return "Required.";
                 return undefined;
+            }
+            if (isJson) {
+                const parsed = parseJsonFieldValue(field.name, types, v);
+                return "error" in parsed ? parsed.error : undefined;
             }
             if (isInteger && !Number.isInteger(Number(v))) return `Enter a whole number for ${field.name}.`;
             if (isNumber && !Number.isFinite(Number(v))) return `Enter a number for ${field.name}.`;
@@ -884,6 +1074,13 @@ export async function promptForField(field, prompts = { select, confirm, text })
     if (isCancel(raw)) return raw;
     const v = (raw ?? "").trim();
     if (!v) return field.default;
+    if (isJson) {
+        // validate already guaranteed parseability; the fallthrough is defensive
+        // (a prompts implementation that skips validate still can't smuggle a
+        // raw string through as the field value).
+        const parsed = parseJsonFieldValue(field.name, types, v);
+        if ("value" in parsed) return parsed.value;
+    }
     return isNumber ? Number(v) : v;
 }
 
@@ -1057,8 +1254,8 @@ function launchTuiMonitor(tuiEntry, runId, cliIndexPath, gatewayUrl, backend, au
  * `error` event), so its race arm has an explicit rejection handler: rather than
  * letting a startup failure throw out of the structured failure path (as an
  * unhandled rejection) after the run already launched, it is folded into a
- * `{ monitorError }` outcome the caller can recover from (fall back to
- * `streamRun` so the still-running detached run stays observable).
+ * `{ monitorError }` outcome the caller reports loudly — while LEAVING the
+ * still-running detached run alive and observable (`smithers ps` / the log file).
  *
  * @param {{ exit: Promise<{ code: number | null; signal: NodeJS.Signals | null }>; terminate: () => void }} monitor
  * @param {Promise<Error>} childFailure
@@ -1079,9 +1276,9 @@ export async function superviseTuiMonitor(monitor, childFailure, adapter, runId)
     }
     if (outcome.kind === "monitor-error") {
         // The monitor process failed to START (e.g. `bun` missing / spawn error)
-        // AFTER the run already launched. Surface it as a recoverable monitor
+        // AFTER the run already launched. Surface it as a structured monitor
         // error — no unhandled rejection, single return path — so the caller can
-        // fall back to streamRun() and keep the running detached run observable.
+        // fail loudly while leaving the running detached run alive.
         return { monitorError: outcome.error };
     }
     // The detached run child exited while the monitor was up. Re-read the run
@@ -1103,6 +1300,57 @@ export async function superviseTuiMonitor(monitor, childFailure, adapter, runId)
     // Child died with the run still in flight — tear the monitor down and fail.
     monitor.terminate();
     return { error: outcome.error };
+}
+
+/**
+ * Failure descriptors for the two "the full-screen monitor cannot run" paths
+ * in runTuiCommand: the monitor child failed to start (spawn error), or its
+ * package (@smithers-orchestrator/tui) could not be resolved at all.
+ *
+ * Both happen AFTER the detached run launched, and the run is durable and
+ * still executing — so the launcher must NOT kill it. (An earlier version
+ * SIGTERM'd the run's whole process group on these paths while telling the
+ * user to reattach to it; commit 871e3d9e9a introduced the kill and the
+ * contradictory wording in the same change. The sibling monitor exit-code
+ * failure branches always left the run alive.) Neither path may suggest
+ * `smithers-mon` either: in the unresolvable case that bin belongs to the
+ * very package that failed to resolve, so it cannot be run. Point at
+ * surfaces that always work instead: `smithers ps` / `smithers inspect` and
+ * the run's log file.
+ *
+ * @param {Error} error
+ * @param {string} runId
+ * @param {string} logFile
+ */
+export function monitorStartFailure(error, runId, logFile) {
+    return {
+        code: "TUI_MONITOR_FAILED",
+        message:
+            `The run monitor failed to start: ${error?.message ?? String(error)}. ` +
+            `The run is still running detached; watch it with \`smithers ps\` / \`smithers inspect ${runId}\` or see ${logFile}.`,
+        exitCode: 1,
+        runId,
+        logFile,
+    };
+}
+
+/**
+ * See {@link monitorStartFailure} for why the run stays alive and why the
+ * guidance must not mention `smithers-mon`.
+ *
+ * @param {string} runId
+ * @param {string} logFile
+ */
+export function monitorUnavailableFailure(runId, logFile) {
+    return {
+        code: "TUI_MONITOR_UNAVAILABLE",
+        message:
+            "The run monitor package (@smithers-orchestrator/tui) could not be resolved, so the full-screen monitor can't launch. " +
+            `The run is still running detached; watch it with \`smithers ps\` / \`smithers inspect ${runId}\` or see ${logFile}.`,
+        exitCode: 1,
+        runId,
+        logFile,
+    };
 }
 
 /**
@@ -1373,6 +1621,11 @@ export function buildDetachedUpArgs(indexPath, entryFile, runId, inputs, options
     // a bare `-` even if a caller bypassed the parent validation.
     if (o.annotations && o.annotations !== "-") args.push("--annotations", String(o.annotations));
     if (o.backend) args.push("--backend", String(o.backend));
+    // `--no-post-failure` opts OUT of the default-on post-failure autopsy. The
+    // detached child re-parses its own argv with the default (true), so dropping
+    // the flag here would auto-launch the very background agent workflow the
+    // user disabled. Mirrors the non-interactive detach path (index.js).
+    if (o.postFailure === false) args.push("--no-post-failure");
     return args;
 }
 
@@ -1388,7 +1641,8 @@ export function buildDetachedUpArgs(indexPath, entryFile, runId, inputs, options
  * `upRunOptions` in index.js):
  *   FORWARD to the detached child (buildDetachedUpArgs): `--run-id`, `--root`,
  *     `--backend`, `--max-concurrency`, `--log`/`--no-log`, `--log-dir`,
- *     `--allow-network`, `--max-output-bytes`, `--tool-timeout-ms`, `--hot`.
+ *     `--allow-network`, `--max-output-bytes`, `--tool-timeout-ms`, `--hot`,
+ *     `--post-failure`/`--no-post-failure`.
  *   RESOLVE in the parent, never forwarded raw: `--input`/`--prompt` (parsed into
  *     the prompted inputs object; the `-` stdin sentinel is treated as no input),
  *     `--annotations` (validated by resolveInteractiveAnnotations; `-` rejected
@@ -1529,6 +1783,26 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
         });
     }
 
+    // The detached child, the launcher's store poll, and the monitor's gateway
+    // must all target the SAME backend the user selected with `--backend`.
+    const backend = (c.options && typeof c.options.backend === "string" && c.options.backend) || undefined;
+
+    // An explicit `--run-id` that already exists must fail HERE, before the
+    // picker/prompts and before spawning: the child's RUN_EXISTS death (exit 4)
+    // is visible only in the log file, and the pre-existing row would satisfy
+    // the run-row wait — the launcher would then declare the OLD run "started"
+    // and monitor it. Mirrors `up`'s own RUN_EXISTS guard (index.js).
+    const explicitRunId = (c.options && typeof c.options.runId === "string" && c.options.runId) || undefined;
+    if (explicitRunId && (await workspaceRunExists(explicitRunId, { cwd: process.cwd(), backend }))) {
+        return fail({
+            code: "RUN_EXISTS",
+            message:
+                `Run already exists: ${explicitRunId}. Interactive mode always starts a NEW run; ` +
+                `pick a fresh --run-id or resume non-interactively with smithers up <workflow> --resume ${explicitRunId}.`,
+            exitCode: 4,
+        });
+    }
+
     let workflow = opts.preselect ?? null;
     if (!workflow) {
         const workflows = discoverWorkflows().filter((w) => !w.system);
@@ -1584,13 +1858,10 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     // prompt covered are preserved.
     const inputs = mergeInteractiveInputs(suppliedInput, prompted);
 
-    // The detached child, the launcher's store poll, and the monitor's gateway
-    // must all target the SAME backend the user selected with `--backend`.
-    const backend = (c.options && typeof c.options.backend === "string" && c.options.backend) || undefined;
-
-    // Honor a user-supplied `--run-id`; otherwise generate one so the detached
-    // child and the monitor agree on which run to watch.
-    const runId = (c.options && typeof c.options.runId === "string" && c.options.runId) || `run-${Date.now().toString(36)}`;
+    // Honor a user-supplied `--run-id` (already probed for a collision above);
+    // otherwise generate one so the detached child and the monitor agree on
+    // which run to watch.
+    const runId = explicitRunId ?? `run-${Date.now().toString(36)}`;
     const name = workflow.displayName ?? workflow.id;
     const promptText = workflow.description ?? name;
 
@@ -1607,6 +1878,10 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     const logDir = (c.options && typeof c.options.logDir === "string" && c.options.logDir) || dirname(workflow.entryFile);
     const logFile = resolve(logDir, `${runId}.log`);
     let child;
+    // Taken just before spawn: the run row the child inserts can only carry a
+    // createdAtMs at or after this, so waitForRunRow can tell a fresh row from
+    // a pre-existing one that raced past the collision probe above.
+    const spawnedAtMs = Date.now();
     try {
         const fd = openSync(logFile, "a");
         try {
@@ -1636,43 +1911,56 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
     const childFailure = childFailurePromise(child);
     child.unref();
 
+    // From here until the run is ANNOUNCED (the spinner stop prints the run id
+    // and log path), a user cancel must tear the just-spawned child down like
+    // every failure branch in this window does — clack's spinner would instead
+    // swallow it (raw-mode Ctrl-C becomes process.exit(0); an external SIGINT
+    // prints "Canceled" and continues), stranding an unannounced run.
+    const cancellation = armLaunchCancellation({ runId, logFile, terminate: () => terminateDetachedChild(child) });
     let db;
     try {
-        const dbResult = await waitForOpenDbOrChild(process.cwd(), { timeoutMs: 20_000, intervalMs: 150, backend }, childFailure);
-        if (dbResult.error) {
-            throw dbResult.error;
+        try {
+            const dbResult = await waitForOpenDbOrChild(process.cwd(), { timeoutMs: 20_000, intervalMs: 150, backend }, childFailure);
+            if (dbResult.error) {
+                throw dbResult.error;
+            }
+            db = dbResult.db;
+        } catch (err) {
+            terminateDetachedChild(child);
+            s.stop(pc.red(`Could not open workspace DB: ${err?.message ?? err}`), 1);
+            return fail({
+                code: "TUI_DB_NOT_FOUND",
+                message: err?.message ?? String(err),
+                exitCode: 1,
+                runId,
+                logFile,
+            });
         }
-        db = dbResult.db;
-    } catch (err) {
-        terminateDetachedChild(child);
-        s.stop(pc.red(`Could not open workspace DB: ${err?.message ?? err}`), 1);
-        return fail({
-            code: "TUI_DB_NOT_FOUND",
-            message: err?.message ?? String(err),
-            exitCode: 1,
-            runId,
-            logFile,
-        });
-    }
 
-    s.message("Waiting for the run to start…");
-    const appeared = await waitForRunRow(db.adapter, runId, 20_000, 200, childFailure);
-    if (!appeared.appeared) {
-        terminateDetachedChild(child);
-        const message = appeared.error
-            ? `${appeared.error.message} See ${logFile}.`
-            : `Run ${runId} did not start within 20s. See ${logFile}.`;
-        s.stop(pc.red(message), 1);
-        db.cleanup();
-        return fail({
-            code: "TUI_RUN_DID_NOT_START",
-            message,
-            exitCode: 1,
-            runId,
-            logFile,
-        });
+        s.message("Waiting for the run to start…");
+        const appeared = await waitForRunRow(db.adapter, runId, 20_000, 200, childFailure, spawnedAtMs);
+        if (!appeared.appeared) {
+            terminateDetachedChild(child);
+            const message = appeared.error
+                ? `${appeared.error.message} See ${logFile}.`
+                : `Run ${runId} did not start within 20s. See ${logFile}.`;
+            s.stop(pc.red(message), 1);
+            db.cleanup();
+            return fail({
+                code: "TUI_RUN_DID_NOT_START",
+                message,
+                exitCode: 1,
+                runId,
+                logFile,
+            });
+        }
+        s.stop(`Run ${pc.dim(runId)} started ${pc.dim("·")} logs → ${pc.dim(logFile)}`);
+    } finally {
+        // The launch left the cancel-owned window: the run is either announced
+        // (id + log path printed, so a later quit keeps the durable run alive as
+        // designed) or a failure branch above already tore the child down.
+        cancellation.disarm();
     }
-    s.stop(`Run ${pc.dim(runId)} started ${pc.dim("·")} logs → ${pc.dim(logFile)}`);
 
     // An explicit `--auth-token` must reach the monitor's gateway client
     // (forwarded as SMITHERS_TOKEN); the TUI only reads --token/SMITHERS_TOKEN/
@@ -1698,16 +1986,11 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
             const supervised = await superviseTuiMonitor(monitor, childFailure, db.adapter, runId);
             if (supervised.monitorError) {
                 // No silent fallback: if the monitor can't start, fail loudly instead
-                // of reverting to the old inline stream. The detached run is still
-                // running — reattach with `smithers-mon <runId>` or read the log file.
-                terminateDetachedChild(child);
-                return fail({
-                    code: "TUI_MONITOR_FAILED",
-                    message: `The run monitor failed to start: ${supervised.monitorError.message}. Run started; reattach with \`smithers-mon ${runId}\` or see ${logFile}.`,
-                    exitCode: 1,
-                    runId,
-                    logFile,
-                });
+                // of reverting to the old inline stream. The detached run is durable
+                // and STILL RUNNING — leave it alone (killing it here would contradict
+                // this very message; the sibling monitor exit-code branches below
+                // leave it alive too) and point at `smithers ps`/`inspect` + the log.
+                return fail(monitorStartFailure(supervised.monitorError, runId, logFile));
             }
             if (supervised.error) {
                 return fail({
@@ -1776,15 +2059,11 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
         } else {
             // No silent fallback: the full-screen monitor is the interactive
             // experience. If its package (@smithers-orchestrator/tui) can't be
-            // resolved, fail loudly instead of quietly running the old inline stream.
-            terminateDetachedChild(child);
-            return fail({
-                code: "TUI_MONITOR_UNAVAILABLE",
-                message: `The run monitor package (@smithers-orchestrator/tui) could not be resolved, so the full-screen monitor can't launch. Run started; reattach with \`smithers-mon ${runId}\` or see ${logFile}.`,
-                exitCode: 1,
-                runId,
-                logFile,
-            });
+            // resolved, fail loudly instead of quietly running the old inline
+            // stream — but leave the durable detached run RUNNING (and never
+            // suggest `smithers-mon`, the bin of the very package that just
+            // failed to resolve).
+            return fail(monitorUnavailableFailure(runId, logFile));
         }
     } finally {
         db.cleanup();

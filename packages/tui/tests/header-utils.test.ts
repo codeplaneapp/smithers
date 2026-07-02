@@ -33,6 +33,16 @@ describe("statusDotColor", () => {
     expect(statusDotColor("canceled")).toBe("#888888");
     expect(statusDotColor("cancelled")).not.toBe(statusDotColor("failed"));
   });
+
+  it("treats waiting-quota (a real engine wait status) as amber paused, not unknown grey", () => {
+    // The engine parks quota-blocked runs with status "waiting-quota" (see
+    // packages/db DB_RUN_ALLOWED_STATUSES) — the flagship quota-resume path.
+    expect(statusDotColor("waiting-quota")).toBe("#ffaf00");
+  });
+
+  it("prefix-matches future waiting-* statuses so new engine wait states stay amber", () => {
+    expect(statusDotColor("waiting-webhook")).toBe("#ffaf00");
+  });
 });
 
 describe("runLiveLabel", () => {
@@ -41,6 +51,13 @@ describe("runLiveLabel", () => {
     expect(runLiveLabel("waiting-approval").text).toBe("paused");
     expect(runLiveLabel("succeeded").text).toBe("succeeded");
     expect(runLiveLabel("cancelled").text).toBe("cancelled");
+  });
+
+  it("labels every waiting-* status paused, including waiting-quota", () => {
+    expect(runLiveLabel("waiting-quota").text).toBe("paused");
+    expect(runLiveLabel("waiting-quota").color).toBe("#ffaf00");
+    expect(runLiveLabel("waiting-event").text).toBe("paused");
+    expect(runLiveLabel("waiting-timer").text).toBe("paused");
   });
 });
 

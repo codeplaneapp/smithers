@@ -1,7 +1,8 @@
 import { useState, useMemo, type ReactNode } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useRunTree } from "../data.ts";
-import { nodeGlyph, nodeGlyphColor } from "./treeUtils.ts";
+import { useOverlayOpen } from "../OverlayContext.tsx";
+import { nodeGlyph, nodeGlyphColor, isModifiedKeyEvent } from "./treeUtils.ts";
 import {
   computeGraphLayout,
   edgesForConnector,
@@ -132,8 +133,12 @@ export function GraphMode({
   const safeIdx =
     flatNodeKeys.length > 0 ? Math.min(selectedIdx, flatNodeKeys.length - 1) : 0;
   const selectedNodeKey = flatNodeKeys[safeIdx] ?? null;
+  const overlayOpen = useOverlayOpen();
 
   useKeyboard((e) => {
+    // Keys must not leak through an open help overlay, and ctrl/meta chords
+    // are not graph bindings.
+    if (overlayOpen || isModifiedKeyEvent(e)) return;
     const key = e.name;
     if (key === "j" || key === "down") {
       setSelectedIdx((i) => Math.min(i + 1, Math.max(0, flatNodeKeys.length - 1)));

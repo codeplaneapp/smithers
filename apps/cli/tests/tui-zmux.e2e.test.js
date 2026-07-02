@@ -22,6 +22,8 @@ import {
     gatewayRpc,
     stopGatewayPort,
     cancelVisibleRun,
+    cancelLatestRun,
+    isolatedGatewayEnv,
     navigateToWorkflow,
     paneDriver,
 } from "./zmux-harness.js";
@@ -35,7 +37,8 @@ const AGENT_HARNESS = Boolean(process.env.CLAUDECODE || process.env.CLAUDE_CODE_
 // the `bun run cli` script). With no workflow argument it opens the picker.
 const TUI_COMMAND = "bun apps/cli/src/index.js up --interactive";
 
-const commandForGatewayPort = (port) => `env SMITHERS_GATEWAY_PORT=${port} ${TUI_COMMAND}`;
+// Each test gets an isolated singleton-gateway state dir (see isolatedGatewayEnv).
+const interactiveCommand = (iso) => `${iso.pane}${TUI_COMMAND}`;
 
 describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux PTY", () => {
     test("renders the workflow picker without wrapped ghost rows", async () => {
@@ -43,12 +46,13 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
         const rows = 20;
         const { rpc, stop } = await startDaemon(ZMUXD, { prefix: "zmx-smithers-tui" });
         const gatewayPort = await freePort();
+        const iso = isolatedGatewayEnv(gatewayPort);
         let sessionId;
         try {
             await rpc("daemon.ping", {});
 
             const created = await rpc("session.create", {
-                command: commandForGatewayPort(gatewayPort),
+                command: interactiveCommand(iso),
                 cwd: REPO_ROOT,
                 cols,
                 rows,
@@ -92,6 +96,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             }
             await stop();
             await stopGatewayPort(gatewayPort);
+            iso.cleanup();
         }
     }, 30_000);
 
@@ -100,10 +105,11 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
         const rows = 20;
         const { rpc, stop } = await startDaemon(ZMUXD, { prefix: "zmx-smithers-tui-filter" });
         const gatewayPort = await freePort();
+        const iso = isolatedGatewayEnv(gatewayPort);
         let sessionId;
         try {
             const created = await rpc("session.create", {
-                command: commandForGatewayPort(gatewayPort),
+                command: interactiveCommand(iso),
                 cwd: REPO_ROOT,
                 cols,
                 rows,
@@ -137,6 +143,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             }
             await stop();
             await stopGatewayPort(gatewayPort);
+            iso.cleanup();
         }
     }, 30_000);
 
@@ -145,10 +152,11 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
         const rows = 24;
         const { rpc, stop } = await startDaemon(ZMUXD, { prefix: "zmx-smithers-tui-in" });
         const gatewayPort = await freePort();
+        const iso = isolatedGatewayEnv(gatewayPort);
         let sessionId;
         try {
             const created = await rpc("session.create", {
-                command: commandForGatewayPort(gatewayPort),
+                command: interactiveCommand(iso),
                 cwd: REPO_ROOT,
                 cols,
                 rows,
@@ -208,6 +216,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             }
             await stop();
             await stopGatewayPort(gatewayPort);
+            iso.cleanup();
         }
     }, 60_000);
 
@@ -217,10 +226,11 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
         const testStartedAtMs = Date.now();
         const { rpc, stop } = await startDaemon(ZMUXD, { prefix: "zmx-smithers-tui-ap", idleSeconds: 180 });
         const gatewayPort = await freePort();
+        const iso = isolatedGatewayEnv(gatewayPort);
         let sessionId;
         try {
             const created = await rpc("session.create", {
-                command: commandForGatewayPort(gatewayPort),
+                command: interactiveCommand(iso),
                 cwd: REPO_ROOT,
                 cols,
                 rows,
@@ -269,11 +279,16 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             expect(reached).toBe(true);
             expect(approvalShown).toBe(true);
         } finally {
+            // Cancel via listRuns BEFORE tearing the gateway down: an assertion
+            // that threw before cancelVisibleRun ran would otherwise strand the
+            // parked run in the workspace store forever.
+            await cancelLatestRun("e2e-approval-probe", testStartedAtMs, gatewayPort, iso.env);
             if (sessionId) {
                 await rpc("session.terminate", { sessionId }).catch(() => {});
             }
             await stop();
             await stopGatewayPort(gatewayPort);
+            iso.cleanup();
         }
     }, 180_000);
 
@@ -283,10 +298,11 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
         const testStartedAtMs = Date.now();
         const { rpc, stop } = await startDaemon(ZMUXD, { prefix: "zmx-smithers-tui-human", idleSeconds: 180 });
         const gatewayPort = await freePort();
+        const iso = isolatedGatewayEnv(gatewayPort);
         let sessionId;
         try {
             const created = await rpc("session.create", {
-                command: commandForGatewayPort(gatewayPort),
+                command: interactiveCommand(iso),
                 cwd: REPO_ROOT,
                 cols,
                 rows,
@@ -329,11 +345,13 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             }
             expect(status).toBe("waiting-approval");
         } finally {
+            await cancelLatestRun("e2e-ask-human-probe", testStartedAtMs, gatewayPort, iso.env);
             if (sessionId) {
                 await rpc("session.terminate", { sessionId }).catch(() => {});
             }
             await stop();
             await stopGatewayPort(gatewayPort);
+            iso.cleanup();
         }
     }, 180_000);
 });

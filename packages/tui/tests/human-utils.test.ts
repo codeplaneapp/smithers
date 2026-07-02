@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import type { GatewayRunNode, GatewayApprovalRow } from "@smithers-orchestrator/gateway-client";
 import { snapshotToGatewayRunNode } from "@smithers-orchestrator/gateway-client";
-import { isHumanTaskNode, buildHumanRequestUi } from "../src/modes/humanUtils.ts";
+import { isHumanTaskNode, buildHumanRequestUi, mayAwaitHumanInput } from "../src/modes/humanUtils.ts";
 
 function node(overrides: Partial<GatewayRunNode> = {}): GatewayRunNode {
   return { id: "ask", name: "ask-human", kind: "human", status: "waiting", iteration: 0, ...overrides };
@@ -47,13 +47,45 @@ describe("buildHumanRequestUi", () => {
     expect(ui).toEqual({ title: "collect-input", prompt: undefined, runId: "run-1" });
   });
 
-  it("returns null when the human node is no longer waiting", () => {
-    expect(buildHumanRequestUi(node({ status: "done" }), approval(), "run-1")).toBeNull();
+  it("shows the banner for a pending request even when the derived status is not waiting", () => {
+    // The pending approval row is authoritative (listApprovals returns only
+    // status='requested' rows). A HumanTask parked while a parallel sibling
+    // still runs leaves run.status "running", so the node derives "queued" —
+    // it must STILL get the CLI-guidance banner, not approve/deny controls
+    // whose one keystroke would strand or fail the task.
+    const queued = buildHumanRequestUi(node({ status: "queued" }), approval(), "run-1");
+    expect(queued).not.toBeNull();
+    expect(queued!.title).toBe("Need a value");
+    // Same for a stale derived status: the row wins.
+    expect(buildHumanRequestUi(node({ status: "done" }), approval(), "run-1")).not.toBeNull();
+    expect(buildHumanRequestUi(node({ status: "running" }), approval(), "run-1")).not.toBeNull();
+  });
+
+  it("returns null for a settled human node WITHOUT a pending request row", () => {
+    expect(buildHumanRequestUi(node({ status: "done" }), undefined, "run-1")).toBeNull();
+    expect(buildHumanRequestUi(node({ status: "queued" }), undefined, "run-1")).toBeNull();
   });
 
   it("falls back the title to the node name when the request has no title", () => {
     const ui = buildHumanRequestUi(node({ name: "collect-input" }), approval({ requestTitle: undefined }), "run-1");
     expect(ui!.title).toBe("collect-input");
+  });
+});
+
+describe("mayAwaitHumanInput", () => {
+  it("is true for human nodes in any non-settled status (waiting, queued, running)", () => {
+    expect(mayAwaitHumanInput(node({ status: "waiting" }))).toBe(true);
+    expect(mayAwaitHumanInput(node({ status: "queued" }))).toBe(true);
+    expect(mayAwaitHumanInput(node({ status: "running" }))).toBe(true);
+  });
+
+  it("is false for settled human nodes and non-human nodes", () => {
+    expect(mayAwaitHumanInput(node({ status: "done" }))).toBe(false);
+    expect(mayAwaitHumanInput(node({ status: "failed" }))).toBe(false);
+    expect(mayAwaitHumanInput(node({ status: "cancelled" }))).toBe(false);
+    expect(mayAwaitHumanInput(node({ kind: "approval", status: "waiting" }))).toBe(false);
+    expect(mayAwaitHumanInput(null)).toBe(false);
+    expect(mayAwaitHumanInput(undefined)).toBe(false);
   });
 });
 

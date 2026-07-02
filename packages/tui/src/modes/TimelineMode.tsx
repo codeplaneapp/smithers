@@ -10,7 +10,10 @@ import {
   nodeStatusGlyph,
   nodeStatusColor,
   snapshotKey,
+  unwrapEvent,
 } from "./timelineUtils.ts";
+import { isModifiedKeyEvent } from "./treeUtils.ts";
+import { useOverlayOpen } from "../OverlayContext.tsx";
 
 const COMPACT_WIDTH = 100;
 
@@ -48,11 +51,13 @@ function TickStrip({
 
   return (
     <box width="100%" height={3} flexDirection="column">
-      {/* Info row: position + selected event name */}
+      {/* Info row: position + selected event name. Unwrap the gateway's
+          `run.event` envelope — every live-streamed frame's outer `event` is the
+          literal string "run.event"; the engine event name lives inside. */}
       <box width="100%" height={1} flexDirection="row">
         <text fg="#444444">{`  frame ${selectedIdx + 1}/${events.length}`}</text>
         {selEvent ? (
-          <text fg="#555555">{`  seq:${selEvent.seq}  ${selEvent.event}`}</text>
+          <text fg="#555555">{`  seq:${selEvent.seq}  ${unwrapEvent(selEvent).name}`}</text>
         ) : null}
       </box>
 
@@ -148,6 +153,7 @@ export function TimelineView({
 }) {
   const { width } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
+  const overlayOpen = useOverlayOpen();
 
   // selectedIdx = -1 means "live" (show latest frame)
   const [selectedIdx, setSelectedIdx] = useState(-1);
@@ -163,6 +169,9 @@ export function TimelineView({
   const selectedEvent = events[safeIdx];
 
   useKeyboard((e) => {
+    // Keys must not leak through an open help overlay, and ctrl/meta chords
+    // (Ctrl-K etc.) are not scrub bindings.
+    if (overlayOpen || isModifiedKeyEvent(e)) return;
     const key = e.name;
     if (key === "j" || key === "right") {
       setSelectedIdx((prev) => {
@@ -177,7 +186,11 @@ export function TimelineView({
         const cur = prev < 0 ? events.length - 1 : prev;
         return Math.max(0, cur - 1);
       });
-    } else if (key === "L") {
+    } else if (key === "l" && e.shift) {
+      // Shift+L = back to live. parseKeypress lowercases shifted letters
+      // (raw "L" and kitty CSI both arrive as { name: "l", shift: true }), so
+      // matching the literal name "L" would be dead code — and App.tsx's bare
+      // `l` Logs alias is shift-guarded so this binding can be reached at all.
       setSelectedIdx(-1);
     }
   });

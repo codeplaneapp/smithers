@@ -1,20 +1,25 @@
 /**
  * Shape a gateway `getNodeDiff` payload into something the Diff tab can render.
  *
- * The gateway returns either a full `DiffBundle` (`{ seq, baseRef, patches:
- * [{ path, operation, diff }] }`, where each `diff` is unified-diff text) or a
- * stat-only payload (`{ seq, baseRef, summary: { filesChanged, added, removed,
- * files } }`) when the full bundle is too large. This normalizes both — plus the
- * "nothing changed / unavailable" cases — into a small view model so the
- * presentational component stays dumb and is trivially testable.
+ * The gateway returns a full `DiffBundle` (`{ seq, baseRef, patches:
+ * [{ path, operation, diff, binaryContent? }] }`, where each `diff` is the raw
+ * `git diff --binary` chunk). A stat-only payload (`{ seq, baseRef, summary:
+ * { filesChanged, added, removed, files } }`) is also normalized for callers
+ * that request `--stat` shapes (the in-process CLI does; the gateway RPC does
+ * NOT fall back to it automatically — an oversized bundle surfaces as a
+ * DiffTooLarge RPC error instead, which callers must pass in as `error`).
+ * This normalizes those — plus the RPC-error and "nothing changed /
+ * unavailable" cases — into a small view model so the presentational component
+ * stays dumb and is trivially testable.
  */
 
 export type NodeDiffView =
   | { kind: "patch"; unified: string; summary: string }
   | { kind: "stat"; summary: string; files: string }
+  | { kind: "error"; message: string }
   | { kind: "empty"; message: string };
 
-type FilePatch = { path?: unknown; operation?: unknown; diff?: unknown };
+type FilePatch = { path?: unknown; operation?: unknown; diff?: unknown; binaryContent?: unknown };
 type DiffSummaryFile = { path?: unknown; added?: unknown; removed?: unknown };
 
 function asNumber(value: unknown): number {
@@ -22,9 +27,30 @@ function asNumber(value: unknown): number {
 }
 
 /**
- * @param payload  The raw `getNodeDiff` RPC payload (or undefined while loading).
+ * Matches the two shapes `git diff --binary` emits for binary files (the same
+ * detection the engine's diff-bundle uses). Such chunks carry base85-encoded
+ * literal data — potentially megabytes of it — which must never be rendered as
+ * if it were a unified diff.
  */
-export function toNodeDiffView(payload: unknown): NodeDiffView {
+const BINARY_PATCH_RE = /(^GIT binary patch$)|(^Binary files )/m;
+
+function isBinaryPatch(patch: FilePatch, diffText: string): boolean {
+  if (typeof patch.binaryContent === "string" && patch.binaryContent.length > 0) return true;
+  return BINARY_PATCH_RE.test(diffText);
+}
+
+/**
+ * @param payload  The raw `getNodeDiff` RPC payload (or undefined while loading).
+ * @param error    The RPC error, if the request failed. Surfaced as a distinct
+ *                 `error` view — a failed request (DiffTooLarge, dirty working
+ *                 tree, gateway down, …) must NOT masquerade as the factually
+ *                 different "No diff available".
+ */
+export function toNodeDiffView(payload: unknown, error?: Error | null): NodeDiffView {
+  if (error) {
+    const message = error.message.trim().length > 0 ? error.message : "diff request failed";
+    return { kind: "error", message };
+  }
   if (!payload || typeof payload !== "object") {
     return { kind: "empty", message: "No diff available for this node." };
   }
@@ -41,14 +67,20 @@ export function toNodeDiffView(payload: unknown): NodeDiffView {
       .map((p) => {
         const path = typeof p.path === "string" ? p.path : "(unknown)";
         const op = typeof p.operation === "string" ? p.operation : "modify";
-        return `# ${op} ${path}\n${(p.diff as string).replace(/\n$/, "")}`;
+        const diffText = p.diff as string;
+        // Binary patches are base85 payloads, not human-readable diffs —
+        // collapse them to a one-line marker (still counted in the summary).
+        if (isBinaryPatch(p, diffText)) {
+          return `# ${op} ${path}\n(binary file changed)`;
+        }
+        return `# ${op} ${path}\n${diffText.replace(/\r?\n$/, "")}`;
       })
       .join("\n");
     const noun = withText.length === 1 ? "file" : "files";
     return { kind: "patch", unified, summary: `${withText.length} ${noun} changed` };
   }
 
-  // Stat-only payload (bundle too large): render the summary + per-file counts.
+  // Stat-only payload: render the summary + per-file counts.
   const summaryRaw = rec["summary"];
   if (summaryRaw && typeof summaryRaw === "object") {
     const s = summaryRaw as Record<string, unknown>;

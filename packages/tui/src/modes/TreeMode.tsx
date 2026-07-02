@@ -12,6 +12,9 @@ import {
   nodeChevron,
   defaultTab,
   eventKeyName,
+  isModifiedKeyEvent,
+  treeScrollWindow,
+  resolveFocusIdx,
   ALL_TABS,
   type FlatNode,
   type TabId,
@@ -19,6 +22,7 @@ import {
 import {
   approvalModeOf,
   approvalOptionsOf,
+  approvalOptionWindow,
   modeHasOptions,
   buildApprovalDecision,
   runApprovalSubmit,
@@ -33,8 +37,9 @@ import {
   type ApprovalDecision,
   type ApprovalKeyAction,
 } from "./approvalUtils.ts";
-import { buildHumanRequestUi, type HumanRequestUiState } from "./humanUtils.ts";
+import { buildHumanRequestUi, mayAwaitHumanInput, type HumanRequestUiState } from "./humanUtils.ts";
 import { toNodeDiffView, type NodeDiffView } from "./diffUtils.ts";
+import { useOverlayOpen } from "../OverlayContext.tsx";
 
 /**
  * Everything the inspector needs to render a pending approval and its controls.
@@ -72,8 +77,20 @@ const MAX_OPTION_ROWS = 6;
 function ApprovalBanner({ approval }: { approval: ApprovalUiState }) {
   const { title, summary, mode, options, selectedKey, busy, error } = approval;
   const showOptions = modeHasOptions(mode);
+  // Window the rendered options around the highlighted one: `[`/`]` cycle
+  // through ALL options, so a fixed 0-based slice would let the selection walk
+  // off-screen (an invisible pick submitted on [a]). When the list overflows,
+  // one row of the budget becomes a "+N more" indicator for select AND rank
+  // (rank submits every option, so hidden entries must be announced).
+  const selectedIdx =
+    mode === "select" && selectedKey !== null
+      ? Math.max(0, options.findIndex((o) => o.key === selectedKey))
+      : 0;
+  const win = showOptions
+    ? approvalOptionWindow(options.length, selectedIdx, MAX_OPTION_ROWS)
+    : { start: 0, end: 0, hiddenCount: 0 };
   const optionRows = showOptions ? Math.min(options.length, MAX_OPTION_ROWS) : 0;
-  // border(2) + title(1) + summary/error(1) + options + controls(1)
+  // border(2) + title(1) + summary/error(1) + options (window + indicator) + controls(1)
   const height = 5 + optionRows;
 
   const controls = (() => {
@@ -103,9 +120,12 @@ function ApprovalBanner({ approval }: { approval: ApprovalUiState }) {
         <text fg="#555555">{"   awaiting your decision"}</text>
       )}
       {showOptions
-        ? options.slice(0, MAX_OPTION_ROWS).map((opt, i) => {
+        ? options.slice(win.start, win.end).map((opt, i) => {
+            const absIdx = win.start + i;
             const isSel = mode === "select" && opt.key === selectedKey;
-            const prefix = mode === "rank" ? `${i + 1}.` : isSel ? "›" : " ";
+            // Rank numbering uses the ABSOLUTE position so a scrolled window
+            // still shows the true submitted order.
+            const prefix = mode === "rank" ? `${absIdx + 1}.` : isSel ? "›" : " ";
             return (
               <box key={opt.key} width="100%" height={1} flexDirection="row">
                 <text fg={isSel ? "#ffaf00" : "#888888"}>{`   ${prefix} `}</text>
@@ -114,6 +134,11 @@ function ApprovalBanner({ approval }: { approval: ApprovalUiState }) {
             );
           })
         : null}
+      {showOptions && win.hiddenCount > 0 ? (
+        <box width="100%" height={1}>
+          <text fg="#555555">{`   … +${win.hiddenCount} more (showing ${win.start + 1}-${win.end} of ${options.length})`}</text>
+        </box>
+      ) : null}
       <box width="100%" height={1}>
         <text fg={busy ? "#ffaf00" : "#888888"}>{controls}</text>
       </box>
@@ -170,12 +195,45 @@ function TabBar({ activeTab }: { activeTab: TabId }) {
 
 // ─── Node Inspector (presentational) ──────────────────────────────────────────
 
-function deriveOutputText(outputData: unknown, node: GatewayRunNode): string {
+/** Pull the human-readable output string out of an output-row object. */
+function rowOutputText(row: Record<string, unknown>): string | undefined {
+  if (typeof row["output"] === "string") return row["output"];
+  if (typeof row["text"] === "string") return row["text"];
+  if (typeof row["content"] === "string") return row["content"];
+  return undefined;
+}
+
+/**
+ * Derive the Output tab's text from the raw `getNodeOutput` RPC payload, which
+ * is ALWAYS the envelope `{ status: produced|pending|failed, row, schema,
+ * partial? }` (see the server's getNodeOutput route) — the node's actual output
+ * lives at `row.output`, so the envelope must be unwrapped or the tab shows the
+ * whole thing (schema descriptor included) as JSON with the real output buried
+ * inside as one escaped string. Non-envelope objects keep the plain
+ * string-field fallbacks for older/looser payloads. Exported for tests.
+ */
+export function deriveOutputText(outputData: unknown, node: GatewayRunNode): string {
   if (outputData && typeof outputData === "object") {
     const d = outputData as Record<string, unknown>;
-    if (typeof d["output"] === "string") return d["output"];
-    if (typeof d["text"] === "string") return d["text"];
-    if (typeof d["content"] === "string") return d["content"];
+    const status = d["status"];
+    if ("row" in d && (status === "produced" || status === "pending" || status === "failed")) {
+      const row = d["row"];
+      if (row && typeof row === "object") {
+        const text = rowOutputText(row as Record<string, unknown>);
+        return text ?? JSON.stringify(row, null, 2);
+      }
+      if (status === "pending") return "(no output yet)";
+      if (status === "failed") {
+        const partial = d["partial"];
+        return partial === undefined || partial === null
+          ? "(failed, no output)"
+          : `(failed) partial output:\n${JSON.stringify(partial, null, 2)}`;
+      }
+      return "(no output)";
+    }
+    // Defensive fallback for non-envelope payloads.
+    const text = rowOutputText(d);
+    if (text !== undefined) return text;
     return JSON.stringify(d, null, 2);
   }
   if (node.output) return String(node.output);
@@ -262,6 +320,11 @@ export function NodeInspectorView({
                 <text fg="#888888">{`  ${diff.summary}`}</text>
                 <code width="100%" content={diff.files} syntaxStyle={style} wrapMode="char" />
               </box>
+            ) : diff.kind === "error" ? (
+              // A failed RPC (DiffTooLarge, dirty working tree, gateway down…)
+              // is NOT "no diff" — surface it distinctly so the operator knows
+              // a diff may exist but could not be fetched.
+              <text fg="#ff5f5f" wrapMode="char">{`  Diff unavailable: ${diff.message}`}</text>
             ) : (
               <text fg="#444444">{`  ${diff.message}`}</text>
             )}
@@ -296,7 +359,9 @@ function NodeInspector({
   const { data: outputData } = useNodeOutput({ runId, nodeId: node?.id, iteration: node?.iteration });
   // Only the Diff tab needs the (potentially expensive) node diff; gate the RPC
   // on it so switching nodes/tabs doesn't fetch diffs nobody is looking at.
-  const { data: diffData, loading: diffLoading } = useNodeDiff({
+  // The error is threaded into the view — a failed getNodeDiff must not
+  // masquerade as "No diff available".
+  const { data: diffData, loading: diffLoading, error: diffError } = useNodeDiff({
     runId,
     nodeId: activeTab === "diff" ? node?.id : undefined,
     iteration: node?.iteration,
@@ -337,7 +402,7 @@ function NodeInspector({
       outputText={outputText}
       nodeLogs={nodeLogs}
       propsText={propsText}
-      diff={toNodeDiffView(diffData)}
+      diff={toNodeDiffView(diffData, diffError)}
       diffLoading={activeTab === "diff" && diffLoading}
       approval={approval}
       humanRequest={humanRequest}
@@ -347,27 +412,41 @@ function NodeInspector({
 
 // ─── Tree Panel ───────────────────────────────────────────────────────────────
 
-function TreePanel({
+/**
+ * Presentational tree pane. Renders a SCROLL WINDOW of the flat rows that
+ * follows `focusIdx` (see treeScrollWindow): a scrollbox never self-scrolls
+ * without the renderer focus system, so j/k past the pane height used to walk
+ * the highlight off-screen with no way to bring it back into view. `paneRows`
+ * is the pane's height in rows; the window keeps the focused row visible with
+ * context on both sides. Exported so render tests can drive the REAL pane with
+ * an overflowing list.
+ */
+export function TreePanel({
   flat,
   focusIdx,
   panelWidth,
+  paneRows,
 }: {
   flat: FlatNode[];
   focusIdx: number;
   panelWidth: number;
+  paneRows: number;
 }) {
   if (flat.length === 0) {
     return (
-      <scrollbox width="100%" height="100%">
+      <box width="100%" height="100%">
         <text fg="#444444">{"  (no nodes)"}</text>
-      </scrollbox>
+      </box>
     );
   }
 
+  const { start, end } = treeScrollWindow(flat.length, paneRows, focusIdx);
+
   return (
-    <scrollbox width="100%" height="100%" scrollY>
-      {flat.map(({ node, depth, hasChildren, isCollapsed }, i) => {
-        const isFocused = i === focusIdx;
+    <box width="100%" height="100%" flexDirection="column">
+      {flat.slice(start, end).map(({ node, depth, hasChildren, isCollapsed }, i) => {
+        const absIdx = start + i;
+        const isFocused = absIdx === focusIdx;
         const chevron = nodeChevron(hasChildren, isCollapsed);
         const glyph = nodeGlyph(node.status ?? "");
         const glyphColor = nodeGlyphColor(node.status ?? "");
@@ -395,7 +474,7 @@ function TreePanel({
           </box>
         );
       })}
-    </scrollbox>
+    </box>
   );
 }
 
@@ -411,15 +490,40 @@ export function TreeMode({
   const { root, nodes, isLoading, error } = useRunTree(runId);
   const { data: approvalsData, refetch: refetchApprovals } = useApprovals(runId);
   const actions = useActions();
-  const { width } = useTerminalDimensions();
+  const { width, height } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
+  const overlayOpen = useOverlayOpen();
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [focusIdx, setFocusIdx] = useState(0);
+  // Selection is anchored by node KEY, not by index: the flat list is rebuilt
+  // live (loop/retry attempts insert rows, rewind/reconnect delete them), so a
+  // bare index silently drifts onto a different node as rows shift. The row
+  // index is DERIVED each render (resolveFocusIdx); when the anchored node
+  // disappears, the last known index — clamped in range — takes over so `k`
+  // responds immediately after a shrink.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [focusPane, setFocusPane] = useState<"tree" | "inspector">("tree");
   const [activeTab, setActiveTab] = useState<TabId>("props");
 
   const flat = useMemo(() => flattenTree(nodes, root, collapsed), [nodes, root, collapsed]);
+
+  const lastFocusIdxRef = useRef(0);
+  const focusIdx = useMemo(
+    () => resolveFocusIdx(flat, selectedKey, lastFocusIdxRef.current),
+    [flat, selectedKey],
+  );
+  useEffect(() => {
+    lastFocusIdxRef.current = focusIdx;
+  }, [focusIdx]);
+
+  /** Anchor the selection to a concrete row (no-op for out-of-range indices). */
+  const focusRow = useCallback(
+    (idx: number) => {
+      const row = flat[idx];
+      if (row) setSelectedKey(runNodeKey(row.node));
+    },
+    [flat],
+  );
 
   // When switching from Graph mode with a selected node, focus it — but only
   // once per selection. Reruns when `flat` changes so it still focuses if the
@@ -432,13 +536,12 @@ export function TreeMode({
     // Graph mode hands us a row `key` (unique per attempt), so match on `key`.
     const idx = flat.findIndex((f) => runNodeKey(f.node) === initialSelectedNodeKey);
     if (idx >= 0) {
-      setFocusIdx(idx);
+      setSelectedKey(initialSelectedNodeKey);
       focusedSelectionRef.current = initialSelectedNodeKey;
     }
   }, [initialSelectedNodeKey, flat]);
 
-  const safeIdx = flat.length > 0 ? Math.min(focusIdx, flat.length - 1) : 0;
-  const focusedNode = flat[safeIdx]?.node ?? null;
+  const focusedNode = flat[focusIdx]?.node ?? null;
 
   // Guards setState in async approval continuations that can resolve after a
   // mode switch unmounts this component.
@@ -469,9 +572,13 @@ export function TreeMode({
   const nodeApproval = selectNodeApproval(approvals, focusedNode, resolvedKeys);
 
   useEffect(() => {
+    // Human-kind nodes can hold a pending request while the run itself is still
+    // "running" (a parallel sibling keeps it un-parked), deriving a
+    // non-"waiting" status like "queued" — so poll for their rows whenever the
+    // node isn't settled (mayAwaitHumanInput), not just on "waiting".
     const waitsOnApproval =
-      focusedNode?.status === "waiting" &&
-      (focusedNode.kind === "approval" || focusedNode.kind === "human");
+      (focusedNode?.kind === "approval" && focusedNode.status === "waiting") ||
+      mayAwaitHumanInput(focusedNode);
     if (!waitsOnApproval || nodeApproval) return;
     let cancelled = false;
     const refetch = () => {
@@ -635,6 +742,11 @@ export function TreeMode({
     : null;
 
   useKeyboard((e) => {
+    // Keys must not leak through an open help overlay, and ctrl/meta chords
+    // must never reach the routing below: parseKeypress maps Ctrl-D to
+    // { name: "d", ctrl: true }, so an unguarded handler would let a reflexive
+    // Ctrl-D DENY (and Ctrl-A approve) a pending gate in one keystroke.
+    if (overlayOpen || isModifiedKeyEvent(e)) return;
     const key = eventKeyName(e);
 
     if (key === "tab") {
@@ -685,11 +797,11 @@ export function TreeMode({
 
     if (focusPane === "tree") {
       if (key === "j" || key === "down") {
-        setFocusIdx((i) => Math.min(i + 1, Math.max(0, flat.length - 1)));
+        focusRow(Math.min(focusIdx + 1, Math.max(0, flat.length - 1)));
       } else if (key === "k" || key === "up") {
-        setFocusIdx((i) => Math.max(i - 1, 0));
+        focusRow(Math.max(focusIdx - 1, 0));
       } else if (key === "space") {
-        const item = flat[safeIdx];
+        const item = flat[focusIdx];
         if (item?.hasChildren) {
           // Collapse state is keyed by the unique row `key` (matches flattenTree),
           // so two attempts of the same logical node fold independently.
@@ -725,11 +837,18 @@ export function TreeMode({
 
   const treePanelWidth = Math.floor(width * 0.38);
 
+  // The tree pane's height in rows drives its scroll window: the mode body is
+  // the terminal minus the header (1) and keybar (1); compact mode stacks the
+  // tree above the inspector at half that. Passed explicitly (not "50%") so the
+  // window math and the layout can't disagree by a rounding row.
+  const bodyRows = Math.max(3, height - 2);
+  const paneRows = compact ? Math.max(3, Math.floor(bodyRows / 2)) : bodyRows;
+
   if (compact) {
     return (
       <box width="100%" height="100%" flexDirection="column">
-        <box width="100%" height="50%">
-          <TreePanel flat={flat} focusIdx={safeIdx} panelWidth={Math.floor(width * 0.5)} />
+        <box width="100%" height={paneRows}>
+          <TreePanel flat={flat} focusIdx={focusIdx} panelWidth={Math.floor(width * 0.5)} paneRows={paneRows} />
         </box>
         <box width="100%" flexGrow={1}>
           <NodeInspector
@@ -747,7 +866,7 @@ export function TreeMode({
   return (
     <box width="100%" height="100%" flexDirection="row">
       <box width="38%" height="100%" border={["right"]} borderColor="#333333">
-        <TreePanel flat={flat} focusIdx={safeIdx} panelWidth={treePanelWidth} />
+        <TreePanel flat={flat} focusIdx={focusIdx} panelWidth={treePanelWidth} paneRows={paneRows} />
       </box>
       <box width="62%" height="100%">
         <NodeInspector

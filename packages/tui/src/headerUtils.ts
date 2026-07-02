@@ -5,15 +5,26 @@
 
 /** Run states where the run is actively making progress. */
 const RUNNING_STATES = new Set(["running", "recovering", "resuming", "in-progress", "started"]);
-/** Run states where the run is parked waiting on an external decision/event/timer. */
+/** Run states where the run is parked waiting on an external decision/event/timer/quota. */
 const PAUSED_STATES = new Set([
   "waiting-approval",
   "waiting-event",
   "waiting-timer",
+  "waiting-quota",
   "waiting",
   "blocked",
   "paused",
 ]);
+
+/**
+ * Paused check is ALSO prefix-based: the engine's run-status union (see
+ * packages/db DB_RUN_ALLOWED_STATUSES) grows new `waiting-*` states over time
+ * (waiting-quota shipped after this set was written), and every one of them is
+ * "parked, will resume" — amber paused, never the grey unknown treatment.
+ */
+function isPausedStatus(status: string): boolean {
+  return PAUSED_STATES.has(status) || status.startsWith("waiting-");
+}
 const FAILED_STATES = new Set(["failed", "errored", "error", "stale", "orphaned"]);
 /**
  * User-cancelled runs are terminal but NOT failures: they are shown dim/grey, not
@@ -29,7 +40,7 @@ export function isRunningStatus(status: string): boolean {
 /** Status-dot color, sharing the run UI's palette. */
 export function statusDotColor(status: string): string {
   if (RUNNING_STATES.has(status)) return "#00d7ff";
-  if (PAUSED_STATES.has(status)) return "#ffaf00";
+  if (isPausedStatus(status)) return "#ffaf00";
   if (FAILED_STATES.has(status)) return "#ff5f5f";
   if (DONE_STATES.has(status)) return "#00d787";
   // Cancelled: dim grey (terminal but not a failure). Distinct from the darker
@@ -41,7 +52,7 @@ export function statusDotColor(status: string): string {
 /** The live/paused indicator: `live` while progressing, `paused` while parked, else the literal state. */
 export function runLiveLabel(status: string): { text: string; color: string } {
   if (RUNNING_STATES.has(status)) return { text: "live", color: "#00d787" };
-  if (PAUSED_STATES.has(status)) return { text: "paused", color: "#ffaf00" };
+  if (isPausedStatus(status)) return { text: "paused", color: "#ffaf00" };
   return { text: status, color: "#888888" };
 }
 

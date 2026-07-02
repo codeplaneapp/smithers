@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+    armLaunchCancellation,
     buildApprovalLines,
     buildDetachedUpArgs,
     buildNextStepsLines,
@@ -19,9 +20,12 @@ import {
     includeFieldValue,
     isCleanMonitorExit,
     mergeInteractiveInputs,
+    monitorStartFailure,
+    monitorUnavailableFailure,
     normalizeStreamText,
     normalizeSuppliedInput,
     OMIT_FIELD,
+    parseJsonFieldValue,
     parseMonitorGatewayPort,
     pickerMaxItems,
     promptForField,
@@ -34,6 +38,7 @@ import {
     truncate,
     validateGatewayServesRun,
     waitForRunRow,
+    workspaceRunExists,
     wrapText,
 } from "../src/tui.js";
 
@@ -172,6 +177,21 @@ describe("tui helpers", () => {
         // `-` (stdin) must never reach the stdin-`ignore`d child.
         const args = buildDetachedUpArgs("/cli/index.js", "/wf/hello.tsx", "run-1", {}, { annotations: "-" });
         expect(args).toEqual(["/cli/index.js", "up", "/wf/hello.tsx", "--run-id", "run-1"]);
+    });
+
+    test("buildDetachedUpArgs forwards --no-post-failure so the child honors the opt-out", () => {
+        // The child re-parses its argv with the default (postFailure: true), so
+        // dropping the flag would auto-launch the autopsy workflow the user
+        // explicitly disabled.
+        const disabled = buildDetachedUpArgs("/cli/index.js", "/wf/hello.tsx", "run-1", {}, { postFailure: false });
+        expect(disabled).toContain("--no-post-failure");
+        // Default-on (true after parsing) and unset both emit nothing; only the
+        // opt-out needs forwarding.
+        expect(buildDetachedUpArgs("/cli/index.js", "/wf/hello.tsx", "run-1", {}, { postFailure: true })).not.toContain("--no-post-failure");
+        expect(buildDetachedUpArgs("/cli/index.js", "/wf/hello.tsx", "run-1", {}, {})).not.toContain("--no-post-failure");
+        // It is a FORWARD option in the interactive disposition audit, never a reject.
+        expect(rejectIncompatibleInteractiveOptions({ postFailure: false })).toBeNull();
+        expect(rejectIncompatibleInteractiveOptions({ postFailure: true })).toBeNull();
     });
 
     test("rejectIncompatibleInteractiveOptions passes clean/forwarded/resolved options", () => {
@@ -388,8 +408,12 @@ describe("tui helpers", () => {
             entryFile: "/wf/hello.tsx",
             uiExists: false,
         });
-        expect(lines[0]).toContain("smithers ui run-1");
+        // Without a custom UI, `smithers ui run-1` fails NO_UI (there is no
+        // generic run inspector behind it), so the guidance must lead with
+        // AUTHORING the UI file — mirroring buildAgentNextSteps' wording.
         expect(lines[0]).toContain(".smithers/ui/hello.tsx");
+        expect(lines[0]).toContain("gateway-react");
+        expect(lines[0]).toContain("smithers ui run-1");
         expect(lines).toContainEqual(expect.stringContaining("smithers graph /wf/hello.tsx"));
         expect(lines).toContainEqual(expect.stringContaining("smithers tree run-1"));
         expect(lines).toContainEqual(expect.stringContaining("smithers workflow run create-workflow"));
@@ -400,8 +424,21 @@ describe("tui helpers", () => {
         expect(withUi[0]).not.toContain(".smithers/ui/hello.tsx");
         // No entryFile: the graph suggestion is omitted rather than malformed.
         expect(withUi.some((l) => l.includes("smithers graph"))).toBe(false);
-        // No em-dashes anywhere in operator-facing guidance.
-        for (const line of [...lines, ...withUi]) expect(line).not.toContain("—");
+
+        // No workflow id and no UI: we can't name a UI file to author and
+        // `smithers ui run-1` would fail NO_UI, so point at the full
+        // control-plane UI instead.
+        const anonymous = buildNextStepsLines({ runId: "run-1", uiExists: false });
+        expect(anonymous[0]).toContain("smithers ui --app");
+        expect(anonymous[0]).not.toContain("smithers ui run-1");
+
+        for (const line of [...lines, ...withUi, ...anonymous]) {
+            // The false "open this run in the inspector" claim must never come
+            // back: the command has no inspector fallback.
+            expect(line).not.toContain("inspector");
+            // No em-dashes anywhere in operator-facing guidance.
+            expect(line).not.toContain("—");
+        }
     });
 
     test("customUiExists resolves the .smithers/ui/<workflowId>.tsx convention", () => {
@@ -502,6 +539,89 @@ describe("tui helpers", () => {
 
         expect(result).toEqual({ appeared: true });
         expect(calls).toBe(2);
+    });
+
+    test("waitForRunRow never accepts a run row older than the child spawn time", async () => {
+        // A user-supplied --run-id colliding with an OLD run: the child dies
+        // RUN_EXISTS (its stderr only in the log file) while the stale row sits in
+        // the store. Without the spawn-time guard the wait would report the OLD
+        // run as "started" and the launcher would monitor it.
+        const stale = { ...runRow("finished"), createdAtMs: 1_000 };
+        const result = await waitForRunRow({
+            async getRun() {
+                return stale;
+            },
+        }, "run-old", 10_000, 10_000, Promise.resolve(new Error("Run process exited (exit 4).")), 2_000);
+
+        expect(result.appeared).toBe(false);
+        expect(result.error?.message).toContain("exit 4");
+    });
+
+    test("waitForRunRow accepts fresh rows, and rows without a createdAtMs stamp", async () => {
+        // Created at/after the spawn time: the child's own row.
+        const fresh = await waitForRunRow({
+            async getRun() {
+                return { ...runRow("running"), createdAtMs: 2_000 };
+            },
+        }, "run-new", 10_000, 10, undefined, 2_000);
+        expect(fresh).toEqual({ appeared: true });
+
+        // Only a DEFINITELY stale timestamp is rejected: a row without a numeric
+        // createdAtMs keeps the pre-guard behavior instead of stalling launches.
+        const unstamped = await waitForRunRow({
+            async getRun() {
+                return { ...runRow("running"), createdAtMs: undefined };
+            },
+        }, "run-unstamped", 10_000, 10, undefined, 2_000);
+        expect(unstamped).toEqual({ appeared: true });
+    });
+
+    test("workspaceRunExists reports a collision only on a positive match, and always cleans up", async () => {
+        let cleanups = 0;
+        const storeWith = (row) => async () => ({
+            adapter: {
+                async getRun() {
+                    return row;
+                },
+            },
+            cleanup() {
+                cleanups += 1;
+            },
+        });
+        expect(await workspaceRunExists("run-1", { openStore: storeWith(runRow("finished")) })).toBe(true);
+        expect(await workspaceRunExists("run-1", { openStore: storeWith(null) })).toBe(false);
+        expect(cleanups).toBe(2);
+    });
+
+    test("workspaceRunExists treats a missing store and probe failures as no collision", async () => {
+        // Fresh workspace: no store yet, so no run can collide.
+        const notFound = async () => {
+            const err = new Error("no smithers db");
+            err.code = "CLI_DB_NOT_FOUND";
+            throw err;
+        };
+        expect(await workspaceRunExists("run-1", { openStore: notFound })).toBe(false);
+
+        // Any other probe failure defers to the spawn path's own error handling
+        // (the child would hit the same fault and surface it loudly there).
+        const migration = async () => {
+            throw new Error("SMITHERS_MIGRATION_REQUIRED");
+        };
+        expect(await workspaceRunExists("run-1", { openStore: migration })).toBe(false);
+
+        let cleaned = false;
+        const readFails = async () => ({
+            adapter: {
+                async getRun() {
+                    throw new Error("database is locked");
+                },
+            },
+            cleanup() {
+                cleaned = true;
+            },
+        });
+        expect(await workspaceRunExists("run-1", { openStore: readFails })).toBe(false);
+        expect(cleaned).toBe(true);
     });
 
     test("streamRun returns an error when the child exits before a terminal DB state", async () => {
@@ -629,6 +749,83 @@ describe("tui helpers", () => {
         // A chosen boolean `false` is still a real answer that must be kept.
         expect(includeFieldValue(false)).toBe(true);
         expect(includeFieldValue(undefined)).toBe(false);
+    });
+
+    test("promptForField parses object/array answers into REAL values, re-asking on bad JSON", async () => {
+        // The collected inputs are JSON.stringify'd into the child's --input and
+        // nothing downstream rejects a string on a json column, so the prompt is
+        // the ONLY place a raw '["a","b"]' string can be caught and parsed.
+        const rejections = [];
+        // A clack-like text prompt: walks the queued answers through `validate`
+        // the way clack re-asks on a validation error, resolving with the first
+        // accepted answer.
+        const textAnswering = (answers) => async ({ validate }) => {
+            for (const answer of answers) {
+                const error = validate?.(answer);
+                if (!error) return answer;
+                rejections.push(error);
+            }
+            throw new Error("every queued answer was rejected");
+        };
+
+        const items = await promptForField(
+            { name: "items", type: "array", required: true },
+            { text: textAnswering(["not json", '{"k":1}', '["a","b"]']) },
+        );
+        expect(items).toEqual(["a", "b"]);
+        expect(rejections[0]).toContain("valid JSON");
+        expect(rejections[1]).toContain("JSON array");
+
+        const features = await promptForField(
+            { name: "features", type: "object", required: true },
+            { text: textAnswering(['["not","an","object"]', '{"web":["auth"]}']) },
+        );
+        expect(features).toEqual({ web: ["auth"] });
+        expect(rejections[2]).toContain("JSON object");
+    });
+
+    test("promptForField keeps blank/default handling for JSON fields", async () => {
+        // Blank optional: absence stays absence (no default), so the key is omitted.
+        const blank = await promptForField(
+            { name: "extras", type: "array", required: false },
+            {
+                text: async ({ validate }) => {
+                    expect(validate("")).toBeUndefined();
+                    return "";
+                },
+            },
+        );
+        expect(blank).toBeUndefined();
+        expect(includeFieldValue(blank)).toBe(false);
+
+        // A JSON default renders as its JSON spelling (not "[object Object]") and
+        // a blank answer returns the REAL default value, never a string.
+        let placeholder;
+        const defaulted = await promptForField(
+            { name: "cfg", type: "object", required: false, default: { a: 1 } },
+            {
+                text: async (opts) => {
+                    placeholder = opts.placeholder;
+                    return "";
+                },
+            },
+        );
+        expect(placeholder).toBe('{"a":1}');
+        expect(defaulted).toEqual({ a: 1 });
+    });
+
+    test("parseJsonFieldValue shape-checks pure declarations and spares string unions", () => {
+        expect(parseJsonFieldValue("items", ["array"], '["a"]')).toEqual({ value: ["a"] });
+        expect(parseJsonFieldValue("cfg", ["object"], '{"a":1}')).toEqual({ value: { a: 1 } });
+        expect("error" in parseJsonFieldValue("items", ["array"], '{"a":1}')).toBe(true);
+        expect("error" in parseJsonFieldValue("cfg", ["object"], "[1]")).toBe(true);
+        expect("error" in parseJsonFieldValue("cfg", ["object"], "null")).toBe(true);
+        // A union that also admits a plain string keeps non-JSON text as-is.
+        expect(parseJsonFieldValue("q", ["string", "array"], "hello")).toEqual({ value: "hello" });
+        expect(parseJsonFieldValue("q", ["string", "array"], '["a"]')).toEqual({ value: ["a"] });
+        // Mixed object/array unions accept either shape.
+        expect(parseJsonFieldValue("any", ["object", "array"], "[1]")).toEqual({ value: [1] });
+        expect(parseJsonFieldValue("any", ["object", "array"], '{"a":1}')).toEqual({ value: { a: 1 } });
     });
 
     test("mergeInteractiveInputs preserves supplied input when no prompts run", () => {
@@ -907,6 +1104,129 @@ describe("tui helpers", () => {
         );
         expect(result).toEqual({ exit: { code: 0, signal: null } });
         expect(monitor.terminated).toBe(false);
+    });
+
+    test("monitor-failure guidance says the run is STILL RUNNING and never suggests smithers-mon", () => {
+        // Both descriptors fire AFTER the run launched; the launcher leaves the
+        // durable run alive, so the message must say so and point at surfaces
+        // that always work. `smithers-mon` is the bin of @smithers-orchestrator/tui
+        // — in the unresolvable case, the very package that failed to resolve.
+        for (const failure of [
+            monitorStartFailure(new Error("spawn bun ENOENT"), "run-1", "/logs/run-1.log"),
+            monitorUnavailableFailure("run-1", "/logs/run-1.log"),
+        ]) {
+            expect(failure.exitCode).toBe(1);
+            expect(failure.runId).toBe("run-1");
+            expect(failure.logFile).toBe("/logs/run-1.log");
+            expect(failure.message).toContain("still running");
+            expect(failure.message).toContain("smithers ps");
+            expect(failure.message).toContain("smithers inspect run-1");
+            expect(failure.message).toContain("/logs/run-1.log");
+            expect(failure.message).not.toContain("smithers-mon");
+        }
+        expect(monitorStartFailure(new Error("spawn bun ENOENT"), "run-1", "/l.log").code).toBe("TUI_MONITOR_FAILED");
+        expect(monitorStartFailure(new Error("spawn bun ENOENT"), "run-1", "/l.log").message).toContain("spawn bun ENOENT");
+        expect(monitorUnavailableFailure("run-1", "/l.log").code).toBe("TUI_MONITOR_UNAVAILABLE");
+        expect(monitorUnavailableFailure("run-1", "/l.log").message).toContain("@smithers-orchestrator/tui");
+    });
+
+    test("armLaunchCancellation tears the unannounced run down when clack exits the process", () => {
+        // Keyboard Ctrl-C during the "Starting…" spinner: clack holds stdin RAW,
+        // sees \x03 as a cancel keypress, and calls process.exit(0) — no signal is
+        // ever delivered. The "exit" hook is the only interception point, and it
+        // must terminate the child AND say what was stopped (the run id and log
+        // path were never printed at this stage).
+        const proc = new EventEmitter();
+        const written = [];
+        const exits = [];
+        let terminated = 0;
+        armLaunchCancellation({
+            runId: "run-1",
+            logFile: "/logs/run-1.log",
+            terminate: () => {
+                terminated += 1;
+            },
+            write: (line) => written.push(line),
+            exit: (code) => exits.push(code),
+            proc,
+        });
+
+        proc.emit("exit");
+        expect(terminated).toBe(1);
+        expect(written).toHaveLength(1);
+        expect(written[0]).toContain("run-1");
+        expect(written[0]).toContain("stopped");
+        expect(written[0]).toContain("/logs/run-1.log");
+        // The process is already exiting; the hook must not call exit() itself.
+        expect(exits).toEqual([]);
+
+        // Idempotent: the first stop disarms, so a racing signal or second exit
+        // can neither double-kill nor double-print.
+        proc.emit("exit");
+        proc.emit("SIGINT");
+        expect(terminated).toBe(1);
+        expect(written).toHaveLength(1);
+    });
+
+    test("armLaunchCancellation terminates and exits 130/143 on external signals", () => {
+        // External `kill -INT`/`-TERM` while the spinner runs: clack's handler
+        // prints "Canceled" and CONTINUES, so ours must stop the child, report,
+        // and exit with the conventional interrupt code.
+        for (const [signal, expectedCode] of [["SIGINT", 130], ["SIGTERM", 143]]) {
+            const proc = new EventEmitter();
+            const written = [];
+            const exits = [];
+            let terminated = 0;
+            armLaunchCancellation({
+                runId: "run-1",
+                logFile: "/logs/run-1.log",
+                terminate: () => {
+                    terminated += 1;
+                },
+                write: (line) => written.push(line),
+                exit: (code) => exits.push(code),
+                proc,
+            });
+            proc.emit(signal);
+            expect(terminated).toBe(1);
+            expect(exits).toEqual([expectedCode]);
+            expect(written).toHaveLength(1);
+            // The exit(130/143) path fires the real process "exit" event next;
+            // the already-disarmed hook must stay quiet.
+            proc.emit("exit");
+            expect(terminated).toBe(1);
+            expect(written).toHaveLength(1);
+        }
+    });
+
+    test("armLaunchCancellation disarm removes every hook so a later cancel keeps the run alive", () => {
+        // Once the run is announced (spinner stop printed the id + log path), a
+        // user cancel or monitor quit must leave the durable run running: disarm
+        // removes all hooks, so nothing fires afterwards.
+        const proc = new EventEmitter();
+        const written = [];
+        const exits = [];
+        let terminated = 0;
+        const cancellation = armLaunchCancellation({
+            runId: "run-1",
+            logFile: "/logs/run-1.log",
+            terminate: () => {
+                terminated += 1;
+            },
+            write: (line) => written.push(line),
+            exit: (code) => exits.push(code),
+            proc,
+        });
+        cancellation.disarm();
+        expect(proc.listenerCount("exit")).toBe(0);
+        expect(proc.listenerCount("SIGINT")).toBe(0);
+        expect(proc.listenerCount("SIGTERM")).toBe(0);
+        proc.emit("exit");
+        proc.emit("SIGINT");
+        proc.emit("SIGTERM");
+        expect(terminated).toBe(0);
+        expect(written).toHaveLength(0);
+        expect(exits).toEqual([]);
     });
 });
 
