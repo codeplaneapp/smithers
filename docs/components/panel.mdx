@@ -310,9 +310,10 @@ function mergeDependsOn(dependsOn, depNodeIds) {
  * @param {any} ctx
  * @param {DepsSpec | undefined} deps
  * @param {Record<string, string> | undefined} needs
+ * @param {boolean | undefined} optional
  * @returns {Record<string, unknown> | null}
  */
-function resolveDeps(ctx, deps, needs) {
+function resolveDeps(ctx, deps, needs, optional) {
     if (!deps)
         return Object.create(null);
     const keys = Object.keys(deps);
@@ -323,8 +324,11 @@ function resolveDeps(ctx, deps, needs) {
         const target = deps[key];
         const nodeId = needs?.[key] ?? key;
         const value = ctx.outputMaybe(target, { nodeId });
-        if (value === undefined)
+        if (value === undefined) {
+            if (optional)
+                continue;
             return null;
+        }
         resolved[key] = value;
     }
     return resolved;
@@ -403,7 +407,7 @@ function resolveCliToolAllowlist(ctx, allowTools) {
  * @returns {React.ReactElement | null}
  */
 export function Task(props) {
-    const { children, agent, fallbackAgent, deps, ...rest } = props;
+    const { children, agent, fallbackAgent, deps, depsOptional, ...rest } = props;
     const taskContext = props.smithersContext ?? SmithersContext;
     const ctx = React.useContext(taskContext);
     const aspectCtx = React.useContext(AspectContext);
@@ -411,7 +415,7 @@ export function Task(props) {
     if (deps && !ctx) {
         throw new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "Task deps require a workflow context. Build the workflow with createSmithers().");
     }
-    const resolvedDeps = deps ? resolveDeps(ctx, deps, rest.needs) : undefined;
+    const resolvedDeps = deps ? resolveDeps(ctx, deps, rest.needs, depsOptional) : undefined;
     if (deps && resolvedDeps == null) {
         // Deps not yet available — component defers until upstream tasks complete.
         // This is normal reactive behavior; the task will re-render once deps are
