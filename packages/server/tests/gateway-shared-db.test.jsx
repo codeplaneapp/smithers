@@ -95,6 +95,16 @@ describe("gateway — many workflows sharing one DB", () => {
     expect(keyByRun.get("run-alpha")).toBe("alpha");
     expect(keyByRun.get("run-beta")).toBe("beta");
     expect(keyByRun.get("run-gamma")).toBe("gamma");
+
+    const filtered = await gateway.listRunsAcrossWorkflows(1, undefined, "beta");
+    expect(filtered.map((run) => run.runId)).toEqual(["run-beta"]);
+
+    const response = await gateway.routeRequest(
+      { role: "operator", scopes: ["run:read"], userId: "test" },
+      { id: "runs", method: "listRuns", params: { filter: { workflow: "beta", limit: 1 } } },
+    );
+    expect(response.ok).toBe(true);
+    expect(response.payload.map((run) => run.runId)).toEqual(["run-beta"]);
   });
 
   test("resolveRun attributes a run to its true workflow, not the first adapter", async () => {

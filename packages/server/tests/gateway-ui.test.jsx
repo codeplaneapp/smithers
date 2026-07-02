@@ -205,6 +205,51 @@ describe("Gateway UI", () => {
     expect(await asset.text()).toContain("Smithers Console");
   });
 
+  test("requires bearer auth for workflow-level UI HTML and assets when gateway auth is configured", async () => {
+    tempDir = mkdtempSync(join(process.cwd(), ".smithers-workflow-ui-auth-"));
+    const dbPath = join(tempDir, "workflow-auth.db");
+    const entry = writeUiEntry(tempDir, "Deploy Workflow");
+    gateway = new Gateway({
+      auth: {
+        mode: "token",
+        tokens: {
+          "workflow-token": {
+            role: "operator",
+            scopes: ["*"],
+            userId: "user:workflow",
+          },
+        },
+      },
+    });
+    gateway.register("deploy", createValueWorkflow(dbPath), {
+      ui: {
+        entry,
+        title: "Deploy Workflow",
+        props: { workflowKind: "deploy" },
+      },
+    });
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+
+    const anonymousHtml = await fetch(`http://127.0.0.1:${port}/workflows/deploy`);
+    expect(anonymousHtml.status).toBe(401);
+
+    const anonymousAsset = await fetch(`http://127.0.0.1:${port}/workflows/deploy/__smithers_ui/client.js`);
+    expect(anonymousAsset.status).toBe(401);
+
+    const authorizedHtml = await fetch(`http://127.0.0.1:${port}/workflows/deploy`, {
+      headers: { authorization: "Bearer workflow-token" },
+    });
+    expect(authorizedHtml.status).toBe(200);
+    expect(await authorizedHtml.text()).toContain("<title>Deploy Workflow</title>");
+
+    const authorizedAsset = await fetch(`http://127.0.0.1:${port}/workflows/deploy/__smithers_ui/client.js`, {
+      headers: { authorization: "Bearer workflow-token" },
+    });
+    expect(authorizedAsset.status).toBe(200);
+    expect(await authorizedAsset.text()).toContain("Deploy Workflow");
+  });
+
   test("built-in operator console loads and launches a real run in the browser", async () => {
     tempDir = mkdtempSync(join(process.cwd(), ".smithers-op-console-behavioral-"));
     const dbPath = join(tempDir, "op.db");
