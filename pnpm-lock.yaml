@@ -1472,6 +1472,9 @@ importers:
       '@smithers-orchestrator/gateway':
         specifier: workspace:*
         version: link:../gateway
+      '@smithers-orchestrator/gateway-ui':
+        specifier: workspace:*
+        version: link:../gateway-ui
       '@smithers-orchestrator/observability':
         specifier: workspace:*
         version: link:../../apps/observability

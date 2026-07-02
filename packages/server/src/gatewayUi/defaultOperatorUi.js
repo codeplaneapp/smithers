@@ -1,4 +1,7 @@
+import { workflowUiThemeCss } from "@smithers-orchestrator/gateway-ui/styleguide-css";
+
 export const DEFAULT_OPERATOR_UI_ENTRY = "smithers:default-operator-ui";
+const WORKFLOW_UI_THEME_PLACEHOLDER = "/*__SMITHERS_WORKFLOW_UI_THEME_CSS__*/";
 
 function defaultOperatorUiClient() {
 const boot = globalThis.__SMITHERS_GATEWAY_UI__ ?? {};
@@ -59,23 +62,20 @@ const state = {
 };
 
 const css = `
+/*__SMITHERS_WORKFLOW_UI_THEME_CSS__*/
 :root {
-  color-scheme: light;
-  --ink: #161616;
-  --muted: #6f6a61;
-  --line: #ded8ce;
-  --surface: #f7f3ec;
-  --panel: #fffaf2;
-  --panel-strong: #fffdf8;
-  --accent: #235c58;
-  --accent-soft: rgba(35,92,88,0.1);
-  --accent-strong: #17413e;
-  --blue: #285f9f;
-  --violet: #684aa0;
-  --amber: #9b6a16;
-  --danger: #9f2e24;
-  --ok: #2f6b3f;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: light dark;
+  --ink: var(--text);
+  --muted: var(--text-muted);
+  --line: var(--border-solid);
+  --panel-strong: var(--surface-glass-strong);
+  --accent: var(--brand);
+  --accent-soft: color-mix(in srgb, var(--brand) 10%, transparent);
+  --accent-strong: var(--brand);
+  --blue: var(--brand);
+  --violet: var(--brand);
+  --amber: var(--warning);
+  font-family: var(--font-sans, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
 }
 * { box-sizing: border-box; }
 body {
@@ -1429,4 +1429,6 @@ refresh();
 setInterval(refresh, 5000);
 }
 
-export const DEFAULT_OPERATOR_UI_CLIENT_JS = `(${defaultOperatorUiClient.toString()})();\n`;
+export const DEFAULT_OPERATOR_UI_CLIENT_JS = `(${defaultOperatorUiClient
+  .toString()
+  .replace(WORKFLOW_UI_THEME_PLACEHOLDER, workflowUiThemeCss.replace(/\$/g, "$$$$"))})();\n`;
