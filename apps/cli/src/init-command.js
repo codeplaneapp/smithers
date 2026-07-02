@@ -136,6 +136,12 @@ async function runDurableReinit(options) {
                 await close.call(workflow.close ? workflow : workflow.db);
             }
         }
+        if (result.status !== "finished") {
+            // A run that terminated without finishing (failed/cancelled) must
+            // not masquerade as a successful init — fall back imperatively.
+            process.stderr.write(`[smithers:init] durable init run ${result.runId} ended ${result.status}, falling back\n`);
+            return null;
+        }
         return {
             durable: true,
             workflow: "init",
