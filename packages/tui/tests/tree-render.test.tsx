@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/react */
-import { describe, it, expect } from "bun:test";
-import { renderForTest } from "./renderHelpers.tsx";
+import { it, expect } from "bun:test";
+import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
 import type { GatewayRunNode, GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
 import { NodeInspectorView, TreePanel, type ApprovalUiState } from "../src/modes/TreeMode.tsx";
 import type { NodeDiffView } from "../src/modes/diffUtils.ts";
@@ -40,7 +40,7 @@ function baseProps(overrides: Partial<Parameters<typeof NodeInspectorView>[0]> =
   };
 }
 
-describe("NodeInspectorView – terminal rendering (CI-safe, no gateway)", () => {
+describeHeadlessRender("NodeInspectorView – terminal rendering (CI-safe, no gateway)", () => {
   it("shows the placeholder when no node is selected", async () => {
     const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
       <NodeInspectorView {...baseProps({ node: null })} />,
