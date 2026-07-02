@@ -163,6 +163,7 @@ const API_STREAM_OUTBOUND_QUEUE_LIMIT = 256;
 const API_STREAM_OUTBOUND_BYTES = 64 * 1024;
 const API_COLLECTION_NAME_SET = new Set(apiCollectionNames);
 const RUN_EVENT_WINDOW_RETAINED_RUN_LIMIT = 1_000;
+const RUN_EVENT_TERMINAL_WINDOW_GRACE_MS = 1_000;
 const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "continued"]);
 export const GATEWAY_RPC_MAX_PAYLOAD_BYTES = DEFAULT_MAX_BODY_BYTES;
 export const GATEWAY_RPC_MAX_DEPTH = 32;
@@ -1545,6 +1546,7 @@ export class Gateway {
     apiStreamFlushTimer = null;
     runEventSubscriberCounts = new Map();
     terminalRunEventWindows = new Map();
+    terminalRunEventWindowTimers = new Map();
     /** Absolute active subscriber count per runId (gauge source of truth). */
     devtoolsSubscriberCounts = new Map();
     /** Flagged subscriber IDs that should force a snapshot on their next emit. */
@@ -2028,8 +2030,32 @@ export class Gateway {
    * @param {string} runId
    */
     deleteRunEventWindow(runId) {
+        this.clearTerminalRunEventWindowTimer(runId);
         this.runEventWindows.delete(runId);
         this.outOfProcessEventBridgeLastFedSeq.delete(runId);
+    }
+    /**
+   * @param {string} runId
+   */
+    clearTerminalRunEventWindowTimer(runId) {
+        const timer = this.terminalRunEventWindowTimers.get(runId);
+        if (timer) {
+            clearTimeout(timer);
+            this.terminalRunEventWindowTimers.delete(runId);
+        }
+    }
+    /**
+   * @param {string} runId
+   */
+    scheduleTerminalRunEventWindowRelease(runId) {
+        this.clearTerminalRunEventWindowTimer(runId);
+        const timer = setTimeout(() => {
+            this.terminalRunEventWindowTimers.delete(runId);
+            this.releaseTerminalRunEventWindow(runId);
+            this.enforceRunEventWindowLimit();
+        }, RUN_EVENT_TERMINAL_WINDOW_GRACE_MS);
+        timer.unref?.();
+        this.terminalRunEventWindowTimers.set(runId, timer);
     }
     /**
    * @param {string} runId
@@ -2042,6 +2068,7 @@ export class Gateway {
         if (this.getRunEventSubscriberCount(runId) > 0) {
             return false;
         }
+        this.clearTerminalRunEventWindowTimer(runId);
         this.deleteRunEventWindow(runId);
         this.terminalRunEventWindows.delete(runId);
         return true;
@@ -2052,7 +2079,7 @@ export class Gateway {
     markRunEventWindowTerminal(runId) {
         this.terminalRunEventWindows.delete(runId);
         this.terminalRunEventWindows.set(runId, nowMs());
-        this.releaseTerminalRunEventWindow(runId);
+        this.scheduleTerminalRunEventWindowRelease(runId);
         this.enforceRunEventWindowLimit();
     }
     enforceRunEventWindowLimit() {
@@ -3500,6 +3527,10 @@ export class Gateway {
             catch { }
         }
         this.apiStreamSubscribers.clear();
+        for (const timer of this.terminalRunEventWindowTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.terminalRunEventWindowTimers.clear();
         // Durability seam teardown: close every `_smithers_docs` file-watcher
         // (`fs.watch` handles) started via `watchTicketsDirectory`, so a closed
         // gateway never leaks watchers (e.g. across e2e boots or test runs).

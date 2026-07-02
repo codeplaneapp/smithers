@@ -168,6 +168,38 @@ describe("gateway run event window cleanup", () => {
     }
   }, 60_000);
 
+  test("keeps a terminal run window briefly for late replay before cleanup", async () => {
+    const dbPath = makeDbPath("late");
+    dbPaths.push(dbPath);
+    const workflow = createCleanupWorkflow(dbPath);
+    gateway = new Gateway({ heartbeatMs: 1000 });
+    gateway.register("cleanup", workflow);
+    ensureSmithersTables(workflow.db);
+    const adapter = gateway.adapterForWorkflow(workflow);
+    const runId = "late-replay-window";
+    await adapter.insertRun({
+      runId,
+      workflowName: "cleanup",
+      status: "running",
+      createdAtMs: Date.now(),
+    });
+
+    gateway.broadcastEvent("node.started", { runId, nodeId: "a" });
+    gateway.broadcastEvent("run.completed", { runId, status: "finished" });
+
+    expect(gateway.getRunEventCurrentSeq(runId)).toBe(2);
+    expect(gateway.runEventWindows.has(runId)).toBe(true);
+    expect(gateway.terminalRunEventWindows.has(runId)).toBe(true);
+
+    await waitUntil(
+      () =>
+        !gateway.runEventWindows.has(runId) &&
+        !gateway.terminalRunEventWindows.has(runId) &&
+        !gateway.terminalRunEventWindowTimers.has(runId),
+      "late replay terminal window cleanup",
+    );
+  });
+
   test("keeps a terminal run window while a streamRunEvents subscriber is active", async () => {
     const dbPath = makeDbPath("subscriber");
     dbPaths.push(dbPath);
