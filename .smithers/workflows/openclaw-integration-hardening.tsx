@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
+const AGENT_AUDIT_TIMEOUT_MS = 2 * 60_000;
 
 const inputSchema = z.object({
   mode: z.enum(["verify", "implement"]).default("verify"),
@@ -115,19 +116,19 @@ export default smithers((ctx) => {
     <Workflow name="openclaw-integration-hardening">
       <Sequence>
         <Parallel maxConcurrency={5}>
-          <Task id="fable-integration-audit" output={outputs.audit} agent={fable} timeoutMs={25 * 60_000}>
+          <Task id="fable-integration-audit" output={outputs.audit} agent={fable} timeoutMs={AGENT_AUDIT_TIMEOUT_MS} continueOnFail noRetry>
             {auditPrompt("Claude Fable integration reviewer", ctx.input.focus, ctx.input.mode, ctx.input.allowEdits)}
           </Task>
 
-          <Task id="codex-test-hardening-audit" output={outputs.audit} agent={codex} timeoutMs={25 * 60_000}>
+          <Task id="codex-test-hardening-audit" output={outputs.audit} agent={codex} timeoutMs={AGENT_AUDIT_TIMEOUT_MS} continueOnFail noRetry>
             {auditPrompt("Codex unit and e2e coverage reviewer", ctx.input.focus, ctx.input.mode, ctx.input.allowEdits)}
           </Task>
 
-          <Task id="codex-openclaw-worker-audit" output={outputs.audit} agent={codex} timeoutMs={25 * 60_000}>
+          <Task id="codex-openclaw-worker-audit" output={outputs.audit} agent={codex} timeoutMs={AGENT_AUDIT_TIMEOUT_MS} continueOnFail noRetry>
             {auditPrompt("Codex OpenClaw workflow-agent reviewer", ctx.input.focus, ctx.input.mode, ctx.input.allowEdits)}
           </Task>
 
-          <Task id="fable-marketing-audit" output={outputs.audit} agent={fable} timeoutMs={25 * 60_000}>
+          <Task id="fable-marketing-audit" output={outputs.audit} agent={fable} timeoutMs={AGENT_AUDIT_TIMEOUT_MS} continueOnFail noRetry>
             {auditPrompt("Claude Fable non-technical marketing-site reviewer", ctx.input.focus, ctx.input.mode, ctx.input.allowEdits)}
           </Task>
 
@@ -151,12 +152,18 @@ export default smithers((ctx) => {
 
         <Task id="synthesis" output={outputs.summary} dependsOn={["targeted-tests", ...auditIds]} noRetry>
           {() => {
-            const audits = auditIds
-              .map((id) => ctx.outputMaybe(outputs.audit, { nodeId: id }))
+            const auditResults = auditIds.map((id) => ({
+              id,
+              output: ctx.outputMaybe(outputs.audit, { nodeId: id }),
+            }));
+            const audits = auditResults
+              .map((result) => result.output)
               .filter((audit): audit is NonNullable<typeof audit> => Boolean(audit));
             const checks = ctx.outputMaybe(outputs.commandCheck, { nodeId: "targeted-tests" });
             const failingAreas = [
+              ...auditResults.flatMap((result) => result.output ? [] : [`${result.id} did not produce audit output.`]),
               ...audits.flatMap((audit) => audit.status === "pass" ? [] : audit.findings),
+              ...(!checks ? ["targeted-tests did not produce command output."] : []),
               ...(checks?.status === "pass" ? [] : checks?.commands.filter((cmd) => cmd.exitCode !== 0).map((cmd) => cmd.command) ?? []),
             ];
             return {
