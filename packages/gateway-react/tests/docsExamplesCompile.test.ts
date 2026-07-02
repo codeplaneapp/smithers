@@ -49,10 +49,10 @@ function compile(opts: {
       skipLibCheck: true,
       allowImportingTsExtensions: true,
       jsx: opts.jsx ? "react-jsx" : undefined,
-      baseUrl: REPO_ROOT,
+      // TS 6 deprecates baseUrl (TS5101); use absolute paths entries instead.
       paths: {
-        "smithers-orchestrator/gateway-react": ["packages/gateway-react/src/index.ts"],
-        "smithers-orchestrator/gateway-client": ["packages/gateway-client/src/index.ts"],
+        "smithers-orchestrator/gateway-react": [resolve(REPO_ROOT, "packages/gateway-react/src/index.ts")],
+        "smithers-orchestrator/gateway-client": [resolve(REPO_ROOT, "packages/gateway-client/src/index.ts")],
       },
       typeRoots: [resolve(REPO_ROOT, "node_modules", "@types")],
     },
