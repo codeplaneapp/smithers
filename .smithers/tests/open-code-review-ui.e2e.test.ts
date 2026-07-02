@@ -158,7 +158,11 @@ browserTest("Open Code Review UI renders a real workflow run", async () => {
       },
       undefined,
       { timeout: 20_000 },
-    );
+    ).catch(async (error) => {
+      console.log(await page.locator("body").textContent());
+      throw error;
+    });
+    expect(await page.locator('[data-testid="ocr-kpi-tokens"]').textContent()).toContain("321");
 
     expect(errors).toEqual([]);
   } finally {

@@ -132,9 +132,9 @@ function extractReview(value: unknown): ReviewOutput | null {
     error: asString(row.error),
     summary: isRecord(row.summary)
       ? {
-          filesReviewed: asNumber(row.summary.filesReviewed),
+          filesReviewed: asNumber(row.summary.filesReviewed ?? row.summary.files_reviewed),
           comments: asNumber(row.summary.comments),
-          totalTokens: asNumber(row.summary.totalTokens),
+          totalTokens: asNumber(row.summary.totalTokens ?? row.summary.total_tokens),
           elapsed: asString(row.summary.elapsed),
         }
       : null,
@@ -151,7 +151,7 @@ function extractSummary(value: unknown): WorkflowSummary | null {
     excludedFiles: asNumber(row.excludedFiles) ?? 0,
     comments: asNumber(row.comments) ?? 0,
     warnings: asNumber(row.warnings) ?? 0,
-    totalTokens: asNumber(row.totalTokens) ?? 0,
+    totalTokens: asNumber(row.totalTokens ?? row.total_tokens) ?? 0,
     message: asString(row.message) ?? "",
   };
 }
