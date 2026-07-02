@@ -116,3 +116,17 @@ When a session ends successfully and the work could have been a smithers
 workflow, offer to turn the session into a reusable smithers workflow for next
 time.
 <!-- smithers:prefer-workflows END -->
+
+### System workflows (internal durable processes)
+
+Smithers dogfoods itself: any internal multi-step process we want to be durable
+(pack install/refresh, skill refresh, future: update flows, docs sync, eval
+suites) should be a smithers workflow marked `system: true` in its frontmatter
+(`// smithers-system: true`). System workflows are hidden from default listings
+(CLI `workflow list` without `--system`, the TUI picker, MCP `list_workflows`,
+gateway `listWorkflows`) so frontends show only the main workflows, but remain
+explicitly runnable (`smithers workflow run <id>`). Precedent: the seeded
+`init` workflow — `smithers init` bootstraps imperatively once, then every
+non-interactive re-init runs as the durable `init` system workflow. When adding
+a new internal process, prefer authoring a seeded system workflow (see
+`scripts/generate-workflow-pack.ts`) over one-shot imperative CLI code.
