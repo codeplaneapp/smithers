@@ -1,0 +1,90 @@
+---
+title: Telegram
+description: Use the first-class Smithers Telegram helpers for Bot API calls, webhook ingestion, retries, formatting, and tests.
+---
+
+Smithers ships `@smithers-orchestrator/telegram` for Telegram bots that need to
+run inside serverless functions, workflow tasks, or tests without owning a
+long-lived polling process.
+
+The package follows the integration shape proven by Eliza's Telegram plugin:
+separate bot lifecycle/API access, normalized incoming messages, formatting
+helpers, and a fake test client. Smithers keeps the implementation raw `fetch`
+instead of Telegraf so Vercel Functions, Cloudflare Workers, and Sandbox tasks
+can call the Bot API without starting a local polling loop.
+
+## Install
+
+```sh
+pnpm add @smithers-orchestrator/telegram
+```
+
+## Send messages
+
+```ts
+import {
+  createTelegramClient,
+  escapeTelegramMarkdownV2,
+  sendTelegramTextChunks,
+} from "@smithers-orchestrator/telegram";
+
+const telegram = createTelegramClient({
+  botToken: process.env.TELEGRAM_BOT_TOKEN!,
+});
+
+await sendTelegramTextChunks(telegram, {
+  chatId: process.env.TELEGRAM_CHAT_ID!,
+  text: escapeTelegramMarkdownV2("Build finished!"),
+  parseMode: "MarkdownV2",
+});
+```
+
+`createTelegramClient` retries Bot API `429` and `5xx` responses plus transient
+network/read failures. `429` honors Telegram's `retry_after` parameter; other
+retryable failures use exponential backoff. Permanent `4xx` responses are not
+retried.
+
+## Verify webhooks
+
+```ts
+import {
+  normalizeTelegramUpdate,
+  isTelegramChatAllowed,
+  verifyTelegramWebhookSecret,
+} from "@smithers-orchestrator/telegram";
+
+export async function POST(request: Request) {
+  if (!verifyTelegramWebhookSecret(request, process.env.TELEGRAM_WEBHOOK_SECRET)) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const message = normalizeTelegramUpdate(await request.json());
+  if (!message) return Response.json({ ok: true, ignored: true });
+  if (!isTelegramChatAllowed(message.chatId, process.env.TELEGRAM_ALLOWED_CHATS)) {
+    return Response.json({ ok: true, ignored: true });
+  }
+
+  // Persist message.updateId, message.chatId, message.messageId, message.text, ...
+  return Response.json({ ok: true });
+}
+```
+
+`normalizeTelegramUpdate` handles `message`, `edited_message`, `channel_post`,
+and `edited_channel_post` updates and ignores bot-authored messages by default.
+`isTelegramChatAllowed` follows Eliza's fail-closed access-control shape:
+missing or blank `TELEGRAM_ALLOWED_CHATS` allows all chats, a JSON array of chat
+ids restricts processing to those ids, and malformed values block all chats until
+the configuration is fixed.
+
+## Test with a fake
+
+```ts
+import { FakeTelegramClient } from "@smithers-orchestrator/telegram";
+
+const telegram = new FakeTelegramClient();
+await telegram.sendMessage({ chatId: 123, text: "hello" });
+
+console.log(telegram.messages[0].message_id);
+```
+
+Use the fake in local e2e tests when production uses real Telegram credentials.

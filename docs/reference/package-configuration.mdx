@@ -21,6 +21,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/gateway-react` | `./src/gateway-react.js` | React hooks and providers for gateway-backed UIs |
 | `smithers-orchestrator/gateway-ui` | `./src/gateway-ui.js` | Prebuilt React components for gateway-backed UIs (`RunList`, `RunTree`, `ApprovalPanel`, and more) |
 | `smithers-orchestrator/sandbox` | `./src/sandbox.js` | Sandbox provider contracts, bundles, and execution helpers |
+| `smithers-orchestrator/telegram` | `./src/telegram.js` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes |
 | `smithers-orchestrator/cloudflare` | `./src/cloudflare.js` | Cloudflare Workers helpers: Sandbox provider, Durable Object SQLite descriptor, and D1 descriptor |
 | `smithers-orchestrator/jsx-runtime` | `./src/jsx-runtime.js` | JSX runtime (auto-resolved by `jsxImportSource`) |
 | `smithers-orchestrator/jsx-dev-runtime` | `./src/jsx-runtime.js` | JSX dev runtime (auto-resolved in dev mode) |
@@ -83,6 +84,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/scorers` | Scorer definitions, LLM judges, batch execution, aggregation, persistence schema, and metrics | [Evals](/guides/evals-quickstart), [Evals Quickstart](/guides/evals-quickstart) |
 | `@smithers-orchestrator/server` | HTTP, WebSocket, Gateway, cron, webhook, metrics, and single-workflow serving APIs | [Server](/integrations/server), [Serve](/integrations/serve) |
 | `@smithers-orchestrator/smithers-ui` | Private local-only UI app: the full run/approval/memory control surface, served by `bunx smithers-orchestrator ui --app` against a local Gateway | [Gateway UI Components](/reference/gateway-ui) |
+| `@smithers-orchestrator/telegram` | Telegram Bot API helpers for serverless bots: webhook secret verification, update normalization, typed Bot API calls, retries, MarkdownV2 escaping, chunking, and test fakes | [Telegram](/integrations/telegram) |
 | `@smithers-orchestrator/telegram-summary` | Private Cloudflare app: Telegram Bot API ingestion, Kimi daily digests, D1 storage, and the `telegram-summary.smithers.sh` dashboard | [Custom Workflow UI](/guides/custom-workflow-ui), [CLI Overview](/cli/overview) |
 | `@smithers-orchestrator/time-travel` | Snapshots, diffs, forks, replay, timelines, VCS tags, rewind locks/audits, and time-travel metrics | [Time Travel](/recipes), [Time Travel Quickstart](/guides/time-travel-quickstart) |
 | `@smithers-orchestrator/tool-context` | AsyncLocalStorage tool-execution context (run/node/idempotency keys, durability snapshot hook) shared by the engine and `smithers-orchestrator` without a dependency cycle | [Execution Model](/how-it-works) |

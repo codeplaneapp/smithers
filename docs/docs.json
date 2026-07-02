@@ -260,6 +260,7 @@
           "integrations/mcp-toolset",
           "integrations/server",
           "integrations/serve",
+          "integrations/telegram",
           "integrations/gateway",
           "integrations/custom-ui",
           "integrations/mcp-server",
