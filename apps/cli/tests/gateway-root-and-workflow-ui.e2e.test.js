@@ -129,7 +129,7 @@ browserTest(
 
       // 2 — A workflow UI bundle builds + boots + mounts. `plan` ships a UI with
       // a stable test id (see workflow-ui-descriptors.json).
-      await page.goto(`${base}/workflows/plan`, { waitUntil: "networkidle" });
+      await page.goto(`${base}/workflows/plan`, { waitUntil: "domcontentloaded" });
       await page.waitForSelector('[data-testid="plan-ui"]', { timeout: 20_000 });
 
       // An unknown runId must still serve the bundle (empty-run state handled

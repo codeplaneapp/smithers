@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import { gatewayKeys, type GatewayRpcPayload, type GatewayRunRow } from "@smithers-orchestrator/gateway-client";
-import { useSyncClient } from "./sync/useSyncClient.ts";
+import type { GatewayRpcPayload, GatewayRunRow } from "@smithers-orchestrator/gateway-client";
+import { useSmithersCollections } from "./useSmithersCollections.ts";
 import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
@@ -10,17 +10,17 @@ import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
  * whole-tree refetch). Same `GatewayAsyncState` shape the RPC hook returned.
  */
 export function useGatewayRun(runId: string | undefined): GatewayAsyncState<GatewayRpcPayload<"getRun">> {
-  const registry = useSyncClient();
-  const collection = runId ? registry.run(runId) : undefined;
+  const { collections } = useSmithersCollections();
+  const collection = runId ? collections.run(runId) : undefined;
   const live = useLiveQuery(
     (q) => (collection ? q.from({ row: collection }) : undefined),
     [collection],
   );
   const refetch = useCallback(async () => {
-    if (runId) await registry.invalidate(gatewayKeys.run(runId));
-  }, [registry, runId]);
+    if (runId) await collections.invalidate(["runs"]);
+  }, [collections, runId]);
 
-  const data = ((live.data ?? []) as GatewayRunRow[])[0] as GatewayRpcPayload<"getRun"> | undefined;
+  const data = ((live.data ?? []) as GatewayRunRow[]).find((row) => row.runId === runId) as GatewayRpcPayload<"getRun"> | undefined;
   return {
     data,
     error: undefined,

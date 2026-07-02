@@ -18,7 +18,7 @@ import { resolveSchema, runWorkflow } from "@smithers-orchestrator/engine";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
 import { signalRun } from "@smithers-orchestrator/engine/signals";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import { captureTxid } from "@smithers-orchestrator/db/captureTxid";
+import { captureTxid, createTxidCapture, isRealPostgresAdapter, runWithTxidCapture } from "@smithers-orchestrator/db/captureTxid";
 import { getSmithersSchemaSignature } from "@smithers-orchestrator/db/getSmithersSchemaSignature";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
@@ -1393,8 +1393,11 @@ function serializeGatewayApiPayload(method, payload) {
         case "listScores":
             return serializeRowOrRows(payload, serializeScoreRow);
         case "listTickets":
+        case "createTicket":
+        case "updateTicket":
             return serializeRowOrRows(payload, serializeTicketRow);
         case "cronList":
+        case "cronCreate":
             return serializeRowOrRows(payload, serializeCronRow);
         case "listAccounts":
             return serializeRowOrRows(payload, serializeAccountRow);
@@ -1418,6 +1421,14 @@ function apiMutationCollections(method) {
             return ["approvals", "runs", "run_events", "nodes"];
         case "submitSignal":
             return ["runs", "run_events", "nodes"];
+        case "cronCreate":
+        case "cronDelete":
+        case "cronRun":
+            return ["crons", "runs", "run_events"];
+        case "createTicket":
+        case "updateTicket":
+        case "deleteTicket":
+            return ["tickets", "docs"];
         default:
             return ["runs"];
     }
@@ -2601,10 +2612,27 @@ export class Gateway {
      * @returns {Promise<SmithersDb | null>}
      */
     async adapterForApiMutation(method, params) {
-        if (method === "launchRun") {
+        if (method === "launchRun" || method === "cronCreate" || method === "cronRun") {
             const workflowKey = asString(params.workflow);
+            const resolvedCron = method === "cronRun" && !workflowKey && asString(params.cronId)
+                ? await this.findCron(asString(params.cronId))
+                : null;
+            if (resolvedCron) {
+                return resolvedCron.adapter;
+            }
             const entry = workflowKey ? this.workflows.get(workflowKey) : undefined;
             return entry ? this.adapterForWorkflow(entry.workflow) : null;
+        }
+        if (method === "cronDelete") {
+            const cronId = asString(params.cronId);
+            const resolvedCron = cronId ? await this.findCron(cronId) : null;
+            return resolvedCron?.adapter ?? null;
+        }
+        if (method === "createTicket" || method === "updateTicket" || method === "deleteTicket") {
+            return this.primaryDocsAdapter();
+        }
+        if (method === "hijackRun") {
+            return null;
         }
         const runId = asString(params.runId);
         if (!runId) {
@@ -2641,11 +2669,11 @@ export class Gateway {
                 mutation: true,
             };
         }
-        const runAction = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/(cancel|resume|rewind)$/);
+        const runAction = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/(cancel|resume|rewind|hijack)$/);
         if (httpMethod === "POST" && runAction) {
             const action = runAction[2];
             return {
-                method: action === "cancel" ? "cancelRun" : action === "resume" ? "resumeRun" : "rewindRun",
+                method: action === "cancel" ? "cancelRun" : action === "resume" ? "resumeRun" : action === "hijack" ? "hijackRun" : "rewindRun",
                 params: { ...body, runId: decodeURIComponent(runAction[1]) },
                 mutation: true,
             };
@@ -2722,6 +2750,26 @@ export class Gateway {
         }
         if (httpMethod === "POST" && pathname === "/v1/api/signals") {
             return { method: "submitSignal", params: body, mutation: true };
+        }
+        if (httpMethod === "POST" && pathname === "/v1/api/crons") {
+            return { method: "cronCreate", params: body, mutation: true };
+        }
+        const cronById = pathname.match(/^\/v1\/api\/crons\/([^/]+)$/);
+        if (httpMethod === "DELETE" && cronById) {
+            return { method: "cronDelete", params: { ...body, cronId: decodeURIComponent(cronById[1]) }, mutation: true };
+        }
+        if (httpMethod === "POST" && pathname === "/v1/api/crons/run") {
+            return { method: "cronRun", params: body, mutation: true };
+        }
+        if (httpMethod === "POST" && pathname === "/v1/api/tickets") {
+            return { method: "createTicket", params: body, mutation: true };
+        }
+        const ticketByPath = pathname.match(/^\/v1\/api\/tickets\/(.+)$/);
+        if ((httpMethod === "PATCH" || httpMethod === "PUT") && ticketByPath) {
+            return { method: "updateTicket", params: { ...body, path: decodeURIComponent(ticketByPath[1]) }, mutation: true };
+        }
+        if (httpMethod === "DELETE" && ticketByPath) {
+            return { method: "deleteTicket", params: { ...body, path: decodeURIComponent(ticketByPath[1]) }, mutation: true };
         }
         const simpleReads = new Map([
             ["/v1/api/workflows", "listWorkflows"],
@@ -2824,13 +2872,15 @@ export class Gateway {
             if (!route) {
                 return sendJson(res, 404, { ok: false, error: { code: "NOT_FOUND", message: "Route not found" } });
             }
+            const mutationAdapter = route.mutation ? await this.adapterForApiMutation(route.method, route.params) : null;
+            const txidCapture = mutationAdapter ? createTxidCapture(mutationAdapter) : null;
             const frame = {
                 type: "req",
                 id: requestId,
                 method: route.method,
                 params: route.params,
             };
-            const response = await this.executeRpc(context, frame, async () => {
+            const execute = () => this.executeRpc(context, frame, async () => {
                 if (!hasScope(context.scopes, route.method, this.extensions)) {
                     return responseForbidden(requestId, route.method, this.extensions);
                 }
@@ -2839,6 +2889,9 @@ export class Gateway {
                 }
                 return this.routeRequest(context, frame);
             });
+            const response = txidCapture
+                ? await runWithTxidCapture(txidCapture, execute)
+                : await execute();
             if (!response.ok) {
                 return sendJson(res, statusForRpcError(response.error?.code), {
                     ok: false,
@@ -2849,11 +2902,20 @@ export class Gateway {
             if (!route.mutation) {
                 return sendJson(res, 200, { ok: true, data });
             }
-            const adapter = await this.adapterForApiMutation(route.method, route.params);
-            const txid = adapter ? await captureTxid(adapter).catch(() => null) : null;
+            const expectsTxid = mutationAdapter ? await isRealPostgresAdapter(mutationAdapter).catch(() => false) : false;
+            const txid = txidCapture ? await captureTxid(txidCapture, { waitMs: expectsTxid ? 2_000 : 0 }).catch(() => null) : null;
             if (txid) {
                 await this.queueApiInvalidation(apiMutationCollections(route.method));
                 return sendJson(res, 200, { ok: true, data, txid });
+            }
+            if (expectsTxid) {
+                return sendJson(res, 500, {
+                    ok: false,
+                    error: {
+                        code: "TXID_NOT_CAPTURED",
+                        message: "Postgres mutation completed without a transaction id captured inside the write transaction.",
+                    },
+                });
             }
             const seq = await this.queueApiInvalidation(apiMutationCollections(route.method));
             return sendJson(res, 200, { ok: true, data, seq });

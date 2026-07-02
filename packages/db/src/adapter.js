@@ -23,6 +23,7 @@ import { FRAME_KEYFRAME_INTERVAL, applyFrameDeltaJson, encodeFrameDelta, normali
 import { getKeyColumns } from "./output.js";
 import { withSqliteWriteRetryEffect } from "./write-retry.js";
 import { camelToSnake } from "./utils/camelToSnake.js";
+import { capturePostgresTransactionTxid, recordCommittedTxid, shouldCapturePostgresTxid, } from "./captureTxid.js";
 /** @typedef {import("./adapter/AlertRow.ts").AlertRow} AlertRow */
 /** @typedef {import("./adapter/AlertStatus.ts").AlertStatus} AlertStatus */
 /** @typedef {import("./adapter/AttemptRow.ts").AttemptRow} AttemptRow */
@@ -585,8 +586,6 @@ export class SmithersDb {
     transactionOwnerThread = null;
     /** @type {Promise<unknown>} */
     transactionTail = Promise.resolve();
-    /** @type {string | null} */
-    lastCommittedTxid = null;
     /**
    * @param {BunSQLiteDatabase<Record<string, unknown>>} db
    */
@@ -740,9 +739,40 @@ export class SmithersDb {
             }
             else {
                 const releaseTurn = yield* self.acquireTransactionTurn();
-                result = yield* withSqliteWriteRetryEffect(() => writeOperation, { label }).pipe(Effect.ensuring(Effect.sync(() => {
-                    releaseTurn();
-                })));
+                const captureTxidForWrite = yield* Effect.promise(() => shouldCapturePostgresTxid(self));
+	                result = yield* withSqliteWriteRetryEffect(() => captureTxidForWrite
+	                    ? Effect.gen(function* () {
+	                        yield* Effect.tryPromise({
+	                            try: () => self.internalStorage.execute(beginTransactionSql(self.internalStorage.dialect)),
+	                            catch: (cause) => toSmithersError(cause, `begin ${label}`, {
+                                code: "DB_WRITE_FAILED",
+	                                details: { operation: label, phase: "begin" },
+	                            }),
+	                        });
+	                        const value = yield* writeOperation;
+	                        const capturedTxid = yield* Effect.tryPromise({
+	                            try: () => capturePostgresTransactionTxid(self),
+	                            catch: (cause) => toSmithersError(cause, `capture txid ${label}`, {
+	                                code: "DB_QUERY_FAILED",
+	                                details: { operation: label, phase: "txid" },
+	                            }),
+	                        });
+	                        yield* Effect.tryPromise({
+	                            try: () => self.internalStorage.execute("COMMIT"),
+	                            catch: (cause) => toSmithersError(cause, `commit ${label}`, {
+	                                code: "DB_WRITE_FAILED",
+	                                details: { operation: label, phase: "commit" },
+	                            }),
+	                        });
+	                        recordCommittedTxid(self, capturedTxid);
+	                        return value;
+	                    }).pipe(Effect.catchAll((error) => Effect.gen(function* () {
+	                        yield* Effect.promise(() => self.internalStorage.execute("ROLLBACK").then(() => undefined, () => undefined));
+	                        return yield* Effect.fail(error);
+	                    })))
+	                    : writeOperation, { label }).pipe(Effect.ensuring(Effect.sync(() => {
+	                    releaseTurn();
+	                })));
             }
             yield* Metric.update(dbQueryDuration, performance.now() - start);
             return result;
@@ -844,10 +874,10 @@ export class SmithersDb {
                     }));
                     yield* Effect.promise(() => runControl("ROLLBACK").then(() => undefined, () => undefined));
                 });
-                yield* Effect.tryPromise({
-                    try: async () => {
-                        await runControl(beginTransactionSql(self.internalStorage.dialect));
-                        transactionState.depth += 1;
+	                yield* Effect.tryPromise({
+	                    try: async () => {
+	                        await runControl(beginTransactionSql(self.internalStorage.dialect));
+	                        transactionState.depth += 1;
                         transactionState.ownerThread = currentFiberThread;
                         self.transactionDepth = transactionState.depth;
                         self.transactionOwnerThread = transactionState.ownerThread;
@@ -858,22 +888,21 @@ export class SmithersDb {
                         details: { writeGroup, phase: "begin" },
                     }),
                 });
-                const operationExit = yield* Effect.exit(operation);
-                if (Exit.isFailure(operationExit)) {
-                    yield* rollback("operation", operationExit.cause);
-                    return yield* Effect.failCause(operationExit.cause);
-                }
-                let capturedTxid = null;
-                if (isPostgres) {
-                    const txidExit = yield* Effect.exit(Effect.tryPromise({
-                        try: async () => {
-                            const row = await self.internalStorage.queryOneRaw("SELECT pg_current_xact_id()::xid::text AS txid");
-                            const txid = typeof row?.txid === "string" ? row.txid : null;
-                            return txid && /^\d+$/.test(txid) ? txid : null;
-                        },
-                        catch: (cause) => toSmithersError(cause, "capture postgres txid", {
-                            code: "DB_QUERY_FAILED",
-                            details: { writeGroup, phase: "txid" },
+	                const operationExit = yield* Effect.exit(operation);
+	                if (Exit.isFailure(operationExit)) {
+	                    yield* rollback("operation", operationExit.cause);
+	                    return yield* Effect.failCause(operationExit.cause);
+	                }
+	                let capturedTxid = null;
+	                const captureTxidForTransaction = isPostgres
+	                    ? yield* Effect.promise(() => shouldCapturePostgresTxid(self))
+	                    : false;
+	                if (captureTxidForTransaction) {
+	                    const txidExit = yield* Effect.exit(Effect.tryPromise({
+	                        try: () => capturePostgresTransactionTxid(self),
+	                        catch: (cause) => toSmithersError(cause, "capture postgres txid", {
+	                            code: "DB_QUERY_FAILED",
+	                            details: { writeGroup, phase: "txid" },
                         }),
                     }));
                     if (Exit.isSuccess(txidExit)) {
@@ -887,14 +916,14 @@ export class SmithersDb {
                         details: { writeGroup, phase: "commit" },
                     }),
                 }));
-                if (Exit.isFailure(commitExit)) {
-                    yield* rollback("commit", commitExit.cause);
-                    return yield* Effect.failCause(commitExit.cause);
-                }
-                if (capturedTxid) {
-                    self.lastCommittedTxid = capturedTxid;
-                }
-                return operationExit.value;
+	                if (Exit.isFailure(commitExit)) {
+	                    yield* rollback("commit", commitExit.cause);
+	                    return yield* Effect.failCause(commitExit.cause);
+	                }
+	                if (capturedTxid) {
+	                    recordCommittedTxid(self, capturedTxid);
+	                }
+	                return operationExit.value;
             }).pipe(Effect.ensuring(Effect.gen(function* () {
                 transactionState.depth = Math.max(0, transactionState.depth - 1);
                 if (transactionState.depth === 0) {
@@ -1956,19 +1985,26 @@ export class SmithersDb {
                 return existing.seq;
             }
             const client = /** @type {{ exec?: unknown; query?: unknown; run?: unknown }} */ (resolveSqliteClientKey(self.db));
-            if (typeof client.exec !== "function" ||
-                typeof client.query !== "function" ||
-                typeof client.run !== "function") {
-                // Non-bun:sqlite (Postgres/pglite) fallback. Serialize the
-                // read-MAX-then-insert under the shared transaction turn so two
-                // concurrent allocations can't both read the same lastSeq and
-                // collide on the (run_id, seq) primary key — insertIgnore would
-                // otherwise silently drop the loser, losing a signal.
-                const releaseTurn = yield* self.acquireTransactionTurn();
-                return yield* Effect.gen(function* () {
-                    const lastSeq = (yield* Effect.tryPromise({
-                        try: () => self.internalStorage.getLastSignalSeq(row.runId),
-                        catch: (cause) => toSmithersError(cause, "get fallback last signal seq"),
+	            if (typeof client.exec !== "function" ||
+	                typeof client.query !== "function" ||
+	                typeof client.run !== "function") {
+	                // Non-bun:sqlite (Postgres/pglite) fallback. Serialize the
+	                // read-MAX-then-insert under the shared transaction turn so two
+	                // concurrent allocations can't both read the same lastSeq and
+	                // collide on the (run_id, seq) primary key — insertIgnore would
+	                // otherwise silently drop the loser, losing a signal.
+	                const releaseTurn = yield* self.acquireTransactionTurn();
+	                const captureTxidForWrite = yield* Effect.promise(() => shouldCapturePostgresTxid(self));
+	                return yield* Effect.gen(function* () {
+	                    if (captureTxidForWrite) {
+	                        yield* Effect.tryPromise({
+	                            try: () => self.internalStorage.execute(beginTransactionSql(self.internalStorage.dialect)),
+	                            catch: (cause) => toSmithersError(cause, "begin fallback signal transaction"),
+	                        });
+	                    }
+	                    const lastSeq = (yield* Effect.tryPromise({
+	                        try: () => self.internalStorage.getLastSignalSeq(row.runId),
+	                        catch: (cause) => toSmithersError(cause, "get fallback last signal seq"),
                     })) ?? -1;
                     const seq = lastSeq + 1;
                     yield* Effect.tryPromise({
@@ -1976,14 +2012,32 @@ export class SmithersDb {
                             ...row,
                             receivedBy: row.receivedBy ?? null,
                             seq,
-                        }),
-                        catch: (cause) => toSmithersError(cause, "insert fallback signal row"),
-                    });
-                    return seq;
-                }).pipe(Effect.ensuring(Effect.sync(() => {
-                    releaseTurn();
-                })));
-            }
+	                        }),
+	                        catch: (cause) => toSmithersError(cause, "insert fallback signal row"),
+	                    });
+	                    const capturedTxid = captureTxidForWrite
+	                        ? yield* Effect.tryPromise({
+	                            try: () => capturePostgresTransactionTxid(self),
+	                            catch: (cause) => toSmithersError(cause, "capture fallback signal txid"),
+	                        })
+	                        : null;
+	                    if (captureTxidForWrite) {
+	                        yield* Effect.tryPromise({
+	                            try: () => self.internalStorage.execute("COMMIT"),
+	                            catch: (cause) => toSmithersError(cause, "commit fallback signal transaction"),
+	                        });
+	                        recordCommittedTxid(self, capturedTxid);
+	                    }
+	                    return seq;
+	                }).pipe(Effect.catchAll((error) => Effect.gen(function* () {
+	                    if (captureTxidForWrite) {
+	                        yield* Effect.promise(() => self.internalStorage.execute("ROLLBACK").then(() => undefined, () => undefined));
+	                    }
+	                    return yield* Effect.fail(error);
+	                })), Effect.ensuring(Effect.sync(() => {
+	                    releaseTurn();
+	                })));
+	            }
             const releaseTurn = yield* self.acquireTransactionTurn();
             return yield* Effect.try({
                 try: () => {
@@ -2221,32 +2275,57 @@ export class SmithersDb {
                 return existing.seq;
             }
             const client = /** @type {{ exec?: unknown; query?: unknown; run?: unknown }} */ (resolveSqliteClientKey(self.db));
-            if (typeof client.exec !== "function" ||
-                typeof client.query !== "function" ||
-                typeof client.run !== "function") {
-                // Non-bun:sqlite (Postgres/pglite) fallback. Serialize the
-                // read-MAX-then-insert under the shared transaction turn — the
-                // same primitive the bun:sqlite path below relies on — so two
-                // concurrent allocations can't both read the same lastSeq and
-                // collide on the (run_id, seq) primary key. Without the turn,
-                // insertIgnore would silently drop the loser, losing an event
-                // from the durable log that replay/live-stream depend on.
-                const releaseTurn = yield* self.acquireTransactionTurn();
-                return yield* Effect.gen(function* () {
-                    const lastSeq = (yield* Effect.tryPromise({
-                        try: () => self.internalStorage.getLastEventSeq(row.runId),
-                        catch: (cause) => toSmithersError(cause, "get fallback last event seq"),
+	            if (typeof client.exec !== "function" ||
+	                typeof client.query !== "function" ||
+	                typeof client.run !== "function") {
+	                // Non-bun:sqlite (Postgres/pglite) fallback. Serialize the
+	                // read-MAX-then-insert under the shared transaction turn — the
+	                // same primitive the bun:sqlite path below relies on — so two
+	                // concurrent allocations can't both read the same lastSeq and
+	                // collide on the (run_id, seq) primary key. Without the turn,
+	                // insertIgnore would silently drop the loser, losing an event
+	                // from the durable log that replay/live-stream depend on.
+	                const releaseTurn = yield* self.acquireTransactionTurn();
+	                const captureTxidForWrite = yield* Effect.promise(() => shouldCapturePostgresTxid(self));
+	                return yield* Effect.gen(function* () {
+	                    if (captureTxidForWrite) {
+	                        yield* Effect.tryPromise({
+	                            try: () => self.internalStorage.execute(beginTransactionSql(self.internalStorage.dialect)),
+	                            catch: (cause) => toSmithersError(cause, "begin fallback event transaction"),
+	                        });
+	                    }
+	                    const lastSeq = (yield* Effect.tryPromise({
+	                        try: () => self.internalStorage.getLastEventSeq(row.runId),
+	                        catch: (cause) => toSmithersError(cause, "get fallback last event seq"),
                     })) ?? -1;
                     const seq = lastSeq + 1;
-                    yield* Effect.tryPromise({
-                        try: () => self.internalStorage.insertIgnore("_smithers_events", { ...row, seq }),
-                        catch: (cause) => toSmithersError(cause, "insert fallback event row"),
-                    });
-                    return seq;
-                }).pipe(Effect.ensuring(Effect.sync(() => {
-                    releaseTurn();
-                })));
-            }
+	                    yield* Effect.tryPromise({
+	                        try: () => self.internalStorage.insertIgnore("_smithers_events", { ...row, seq }),
+	                        catch: (cause) => toSmithersError(cause, "insert fallback event row"),
+	                    });
+	                    const capturedTxid = captureTxidForWrite
+	                        ? yield* Effect.tryPromise({
+	                            try: () => capturePostgresTransactionTxid(self),
+	                            catch: (cause) => toSmithersError(cause, "capture fallback event txid"),
+	                        })
+	                        : null;
+	                    if (captureTxidForWrite) {
+	                        yield* Effect.tryPromise({
+	                            try: () => self.internalStorage.execute("COMMIT"),
+	                            catch: (cause) => toSmithersError(cause, "commit fallback event transaction"),
+	                        });
+	                        recordCommittedTxid(self, capturedTxid);
+	                    }
+	                    return seq;
+	                }).pipe(Effect.catchAll((error) => Effect.gen(function* () {
+	                    if (captureTxidForWrite) {
+	                        yield* Effect.promise(() => self.internalStorage.execute("ROLLBACK").then(() => undefined, () => undefined));
+	                    }
+	                    return yield* Effect.fail(error);
+	                })), Effect.ensuring(Effect.sync(() => {
+	                    releaseTurn();
+	                })));
+	            }
             const releaseTurn = yield* self.acquireTransactionTurn();
             return yield* Effect.try({
                 try: () => {

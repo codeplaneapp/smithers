@@ -15,16 +15,13 @@ import type { SmithersGatewayClient } from "@smithers-orchestrator/gateway-clien
 function createSpyClient() {
   const calls: string[] = [];
   const client = {
-    launchRun: () => calls.push("launchRun"),
-    resumeRun: () => calls.push("resumeRun"),
-    cancelRun: () => calls.push("cancelRun"),
-    hijackRun: () => calls.push("hijackRun"),
-    rewindRun: () => calls.push("rewindRun"),
-    submitApproval: () => calls.push("submitApproval"),
-    submitSignal: () => calls.push("submitSignal"),
-    cronCreate: () => calls.push("cronCreate"),
-    cronDelete: () => calls.push("cronDelete"),
-    cronRun: () => calls.push("cronRun"),
+    baseUrl: "http://gateway.test",
+    fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const method = init?.method ?? "GET";
+      calls.push(`${method} ${url.pathname}`);
+      return Response.json({ ok: true, data: { runId: "run-1", status: "ok" } });
+    },
   } as unknown as SmithersGatewayClient;
   return { client, calls };
 }
@@ -35,6 +32,11 @@ function createRpcClient() {
     rpc: (method: string, params: unknown) => {
       calls.push({ method, params });
       return Promise.resolve({ ok: true });
+    },
+    fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      calls.push({ method: `${init?.method ?? "GET"} ${url.pathname}`, params: Object.fromEntries(url.searchParams) });
+      return Response.json({ ok: true, data: { ok: true } });
     },
     streamRunEvents: async function* () {},
     streamRunEventsResilient: async function* () {},
@@ -114,7 +116,7 @@ describe("useSmithersGateway", () => {
 });
 
 describe("useGatewayActions", () => {
-  test("exposes write helpers for the full stable gateway action surface", () => {
+  test("exposes write helpers for the full stable gateway action surface", async () => {
     const { client, calls } = createSpyClient();
     let actions: ReturnType<typeof useGatewayActions> | undefined;
 
@@ -126,32 +128,32 @@ describe("useGatewayActions", () => {
     renderToString(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
 
     expect(actions).toBeDefined();
-    actions?.launchRun({ workflow: "deploy" });
-    actions?.resumeRun({ runId: "run-1" });
-    actions?.cancelRun({ runId: "run-1" });
-    actions?.hijackRun({ runId: "run-1" });
-    actions?.rewindRun({ runId: "run-1", frameNo: 1, confirm: true });
-    actions?.submitApproval({
+    await actions?.launchRun({ workflow: "deploy" });
+    await actions?.resumeRun({ runId: "run-1" });
+    await actions?.cancelRun({ runId: "run-1" });
+    await actions?.hijackRun({ runId: "run-1" });
+    await actions?.rewindRun({ runId: "run-1", frameNo: 1, confirm: true });
+    await actions?.submitApproval({
       runId: "run-1",
       nodeId: "approve",
       decision: { approved: true },
     });
-    actions?.submitSignal({ runId: "run-1", correlationKey: "signal-1" });
-    actions?.cronCreate({ workflow: "deploy", pattern: "* * * * *" });
-    actions?.cronDelete({ cronId: "cron-1" });
-    actions?.cronRun({ workflow: "deploy" });
+    await actions?.submitSignal({ runId: "run-1", correlationKey: "signal-1" });
+    await actions?.cronCreate({ workflow: "deploy", pattern: "* * * * *" });
+    await actions?.cronDelete({ cronId: "cron-1" });
+    await actions?.cronRun({ workflow: "deploy" });
 
     expect(calls).toEqual([
-      "launchRun",
-      "resumeRun",
-      "cancelRun",
-      "hijackRun",
-      "rewindRun",
-      "submitApproval",
-      "submitSignal",
-      "cronCreate",
-      "cronDelete",
-      "cronRun",
+      "POST /v1/api/runs",
+      "POST /v1/api/runs/run-1/resume",
+      "POST /v1/api/runs/run-1/cancel",
+      "POST /v1/api/runs/run-1/hijack",
+      "POST /v1/api/runs/run-1/rewind",
+      "POST /v1/api/approvals/run-1%3Aapprove%3A0",
+      "POST /v1/api/signals",
+      "POST /v1/api/crons",
+      "DELETE /v1/api/crons/cron-1",
+      "POST /v1/api/crons/run",
     ]);
   });
 });
@@ -216,11 +218,9 @@ describe("gateway query hooks", () => {
     expect(rejecting.calls).toEqual([{ method: "listRuns", params: { limit: 1 } }]);
   });
 
-  // The collection-backed hooks (useGatewayRuns / useGatewayRun /
-  // useGatewayApprovals / useGatewayWorkflows / useGatewayRunEvents) now run over
-  // the `SyncProvider` registry — see `tests/sync/sync.test.ts`. The on-demand
-  // node-output hook stays on the legacy `SmithersGatewayContext` client.
-  test("useGatewayNodeOutput reflects enabled / disabled state on the legacy client", () => {
+  // The collection-backed hooks and on-demand node output now run over the
+  // Smithers domain API client.
+  test("useGatewayNodeOutput reflects enabled / disabled state on the domain client", () => {
     const { client } = createRpcClient();
     const observed: Record<string, unknown> = {};
 
@@ -256,7 +256,7 @@ describe("gateway query hooks", () => {
 
     await output?.refetch();
     expect(calls).toEqual([
-      { method: "getNodeOutput", params: { runId: "run-1", nodeId: "ship", iteration: 0 } },
+      { method: "GET /v1/api/nodes/run-1/ship/output", params: { iteration: "0" } },
     ]);
   });
 });

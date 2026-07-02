@@ -1,8 +1,8 @@
 import { useCallback } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import { gatewayKeys, type GatewayPromptRow } from "@smithers-orchestrator/gateway-client";
+import type { GatewayPromptRow } from "@smithers-orchestrator/gateway-client";
 import type { ListPromptsRequest } from "@smithers-orchestrator/gateway/rpc";
-import { useSyncClient } from "./sync/useSyncClient.ts";
+import { useSmithersCollections } from "./useSmithersCollections.ts";
 import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
@@ -14,12 +14,12 @@ import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
  */
 export function useGatewayPrompts(): GatewayAsyncState<GatewayPromptRow[]> {
   const params: ListPromptsRequest = {};
-  const registry = useSyncClient();
-  const collection = registry.prompts(params);
+  const { collections } = useSmithersCollections();
+  const collection = collections.prompts();
   const live = useLiveQuery((q) => q.from({ row: collection }), [collection]);
   const refetch = useCallback(async () => {
-    await registry.invalidate(gatewayKeys.prompts(params));
-  }, [registry, collection]);
+    await collections.invalidate(["prompts"]);
+  }, [collections]);
 
   const data = (live.data ?? []) as GatewayPromptRow[];
   return {

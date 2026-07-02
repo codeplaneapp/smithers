@@ -67,6 +67,26 @@ export const smithersElectricShapeCatalog: readonly SmithersElectricShapeDefinit
     requiredScope: "run:read",
     description: "DB-backed tickets, plans, specs, and proposals.",
   },
+  {
+    name: "scores",
+    table: "_smithers_scorers",
+    requiredScope: "run:read",
+    runIdColumn: "run_id",
+    whereTemplate: "run_id IN ({run_ids})",
+    description: "Per-run scorer and eval result rows.",
+  },
+  {
+    name: "memory_facts",
+    table: "_smithers_memory_facts",
+    requiredScope: "run:read",
+    description: "Workspace memory fact rows.",
+  },
+  {
+    name: "crons",
+    table: "_smithers_cron",
+    requiredScope: "run:read",
+    description: "Registered cron schedules.",
+  },
 ] as const;
 
 /**

@@ -996,12 +996,24 @@ importers:
 
   packages/gateway-client:
     dependencies:
+      '@smithers-orchestrator/electric-proxy':
+        specifier: workspace:^
+        version: link:../electric-proxy
       '@smithers-orchestrator/gateway':
         specifier: workspace:*
         version: link:../gateway
       '@tanstack/db':
         specifier: 0.6.13
         version: 0.6.13(typescript@6.0.3)
+      '@tanstack/electric-db-collection':
+        specifier: 0.3.11
+        version: 0.3.11(typescript@6.0.3)
+      '@tanstack/query-db-collection':
+        specifier: 1.0.45
+        version: 1.0.45(@tanstack/query-core@5.101.2)(typescript@6.0.3)
+      '@tanstack/react-query':
+        specifier: 5.101.2
+        version: 5.101.2(react@19.2.7)
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -1009,10 +1021,6 @@ importers:
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
-    optionalDependencies:
-      '@electric-sql/client':
-        specifier: ^1.5.22
-        version: 1.5.22
 
   packages/gateway-react:
     dependencies:
@@ -1022,9 +1030,15 @@ importers:
       '@smithers-orchestrator/gateway-client':
         specifier: workspace:*
         version: link:../gateway-client
+      '@tanstack/query-db-collection':
+        specifier: 1.0.45
+        version: 1.0.45(@tanstack/query-core@5.101.2)(typescript@6.0.3)
       '@tanstack/react-db':
         specifier: 0.1.91
         version: 0.1.91(react@19.2.7)(typescript@6.0.3)
+      '@tanstack/react-query':
+        specifier: 5.101.2
+        version: 5.101.2(react@19.2.7)
     devDependencies:
       '@happy-dom/global-registrator':
         specifier: ^20.10.6
@@ -4055,6 +4069,9 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
+  '@tanstack/electric-db-collection@0.3.11':
+    resolution: {integrity: sha512-tTG7YWqs+FeGh4H/oinZ7zbE9F9w/cF+QLeX3iyNd8A4SDxwmZeTCmy9u9wuAQ4IJM/hu7lMknup+ebryoZrzg==}
+
   '@tanstack/history@1.162.0':
     resolution: {integrity: sha512-79pf/RkhteYZTRgcR4F9kbk84P2N8rugQJswxfIqovlbRiT3yI7eBE+5QorIrZaOKktsgzRlXh1l/du/xpl4iA==}
     engines: {node: '>=20.19'}
@@ -4070,6 +4087,12 @@ packages:
 
   '@tanstack/query-core@5.101.2':
     resolution: {integrity: sha512-hH5MLoJhF7KaIGd7q3xTXGXvslI+GYlM1Z/35aSHHWaCJWB7XvTSHYuV3eM7tw+aE0mT/xMro4M4Q9rCGHT0lw==}
+
+  '@tanstack/query-db-collection@1.0.45':
+    resolution: {integrity: sha512-BS5Cp+gwguQoL1CBWycKeOXHXfxw8OF5vuK34n6GT8V3wqSmrz0Nj7EHQEKdK8A+QTZwSSj/SiRBmYLHHkg2Cw==}
+    peerDependencies:
+      '@tanstack/query-core': ^5.0.0
+      typescript: '>=4.7'
 
   '@tanstack/react-db@0.1.91':
     resolution: {integrity: sha512-iiGXa0NUR5ZgWnaIzUw6T+VvkKv2kTo5jYYK57EtajDcrJbBlNw2+pnRp8Ni2QhXWG7GxFbDEuyY8aj4V975NA==}
@@ -8272,7 +8295,6 @@ snapshots:
       '@microsoft/fetch-event-source': 2.0.1
     optionalDependencies:
       '@rollup/rollup-darwin-arm64': 4.60.2
-    optional: true
 
   '@electric-sql/pglite-age@0.0.2(@electric-sql/pglite@0.5.3)':
     dependencies:
@@ -9040,8 +9062,7 @@ snapshots:
     dependencies:
       '@chevrotain/types': 11.1.2
 
-  '@microsoft/fetch-event-source@2.0.1':
-    optional: true
+  '@microsoft/fetch-event-source@2.0.1': {}
 
   '@milkdown/components@7.21.2(@codemirror/language@6.12.4)(@codemirror/state@6.7.0)(@codemirror/view@6.43.4)(typescript@6.0.3)':
     dependencies:
@@ -10084,6 +10105,17 @@ snapshots:
 
   '@tanstack/devtools-event-client@0.4.4': {}
 
+  '@tanstack/electric-db-collection@0.3.11(typescript@6.0.3)':
+    dependencies:
+      '@electric-sql/client': 1.5.22
+      '@standard-schema/spec': 1.1.0
+      '@tanstack/db': 0.6.13(typescript@6.0.3)
+      '@tanstack/store': 0.9.3
+      debug: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
+      - typescript
+
   '@tanstack/history@1.162.0': {}
 
   '@tanstack/openai-base@0.9.6(@aws-sdk/credential-provider-node@3.972.61)(@smithy/signature-v4@5.6.1)(@tanstack/ai@0.39.0(@opentelemetry/api@1.9.0))(ws@8.21.0)(zod@4.4.3)':
@@ -10101,6 +10133,13 @@ snapshots:
   '@tanstack/pacer-lite@0.2.2': {}
 
   '@tanstack/query-core@5.101.2': {}
+
+  '@tanstack/query-db-collection@1.0.45(@tanstack/query-core@5.101.2)(typescript@6.0.3)':
+    dependencies:
+      '@standard-schema/spec': 1.1.0
+      '@tanstack/db': 0.6.13(typescript@6.0.3)
+      '@tanstack/query-core': 5.101.2
+      typescript: 6.0.3
 
   '@tanstack/react-db@0.1.91(react@19.2.7)(typescript@6.0.3)':
     dependencies:

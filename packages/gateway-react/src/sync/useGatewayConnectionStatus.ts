@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { useSyncClient } from "./useSyncClient.ts";
+import { useSmithersCollections } from "../useSmithersCollections.ts";
 import type { GatewayConnectionStatus } from "./GatewayConnectionState.ts";
 
 export type UseGatewayConnectionStatusResult = {
@@ -16,11 +16,11 @@ export type UseGatewayConnectionStatusResult = {
  * hand-rolled `GatewayStatus` field apps/smithers kept in its zustand store.
  */
 export function useGatewayConnectionStatus(): UseGatewayConnectionStatusResult {
-  const registry = useSyncClient();
+  const { client } = useSmithersCollections();
   const state = useSyncExternalStore(
-    registry.subscribeConnection,
-    registry.connection,
-    registry.connection,
+    client.stream.subscribeStatus,
+    client.stream.status,
+    client.stream.status,
   );
   return {
     status: state.status,

@@ -18,6 +18,7 @@ const repoRoot = join(here, "..", "..", "..", "..");
 const composeFile = join(repoRoot, "deploy", "electric", "docker-compose.yml");
 const PROJECT = process.env.SMITHERS_ELECTRIC_TEST_PROJECT ?? "smithers-electric-test";
 const ELECTRIC_PORT = process.env.SMITHERS_ELECTRIC_PORT ?? "30001";
+const POSTGRES_PORT = process.env.SMITHERS_PG_PORT ?? "54329";
 const ELECTRIC_BASE = `http://localhost:${ELECTRIC_PORT}`;
 
 function run(cmd: string, args: readonly string[], timeoutMs = 120_000): string {
@@ -68,6 +69,8 @@ async function waitForElectricHealthy(timeoutMs = 60_000): Promise<void> {
 export type ElectricFixture = {
   /** Base Electric shape URL the proxy fronts: `${base}/v1/shape`. */
   shapeUrl: string;
+  /** Postgres-of-record URL for tests that need Gateway writes and Electric reads against one database. */
+  postgresUrl: string;
   /** Seed `_smithers_runs` rows (run_id, status). */
   seedRuns(rows: ReadonlyArray<{ runId: string; status: string; workflow?: string }>): void;
   teardown(): void;
@@ -85,6 +88,7 @@ export async function startElectricFixture(): Promise<ElectricFixture> {
 
   return {
     shapeUrl: `${ELECTRIC_BASE}/v1/shape`,
+    postgresUrl: `postgresql://smithers:smithers_pw@localhost:${POSTGRES_PORT}/smithers`,
     seedRuns(rows) {
       for (const row of rows) {
         const workflow = (row.workflow ?? "hello").replaceAll("'", "''");

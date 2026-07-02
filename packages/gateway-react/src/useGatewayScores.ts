@@ -1,8 +1,8 @@
 import { useCallback } from "react";
 import { useLiveQuery } from "@tanstack/react-db";
-import { gatewayKeys, type GatewayScoreRow } from "@smithers-orchestrator/gateway-client";
+import type { GatewayScoreRow } from "@smithers-orchestrator/gateway-client";
 import type { ListScoresRequest } from "@smithers-orchestrator/gateway/rpc";
-import { useSyncClient } from "./sync/useSyncClient.ts";
+import { useSmithersCollections } from "./useSmithersCollections.ts";
 import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
 
 /**
@@ -18,12 +18,12 @@ import type { GatewayAsyncState } from "./GatewayAsyncState.ts";
  */
 export function useGatewayScores(runId: string, nodeId?: string): GatewayAsyncState<GatewayScoreRow[]> {
   const params: ListScoresRequest = nodeId ? { runId, nodeId } : { runId };
-  const registry = useSyncClient();
-  const collection = registry.scores(params);
+  const { collections } = useSmithersCollections();
+  const collection = collections.scores(params);
   const live = useLiveQuery((q) => q.from({ row: collection }), [collection]);
   const refetch = useCallback(async () => {
-    await registry.invalidate(gatewayKeys.scores(params));
-  }, [registry, collection]);
+    await collections.invalidate(["scores"]);
+  }, [collections, runId, nodeId]);
 
   const data = (live.data ?? []) as GatewayScoreRow[];
   return {

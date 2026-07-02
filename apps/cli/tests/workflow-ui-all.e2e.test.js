@@ -84,7 +84,7 @@ async function waitForHealth(base, timeoutMs = 60_000) {
 
 async function checkUi(page, base, descriptor, runId) {
   const url = `${base}/workflows/${descriptor.key}${runId ? `?runId=${runId}` : ""}`;
-  await page.goto(url, { waitUntil: "networkidle" });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
   // Real bundle built + app mounted to its root element.
   if (descriptor.primaryTestId) {
     await page.waitForSelector(`[data-testid="${descriptor.primaryTestId}"]`, { timeout: 20_000 });

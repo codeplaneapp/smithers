@@ -26,27 +26,13 @@ export type {
   GatewayExtensionSubscribeResponse,
 } from "./GatewayExtensionEnvelope.ts";
 
-// Declarative sync SDK: TanStack DB collection options backed by the gateway
-// RPC + WebSocket transport. React bindings live in
-// `@smithers-orchestrator/gateway-react` so the core stays framework-free.
-export { createGatewayCollection, type GatewayCollectionConfig } from "./sync/createGatewayCollection.ts";
-// Cloud-Electric source: the sibling of `createGatewayCollection` that feeds the
-// same `CollectionConfig` from an ElectricSQL shape instead of the gateway RPC +
-// WS transport. Selected by the registry when the `electric` sync source is set.
-export {
-  createElectricCollection,
-  type ElectricCollectionConfig,
-  type ElectricCollectionDef,
-  type ElectricRawRow,
-} from "./sync/createElectricCollection.ts";
-export { electricCollectionDefs, mapMemoryFactRow } from "./sync/electricCollectionDefs.ts";
 export { flattenGatewayRunNode } from "./sync/flattenGatewayRunNode.ts";
 export { snapshotToGatewayRunNode } from "./sync/snapshotToGatewayRunNode.ts";
 export type { DevToolsSnapshot, DevToolsSnapshotNode } from "./sync/snapshotToGatewayRunNode.ts";
-export { gatewayCollectionDefs } from "./sync/gatewayCollectionDefs.ts";
 export { reconcileSnapshotNodes } from "./sync/reconcileSnapshotNodes.ts";
 export type { GatewayApprovalRow } from "./sync/GatewayApprovalRow.ts";
 export type { GatewayCronRow } from "./sync/GatewayCronRow.ts";
+export type { GatewayDocRow } from "./data/GatewayDocRow.ts";
 export type { GatewayMemoryFactRow } from "./sync/GatewayMemoryFactRow.ts";
 export type { GatewayPromptRow } from "./sync/GatewayPromptRow.ts";
 export type { GatewayScoreRow } from "./sync/GatewayScoreRow.ts";
@@ -61,15 +47,19 @@ export { syncBackoffDelay } from "./sync/SyncBackoff.ts";
 export type { SyncBackoffOptions } from "./sync/SyncBackoff.ts";
 export { syncKeyFingerprint, syncKeyMatches } from "./sync/SyncKey.ts";
 export type { SyncKey } from "./sync/SyncKey.ts";
-export type {
-  SyncRpcOptions,
-  SyncStreamFrame,
-  SyncStreamOptions,
-  SyncTransport,
-} from "./sync/SyncTransport.ts";
-export { gatewayKeys } from "./sync/gatewayKeys.ts";
-export {
-  createSmithersGatewayTransport,
-  type CreateSmithersGatewayTransportOptions,
-  type SmithersGatewayStreamScope,
-} from "./sync/createSmithersGatewayTransport.ts";
+export type { ApiMutationResult } from "./data/ApiMutationResult.ts";
+export type { CreateSmithersDataClientOptions } from "./data/CreateSmithersDataClientOptions.ts";
+export type { SmithersApi } from "./data/SmithersApi.ts";
+export type { SmithersCollectionName } from "./data/SmithersCollectionName.ts";
+export type { SmithersCollections } from "./data/SmithersCollections.ts";
+export type { SmithersDataClient } from "./data/SmithersDataClient.ts";
+export type { SmithersStreamEvent } from "./data/SmithersStreamEvent.ts";
+export type { WorkspaceMode } from "./data/WorkspaceMode.ts";
+export { createSmithersCollections } from "./data/createSmithersCollections.ts";
+export { createSmithersDataClient } from "./data/createSmithersDataClient.ts";
+export { mapSmithersElectricRow } from "./data/mapSmithersElectricRow.ts";
+export { normalizeGatewayRunEventRow } from "./data/normalizeGatewayRunEventRow.ts";
+export { gatewayKeys } from "./data/gatewayKeys.ts";
+export { smithersCollectionKeys } from "./data/smithersCollectionKeys.ts";
+export { smithersElectricCollectionOptions } from "./data/smithersElectricCollectionOptions.ts";
+export { smithersLocalCollectionOptions } from "./data/smithersLocalCollectionOptions.ts";
