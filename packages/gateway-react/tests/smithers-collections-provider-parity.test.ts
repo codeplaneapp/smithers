@@ -5,9 +5,9 @@ try { GlobalRegistrator.register(); } catch { /* already registered */ }
   .happyDOM!.settings!.fetch!.disableSameOriginPolicy = true;
 
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import React, { createElement, type ReactElement } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -44,16 +44,12 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function removeSqliteFile(path: string) {
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    try {
-      rmSync(path, { force: true });
-      return;
-    } catch (error: any) {
-      if (process.platform !== "win32" || !["EBUSY", "EPERM"].includes(error?.code) || attempt === 29) {
-        throw error;
-      }
-      await sleep(100);
+function removeSqliteTempDir(dbPath: string) {
+  try {
+    rmSync(dirname(dbPath), { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+  } catch (error: any) {
+    if (process.platform !== "win32" || !["EBUSY", "EPERM"].includes(error?.code)) {
+      throw error;
     }
   }
 }
@@ -83,7 +79,7 @@ function getPort(server: import("node:http").Server) {
 }
 
 function makeDbPath(name: string) {
-  return join(tmpdir(), `smithers-collections-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+  return join(mkdtempSync(join(tmpdir(), `smithers-collections-${name}-`)), "store.db");
 }
 
 async function createApi(backend: Backend) {
@@ -95,10 +91,11 @@ async function createApi(backend: Backend) {
     const dbPath = makeDbPath("sqlite");
     const api = createSmithers(schemas, { dbPath });
     cleanups.push(async () => {
+      try {
+        api.db.$client?.run?.("PRAGMA wal_checkpoint(TRUNCATE)");
+      } catch {}
       await api.db.$client?.close?.();
-      await removeSqliteFile(dbPath);
-      await removeSqliteFile(`${dbPath}-shm`);
-      await removeSqliteFile(`${dbPath}-wal`);
+      removeSqliteTempDir(dbPath);
     });
     return api;
   }

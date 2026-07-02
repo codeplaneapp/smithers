@@ -24,7 +24,7 @@ function makeStateDirEnv() {
  */
 async function startGateway(repo, env, extraArgs = []) {
     const gateway = spawnGateway(repo, env, extraArgs);
-    await waitFor(() => gateway.stderr().includes("Gateway listening on"), 20_000);
+    await waitFor(() => gateway.stderr().includes("Runtime state:"), 20_000);
     return gateway;
 }
 
