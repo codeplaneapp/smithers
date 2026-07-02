@@ -224,16 +224,19 @@ export function workspaceAdd(name, path, opts = {}) {
             // but log a warning so cleanup failures are diagnosable rather than silent.
             yield* Effect.logWarning(`jj workspace pre-create cleanup failed at ${path}: ${error instanceof Error ? error.message : String(error)}`);
         }
-        let lastErr = "";
+        const errors = [];
         for (const args of attempts) {
             const res = yield* runJj(args, { cwd: opts.cwd });
             if (res.code === 0) {
                 return { success: true };
             }
-            lastErr = jjError(res);
+            errors.push(`\`jj ${args.join(" ")}\`: ${jjError(res)}`);
         }
+        // Report every attempt: the first uses the current jj syntax, so its error
+        // is the real cause; later ones are legacy-syntax fallbacks whose noise
+        // (e.g. "unexpected argument '--wc-path'") used to mask it.
         const hint = ` (partial state may exist at ${path}; consider removing it before retrying)`;
-        return { success: false, error: lastErr + hint };
+        return { success: false, error: errors.join("; ") + hint };
     }).pipe(Effect.annotateLogs({
         cwd: opts.cwd ?? "",
         workspaceName: name,
