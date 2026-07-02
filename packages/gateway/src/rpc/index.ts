@@ -86,6 +86,7 @@ export type GatewayRpcMethod =
   | "listDocs"
   | "streamRunEvents"
   | "streamDevTools"
+  | "getDevToolsSnapshot"
   | "getNodeOutput"
   | "getNodeDiff"
   | "cronList"
@@ -286,6 +287,13 @@ export type StreamDevToolsRequest = {
   afterSeq?: number;
   fromSeq?: number;
 };
+
+export type GetDevToolsSnapshotRequest = {
+  runId: string;
+  frameNo?: number;
+};
+
+export type GetDevToolsSnapshotResponse = Record<string, unknown>;
 
 export type NodeRequest = {
   runId: string;
@@ -875,6 +883,26 @@ export const GATEWAY_RPC_DEFINITIONS: readonly GatewayRpcDefinition[] = [
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "SeqOutOfRange", "BackpressureDisconnect", "Internal"],
     exampleRequest: { runId: "run_01", afterSeq: 10 },
     exampleResponse: { streamId: "stream_01", runId: "run_01", fromSeq: 10, afterSeq: 10 },
+  },
+  {
+    version: SMITHERS_API_VERSION,
+    method: "getDevToolsSnapshot",
+    title: "Get DevTools Snapshot",
+    description: "Fetch a DevTools snapshot tree for a run, optionally pinned to a frame number.",
+    maturity: "stable",
+    transport: "http+websocket",
+    requiredScope: "observability:read",
+    requestSchema: objectSchema({ runId, frameNo: integerSchema("Target frame number.", 0) }, ["runId"]),
+    responseSchema: objectSchema({}, [], "DevTools snapshot payload.", true),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "FrameOutOfRange", "PayloadTooLarge", "Internal"],
+    exampleRequest: { runId: "run_01", frameNo: 4 },
+    exampleResponse: {
+      version: 1,
+      runId: "run_01",
+      frameNo: 4,
+      seq: 18,
+      root: { id: 0, type: "workflow", name: "deploy", props: {}, children: [], depth: 0 },
+    },
   },
   {
     version: SMITHERS_API_VERSION,
