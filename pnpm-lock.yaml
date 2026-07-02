@@ -213,6 +213,12 @@ importers:
       '@milkdown/crepe':
         specifier: 7.21.2
         version: 7.21.2(prosemirror-model@1.25.9)(prosemirror-state@1.4.4)(prosemirror-view@1.41.9)(typescript@6.0.3)
+      '@smithers-orchestrator/cli':
+        specifier: workspace:*
+        version: link:../apps/cli
+      '@smithers-orchestrator/components':
+        specifier: workspace:*
+        version: link:../packages/components
       '@smithers-orchestrator/scorers':
         specifier: workspace:*
         version: link:../packages/scorers

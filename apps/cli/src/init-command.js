@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { z } from "incur";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
@@ -90,6 +93,56 @@ function buildInitCta(templateResult) {
 }
 
 /**
+ * Re-run init THROUGH the engine once a pack exists: the seeded `init` system
+ * workflow performs the same pack refresh as the imperative path, but as a
+ * durable, replayable smithers run. First-time init cannot go through the
+ * engine (the workflow file is itself a pack file), so bootstrap stays
+ * imperative and every subsequent non-interactive `smithers init` upgrades to
+ * the workflow. Returns null when the durable path is unavailable so the
+ * caller falls back to the imperative scaffold.
+ *
+ * @param {{ force?: boolean; skipInstall?: boolean }} options
+ * @returns {Promise<Record<string, unknown> | null>}
+ */
+async function runDurableReinit(options) {
+    const entryFile = resolve(process.cwd(), ".smithers", "workflows", "init.tsx");
+    if (!existsSync(entryFile)) return null;
+    try {
+        const [{ Effect }, { runWorkflow }, { ensureSmithersTables }, { mdxPlugin }] = await Promise.all([
+            import("effect"),
+            import("@smithers-orchestrator/engine"),
+            import("@smithers-orchestrator/db/ensure"),
+            import("./mdx-plugin.js"),
+        ]);
+        mdxPlugin();
+        const mod = await import(pathToFileURL(entryFile).href);
+        const workflow = mod.default;
+        if (!workflow) return null;
+        ensureSmithersTables(workflow.db);
+        const runId = crypto.randomUUID();
+        const result = await Effect.runPromise(runWorkflow(workflow, {
+            input: { force: options.force ?? false, skipInstall: options.skipInstall ?? false },
+            runId,
+            workflowPath: entryFile,
+        }));
+        return {
+            durable: true,
+            workflow: "init",
+            runId: result.runId,
+            status: result.status,
+            output: result.output ?? null,
+        };
+    }
+    catch (err) {
+        // Any failure (stale pack without the workflow's imports, missing deps,
+        // broken user edits) falls back to the imperative scaffold — init must
+        // never be blocked by the durable path.
+        process.stderr.write(`[smithers:init] durable init workflow unavailable, falling back: ${err?.message ?? String(err)}\n`);
+        return null;
+    }
+}
+
+/**
  * @param {{ options: any; format?: string; ok: (...args: any[]) => any; error: (...args: any[]) => any }} c
  * @param {(opts: { code: string; message: string; exitCode?: number; details?: Record<string, unknown> }) => any} fail
  */
@@ -97,6 +150,14 @@ export async function runInitCommand(c, fail) {
     try {
         const human = resolveInitMode(c) === "interactive";
         const selectedTemplate = c.options.template ? findStarterRecipe(c.options.template) : undefined;
+        // Non-interactive re-init on an existing pack runs as the durable `init`
+        // system workflow instead of the one-shot imperative pass.
+        if (!human && !c.options.agentsOnly && !c.options.global && !c.options.addAgents && !c.options.template) {
+            const durable = await runDurableReinit({ force: c.options.force, skipInstall: !c.options.install });
+            if (durable) {
+                return c.ok(durable, { cta: { ...buildInitCta(undefined), description: "Next steps:" } });
+            }
+        }
         const result = human
             ? await runInitCeremony({
                 force: c.options.force,

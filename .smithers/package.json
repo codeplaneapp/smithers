@@ -21,6 +21,8 @@
   },
   "dependencies": {
     "@milkdown/crepe": "7.21.2",
+    "@smithers-orchestrator/cli": "workspace:*",
+    "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/scorers": "workspace:*",
     "@xyflow/react": "^12.10.2",
     "dagre": "^0.8.5",

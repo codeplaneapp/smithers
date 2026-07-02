@@ -55,6 +55,8 @@ const SEEDED_WORKFLOW_IDS = [
   "smithering",
   // First-run tutorial that recommends and builds a project-specific workflow.
   "make-workflow-tutorial",
+  // Durable `smithers init` (system workflow — hidden from default listings).
+  "init",
 ];
 
 type TemplateFile = { path: string; contents: string };

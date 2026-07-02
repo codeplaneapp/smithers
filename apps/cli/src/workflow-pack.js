@@ -253,6 +253,8 @@ const WORKFLOW_MANIFEST = [
     { id: "report-slideshow", ui: "report-slideshow", components: [], prompts: [], seeded: true },
     { id: "smithering", ui: "smithering", components: [], prompts: [], seeded: true },
     { id: "make-workflow-tutorial", ui: "make-workflow-tutorial", components: [], prompts: [], seeded: true },
+    // System workflow: durable `smithers init` (hidden from default listings).
+    { id: "init", ui: "init", components: [], prompts: [], seeded: true },
 ];
 /**
  * Prompt IDs from renderPrompts() that are always emitted regardless of
