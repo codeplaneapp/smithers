@@ -1695,7 +1695,7 @@ function checkAgentAndCacheDocsMatchSourceTypes() {
     [AGENT_LIKE_SOURCE, "generate: (args?: AgentGenerateOptions) => Promise<unknown>;"],
     [AGENT_GENERATE_OPTIONS_SOURCE, "taskContext?: {"],
     [AGENT_GENERATE_OPTIONS_SOURCE, "[key: string]: unknown;"],
-    [AGENT_CAPABILITY_REGISTRY_SOURCE, 'engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode" | "vibe";'],
+    [AGENT_CAPABILITY_REGISTRY_SOURCE, 'engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode" | "openclaw" | "vibe";'],
     [AGENT_CAPABILITY_REGISTRY_SOURCE, "runtimeTools: Record<string, AgentToolDescriptor>;"],
     [AGENT_TOOL_DESCRIPTOR_SOURCE, 'source?: "builtin" | "mcp" | "extension" | "skill" | "runtime";'],
     [TYPES_REFERENCE, "type CachePolicy<Ctx = unknown> = {"],
@@ -1703,7 +1703,7 @@ function checkAgentAndCacheDocsMatchSourceTypes() {
     [TYPES_REFERENCE, "type AgentToolDescriptor = {"],
     [TYPES_REFERENCE, 'source?: "builtin" | "mcp" | "extension" | "skill" | "runtime";'],
     [TYPES_REFERENCE, "type AgentCapabilityRegistry = {"],
-    [TYPES_REFERENCE, 'engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode" | "vibe";'],
+    [TYPES_REFERENCE, 'engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode" | "openclaw" | "vibe";'],
     [TYPES_REFERENCE, "runtimeTools: Record<string, AgentToolDescriptor>;"],
     [TYPES_REFERENCE, "type AgentGenerateOptions = {"],
     [TYPES_REFERENCE, "taskContext?: {"],
@@ -3506,7 +3506,7 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
   ]);
   const required = [
     [BASE_CLI_AGENT_SOURCE, "this.model = opts.model;"],
-    [CLI_AGENTS_INTEGRATION, "agents[11]{class,cli,modelDefault,hijack,notes}:"],
+    [CLI_AGENTS_INTEGRATION, "agents[12]{class,cli,modelDefault,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "ClaudeCodeAgent,claude,CLI default,native session id"],
     [CLI_AGENTS_INTEGRATION, "CodexAgent,codex,CLI default,native thread id"],
     [CLI_AGENTS_INTEGRATION, "PiAgent,pi,CLI default,native session id"],
@@ -3516,11 +3516,14 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
     [CLI_AGENTS_INTEGRATION, "AmpAgent,amp,CLI default,thread id"],
     [CLI_AGENTS_INTEGRATION, "VibeAgent,vibe,CLI default,headless session id"],
     [CLI_AGENTS_INTEGRATION, "OpenCodeAgent,opencode,CLI default,not yet"],
+    [CLI_AGENTS_INTEGRATION, "OpenClawAgent,openclaw,CLI default,not yet"],
     [CLI_AGENT_DETECTION_SOURCE, 'id: "vibe"'],
+    [CLI_AGENT_DETECTION_SOURCE, 'id: "openclaw"'],
     [CLI_AGENT_AVAILABILITY_TYPE, '"vibe"'],
+    [CLI_AGENT_AVAILABILITY_TYPE, '"openclaw"'],
   ];
   const forbidden = [
-    [CLI_AGENTS_INTEGRATION, "agents[11]{class,cli,defaultModel,hijack,notes}:"],
+    [CLI_AGENTS_INTEGRATION, "agents[12]{class,cli,defaultModel,hijack,notes}:"],
     [CLI_AGENTS_INTEGRATION, "ClaudeCodeAgent,claude,claude-sonnet-4-20250514,"],
     [CLI_AGENTS_INTEGRATION, "HermesCliAgent,hermes,hermes-4,"],
     [CLI_AGENTS_INTEGRATION, "CodexAgent,codex,gpt-5.3-codex,"],
@@ -3569,7 +3572,7 @@ function checkCliAgentHijackDocsMatchLauncher() {
     [CLI_AGENTS_INTEGRATION, "| `KimiAgent` | `kimi --session` |"],
     [CLI_AGENTS_INTEGRATION, "| `ForgeAgent` | `forge --conversation-id` |"],
     [CLI_AGENTS_INTEGRATION, "| `AmpAgent` | `amp threads continue` |"],
-    [CLI_AGENTS_INTEGRATION, "native `bunx smithers-orchestrator hijack` support for Vibe and OpenCode is not shipped yet"],
+    [CLI_AGENTS_INTEGRATION, "native `bunx smithers-orchestrator hijack` support for Vibe, OpenCode, and OpenClaw is not shipped yet"],
   ];
   const forbidden = [
     [CLI_AGENTS_INTEGRATION, "| `GeminiAgent` | `gemini --resume` |"],

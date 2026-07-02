@@ -35,7 +35,7 @@ export default smithers((ctx) => (
 ## Available agents
 
 ```toon
-agents[11]{class,cli,modelDefault,hijack,notes}:
+agents[12]{class,cli,modelDefault,hijack,notes}:
   ClaudeCodeAgent,claude,CLI default,native session id,Anthropic Claude Code CLI
   CodexAgent,codex,CLI default,native thread id,OpenAI Codex CLI (codex exec via stdin + JSON stream)
   AntigravityAgent,agy,CLI default,native session id,Google Antigravity CLI
@@ -47,9 +47,10 @@ agents[11]{class,cli,modelDefault,hijack,notes}:
   AmpAgent,amp,CLI default,thread id,Amp CLI (--execute headless mode)
   VibeAgent,vibe,CLI default,headless session id,Mistral Vibe CLI
   OpenCodeAgent,opencode,CLI default,not yet,OpenCode CLI (opencode run --format json)
+  OpenClawAgent,openclaw,CLI default,not yet,OpenClaw gateway-backed agent CLI (openclaw agent --message)
 ```
 
-CLI binaries must be on `PATH`: `claude`, `codex`, `agy`, `gemini`, `pi`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`.
+CLI binaries must be on `PATH`: `claude`, `codex`, `agy`, `gemini`, `pi`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`.
 
 `HermesCliAgent` drives the Hermes *agent* CLI. It is distinct from `HermesAgent`,
 which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
@@ -468,6 +469,29 @@ injector, lifecycle hooks, a bundled skill, and approval buttons) when you run
 so Hermes can drive Smithers as its durable control plane. See the
 [Hermes & Eliza](/integrations/hermes) page.
 
+`OpenClawAgent` wraps the OpenClaw gateway-backed agent CLI via
+`openclaw agent --message <prompt> --json`. Key additions: `agent`, `session`,
+`workspace`, `json`, and `continueSession`. A per-call `resumeSession` emits
+`--session <id>`, so Smithers can route retries or continuations into the right
+OpenClaw conversation when the installed CLI supports sessions.
+
+```ts
+import { OpenClawAgent } from "smithers-orchestrator";
+new OpenClawAgent({
+  agent?: string;
+  session?: string;
+  workspace?: string;
+  json?: boolean;
+  continueSession?: boolean;
+});
+```
+
+Smithers also installs a native OpenClaw plugin when you run
+`bunx smithers-orchestrator mcp add --agent openclaw`. The plugin adds Smithers
+workflow tools, a bundled orchestration skill, and eval/optimization tools that
+encourage OpenClaw to turn repeated work into reusable, measured workflows. See
+[OpenClaw](/agents/openclaw).
+
 `AmpAgent` wraps the Amp CLI in `--execute` headless mode. Key additions: `visibility`, `mcpConfig`, `dangerouslyAllowAll`.
 
 ```ts
@@ -520,7 +544,12 @@ Smithers persists the native session or conversation id on each task event. On h
 | `ForgeAgent` | `forge --conversation-id` |
 | `AmpAgent` | `amp threads continue` |
 
-On clean exit the workflow resumes in detached mode. Vibe and OpenCode stream capture and headless session continuation are documented above, but native `bunx smithers-orchestrator hijack` support for Vibe and OpenCode is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See [How it works → Durability and resume](/how-it-works#durability--resume).
+On clean exit the workflow resumes in detached mode. Vibe, OpenCode, and
+OpenClaw stream capture and headless session continuation are documented above,
+but native `bunx smithers-orchestrator hijack` support for Vibe, OpenCode, and
+OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack
+launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover.
+See [How it works → Durability and resume](/how-it-works#durability--resume).
 
 ## Notes
 

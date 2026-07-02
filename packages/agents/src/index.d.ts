@@ -78,7 +78,7 @@ type ImageGenerationProvider$1 = {
     generateImage(request: ImageGenerationRequest$1): Promise<ImageGenerationResult$1> | ImageGenerationResult$1;
 };
 
-type CliAgentCapabilityAdapterId$1 = "claude" | "amp" | "antigravity" | "codex" | "forge" | "hermes" | "kimi" | "opencode" | "pi" | "vibe";
+type CliAgentCapabilityAdapterId$1 = "claude" | "amp" | "antigravity" | "codex" | "forge" | "hermes" | "kimi" | "opencode" | "openclaw" | "pi" | "vibe";
 
 type CliAgentSurfaceOptionMapping$1 = {
     option: string;
@@ -117,7 +117,7 @@ type AgentToolDescriptor$1 = {
 
 type AgentCapabilityRegistry$8 = {
     version: 1;
-    engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode" | "vibe";
+    engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode" | "openclaw" | "vibe";
     runtimeTools: Record<string, AgentToolDescriptor$1>;
     mcp: {
         bootstrap: "inline-config" | "project-config" | "allow-list" | "unsupported";
@@ -271,6 +271,26 @@ type HermesCliAgentOptions$2 = BaseCliAgentOptions$2 & {
      * Emitted as `-c`/`--continue`. Overridden by a per-call `resumeSession`.
      */
     continueSession?: string | boolean;
+};
+
+/**
+ * Options for {@link OpenClawAgent}.
+ *
+ * Drives the `openclaw` binary through the gateway-backed one-shot agent CLI:
+ * `openclaw agent --agent <id> --message <prompt> --json`. Use this when a
+ * workflow `<Task>` should delegate to OpenClaw itself.
+ */
+type OpenClawAgentOptions$2 = BaseCliAgentOptions$2 & {
+    /** OpenClaw agent id. Defaults to OpenClaw's configured default agent. */
+    agent?: string;
+    /** Session id to route the message into, when supported by the installed CLI. */
+    session?: string;
+    /** Workspace/root directory to expose to OpenClaw, when supported by the installed CLI. */
+    workspace?: string;
+    /** Request JSON output from OpenClaw. Defaults to true. */
+    json?: boolean;
+    /** Continue an existing/default conversation, when supported by the installed CLI. */
+    continueSession?: boolean;
 };
 
 type SdkAgentOptions<CALL_OPTIONS = never, TOOLS extends ToolSet = {}, MODEL = any> = Omit<ToolLoopAgentSettings<CALL_OPTIONS, TOOLS, any, never>, "model"> & {
@@ -1331,6 +1351,52 @@ type CliOutputInterpreter = CliOutputInterpreter$2$1;
 type HermesCliAgentOptions$1 = HermesCliAgentOptions$2;
 
 /**
+ * Capability registry for the OpenClaw agent CLI.
+ *
+ * @returns {AgentCapabilityRegistry}
+ */
+declare function createOpenClawCapabilityRegistry(): AgentCapabilityRegistry$1;
+/**
+ * OpenClaw driven through its gateway-backed `openclaw agent` CLI.
+ *
+ * The command path mirrors OpenClaw's user-facing one-shot agent surface:
+ *
+ *   openclaw agent --agent <id> --message "<prompt>" --json
+ *
+ * It sends a Smithers task prompt into an OpenClaw agent session and returns the
+ * final reply. OpenClaw itself owns its skills, tools, memory, channel context,
+ * and gateway policy.
+ */
+declare class OpenClawAgent extends BaseCliAgent {
+    /**
+     * @param {OpenClawAgentOptions} [opts]
+     */
+    constructor(opts?: OpenClawAgentOptions$1);
+    opts: OpenClawAgentOptions$2;
+    /** @type {AgentCapabilityRegistry} */
+    capabilities: AgentCapabilityRegistry$1;
+    cliEngine: string;
+    /**
+     * @returns {CliOutputInterpreter}
+     */
+    createOutputInterpreter(): CliOutputInterpreter;
+    /**
+     * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+     */
+    buildCommand(params: {
+        prompt: string;
+        systemPrompt?: string;
+        cwd: string;
+        options: any;
+    }): Promise<{
+        command: string;
+        args: string[];
+        outputFormat: string;
+    }>;
+}
+type OpenClawAgentOptions$1 = OpenClawAgentOptions$2;
+
+/**
  * @returns {CliAgentCapabilityReportEntry[]}
  */
 declare function getCliAgentCapabilityReport(): CliAgentCapabilityReportEntry$2[];
@@ -1467,6 +1533,7 @@ type AnthropicAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = Anthropic
 type OpenAIAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = OpenAIAgentOptions$2<CALL_OPTIONS, TOOLS>;
 type HermesAgentOptions<CALL_OPTIONS = never, TOOLS = ai.ToolSet> = HermesAgentOptions$2<CALL_OPTIONS, TOOLS>;
 type HermesCliAgentOptions = HermesCliAgentOptions$2;
+type OpenClawAgentOptions = OpenClawAgentOptions$2;
 type PiAgentOptions = PiAgentOptions$2;
 type PiExtensionUiRequest = PiExtensionUiRequest$2;
 type PiExtensionUiResponse = PiExtensionUiResponse$2;
@@ -1495,4 +1562,4 @@ type HttpToolAuth = HttpToolAuth$1;
 type HttpToolInput = HttpToolInput$1;
 type HttpToolOutput = HttpToolOutput$1;
 
-export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, VibeAgent, type VibeAgentOptions, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };
+export { type AgentCapabilityRegistry, type AgentGenerateOptions, type AgentLike, type AgentToolDescriptor, AmpAgent, AnthropicAgent, type AnthropicAgentOptions, AntigravityAgent, BaseCliAgent, CLI_AGENT_SURFACE_MANIFEST, ClaudeCodeAgent, type CliAgentCapabilityAdapterId, type CliAgentCapabilityDoctorEntry, type CliAgentCapabilityDoctorReport, type CliAgentCapabilityIssue, type CliAgentCapabilityReportEntry, type CliAgentSurfaceManifestEntry, type CliAgentSurfaceOptionMapping, type CliAgentSurfaceResumeContract, type CliAgentUnsupportedFlag, CodexAgent, type CreateHttpToolOptions, ForgeAgent, GeminiAgent, HermesAgent, type HermesAgentOptions, HermesCliAgent, type HermesCliAgentOptions, type HttpToolAuth, type HttpToolInput, type HttpToolOutput, type ImageGenerationProvider, type ImageGenerationRequest, type ImageGenerationResult, type ImageGenerationToolOptions, KimiAgent, OpenAIAgent, type OpenAIAgentOptions, OpenClawAgent, type OpenClawAgentOptions, OpenCodeAgent, type OpenCodeAgentOptions, PiAgent, type PiAgentOptions, type PiExtensionUiRequest, type PiExtensionUiResponse, type SmithersAgentContract, type SmithersAgentContractTool, type SmithersAgentToolCategory, type SmithersListedTool, type SmithersToolSurface, VibeAgent, type VibeAgentOptions, createBraveSearchProvider, createElevenLabsTextToSpeechTool, createExaSearchProvider, createGroundedWebSearchToolset, createHermesCliCapabilityRegistry, createHttpTool, createImageGenerationTool, createOpenClawCapabilityRegistry, createSerperSearchProvider, createSmithersAgentContract, createTavilySearchProvider, createTranscriptionTool, formatCliAgentCapabilityDoctorReport, getCliAgentCapabilityDoctorReport, getCliAgentCapabilityReport, getCliAgentSurfaceManifestEntry, hashCapabilityRegistry, listCliAgentSurfaceManifests, renderSmithersAgentPromptGuidance, sanitizeForOpenAI, zodToOpenAISchema };

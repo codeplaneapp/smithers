@@ -179,7 +179,8 @@
           {
             "group": "System",
             "pages": [
-              "workflows/init"
+              "workflows/init",
+              "workflows/post-failure"
             ]
           }
         ]

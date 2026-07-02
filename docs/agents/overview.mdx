@@ -98,7 +98,7 @@ the exact supported setup.
 | [GitHub Copilot](/agents/copilot) | Custom instructions / prompt files | `.vscode/mcp.json` (editor) / repo settings (cloud agent) | Two distinct MCP schemas |
 | [Pi](/agents/pi) | `skills add` → `~/.pi/agent/skills` | no native MCP | First-party `pi-plugin` with a live run inspector; see [Pi integration](/integrations/pi-integration) |
 | [Hermes](/agents/hermes) | `skills add` | `mcp add` → `~/.hermes/config.yaml` (YAML) | Reads `AGENTS.md` |
-| [OpenClaw](/agents/openclaw) | `skills add` → `~/.agents/skills` | `mcp add` → `~/.openclaw/openclaw.json` | Skills via ClawHub |
+| [OpenClaw](/agents/openclaw) | Native Smithers plugin + optional `skills add` → `~/.agents/skills` | `mcp add` → `~/.openclaw/openclaw.json` | `mcp add --agent openclaw` installs the plugin and MCP entry |
 
 `mcp add` also reaches **Gemini CLI, OpenCode, Amp, Windsurf, Cline, Continue,
 Roo, Kilo, Goose, Augment, Trae, Junie, Crush, Kiro, Qwen Code, OpenHands**.
@@ -107,20 +107,21 @@ Run it once and any detected MCP-capable agent is wired up.
 <Note>
 Pi, Hermes, and OpenClaw aren't in the underlying skill/MCP framework's built-in
 registry, so Smithers wires them as a supplementary step: `mcp add` writes the
-Smithers server into Hermes's `config.yaml` and OpenClaw's `openclaw.json`
-directly, and `skills add` copies the canonical skill set into Pi's
-`~/.pi/agent/skills`. MCP wiring respects `--agent` and `--command`; skill
-wiring respects `--no-global`. Each preserves existing config and silently skips
-an agent that isn't installed.
+Smithers server into Hermes's `config.yaml` and OpenClaw's `openclaw.json`, also
+installing the native Hermes/OpenClaw plugin where supported. `skills add` copies
+the canonical skill set into Pi's `~/.pi/agent/skills`. MCP wiring respects
+`--agent` and `--command`; skill wiring respects `--no-global`. Each preserves
+existing config and silently skips an agent that isn't installed.
 </Note>
 
 ## The other direction: Smithers runs the agent
 
 Everything above is about an agent **driving** Smithers. Smithers also runs these
 agents as the **workers inside** a workflow. `<Task agent={claude}>` spawns
-Claude Code, `<Task agent={codex}>` spawns Codex, and so on, with native session
-hijack to take over interactively. That's covered in [CLI Agents](/integrations/cli-agents)
-and [SDK Agents](/integrations/sdk-agents).
+Claude Code, `<Task agent={codex}>` spawns Codex, `<Task agent={openclaw}>`
+spawns OpenClaw, and so on. Native session hijack is available where the adapter
+supports it. That's covered in [CLI Agents](/integrations/cli-agents) and
+[SDK Agents](/integrations/sdk-agents).
 
 ## See also
 
