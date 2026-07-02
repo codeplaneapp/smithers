@@ -450,6 +450,10 @@ describe("OpenCodeReview compatibility helpers", () => {
     const preview = await previewOpenCodeReview(input(repo));
     const byPath = new Map(preview.entries.map((entry) => [entry.path, entry]));
 
+    console.log("DEBUG repo", repo);
+    console.log("DEBUG entries", JSON.stringify(preview.entries));
+    console.log("DEBUG status", execFileSync("git", ["status", "--porcelain"], { cwd: repo }).toString());
+    console.log("DEBUG version", execFileSync("git", ["--version"], { cwd: repo }).toString());
     expect(byPath.get("src/app.ts")?.willReview).toBe(true);
     expect(byPath.get("src/app.test.ts")?.willReview).toBe(false);
     expect(byPath.get("src/app.test.ts")?.excludeReason).toBe("default_path");

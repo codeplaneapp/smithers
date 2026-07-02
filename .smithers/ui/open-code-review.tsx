@@ -310,6 +310,21 @@ function App() {
     reviewOut.refetch,
     summaryOut.refetch,
   ]);
+  useEffect(() => {
+    if (!activeRunId || eventCount <= 0) return;
+    const timeout = window.setTimeout(() => {
+      void refresh();
+    }, 100);
+    return () => window.clearTimeout(timeout);
+  }, [activeRunId, eventCount, refresh]);
+  useEffect(() => {
+    if (!activeRunId || (hasTarget && hasPreview && hasReview && hasSummary)) return;
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, 1_000);
+    return () => window.clearInterval(interval);
+  }, [activeRunId, hasTarget, hasPreview, hasReview, hasSummary, refresh]);
+
   async function launch() {
     setBusy(true);
     try {
