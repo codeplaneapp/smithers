@@ -20,6 +20,19 @@ import {
     resolvePiSessionFile,
 } from "@smithers-orchestrator/observability/_sessionFileResolvers";
 
+// Bound the in-memory canonical trace-event buffer (spec decision 15). A chatty
+// agent node can emit tens of thousands of stdout-derived events before flush;
+// retaining every one is unbounded transient memory at scale (50 concurrent
+// runs × ~4 nodes). Keep the head (early setup/handshake, usually the most
+// diagnostic start) and the most recent tail (where a failure/completion lands),
+// dropping the middle and recording the count so the trace shows the gap. The
+// NDJSON artifact and summary are diagnostic, not the durable event log, so a
+// bounded-with-a-marker trace is the right trade against an OOM. Trim in batches
+// so the splice is amortized O(1) per event, not O(n) per over-cap push.
+const TRACE_EVENT_HEAD_KEEP = 256;
+const TRACE_EVENT_MAX_RETAINED = 4096;
+const TRACE_EVENT_TRIM_BATCH = 512;
+
 /**
  * @typedef {import("@smithers-orchestrator/observability/SmithersEvent").SmithersEvent} SmithersEvent
  * @typedef {import("@smithers-orchestrator/observability/agentTrace").AgentCaptureMode} AgentCaptureMode
@@ -89,6 +102,8 @@ export class AgentTraceCollector {
     startedAtMs = nowMs();
     /** @type {CanonicalAgentTraceEvent[]} */
     events = [];
+    /** Count of canonical events dropped from the middle to bound memory. */
+    droppedEventCount = 0;
     /** @type {AgentSessionTranscriptEvent[]} */
     sessionEvents = [];
     /** @type {string[]} */
@@ -203,6 +218,10 @@ export class AgentTraceCollector {
         this.endListener();
         const finishedAtMs = nowMs();
         this.flushStructuredBuffers();
+        if (this.droppedEventCount > 0) {
+            this.warnings.push(`agent trace exceeded ${TRACE_EVENT_MAX_RETAINED} in-memory events; dropped ${this.droppedEventCount} middle events to bound memory (head + recent tail retained)`);
+            this.pushDerived("capture.warning", { reason: "trace-truncated", droppedEventCount: this.droppedEventCount, retainedEventCount: this.events.length }, { reason: "trace-truncated", droppedEventCount: this.droppedEventCount }, "capture");
+        }
         await this.importProviderSessionTranscript();
         if (this.captureMode !== "sdk-events" &&
             !this.seenKinds.has("assistant.message.final") &&
@@ -532,6 +551,15 @@ export class AgentTraceCollector {
             annotations: this.annotations,
         };
         this.events.push(event);
+        // Bound memory: keep head + most-recent tail, drop the middle in batches.
+        // seenKinds/directKinds are tracked below regardless, so the "which kinds
+        // occurred" aggregate survives; `sequence` is monotonic so a gap is
+        // visible. Frames/summary are diagnostic, not the durable event log.
+        if (this.events.length > TRACE_EVENT_MAX_RETAINED + TRACE_EVENT_TRIM_BATCH) {
+            const removeCount = this.events.length - TRACE_EVENT_MAX_RETAINED;
+            this.events.splice(TRACE_EVENT_HEAD_KEEP, removeCount);
+            this.droppedEventCount += removeCount;
+        }
         this.seenKinds.add(kind);
         if (direct) this.directKinds.add(kind);
     }
