@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
 import { request } from "node:http";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -25,6 +26,8 @@ const repoRoot = resolve(here, "../..");
 const runnerScript = resolve(here, "ultragrillRunFixture.ts");
 const realNodeModules = resolve(repoRoot, "node_modules");
 const RUN_ID = "ultragrill-e2e";
+const require = createRequire(import.meta.url);
+const STUDIO_PLAYWRIGHT_ENTRY = resolve(repoRoot, "apps/smithers-studio-2/node_modules/playwright/index.js");
 
 // Superset worker response: satisfies the work schema with recognizable tokens.
 const FAKE_RESPONSE = JSON.stringify({
@@ -74,16 +77,23 @@ function healthOk(): Promise<boolean> {
     req.end();
   });
 }
-async function loadChromium() {
-  const pkg = "playwright";
-  try {
-    return (await import(pkg)).chromium;
-  } catch {
-    return (await import(resolve(repoRoot, "apps/smithers-studio-2/node_modules/playwright/index.js"))).chromium;
+function resolveChromium() {
+  const entries = ["playwright"];
+  if (existsSync(STUDIO_PLAYWRIGHT_ENTRY)) entries.push(STUDIO_PLAYWRIGHT_ENTRY);
+  for (const entry of entries) {
+    try {
+      const chromium = require(entry).chromium;
+      const executablePath = chromium?.executablePath?.();
+      if (typeof executablePath === "string" && existsSync(executablePath)) return chromium;
+    } catch {}
   }
+  return null;
 }
+const CHROMIUM = resolveChromium();
+const browserTest = CHROMIUM ? test : test.skip;
 
 beforeAll(async () => {
+  if (!CHROMIUM) return;
   // No git/worktree needed for ultragrill — just a cwd with node_modules so the
   // subprocess resolves modules from the real repo.
   tempRepo = mkdtempSync(join(tmpdir(), "ultragrill-e2e-"));
@@ -118,19 +128,20 @@ beforeAll(async () => {
 }, 80_000);
 
 afterAll(() => {
+  if (!CHROMIUM) return;
   try { proc?.kill("SIGTERM"); } catch {}
   try { rmSync(tempRepo, { recursive: true, force: true }); } catch {}
   try { rmSync(binDir, { recursive: true, force: true }); } catch {}
 });
 
-test("a real UltraGrill session: say something → worker works → spec + questions → end", async () => {
-  const browser = await (await loadChromium()).launch({ headless: true });
+browserTest("a real UltraGrill session: say something → worker works → spec + questions → end", async () => {
+  const browser = await CHROMIUM!.launch({ headless: true });
   try {
     const page = await browser.newPage();
     const errors: string[] = [];
     page.on("pageerror", (e: Error) => errors.push(e.message));
 
-    await page.goto(`${base}/workflows/ultragrill?runId=${RUN_ID}`, { waitUntil: "networkidle" });
+    await page.goto(`${base}/workflows/ultragrill?runId=${RUN_ID}`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector('[data-testid="ultragrill-ui"]', { timeout: 20_000 });
 
     // Say something: type a directive and Send → posts a real `utterance` signal.

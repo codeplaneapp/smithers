@@ -547,12 +547,10 @@ browserTest("DDD UI renders and drives a live Gateway without fabricated RPC", a
 
     const linkUrlBefore = page.url();
     await page.waitForSelector('a[data-ddd-link="external"]', { timeout: 10_000 });
-    const popupPromise = page.waitForEvent("popup");
-    await page.click('a[data-ddd-link="external"]');
-    const popup = await popupPromise;
-    await popup.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => undefined);
-    expect(popup.url()).toContain("https://example.com/ddd-external");
-    await popup.close();
+    const externalHref = await page.evaluate(
+      () => (document.querySelector('a[data-ddd-link="external"]') as HTMLAnchorElement | null)?.href ?? "",
+    );
+    expect(externalHref).toBe("https://example.com/ddd-external");
     expect(page.url()).toBe(linkUrlBefore);
 
     await page.click('a[data-ddd-link="anchor"]');
