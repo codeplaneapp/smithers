@@ -54,7 +54,8 @@ describe("GET /metrics", () => {
     expect(body).toContain('review_spend_usd_total{repo="octo/widgets",model="claude-sonnet-4-6"}');
     expect(body).toContain('review_prs_reviewed_total{repo="octo/widgets"} 1');
     expect(body).toContain('review_quota_remaining{repo="octo/widgets"} 4');
-    expect(body).toContain("# TYPE review_proxy_errors_total counter");
-    expect(body).toContain("# TYPE review_sessions_total counter");
+    // Never-emitted series were removed; stale HELP/TYPE headers must not linger.
+    expect(body).not.toContain("review_proxy_errors_total");
+    expect(body).not.toContain("review_sessions_total");
   });
 });

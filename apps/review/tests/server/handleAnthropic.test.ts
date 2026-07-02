@@ -375,4 +375,111 @@ describe("anthropic proxy", () => {
     );
     expect(res.status).toBe(402);
   });
+
+  test("attributes srk_ spend to the repo named in x-smithers-repo", async () => {
+    const env = await buildTestEnv();
+    const JSON_BODY = JSON.stringify({
+      id: "msg_03",
+      type: "message",
+      role: "assistant",
+      model: "claude-sonnet-4-6",
+      content: [{ type: "text", text: "hi" }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    const fixture = serveFixtureAnthropic({ contentType: "application/json", body: JSON_BODY });
+    teardowns.push(() => fixture.stop());
+    const apiKey = "srk_multirepo";
+    await env.DB
+      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+      .bind(await sha256Hex(apiKey), "octo", JSON.stringify(["octo/widgets", "octo/wrenches"]), Date.now())
+      .run();
+    const meterings: Promise<unknown>[] = [];
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: (p) => meterings.push(p),
+    });
+    const res = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "x-smithers-repo": "octo/wrenches",
+          "content-type": "application/json",
+        },
+        body: '{"model":"claude-sonnet-4-6","messages":[]}',
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    await Promise.all(meterings);
+    const row = await env.DB.prepare("SELECT repo FROM usage_events").first<{ repo: string }>();
+    expect(row?.repo).toBe("octo/wrenches");
+  });
+
+  test("403s an x-smithers-repo hint outside the srk_ key's repo list", async () => {
+    const env = await buildTestEnv();
+    const fixture = serveFixtureAnthropic({ contentType: "application/json", body: "{}" });
+    teardowns.push(() => fixture.stop());
+    const apiKey = "srk_limitedkey";
+    await env.DB
+      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+      .bind(await sha256Hex(apiKey), "octo", JSON.stringify(["octo/widgets"]), Date.now())
+      .run();
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: () => undefined,
+    });
+    const res = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "x-smithers-repo": "evil/other",
+          "content-type": "application/json",
+        },
+        body: "{}",
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+    expect(fixture.requests.length).toBe(0);
+  });
+
+  test("forwards retry-after and x-request-id from upstream responses", async () => {
+    const env = await buildTestEnv();
+    const fixture = serveFixtureAnthropic({
+      status: 429,
+      contentType: "application/json",
+      body: '{"type":"error","error":{"type":"rate_limit_error"}}',
+      headers: { "retry-after": "17", "x-request-id": "req_abc123" },
+    });
+    teardowns.push(() => fixture.stop());
+    const token = await seedSession(env, REPO);
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: () => undefined,
+    });
+    const res = await worker.fetch(
+      new Request("https://review.test/anthropic/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": token, "content-type": "application/json" },
+        body: "{}",
+      }),
+      env,
+    );
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("17");
+    expect(res.headers.get("x-request-id")).toBe("req_abc123");
+  });
 });

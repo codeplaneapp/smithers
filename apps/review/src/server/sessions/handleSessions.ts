@@ -61,7 +61,12 @@ export async function handleSessions(
     repo = claims.repository;
     const prFromRef = pullRequestFromOidcRef(claims.ref);
     const prFromClaim = typeof claims.pull_request?.number === "number" ? claims.pull_request.number : null;
-    const prFromBody = typeof body.pr === "number" ? body.pr : null;
+    // The body is caller-controlled; only accept its PR number when the
+    // verified claims prove a PR context. Otherwise a push-triggered token
+    // could claim an already-reviewed PR and dodge the monthly quota.
+    const prContextEvents = new Set(["pull_request", "pull_request_target", "issue_comment"]);
+    const prFromBody =
+      prContextEvents.has(claims.event_name ?? "") && typeof body.pr === "number" ? body.pr : null;
     pr = prFromRef ?? prFromClaim ?? prFromBody ?? 0;
     if (!pr || pr <= 0) return jsonError(400, "missing pull request number");
   } else if (typeof body.apiKey === "string" && body.apiKey.length > 0) {
@@ -110,13 +115,23 @@ export async function handleSessions(
     now,
   );
 
+  const used = quota.alreadyReviewed ? quota.used : quota.used + 1;
+  const nowDate = new Date(now);
+  const resetsAt = new Date(Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth() + 1, 1)).toISOString();
   return Response.json({
     token: minted.token,
     expiresAt: minted.expiresAt,
     mode: registration.mode,
+    quiz: registration.quiz,
     plan: {
       prsPerMonth: registration.prs_per_month,
-      used: quota.alreadyReviewed ? quota.used : quota.used + 1,
+      used,
+    },
+    // Quota detail the action surfaces in its PR status comment.
+    quota: {
+      limit: registration.prs_per_month,
+      remaining: Math.max(0, registration.prs_per_month - used),
+      resetsAt,
     },
     anthropicBaseUrl: `${origin}/anthropic`,
     publishUrl: origin,

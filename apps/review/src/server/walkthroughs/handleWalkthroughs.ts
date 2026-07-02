@@ -5,10 +5,13 @@ import { timingSafeStringEqual } from "../timingSafeStringEqual.ts";
 
 const MAX_WALKTHROUGH_BYTES = 25 * 1024 * 1024;
 
+// 32 chars: 256 % 32 === 0, so byte % 32 is unbiased (base-36 was not).
+const ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz012345";
+
 function newWalkthroughId(): string {
   const bytes = new Uint8Array(12);
   crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => (b % 36).toString(36)).join("");
+  return [...bytes].map((b) => ID_ALPHABET[b % 32]).join("");
 }
 
 /**

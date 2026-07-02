@@ -32,4 +32,50 @@ describe("verifyOidc", () => {
       jwks.stop();
     }
   });
+
+  test("rejects a token with nbf in the future", async () => {
+    const keypair = await rsaKeypair("kid-nbf");
+    const jwks = serveJwks([keypair.publicJwk]);
+    try {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const token = await signTestJwt(keypair, { ...baseClaims(nowSec + 600), nbf: nowSec + 300 });
+      const outcome = await verifyOidc(token, jwks.url, Date.now());
+
+      expect(outcome).toEqual({ ok: false, reason: "not-yet-valid" });
+    } finally {
+      jwks.stop();
+    }
+  });
+
+  test("rejects a token with iat in the future", async () => {
+    const keypair = await rsaKeypair("kid-iat");
+    const jwks = serveJwks([keypair.publicJwk]);
+    try {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const token = await signTestJwt(keypair, { ...baseClaims(nowSec + 600), iat: nowSec + 300 });
+      const outcome = await verifyOidc(token, jwks.url, Date.now());
+
+      expect(outcome).toEqual({ ok: false, reason: "not-yet-valid" });
+    } finally {
+      jwks.stop();
+    }
+  });
+
+  test("allows nbf/iat within the clock-skew window", async () => {
+    const keypair = await rsaKeypair("kid-skew");
+    const jwks = serveJwks([keypair.publicJwk]);
+    try {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const token = await signTestJwt(keypair, {
+        ...baseClaims(nowSec + 600),
+        nbf: nowSec + 30,
+        iat: nowSec + 30,
+      });
+      const outcome = await verifyOidc(token, jwks.url, Date.now());
+
+      expect(outcome.ok).toBe(true);
+    } finally {
+      jwks.stop();
+    }
+  });
 });

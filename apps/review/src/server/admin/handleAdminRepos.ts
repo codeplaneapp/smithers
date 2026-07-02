@@ -1,10 +1,12 @@
 import type { ReviewWorkerEnv } from "../env.ts";
 import { jsonError } from "../jsonError.ts";
+import { monthKey } from "../monthKey.ts";
 import { timingSafeStringEqual } from "../timingSafeStringEqual.ts";
 
 interface UpsertBody {
   repo?: unknown;
   mode?: unknown;
+  quiz?: unknown;
   prsPerMonth?: unknown;
   spendCapUsd?: unknown;
 }
@@ -12,6 +14,7 @@ interface UpsertBody {
 interface RepoListRow {
   repo: string;
   mode: string;
+  quiz: string;
   prs_per_month: number;
   spend_cap_usd: number;
   created_at: number;
@@ -25,11 +28,6 @@ interface UsageRow {
 interface MonthPrsRow {
   repo: string;
   c: number;
-}
-
-function monthKey(now: number): string {
-  const d = new Date(now);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 /**
@@ -55,24 +53,26 @@ export async function handleAdminRepos(
     }
     if (typeof body.repo !== "string" || body.repo.length === 0) return jsonError(400, "repo required");
     if (body.mode !== "auto" && body.mode !== "comment") return jsonError(400, "mode must be auto|comment");
+    const quiz = body.quiz === undefined ? "auto" : body.quiz;
+    if (quiz !== "off" && quiz !== "auto" && quiz !== "on") return jsonError(400, "quiz must be off|auto|on");
     if (typeof body.prsPerMonth !== "number" || body.prsPerMonth <= 0) return jsonError(400, "prsPerMonth must be > 0");
     if (typeof body.spendCapUsd !== "number" || body.spendCapUsd <= 0) return jsonError(400, "spendCapUsd must be > 0");
     await env.DB
       .prepare(
-        `INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(repo) DO UPDATE SET mode = excluded.mode, prs_per_month = excluded.prs_per_month, spend_cap_usd = excluded.spend_cap_usd`,
+        `INSERT INTO repos (repo, mode, quiz, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(repo) DO UPDATE SET mode = excluded.mode, quiz = excluded.quiz, prs_per_month = excluded.prs_per_month, spend_cap_usd = excluded.spend_cap_usd`,
       )
-      .bind(body.repo, body.mode, body.prsPerMonth, body.spendCapUsd, now)
+      .bind(body.repo, body.mode, quiz, body.prsPerMonth, body.spendCapUsd, now)
       .run();
     return Response.json(
-      { repo: body.repo, mode: body.mode, prsPerMonth: body.prsPerMonth, spendCapUsd: body.spendCapUsd },
+      { repo: body.repo, mode: body.mode, quiz, prsPerMonth: body.prsPerMonth, spendCapUsd: body.spendCapUsd },
       { status: 200 },
     );
   }
   if (request.method === "GET") {
     const month = monthKey(now);
     const repos = await env.DB
-      .prepare("SELECT repo, mode, prs_per_month, spend_cap_usd, created_at FROM repos ORDER BY repo")
+      .prepare("SELECT repo, mode, quiz, prs_per_month, spend_cap_usd, created_at FROM repos ORDER BY repo")
       .all<RepoListRow>();
     const usage = await env.DB
       .prepare(
@@ -91,6 +91,7 @@ export async function handleAdminRepos(
       repos: repos.results.map((r) => ({
         repo: r.repo,
         mode: r.mode,
+        quiz: r.quiz,
         prsPerMonth: r.prs_per_month,
         spendCapUsd: r.spend_cap_usd,
         createdAt: r.created_at,

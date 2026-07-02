@@ -13,6 +13,7 @@ export interface OidcClaims {
   aud: string;
   exp: number;
   iat?: number;
+  nbf?: number;
   repository: string;
   repository_owner?: string;
   repository_id?: string;
@@ -36,7 +37,8 @@ export interface OidcVerifyFailure {
     | "bad-signature"
     | "wrong-issuer"
     | "wrong-audience"
-    | "expired";
+    | "expired"
+    | "not-yet-valid";
 }
 
 export type OidcVerifyOutcome = OidcVerifyResult | OidcVerifyFailure;
@@ -119,6 +121,15 @@ export async function verifyOidc(
   if (payload.aud !== AUDIENCE) return { ok: false, reason: "wrong-audience" };
   const expMs = payload.exp * 1000;
   if (!Number.isFinite(expMs) || expMs <= now) return { ok: false, reason: "expired" };
+  // nbf/iat sanity: reject tokens dated in the future, allowing small skew
+  // between GitHub's clock and ours.
+  const skewMs = 60_000;
+  if (typeof payload.nbf === "number" && payload.nbf * 1000 > now + skewMs) {
+    return { ok: false, reason: "not-yet-valid" };
+  }
+  if (typeof payload.iat === "number" && payload.iat * 1000 > now + skewMs) {
+    return { ok: false, reason: "not-yet-valid" };
+  }
 
   return { ok: true, claims: payload };
 }

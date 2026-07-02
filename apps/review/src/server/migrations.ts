@@ -4,6 +4,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS repos (
     repo TEXT PRIMARY KEY,
     mode TEXT NOT NULL,
+    quiz TEXT NOT NULL DEFAULT 'auto',
     prs_per_month INTEGER NOT NULL,
     spend_cap_usd REAL NOT NULL,
     created_at INTEGER NOT NULL
@@ -59,5 +60,10 @@ export async function ensureSchema(db: D1Database): Promise<void> {
   for (const stmt of SCHEMA_STATEMENTS) {
     await db.prepare(stmt).run();
   }
+  // Additive columns for databases created before the column existed; SQLite
+  // has no ADD COLUMN IF NOT EXISTS, so a duplicate-column error means done.
+  try {
+    await db.prepare(`ALTER TABLE repos ADD COLUMN quiz TEXT NOT NULL DEFAULT 'auto'`).run();
+  } catch {}
   ensured.add(db);
 }

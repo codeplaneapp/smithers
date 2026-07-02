@@ -1,17 +1,11 @@
 import type { D1Database } from "../d1.ts";
+import { monthKey as monthKeyFor } from "../monthKey.ts";
 
 export interface QuotaState {
   monthKey: string;
   used: number;
   alreadyReviewed: boolean;
   overQuota: boolean;
-}
-
-function monthKeyFor(now: number): string {
-  const d = new Date(now);
-  const yyyy = d.getUTCFullYear();
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  return `${yyyy}-${mm}`;
 }
 
 /**

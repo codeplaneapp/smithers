@@ -32,7 +32,8 @@ describe("walkthrough publish and serve", () => {
 
     expect(publish.status).toBe(201);
     const body = (await publish.json()) as { id: string; url: string };
-    expect(body.id).toMatch(/^[a-z0-9]{12}$/);
+    // 32-char alphabet (a-z plus 0-5) so byte % 32 is modulo-unbiased.
+    expect(body.id).toMatch(/^[a-z0-5]{12}$/);
     expect(body.url).toBe(`https://review.example/w/${body.id}`);
 
     const served = await worker.fetch(new Request(body.url), env);

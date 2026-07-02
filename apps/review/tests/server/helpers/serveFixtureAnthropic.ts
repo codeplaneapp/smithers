@@ -16,6 +16,7 @@ export interface FixtureAnthropicResponse {
   status?: number;
   contentType: string;
   body: string;
+  headers?: Record<string, string>;
 }
 
 export function serveFixtureAnthropic(
@@ -32,7 +33,7 @@ export function serveFixtureAnthropic(
       const r = typeof response === "function" ? response({ url: request.url, method: request.method }) : response;
       return new Response(r.body, {
         status: r.status ?? 200,
-        headers: { "content-type": r.contentType },
+        headers: { "content-type": r.contentType, ...(r.headers ?? {}) },
       });
     },
   });

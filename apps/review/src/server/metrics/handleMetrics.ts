@@ -1,5 +1,6 @@
 import type { ReviewWorkerEnv } from "../env.ts";
 import { jsonError } from "../jsonError.ts";
+import { monthKey as monthKeyOf } from "../monthKey.ts";
 import { timingSafeStringEqual } from "../timingSafeStringEqual.ts";
 
 function escapeLabel(value: string): string {
@@ -41,8 +42,7 @@ export async function handleMetrics(request: Request, env: ReviewWorkerEnv): Pro
     return jsonError(401, "unauthorized");
   }
 
-  const now = new Date();
-  const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  const monthKey = monthKeyOf(Date.now());
 
   const tokensRes = await env.DB
     .prepare(
@@ -96,12 +96,6 @@ export async function handleMetrics(request: Request, env: ReviewWorkerEnv): Pro
     lines.push(`review_quota_remaining{repo="${escapeLabel(row.repo)}"} ${remaining}`);
   }
 
-  // Proxy errors and session outcomes are tracked through usage_events.kind;
-  // surface them as 0 baselines so dashboards never break on absent series.
-  lines.push("# HELP review_proxy_errors_total Proxy non-2xx upstream responses");
-  lines.push("# TYPE review_proxy_errors_total counter");
-  lines.push("# HELP review_sessions_total Session mint outcomes");
-  lines.push("# TYPE review_sessions_total counter");
 
   return new Response(`${lines.join("\n")}\n`, {
     status: 200,

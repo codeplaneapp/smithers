@@ -25,6 +25,9 @@ const FORWARDED_HEADERS = new Set([
   "anthropic-beta",
 ]);
 
+// Clients need these to back off correctly and to reference upstream errors.
+const PASSTHROUGH_RESPONSE_HEADERS = ["retry-after", "x-request-id"];
+
 function pickForwardHeaders(source: Headers): Headers {
   const out = new Headers();
   for (const [k, v] of source.entries()) {
@@ -85,12 +88,28 @@ export async function handleAnthropic(
     pr = auth.pr;
     sessionHash = auth.hash;
     spendCapUsd = auth.spendCapUsd;
-    spentUsd = auth.spentUsd;
+    // Re-read spent_usd at admission: concurrent streaming requests meter via
+    // waitUntil after their streams close, so the row read during auth can be
+    // stale. A fresh read narrows (not eliminates) the over-spend window
+    // without a full reservation system.
+    const fresh = await env.DB
+      .prepare("SELECT spent_usd FROM sessions WHERE hash = ?")
+      .bind(auth.hash)
+      .first<{ spent_usd: number }>();
+    spentUsd = fresh?.spent_usd ?? auth.spentUsd;
     if (spentUsd >= spendCapUsd) {
       return jsonError(402, "session spend cap exhausted", { spendCapUsd, spentUsd });
     }
   } else {
-    repo = auth.repos[0] ?? auth.owner;
+    const repoHint = request.headers.get("x-smithers-repo");
+    if (repoHint) {
+      if (auth.repos.length > 0 && !auth.repos.includes(repoHint)) {
+        return jsonError(403, "api key not authorized for repo", { repo: repoHint });
+      }
+      repo = repoHint;
+    } else {
+      repo = auth.repos[0] ?? auth.owner;
+    }
     pr = 0;
   }
 
@@ -117,10 +136,14 @@ export async function handleAnthropic(
 
   if (!upstream.body) {
     const text = await upstream.text();
-    return new Response(text, {
-      status: upstream.status,
-      headers: { "content-type": upstream.headers.get("content-type") ?? "application/json" },
+    const headers = new Headers({
+      "content-type": upstream.headers.get("content-type") ?? "application/json",
     });
+    for (const h of PASSTHROUGH_RESPONSE_HEADERS) {
+      const v = upstream.headers.get(h);
+      if (v) headers.set(h, v);
+    }
+    return new Response(text, { status: upstream.status, headers });
   }
 
   const contentType = upstream.headers.get("content-type") ?? "";
@@ -144,7 +167,7 @@ export async function handleAnthropic(
   deps.waitUntil(metering);
 
   const responseHeaders = new Headers();
-  for (const h of ["content-type", "cache-control"]) {
+  for (const h of ["content-type", "cache-control", ...PASSTHROUGH_RESPONSE_HEADERS]) {
     const v = upstream.headers.get(h);
     if (v) responseHeaders.set(h, v);
   }

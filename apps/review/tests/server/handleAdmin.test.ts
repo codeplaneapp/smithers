@@ -34,7 +34,31 @@ describe("admin endpoints", () => {
     expect(list.status).toBe(200);
     const body = (await list.json()) as { repos: Array<{ repo: string; mode: string; prsPerMonth: number }> };
     expect(body.repos).toHaveLength(1);
-    expect(body.repos[0]).toMatchObject({ repo: "octo/widgets", mode: "auto", prsPerMonth: 10 });
+    expect(body.repos[0]).toMatchObject({ repo: "octo/widgets", mode: "auto", quiz: "auto", prsPerMonth: 10 });
+  });
+
+  test("repo upsert accepts an explicit quiz mode and rejects invalid values", async () => {
+    const env = await buildTestEnv();
+    const worker = makeWorker();
+    const upsert = await worker.fetch(
+      new Request("https://review.test/api/admin/repos", {
+        method: "POST",
+        headers: { authorization: "Bearer test-admin", "content-type": "application/json" },
+        body: JSON.stringify({ repo: "octo/widgets", mode: "auto", quiz: "on", prsPerMonth: 10, spendCapUsd: 25 }),
+      }),
+      env,
+    );
+    expect(upsert.status).toBe(200);
+    expect(((await upsert.json()) as { quiz: string }).quiz).toBe("on");
+    const bad = await worker.fetch(
+      new Request("https://review.test/api/admin/repos", {
+        method: "POST",
+        headers: { authorization: "Bearer test-admin", "content-type": "application/json" },
+        body: JSON.stringify({ repo: "octo/widgets", mode: "auto", quiz: "sometimes", prsPerMonth: 10, spendCapUsd: 25 }),
+      }),
+      env,
+    );
+    expect(bad.status).toBe(400);
   });
 
   test("mints an api key and the key authenticates a session", async () => {

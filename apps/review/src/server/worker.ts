@@ -2,6 +2,7 @@ import { handleAdminKeys } from "./admin/handleAdminKeys.ts";
 import { handleAdminRepos } from "./admin/handleAdminRepos.ts";
 import { handleAdminUsage } from "./admin/handleAdminUsage.ts";
 import type { ReviewWorkerEnv } from "./env.ts";
+import { jsonError } from "./jsonError.ts";
 import { landingPage } from "./landingPage.ts";
 import { ensureSchema } from "./migrations.ts";
 import { handleMetrics } from "./metrics/handleMetrics.ts";
@@ -74,7 +75,10 @@ export function createReviewWorker(overrides?: Partial<ReviewWorkerDeps>) {
         });
       }
 
-      if (env.DB) await ensureSchema(env.DB);
+      // Everything below needs D1. A missing binding is a deploy/config
+      // problem — answer 503 instead of crashing on an undefined dereference.
+      if (!env.DB) return jsonError(503, "database unavailable");
+      await ensureSchema(env.DB);
 
       if (request.method === "POST" && url.pathname === "/api/sessions") {
         return handleSessions(request, env, deps, origin);
