@@ -86,7 +86,7 @@ describe("normalizeStory", () => {
       files,
     );
     expect(story.chapters[0].blocks[0]).toMatchObject({ kind: "prose", text: "keep this text" });
-    expect(story.headline).toContain("3 file(s) changed");
+    expect(story.headline).toBe("Change walkthrough: src");
     expect(story.synopsis.length).toBeGreaterThan(0);
   });
 });

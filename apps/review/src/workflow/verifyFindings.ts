@@ -1,3 +1,5 @@
+import { fenceFor, trimDiff } from "../quiz/promptDiff";
+
 export type VerifiableFinding = {
   path: string;
   content: string;
@@ -9,19 +11,13 @@ export type VerifiableFinding = {
   existingCode: string;
 };
 
-const perFileDiffLimit = 20_000;
-
-function trimDiff(diff: string) {
-  if (diff.length <= perFileDiffLimit) return diff;
-  return `${diff.slice(0, perFileDiffLimit)}\n[diff truncated for prompt size]`;
-}
-
 function findingLines(finding: VerifiableFinding, index: number) {
   const anchor = finding.startLine > 0 ? ` lines ${finding.startLine}-${finding.endLine}` : "";
+  const codeFence = fenceFor(finding.existingCode);
   return [
     `Finding ${index}: [${finding.severity}/${finding.category}/${finding.confidence}] ${finding.path}${anchor}`,
     finding.content,
-    ...(finding.existingCode.trim() ? ["Existing code:", "```", finding.existingCode, "```"] : []),
+    ...(finding.existingCode.trim() ? ["Existing code:", codeFence, finding.existingCode, codeFence] : []),
     "",
   ];
 }
@@ -34,7 +30,9 @@ export function buildVerifyFindingsPrompt(args: {
   const diffSections = uniquePaths.flatMap((path) => {
     const file = args.filesByPath.get(path);
     if (!file || !file.diff.trim()) return [];
-    return [`File: ${path}`, "```diff", trimDiff(file.diff), "```", ""];
+    const diff = trimDiff(file.diff);
+    const fence = fenceFor(diff);
+    return [`File: ${path}`, `${fence}diff`, diff, fence, ""];
   });
   return [
     "You are an adversarial verification agent for code-review findings.",

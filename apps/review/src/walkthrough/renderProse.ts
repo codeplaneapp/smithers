@@ -8,16 +8,26 @@ function renderInline(escaped: string): string {
 }
 
 /**
+ * Escape-first inline-only markdown (backtick code, **bold**, *emphasis*)
+ * for single-line contexts like diff-card intros. Same escaping guarantee as
+ * renderProse: input is HTML-escaped before any transformation.
+ */
+export function renderProseInline(text: string): string {
+  return renderInline(escapeHtml(text));
+}
+
+/**
  * Escape-first markdown subset for narrator prose: paragraphs, ### headings,
- * - lists, > blockquotes, ``` fences, and inline code, bold, and emphasis.
- * Input is HTML-escaped before any transformation, so narrator output cannot
- * inject markup into the page.
+ * - lists, 1. ordered lists, > blockquotes, ``` fences, and inline code,
+ * bold, and emphasis. Input is HTML-escaped before any transformation, so
+ * narrator output cannot inject markup into the page.
  */
 export function renderProse(text: string): string {
   const out: string[] = [];
   const lines = escapeHtml(text).split("\n");
   let paragraph: string[] = [];
   let list: string[] = [];
+  let ordered: string[] = [];
   let quote: string[] = [];
   let fence: string[] | null = null;
 
@@ -29,6 +39,10 @@ export function renderProse(text: string): string {
     if (list.length > 0) out.push(`<ul>${list.map((item) => `<li>${renderInline(item)}</li>`).join("")}</ul>`);
     list = [];
   };
+  const flushOrdered = () => {
+    if (ordered.length > 0) out.push(`<ol>${ordered.map((item) => `<li>${renderInline(item)}</li>`).join("")}</ol>`);
+    ordered = [];
+  };
   const flushQuote = () => {
     if (quote.length > 0) out.push(`<blockquote>${renderInline(quote.join(" "))}</blockquote>`);
     quote = [];
@@ -36,6 +50,7 @@ export function renderProse(text: string): string {
   const flushAll = () => {
     flushParagraph();
     flushList();
+    flushOrdered();
     flushQuote();
   };
 
@@ -68,17 +83,27 @@ export function renderProse(text: string): string {
     }
     if (/^[-*]\s+/.test(trimmed)) {
       flushParagraph();
+      flushOrdered();
       flushQuote();
       list.push(trimmed.replace(/^[-*]\s+/, ""));
+      continue;
+    }
+    if (/^\d{1,3}[.)]\s+/.test(trimmed)) {
+      flushParagraph();
+      flushList();
+      flushQuote();
+      ordered.push(trimmed.replace(/^\d{1,3}[.)]\s+/, ""));
       continue;
     }
     if (/^&gt;\s?/.test(trimmed)) {
       flushParagraph();
       flushList();
+      flushOrdered();
       quote.push(trimmed.replace(/^&gt;\s?/, ""));
       continue;
     }
     flushList();
+    flushOrdered();
     flushQuote();
     paragraph.push(trimmed);
   }

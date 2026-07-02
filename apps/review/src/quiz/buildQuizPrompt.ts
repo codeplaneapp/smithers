@@ -1,12 +1,6 @@
 import type { ImpactFile, ImpactFinding } from "./assessChangeImpact";
+import { fenceFor, trimDiff } from "./promptDiff";
 import type { QuizImpact } from "./quizSchema";
-
-const perFileDiffLimit = 20_000;
-
-function trimDiff(diff: string) {
-  if (diff.length <= perFileDiffLimit) return diff;
-  return `${diff.slice(0, perFileDiffLimit)}\n[diff truncated for prompt size]`;
-}
 
 export function buildQuizPrompt(args: {
   files: ImpactFile[];
@@ -27,13 +21,17 @@ export function buildQuizPrompt(args: {
     args.impact.reasons.length > 0
       ? args.impact.reasons.map((reason) => `- ${reason.signal}${reason.path ? ` (${reason.path})` : ""}`)
       : ["none recorded"];
-  const fileSections = args.files.flatMap((file) => [
-    `File: ${file.path} (${file.status}, +${file.insertions} -${file.deletions})`,
-    "```diff",
-    trimDiff(file.diff),
-    "```",
-    "",
-  ]);
+  const fileSections = args.files.flatMap((file) => {
+    const diff = trimDiff(file.diff);
+    const fence = fenceFor(diff);
+    return [
+      `File: ${file.path} (${file.status}, +${file.insertions} -${file.deletions})`,
+      `${fence}diff`,
+      diff,
+      fence,
+      "",
+    ];
+  });
 
   return [
     "You are writing a reviewer comprehension quiz for a code change.",

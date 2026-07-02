@@ -1,10 +1,9 @@
 import type { ChangedFile } from "./changedFileSchema";
 import { escapeHtml } from "./escapeHtml";
+import { pluralize } from "./pluralize";
 
-const MAX_AREAS = 8;
-const BAR_AREA_WIDTH = 460;
-const ROW_HEIGHT = 26;
-const LABEL_WIDTH = 220;
+const MAX_ROWS = 12;
+const MIN_SEGMENT_PCT = 1.5;
 
 const groupedRoots = new Set(["apps", "packages", "examples", "src"]);
 
@@ -15,13 +14,37 @@ function areaOf(path: string): string {
   return parts[0];
 }
 
+type AreaEntry = { insertions: number; deletions: number; files: number };
+
+function pct(value: number): string {
+  return `${Math.round(value * 100) / 100}%`;
+}
+
+function barSegments(entry: AreaEntry, maxChurn: number): string {
+  const churn = entry.insertions + entry.deletions;
+  if (churn === 0) return "";
+  // sqrt scale so small areas stay visible next to a dominant one.
+  const total = Math.sqrt(churn / maxChurn) * 100;
+  let addPct = (entry.insertions / churn) * total;
+  let delPct = total - addPct;
+  if (entry.insertions > 0 && addPct < MIN_SEGMENT_PCT) addPct = MIN_SEGMENT_PCT;
+  if (entry.deletions > 0 && delPct < MIN_SEGMENT_PCT) delPct = MIN_SEGMENT_PCT;
+  const parts: string[] = [];
+  if (entry.insertions > 0) parts.push(`<div class="chart-add" style="width:${pct(addPct)}"></div>`);
+  if (entry.deletions > 0) parts.push(`<div class="chart-del" style="width:${pct(delPct)}"></div>`);
+  return parts.join("");
+}
+
 /**
- * Deterministic change-shape visual for the walkthrough header: one row per
- * workspace area, additions and deletions as proportional bars. Pure SVG,
- * no agent and no runtime dependency.
+ * Deterministic change-shape visual for the walkthrough header: one HTML row
+ * per workspace area (flex label + counts, then a percentage-width bar split
+ * into additions/deletions). Plain divs keep the text legible at any viewport
+ * width (no SVG scaling), and a sqrt scale keeps small areas distinguishable
+ * next to a dominant one. Areas beyond MAX_ROWS collapse into a truthful
+ * "+N more areas" row instead of being dropped. No runtime deps.
  */
 export function renderOverviewChart(files: ChangedFile[]): string {
-  const byArea = new Map<string, { insertions: number; deletions: number; files: number }>();
+  const byArea = new Map<string, AreaEntry>();
   for (const file of files) {
     const area = areaOf(file.path);
     const entry = byArea.get(area) ?? { insertions: 0, deletions: 0, files: 0 };
@@ -30,28 +53,40 @@ export function renderOverviewChart(files: ChangedFile[]): string {
     entry.files += 1;
     byArea.set(area, entry);
   }
-  const rows = [...byArea.entries()]
-    .sort((a, b) => b[1].insertions + b[1].deletions - (a[1].insertions + a[1].deletions))
-    .slice(0, MAX_AREAS);
-  if (rows.length === 0) return "";
+  const sorted = [...byArea.entries()].sort(
+    (a, b) => b[1].insertions + b[1].deletions - (a[1].insertions + a[1].deletions) || a[0].localeCompare(b[0]),
+  );
+  if (sorted.length === 0) return "";
+
+  const rows: Array<[string, AreaEntry]> = sorted.slice(0, sorted.length > MAX_ROWS ? MAX_ROWS - 1 : MAX_ROWS);
+  const rest = sorted.slice(rows.length);
+  if (rest.length > 0) {
+    const merged = rest.reduce(
+      (acc, [, entry]) => ({
+        insertions: acc.insertions + entry.insertions,
+        deletions: acc.deletions + entry.deletions,
+        files: acc.files + entry.files,
+      }),
+      { insertions: 0, deletions: 0, files: 0 },
+    );
+    rows.push([`+${pluralize(rest.length, "more area")}`, merged]);
+  }
 
   const maxChurn = Math.max(...rows.map(([, entry]) => entry.insertions + entry.deletions), 1);
-  const height = rows.length * ROW_HEIGHT + 8;
   const parts: string[] = [
-    `<svg class="overview-chart" viewBox="0 0 ${LABEL_WIDTH + BAR_AREA_WIDTH + 90} ${height}" role="img" aria-label="Changed lines by area">`,
+    `<div class="overview-chart" role="img" aria-label="Changed lines by area">`,
+    `<div class="chart-key" aria-hidden="true"><span class="key-swatch chart-add"></span>added<span class="key-swatch chart-del"></span>removed</div>`,
   ];
-  rows.forEach(([area, entry], index) => {
-    const y = index * ROW_HEIGHT + 4;
-    const addWidth = Math.max(entry.insertions > 0 ? 2 : 0, Math.round((entry.insertions / maxChurn) * BAR_AREA_WIDTH));
-    const delWidth = Math.max(entry.deletions > 0 ? 2 : 0, Math.round((entry.deletions / maxChurn) * BAR_AREA_WIDTH));
-    const label = `${area} (${entry.files})`;
+  for (const [area, entry] of rows) {
+    const counts = `+${entry.insertions} −${entry.deletions}`;
     parts.push(
-      `<text x="${LABEL_WIDTH - 8}" y="${y + 14}" text-anchor="end" class="chart-label">${escapeHtml(label)}</text>`,
-      `<rect x="${LABEL_WIDTH}" y="${y + 3}" width="${addWidth}" height="7" rx="2" class="chart-add"></rect>`,
-      `<rect x="${LABEL_WIDTH}" y="${y + 12}" width="${delWidth}" height="7" rx="2" class="chart-del"></rect>`,
-      `<text x="${LABEL_WIDTH + Math.max(addWidth, delWidth) + 8}" y="${y + 14}" class="chart-count">+${entry.insertions} −${entry.deletions}</text>`,
+      `<div class="chart-row" title="${escapeHtml(area)}: ${counts} across ${escapeHtml(pluralize(entry.files, "file"))}">`,
+      `<span class="chart-label">${escapeHtml(area)} <span class="chart-files">· ${escapeHtml(pluralize(entry.files, "file"))}</span></span>`,
+      `<span class="chart-count">${escapeHtml(counts)}</span>`,
+      `<div class="chart-track">${barSegments(entry, maxChurn)}</div>`,
+      `</div>`,
     );
-  });
-  parts.push("</svg>");
+  }
+  parts.push("</div>");
   return parts.join("");
 }

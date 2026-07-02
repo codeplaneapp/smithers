@@ -1,6 +1,8 @@
 import { ClaudeCodeAgent, CodexAgent, type AgentLike } from "smithers-orchestrator";
 import { nativeReviewAgentOutputSchema } from "smithers-workflows/lib/open-code-review";
+import { quizSchema } from "../quiz/quizSchema";
 import { storySchema } from "../walkthrough/storySchema";
+import { verifyVerdictsSchema } from "./verifyVerdictsSchema";
 import { writeOpenAiSchemaFile } from "./writeOpenAiSchemaFile";
 
 /**
@@ -25,7 +27,12 @@ import { writeOpenAiSchemaFile } from "./writeOpenAiSchemaFile";
  * auth wins). Otherwise (local dev, BYO Claude via CLAUDE_CODE_OAUTH_TOKEN) keep
  * subscription mode.
  */
-export function createReviewAgents(repoDir: string): { review: AgentLike[]; narrate: AgentLike[] } {
+export function createReviewAgents(repoDir: string): {
+  review: AgentLike[];
+  narrate: AgentLike[];
+  verify: AgentLike[];
+  quiz: AgentLike[];
+} {
   const engine = process.env.SMITHERS_REVIEW_ENGINE?.trim().toLowerCase();
 
   if (engine === "codex") {
@@ -39,12 +46,14 @@ export function createReviewAgents(repoDir: string): { review: AgentLike[]; narr
     // survives. (#277-adjacent.)
     const maxOutputBytes = 64 * 1024 * 1024;
     const base = { model, cwd: repoDir, skipGitRepoCheck: true, maxOutputBytes, ...(configDir ? { configDir } : {}) };
-    // Per-task --output-schema: the review and narrate tasks have different
-    // shapes, and codex enforces the schema file so gpt-5.5 returns the JSON
-    // the pipeline needs instead of a prose summary.
+    // Per-task --output-schema: review, narrate, verify, and quiz tasks each
+    // have their own shape, and codex enforces the schema file so gpt-5.5
+    // returns the JSON the pipeline needs instead of a prose summary.
     const review = new CodexAgent({ ...base, outputSchema: writeOpenAiSchemaFile(nativeReviewAgentOutputSchema) });
     const narrate = new CodexAgent({ ...base, outputSchema: writeOpenAiSchemaFile(storySchema) });
-    return { review: [review], narrate: [narrate] };
+    const verify = new CodexAgent({ ...base, outputSchema: writeOpenAiSchemaFile(verifyVerdictsSchema) });
+    const quiz = new CodexAgent({ ...base, outputSchema: writeOpenAiSchemaFile(quizSchema) });
+    return { review: [review], narrate: [narrate], verify: [verify], quiz: [quiz] };
   }
 
   const baseUrl = process.env.ANTHROPIC_BASE_URL?.trim();
@@ -61,5 +70,6 @@ export function createReviewAgents(repoDir: string): { review: AgentLike[]; narr
     ? new ClaudeCodeAgent({ model: fallbackModel, cwd: repoDir, apiKey })
     : new ClaudeCodeAgent({ model: fallbackModel, cwd: repoDir });
 
-  return { review: [primary, fallback], narrate: [primary, fallback] };
+  const pool = [primary, fallback];
+  return { review: pool, narrate: pool, verify: pool, quiz: pool };
 }

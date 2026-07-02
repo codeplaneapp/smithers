@@ -94,12 +94,9 @@ describe("assessChangeImpact", () => {
       ["exec(", "+exec(cmd);"],
       ["innerHTML", "+el.innerHTML = userInput;"],
       ["dangerouslySetInnerHTML", "+<div dangerouslySetInnerHTML={{ __html: raw }} />"],
-      ["process.env", "+const key = process.env.SECRET_KEY;"],
       ["DROP TABLE", "+await db.query('DROP TABLE users');"],
       ["DELETE FROM", "+await db.query('DELETE FROM sessions');"],
       ["chmod", "+chmodSync(path, 0o777);"],
-      ["crypto.", "+const digest = crypto.createHash('md5');"],
-      ["timing", "+// timing sensitive comparison"],
     ])("marker %s in added lines is a reason", (marker, addedLine) => {
       const impact = assessChangeImpact([file("src/renderGreeting.ts", { diff: `${addedLine}\n` })], []);
       expect(impact.reasons).toContainEqual({ signal: `risky added content (${marker})`, path: "src/renderGreeting.ts" });
@@ -112,9 +109,35 @@ describe("assessChangeImpact", () => {
     });
 
     test("+++ header line does not count as an added line", () => {
-      const diff = ["+++ b/src/process.envish.ts", "+const clean = 1;"].join("\n");
+      const diff = ["+++ b/src/chmodish.ts", "+const clean = 1;"].join("\n");
       const impact = assessChangeImpact([file("src/renderGreeting.ts", { diff })], []);
       expect(impact.score).toBe(0);
+    });
+
+    test.each([
+      ["process.env", "+const key = process.env.SECRET_KEY;"],
+      ["crypto.", "+const digest = crypto.createHash('md5');"],
+      ["timing", "+// timing sensitive comparison"],
+    ])("ordinary-code marker %s no longer fires", (_marker, addedLine) => {
+      const impact = assessChangeImpact([file("src/renderGreeting.ts", { diff: `${addedLine}\n` })], []);
+      expect(impact.score).toBe(0);
+      expect(impact.reasons).toEqual([]);
+    });
+
+    test("the same marker repeated in one file counts once", () => {
+      const diff = ["+eval(a);", "+eval(b);", "+eval(c);"].join("\n");
+      const impact = assessChangeImpact([file("src/renderGreeting.ts", { diff })], []);
+      expect(impact.score).toBe(2);
+      expect(impact.reasons).toHaveLength(1);
+    });
+
+    test("riskyContent contribution is capped at 2 hits per file", () => {
+      const diff = ["+eval(code);", "+exec(cmd);", "+el.innerHTML = raw;", "+chmodSync(p, 0o777);"].join("\n");
+      const impact = assessChangeImpact([file("src/renderGreeting.ts", { diff })], []);
+      expect(impact.score).toBe(4);
+      expect(impact.reasons).toHaveLength(2);
+      // 4 points is moderate: one file's markers alone can never reach critical.
+      expect(impact.level).toBe("moderate");
     });
   });
 

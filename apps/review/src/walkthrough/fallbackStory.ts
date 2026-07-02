@@ -1,6 +1,7 @@
 import type { ChangedFile } from "./changedFileSchema";
 import { classifyChangeRole } from "./classifyChangeRole";
 import { describeChange } from "./describeChange";
+import { pluralize } from "./pluralize";
 import type { Story, StoryBlock, StoryChapter } from "./storySchema";
 
 const groupedRoots = new Set(["apps", "packages", "examples", "src"]);
@@ -70,7 +71,7 @@ export function fallbackStory(files: ChangedFile[]): Story {
   const chapters: StoryChapter[] = [];
   for (const [area, areaFiles] of codeAreas) {
     const title = chapters.length === 0 ? `The main change: ${area}` : `Alongside: ${area}`;
-    const narrative = `${areaFiles.length} file(s) changed in ${area} (+${insertionsOf(areaFiles)} −${deletionsOf(areaFiles)}).`;
+    const narrative = `${pluralize(areaFiles.length, "file")} changed in ${area} (+${insertionsOf(areaFiles)} −${deletionsOf(areaFiles)}).`;
     chapters.push(chapter(title, narrative, areaFiles));
   }
 
@@ -84,9 +85,26 @@ export function fallbackStory(files: ChangedFile[]): Story {
     chapters.push(chapter("The paper trail: docs", "Documentation that records the change.", docs));
   }
 
+  // Dominant area = the area with the most churn across ALL files (code or
+  // not), so the headline names the part of the tree the reader cares about.
+  // Raw stats stay out of the headline — it doubles as the page <title>/H1.
+  const churnByArea = new Map<string, number>();
+  for (const file of files) {
+    const area = areaOf(file.path);
+    churnByArea.set(area, (churnByArea.get(area) ?? 0) + file.insertions + file.deletions);
+  }
+  const dominant = [...churnByArea.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? "";
+
+  const synopsis =
+    chapters.length === 0
+      ? "No changes detected."
+      : chapters.length === 1
+        ? `All of the change lands in ${dominant}.`
+        : `${pluralize(chapters.length, "area")} changed; ${dominant} carries most of the churn.`;
+
   return {
-    headline: `${files.length} file(s) changed (+${insertionsOf(files)} −${deletionsOf(files)}) across ${chapters.length} area(s)`,
-    synopsis: chapters.length > 0 ? `Reading order: ${chapters.map((c) => c.title).join("; ")}.` : "No changes detected.",
+    headline: dominant ? `Change walkthrough: ${dominant}` : "Change walkthrough",
+    synopsis,
     chapters,
   };
 }

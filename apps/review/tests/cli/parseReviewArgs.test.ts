@@ -21,6 +21,41 @@ describe("parseReviewArgs", () => {
     expect(args.pr).toBe("");
     expect(args.open).toBe(false);
     expect(args.help).toBe(false);
+    expect(args.version).toBe(false);
+    expect(args.verify).toBe(true);
+    expect(args.quiz).toBe("auto");
+  });
+
+  test("--quiz accepts off, auto, on", () => {
+    expect(parseReviewArgs(["--quiz", "off"]).quiz).toBe("off");
+    expect(parseReviewArgs(["--quiz", "auto"]).quiz).toBe("auto");
+    expect(parseReviewArgs(["--quiz", "on"]).quiz).toBe("on");
+  });
+
+  test("--quiz rejects other values", () => {
+    expect(() => parseReviewArgs(["--quiz", "always"])).toThrow('--quiz must be one of off, auto, on (got "always")');
+    expect(() => parseReviewArgs(["--quiz", ""])).toThrow("--quiz must be one of off, auto, on");
+    expect(() => parseReviewArgs(["--quiz", "ON"])).toThrow("--quiz must be one of off, auto, on");
+  });
+
+  test("--quiz requires a value", () => {
+    expect(() => parseReviewArgs(["--quiz"])).toThrow("--quiz requires a value");
+  });
+
+  test("--no-verify disables the verification pass", () => {
+    expect(parseReviewArgs(["--no-verify"]).verify).toBe(false);
+  });
+
+  test("--version sets version=true", () => {
+    expect(parseReviewArgs(["--version"]).version).toBe(true);
+  });
+
+  test("new flags combine with existing ones", () => {
+    const args = parseReviewArgs(["--quiz", "on", "--no-verify", "--no-review", "--pr", "42"]);
+    expect(args.quiz).toBe("on");
+    expect(args.verify).toBe(false);
+    expect(args.review).toBe(false);
+    expect(args.pr).toBe("42");
   });
 
   test("--help sets help=true", () => {
@@ -120,5 +155,38 @@ describe("parseReviewArgs", () => {
   test("last positional wins as repo path", () => {
     const args = parseReviewArgs(["first", "second"]);
     expect(args.repo).toBe("second");
+  });
+
+  describe("conflicting review targets", () => {
+    test("--commit with --from/--to throws", () => {
+      expect(() => parseReviewArgs(["--commit", "abc", "--from", "main"])).toThrow(
+        'conflicting review targets: --commit and --from/--to cannot be combined — pick one',
+      );
+      expect(() => parseReviewArgs(["--commit", "abc", "--to", "HEAD"])).toThrow("conflicting review targets");
+    });
+
+    test("--commit with --pr throws", () => {
+      expect(() => parseReviewArgs(["--commit", "abc", "--pr", "42"])).toThrow(
+        "conflicting review targets: --commit and --pr cannot be combined — pick one",
+      );
+    });
+
+    test("--from/--to with --pr throws", () => {
+      expect(() => parseReviewArgs(["--from", "main", "--to", "HEAD", "--pr", "42"])).toThrow(
+        "conflicting review targets: --from/--to and --pr cannot be combined — pick one",
+      );
+    });
+
+    test("all three together throws", () => {
+      expect(() => parseReviewArgs(["--commit", "abc", "--from", "main", "--pr", "42"])).toThrow(
+        "conflicting review targets: --commit and --from/--to and --pr cannot be combined — pick one",
+      );
+    });
+
+    test("each target alone is fine", () => {
+      expect(parseReviewArgs(["--commit", "abc"]).commit).toBe("abc");
+      expect(parseReviewArgs(["--from", "main", "--to", "HEAD"]).from).toBe("main");
+      expect(parseReviewArgs(["--pr", "42"]).pr).toBe("42");
+    });
   });
 });

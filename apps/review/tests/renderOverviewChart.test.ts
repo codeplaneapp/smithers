@@ -6,20 +6,59 @@ function file(path: string, insertions: number, deletions: number): ChangedFile 
   return { path, status: "modified", insertions, deletions, diff: "", reviewed: true, excludeReason: "" };
 }
 
+function rowsOf(html: string): string[] {
+  return html.split('<div class="chart-row"').slice(1);
+}
+
+function rowWidth(row: string): number {
+  const widths = [...row.matchAll(/width:([\d.]+)%/g)].map((match) => Number(match[1]));
+  return widths.reduce((sum, width) => sum + width, 0);
+}
+
 describe("renderOverviewChart", () => {
-  test("renders one row per area, biggest churn first", () => {
-    const svg = renderOverviewChart([
+  test("renders one HTML row per area, biggest churn first, with counts", () => {
+    const html = renderOverviewChart([
       file("apps/web/src/a.ts", 10, 2),
       file("apps/web/src/b.ts", 5, 1),
       file("packages/x/y.ts", 100, 50),
       file("README.md", 1, 0),
     ]);
-    expect(svg).toContain("<svg");
-    expect(svg.indexOf("packages/x")).toBeLessThan(svg.indexOf("apps/web"));
-    expect(svg).toContain("packages/x (1)");
-    expect(svg).toContain("apps/web (2)");
-    expect(svg).toContain("+100 −50");
-    expect(svg).toContain("+15 −3");
+    expect(html).not.toContain("<svg");
+    const rows = rowsOf(html);
+    expect(rows.length).toBe(3); // packages/x, apps/web, (root)
+    expect(rows[0]).toContain("packages/x");
+    expect(rows[1]).toContain("apps/web");
+    expect(rows[2]).toContain("(root)");
+    expect(rows[0]).toContain("+100 −50");
+    expect(rows[1]).toContain("+15 −3");
+    expect(rows[0]).toContain("1 file");
+    expect(rows[1]).toContain("2 files");
+  });
+
+  test("bar widths are monotonically non-increasing in row order", () => {
+    const html = renderOverviewChart([
+      file("packages/big/a.ts", 9000, 1000),
+      file("apps/mid/b.ts", 400, 100),
+      file("scripts/small.ts", 9, 1),
+    ]);
+    const widths = rowsOf(html).map(rowWidth);
+    expect(widths.length).toBe(3);
+    for (let i = 1; i < widths.length; i += 1) {
+      expect(widths[i]).toBeLessThanOrEqual(widths[i - 1]);
+    }
+    // Dominant area fills the track; the sqrt scale keeps the smallest area
+    // clearly visible (a linear scale would give it 0.1%).
+    expect(widths[0]).toBeGreaterThan(95);
+    expect(widths[2]).toBeGreaterThan(1);
+  });
+
+  test("collapses overflow areas into a truthful +N more row", () => {
+    const files: ChangedFile[] = [];
+    for (let i = 0; i < 15; i += 1) files.push(file(`area${String(i).padStart(2, "0")}/f.ts`, 15 - i, 0));
+    const html = renderOverviewChart(files);
+    const rows = rowsOf(html);
+    expect(rows.length).toBe(12);
+    expect(rows[11]).toContain("more areas");
   });
 
   test("empty change set renders nothing", () => {

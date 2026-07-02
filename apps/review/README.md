@@ -69,9 +69,25 @@ registered in `auto` mode skip the comment and review every non-draft PR
 push; `comment` mode is the default. The mode is a server-side setting on
 your registration, so switching never touches your workflow file.
 
+### Reviewer quiz
+
+High-impact changes get a short comprehension quiz: 3–6 multiple-choice
+questions a reviewer can answer only if they actually read and understood
+the change. It is honor-system — nothing blocks a merge on the score.
+
+The quiz auto-triggers when the assessed impact is **high** or
+**critical** (security-sensitive paths, schema/migration changes, risky
+added code, critical findings, sheer size, …); the specific reasons behind
+the assessment are listed in the walkthrough. Force it with `--quiz on`,
+disable it with `--quiz off` (CLI), or set the `quiz:` action input.
+
+After taking the quiz in the walkthrough, copy the attestation (your
+score) into a PR comment so the author knows the review was earned.
+
 ### Plans and quota
 
-Subscriptions meter reviewed PRs, N per repo per calendar month.
+Subscriptions meter reviewed PRs — a monthly per-repo PR allotment set on
+your registration; the status comment shows remaining quota.
 Re-reviewing a PR that already counted this month is free. When the quota
 is spent, the action skips with a notice instead of failing your checks.
 

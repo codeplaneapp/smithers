@@ -93,6 +93,56 @@ describe("normalizeQuiz", () => {
     expect(quiz!.questions[0].question).toBe("What breaks when value is undefined?");
   });
 
+  test("a shared prefix does not dedupe distinct questions", () => {
+    const quiz = normalizeQuiz(
+      {
+        questions: [
+          question({ question: "What breaks when value is null?" }),
+          question({ question: "What breaks when value is null after retry?" }),
+        ],
+      },
+      changedPaths,
+    );
+    expect(quiz!.questions).toHaveLength(2);
+  });
+
+  test("unicode near-duplicates dedupe when accent-stripped keys are equal", () => {
+    const quiz = normalizeQuiz(
+      {
+        questions: [
+          question({ question: "What breaks when café is renamed?" }),
+          question({ question: "What breaks when cafe is renamed?" }),
+        ],
+      },
+      changedPaths,
+    );
+    expect(quiz!.questions).toHaveLength(1);
+  });
+
+  test("distinct CJK questions with empty normalized keys are not deduped", () => {
+    const quiz = normalizeQuiz(
+      {
+        questions: [
+          question({ question: "値が未定義のとき何が壊れますか？" }),
+          question({ question: "どの呼び出し元が影響を受けますか？" }),
+        ],
+      },
+      changedPaths,
+    );
+    expect(quiz!.questions).toHaveLength(2);
+  });
+
+  test("10,000 questions return 6 quickly", () => {
+    const questions = Array.from({ length: 10_000 }, (_, i) =>
+      question({ question: `Distinct question number ${i} about a unique aspect of the change?` }),
+    );
+    const start = performance.now();
+    const quiz = normalizeQuiz({ questions }, changedPaths);
+    const elapsed = performance.now() - start;
+    expect(quiz!.questions).toHaveLength(6);
+    expect(elapsed).toBeLessThan(1_000);
+  });
+
   test("mixed valid and invalid questions keeps only the valid ones", () => {
     const quiz = normalizeQuiz(
       {

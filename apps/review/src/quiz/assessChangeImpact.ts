@@ -42,19 +42,23 @@ const supplyChainKeywords = ["dockerfile", "deploy", "infra", "terraform"];
 
 const surfaceKeywords = ["api", "handler", "route", "controller"];
 
+// Deliberately excludes broad markers like "process.env", "crypto.", and
+// "timing": they flag ordinary code far more often than risky code.
 const riskyContentMarkers = [
   "eval(",
   "child_process",
   "exec(",
   "innerHTML",
   "dangerouslySetInnerHTML",
-  "process.env",
   "DROP TABLE",
   "DELETE FROM",
   "chmod",
-  "crypto.",
-  "timing",
 ];
+
+// Each marker counts at most once per file, and a single file's riskyContent
+// contribution is capped at this many hits, so one file cannot reach
+// critical from repeated markers alone.
+const maxRiskyHitsPerFile = 2;
 
 // Score weights per signal; thresholds documented at levelForScore.
 const weights = {
@@ -152,8 +156,11 @@ export function assessChangeImpact(files: ImpactFile[], findings: ImpactFinding[
     }
 
     const added = addedLines(file.diff).toLowerCase();
+    let riskyHits = 0;
     for (const marker of riskyContentMarkers) {
+      if (riskyHits >= maxRiskyHitsPerFile) break;
       if (added.includes(marker.toLowerCase())) {
+        riskyHits += 1;
         score += weights.riskyContent;
         reasons.push({ signal: `risky added content (${marker})`, path: file.path });
       }

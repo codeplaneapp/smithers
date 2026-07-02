@@ -106,7 +106,7 @@ describe("renderWalkthroughHtml", () => {
     expect(prose2).toBeLessThan(diffB);
     expect(html).toContain("Swaps removed for added &amp; adds more; check the constant values.");
     expect(html).toContain("const added = safe();");
-    expect(html).toContain("Review findings (1)");
+    expect(html).toContain('Review findings<span class="count-pill">1</span>');
   });
 
   test("renders the diagram and inlines the mermaid runtime only when present", async () => {
@@ -135,13 +135,35 @@ describe("renderWalkthroughHtml", () => {
     expect(html).toContain('data-line-type="change-addition"');
     expect(html).toContain("--diffs-token-light");
     expect(html).toContain('class="overview-chart"');
-    // Two Pierre-rendered files share one set of assets: page css + 2 pierre styles.
-    expect((html.match(/<style/g) ?? []).length).toBe(3);
+    // Shared Pierre assets are hoisted once: no duplicate <style> blocks
+    // even though two files were Pierre-rendered.
+    const styleBlocks = html.match(/<style[\s\S]*?<\/style>/g) ?? [];
+    expect(styleBlocks.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(styleBlocks).size).toBe(styleBlocks.length);
   });
 
   test("binary files fall back to the plain note", async () => {
     const html = await render();
     expect(html).toContain("No textual diff (binary or empty change).");
+  });
+
+  test("orphan findings render as full cards so index links resolve", async () => {
+    const orphan = { ...comments[0], path: "ghost/not-changed.ts" };
+    const html = await renderWalkthroughHtml({
+      title: "",
+      story,
+      files,
+      comments: [...comments, orphan],
+      repoDir: "/tmp/repo",
+      mode: "workspace",
+      ref: "workspace",
+      generatedAt: "2026-06-10T00:00:00.000Z",
+    });
+    expect(html).toContain("Findings without a matching file");
+    // The orphan's index link target exists as a rendered card.
+    expect(html).toContain('href="#finding-2"');
+    expect(html).toContain('id="finding-2"');
+    expect(html).toContain("ghost/not-changed.ts");
   });
 
   test("handles an empty change set", async () => {

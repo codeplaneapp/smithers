@@ -1,18 +1,15 @@
 import { quizSchema, type Quiz, type QuizQuestion } from "./quizSchema";
 
+// Exact normalized-key dedupe only: lowercase, strip accents, drop everything
+// but ascii alphanumerics. A shared-prefix "near identical" heuristic falsely
+// merged distinct questions ("…when X is null?" vs "…when X is null after
+// retry?"), so extra words must always make a question distinct.
 function normalizedTextKey(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function nearIdenticalText(a: string, b: string) {
-  const keyA = normalizedTextKey(a);
-  const keyB = normalizedTextKey(b);
-  if (keyA === keyB) return true;
-  const shorter = Math.min(keyA.length, keyB.length);
-  if (shorter === 0) return false;
-  let shared = 0;
-  while (shared < shorter && keyA[shared] === keyB[shared]) shared += 1;
-  return shared / shorter >= 0.9;
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }
 
 const maxQuestions = 6;
@@ -25,6 +22,7 @@ export function normalizeQuiz(raw: unknown, changedPaths: string[]): Quiz | null
   const parsed = quizSchema.safeParse(raw);
   if (!parsed.success) return null;
   const knownPaths = new Set(changedPaths);
+  const seenKeys = new Set<string>();
   const valid: QuizQuestion[] = [];
   for (const question of parsed.data.questions) {
     const text = question.question.trim();
@@ -36,7 +34,13 @@ export function normalizeQuiz(raw: unknown, changedPaths: string[]): Quiz | null
     if (options.some((option) => !option)) continue;
     if (question.correctIndex < 0 || question.correctIndex >= options.length) continue;
     if (path && !knownPaths.has(path)) continue;
-    if (valid.some((existing) => nearIdenticalText(existing.question, text))) continue;
+    // An empty key (e.g. CJK text with no ascii alphanumerics) carries no
+    // dedupe signal; never treat two such questions as duplicates.
+    const key = normalizedTextKey(text);
+    if (key) {
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+    }
     valid.push({ question: text, options, correctIndex: question.correctIndex, explanation, path });
     if (valid.length === maxQuestions) break;
   }

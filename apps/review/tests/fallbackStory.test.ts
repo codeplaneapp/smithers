@@ -28,7 +28,8 @@ describe("fallbackStory", () => {
     expect(
       story.chapters[0].blocks.filter((block) => block.kind === "diff").map((block) => block.path),
     ).toEqual(["apps/web/src/app.ts", "apps/web/src/router.ts"]);
-    expect(story.headline).toContain("6 file(s) changed");
+    expect(story.headline).toBe("Change walkthrough: apps/web");
+    expect(story.synopsis).toBe("5 areas changed; apps/web carries most of the churn.");
   });
 
   test("covers every file in exactly one diff block", () => {
@@ -50,6 +51,13 @@ describe("fallbackStory", () => {
   test("handles an empty change set", () => {
     const story = fallbackStory([]);
     expect(story.chapters).toEqual([]);
+    expect(story.headline).toBe("Change walkthrough");
     expect(story.synopsis).toBe("No changes detected.");
+  });
+
+  test("single-area change gets a one-area synopsis", () => {
+    const story = fallbackStory([file("apps/web/src/a.ts", 3)]);
+    expect(story.headline).toBe("Change walkthrough: apps/web");
+    expect(story.synopsis).toBe("All of the change lands in apps/web.");
   });
 });

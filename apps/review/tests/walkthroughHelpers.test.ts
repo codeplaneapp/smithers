@@ -175,10 +175,10 @@ describe("buildNarratePrompt", () => {
     expect(prompt).toContain("Changed file inventory (2 file(s)):");
     expect(prompt).toContain("small.ts");
     expect(prompt).toContain("big.ts");
-    expect(prompt).toContain("Review findings (1):");
-    // findingLine uses only the first line of the comment.
+    expect(prompt).toContain("Review findings (1, tagged [severity/category]):");
+    // The full finding content (all lines) is passed to the narrator.
     expect(prompt).toContain("watch this");
-    expect(prompt).not.toContain("second line");
+    expect(prompt).toContain("second line");
     // Excerpts are largest-churn first: big.ts excerpt precedes small.ts.
     expect(prompt.indexOf("big-diff")).toBeLessThan(prompt.indexOf("small-diff"));
   });
