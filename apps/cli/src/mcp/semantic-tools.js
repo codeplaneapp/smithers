@@ -1473,6 +1473,7 @@ export function createSemanticToolDefinitions(options = {}) {
                     nodeId: input.nodeId,
                     iteration: input.iteration,
                     seq: input.seq,
+                    target,
                     stdout: { write: (chunk) => { stdoutText += chunk; } },
                     stderr: { write: (chunk) => { stderrText += chunk; } },
                 });

@@ -345,20 +345,25 @@ function makeSemanticAdapter(overrides = {}) {
         deleteFramesAfter: (_runId, _frameNo) => Effect.succeed(undefined),
         listEvents: async (_runId, afterSeq) => afterSeq < 0 ? state.events : [],
         listEventHistory: async () => state.historyEvents,
-        listWorkspaceCheckpoints: async () => [
-            {
-                seq: 0,
-                nodeId: "artifact-node",
-                iteration: 0,
-                attempt: 1,
-                tier: 1,
-                source: "hook",
-                label: "Edit output",
-                jjCwd: "/tmp/work",
-                jjCommitId: "commit-1",
-                createdAtMs: NOW - 1_000,
-            },
-        ],
+        listWorkspaceCheckpoints: async (runId) => {
+            if (typeof state.listWorkspaceCheckpoints === "function") {
+                return state.listWorkspaceCheckpoints(runId);
+            }
+            return [
+                {
+                    seq: 0,
+                    nodeId: "artifact-node",
+                    iteration: 0,
+                    attempt: 1,
+                    tier: 1,
+                    source: "hook",
+                    label: "Edit output",
+                    jjCwd: "/tmp/work",
+                    jjCommitId: "commit-1",
+                    createdAtMs: NOW - 1_000,
+                },
+            ];
+        },
         listWorkspaceStates: async () => [
             {
                 jjCwd: "/tmp/work",
@@ -716,6 +721,44 @@ describe("semantic tool definitions", () => {
             success: false,
         });
         expect(restore.structuredContent.data.error).toBeString();
+    });
+
+    test("restore_checkpoint restores the same checkpoint it reports", async () => {
+        let reads = 0;
+        const harness = makeHarness({
+            listWorkspaceCheckpoints: async () => {
+                reads += 1;
+                if (reads > 1) throw new Error("checkpoint target was selected twice");
+                return [
+                    {
+                        seq: 0,
+                        nodeId: "artifact-node",
+                        iteration: 0,
+                        attempt: 1,
+                        tier: 1,
+                        source: "hook",
+                        label: "Edit output",
+                        jjCwd: "/tmp/work",
+                        jjCommitId: "commit-1",
+                        createdAtMs: NOW - 1_000,
+                    },
+                ];
+            },
+        });
+
+        const restore = await harness.call("restore_checkpoint", {
+            runId: "run-1",
+            nodeId: "artifact-node",
+        });
+
+        expect(reads).toBe(1);
+        expect(restore.structuredContent.data).toMatchObject({
+            runId: "run-1",
+            nodeId: "artifact-node",
+            seq: 0,
+            commitId: "commit-1",
+            cwd: "/tmp/work",
+        });
     });
 
     test("returns structured errors for missing and ambiguous operations", async () => {
