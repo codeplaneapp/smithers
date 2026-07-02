@@ -3709,6 +3709,9 @@ paths:
                           type: integer
                           minimum: 1
                           description: "Maximum number of runs."
+                        workflow:
+                          type: string
+                          description: "Optional workflow key filter."
                       required: []
                       additionalProperties: false
                   required: []
@@ -3720,6 +3723,7 @@ paths:
                 filter:
                   status: finished
                   limit: 20
+                  workflow: deploy
       responses:
         200:
           description: "List Runs response."
