@@ -260,7 +260,8 @@ ${JSON.stringify(triage.actions, null, 2)}
 
 For each one, cd into the project directory (projects live under $HOME, e.g. /Users/williamcory/<project>; the 'project' field is the directory basename) and apply the SMALLEST safe remediation with the smithers CLI (use \`bunx smithers-orchestrator\` if \`smithers\` is missing):
 - Stuck task / heartbeat timeout → \`smithers why <runId>\`, then the retry-task command it suggests.
-- Orphaned run (no heartbeat) → resume it detached: \`smithers up <workflow file> --run-id <id> --resume true --force true --detach\`. If resume fails with RESUME_METADATA_MISMATCH, report it — do NOT delete or recreate anything.
+- Orphaned run (no heartbeat) with activity in the last 24h → resume it detached: \`smithers up <workflow file> --run-id <id> --resume true --force true --detach\`. If resume fails with RESUME_METADATA_MISMATCH, report it — do NOT delete or recreate anything.
+- Stale/orphaned run with NO activity for over 24h → abandoned debris: \`smithers cancel <runId>\`. NEVER resume anything idle for more than 24h; resurrecting old builds burns agents on dead work.
 - Stale leftover probe/test runs (e2e-*-probe, *-smoke leftovers superseded by a newer run) → \`smithers cancel <runId>\`.
 - A run waiting on an approval or human question → do NOT decide it; list it in escalatedToHuman with the question.
 NEVER: cancel a run doing real work, push/publish anything, edit workflow source files, or approve/deny gates. When unsure, escalate instead of acting.
