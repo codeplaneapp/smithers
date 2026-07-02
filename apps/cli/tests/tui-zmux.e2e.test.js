@@ -8,7 +8,6 @@
 // `resolveZmuxd()` returns null these tests skip cleanly so CI stays green;
 // CI installs the daemon, exports ZMUXD, and runs them explicitly.
 import { describe, expect, test } from "bun:test";
-import { createServer } from "node:net";
 import {
     REPO_ROOT,
     KEY,
@@ -19,6 +18,12 @@ import {
     emulate,
     activeRows,
     activeLabel,
+    freePort,
+    gatewayRpc,
+    stopGatewayPort,
+    cancelVisibleRun,
+    navigateToWorkflow,
+    paneDriver,
 } from "./zmux-harness.js";
 
 const ZMUXD = resolveZmuxd();
@@ -222,27 +227,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             });
             sessionId = created.id;
 
-            // The TUI process exits when the run finishes, closing the PTY — capture/send
-            // then error with InputOutput. Treat that as "session ended", not a crash.
-            let dead = false;
-            let last = [];
-            const grid = async () => {
-                if (dead) return last;
-                try {
-                    last = emulate((await withTimeout(rpc("session.capture", { sessionId, lines: 600 }), 2_000)).text, cols, rows);
-                } catch {
-                    dead = true;
-                }
-                return last;
-            };
-            const send = async (keys) => {
-                if (dead) return;
-                try {
-                    await withTimeout(rpc("session.send", { sessionId, dataBase64: b64(keys) }), 1_000);
-                } catch {
-                    dead = true;
-                }
-            };
+            const { grid, send, isDead } = paneDriver(rpc, sessionId, { cols, rows });
             const has = (g, re) => g.some((line) => re.test(line));
 
             // 1) picker → type-to-filter to "E2E Approval Probe" → select
@@ -256,7 +241,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             // so the monitor hotkeys act on the pending approval row.
             let status = "none";
             let approvalShown = false;
-            for (let i = 0; i < 180 && !dead; i += 1) {
+            for (let i = 0; i < 180 && !isDead(); i += 1) {
                 g = await grid();
                 if (
                     has(g, /Approve E2E gated task/i) &&
@@ -272,11 +257,11 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             }
             if (!approvalShown) {
                 status = await latestProbeStatus("e2e-approval-probe", testStartedAtMs, gatewayPort);
-                throw new Error(`approval node not visible; status=${status}; dead=${dead}\n${g.join("\n")}`);
+                throw new Error(`approval node not visible; status=${status}; dead=${isDead()}\n${g.join("\n")}`);
             }
             await cancelVisibleRun(g, gatewayPort);
 
-            if (!dead) {
+            if (!isDead()) {
                 await send(KEY.ctrlC);
                 await sleep(200);
             }
@@ -308,25 +293,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             });
             sessionId = created.id;
 
-            let dead = false;
-            let last = [];
-            const grid = async () => {
-                if (dead) return last;
-                try {
-                    last = emulate((await withTimeout(rpc("session.capture", { sessionId, lines: 600 }), 2_000)).text, cols, rows);
-                } catch {
-                    dead = true;
-                }
-                return last;
-            };
-            const send = async (keys) => {
-                if (dead) return;
-                try {
-                    await withTimeout(rpc("session.send", { sessionId, dataBase64: b64(keys) }), 1_000);
-                } catch {
-                    dead = true;
-                }
-            };
+            const { grid, send, isDead } = paneDriver(rpc, sessionId, { cols, rows });
             const has = (g, re) => g.some((line) => re.test(line));
 
             // type-to-filter to "E2E Ask Human Probe" → select
@@ -338,7 +305,7 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
 
             let promptShown = false;
             let status = "none";
-            for (let i = 0; i < 180 && !dead; i += 1) {
+            for (let i = 0; i < 180 && !isDead(); i += 1) {
                 g = await grid();
                 if (has(g, /\[human input\]/i) || has(g, /smithers human inbox/i)) {
                     promptShown = true;
@@ -352,13 +319,13 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
             }
             await cancelVisibleRun(g, gatewayPort);
 
-            if (!dead) {
+            if (!isDead()) {
                 await send(KEY.ctrlC);
                 await sleep(200);
             }
 
             if (!promptShown) {
-                throw new Error(`human guidance not visible; status=${status}; dead=${dead}\n${g.join("\n")}`);
+                throw new Error(`human guidance not visible; status=${status}; dead=${isDead()}\n${g.join("\n")}`);
             }
             expect(status).toBe("waiting-approval");
         } finally {
@@ -371,86 +338,6 @@ describe.skipIf(ZMUXD == null || AGENT_HARNESS)("smithers up --interactive zmux 
     }, 180_000);
 });
 
-/**
- * Pick a workflow in the TUI picker by TYPING to fuzzy-filter (the picker is a
- * fuzzy select). Far more robust under load than arrowing against a laggy grid:
- * the typed text narrows the list so the match rises to the top. Returns true
- * once the active row matches.
- */
-async function navigateToWorkflow(send, grid, filterText, matchRe) {
-    let g = [];
-    for (let i = 0; i < 60; i += 1) {
-        await sleep(250);
-        g = await grid();
-        if (g.some((line) => /Select a workflow/.test(line))) break;
-    }
-    await send(filterText);
-    for (let i = 0; i < 80; i += 1) {
-        g = await grid();
-        if (matchRe.test(activeLabel(g))) return true;
-        await sleep(200);
-    }
-    return false;
-}
-
-async function withTimeout(promise, ms) {
-    let timer;
-    try {
-        return await Promise.race([
-            promise,
-            new Promise((_, reject) => {
-                timer = setTimeout(() => reject(new Error(`zmux rpc timed out after ${ms}ms`)), ms);
-            }),
-        ]);
-    } finally {
-        clearTimeout(timer);
-    }
-}
-
-async function stopGatewayPort(port) {
-    try {
-        const proc = Bun.spawn(["ps", "-ef"], { stdout: "pipe", stderr: "ignore" });
-        const output = await new Response(proc.stdout).text();
-        await proc.exited;
-        const needle = `apps/cli/src/index.js gateway --host 127.0.0.1 --port ${port}`;
-        for (const line of output.split("\n")) {
-            if (!line.includes(needle)) continue;
-            const pid = Number(line.trim().split(/\s+/)[1]);
-            if (Number.isFinite(pid) && pid > 0) {
-                try {
-                    process.kill(pid, "SIGTERM");
-                } catch {
-                    // already gone
-                }
-            }
-        }
-    } catch {
-        // best-effort cleanup only
-    }
-}
-
-function runIdFromGrid(grid) {
-    const match = grid.join("\n").match(/\brun-[a-z0-9]+\b/i);
-    return match?.[0] ?? null;
-}
-
-async function gatewayRpc(gatewayPort, method, params, timeoutMs = 1_500) {
-    const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/rpc/${method}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(params),
-        signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!response.ok) return null;
-    return await response.json().catch(() => null);
-}
-
-async function cancelVisibleRun(grid, gatewayPort) {
-    const runId = runIdFromGrid(grid);
-    if (!runId) return;
-    await gatewayRpc(gatewayPort, "cancelRun", { runId }).catch(() => {});
-}
-
 async function latestProbeStatus(workflowName, sinceMs, gatewayPort) {
     try {
         const frame = await gatewayRpc(gatewayPort, "listRuns", { limit: 50 }, 300);
@@ -462,19 +349,4 @@ async function latestProbeStatus(workflowName, sinceMs, gatewayPort) {
     } catch {
         return "error";
     }
-}
-
-async function freePort() {
-    return await new Promise((resolve, reject) => {
-        const server = createServer();
-        server.once("error", reject);
-        server.listen(0, "127.0.0.1", () => {
-            const address = server.address();
-            const port = typeof address === "object" && address ? address.port : null;
-            server.close(() => {
-                if (typeof port === "number") resolve(port);
-                else reject(new Error("could not allocate free port"));
-            });
-        });
-    });
 }

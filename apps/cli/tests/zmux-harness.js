@@ -294,3 +294,175 @@ export function activeRows(grid) {
 export function activeLabel(grid) {
     return (activeRows(grid)[0] ?? "").replace(/[│●]/g, "").trim();
 }
+
+/** Allocate a free loopback TCP port so each test gets an isolated gateway. */
+export async function freePort() {
+    return await new Promise((resolvePort, reject) => {
+        const server = net.createServer();
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", () => {
+            const address = server.address();
+            const port = typeof address === "object" && address ? address.port : null;
+            server.close(() => {
+                if (typeof port === "number") resolvePort(port);
+                else reject(new Error("could not allocate free port"));
+            });
+        });
+    });
+}
+
+/** Race a promise against a timeout (rejects with a labelled error). */
+export async function withTimeout(promise, ms) {
+    let timer;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`zmux rpc timed out after ${ms}ms`)), ms);
+            }),
+        ]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+/** POST a gateway v1 RPC over HTTP; resolves null on any failure. */
+export async function gatewayRpc(gatewayPort, method, params, timeoutMs = 1_500) {
+    try {
+        const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/rpc/${method}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(params),
+            signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (!response.ok) return null;
+        return await response.json().catch(() => null);
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Best-effort SIGTERM of the gateway the monitor autostarted on `port` (the
+ * monitor leaves it running by design so later attachments are instant; tests
+ * must reap it or every run leaks a gateway process).
+ */
+export async function stopGatewayPort(port) {
+    try {
+        const proc = Bun.spawn(["ps", "-ef"], { stdout: "pipe", stderr: "ignore" });
+        const output = await new Response(proc.stdout).text();
+        await proc.exited;
+        const needle = `apps/cli/src/index.js gateway --host 127.0.0.1 --port ${port}`;
+        for (const line of output.split("\n")) {
+            if (!line.includes(needle)) continue;
+            const pid = Number(line.trim().split(/\s+/)[1]);
+            if (Number.isFinite(pid) && pid > 0) {
+                try {
+                    process.kill(pid, "SIGTERM");
+                } catch {
+                    // already gone
+                }
+            }
+        }
+    } catch {
+        // best-effort cleanup only
+    }
+}
+
+/** First `run-…` id visible in a rendered grid, or null. */
+export function runIdFromGrid(grid) {
+    const match = grid.join("\n").match(/\brun-[a-z0-9]+\b/i);
+    return match?.[0] ?? null;
+}
+
+/**
+ * Cancel a run started by a test. Tries the gateway `cancelRun` RPC first
+ * (works while the detached engine is attached and live), then falls back to
+ * `smithers cancel <runId>`: a PARKED run — e.g. waiting-approval after its
+ * detached engine persisted state and exited — is not "active" to the gateway,
+ * so the RPC alone returns RUN_NOT_ACTIVE and the run would leak forever in
+ * the workspace DB as waiting-approval.
+ */
+export async function cancelRunId(runId, gatewayPort) {
+    if (!runId) return;
+    const frame = await gatewayRpc(gatewayPort, "cancelRun", { runId });
+    if (frame && frame.type === "res" && frame.ok) return;
+    await new Promise((resolveExit) => {
+        const child = spawn("bun", ["apps/cli/src/index.js", "cancel", runId], {
+            cwd: REPO_ROOT,
+            stdio: "ignore",
+            env: process.env,
+        });
+        const timer = setTimeout(() => {
+            child.kill("SIGTERM");
+            resolveExit();
+        }, 15_000);
+        child.once("exit", () => {
+            clearTimeout(timer);
+            resolveExit();
+        });
+        child.once("error", () => {
+            clearTimeout(timer);
+            resolveExit();
+        });
+    });
+}
+
+/** Cancel whichever run id is visible in `grid` (see {@link cancelRunId}). */
+export async function cancelVisibleRun(grid, gatewayPort) {
+    await cancelRunId(runIdFromGrid(grid), gatewayPort);
+}
+
+/**
+ * Pick a workflow in the TUI picker by TYPING to fuzzy-filter (the picker is a
+ * fuzzy select). Far more robust under load than arrowing against a laggy grid:
+ * the typed text narrows the list so the match rises to the top. Returns true
+ * once the active row matches.
+ */
+export async function navigateToWorkflow(send, grid, filterText, matchRe) {
+    let g = [];
+    for (let i = 0; i < 60; i += 1) {
+        await sleep(250);
+        g = await grid();
+        if (g.some((line) => /Select a workflow/.test(line))) break;
+    }
+    await send(filterText);
+    for (let i = 0; i < 80; i += 1) {
+        g = await grid();
+        if (matchRe.test(activeLabel(g))) return true;
+        await sleep(200);
+    }
+    return false;
+}
+
+/**
+ * Dead-tolerant pane driver over a zmux session. The monitor process exits
+ * when its run finishes (closing the PTY), after which capture/send error with
+ * InputOutput — treat that as "session ended", not a crash: `grid()` keeps
+ * returning the last good frame and `send()` becomes a no-op.
+ */
+export function paneDriver(rpc, sessionId, { cols, rows }) {
+    let dead = false;
+    let last = [];
+    return {
+        isDead: () => dead,
+        grid: async () => {
+            if (dead) return last;
+            try {
+                const captured = await withTimeout(rpc("session.capture", { sessionId, lines: 600 }), 2_000);
+                last = emulate(captured.text, cols, rows);
+            } catch {
+                dead = true;
+            }
+            return last;
+        },
+        send: async (keys) => {
+            if (dead) return;
+            try {
+                await withTimeout(rpc("session.send", { sessionId, dataBase64: b64(keys) }), 1_000);
+            } catch {
+                dead = true;
+            }
+        },
+    };
+}
