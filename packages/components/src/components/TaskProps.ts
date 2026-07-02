@@ -32,10 +32,10 @@ export type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends
 	/** Render-time typed dependencies. Keys resolve from task ids of the same name, or from matching `needs` entries. */
 	deps?: D;
 	/**
-	 * When true, missing render-time deps are omitted from the deps object instead
-	 * of deferring this task. Pair with `needs`/`dependsOn` when the task should
-	 * still wait for upstream terminal state but tolerate upstream failures that
-	 * produce no output row.
+	 * When true, `deps` resolution omits keys whose upstream task has no output
+	 * (e.g. a `continueOnFail` task that failed) instead of deferring the task
+	 * until every dep resolves. Pair with `needs`/`dependsOn` so the task is
+	 * still gated on upstream tasks reaching a terminal state.
 	 */
 	depsOptional?: boolean;
 	/**
