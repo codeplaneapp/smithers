@@ -95,6 +95,16 @@
       .bub:nth-child(3) { animation-delay: 1.6s; }
       @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
+      /* inline-keyboard mock (approval buttons under a message) */
+      .kbd { display: flex; gap: 6px; margin-top: 10px; }
+      .kbd button, .kbd-wide {
+        font-family: var(--mono); font-size: 0.78rem; border: 1px solid var(--line2); border-radius: 8px;
+        padding: 8px 10px; background: var(--panel2); color: var(--tg-2); font-weight: 600; cursor: default; flex: 1;
+      }
+      .kbd button.ok { color: #2f7d1f; border-color: var(--out-line); background: var(--out); }
+      .kbd button.no { color: #b23; }
+      .kbd-wide { display: block; width: 100%; margin-top: 6px; background: var(--tg-soft); border-color: var(--line2); }
+
       section.block { padding: 58px 0; border-top: 1px solid var(--line); }
       .kicker { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--faint); margin: 0 0 14px; }
       .block h2 { font-size: clamp(1.55rem, 3vw, 2.1rem); font-weight: 690; letter-spacing: -0.015em; max-width: 20ch; }
@@ -148,6 +158,7 @@
         <nav class="links" aria-label="Primary">
           <a href="#why">Why</a>
           <a href="#how">How it works</a>
+          <a href="#approve">Approvals</a>
           <a href="#build">Build your own</a>
           <a class="ghost" href="#start">Deploy</a>
         </nav>
@@ -157,20 +168,20 @@
     <main id="top">
       <section class="wrap hero">
         <div>
-          <p class="eyebrow">Digest bot + Bot API toolkit</p>
-          <h1>Your group moves fast. <span class="hl">Read the part that matters.</span></h1>
+          <p class="eyebrow">Digests · in-app approvals · Bot API toolkit</p>
+          <h1>Your group moves fast. <span class="hl">Read it, and act on it.</span></h1>
           <p class="sub">
-            Smithers posts a daily digest of your Telegram group, powered by a
-            durable, replayable workflow. And it ships a secure Bot API toolkit,
-            so you can wire your own runs to a chat.
+            Smithers posts a daily digest of your Telegram group, and lets you
+            approve a workflow's risky step from the chat with a tap. Both run on
+            durable, replayable workflows, on a secure Bot API toolkit.
           </p>
           <div class="cta">
-            <a class="btn" href="#how">See the digest</a>
-            <a class="btn sec" href="#build">Build a bot</a>
+            <a class="btn" href="#approve">Approve from the chat</a>
+            <a class="btn sec" href="#how">See the digest</a>
           </div>
           <div class="trust">
-            <span><b>Daily digest</b>, on a cron</span>
-            <span><b>Durable</b> workflow behind it</span>
+            <span><b>Approve</b> from the chat</span>
+            <span><b>Durable</b> workflows behind it</span>
             <span><b>Verified</b> inbound</span>
           </div>
         </div>
@@ -229,6 +240,53 @@
         </div>
       </section>
 
+      <section class="block wrap" id="approve">
+        <p class="kicker">Human in the loop</p>
+        <h2>Approve the risky step from your phone.</h2>
+        <p class="lead">
+          When a workflow hits an approval gate, Smithers posts it to the chat
+          with Approve and Reject buttons. Tap one and the run continues. It is a
+          durable, replayable step, so nothing is lost if the process restarts
+          while it waits for you.
+        </p>
+        <div class="two">
+          <div class="chat" role="img" aria-label="A Telegram chat: the Smithers Deploys bot asks to deploy release 0.27 to prod with Approve and Reject buttons and an Open review Mini App button; the next message confirms it was approved by @will.">
+            <div class="cbar">
+              <span class="avatar"><svg viewBox="0 0 24 24" fill="#fff"><path d="M21.9 4.3 18.5 20c-.25 1.14-.93 1.42-1.88.88l-5.2-3.83-2.5 2.4c-.28.28-.51.51-1.05.51l.37-5.3L18 5.6c.42-.37-.09-.58-.66-.21L6.1 12.6l-5.24-1.64c-1.14-.36-1.16-1.14.24-1.68L20.4 2.6c.95-.35 1.78.22 1.5 1.7z"/></svg></span>
+              <div class="who"><b>Smithers Deploys</b><span class="badge">bot</span><small>waits for your call</small></div>
+            </div>
+            <div class="cbody">
+              <div class="bub in">
+                <span class="h">🚦 Approval needed</span>
+                Deploy release 0.27 to prod? Tests are green.
+                <div class="kbd">
+                  <button class="ok">✅ Approve</button>
+                  <button class="no">🚫 Reject</button>
+                </div>
+                <button class="kbd-wide">🔍 Open review</button>
+                <span class="time">14:20</span>
+              </div>
+              <div class="bub in">✅ Approved by @will. Shipping now.<span class="time">14:21</span></div>
+            </div>
+          </div>
+          <article class="aud">
+            <div class="t">one component</div>
+            <h3>Drop it into any workflow</h3>
+            <p>
+              A single component turns an approval into inline buttons and
+              resolves it from the press. The decision matches the built-in
+              approval shape, so the rest of your workflow does not change.
+            </p>
+            <div class="code">&lt;<span class="k">TelegramApproval</span><br />&nbsp;&nbsp;chatId={chatId}<br />&nbsp;&nbsp;request={{ title: <span class="s">"Deploy to prod?"</span> }}<br />&nbsp;&nbsp;output={outputs.decision}<br />/&gt;</div>
+            <p style="margin-top:14px">
+              Need a richer decision? Add a Mini App button to open a web page
+              inside Telegram. Its signed <code style="font-family: var(--mono); color: var(--tg-2)">initData</code>
+              is verified on your server before anything is trusted.
+            </p>
+          </article>
+        </div>
+      </section>
+
       <section class="block wrap" id="build">
         <p class="kicker">Build your own</p>
         <h2>A Bot API toolkit, not a black box.</h2>
@@ -272,9 +330,9 @@
             <p>Webhook secret verification and a chat allowlist ship in the box. Only chats you name get through.</p>
           </div>
           <div class="cell">
-            <div class="ic">⚙ your model</div>
-            <h3>Summarize with anything</h3>
-            <p>The summarizer is pluggable. Point it at the model you already pay for, on the runtime you already use.</p>
+            <div class="ic">✅ in-app approvals</div>
+            <h3>Approve or reject in a tap</h3>
+            <p>Gate a workflow step behind an inline button, or a Mini App with verified <code style="font-family: var(--mono); color: var(--tg-2)">initData</code> for a richer decision. The run waits durably until you answer.</p>
           </div>
         </div>
       </section>

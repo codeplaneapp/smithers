@@ -1,7 +1,11 @@
+import { handleApprove } from "./handleApprove.ts";
+
 export interface TelegramSiteEnv {
   ASSETS: {
     fetch(request: Request): Promise<Response>;
   };
+  /** Bot token (Wrangler secret). Enables the reference /approve Mini App endpoint. */
+  TELEGRAM_BOT_TOKEN?: string;
 }
 
 const HTML_HEADERS = {
@@ -42,6 +46,17 @@ export function createTelegramSiteWorker() {
   return {
     async fetch(request: Request, env: TelegramSiteEnv): Promise<Response> {
       const url = new URL(request.url);
+
+      // Reference Mini App approval endpoint (verifies Telegram initData).
+      if (url.pathname === "/approve") {
+        if (request.method !== "POST") {
+          return new Response("method not allowed", {
+            status: 405,
+            headers: { allow: "POST", "content-type": "text/plain; charset=utf-8" },
+          });
+        }
+        return handleApprove(request, env);
+      }
 
       if (request.method !== "GET" && request.method !== "HEAD") {
         return new Response("method not allowed", {
