@@ -248,16 +248,16 @@
     
 <section class="hero">
   <div class="wrap">
-    <span class="eyebrow anim d1"><span class="dot"></span> Durable workflows · for ElizaOS agents · powered by Smithers</span>
-    <h1 class="anim d2">Give your Eliza agent jobs that <span class="grad">actually finish.</span></h1>
+    <span class="eyebrow anim d1"><span class="dot"></span> Run your ElizaOS character · as a durable Smithers agent</span>
+    <h1 class="anim d2">Give your Eliza character jobs that <span class="grad">actually finish.</span></h1>
     <p class="lede anim d3">
-      Smithers lets your ElizaOS agent take on bigger, longer jobs and see them through. It launches
-      durable workflows, runs steps side by side so they're faster, retries the parts that flake,
-      pauses to ask you before anything risky, and reports back in the same chat. Open, and it runs
-      next to the agent you already have.
+      Wrap your ElizaOS character in the <b>agent-eliza</b> harness and any Smithers workflow step can
+      be your persona. Steps run side by side so they're faster, flaky ones retry instead of dropping
+      the job, risky ones pause for your approval, and every run is checkpointed and replayable. Your
+      character does the thinking; Smithers makes the run survive.
     </p>
     <div class="actions anim d4">
-      <a class="btn primary" href="#install" data-jump="install">Add it to your agent →</a>
+      <a class="btn primary" href="#install" data-jump="install">Run it in a workflow →</a>
       <a class="btn ghost" data-tab="design">See the design</a>
     </div>
 
@@ -292,8 +292,8 @@
 <section class="section" id="how">
   <div class="wrap reveal">
     <div class="shead"><h2>What it gives your agent</h2>
-      <p>Your ElizaOS agent already talks, remembers, and acts. The Smithers plugin lets it run real,
-      durable work behind those conversations, without losing the thread.</p>
+      <p>Your ElizaOS character already talks, remembers, and acts. The agent-eliza harness runs it as
+      a durable Smithers agent, so its work survives restarts, retries, and gates without losing the thread.</p>
     </div>
     <div class="cap-grid">
       <div class="cap-card"><div class="cap-top"><div class="cap-icon">♾️</div><h3>Durable runs</h3></div>
@@ -311,39 +311,39 @@
       <div class="cap-card"><div class="cap-top"><div class="cap-icon">⟲</div><h3>Retries &amp; time-travel</h3></div>
         <p>Flaky steps retry automatically. And because every run is checkpointed, you can replay, fork,
         or rewind a run when something goes sideways.</p></div>
-      <div class="cap-card"><div class="cap-top"><div class="cap-icon">🔁</div><h3>Works both ways</h3></div>
-        <p>Your Eliza persona can drive Smithers — and a Smithers workflow can use that same Eliza
-        character as a step. One bridge, both directions.</p></div>
+      <div class="cap-card"><div class="cap-top"><div class="cap-icon">🔁</div><h3>Pass-through plugins</h3></div>
+        <p>Your character keeps all of its elizaOS plugins. The harness runs them as-is, so the persona
+        behaves exactly as it does in Eliza, now inside a durable run.</p></div>
     </div>
   </div>
 </section>
 
 <section class="section" id="install">
   <div class="wrap reveal">
-    <div class="shead"><h2>Add it, then just ask</h2><span class="count">one plugin · one control plane</span>
-      <p>Drop the plugin into your character, point it at a running Smithers, and talk to your agent
-      like always.</p>
+    <div class="shead"><h2>Wrap it, then run it</h2><span class="count">one package · any workflow step</span>
+      <p>Install the harness, wrap your character, and use it anywhere a Smithers workflow expects an agent.</p>
     </div>
     <div class="dist">
       <div class="code">
         <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>your eliza project</span></div>
-<pre><span class="c"># 1. Add the plugin to your Eliza agent</span>
-<span class="k">elizaos plugins add</span> <span class="v">elizaos-plugin-smithers</span>
+<pre><span class="c"># 1. Install the harness (pulls in @elizaos/core)</span>
+<span class="k">bun add</span> <span class="v">@smithers-orchestrator/agent-eliza @elizaos/core</span>
 
-<span class="c"># 2. Run a durable Smithers control plane (survives restarts)</span>
-<span class="k">smithers gateway</span>
+<span class="c"># 2. Wrap your ElizaOS character as a Smithers agent</span>
+<span class="k">import</span> { ElizaAgent } <span class="k">from</span> <span class="v">"@smithers-orchestrator/agent-eliza"</span>
 
-<span class="c"># 3. In your character.json</span>
-<span class="v">"plugins"</span>: [ <span class="v">"@elizaos/plugin-bootstrap"</span>, <span class="v">"elizaos-plugin-smithers"</span> ]
+<span class="k">const</span> agent = <span class="k">new</span> ElizaAgent({
+  character: myCharacter,   <span class="c">// your elizaOS Character</span>
+  plugins: [ bootstrapPlugin ],
+  model: <span class="v">"claude-sonnet-5"</span>,
+})
 
-<span class="c"># 4. Then just talk to your agent:</span>
-<span class="v">"run the nightly-deploy workflow and ping me</span>
-<span class="v"> when it needs my approval"</span></pre>
+<span class="c"># 3. Use `agent` as any step in a durable workflow</span></pre>
       </div>
       <div class="steps">
-        <div class="step"><div class="n">1</div><div><h4>Ask in plain language</h4><p>Tell your agent what to run. It picks the workflow and launches a durable run.</p></div></div>
-        <div class="step"><div class="n">2</div><div><h4>It does the work</h4><p>Steps run in parallel, flaky ones retry, and it keeps going even if the agent restarts.</p></div></div>
-        <div class="step"><div class="n">3</div><div><h4>You stay in the loop</h4><p>It asks before anything risky and reports progress back into the same chat.</p></div></div>
+        <div class="step"><div class="n">1</div><div><h4>Bring your persona</h4><p>Your character and its elizaOS plugins become a first-class Smithers agent. @elizaos/core loads on first use.</p></div></div>
+        <div class="step"><div class="n">2</div><div><h4>It runs durably</h4><p>Drop it into a step. Steps run in parallel, flaky ones retry, and the run keeps going across restarts.</p></div></div>
+        <div class="step"><div class="n">3</div><div><h4>You stay in control</h4><p>Ask a step for structured output, pause it at an approval gate, and replay any run after the fact.</p></div></div>
       </div>
     </div>
   </div>
@@ -351,9 +351,9 @@
 
 <section class="section" id="setup">
   <div class="wrap reveal">
-    <div class="shead"><h2>What the plugin adds</h2><span class="count">tap any to learn more</span>
-      <p>It's a normal ElizaOS plugin — a Service, some Actions, a Provider, an Evaluator. Curious what
-      each piece does? Tap it.</p>
+    <div class="shead"><h2>What the reverse bridge will add</h2><span class="count">plugin-smithers · in design</span>
+      <p>Letting an Eliza agent drive Smithers is designed as a normal ElizaOS plugin — a Service, some
+      Actions, a Provider, an Evaluator. Here's the plan for when it lands. Tap any piece.</p>
     </div>
     <div class="setup-grid">
       <button class="setup-item" data-modal="service"><div class="ic">◈</div><h3>A durable connection</h3><p>One Service holds the link to Smithers.</p><div class="more">what this is →</div></button>
@@ -371,26 +371,26 @@
 <section class="section" id="both">
   <div class="wrap reveal">
     <div class="shead"><h2>One bridge, both directions</h2><span class="count">eliza ⇄ smithers</span>
-      <p>The integration isn't one-way. Pick the direction you need — or use both and let an Eliza
-      persona orchestrate durable work that can, in turn, delegate back to Eliza.</p>
+      <p>Two directions. One is shipping today — run your Eliza character as a durable Smithers agent.
+      The other, letting an Eliza agent drive Smithers from chat, is designed and on the way.</p>
     </div>
     <div class="narrative" style="grid-template-columns:1fr 1fr;gap:18px">
       <div class="nbox after">
-        <span class="tag">Eliza → Smithers</span>
-        <h3>plugin-smithers</h3>
+        <span class="tag">Smithers → Eliza · shipped</span>
+        <h3>agent-eliza</h3>
         <ul>
-          <li>Your agent launches and steers durable workflows</li>
-          <li>Approvals and human questions surface in chat</li>
-          <li>This site's Design tab is the full build plan</li>
+          <li>Wrap your character as a durable Smithers agent</li>
+          <li>Run the persona as any step, with all its plugins</li>
+          <li>Shipping now in @smithers-orchestrator/agent-eliza</li>
         </ul>
       </div>
       <div class="nbox after">
-        <span class="tag">Smithers → Eliza</span>
-        <h3>agent-eliza</h3>
+        <span class="tag">Eliza → Smithers · in design</span>
+        <h3>plugin-smithers</h3>
         <ul>
-          <li>A Smithers workflow step runs an Eliza character</li>
-          <li>Use a persona as a model backend inside a run</li>
-          <li>Already shipping in the Smithers monorepo</li>
+          <li>Your Eliza agent launches and steers durable runs</li>
+          <li>Approvals and human questions surface in chat</li>
+          <li>Designed and speced — see the Design tab</li>
         </ul>
       </div>
     </div>
@@ -427,9 +427,9 @@
           <a data-tab="research" style="cursor:pointer">Plugin research</a>
           <a data-tab="design" style="cursor:pointer">Plugin design</a>
         </div>
-        <p>Smithers is a durable control plane for long-running agents. <b style="color:var(--muted)">plugin-smithers</b>
-        brings it to ElizaOS so your agent can run durable, multi-step workflows and finish them. Overview is an
-        integration preview; the Research and Design tabs are the full spec.</p>
+        <p>Smithers is a durable control plane for long-running agents. <b style="color:var(--muted)">agent-eliza</b>
+        runs your ElizaOS character as a durable Smithers agent today; <b style="color:var(--muted)">plugin-smithers</b>
+        (the reverse bridge) is designed in the Research and Design tabs.</p>
       </div>
     </footer>
   </section>

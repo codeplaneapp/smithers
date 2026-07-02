@@ -16,20 +16,20 @@ import { homedir } from "node:os";
 import type { AgentAvailability } from "../AgentAvailability.js";
 import { detectAvailableAgents } from "../agent-detection.js";
 import { skillTargets } from "../installCuratedSkill.js";
+import { workflowManifestIds } from "../workflow-pack.js";
 
 // ---------------------------------------------------------------------------
-// Workflow manifest (mirrors WORKFLOW_MANIFEST in workflow-pack.js)
+// Workflow list + labels
 // ---------------------------------------------------------------------------
+//
+// The id list is DERIVED from WORKFLOW_MANIFEST (workflow-pack.js) so a workflow
+// added to the pack never silently goes missing from this wizard. System
+// workflows (durable `init`, `post-failure`) are intentionally excluded: they
+// are internal plumbing the pack closure always installs, so offering a
+// checkbox for them would be misleading. WORKFLOW_LABELS is a presentation-only
+// map with a `?? id` fallback, so a missing label degrades gracefully.
 
-const ALL_WORKFLOW_IDS: string[] = [
-    "vcs", "implement", "research-plan-implement", "review", "plan", "research",
-    "ticket-create", "tickets-create", "ralph", "improve-test-coverage", "debug",
-    "grill-me", "feature-enum", "audit", "mission", "workflow-skill", "kanban",
-    "hello", "create-workflow", "context-engineer", "route-task", "create-skill",
-    "extract-skill", "monitor-smithers", "monitor", "triage-run", "context-doctor",
-    "backpressure-plan", "eval-author", "report-slideshow", "smithering",
-    "make-workflow-tutorial",
-];
+const ALL_WORKFLOW_IDS: string[] = workflowManifestIds();
 
 const WORKFLOW_LABELS: Record<string, string> = {
     vcs: "vcs – version control integration",
@@ -154,6 +154,25 @@ export function selectionsToPackOptions(sel: InitSelections): {
     };
 }
 
+/**
+ * Force a set of workflow ids into a selection (union, de-duplicated), so a
+ * caller that REQUIRES certain workflows regardless of what the wizard left
+ * checked always gets them installed. `smithers init "<task>"` uses this to keep
+ * `create-workflow` in the pack even if the user unchecked it, since the prompt
+ * is an explicit request for the builder and the post-init dispatch would
+ * otherwise fail with RUN_NOT_FOUND. Pure; unit-tested.
+ */
+export function withRequiredWorkflows(
+    sel: InitSelections,
+    requiredWorkflows: readonly string[] = [],
+): InitSelections {
+    if (requiredWorkflows.length === 0) return sel;
+    return {
+        ...sel,
+        selectedWorkflows: Array.from(new Set([...sel.selectedWorkflows, ...requiredWorkflows])),
+    };
+}
+
 /** Default selections: everything checked, all workflows, all skill targets. */
 export function buildDefaultSelections(env: NodeJS.ProcessEnv = process.env): InitSelections {
     return {
@@ -205,7 +224,11 @@ function buildNoAgentsMessage(detections: AgentAvailability[]): string {
  * will have already verified this).
  */
 export async function runInteractiveInitFlow(
-    opts: { env?: NodeJS.ProcessEnv } = {},
+    opts: {
+        env?: NodeJS.ProcessEnv;
+        /** Injectable OpenTUI loader (tests exercise the degrade paths without a PTY). */
+        loadRenderer?: () => Promise<typeof import("./interactiveInitUi.js")>;
+    } = {},
 ): Promise<InitSelections | null> {
     const env = opts.env ?? process.env;
     const detections = detectAvailableAgents(env);
@@ -246,18 +269,28 @@ export async function runInteractiveInitFlow(
     // Load the OpenTUI render layer lazily. A missing/failing @opentui native
     // binding must degrade THIS path to defaults, never crash the whole CLI —
     // so the import lives here (dynamic), not at module top.
+    const loadRenderer = opts.loadRenderer ?? (() => import("./interactiveInitUi.js"));
     let renderInitWizard: typeof import("./interactiveInitUi.js").renderInitWizard;
     try {
-        ({ renderInitWizard } = await import("./interactiveInitUi.js"));
-    } catch {
+        ({ renderInitWizard } = await loadRenderer());
+    } catch (err) {
+        // No selection UI: tell the user why (a broken native binding otherwise
+        // looks identical to them confirming every default) before proceeding.
+        process.stderr.write(`[smithers:init] interactive wizard unavailable (${errMessage(err)}); installing defaults\n`);
         return buildDefaultSelections(env);
     }
 
     try {
         return await renderInitWizard({ steps, workflowItems, skillItems, agentItems, noAgentsMessage });
-    } catch {
+    } catch (err) {
         // Renderer failed to initialize (non-PTY environment, missing dylib).
         // Fall back to all-selected defaults so init proceeds normally.
+        process.stderr.write(`[smithers:init] interactive wizard unavailable (${errMessage(err)}); installing defaults\n`);
         return buildDefaultSelections(env);
     }
+}
+
+/** @internal Normalize an unknown thrown value to a short message. */
+function errMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
 }

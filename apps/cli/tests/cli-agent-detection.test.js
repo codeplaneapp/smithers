@@ -153,6 +153,28 @@ describe("detectAvailableAgents", () => {
         expect(openclaw.hasAuthSignal).toBe(true);
         expect(openclaw.usable).toBe(true);
     });
+    test("OpenClaw status-0 onboarding text does not count as a configured runtime", () => {
+        const home = tempHome();
+        const binDir = createExecutableDir();
+        // `openclaw status` exits 0 with onboarding text on a fresh, unconfigured
+        // install; the probe must not treat that as usable.
+        writeExecutable(binDir, "openclaw", [
+            `#!${process.execPath}`,
+            "if (process.argv[2] === 'status') {",
+            "  process.stdout.write('No agent configured. Run `openclaw configure`.\\n');",
+            "  process.exit(0);",
+            "}",
+            "process.exit(0);",
+            "",
+        ].join("\n"));
+        const results = detectAvailableAgents(envWithPath(home, binDir));
+        const openclaw = results.find((r) => r.id === "openclaw");
+        expect(openclaw.hasBinary).toBe(true);
+        expect(openclaw.hasAuthSignal).toBe(false);
+        expect(openclaw.usable).toBe(false);
+        const probeCheck = openclaw.checks.find((c) => c.startsWith("probe:openclaw:"));
+        expect(probeCheck).toContain("probe:openclaw:no:");
+    });
     test("generated agents.ts uses OpenCode for OpenCode-only defaults", () => {
         const home = tempHome();
         const binDir = createExecutableDir();

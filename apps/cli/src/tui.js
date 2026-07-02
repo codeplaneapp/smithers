@@ -4,7 +4,8 @@ import { spawn } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { discoverWorkflows, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
+import { discoverWorkflows, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
+import { findSmithersDb } from "./find-db.js";
 import { mdxPlugin } from "./mdx-plugin.js";
 import { openSmithersStore } from "smithers-orchestrator/openSmithersStore";
 import { parseJsonArgument } from "./json-args.js";
@@ -1012,16 +1013,24 @@ export function parseJsonFieldValue(name, types, rawText) {
  * JSON text and returned PARSED (see {@link parseJsonFieldValue}) so the value
  * that reaches the workflow is real data, not its string spelling.
  *
+ * When `initial` is supplied (a CLI `--input`/`--prompt` value for this field),
+ * it seeds the control's `initialValue` so a bare Enter KEEPS the supplied value
+ * instead of falling through to the field's schema default — otherwise a workflow
+ * whose field declares a `z.default` (e.g. create-workflow's `prompt`) would
+ * clobber a task the user already typed on the CLI.
+ *
  * @param {{ name: string; type: string; required: boolean; default?: unknown; enum?: unknown[]; description?: string }} field
  * @param {{ select: typeof select; confirm: typeof confirm; text: typeof text }} [prompts] - injectable clack controls (tests)
+ * @param {unknown} [initial] - CLI-supplied value for this field, seeded as the control's initialValue
  * @returns {Promise<unknown | symbol>} coerced value, {@link OMIT_FIELD}, or a clack cancel symbol
  */
-export async function promptForField(field, prompts = { select, confirm, text }) {
+export async function promptForField(field, prompts = { select, confirm, text }, initial) {
     const types = String(field.type ?? "").split(" | ");
     const isNumber = types.includes("number") || types.includes("integer");
     const isInteger = types.includes("integer");
     const isBoolean = types.includes("boolean");
     const isJson = types.includes("object") || types.includes("array");
+    const hasInitial = initial !== undefined;
     const suffix = field.required ? "" : pc.dim(" (optional)");
     const message = `${field.name}${suffix}${field.description ? ` ${pc.dim(field.description)}` : ""}`;
     const skipOption = { value: OMIT_FIELD, label: pc.dim("(leave unset)") };
@@ -1031,7 +1040,7 @@ export async function promptForField(field, prompts = { select, confirm, text })
         // Optional enums must offer an explicit escape hatch; a required enum
         // has none (one of its members must be chosen).
         if (!field.required) options.push(skipOption);
-        return prompts.select({ message, options });
+        return prompts.select({ message, options, ...(hasInitial ? { initialValue: initial } : {}) });
     }
     if (isBoolean) {
         // An optional boolean with NO declared default has three outcomes, not
@@ -1045,12 +1054,18 @@ export async function promptForField(field, prompts = { select, confirm, text })
                     { value: false, label: "false" },
                     skipOption,
                 ],
+                ...(hasInitial ? { initialValue: initial } : {}),
             });
         }
-        return prompts.confirm({ message, initialValue: field.default === true });
+        return prompts.confirm({ message, initialValue: hasInitial ? initial === true : field.default === true });
     }
     const raw = await prompts.text({
         message,
+        // A CLI-supplied value seeds the editable buffer so a bare Enter keeps it
+        // rather than falling through to the field's schema default below.
+        initialValue: hasInitial
+            ? (isJson ? JSON.stringify(initial) : String(initial))
+            : undefined,
         // A JSON-typed default must render as its JSON spelling — String({})
         // would show the useless "[object Object]".
         placeholder: field.default !== undefined
@@ -1133,16 +1148,26 @@ export function mergeInteractiveInputs(supplied, prompted) {
 /**
  * Ask for a workflow's inputs before launching it. Returns the input object, or
  * null if the user cancelled mid-prompt.
+ *
+ * `supplied` carries any CLI `--input`/`--prompt` values (normalized): each
+ * field's supplied value seeds its prompt so a bare Enter KEEPS it instead of
+ * being clobbered by the field's schema default — otherwise a positional/`--prompt`
+ * a user typed on the CLI would silently vanish for any field declaring a default.
+ *
  * @param {{ entryFile: string }} workflow
+ * @param {Record<string, unknown>} [supplied] - normalized CLI-supplied input
  * @returns {Promise<Record<string, unknown> | null>}
  */
-async function askWorkflowInputs(workflow) {
+async function askWorkflowInputs(workflow, supplied = {}) {
     const fields = await loadWorkflowInputFields(workflow.entryFile);
     if (fields.length === 0) return {};
     log.message(pc.dim(`This workflow takes ${fields.length} input${fields.length === 1 ? "" : "s"}.`));
     const inputs = {};
     for (const field of fields) {
-        const value = await promptForField(field);
+        const initial = Object.prototype.hasOwnProperty.call(supplied, field.name)
+            ? supplied[field.name]
+            : undefined;
+        const value = await promptForField(field, undefined, initial);
         if (isCancel(value)) return null;
         // Skip blank optional text (undefined) and explicitly-skipped optional
         // enum/boolean (OMIT_FIELD) so absent input stays absent.
@@ -1155,8 +1180,9 @@ async function askWorkflowInputs(workflow) {
  * Resolve the full-screen TUI monitor entry point through the installed
  * `@smithers-orchestrator/tui` package (its `smithers-mon` bin), so it works for
  * published installs — not just from a relative path inside this monorepo.
- * Returns null when the package can't be resolved (e.g. it wasn't installed),
- * letting the caller fall back to the inline stream loop.
+ * Returns null when the package can't be resolved (e.g. it wasn't installed);
+ * the caller then fails loudly with TUI_MONITOR_UNAVAILABLE (there is no inline
+ * stream fallback) while leaving the detached run running.
  * @returns {string | null}
  */
 export function resolveTuiEntry() {
@@ -1183,16 +1209,43 @@ export function resolveTuiEntry() {
  * client unauthenticated while the gateway (which enables auth once a token is
  * set) rejects every RPC/WS call.
  *
+ * `workspaceRoot` is forwarded as SMITHERS_WORKSPACE_ROOT so the monitor keys
+ * the workspace-gateway state file off the SAME resolved workspace root the CLI
+ * used (its `resolveGatewayWorkspace`), instead of re-deriving it from the
+ * child's cwd — which a `smithers-mon` launched from a subdirectory would get
+ * wrong, missing the running singleton and autostarting a doomed second gateway.
+ *
  * @param {NodeJS.ProcessEnv} baseEnv - env to extend (usually `process.env`)
- * @param {{ cliIndexPath: string; gatewayUrl?: string; backend?: string; authToken?: string }} opts
+ * @param {{ cliIndexPath: string; gatewayUrl?: string; backend?: string; authToken?: string; workspaceRoot?: string }} opts
  * @returns {NodeJS.ProcessEnv}
  */
-export function buildTuiMonitorEnv(baseEnv, { cliIndexPath, gatewayUrl, backend, authToken }) {
+export function buildTuiMonitorEnv(baseEnv, { cliIndexPath, gatewayUrl, backend, authToken, workspaceRoot }) {
     const env = { ...baseEnv, SMITHERS_CLI: cliIndexPath };
     if (gatewayUrl) env.SMITHERS_GATEWAY_URL = gatewayUrl;
     if (backend) env.SMITHERS_BACKEND = backend;
     if (authToken) env.SMITHERS_TOKEN = authToken;
+    if (workspaceRoot) env.SMITHERS_WORKSPACE_ROOT = workspaceRoot;
     return env;
+}
+
+/**
+ * Resolve the workspace root the same way the CLI's gateway commands do
+ * (index.js `resolveGatewayWorkspace`): the nearest local `.smithers` pack's
+ * parent, else the directory holding the nearest `smithers.db`. Forwarded to the
+ * monitor as SMITHERS_WORKSPACE_ROOT so its per-workspace gateway state lookup
+ * hashes the same key the daemon wrote. Returns undefined when neither anchor
+ * exists (the monitor then falls back to its own cwd walk-up).
+ * @param {string} [cwd]
+ * @returns {string | undefined}
+ */
+export function resolveMonitorWorkspaceRoot(cwd = process.cwd()) {
+    const localPackDir = resolvePackDirs(cwd).find((dir) => dir.scope === "local")?.packDir;
+    if (localPackDir) return dirname(localPackDir);
+    try {
+        return dirname(findSmithersDb(cwd));
+    } catch {
+        return undefined;
+    }
 }
 
 /**
@@ -1216,7 +1269,13 @@ export function buildTuiMonitorEnv(baseEnv, { cliIndexPath, gatewayUrl, backend,
  *   under it) and is a no-op once it has already exited.
  */
 function launchTuiMonitor(tuiEntry, runId, cliIndexPath, gatewayUrl, backend, authToken) {
-    const env = buildTuiMonitorEnv(process.env, { cliIndexPath, gatewayUrl, backend, authToken });
+    const env = buildTuiMonitorEnv(process.env, {
+        cliIndexPath,
+        gatewayUrl,
+        backend,
+        authToken,
+        workspaceRoot: resolveMonitorWorkspaceRoot(),
+    });
     const child = spawn("bun", [tuiEntry, runId], { stdio: "inherit", env });
     const exit = new Promise((resolve, reject) => {
         child.once("error", (err) => reject(err));
@@ -1294,8 +1353,15 @@ export async function superviseTuiMonitor(monitor, childFailure, adapter, runId)
     }
     if (state && STOP_STATES.has(state)) {
         // Run legitimately reached a stop state; keep the monitor up until the
-        // user quits, then hand its exit back to the caller unchanged.
-        return { exit: await monitor.exit };
+        // user quits, then hand its exit back to the caller. `monitor.exit` CAN
+        // reject (a late spawn failure racing the child's exit — e.g. `bun`
+        // missing / ENOENT); fold that into a structured `{ monitorError }`
+        // instead of throwing the raw error out of here, so the caller emits the
+        // monitorStartFailure guidance rather than a generic uncaught command error.
+        return monitor.exit.then(
+            (exit) => ({ exit }),
+            (error) => ({ monitorError: error }),
+        );
     }
     // Child died with the run still in flight — tear the monitor down and fail.
     monitor.terminate();
@@ -1849,7 +1915,7 @@ export async function runTuiCommand(c, fail = (opts) => c.error?.(opts) ?? c.ok(
         });
     }
 
-    const prompted = await askWorkflowInputs(workflow);
+    const prompted = await askWorkflowInputs(workflow, suppliedInput);
     if (prompted === null) {
         cancel("Cancelled.");
         return c.ok({ ran: false, reason: "cancelled" });

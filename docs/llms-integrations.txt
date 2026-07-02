@@ -876,6 +876,23 @@ const hermes = new HermesAgent({
 
 `baseURL` falls back to the `HERMES_BASE_URL` env var and must be set in either place. `apiKey` falls back to `HERMES_API_KEY` (then `"hermes"`). Pass `nativeStructuredOutput: true` if your server does honor JSON-schema output. To use Smithers *from* Hermes instead of running Hermes as a worker, see [Agent Support → Hermes](/agents/hermes).
 
+## Eliza
+
+`ElizaAgent` wraps an in-process elizaOS `AgentRuntime` so an Eliza character and its plugins (Slack, Discord, Telegram, model providers) run as a first-class Smithers agent. Unlike the other agents on this page, it ships in a separate opt-in package that owns the `@elizaos/core` dependency, so install and import it from `@smithers-orchestrator/agent-eliza`:
+
+```ts
+import { ElizaAgent } from "@smithers-orchestrator/agent-eliza";
+
+const eliza = new ElizaAgent({
+  character: { name: "SupportBot", bio: "Answers product questions." },
+  plugins: [],
+  settings: { SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN ?? "" },
+  model: "eliza",
+});
+```
+
+The harness lazily initializes the runtime on the first `generate` (or `preflight`) call and reuses it across calls. `settings` and `env` merge onto the character's own `settings` with precedence `env` over `settings` over `character.settings`. Pass an `outputSchema` on the Smithers task (or directly to `generate`) for structured output; `ElizaAgent` extracts JSON from the model's text because it does not set `supportsNativeStructuredOutput`.
+
 ## Hijack Support
 
 SDK agents do not reopen a provider-native CLI. Smithers persists the agent conversation and reopens it through a Smithers-managed REPL via `bunx smithers-orchestrator hijack RUN_ID`.

@@ -12,7 +12,10 @@ import {
     buildAgentDocOptions,
     buildDefaultSelections,
     selectionsToPackOptions,
+    withRequiredWorkflows,
+    runInteractiveInitFlow,
 } from "../src/init/interactiveInit.js";
+import { workflowManifestIds } from "../src/workflow-pack.js";
 
 // ---------------------------------------------------------------------------
 // buildWorkflowOptions
@@ -222,5 +225,113 @@ describe("selection filtering", () => {
     test("no skill targets produces empty selectedSkillTargets", () => {
         const sel = { selectedWorkflows: ["implement"], selectedSkillTargets: [], selectedAgentDocs: ["CLAUDE.md"] };
         expect(selectionsToPackOptions(sel).selectedSkillTargets).toHaveLength(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// withRequiredWorkflows (force-include for `smithers init "<task>"`)
+// ---------------------------------------------------------------------------
+
+describe("withRequiredWorkflows", () => {
+    test("force-includes a required workflow the wizard deselected", () => {
+        // The user unchecked create-workflow, but `init "<task>"` needs it for the
+        // post-init builder dispatch.
+        const sel = { selectedWorkflows: ["hello"], selectedSkillTargets: [], selectedAgentDocs: [] };
+        const out = withRequiredWorkflows(sel, ["create-workflow"]);
+        expect(out.selectedWorkflows).toContain("create-workflow");
+        expect(out.selectedWorkflows).toContain("hello");
+    });
+
+    test("does not duplicate a required workflow already selected", () => {
+        const sel = { selectedWorkflows: ["create-workflow", "hello"], selectedSkillTargets: [], selectedAgentDocs: [] };
+        const out = withRequiredWorkflows(sel, ["create-workflow"]);
+        expect(out.selectedWorkflows.filter((w) => w === "create-workflow")).toHaveLength(1);
+    });
+
+    test("returns the selection unchanged when nothing is required", () => {
+        const sel = { selectedWorkflows: ["hello"], selectedSkillTargets: [], selectedAgentDocs: [] };
+        expect(withRequiredWorkflows(sel, [])).toBe(sel);
+        expect(withRequiredWorkflows(sel)).toBe(sel);
+    });
+
+    test("preserves the other selection fields", () => {
+        const sel = { selectedWorkflows: [], selectedSkillTargets: ["claude"], selectedAgentDocs: ["CLAUDE.md"], selectedAgentSetup: "custom" };
+        const out = withRequiredWorkflows(sel, ["create-workflow"]);
+        expect(out.selectedSkillTargets).toEqual(["claude"]);
+        expect(out.selectedAgentDocs).toEqual(["CLAUDE.md"]);
+        expect(out.selectedAgentSetup).toBe("custom");
+        expect(out.selectedWorkflows).toEqual(["create-workflow"]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Manifest sync guard (the wizard list must not drift from the pack manifest)
+// ---------------------------------------------------------------------------
+
+describe("wizard workflow list stays in sync with the pack manifest", () => {
+    test("buildWorkflowOptions covers exactly the manifest's non-system workflows", () => {
+        const wizardIds = buildWorkflowOptions().map((o) => o.id).sort();
+        expect(wizardIds).toEqual(workflowManifestIds().slice().sort());
+    });
+
+    test("system workflows are never offered in the wizard", () => {
+        const wizardIds = buildWorkflowOptions().map((o) => o.id);
+        expect(wizardIds).not.toContain("init");
+        expect(wizardIds).not.toContain("post-failure");
+        // ...but they DO exist in the full manifest (installed by the closure).
+        expect(workflowManifestIds({ includeSystem: true })).toContain("init");
+        expect(workflowManifestIds({ includeSystem: true })).toContain("post-failure");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// runInteractiveInitFlow degradation (no PTY / broken native binding)
+// ---------------------------------------------------------------------------
+
+describe("runInteractiveInitFlow degradation", () => {
+    async function captureStderr(fn) {
+        const chunks = [];
+        const original = process.stderr.write;
+        process.stderr.write = (chunk) => {
+            chunks.push(typeof chunk === "string" ? chunk : String(chunk));
+            return true;
+        };
+        try {
+            const result = await fn();
+            return { result, stderr: chunks.join("") };
+        } finally {
+            process.stderr.write = original;
+        }
+    }
+
+    test("warns and returns defaults when the render layer fails to load", async () => {
+        const { result, stderr } = await captureStderr(() =>
+            runInteractiveInitFlow({
+                env: {},
+                loadRenderer: async () => {
+                    throw new Error("dlopen boom");
+                },
+            }),
+        );
+        const allIds = buildWorkflowOptions().map((o) => o.id).sort();
+        expect(result.selectedWorkflows.slice().sort()).toEqual(allIds);
+        expect(stderr).toContain("interactive wizard unavailable");
+        expect(stderr).toContain("dlopen boom");
+    });
+
+    test("warns and returns defaults when the renderer throws (no PTY)", async () => {
+        const { result, stderr } = await captureStderr(() =>
+            runInteractiveInitFlow({
+                env: {},
+                loadRenderer: async () => ({
+                    renderInitWizard: async () => {
+                        throw new Error("no pty");
+                    },
+                }),
+            }),
+        );
+        expect(result.selectedWorkflows.length).toBeGreaterThan(0);
+        expect(stderr).toContain("interactive wizard unavailable");
+        expect(stderr).toContain("no pty");
     });
 });

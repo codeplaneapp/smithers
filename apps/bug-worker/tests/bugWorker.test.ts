@@ -88,6 +88,31 @@ describe("bug worker", () => {
     expect(res.status).toBe(413);
   });
 
+  test("oversized streamed body with no content-length is rejected 413 by the stream counter", async () => {
+    const worker = createBugWorker();
+    const oversized = new TextEncoder().encode(JSON.stringify({ title: "big", body: "x".repeat(256 * 1024 + 1) }));
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        // Emit in chunks so the running byte count crosses the cap mid-stream.
+        for (let offset = 0; offset < oversized.byteLength; offset += 64 * 1024) {
+          controller.enqueue(oversized.subarray(offset, offset + 64 * 1024));
+        }
+        controller.close();
+      },
+    });
+    const request = new Request("https://bug.smithers.sh/api/bugs", {
+      method: "POST",
+      headers: { "content-type": "application/json", "cf-connecting-ip": "203.0.113.42" },
+      body: stream,
+      // No content-length header: the size gate must come from stream-counting.
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    expect(request.headers.get("content-length")).toBeNull();
+
+    const res = await worker.fetch(request, makeEnv());
+    expect(res.status).toBe(413);
+  });
+
   test("rate limit trips at 21 posts from one IP within the hour", async () => {
     let clock = Date.parse("2026-07-02T10:00:00Z");
     const worker = createBugWorker({ now: () => clock });

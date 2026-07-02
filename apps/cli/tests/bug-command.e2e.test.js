@@ -84,7 +84,7 @@ async function seedFailedRun(adapter, runId, eventCount) {
         finishedAtMs: now - 1_000,
         heartbeatAtMs: now - 1_000,
         errorJson: JSON.stringify({
-            message: "agent crashed: OPENAI_API_KEY=sk-verysecret1234567890 rejected (header was 'Authorization: Bearer topsecrettoken123')",
+            message: "agent crashed: OPENAI_API_KEY=sk-verysecret1234567890 rejected (header was 'Authorization: Bearer topsecrettoken123'); db DATABASE_URL=postgres://admin:s3cr3tpw@db.host:5432/app; remote https://x-access-token:ghp_urltoken0123456789ABCDEFGHIJ@github.com/o/r; aws AKIA1234567890ABCDEF; bare ghp_baretoken0123456789ABCDEFGHIJ",
         }),
     });
     for (let i = 1; i <= eventCount; i += 1) {
@@ -116,7 +116,7 @@ describe("smithers bug", () => {
             );
 
             expect(result.exitCode).toBe(0);
-            expect(result.json).toMatchObject({ url: expect.stringContaining("bug.smithers.sh/b/") });
+            expect(result.json).toMatchObject({ url: expect.stringContaining("bug.smithers.sh/api/bugs/") });
             const payloads = receivedPayloadsSnapshot();
             expect(payloads.length).toBe(before + 1);
 
@@ -142,11 +142,38 @@ describe("smithers bug", () => {
             expect(wire).not.toContain("sk-ant-abcdef0123456789");
             expect(wire).not.toContain("topsecrettoken123");
             expect(wire).not.toContain("raw-secret-value-in-key-field");
+            // DB-URL password, x-access-token URL creds, bare GitHub + AWS keys.
+            expect(wire).not.toContain("s3cr3tpw");
+            expect(wire).not.toContain("ghp_urltoken0123456789ABCDEFGHIJ");
+            expect(wire).not.toContain("ghp_baretoken0123456789ABCDEFGHIJ");
+            expect(wire).not.toContain("AKIA1234567890ABCDEF");
             expect(wire).toContain("[REDACTED]");
         }
         finally {
             sqlite.close();
         }
+    }, CLI_COMMAND_TIMEOUT_MS);
+
+    test("default (non-JSON) format prints the friendly line once and does not double-print onto stdout", async () => {
+        const repo = createTempRepo();
+        pinSqliteBackend(repo.dir);
+
+        // No `format` here: exercise the default (toon) output path. The
+        // friendly "Filed bug ..." line goes to stderr while stdout carries only
+        // the structured result, so it must never appear twice.
+        const result = runSmithers(
+            ["bug", "--title", "default format", "--body", "check output", "--endpoint", liveEndpoint()],
+            { cwd: repo.dir, timeoutMs: CLI_COMMAND_TIMEOUT_MS },
+        );
+
+        expect(result.exitCode).toBe(0);
+        const filedCount = `${result.stdout}${result.stderr}`.split("Filed bug").length - 1;
+        expect(filedCount).toBe(1);
+        // The friendly line is on stderr; stdout must not also carry it (that was
+        // the double-print), and stdout still gets the structured payload.
+        expect(result.stdout).not.toContain("Filed bug");
+        expect(result.stderr).toContain("Filed bug");
+        expect(result.stdout).toContain("endpoint");
     }, CLI_COMMAND_TIMEOUT_MS);
 
     test("SMITHERS_BUG_ENDPOINT env var takes precedence over --endpoint", async () => {

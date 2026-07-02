@@ -36,6 +36,12 @@ export type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends
 	 * (e.g. a `continueOnFail` task that failed) instead of deferring the task
 	 * until every dep resolves. Pair with `needs`/`dependsOn` so the task is
 	 * still gated on upstream tasks reaching a terminal state.
+	 *
+	 * Runtime caveat: under `depsOptional`, a resolved `deps` value is absent
+	 * (not present-but-undefined) when its upstream produced no output, even
+	 * though the `children(deps)` callback types every key as present. Null-check
+	 * each dep you read (`deps.a?.field`) — reading `deps.a.field` for a failed
+	 * upstream throws at runtime despite compiling cleanly.
 	 */
 	depsOptional?: boolean;
 	/**

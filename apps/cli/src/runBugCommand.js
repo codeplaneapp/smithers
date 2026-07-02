@@ -6,23 +6,37 @@ import { findAndOpenDb } from "./find-db.js";
 
 const DEFAULT_BUG_ENDPOINT = "https://bug.smithers.sh/api/bugs";
 const MAX_RUN_EVENTS = 50;
-const EVENTS_PAGE_SIZE = 1000;
 const POST_TIMEOUT_MS = 15_000;
 /** Object keys whose values are always redacted wholesale. */
-const SECRET_KEY_PATTERN = /(?:api[-_]?key|[-_]key$|^key$|token|secret|password|credential|authorization)/i;
+const SECRET_KEY_PATTERN = /(?:api[-_]?key|[-_]key$|^key$|token|secret|password|credential|authorization|dsn|connection)/i;
 
 /**
- * Redact secret-looking material inside a free-form string: bearer tokens,
- * `sk-...` API keys, and `SOME_KEY=value` / `"someToken": "value"` pairs whose
- * key looks like an env secret (KEY / TOKEN / SECRET / PASSWORD).
+ * Redact secret-looking material inside a free-form string:
+ * - inline credentials in any URL / connection string
+ *   (`postgres://user:pass@host`, `https://x-access-token:tok@host`), keeping
+ *   the scheme/user/host but replacing the password — this catches DB URLs
+ *   whose key (`DATABASE_URL`) is not itself a secret word;
+ * - bearer tokens and `sk-...` API keys;
+ * - provider token formats that carry no `KEY=` context (GitHub `ghp_` /
+ *   `github_pat_`, AWS `AKIA...`, Slack `xox...`, Google `AIza...`);
+ * - `SOME_KEY=value` / `"someToken": "value"` pairs whose key looks like an env
+ *   secret (KEY / TOKEN / SECRET / PASSWORD / CREDENTIAL).
  *
  * @param {string} text
  * @returns {string}
  */
 function scrubText(text) {
     return text
+        // Strip the password out of any `scheme://user:pass@host` regardless of
+        // the surrounding key name (leaves benign URLs and git@ SSH untouched).
+        .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:@/]+):[^\s:@/]+@/gi, "$1:[REDACTED]@")
         .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{4,}/gi, "Bearer [REDACTED]")
         .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, "[REDACTED]")
+        .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}/g, "[REDACTED]")
+        .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}/g, "[REDACTED]")
+        .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[REDACTED]")
+        .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}/g, "[REDACTED]")
+        .replace(/\bAIza[0-9A-Za-z_-]{35,}/g, "[REDACTED]")
         .replace(/\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)S?)=("[^"]*"|'[^']*'|\S+)/g, "$1=[REDACTED]")
         .replace(/"([A-Za-z0-9_-]*(?:key|token|secret|password|credential)[A-Za-z0-9_-]*)"(\s*:\s*)"(?:[^"\\]|\\.)*"/gi, '"$1"$2"[REDACTED]"');
 }
@@ -98,15 +112,16 @@ async function gatherRun(runId) {
     try {
         const run = await adapter.getRun(runId);
         if (!run) return undefined;
-        let lastSeq = -1;
+        // Read only the tail: find the last seq, then fetch the window just
+        // before it (listEvents' afterSeq is exclusive, so `lastSeq -
+        // MAX_RUN_EVENTS` yields exactly the last MAX_RUN_EVENTS rows including
+        // the terminal event) instead of scanning the whole event history.
+        const lastSeq = await adapter.getLastEventSeq(runId);
         /** @type {any[]} */
         let tail = [];
-        while (true) {
-            const page = await adapter.listEvents(runId, lastSeq, EVENTS_PAGE_SIZE);
-            if (!Array.isArray(page) || page.length === 0) break;
-            lastSeq = page[page.length - 1].seq;
-            tail = tail.concat(page).slice(-MAX_RUN_EVENTS);
-            if (page.length < EVENTS_PAGE_SIZE) break;
+        if (lastSeq != null) {
+            const page = await adapter.listEvents(runId, lastSeq - MAX_RUN_EVENTS, MAX_RUN_EVENTS);
+            if (Array.isArray(page)) tail = page;
         }
         const events = tail.map((event) => {
             let payload = event.payloadJson ?? null;
@@ -133,7 +148,7 @@ async function gatherRun(runId) {
 }
 
 /**
- * `smithers bug [--run <runId>] [--title <t>] [--body <b>] [--json] [--endpoint <url>]`
+ * `smithers bug [--run <runId>] [--title <t>] [--body <b>] [--endpoint <url>]`
  *
  * Files a bug report (smithers version, platform, and optionally a run's
  * status/error/recent events, secrets scrubbed) to
@@ -227,11 +242,10 @@ export async function runBugCommand(c, fail) {
         const data = await response.json().catch(() => ({}));
         const id = typeof data?.id === "string" ? data.id : undefined;
         const url = typeof data?.url === "string" ? data.url : undefined;
-        if (c.options.json) {
-            process.stdout.write(`${JSON.stringify({ id, url, endpoint, payload }, null, 2)}\n`);
-        }
-        else if (c.format !== "json") {
-            console.log(`Filed bug${id ? ` ${id}` : ""}${url ? `: ${url}` : ""}`);
+        if (c.format !== "json") {
+            // Friendly line goes to stderr so the default (toon) format leaves
+            // stdout with only the structured `c.ok` payload — no double print.
+            process.stderr.write(`Filed bug${id ? ` ${id}` : ""}${url ? `: ${url}` : ""}\n`);
         }
         return c.ok({ id, url, endpoint });
     }
@@ -244,7 +258,10 @@ export async function runBugCommand(c, fail) {
             savedPath = join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
             writeFileSync(savedPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
         }
-        catch {
+        catch (saveErr) {
+            // If even the local fallback save fails the report is lost — say so
+            // instead of silently dropping it.
+            process.stderr.write(`[smithers] failed to save fallback bug report: ${saveErr?.message ?? saveErr}\n`);
             savedPath = undefined;
         }
         const reason = err?.message ?? String(err);

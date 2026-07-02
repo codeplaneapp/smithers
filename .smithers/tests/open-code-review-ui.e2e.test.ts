@@ -65,10 +65,8 @@ function healthOk(): Promise<boolean> {
 // than fail there (matches apps/cli's workflow-ui e2e). Runs wherever a browser
 // is installed (local dev, or a job that ran `playwright install`).
 const require = createRequire(import.meta.url);
-const STUDIO_PLAYWRIGHT_ENTRY = resolve(repoRoot, "apps/smithers-studio-2/node_modules/playwright/index.js");
 function resolveChromium() {
   const entries = ["playwright"];
-  if (existsSync(STUDIO_PLAYWRIGHT_ENTRY)) entries.push(STUDIO_PLAYWRIGHT_ENTRY);
   for (const entry of entries) {
     try {
       const chromium = require(entry).chromium;

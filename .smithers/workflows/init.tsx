@@ -7,6 +7,7 @@
 // smithers-disable-model-invocation: true
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers } from "smithers-orchestrator";
+import { resolve } from "node:path";
 import { z } from "zod/v4";
 
 // The durable form of `smithers init`. Every step is a deterministic task that
@@ -44,6 +45,11 @@ const skillsSchema = z.object({
   detail: z.string().describe("Human-readable refresh summary."),
 });
 
+const agentDocsSchema = z.object({
+  noted: z.boolean().describe("Whether workflow guidance was appended to an agent doc."),
+  detail: z.string().describe("Human-readable summary of the agent-doc update."),
+});
+
 const outputSchema = z.object({
   written: z.number().int(),
   skipped: z.number().int(),
@@ -55,6 +61,7 @@ const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
   input: inputSchema,
   pack: packSchema,
   skills: skillsSchema,
+  agentDocs: agentDocsSchema,
   output: outputSchema,
 });
 
@@ -98,11 +105,49 @@ export default smithers((ctx) => {
               if (!refreshSkills) {
                 return { refreshed: false, detail: "skipped (refreshSkills=false)" };
               }
+              // The imperative path routes skill refresh through
+              // ensureCuratedSkillsFresh, which honors this opt-out; the durable
+              // path calls refreshCuratedSkills directly, so re-check it here.
+              if (process.env.SMITHERS_NO_SKILL_REFRESH === "1") {
+                return { refreshed: false, detail: "skipped (SMITHERS_NO_SKILL_REFRESH=1)" };
+              }
               const { refreshCuratedSkills, formatRefreshNotice } = await import(
                 cliModule("refreshCuratedSkills")
               );
               const result = refreshCuratedSkills({});
               return { refreshed: true, detail: formatRefreshNotice(result) || "up to date" };
+            }}
+          </Task>
+        ) : null}
+        {pack ? (
+          <Task id="note-agent-docs" output={outputs.agentDocs} retries={0}>
+            {async () => {
+              // Mirror the imperative path: append the smithers.sh workflow
+              // guidance block to any existing CLAUDE.md / AGENTS.md. Gated on
+              // refreshSkills so a single `--no-skill` opts out of every
+              // agent-instruction mutation, matching the CLI.
+              if (!refreshSkills) {
+                return { noted: false, detail: "skipped (refreshSkills=false)" };
+              }
+              const [{ noteWorkflowPreferenceInAgentDocs }, { resolveEffectiveAgentDocs }] =
+                await Promise.all([
+                  import(cliModule("noteWorkflowPreferenceInAgentDocs")),
+                  import(cliModule("workflow-pack")),
+                ]);
+              // Honor a persisted à-la-carte deselection (pack-selections.json):
+              // an interactive init that unchecked CLAUDE.md/AGENTS.md must not be
+              // re-added by this non-interactive durable re-init. undefined =
+              // nothing deselected = both docs (the helper's default).
+              const fileNames = resolveEffectiveAgentDocs(resolve(process.cwd(), ".smithers"));
+              const result = noteWorkflowPreferenceInAgentDocs({
+                projectRoot: process.cwd(),
+                ...(fileNames ? { fileNames } : {}),
+              });
+              const updated = result.files.filter((file: { status: string }) => file.status === "updated").length;
+              return {
+                noted: updated > 0,
+                detail: updated > 0 ? `appended guidance to ${updated} agent doc(s)` : "no agent docs to update",
+              };
             }}
           </Task>
         ) : null}

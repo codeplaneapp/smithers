@@ -8,6 +8,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { Effect, Fiber } from "effect";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "../src/adapter.js";
 import { ensureSmithersTables } from "../src/ensure.js";
@@ -17,6 +18,23 @@ function createAdapter() {
   const db = drizzle(sqlite);
   ensureSmithersTables(db);
   return new SmithersDb(db);
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+const tick = () => new Promise((res) => setTimeout(res, 0));
+
+function raceWithTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+  ]);
 }
 
 const RUN = "race-run";
@@ -105,5 +123,66 @@ describe("signal seq allocation under concurrency (bun:sqlite)", () => {
     const first = await adapter.insertSignalWithNextSeq(row);
     const second = await adapter.insertSignalWithNextSeq(row);
     expect(second).toBe(first);
+  });
+});
+
+// Regression guard for the transaction-turn interrupt/deadlock fix. The turn is
+// acquired via Effect.acquireUseRelease so its release runs whenever acquire
+// succeeded — a fiber interrupted while queued behind, or while holding, the
+// turn must never leak it. A leaked turn permanently deadlocks every later DB op
+// on the client, so each case asserts a subsequent write still completes.
+describe("transaction turn interruption (bun:sqlite)", () => {
+  test("interrupting a queued write releases the turn so later writes still complete", async () => {
+    const adapter = createAdapter();
+    await seedRun(adapter);
+
+    // Turn #1: holds the turn until the latch resolves.
+    const latch = deferred();
+    const holder = Effect.runFork(
+      adapter.write("hold-turn", () => latch.promise),
+    );
+    await tick();
+
+    // Turn #2: queues behind #1, then is interrupted while still queued.
+    const queued = Effect.runFork(
+      adapter.write("queued", () => Promise.resolve("queued")),
+    );
+    await tick();
+    const interrupted = Effect.runPromise(Fiber.interrupt(queued));
+    await tick();
+
+    // Releasing #1 must hand the turn off cleanly even though #2 was interrupted
+    // mid-queue; #2's release still fires, so the chain keeps advancing.
+    latch.resolve("first");
+    await Effect.runPromise(Fiber.await(holder));
+    await interrupted;
+
+    const later = await raceWithTimeout(
+      Effect.runPromise(adapter.write("after", () => Promise.resolve("done"))),
+      3000,
+      "later write deadlocked: transaction turn leaked",
+    );
+    expect(later).toBe("done");
+  });
+
+  test("interrupting a write that holds the turn releases it for later writes", async () => {
+    const adapter = createAdapter();
+    await seedRun(adapter);
+
+    // A write whose operation is in flight owns the turn; interrupt it there.
+    const latch = deferred();
+    const running = Effect.runFork(
+      adapter.write("running", () => latch.promise),
+    );
+    await tick();
+    await Effect.runPromise(Fiber.interrupt(running));
+
+    const later = await raceWithTimeout(
+      Effect.runPromise(adapter.write("after", () => Promise.resolve("done"))),
+      3000,
+      "later write deadlocked: transaction turn leaked",
+    );
+    expect(later).toBe("done");
+    latch.resolve("unblock");
   });
 });

@@ -7,9 +7,13 @@ post-failure autopsy feature — see `.smithers/specs/post-failure-autopsy.md`.
 ## Routes
 
 - `POST /api/bugs` — zod-validated report (`{ title, body?, smithersVersion?, platform?, run? }`,
-  loose beyond that), 256KB cap, per-IP rate limit of 20/hour via a KV
-  counter. Stores `bug:<id>` and returns `{ id, url }`. No auth: reporting
-  must be zero-friction. CORS allows POST from anywhere.
+  loose beyond that), 256KB cap (stream-counted, so a missing/spoofed
+  content-length can't buffer past the cap), per-IP rate limit of 20/hour via a
+  KV counter. The KV counter is **best-effort/advisory** — KV has no atomic
+  increment, so a concurrent burst from one IP can race past the limit; use a
+  Durable Object or a Rate Limiting binding if a hard cap is ever needed.
+  Stores `bug:<id>` and returns `{ id, url }`. No auth: reporting must be
+  zero-friction. CORS allows POST from anywhere.
 - `GET /api/bugs/:id` — maintainers only; requires the `x-bug-admin` header
   to match the `BUG_ADMIN_TOKEN` binding.
 - `GET /healthz`

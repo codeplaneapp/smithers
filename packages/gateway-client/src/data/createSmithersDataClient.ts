@@ -61,6 +61,7 @@ function append(search: URLSearchParams, key: string, value: unknown) {
 function listRunsSearch(params: ListRunsRequest = {}) {
   const search = new URLSearchParams();
   append(search, "status", params.filter?.status);
+  append(search, "workflow", params.filter?.workflow);
   append(search, "limit", params.filter?.limit);
   return search;
 }

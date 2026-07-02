@@ -29,7 +29,7 @@ const { AuditTab } = await import("./ddd-AuditTab");
 const { TicketsTab } = await import("./ddd-TicketsTab");
 const { LiveTab } = await import("./ddd-LiveTab");
 const { NewEntryMenu, StartPane } = await import("./ddd-StartPane");
-const { App, builderWorkflowName, createWorkflowPromptForApp } = await import("./docs-driven-development");
+const { App, builderWorkflowName, createWorkflowPromptForApp, shouldPollKickoffNode } = await import("./docs-driven-development");
 type AppProps = Parameters<typeof App>[0];
 const {
   Tutorial,
@@ -334,6 +334,9 @@ async function mountAppWithGateway(
     fetch: Bun.fetch as typeof fetch,
     WebSocket: globalThis.WebSocket,
   });
+  // SmithersGatewayProvider now builds and provides the collection layer itself
+  // (from the client's base URL), mirroring the production mount
+  // `createGatewayReactRoot(<App />)`, so no separate sync provider is needed.
   const harness = await mount(
     <SmithersGatewayProvider client={client}>
       <App {...appProps} />
@@ -1817,6 +1820,23 @@ describe("DDD tabs and components", () => {
     expect(builderWorkflowName("x".repeat(80))).toBe(`build-${"x".repeat(48)}`);
     expect(createWorkflowPromptForApp("A markdown notes search app")).toContain("workflow named build-a-markdown-notes-search-app");
     expect(createWorkflowPromptForApp("A markdown notes search app")).toContain("file slug must be exactly build-a-markdown-notes-search-app");
+  });
+
+  test("shouldPollKickoffNode stops polling once the kickoff row lands, the bug-scan id is known, or the generate run is terminal", () => {
+    const base = { generateRunId: "gen-1", bugScanRunId: "", kickoffReady: false, generateRunStatus: "running" as string | undefined };
+    // Poll while the generate run is live and no kickoff output has arrived.
+    expect(shouldPollKickoffNode(base)).toBe(true);
+    // No generate run to follow yet.
+    expect(shouldPollKickoffNode({ ...base, generateRunId: null })).toBe(false);
+    expect(shouldPollKickoffNode({ ...base, generateRunId: undefined })).toBe(false);
+    // Bug-scan run id resolved (launched:true path).
+    expect(shouldPollKickoffNode({ ...base, bugScanRunId: "scan-2" })).toBe(false);
+    // Kickoff row produced with no run id (launched:false, gate-blocked, or an
+    // unparsed launch) — the immutable output has been read once, so stop.
+    expect(shouldPollKickoffNode({ ...base, kickoffReady: true })).toBe(false);
+    // Generate run failed before the kickoff node ever ran.
+    expect(shouldPollKickoffNode({ ...base, generateRunStatus: "failed" })).toBe(false);
+    expect(shouldPollKickoffNode({ ...base, generateRunStatus: "finished" })).toBe(false);
   });
 
   test("StartPane validates trimmed descriptions, hides close in stub mode, and launches with trimmed text", async () => {

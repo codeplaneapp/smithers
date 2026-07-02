@@ -814,6 +814,57 @@ describe("tui helpers", () => {
         expect(defaulted).toEqual({ a: 1 });
     });
 
+    test("promptForField seeds a CLI-supplied value so a bare Enter keeps it over the schema default", async () => {
+        // Simulate clack returning the pre-filled initialValue on a bare Enter.
+        const enterKeepsInitial = async ({ initialValue }) => initialValue ?? "";
+
+        // The bug: create-workflow's `prompt` field declares a z.default, which
+        // used to clobber a task the user already typed. The supplied value must win.
+        const kept = await promptForField(
+            { name: "prompt", type: "string", required: false, default: "SCHEMA DEFAULT" },
+            { text: enterKeepsInitial },
+            "build a docs-sync workflow",
+        );
+        expect(kept).toBe("build a docs-sync workflow");
+
+        // A JSON-typed supplied value is seeded as its JSON spelling and parsed back.
+        let seededJsonInitial;
+        const cfg = await promptForField(
+            { name: "cfg", type: "object", required: false, default: { a: 1 } },
+            {
+                text: async ({ initialValue }) => {
+                    seededJsonInitial = initialValue;
+                    return initialValue ?? "";
+                },
+            },
+            { web: ["auth"] },
+        );
+        expect(seededJsonInitial).toBe('{"web":["auth"]}');
+        expect(cfg).toEqual({ web: ["auth"] });
+
+        // Enum/select fields seed initialValue too.
+        let seededSelectInitial;
+        const mode = await promptForField(
+            { name: "mode", type: "string", required: true, enum: ["fast", "slow"] },
+            {
+                select: async ({ initialValue }) => {
+                    seededSelectInitial = initialValue;
+                    return initialValue ?? "fast";
+                },
+            },
+            "slow",
+        );
+        expect(seededSelectInitial).toBe("slow");
+        expect(mode).toBe("slow");
+
+        // With NO supplied value, behavior is unchanged: a bare Enter yields the default.
+        const def = await promptForField(
+            { name: "prompt", type: "string", required: false, default: "SCHEMA DEFAULT" },
+            { text: async ({ initialValue }) => initialValue ?? "" },
+        );
+        expect(def).toBe("SCHEMA DEFAULT");
+    });
+
     test("parseJsonFieldValue shape-checks pure declarations and spares string unions", () => {
         expect(parseJsonFieldValue("items", ["array"], '["a"]')).toEqual({ value: ["a"] });
         expect(parseJsonFieldValue("cfg", ["object"], '{"a":1}')).toEqual({ value: { a: 1 } });

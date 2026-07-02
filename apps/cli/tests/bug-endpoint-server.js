@@ -27,7 +27,7 @@ const server = Bun.serve({
             appendFileSync(payloadLogFile, `${JSON.stringify(payload)}\n`, "utf8");
             received += 1;
             const id = `bug-${received}`;
-            return Response.json({ id, url: `https://bug.smithers.sh/b/${id}` });
+            return Response.json({ id, url: `https://bug.smithers.sh/api/bugs/${id}` });
         }
         return new Response("not found", { status: 404 });
     },

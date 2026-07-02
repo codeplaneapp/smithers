@@ -2861,6 +2861,7 @@ export class Gateway {
                 params: {
                     limit: queryPositiveInt(url.searchParams, "limit"),
                     status: queryString(url.searchParams, "status"),
+                    workflow: queryString(url.searchParams, "workflow"),
                 },
             };
         }

@@ -23,7 +23,7 @@ import {
  * is no honest frame count to show here — we don't fabricate one.
  */
 export function RunHeaderView({ data, compact }: { data: RunHeaderData; compact: boolean }) {
-  const { status, workflowKey, runId, model, elapsedMs, live } = data;
+  const { status, workflowKey, runId, model, elapsedMs } = data;
   const dot = statusDotColor(status);
   const liveLabel = runLiveLabel(status);
   const id = shortRunId(runId);

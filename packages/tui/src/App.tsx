@@ -23,7 +23,7 @@ function ModeBody({
   runId: string;
   mode: Mode;
   treeSelectedNodeKey: string | null;
-  onSelectNodeKey: (nodeId: string) => void;
+  onSelectNodeKey: (nodeKey: string) => void;
   onBack: () => void;
 }) {
   switch (mode) {
@@ -211,8 +211,8 @@ export function App({ runId, onExit }: { runId: string; onExit: (code: number) =
     }
   });
 
-  function handleSelectNodeKey(nodeId: string) {
-    setTreeSelectedNodeKey(nodeId);
+  function handleSelectNodeKey(nodeKey: string) {
+    setTreeSelectedNodeKey(nodeKey);
     setMode(1);
   }
 

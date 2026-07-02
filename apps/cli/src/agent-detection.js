@@ -225,13 +225,19 @@ const DETECTORS = [
         apiKeys: [],
         availabilityProbe: (homeDir, env) => {
             const status = runProbeCommand("openclaw", ["status"], env);
-            if (status.status === 0 && /configured|gateway|agent|provider|ready|running/i.test(status.output)) {
+            const output = status.output ?? "";
+            // `configured`/`ready`/`running` also appear in onboarding text like
+            // "No agent configured. Run `openclaw configure`", so reject the
+            // negative markers before trusting a status-0 exit as a real runtime.
+            const looksConfigured = /logged in|authenticated|ready|running|✓|configured/i.test(output);
+            const looksUnconfigured = /not configured|no agent|run .*configure|onboarding/i.test(output);
+            if (status.status === 0 && looksConfigured && !looksUnconfigured) {
                 return passProbe("openclaw status reports a configured runtime");
             }
             if (jsonFileHasContent(join(homeDir, ".openclaw", "openclaw.json"))) {
                 return passProbe("OpenClaw config is present");
             }
-            return failProbe(status.output || "OpenClaw setup not verified");
+            return failProbe(output || "OpenClaw setup not verified");
         },
         setupHint: "Install OpenClaw and finish onboarding with `openclaw configure` or the first-run wizard.",
     },

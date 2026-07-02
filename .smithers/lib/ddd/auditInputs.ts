@@ -33,6 +33,7 @@ const LISTED_DIRS = [
   ".smithers/lib/ddd",
   ".smithers/docs-driven-development/artifacts",
 ];
+const MAX_ARTIFACT_FILES = 64;
 
 export function collectAuditInputs(root: string = dddRoot()): string[] {
   const out: string[] = [];
@@ -42,10 +43,23 @@ export function collectAuditInputs(root: string = dddRoot()): string[] {
   for (const dir of LISTED_DIRS) {
     const full = resolve(root, dir);
     if (!existsSync(full) || !statSync(full).isDirectory()) continue;
-    for (const entry of readdirSync(full).sort()) {
+    const entries = readdirSync(full).map((entry) => {
       const entryPath = resolve(full, entry);
-      if (statSync(entryPath).isFile() && statSync(entryPath).size <= 256_000) {
-        out.push(`${dir}/${entry}`);
+      return { entry, entryPath, stat: statSync(entryPath) };
+    });
+    const isArtifacts = dir === ".smithers/docs-driven-development/artifacts";
+    const sorted = entries
+      .filter((entry) => entry.stat.isFile() && entry.stat.size <= 256_000)
+      .sort((left, right) => {
+        if (isArtifacts) {
+          return right.stat.mtimeMs - left.stat.mtimeMs || left.entry.localeCompare(right.entry);
+        }
+        return left.entry.localeCompare(right.entry);
+      })
+      .slice(0, isArtifacts ? MAX_ARTIFACT_FILES : undefined);
+    for (const entry of sorted) {
+      if (entry.stat.size <= 256_000) {
+        out.push(`${dir}/${entry.entry}`);
       }
     }
   }

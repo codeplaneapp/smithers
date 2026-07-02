@@ -14,14 +14,12 @@ export async function* streamReplyViaApi({
   messages,
   system,
   signal,
-  endpoint = "/api/chat",
 }: {
   messages: ApiChatMessage[];
   system?: string;
   signal?: AbortSignal;
-  endpoint?: string;
 }): AsyncGenerator<string> {
-  const response = await fetch(endpoint, {
+  const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ messages, system }),

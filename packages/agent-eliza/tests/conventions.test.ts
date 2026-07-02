@@ -523,6 +523,51 @@ describe("loadWorkflowsFromDir", () => {
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
     expect(result.workflows).toHaveLength(1);
   });
+
+  test("surfaces the frontmatter version field from a companion .md", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    writeFileSync(
+      join(dir, "versioned.js"),
+      `export default { workflow: {}, name: "versioned", description: "v" };`,
+      "utf8"
+    );
+    writeFileSync(
+      join(dir, "versioned.md"),
+      `---\nname: versioned\ndescription: v\nversion: 1.2.3\n---\n`,
+      "utf8"
+    );
+
+    const result = await loadWorkflowsFromDir({ dir, source: "test" });
+    expect(result.workflows[0]!.version).toBe("1.2.3");
+  });
+
+  test("surfaces the frontmatter version from a block-comment header", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    writeFileSync(
+      join(dir, "bc-versioned.js"),
+      `/* ---\nname: bc-versioned\nversion: 2.0.0\n--- */\nexport default { workflow: {}, name: "bc-versioned", description: "d" };`,
+      "utf8"
+    );
+
+    const result = await loadWorkflowsFromDir({ dir, source: "test" });
+    expect(result.workflows[0]!.version).toBe("2.0.0");
+  });
+
+  test("source is the executable file's own text, not the companion .md", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
+    const execText = `export default { workflow: {}, name: "srccheck", description: "d" };`;
+    writeFileSync(join(dir, "srccheck.js"), execText, "utf8");
+    writeFileSync(
+      join(dir, "srccheck.md"),
+      `---\nname: srccheck\ndescription: d\n---\n`,
+      "utf8"
+    );
+
+    const result = await loadWorkflowsFromDir({ dir, source: "test" });
+    expect(result.workflows[0]!.source).toBe(execText);
+    // The companion .md frontmatter (with its `---` fences) must not leak into source.
+    expect(result.workflows[0]!.source).not.toContain("---");
+  });
 });
 
 // ---------------------------------------------------------------------------

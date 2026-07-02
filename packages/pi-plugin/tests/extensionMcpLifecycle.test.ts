@@ -154,4 +154,67 @@ describe("pi-plugin MCP lifecycle", () => {
     // The agent-tool guidance is omitted while the MCP server is unreachable.
     expect(result.systemPrompt).not.toContain("### Tools (available to you, the agent)");
   });
+
+  test("withMcpRetry reconnects once when a live MCP call fails mid-session", async () => {
+    let factoryCalls = 0;
+    const closeCounts: number[] = [];
+    setMcpConnectionFactoryForTesting(async () => {
+      const index = factoryCalls++;
+      closeCounts[index] = 0;
+      const transport = {
+        close: async () => {
+          closeCounts[index]++;
+        },
+      };
+      const client = {
+        async listTools() {
+          // The first connection's live call rejects (subprocess died); the
+          // connection withMcpRetry rebuilds answers successfully.
+          if (index === 0) throw new Error("transport closed mid-session");
+          return { tools: [{ name: "list_runs", description: "List runs" }] as FakeTool[] };
+        },
+      } as unknown as Client;
+      return { client, transport };
+    });
+
+    const pi = makeFakePi();
+    extension(pi.api);
+    const beforeAgentStart = pi.handlers.get("before_agent_start")!;
+    expect(beforeAgentStart).toBeDefined();
+
+    const result = await beforeAgentStart({ systemPrompt: "BASE PROMPT" });
+
+    // Recovered: exactly one rebuild (two connections), the dead transport was
+    // closed once, and the guidance built from the healthy client shipped.
+    expect(factoryCalls).toBe(2);
+    expect(closeCounts[0]).toBe(1);
+    expect(result.systemPrompt).toContain("### Tools (available to you, the agent)");
+  });
+
+  test("withMcpRetry gives up after the second failure without a third connection", async () => {
+    let factoryCalls = 0;
+    setMcpConnectionFactoryForTesting(async () => {
+      factoryCalls++;
+      const transport = { close: async () => {} };
+      const client = {
+        async listTools() {
+          throw new Error("transport closed mid-session");
+        },
+      } as unknown as Client;
+      return { client, transport };
+    });
+
+    const pi = makeFakePi();
+    extension(pi.api);
+    const beforeAgentStart = pi.handlers.get("before_agent_start")!;
+    expect(beforeAgentStart).toBeDefined();
+
+    const result = await beforeAgentStart({ systemPrompt: "BASE PROMPT" });
+
+    // Retried exactly once (two connections), then propagated; before_agent_start
+    // catches it and degrades instead of looping or spawning a third connection.
+    expect(factoryCalls).toBe(2);
+    expect(result.systemPrompt).toContain("BASE PROMPT");
+    expect(result.systemPrompt).not.toContain("### Tools (available to you, the agent)");
+  });
 });

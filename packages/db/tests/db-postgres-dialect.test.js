@@ -16,6 +16,8 @@ import { z } from "zod";
 import { SmithersDb } from "../src/adapter.js";
 import { SqlMessageStorage } from "../src/sql-message-storage.js";
 import { zodToTable } from "../src/zodToTable.js";
+import { syncZodTableSchemaPostgres } from "../src/zodToCreateTableSQL.js";
+import { POSTGRES } from "../src/dialect.js";
 
 // node-postgres returns int8 (BIGINT) as a string by default to avoid precision
 // loss; Smithers stores millisecond timestamps and booleans in BIGINT columns
@@ -270,4 +272,95 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
         const history = await adapter.listEventHistory(runId, { limit: N * 2 });
         expect(history.length).toBe(N); // no event silently dropped
     }, 60_000);
+
+    async function columnNames(table) {
+        const result = await client.query({
+            text: `SELECT column_name FROM information_schema.columns
+                     WHERE table_name = $1 AND table_schema = current_schema()`,
+            values: [table],
+        });
+        return new Set(result.rows.map((row) => row.column_name));
+    }
+
+    test("syncZodTableSchemaPostgres adds newly introduced columns to a stale output table", async () => {
+        const table = `out_evolve_${Date.now().toString(36)}`;
+        // v1 schema: a single user column. Create + seed a row.
+        await syncZodTableSchemaPostgres(client, table, z.object({ a: z.string() }), {
+            dialect: POSTGRES,
+        });
+        await client.query({
+            text: `INSERT INTO "${table}" (run_id, node_id, iteration, a) VALUES ($1, $2, $3, $4)`,
+            values: ["r1", "n1", 0, "hello"],
+        });
+
+        // v2 schema adds `b`; the ALTER-add path must introduce it without
+        // dropping the existing row.
+        await syncZodTableSchemaPostgres(
+            client,
+            table,
+            z.object({ a: z.string(), b: z.number() }),
+            { dialect: POSTGRES },
+        );
+
+        expect(await columnNames(table)).toContain("b");
+        const rows = await client.query({
+            text: `SELECT a, b FROM "${table}" WHERE run_id = $1`,
+            values: ["r1"],
+        });
+        expect(rows.rows[0].a).toBe("hello");
+        expect(rows.rows[0].b).toBeNull();
+
+        // Idempotent: a repeat call with the same schema is a no-op (ADD COLUMN
+        // IF NOT EXISTS), and the row is still intact.
+        await syncZodTableSchemaPostgres(
+            client,
+            table,
+            z.object({ a: z.string(), b: z.number() }),
+            { dialect: POSTGRES },
+        );
+        const after = await client.query({
+            text: `SELECT count(*)::int AS n FROM "${table}"`,
+        });
+        expect(after.rows[0].n).toBe(1);
+    }, 60_000);
+
+    test("syncZodTableSchemaPostgres evolves an isInput table", async () => {
+        const table = `in_evolve_${Date.now().toString(36)}`;
+        await syncZodTableSchemaPostgres(client, table, z.object({ x: z.string() }), {
+            dialect: POSTGRES,
+            isInput: true,
+        });
+        await client.query({
+            text: `INSERT INTO "${table}" (run_id, x) VALUES ($1, $2)`,
+            values: ["r1", "value"],
+        });
+
+        await syncZodTableSchemaPostgres(
+            client,
+            table,
+            z.object({ x: z.string(), y: z.string() }),
+            { dialect: POSTGRES, isInput: true },
+        );
+
+        expect(await columnNames(table)).toContain("y");
+        const rows = await client.query({
+            text: `SELECT x, y FROM "${table}" WHERE run_id = $1`,
+            values: ["r1"],
+        });
+        expect(rows.rows[0].x).toBe("value");
+        expect(rows.rows[0].y).toBeNull();
+    }, 60_000);
+
+    test("a failing statement surfaces a Postgres diagnostic message", async () => {
+        let caught;
+        try {
+            await storage.queryAll("SELECT * FROM __missing_pg_table__");
+        } catch (error) {
+            caught = error;
+        }
+        expect(caught).toBeDefined();
+        const message = caught instanceof Error ? caught.message : String(caught);
+        expect(message).toMatch(/Failed to execute Postgres statement: .+; sql=.+/);
+        expect(message).toContain("sql=SELECT * FROM __missing_pg_table__");
+    });
 });

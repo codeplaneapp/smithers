@@ -106,28 +106,33 @@ interface ElizaSkill {
 }
 
 /**
- * Parse and serialize `---`-fenced YAML frontmatter blocks.
+ * Parse and serialize frontmatter blocks from workflow files.
  *
- * Matches the elizaOS Skill frontmatter convention:
- * a leading `---\n...\n---\n` block containing YAML key-value pairs.
+ * Two formats are supported, matching the elizaOS Skill convention:
+ *  - a leading `---\n...\n---\n` YAML block (companion `.md` files); and
+ *  - a leading `/* ---\n...\n--- *\/` block comment (executable
+ *    `.ts`/`.tsx`/`.js`/`.mjs` files, where raw `---` breaks JS syntax).
  *
  * @module
  */
 
 /**
- * Parse the `---`-fenced YAML frontmatter block from `source`.
+ * Parse the frontmatter block from `source`.
  *
- * Returns `{ frontmatter, body }` where `body` is the remainder of the file
- * after the closing `---`. When no frontmatter block is present, `frontmatter`
- * is an empty object and `body` equals `source`.
+ * Checks block-comment frontmatter first (executable files), then falls back to
+ * `---`-fenced YAML (companion `.md` files). Returns `{ frontmatter, body }`
+ * where `body` is the remainder of the file after the frontmatter. When no
+ * frontmatter block is present, `frontmatter` is an empty object and `body`
+ * equals `source`.
  */
 declare function parseWorkflowFrontmatter(source: string): {
     frontmatter: WorkflowFrontmatter;
     body: string;
 };
 /**
- * Return `source` with the leading `---` YAML frontmatter block stripped.
- * When no frontmatter block is present, `source` is returned unchanged.
+ * Return `source` with the leading frontmatter block stripped (either `---`
+ * YAML or a `/* --- *\/` block comment). When no frontmatter block is present,
+ * `source` is returned unchanged.
  */
 declare function stripFrontmatter(source: string): string;
 /**
@@ -197,8 +202,11 @@ declare function defineWorkflowPlugin(plugin: WorkflowPlugin): WorkflowPlugin;
 /**
  * Workflow loaders — discover and load workflow files from the filesystem.
  *
- * `loadWorkflowsFromDir` walks a directory, dynamic-imports each workflow file,
- * reads its `---` YAML frontmatter, and builds `WorkflowDefinition` objects.
+ * `loadWorkflowsFromDir` walks a directory and, for each workflow file, reads
+ * frontmatter from the file's text FIRST (before dynamic import), then imports
+ * the module and builds a `WorkflowDefinition`. Frontmatter for executable
+ * files lives in a leading `/* ---\n...\n--- *\/` block comment; companion
+ * `.md` files may instead use plain `---`-fenced YAML.
  *
  * `loadWorkflows` aggregates across multiple sources with precedence ordering:
  * bundled < managed < project. Later sources override earlier ones on name
@@ -232,7 +240,8 @@ declare function loadWorkflows(options?: LoadWorkflowsOptions): Promise<LoadWork
  * Format a list of WorkflowDefinitions as a human-readable prompt string.
  *
  * Mirrors the pattern elizaOS uses to inject skill lists into system prompts.
- * Workflows with `disableModelInvocation: true` are omitted from the output.
+ * Workflows with `disableModelInvocation: true` or `system: true` are omitted
+ * from the output.
  *
  * @module
  */
@@ -249,7 +258,8 @@ interface FormatWorkflowsOptions {
  * Render a list of WorkflowDefinitions as a Markdown-ish prompt section.
  *
  * Workflows with `disableModelInvocation: true` are excluded so the LLM cannot
- * invoke them (matching elizaOS `formatSkillsForPrompt` behavior).
+ * invoke them (matching elizaOS `formatSkillsForPrompt` behavior). Workflows
+ * with `system: true` (internal plumbing) are excluded as well.
  */
 declare function formatWorkflowsForPrompt(workflows: WorkflowDefinition[], options?: FormatWorkflowsOptions): string;
 

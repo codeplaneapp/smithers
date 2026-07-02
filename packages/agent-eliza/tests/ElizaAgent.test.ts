@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ElizaAgent } from "../src/ElizaAgent.js";
+import { ElizaAgent, defaultRuntimeFactory } from "../src/ElizaAgent.js";
 import { z } from "zod";
 
 /** Minimal character for tests. */
@@ -226,15 +226,19 @@ describe("ElizaAgent", () => {
             expect((result as any).output).toMatchObject({ count: 42 });
         });
 
-        test("with outputSchema: throws when text is not valid JSON", async () => {
+        test("with outputSchema: throws a contextual error when text is not valid JSON", async () => {
             const { agent } = createAgentWithFakeRuntime(
                 { character: testCharacter },
                 "plain text response"
             );
             const schema = z.object({ count: z.number() });
-            await expect(
-                agent.generate({ prompt: "this won't parse", outputSchema: schema })
-            ).rejects.toThrow();
+            const err = await agent
+                .generate({ prompt: "this won't parse", outputSchema: schema })
+                .then(() => null, (e) => e);
+            expect(err).toBeInstanceOf(Error);
+            expect((err as Error).message).toMatch(/expected JSON output for outputSchema/);
+            // The offending model text is included (truncated) for diagnosis.
+            expect((err as Error).message).toContain("plain text response");
         });
 
         test("reuses the same runtime across multiple generate calls", async () => {
@@ -251,6 +255,16 @@ describe("ElizaAgent", () => {
             await expect(
                 agent.generate({ prompt: "aborted", abortSignal: controller.signal })
             ).rejects.toThrow(/aborted/);
+        });
+
+        test("abort error is named AbortError so the driver treats it as an abort", async () => {
+            const { agent } = createAgentWithFakeRuntime();
+            const controller = new AbortController();
+            controller.abort();
+            const err = await agent
+                .generate({ prompt: "aborted", abortSignal: controller.signal })
+                .then(() => null, (e) => e);
+            expect((err as Error).name).toBe("AbortError");
         });
 
         test("passes abortSignal through to useModel", async () => {
@@ -292,7 +306,45 @@ describe("ElizaAgent", () => {
             await modelCalled;
             controller.abort();
 
-            await expect(generation).rejects.toThrow(/aborted/);
+            const err = await generation.then(() => null, (e) => e);
+            expect((err as Error).name).toBe("AbortError");
+            expect((err as Error).message).toMatch(/aborted/);
+        });
+    });
+
+    describe("defaultRuntimeFactory", () => {
+        test("preserves the underlying load error as `cause`", async () => {
+            const boom = new Error("ESM/CJS interop boom");
+            const err = await defaultRuntimeFactory(
+                { character: testCharacter },
+                { loadCore: async () => { throw boom; } }
+            ).then(() => null, (e) => e);
+            expect(err).toBeInstanceOf(Error);
+            expect((err as Error).message).toMatch(/failed to load @elizaos\/core/);
+            expect((err as Error).cause).toBe(boom);
+        });
+
+        test("throws when the resolved module has no AgentRuntime", async () => {
+            await expect(
+                defaultRuntimeFactory(
+                    { character: testCharacter },
+                    { loadCore: async () => ({}) }
+                )
+            ).rejects.toThrow(/AgentRuntime was not found/);
+        });
+
+        test("merges settings with precedence env > settings > character.settings (real @elizaos/core)", async () => {
+            const runtime = (await defaultRuntimeFactory({
+                character: { name: "PrecedenceBot", settings: { A: "char", B: "char", C: "char" } },
+                settings: { B: "settings", C: "settings" },
+                env: { C: "env" },
+            })) as unknown as { character: { settings: Record<string, unknown> } };
+
+            expect(runtime.character.settings).toMatchObject({
+                A: "char",
+                B: "settings",
+                C: "env",
+            });
         });
     });
 

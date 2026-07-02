@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
 	buildRemoteProjectFiles,
 	buildSeedAgentAuthArgs,
+	DEFAULT_ORCHESTRATOR_VERSION,
 	extractRemoteRunId,
-	mapRemoteRunResult,
 	parseSshCommand,
 	parseUpStatus,
 	REMOTE_AUTH_PREFIX,
@@ -118,33 +120,10 @@ describe("buildSeedAgentAuthArgs", () => {
 	});
 });
 
-describe("mapRemoteRunResult", () => {
-	test("maps a finished run (inspect .run shape) to status finished", () => {
-		const inspect = { run: { id: "run-1", status: "finished" }, runState: { state: "succeeded" } };
-		const outcome = mapRemoteRunResult(inspect, "");
-		expect(outcome.status).toBe("finished");
-		expect(outcome.remoteRunId).toBe("run-1");
-		expect(outcome.output).toBe(inspect);
-	});
-
-	test("reads status from runState.state when run.status is absent", () => {
-		const outcome = mapRemoteRunResult({ run: { id: "run-2" }, runState: { state: "succeeded" } }, "");
-		expect(outcome.status).toBe("finished");
-		expect(outcome.remoteRunId).toBe("run-2");
-	});
-
-	test("maps a non-terminal status to failed with log tail", () => {
-		const outcome = mapRemoteRunResult({ run: { id: "run-3", status: "errored" } }, "boom");
-		expect(outcome.status).toBe("failed");
-		expect(outcome.remoteRunId).toBe("run-3");
-		expect((outcome.output as { logTail: string }).logTail).toBe("boom");
-	});
-
-	test("falls back to knownRunId when inspect omits the id", () => {
-		const outcome = mapRemoteRunResult(null, "no output produced", "run-known");
-		expect(outcome.status).toBe("failed");
-		expect(outcome.remoteRunId).toBe("run-known");
-		expect((outcome.output as { logTail: string }).logTail).toBe("no output produced");
+describe("DEFAULT_ORCHESTRATOR_VERSION", () => {
+	test("tracks the repo's root package.json version so a release bump can't leave it stale", () => {
+		const rootPkg = JSON.parse(readFileSync(join(import.meta.dir, "../../package.json"), "utf8"));
+		expect(DEFAULT_ORCHESTRATOR_VERSION).toBe(rootPkg.version);
 	});
 });
 

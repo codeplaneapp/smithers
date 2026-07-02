@@ -519,10 +519,12 @@ describe("sandbox transport runners", () => {
         expect(layerForSandboxRuntime("docker")).toBeDefined();
         expect(layerForSandboxRuntime("codeplane")).toBeDefined();
         expect(layerForSandboxRuntime("bubblewrap")).toBeDefined();
+        expect(() => layerForSandboxRuntime("cloudflare")).toThrow("requires a provider");
         expect(() => layerForSandboxRuntime("unknown-runtime")).toThrow("Unsupported sandbox runtime");
         expect(resolveSandboxRuntime("docker")).toBe("docker");
         expect(resolveSandboxRuntime("codeplane")).toBe("codeplane");
         expect(resolveSandboxRuntime("bubblewrap")).toBe("bubblewrap");
+        expect(resolveSandboxRuntime("cloudflare")).toBe("cloudflare");
         expect(() => resolveSandboxRuntime("unknown-runtime")).toThrow("Unsupported sandbox runtime");
     });
 

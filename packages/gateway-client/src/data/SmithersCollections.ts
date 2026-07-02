@@ -28,7 +28,6 @@ export type SmithersCollections = {
   runs(params?: ListRunsRequest): Collection<GatewayRunSummaryRow, string>;
   run(runId: string): Collection<GatewayRunRow, string>;
   runTree(runId: string): Collection<GatewayRunNode, string>;
-  events(runId: string, maxRows?: number): Collection<GatewayRunEventRow, string>;
   approvals(params?: ListApprovalsRequest): Collection<GatewayApprovalRow, string>;
   workflows(params?: ListWorkflowsRequest): Collection<GatewayWorkflowRow, string>;
   docs(params?: ListDocsRequest): Collection<GatewayDocRow, string>;

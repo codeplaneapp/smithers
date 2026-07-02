@@ -294,6 +294,32 @@ for (const backend of backends) {
       expect(Array.isArray(events.json.data)).toBe(true);
     }, 60_000);
 
+    test.skipIf(backend === "pglite" && process.platform === "win32")("listRuns filters by workflow over the REST surface", async () => {
+      const { baseUrl } = await bootGateway(backend);
+      const a = await launchRun(baseUrl, "value", { value: 1 });
+      const b = await launchRun(baseUrl, "value", { value: 2 });
+      await waitForRun(baseUrl, a.data.runId, "finished");
+      await waitForRun(baseUrl, b.data.runId, "finished");
+      // A run of a different workflow that the ?workflow=value filter must drop.
+      const slow = await launchRun(baseUrl, "slow");
+
+      const filtered = await apiRequest(baseUrl, "GET", "/v1/api/runs?workflow=value&limit=50");
+      expect(filtered.response.status).toBe(200);
+      expect(filtered.json.ok).toBe(true);
+      const rows = filtered.json.data as Array<{ runId: string; workflowKey: string }>;
+      expect(rows.length).toBeGreaterThanOrEqual(2);
+      expect(rows.every((row) => row.workflowKey === "value")).toBe(true);
+      expect(rows.some((row) => row.runId === slow.data.runId)).toBe(false);
+
+      // Without the filter the slow run is present, proving the filter (not an
+      // empty DB) is what excluded it above.
+      const unfiltered = await apiRequest(baseUrl, "GET", "/v1/api/runs?limit=50");
+      const allIds = (unfiltered.json.data as Array<{ runId: string }>).map((row) => row.runId);
+      expect(allIds).toContain(slow.data.runId);
+
+      await apiRequest(baseUrl, "POST", `/v1/api/runs/${slow.data.runId}/cancel`, {});
+    }, 60_000);
+
     test.skipIf(backend === "pglite" && process.platform === "win32")("write routes return seq locally and invalidate SSE", async () => {
       const { baseUrl } = await bootGateway(backend);
       const eventPromise = readSseUntil(baseUrl, (event) =>

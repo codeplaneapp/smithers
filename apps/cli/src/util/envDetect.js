@@ -15,11 +15,15 @@
  * Pipelines, TeamCity, Semaphore, AppVeyor, Codeship, Heroku CI, Wercker,
  * and the generic CI=true convention.
  *
+ * An explicit `CI=false` opts OUT (the ci-info convention and a common way to
+ * force interactive behavior), so only a truthy, non-"false" `CI` counts.
+ *
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function isCI(env = process.env) {
+    const ci = env.CI && env.CI.toLowerCase() !== "false" ? env.CI : undefined;
     return Boolean(
-        env.CI ||
+        ci ||
         env.GITHUB_ACTIONS ||
         env.GITLAB_CI ||
         env.BUILDKITE ||

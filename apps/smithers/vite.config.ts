@@ -87,7 +87,6 @@ export default defineConfig({
       "/health": { target: gatewayTarget, changeOrigin: true },
       "/workflows": { target: gatewayTarget, changeOrigin: true },
       "/api/chat": { target: conciergeTarget, changeOrigin: true },
-      "/api/ask": { target: conciergeTarget, changeOrigin: true },
     },
   },
   preview: {
@@ -100,7 +99,6 @@ export default defineConfig({
       "/health": { target: gatewayTarget, changeOrigin: true },
       "/workflows": { target: gatewayTarget, changeOrigin: true },
       "/api/chat": { target: conciergeTarget, changeOrigin: true },
-      "/api/ask": { target: conciergeTarget, changeOrigin: true },
     },
   },
   build: {

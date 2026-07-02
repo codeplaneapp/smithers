@@ -9,6 +9,12 @@
  * where the @opentui native binding fails to load only breaks the interactive
  * init path (which degrades to buildDefaultSelections), not every smithers
  * command. Do NOT statically import this file from any code on the startup path.
+ *
+ * Packaging note: @opentui/core resolves its native .dylib at import time via
+ * bun:ffi dlopen. Inside a `bunx smithers-orchestrator` run the platform-native
+ * optional dep loads from the bun cache, so dlopen normally succeeds; keeping
+ * this import dynamic is what turns a failed dlopen into a graceful degrade
+ * rather than a crash of every command.
  */
 
 import React, { useState, useRef } from "react";

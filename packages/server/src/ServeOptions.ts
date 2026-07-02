@@ -8,4 +8,11 @@ export type ServeOptions = {
   abort: AbortController;
   authToken?: string;
   metrics?: boolean;
+  /**
+   * Opt out of the unauthenticated Host/Origin rebinding+CSRF defense for a
+   * deliberate remote unauthenticated bind (the CLI `--insecure` flag). Ignored
+   * when `authToken` is set (the token is the gate). `SMITHERS_SERVE_TRUST_ANY_HOST`
+   * is an equivalent env opt-out.
+   */
+  insecure?: boolean;
 };

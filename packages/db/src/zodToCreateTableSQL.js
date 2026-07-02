@@ -1,5 +1,5 @@
 import { unwrapZodType } from "./unwrapZodType.js";
-import { columnType, SQLITE } from "./dialect.js";
+import { columnType, POSTGRES, SQLITE } from "./dialect.js";
 import { camelToSnake } from "./utils/camelToSnake.js";
 import { assertNoReservedColumns } from "./assertNoReservedColumns.js";
 /**
@@ -134,7 +134,13 @@ export function syncZodTableSchema(sqlite, tableName, schema, opts) {
  * @param {{ isInput?: boolean; dialect?: import("./dialect.js").Dialect }} [opts]
  */
 export async function syncZodTableSchemaPostgres(client, tableName, schema, opts) {
-    await client.query({ text: zodToCreateTableSQL(tableName, schema, opts) });
+    // This is the Postgres/PGlite path, so default to Postgres column types for
+    // both the CREATE below and the ALTER-add loop. Threading the resolved
+    // dialect through zodToCreateTableSQL keeps the two in lockstep even when a
+    // caller omits `dialect` (zodToCreateTableSQL itself defaults to SQLite).
+    const dialect = opts?.dialect ?? POSTGRES;
+    const dialectOpts = { ...opts, dialect };
+    await client.query({ text: zodToCreateTableSQL(tableName, schema, dialectOpts) });
     if (!opts?.isInput) {
         try {
             await client.query({
@@ -152,7 +158,6 @@ export async function syncZodTableSchemaPostgres(client, tableName, schema, opts
         }
     }
     const quotedTable = quoteIdentifier(tableName);
-    const dialect = opts?.dialect ?? SQLITE;
     for (const { name, sqliteType } of zodSchemaColumns(schema)) {
         await client.query({
             text: `ALTER TABLE ${quotedTable} ADD COLUMN IF NOT EXISTS ${quoteIdentifier(name)} ${columnType(dialect, sqliteType)}`,

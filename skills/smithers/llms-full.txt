@@ -2086,16 +2086,17 @@ Commands listed by dotted name. `human` and `alerts` use an action positional in
 ```toon
 commands[85]:
   - name: init
-    purpose: Install the local Smithers workflow pack into .smithers/. Pass an optional prompt to also launch the create-workflow builder after init.
+    purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal a wizard first lets you pick workflows and skill targets; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
       prompt,string,false,Optional plain-English task: after init, launch the create-workflow builder with this prompt pre-filled
-    flags[9]{name,short,type,default,desc}:
+    flags[10]{name,short,type,default,desc}:
       force,,boolean,false,Overwrite existing scaffold files
       agents-only,,boolean,false,Only create .smithers/agents/ and leave workflow pack untouched
       install,,boolean,true,Run bun install inside the pack after scaffolding
       add-agents,,boolean,false,Launch the account registration wizard after scaffolding
       skill,,boolean,true,Install the curated smithers skill into detected coding agents and append workflow guidance to existing CLAUDE.md/AGENTS.md files
       global,,boolean,false,Scaffold the global pack in ~/.smithers (honors SMITHERS_HOME) instead of ./.smithers
+      update-prompt,,boolean,true,In an interactive terminal, ask which drifted shipped pack files to update (warns on shared components); --no-update-prompt skips
       template,,string,,Show next steps for a canonical starter template ID after init
       yes,,boolean,false,Non-interactive: skip prompts and use defaults; alias for --non-interactive
       non-interactive,,boolean,false,Non-interactive: skip prompts and use defaults; alias for --yes
@@ -8627,7 +8628,9 @@ This is a full `.smithers/ui/<workflow>.tsx` bundle: a run picker, the node tree
 a live event log, a node-output pane, and the approval queue, wired together with
 local state. Save it next to a workflow, register the workflow with
 `ui: { entry: ".smithers/ui/<workflow>.tsx" }`, and open it with
-`bunx smithers-orchestrator ui --app` or `bunx smithers-orchestrator ui RUN_ID`.
+`bunx smithers-orchestrator ui RUN_ID` (or `bunx smithers-orchestrator ui --workflow <workflow>`).
+To open the full local control surface instead of a single workflow UI, see
+`bunx smithers-orchestrator ui --app` below.
 
 ```tsx
 /** @jsxImportSource react */
@@ -8681,6 +8684,67 @@ stream live as the run advances, `ApprovalPanel` lets you clear human gates, and
 `LaunchButton` starts a fresh run. Mix these with raw
 `gateway-react` hooks whenever you need something the
 components do not cover.
+
+## The full local Smithers UI
+
+`bunx smithers-orchestrator ui --app` serves the full local control surface (`apps/smithers`)
+instead of a single workflow's UI. It builds the app bundle on first use, serves
+it same-origin with a local Gateway (reverse-proxying the Gateway's RPC,
+WebSocket, and health paths), and opens it in your browser as a dashboard for
+your runs, approvals, workspace files, and VCS state.
+
+### Prerequisites
+
+The app ships a local "concierge" chat that answers questions and backgrounds
+workflows for you, so `--app` fails fast unless both of these hold:
+
+- A chat credential. Set exactly one of `CEREBRAS_API_KEY` (recommended,
+  fastest), `OPENAI_API_KEY`, `CODEX_ACCESS_TOKEN`, or `CODEX_REFRESH_TOKEN`.
+  With none set, the command exits before it binds a port and prints which
+  variable to set.
+- `bun` on your `PATH`. The concierge runs on Bun, so the command checks for it
+  up front and exits with an install hint if it is missing.
+
+```bash
+CEREBRAS_API_KEY=csk-... bunx smithers-orchestrator ui --app
+```
+
+### The concierge
+
+The concierge is a small local chat backend the app talks to at `/api/chat`. Its
+system prompt is seeded with the live catalog of workflows registered on your
+Gateway, so it can background any of them for you, including `create-workflow`,
+the meta-workflow that authors a brand-new workflow. It streams answers back
+token by token, binds to loopback only, and needs no cloud account.
+
+### Local workspace endpoints
+
+Alongside the Gateway proxy, the `--app` server exposes a few loopback-only
+endpoints the app uses to read and edit your working tree:
+
+- `GET /api/files/tree`, `GET /api/files/read`, and `POST /api/files/write` for
+  the file browser and editor.
+- `/__smithers/local-vcs` for the local VCS (jj/git) status the app renders.
+- `/__smithers/local-workspace` and `/__smithers/local-workspace/readiness` for
+  workspace detection and readiness against the proxied Gateway.
+
+These bind to `127.0.0.1` only and are scoped to the directory you launch from.
+
+### Flags
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--app` | `false` | Serve the full local UI instead of a single workflow run UI. |
+| `--app-port <port>` | `7332` | Port to serve the full UI on. |
+| `--rebuild` | `false` | Force a rebuild of the UI bundle before serving. |
+| `--gateway <url>`, `-g` | `http://127.0.0.1:<port>` | Gateway base URL to proxy and read runs from. |
+| `--port <port>` | `7331` | Gateway port when `--gateway` is not set. |
+| `--no-open` | opens a browser | Print the URL instead of opening a browser. |
+| `--no-autostart` | autostarts | Do not start a Gateway if none is reachable. |
+| `--no-daemon` | daemon allowed | Force direct/embedded operation and never start a background Gateway daemon. |
+
+Without `--app`, `bunx smithers-orchestrator ui [runId]` opens a single workflow run's custom UI
+(the component gallery above) against the Gateway rather than the full surface.
 
 ## When to drop to hooks
 
@@ -9111,7 +9175,7 @@ A run id that does not exist is not a `RunState`. It's an error
 
 That removal dropped the old `apps/cli/src/tui/` tree (and, at the time, the CLI's OpenTUI dependency). OpenTUI has since returned in a different place: the full-screen single-run monitor (a separate `@smithers-orchestrator/tui` package, `smithers-mon` bin) is built on OpenTUI and is what `up --interactive` hands off to (see below). The historical note above is about the *old* `tui` command, not the new monitor.
 
-If you want the old "pick a workflow, start it, and watch it live" experience, that flow now lives behind a flag on the run commands: `up --interactive` (or `workflow run --interactive`). With no workflow argument it opens an interactive picker, prompts for inputs, starts the run, and then hands off to the full-screen single-run monitor (a separate `smithers-mon` binary) for the lifetime of the run. When that monitor binary isn't installed (e.g. a slim install), it falls back to an inline append-only stream of the run's status until it finishes or pauses on a gate.
+If you want the old "pick a workflow, start it, and watch it live" experience, that flow now lives behind a flag on the run commands: `up --interactive` (or `workflow run --interactive`). With no workflow argument it opens an interactive picker, prompts for inputs, starts the run, and then hands off to the full-screen single-run monitor (a separate `smithers-mon` binary) for the lifetime of the run. There is no silent fallback: if `@smithers-orchestrator/tui` cannot be resolved (e.g. a slim install), the command fails with `TUI_MONITOR_UNAVAILABLE` while the detached run keeps running — watch it with `smithers ps` / `smithers inspect <runId>` or the run's log file.
 
 ## Replacements
 
@@ -12430,6 +12494,23 @@ const hermes = new HermesAgent({
 ```
 
 `baseURL` falls back to the `HERMES_BASE_URL` env var and must be set in either place. `apiKey` falls back to `HERMES_API_KEY` (then `"hermes"`). Pass `nativeStructuredOutput: true` if your server does honor JSON-schema output. To use Smithers *from* Hermes instead of running Hermes as a worker, see Agent Support → Hermes.
+
+## Eliza
+
+`ElizaAgent` wraps an in-process elizaOS `AgentRuntime` so an Eliza character and its plugins (Slack, Discord, Telegram, model providers) run as a first-class Smithers agent. Unlike the other agents on this page, it ships in a separate opt-in package that owns the `@elizaos/core` dependency, so install and import it from `@smithers-orchestrator/agent-eliza`:
+
+```ts
+import { ElizaAgent } from "@smithers-orchestrator/agent-eliza";
+
+const eliza = new ElizaAgent({
+  character: { name: "SupportBot", bio: "Answers product questions." },
+  plugins: [],
+  settings: { SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN ?? "" },
+  model: "eliza",
+});
+```
+
+The harness lazily initializes the runtime on the first `generate` (or `preflight`) call and reuses it across calls. `settings` and `env` merge onto the character's own `settings` with precedence `env` over `settings` over `character.settings`. Pass an `outputSchema` on the Smithers task (or directly to `generate`) for structured output; `ElizaAgent` extracts JSON from the model's text because it does not set `supportsNativeStructuredOutput`.
 
 ## Hijack Support
 

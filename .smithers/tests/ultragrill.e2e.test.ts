@@ -27,7 +27,6 @@ const runnerScript = resolve(here, "ultragrillRunFixture.ts");
 const realNodeModules = resolve(repoRoot, "node_modules");
 const RUN_ID = "ultragrill-e2e";
 const require = createRequire(import.meta.url);
-const STUDIO_PLAYWRIGHT_ENTRY = resolve(repoRoot, "apps/smithers-studio-2/node_modules/playwright/index.js");
 
 // Superset worker response: satisfies the work schema with recognizable tokens.
 const FAKE_RESPONSE = JSON.stringify({
@@ -79,7 +78,6 @@ function healthOk(): Promise<boolean> {
 }
 function resolveChromium() {
   const entries = ["playwright"];
-  if (existsSync(STUDIO_PLAYWRIGHT_ENTRY)) entries.push(STUDIO_PLAYWRIGHT_ENTRY);
   for (const entry of entries) {
     try {
       const chromium = require(entry).chromium;

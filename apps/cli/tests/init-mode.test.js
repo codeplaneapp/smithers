@@ -114,6 +114,13 @@ test("isCI: returns true for CI=true", () => {
     expect(isCI({ CI: "true" })).toBe(true);
 });
 
+test("isCI: returns false for an explicit CI=false (ci-info opt-out convention)", () => {
+    expect(isCI({ CI: "false" })).toBe(false);
+    expect(isCI({ CI: "False" })).toBe(false);
+    // A non-CI provider var alongside CI=false still wins if it is set.
+    expect(isCI({ CI: "false", GITHUB_ACTIONS: "true" })).toBe(true);
+});
+
 test("isCI: returns true for GITHUB_ACTIONS", () => {
     expect(isCI({ GITHUB_ACTIONS: "true" })).toBe(true);
 });

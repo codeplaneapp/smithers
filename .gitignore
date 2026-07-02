@@ -70,6 +70,8 @@ deno.lock
 # Smithers runtime artifacts
 **/.smithers/sandboxes/
 **/.smithers/executions/
+# Local `smithers bug-report` drafts (per-machine, not history)
+**/.smithers/bug-reports/
 # Behavioral-test temp op-console stores (random suffixes)
 **/.smithers-op-console-*/
 # PGlite/Postgres durable store (default backend's data dir) + migration marker

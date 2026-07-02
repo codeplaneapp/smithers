@@ -637,3 +637,63 @@ test("gateway --mint-token requires the minted bearer", async () => {
     const body = await authenticated.json();
     expect(body.ok).toBe(true);
 }, 60_000);
+
+// An operator-supplied --auth-token (or SMITHERS_API_KEY) is a durable, possibly
+// org-wide secret: it must NOT be copied to the on-disk state file. The daemon
+// mints a SEPARATE session-only bearer for the state file (so cross-shell clients
+// discover a working token), registers BOTH, and never persists the explicit one.
+test("gateway --auth-token keeps the operator token out of the state file but still authenticates", async () => {
+    const repo = createTempRepo();
+    writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
+    const { stateDir, env } = makeStateDirEnv();
+    const port = await findOpenPort();
+    const explicitToken = "operator-durable-secret-abc123";
+
+    const gateway = await startGateway(
+        repo,
+        { ...env, SMITHERS_API_KEY: "" },
+        ["--port", String(port), "--auth-token", explicitToken],
+    );
+    const stateEnv = { ...process.env, SMITHERS_GATEWAY_STATE_DIR: stateDir };
+    const state = readGatewayRuntimeState(repo.dir, stateEnv);
+    // The persisted token is a freshly minted session token, not the operator's.
+    expect(state?.token).toHaveLength(64);
+    expect(state?.token).not.toBe(explicitToken);
+
+    const { stateFile } = gatewayRuntimePaths(repo.dir, stateEnv);
+    const fileContents = readFileSync(stateFile, "utf8");
+    expect(fileContents).toContain(state.token);
+    expect(fileContents).not.toContain(explicitToken);
+
+    // No bearer → rejected.
+    const unauthenticated = await fetch(`${state.url}/v1/rpc/listRuns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+        signal: AbortSignal.timeout(3_000),
+    });
+    expect(unauthenticated.status).toBe(401);
+
+    // The session token from the state file authenticates (cross-shell clients).
+    const withSession = await fetch(`${state.url}/v1/rpc/listRuns`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${state.token}` },
+        body: "{}",
+        signal: AbortSignal.timeout(3_000),
+    });
+    expect(withSession.status).toBe(200);
+
+    // The operator's own explicit token still authenticates too.
+    const withExplicit = await fetch(`${state.url}/v1/rpc/listRuns`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${explicitToken}` },
+        body: "{}",
+        signal: AbortSignal.timeout(3_000),
+    });
+    expect(withExplicit.status).toBe(200);
+
+    // status still reports auth as active (derived from the persisted token).
+    const status = runSmithers(["gateway", "status"], { cwd: repo.dir, format: "json", env, timeoutMs: 30_000 });
+    expect(status.exitCode).toBe(0);
+    expect(status.json?.auth).toBe("token");
+}, 60_000);

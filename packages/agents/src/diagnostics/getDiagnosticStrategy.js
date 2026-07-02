@@ -147,6 +147,7 @@ function readClaudeCliCredentials(env) {
         // macOS Claude Code stores OAuth credentials in the Keychain, not on disk.
         if (process.platform === "darwin") {
             const keychain = spawnSync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], {
+                env,
                 stdio: ["ignore", "pipe", "pipe"],
                 timeout: 5_000,
                 encoding: "utf8",

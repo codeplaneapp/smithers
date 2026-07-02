@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,6 +62,74 @@ describe("docs-driven-development workflow guards", () => {
     expect(bounded.value.startsWith("a".repeat(12_000))).toBe(true);
     expect(bounded.artifactPath).toContain(".smithers/docs-driven-development/artifacts/long-docs-diff-");
     expect(readFileSync(bounded.artifactPath, "utf8")).toBe(long);
+  });
+
+  test("boundedField reuses a stable per-name artifact so repeated audit rounds never accumulate files", async () => {
+    const root = tempRoot();
+    const mod = await importWorkflow(root);
+    const artifactsDir = join(root, ".smithers/docs-driven-development/artifacts");
+
+    const first = mod.boundedField("a".repeat(20_000), "round-diff");
+    const second = mod.boundedField("b".repeat(20_000), "round-diff");
+
+    // Each round overwrites the same `<name>-latest.txt` instead of spilling a
+    // new timestamped file, so the auditor's bounded input set cannot grow.
+    expect(first.artifactPath).toBe(second.artifactPath);
+    expect(readdirSync(artifactsDir).filter((name) => name.startsWith("round-diff"))).toEqual([
+      "round-diff-latest.txt",
+    ]);
+    expect(readFileSync(second.artifactPath, "utf8")).toBe("b".repeat(20_000));
+  });
+
+  test("resolveMaxIterations clamps audit-only runs to a single round and preserves bounded implementation rounds", async () => {
+    const mod = await importWorkflow(tempRoot());
+
+    // runImplementation:false can never self-terminate (no work wave ever
+    // renders), so it must run exactly one spec-refresh pass, whatever maxRounds says.
+    expect(mod.resolveMaxIterations(undefined, false)).toBe(1);
+    expect(mod.resolveMaxIterations(100000, false)).toBe(1);
+    expect(mod.resolveMaxIterations(7, false)).toBe(1);
+    // With implementation enabled, the long-running default and explicit caps stand.
+    expect(mod.resolveMaxIterations(undefined, true)).toBe(100000);
+    expect(mod.resolveMaxIterations(0, true)).toBe(100000);
+    expect(mod.resolveMaxIterations(7, true)).toBe(7);
+  });
+
+  test("tryRunCommand reports success and failure explicitly instead of leaking error text as command output", async () => {
+    const mod = await importWorkflow(tempRoot());
+
+    const ok = mod.tryRunCommand("git", ["--version"]);
+    expect(ok.ok).toBe(true);
+    expect(ok.output).toContain("git");
+    expect(ok.error).toBe("");
+
+    const failed = mod.tryRunCommand("smithers-no-such-binary-xyz", ["status"]);
+    expect(failed.ok).toBe(false);
+    expect(failed.output).toBe("");
+    expect(failed.error.length).toBeGreaterThan(0);
+
+    // The metaTicket node derives codeDiffFiles from this seam; on failure the
+    // list must be empty, never error prose split into fake file names.
+    const codeDiffFiles = failed.ok ? failed.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) : [];
+    expect(codeDiffFiles).toEqual([]);
+  });
+
+  test("runCommandResult logs command failures so they surface in run logs", async () => {
+    const mod = await importWorkflow(tempRoot());
+    const logged: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      logged.push(args.map((arg) => String(arg)).join(" "));
+    };
+    try {
+      const failed = mod.runCommandResult("smithers-no-such-binary-xyz", [], "code-diff");
+      expect(failed.ok).toBe(false);
+      const ok = mod.runCommandResult("git", ["--version"], "git-version");
+      expect(ok.ok).toBe(true);
+    } finally {
+      console.error = originalError;
+    }
+    expect(logged.some((line) => line.includes("code-diff"))).toBe(true);
   });
 
   test("cleanDiffForMetaTicket filters generated, workflow, UI, and DDD script paths", async () => {

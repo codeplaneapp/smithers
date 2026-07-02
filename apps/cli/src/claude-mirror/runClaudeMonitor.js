@@ -87,6 +87,16 @@ export async function runClaudeMonitor(adapter, options = {}) {
                     continue;
                 }
                 const payload = parsePayload(row.payloadJson);
+                if (kind === "approval-pending") {
+                    // Dedupe against emitPendingGates (below), which surfaces the
+                    // same still-pending gate each tick. Use the identical key so a
+                    // gate requested while we are watching a run is announced once,
+                    // not twice (event-log line + pending-gates line).
+                    const nodeId = typeof payload?.nodeId === "string" ? payload.nodeId : "";
+                    const iteration = typeof payload?.iteration === "number" ? payload.iteration : 0;
+                    emitOnce(`approval:${runId}:${nodeId}:${iteration}`, buildEventEntry(kind, runId, payload));
+                    continue;
+                }
                 emit(buildEventEntry(kind, runId, payload));
             }
             cursors.set(runId, cursor);

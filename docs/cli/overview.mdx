@@ -95,16 +95,17 @@ Commands listed by dotted name. `human` and `alerts` use an action positional in
 ```toon
 commands[85]:
   - name: init
-    purpose: Install the local Smithers workflow pack into .smithers/. Pass an optional prompt to also launch the create-workflow builder after init.
+    purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal a wizard first lets you pick workflows and skill targets; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
     args[1]{name,type,required,desc}:
       prompt,string,false,Optional plain-English task: after init, launch the create-workflow builder with this prompt pre-filled
-    flags[9]{name,short,type,default,desc}:
+    flags[10]{name,short,type,default,desc}:
       force,,boolean,false,Overwrite existing scaffold files
       agents-only,,boolean,false,Only create .smithers/agents/ and leave workflow pack untouched
       install,,boolean,true,Run bun install inside the pack after scaffolding
       add-agents,,boolean,false,Launch the account registration wizard after scaffolding
       skill,,boolean,true,Install the curated smithers skill into detected coding agents and append workflow guidance to existing CLAUDE.md/AGENTS.md files
       global,,boolean,false,Scaffold the global pack in ~/.smithers (honors SMITHERS_HOME) instead of ./.smithers
+      update-prompt,,boolean,true,In an interactive terminal, ask which drifted shipped pack files to update (warns on shared components); --no-update-prompt skips
       template,,string,,Show next steps for a canonical starter template ID after init
       yes,,boolean,false,Non-interactive: skip prompts and use defaults; alias for --non-interactive
       non-interactive,,boolean,false,Non-interactive: skip prompts and use defaults; alias for --yes

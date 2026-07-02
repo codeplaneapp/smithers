@@ -89,7 +89,14 @@ export function TimelineCanvas({ runId }: { runId: string }) {
   const run = selectRun(runs, runId);
   const raw = runs.find((entry) => entry.id === runId);
   if (!run || !raw) {
-    return <div className="surface-empty">Run not found.</div>;
+    // The scrubber below is driven by the legacy demo `runsStore`, which real
+    // gateway runs never populate, so time travel isn't wired to real runs yet.
+    // Render an honest empty state instead of a misleading "Run not found."
+    return (
+      <div className="surface-empty" data-testid="timeline-not-wired">
+        Time travel isn&apos;t wired to the gateway yet.
+      </div>
+    );
   }
 
   const latest = run.frameCount - 1;

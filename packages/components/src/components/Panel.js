@@ -10,7 +10,7 @@ import { Task } from "./Task.js";
 /** @typedef {import("./PanelistConfig.ts").PanelistConfig} PanelistConfig */
 
 /**
- * @param {PanelistConfig | AgentLike} entry
+ * @param {PanelistConfig | AgentLike | AgentLike[]} entry
  * @param {number} index
  * @returns {PanelistConfig}
  */

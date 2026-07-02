@@ -214,7 +214,7 @@ const COMPONENT_MANIFEST = {
     FeatureEnum: { components: [], prompts: ["feature-enum-scan", "feature-enum-refine"] },
 };
 /**
- * @typedef {{ id: string; ui: string; components: string[]; prompts: string[]; seeded?: boolean }} WorkflowManifestEntry
+ * @typedef {{ id: string; ui: string; components: string[]; prompts: string[]; seeded?: boolean; system?: boolean }} WorkflowManifestEntry
  */
 /**
  * Single source of truth for every installable workflow — its UI key, the
@@ -258,10 +258,26 @@ const WORKFLOW_MANIFEST = [
     { id: "smithering", ui: "smithering", components: [], prompts: [], seeded: true },
     { id: "make-workflow-tutorial", ui: "make-workflow-tutorial", components: [], prompts: [], seeded: true },
     // System workflow: durable `smithers init` (hidden from default listings).
-    { id: "init", ui: "init", components: [], prompts: [], seeded: true },
+    { id: "init", ui: "init", components: [], prompts: [], seeded: true, system: true },
     // System workflow: auto-launched autopsy for failed runs.
-    { id: "post-failure", ui: "post-failure", components: [], prompts: [], seeded: true },
+    { id: "post-failure", ui: "post-failure", components: [], prompts: [], seeded: true, system: true },
 ];
+/**
+ * The IDs of every installable workflow, in manifest order. System workflows
+ * (durable `init`, `post-failure` autopsy) are internal plumbing the pack
+ * closure always installs — they are never offered in the interactive wizard
+ * and never subject to à-la-carte deselection — so they are excluded unless
+ * `includeSystem: true` is passed. Exported so the init wizard derives its
+ * option list from this single source of truth instead of a hand-kept copy.
+ *
+ * @param {{ includeSystem?: boolean }} [opts]
+ * @returns {string[]}
+ */
+export function workflowManifestIds(opts = {}) {
+    return WORKFLOW_MANIFEST
+        .filter((w) => opts.includeSystem || !w.system)
+        .map((w) => w.id);
+}
 /**
  * Prompt IDs from renderPrompts() that are always emitted regardless of
  * selectedWorkflows — utility prompts not owned by any specific manifest entry.
@@ -292,7 +308,13 @@ const ALWAYS_EMIT_COMPONENTS = new Set(["CommandProbe"]);
  */
 function computeClosure(selectedWorkflows) {
     const allIds = WORKFLOW_MANIFEST.map((w) => w.id);
-    const workflowIds = new Set(selectedWorkflows ?? allIds);
+    // System workflows (durable `init`, `post-failure`) are always installed
+    // regardless of the caller's selection: the wizard never offers them and
+    // an à-la-carte selection must not drop them (else durable re-init and the
+    // failure autopsy silently stop working). Force-include them here rather
+    // than trusting every caller to remember.
+    const systemIds = WORKFLOW_MANIFEST.filter((w) => w.system).map((w) => w.id);
+    const workflowIds = new Set([...(selectedWorkflows ?? allIds), ...systemIds]);
     const componentNames = /** @type {Set<string>} */ (new Set(ALWAYS_EMIT_COMPONENTS));
     const promptIds = new Set(ALWAYS_EMIT_PROMPTS);
     for (const entry of WORKFLOW_MANIFEST) {
@@ -4704,6 +4726,88 @@ function renderTemplateFiles(versions, env, projectRoot, closure, options = {}) 
     ];
 }
 /**
+ * Agent doc filenames that can receive the smithers-workflow guidance block.
+ * Mirrors DEFAULT_FILE_NAMES in noteWorkflowPreferenceInAgentDocs.js; used to
+ * reconstruct the honored allowlist from a persisted deselection.
+ * @type {string[]}
+ */
+const AGENT_DOC_FILE_NAMES = ["CLAUDE.md", "AGENTS.md"];
+
+/**
+ * Pack-local marker recording which workflows / agent docs the user deselected
+ * during an interactive `smithers init`, so a later NON-interactive re-init
+ * (agent-run `init --yes`, the durable `init` workflow, CI) does not silently
+ * re-add them. Mirrors the skill-deselection marker (installCuratedSkill.js).
+ *
+ * It lives at the pack root and is written OUTSIDE `templateFiles`, so `--force`
+ * (which only rewrites bundled templates) never clobbers it. A missing or empty
+ * marker means "install every workflow", keeping existing packs unchanged.
+ */
+const PACK_SELECTIONS_FILE = "pack-selections.json";
+
+/** @param {string} rootDir */
+function packSelectionsPath(rootDir) {
+    return resolve(rootDir, PACK_SELECTIONS_FILE);
+}
+
+/**
+ * @param {string} rootDir
+ * @returns {{ deselectedWorkflows: string[]; deselectedAgentDocs: string[] }}
+ */
+function loadPackSelections(rootDir) {
+    try {
+        const parsed = JSON.parse(readFileSync(packSelectionsPath(rootDir), "utf8"));
+        return {
+            deselectedWorkflows: Array.isArray(parsed.deselectedWorkflows) ? parsed.deselectedWorkflows : [],
+            deselectedAgentDocs: Array.isArray(parsed.deselectedAgentDocs) ? parsed.deselectedAgentDocs : [],
+        };
+    } catch {
+        return { deselectedWorkflows: [], deselectedAgentDocs: [] };
+    }
+}
+
+/**
+ * @param {string} rootDir
+ * @param {{ deselectedWorkflows: string[]; deselectedAgentDocs: string[] }} selections
+ */
+function savePackSelections(rootDir, selections) {
+    try {
+        writeFileSync(packSelectionsPath(rootDir), `${JSON.stringify(selections, null, 2)}\n`, "utf8");
+    } catch {
+        /* best-effort: a persistence failure must never block init */
+    }
+}
+
+/**
+ * Reconstruct the honored agent-doc allowlist from a persisted deselection.
+ * Returns `undefined` when nothing was deselected (meaning "all agent docs"), so
+ * the result passes straight through to `noteWorkflowPreferenceInAgentDocs`'s
+ * optional `fileNames` (undefined = its default of both docs).
+ * @param {string[]} deselectedAgentDocs
+ * @returns {string[] | undefined}
+ */
+function survivingAgentDocs(deselectedAgentDocs) {
+    if (!deselectedAgentDocs || deselectedAgentDocs.length === 0) return undefined;
+    const deselected = new Set(deselectedAgentDocs.map((name) => name.toLowerCase()));
+    return AGENT_DOC_FILE_NAMES.filter((name) => !deselected.has(name.toLowerCase()));
+}
+
+/**
+ * Which agent-doc filenames (CLAUDE.md / AGENTS.md) still opt in to the
+ * workflow-guidance block for the pack at `rootDir`, honoring the à-la-carte
+ * deselection persisted in `pack-selections.json`. Exported so the durable
+ * `init` workflow — whose `note-agent-docs` task calls
+ * `noteWorkflowPreferenceInAgentDocs` directly, outside `initWorkflowPack`'s
+ * `installSkill` block — does not re-add guidance to a doc the user opted out of
+ * during an interactive init. Returns `undefined` when nothing was deselected.
+ * @param {string} rootDir  Pack root (the `.smithers` dir) holding pack-selections.json
+ * @returns {string[] | undefined}
+ */
+export function resolveEffectiveAgentDocs(rootDir) {
+    return survivingAgentDocs(loadPackSelections(rootDir).deselectedAgentDocs);
+}
+
+/**
  * @param {InitOptions} [options]
  * @returns {InitResult}
  */
@@ -4726,6 +4830,21 @@ export function initWorkflowPack(options = {}) {
     // `init` ceremony offers these for selective update; other callers just see
     // them in the result. Enriched with shared-component impact for the warning.
     const changedFiles = [];
+    // Honor a persisted à-la-carte deselection when the caller didn't pass an
+    // explicit selection. Non-interactive re-init and the durable `init`
+    // workflow both call with selectedWorkflows/selectedAgentDocs === undefined
+    // (defaulting to "everything"); without this they would re-add a workflow
+    // or agent-doc the user opted out of during an interactive init.
+    const persisted = options.agentsOnly ? { deselectedWorkflows: [], deselectedAgentDocs: [] } : loadPackSelections(rootDir);
+    let effectiveSelectedWorkflows = options.selectedWorkflows;
+    if (effectiveSelectedWorkflows === undefined && persisted.deselectedWorkflows.length > 0) {
+        const deselected = new Set(persisted.deselectedWorkflows);
+        effectiveSelectedWorkflows = workflowManifestIds({ includeSystem: false }).filter((id) => !deselected.has(id));
+    }
+    let effectiveAgentDocs = options.selectedAgentDocs;
+    if (effectiveAgentDocs === undefined) {
+        effectiveAgentDocs = survivingAgentDocs(persisted.deselectedAgentDocs);
+    }
     ensureDir(rootDir);
     ensureDir(resolve(rootDir, "agents"));
     /** @type {TemplateFile[]} */
@@ -4747,7 +4866,7 @@ export function initWorkflowPack(options = {}) {
         else {
             ensureDir(executionsDir);
         }
-        const closure = computeClosure(options.selectedWorkflows);
+        const closure = computeClosure(effectiveSelectedWorkflows);
         templateFiles = renderTemplateFiles(versions, env, projectRoot, closure, {
             scaffoldCustomAgent: options.scaffoldCustomAgent,
         });
@@ -4843,9 +4962,24 @@ export function initWorkflowPack(options = {}) {
     if (options.installSkill && !options.agentsOnly) {
         agentDocs = noteWorkflowPreferenceInAgentDocs({
             projectRoot,
-            ...(options.selectedAgentDocs ? { fileNames: options.selectedAgentDocs } : {}),
+            ...(effectiveAgentDocs ? { fileNames: effectiveAgentDocs } : {}),
         });
         options.reporter?.agentDocsNoted?.(agentDocs);
+    }
+    // Persist the à-la-carte workflow / agent-doc deselection so a later
+    // non-interactive re-init (or the durable `init` workflow) does not re-add
+    // what the user opted out of. Only write when the caller passed an explicit
+    // selection (the interactive ceremony does); an undefined selection is
+    // non-interactive and HONORS the marker above rather than rewriting it.
+    if (!options.agentsOnly && (options.selectedWorkflows !== undefined || options.selectedAgentDocs !== undefined)) {
+        const deselectedWorkflows = options.selectedWorkflows !== undefined
+            ? workflowManifestIds({ includeSystem: false }).filter((id) => !options.selectedWorkflows.includes(id))
+            : persisted.deselectedWorkflows;
+        const selectedDocs = options.selectedAgentDocs?.map((name) => name.toLowerCase());
+        const deselectedAgentDocs = selectedDocs !== undefined
+            ? AGENT_DOC_FILE_NAMES.filter((name) => !selectedDocs.includes(name.toLowerCase()))
+            : persisted.deselectedAgentDocs;
+        savePackSelections(rootDir, { deselectedWorkflows, deselectedAgentDocs });
     }
     const install = options.agentsOnly
         ? { status: "skipped", reason: "agents-only" }

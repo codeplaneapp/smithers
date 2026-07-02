@@ -108,13 +108,16 @@ describe("deriveClaudeWorkflowPhases", () => {
 });
 
 import { deriveClaudeWorkflowPhasesFromFrame } from "../src/deriveClaudeWorkflowPhasesFromFrame.js";
+import { classifyClaudeWorkflowNodeKind } from "../src/classifyClaudeWorkflowNodeKind.js";
 import { canonicalizeXml } from "../src/utils/xml.js";
 
 /**
- * Serialize a graph the way the engine persists a frame row:
+ * Serialize a graph exactly the way the engine persists a frame row:
  * `canonicalizeXml(graph.xml)` for xml_json and the
- * `{ nodeId, ordinal, iteration, kind }` projection for task_index_json
- * (see persistDriverFrame in packages/engine).
+ * `{ nodeId, ordinal, iteration, kind }` projection for task_index_json, where
+ * `kind` is `classifyClaudeWorkflowNodeKind(task)` — the SAME classifier the
+ * live derivation uses (see persistDriverFrame in packages/engine). Mirroring
+ * that here is what makes the parity assertion meaningful for every node type.
  * @param {ReturnType<typeof extractGraph>} graph
  */
 function frameRowFor(graph) {
@@ -124,7 +127,7 @@ function frameRowFor(graph) {
             nodeId: task.nodeId,
             ordinal: task.ordinal,
             iteration: task.iteration,
-            kind: task.kind,
+            kind: classifyClaudeWorkflowNodeKind(task),
         }))),
     };
 }
@@ -155,6 +158,37 @@ describe("deriveClaudeWorkflowPhasesFromFrame", () => {
         // Kinds agree because the persisted task index carries the engine's own
         // task.kind projection; no function fields are needed at read time.
         expect(fromFrame.nodes).toEqual(live.nodes);
+    });
+
+    test("round-trips timer/wait/subflow/sandbox/approval kinds through the frame path", () => {
+        // These node types have no distinguishing task.kind, so a naive
+        // `kind: task.kind` frame projection would drop them to "unknown"
+        // (and a childless approval gate to "static"). The shared classifier
+        // must make the frame-derived kinds match the live derivation exactly.
+        const graph = extractGraph(hostEl("smithers:workflow", { name: "wf" }, [
+            hostEl("smithers:task", { id: "agent", output: "out", agent: { id: "fake" } }),
+            hostEl("smithers:timer", { id: "timer", duration: "1s" }),
+            hostEl("smithers:wait-for-event", { id: "wait", output: "out", event: "ready" }),
+            hostEl("smithers:subflow", { id: "sub", output: "out" }),
+            hostEl("smithers:sandbox", { id: "safe", output: "out" }),
+            hostEl("smithers:task", { id: "approval", output: "out", needsApproval: true }),
+        ]));
+        const live = deriveClaudeWorkflowPhases(snapshot(graph));
+        // The frame path takes labels from the node table (the live path reads
+        // them off the task descriptor); supply them so the comparison isolates
+        // the kind classification.
+        const labels = Object.fromEntries(graph.tasks.map((task) => [task.nodeId, task.label || task.nodeId]));
+        const fromFrame = deriveClaudeWorkflowPhasesFromFrame(frameRowFor(graph), { labels });
+
+        expect(fromFrame.nodes).toEqual(live.nodes);
+        expect(Object.fromEntries(fromFrame.nodes.map((node) => [node.nodeId, node.kind]))).toEqual({
+            agent: "agent",
+            timer: "timer",
+            wait: "wait",
+            sub: "subflow",
+            safe: "sandbox",
+            approval: "approval",
+        });
     });
 
     test("uses node-table labels and falls back to unknown kinds", () => {

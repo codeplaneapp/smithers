@@ -5,7 +5,6 @@
  * renders the matching component.
  */
 export type Card =
-  | { kind: "signIn" }
   | { kind: "run"; runId: string }
   | { kind: "gatewayRun"; workflowKey: string; runId: string }
   | { kind: "approval"; runId: string }

@@ -78,10 +78,13 @@ const metaTicketSchema = z.object({
   beforeMarkdown: z.string().default(""),
   afterMarkdown: z.string().default(""),
   gitStatus: z.string().default(""),
+  gitStatusError: z.string().default(""),
   docsDiff: z.string().default(""),
   docsDiffArtifactPath: z.string().default(""),
   docsDiffTruncated: z.boolean().default(false),
+  docsDiffError: z.string().default(""),
   codeDiffFiles: z.array(z.string()).default([]),
+  codeDiffError: z.string().default(""),
   summary: z.string().default(""),
 });
 
@@ -187,7 +190,7 @@ export function boundedField(value: string, name: string) {
   if (value.length <= META_TICKET_FIELD_LIMIT) {
     return { value, artifactPath: "", truncated: false };
   }
-  const path = artifactPath(`${name}-${Date.now()}.txt`);
+  const path = artifactPath(`${name}-latest.txt`);
   writeFileSync(path, value);
   return {
     value: `${value.slice(0, META_TICKET_FIELD_LIMIT)}\n...[truncated ${value.length - META_TICKET_FIELD_LIMIT} chars; full value: ${path}]`,
@@ -235,12 +238,21 @@ function runCommand(command: string, args: string[]) {
   });
 }
 
-function tryRunCommand(command: string, args: string[]) {
+export function tryRunCommand(command: string, args: string[]) {
   try {
-    return runCommand(command, args);
+    return { ok: true, output: runCommand(command, args), error: "" };
   } catch (error) {
-    return error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, output: "", error: message };
   }
+}
+
+export function runCommandResult(command: string, args: string[], fieldName: string) {
+  const result = tryRunCommand(command, args);
+  if (!result.ok) {
+    console.error(`docs-driven-development command failed (${fieldName}): ${result.error}`);
+  }
+  return result;
 }
 
 export function ticketSlug(value: unknown): string {
@@ -328,6 +340,10 @@ export function resolvedMaxAgents(value: unknown) {
 export function resolvedMaxRounds(value: unknown) {
   const numeric = Number(value);
   return numeric >= 1 ? numeric : 100000;
+}
+
+export function resolveMaxIterations(value: unknown, runImplementation: boolean) {
+  return runImplementation ? resolvedMaxRounds(value) : 1;
 }
 
 export function agentForSlot(ctx: any, slot: number) {
@@ -431,12 +447,12 @@ export default smithers((ctx) => {
   // Robust against inputs that arrive without zod defaults applied: implementation
   // runs unless explicitly disabled, so the work wave is never silently skipped.
   const maxAgents = resolvedMaxAgents(ctx.input.maxAgents);
+  const runImplementation = ctx.input.runImplementation !== false;
   // Bulletproof: Number(null)===0 and Number(undefined)===NaN both fall through to
   // the floor, so maxIterations can never be 0/null (which silently caps the loop
   // at a single iteration — observed when a stale self-edited module dropped the
   // fallback). Only an explicit >=1 input overrides the long-running default.
-  const maxRounds = resolvedMaxRounds(ctx.input.maxRounds);
-  const runImplementation = ctx.input.runImplementation !== false;
+  const maxRounds = resolveMaxIterations(ctx.input.maxRounds, runImplementation);
   const requireImplementationApproval = ctx.input.requireImplementationApproval === true;
   const implementationApproved = ctx.input.implementationApproved !== false;
   const approvalRequired = runImplementation && requireImplementationApproval && !implementationApproved;
@@ -480,22 +496,41 @@ export default smithers((ctx) => {
           <Task id="metaTicket" output={outputs.metaTicket} dependsOn={["bootstrap"]}>
             {async () => {
               const ticket = ctx.input.metaTicket;
-              const gitStatus = tryRunCommand("git", ["status", "--short"]);
-              const fullDocsDiff = cleanDiffForMetaTicket(tryRunCommand("git", ["diff", "--", ".smithers/spec"]));
+              const gitStatusResult = runCommandResult(
+                "git",
+                ["status", "--short"],
+                "git-status",
+              );
+              const fullDocsDiffResult = runCommandResult(
+                "git",
+                ["diff", "--", ".smithers/spec"],
+                "docs-diff",
+              );
+              const codeDiffResult = runCommandResult(
+                "git",
+                ["diff", "--name-only", "--", "packages", "apps", "docs", "e2e", "package.json"],
+                "code-diff",
+              );
+              const gitStatus = gitStatusResult.ok ? gitStatusResult.output : "";
+              const fullDocsDiff = cleanDiffForMetaTicket(
+                fullDocsDiffResult.ok ? fullDocsDiffResult.output : "",
+              );
               const docsDiff = boundedField(fullDocsDiff, "meta-ticket-docs-diff");
-              const codeDiffFiles = tryRunCommand("git", ["diff", "--name-only", "--", "packages", "apps", "docs", "e2e", "package.json"])
-                .split(/\r?\n/)
-                .map((line) => line.trim())
-                .filter(Boolean);
+              const codeDiffFiles = codeDiffResult.ok
+                ? codeDiffResult.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+                : [];
 
               if (!ticket) {
                 return {
                   created: false,
                   gitStatus,
+                  gitStatusError: gitStatusResult.error,
                   docsDiff: docsDiff.value,
                   docsDiffArtifactPath: docsDiff.artifactPath,
                   docsDiffTruncated: docsDiff.truncated,
+                  docsDiffError: fullDocsDiffResult.error,
                   codeDiffFiles,
+                  codeDiffError: codeDiffResult.error,
                   summary: "No editor-created docs change was submitted. Triage should use the current spec and codebase state.",
                 };
               }
@@ -510,10 +545,13 @@ export default smithers((ctx) => {
                 beforeMarkdown: ticket.beforeMarkdown,
                 afterMarkdown: ticket.afterMarkdown,
                 gitStatus,
+                gitStatusError: gitStatusResult.error,
                 docsDiff: docsDiff.value,
                 docsDiffArtifactPath: docsDiff.artifactPath,
                 docsDiffTruncated: docsDiff.truncated,
+                docsDiffError: fullDocsDiffResult.error,
                 codeDiffFiles,
+                codeDiffError: codeDiffResult.error,
                 summary: `Editor-created docs change for ${ticket.docPath}. Triage should turn this docs delta plus current code state into implementation, e2e, review, or issue tickets.`,
               };
             }}

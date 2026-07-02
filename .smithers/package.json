@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test ./tests/open-code-review.test.ts ./tests/open-code-review-ui.e2e.test.ts",
+    "test": "bun test ./tests/open-code-review.test.ts ./tests/open-code-review-ui.e2e.test.ts ./tests/ddd-scripts.test.ts ./tests/ddd-ui-parsers.test.ts ./tests/ddd-generate-bug-scan.test.ts ./tests/docs-driven-development-workflow.test.ts ./ui/ddd-tabs.test.tsx ./lib/plue-provider.test.ts ./lib/fleet-health.test.ts",
     "lint": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path ../.gitignore .",
     "lint:fix": "oxlint --react-plugin --node-plugin --import-plugin --ignore-path ../.gitignore --fix .",
     "workflow:list": "smithers workflow list",
@@ -17,7 +17,9 @@
     "release:workflow:gated": "cd .. && pnpm release:workflow:gated",
     "marketing:thread": "cd .. && pnpm marketing:thread",
     "marketing:thread:write": "cd .. && pnpm marketing:thread:write",
-    "test:open-code-review": "bun test ./tests/open-code-review.test.ts ./tests/open-code-review-ui.e2e.test.ts"
+    "test:open-code-review": "bun test ./tests/open-code-review.test.ts ./tests/open-code-review-ui.e2e.test.ts",
+    "test:ddd": "bun test ./tests/docs-driven-development-run.e2e.test.ts ./tests/ddd-bug-scan-run.e2e.test.ts ./tests/ddd-generate-docs-run.e2e.test.ts ./tests/docs-driven-development-ui.e2e.test.tsx ./tests/ultragrill.e2e.test.ts",
+    "test:ddd:browser": "bun test ./tests/ship-pipeline-run.e2e.test.ts ./tests/ship-pipeline-ui.e2e.test.tsx"
   },
   "dependencies": {
     "@milkdown/crepe": "7.21.2",

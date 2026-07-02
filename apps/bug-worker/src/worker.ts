@@ -36,6 +36,13 @@ function timingSafeStringEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/**
+ * Best-effort per-IP throttle. KV has no atomic increment and up to ~60s of
+ * propagation, so this is a read-modify-write that concurrent bursts from one
+ * IP can race past — the 20/hour is advisory, a speed bump against accidental
+ * floods, not a hard security boundary. For a strict limit, back the counter
+ * with a Durable Object or a Cloudflare Rate Limiting binding.
+ */
 async function checkRateLimit(env: BugWorkerEnv, ip: string, now: number): Promise<boolean> {
   const hourBucket = Math.floor(now / 3_600_000);
   const key = `ratelimit:${ip}:${hourBucket}`;
@@ -43,6 +50,42 @@ async function checkRateLimit(env: BugWorkerEnv, ip: string, now: number): Promi
   if (count >= RATE_LIMIT_PER_HOUR) return false;
   await env.BUGS.put(key, String(count + 1), { expirationTtl: 3600 });
   return true;
+}
+
+/**
+ * Read the request body while enforcing {@link MAX_PAYLOAD_BYTES}, aborting as
+ * soon as the running byte count exceeds the cap so a client that omits (or
+ * lies about) content-length cannot stream the whole platform body cap into
+ * memory before the size check fires. Returns `null` when the cap is exceeded.
+ */
+async function readBodyBounded(request: Request, maxBytes: number): Promise<string | null> {
+  const body = request.body;
+  if (!body) return "";
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
 }
 
 async function handlePostBug(request: Request, env: BugWorkerEnv, now: number): Promise<Response> {
@@ -56,8 +99,8 @@ async function handlePostBug(request: Request, env: BugWorkerEnv, now: number): 
     return json(429, { error: "rate limit exceeded (20 reports per hour per IP)" });
   }
 
-  const raw = await request.text();
-  if (new TextEncoder().encode(raw).byteLength > MAX_PAYLOAD_BYTES) {
+  const raw = await readBodyBounded(request, MAX_PAYLOAD_BYTES);
+  if (raw === null) {
     return json(413, { error: "payload too large", maxBytes: MAX_PAYLOAD_BYTES });
   }
 

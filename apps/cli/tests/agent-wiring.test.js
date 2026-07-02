@@ -197,6 +197,10 @@ describe("registerOpenClawPlugin", () => {
     expect(result.enabled).toBe(true);
     expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "package.json"))).toBe(true);
     expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "openclaw.plugin.json"))).toBe(true);
+    // The declared `openclaw.extensions` runtime entry must actually ship and
+    // install, or OpenClaw has no code to load. Guards against the entry being
+    // an un-tracked build artifact absent on fresh clones / CI / release tarballs.
+    expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "index.js"))).toBe(true);
     expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "site", "index.html"))).toBe(true);
     expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "skills", "orchestrate", "SKILL.md"))).toBe(true);
     const config = JSON.parse(readFileSync(join(home, ".openclaw", "openclaw.json"), "utf8"));

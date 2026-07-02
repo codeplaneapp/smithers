@@ -10,6 +10,7 @@ import { validateInput } from "@smithers-orchestrator/db/input";
 import { schemaSignature } from "@smithers-orchestrator/db/schema-signature";
 import { withSqliteWriteRetry } from "@smithers-orchestrator/db/write-retry";
 import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
+import { classifyClaudeWorkflowNodeKind } from "@smithers-orchestrator/graph/classifyClaudeWorkflowNodeKind";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
@@ -5285,7 +5286,13 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 nodeId: task.nodeId,
                 ordinal: task.ordinal,
                 iteration: task.iteration,
-                kind: task.kind,
+                // Persist the SAME classification the live derivation computes so
+                // deriveClaudeWorkflowPhasesFromFrame reads back a kind that
+                // matches deriveClaudeWorkflowPhases for every node type. Plain
+                // task.kind only distinguishes agent/compute/static/human and
+                // would drop timer/wait/subflow/sandbox to "unknown" and a
+                // childless approval gate to "static".
+                kind: classifyClaudeWorkflowNodeKind(task),
             }))),
             note: "react-driver",
         };

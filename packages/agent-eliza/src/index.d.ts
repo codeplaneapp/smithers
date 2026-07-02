@@ -84,8 +84,10 @@ type ElizaAgentOptions$2 = {
  * initializes the runtime on the first `generate` call and memoizes it
  * across subsequent calls.
  *
- * `@elizaos/core` is an **optional peer dependency** — it is resolved via
- * a dynamic import so the package builds and tests without it installed.
+ * `@elizaos/core` is a hard dependency this opt-in package owns and installs.
+ * It is resolved via a dynamic import (so this module carries no load-time
+ * dependency and the structural types keep the build self-contained), but
+ * consumers of `@smithers-orchestrator/agent-eliza` get it transitively.
  */
 declare class ElizaAgent {
     /**

@@ -72,6 +72,20 @@ function makeDbPath(name: string) {
   return join(tmpdir(), `smithers-collections-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
+async function removeSqliteFiles(dbPath: string) {
+  for (const target of [dbPath, `${dbPath}-shm`, `${dbPath}-wal`]) {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      try {
+        rmSync(target, { force: true });
+        break;
+      } catch {
+        if (attempt === 5) break;
+        await sleep(50);
+      }
+    }
+  }
+}
+
 async function createApi(backend: Backend) {
   const schemas = {
     result: z.object({ value: z.number() }),
@@ -82,9 +96,10 @@ async function createApi(backend: Backend) {
     const api = createSmithers(schemas, { dbPath });
     cleanups.push(async () => {
       api.db.$client?.close?.();
-      rmSync(dbPath, { force: true });
-      rmSync(`${dbPath}-shm`, { force: true });
-      rmSync(`${dbPath}-wal`, { force: true });
+      // bun:sqlite does not release the file lock synchronously after close()
+      // on Windows, so a same-tick rm throws EBUSY and fails the just-finished
+      // test. These are throwaway tmpdir files — retry briefly, then give up.
+      await removeSqliteFiles(dbPath);
     });
     return api;
   }

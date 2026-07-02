@@ -35,6 +35,45 @@ describe("telegram summary worker", () => {
     expect(response.status).toBe(401);
   });
 
+  test("rejects a wrong-length bearer token", async () => {
+    const env = buildEnv();
+    const response = await worker.fetch(
+      new Request("https://telegram-summary.smithers.sh/api/ingest", {
+        method: "POST",
+        headers: { authorization: "Bearer nope" },
+      }),
+      env,
+    );
+    expect(response.status).toBe(401);
+  });
+
+  test("rejects a same-length wrong bearer token (constant-time compare still denies)", async () => {
+    // "admix" is the same byte length as the configured "admin" token, so this
+    // exercises the equal-length XOR branch of the constant-time compare.
+    const env = buildEnv();
+    const response = await worker.fetch(
+      new Request("https://telegram-summary.smithers.sh/api/ingest", {
+        method: "POST",
+        headers: { authorization: "Bearer admix" },
+      }),
+      env,
+    );
+    expect(response.status).toBe(401);
+  });
+
+  test("authorizes the correct bearer token", async () => {
+    const env = buildEnv();
+    globalThis.fetch = (async () => Response.json({ ok: true, result: [] })) as unknown as typeof fetch;
+    const response = await worker.fetch(
+      new Request("https://telegram-summary.smithers.sh/api/ingest", {
+        method: "POST",
+        headers: { authorization: "Bearer admin" },
+      }),
+      env,
+    );
+    expect(response.status).not.toBe(401);
+  });
+
   test("ingests Telegram Bot API updates into D1", async () => {
     const env = buildEnv();
     let calls = 0;

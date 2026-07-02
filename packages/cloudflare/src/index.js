@@ -79,6 +79,19 @@ export function createCloudflareDurableObjectSqliteDescriptor(storage) {
 /**
  * Build a Smithers SQLite descriptor backed by a Cloudflare D1 database.
  *
+ * WARNING — D1 has NO interactive transactions. Its prepare/bind/run API cannot
+ * hold an open BEGIN/COMMIT/ROLLBACK across round-trips, so the `transaction()`
+ * returned here runs the operation directly with NO atomicity: a failure or
+ * crash partway through leaves the earlier writes committed. Smithers'
+ * run-of-record durability (frame commits — `insertFrame` + `captureSnapshot`,
+ * run-state checkpoints, task completion) assumes transactional writes, so on
+ * the D1 backend a mid-transaction failure can leave partial state. For durable
+ * workflow state use `createCloudflareDurableObjectSqliteDescriptor`, which
+ * binds the real `storage.transaction`; reserve D1 for read-mostly /
+ * non-transactional use. `database.batch()` is not a substitute: the
+ * transaction bodies are interactive read-then-write (e.g. read the current
+ * event seq, then insert), which a fixed batch array cannot express.
+ *
  * @param {{ prepare: (statement: string) => { bind: (...params: unknown[]) => { all: () => Promise<{ results?: Record<string, unknown>[] }>; raw?: () => Promise<unknown[][]>; run: () => Promise<unknown> } } } }} database
  */
 export function createCloudflareD1SqliteDescriptor(database) {
@@ -102,6 +115,9 @@ export function createCloudflareD1SqliteDescriptor(database) {
 			return [];
 		},
 		async transaction(operation) {
+			// D1 has no interactive transactions (see this function's JSDoc): this
+			// runs the operation with no BEGIN/COMMIT/ROLLBACK and is NOT atomic.
+			// Kept as a pass-through so read-mostly D1 usage still works.
 			return await operation();
 		},
 	};
@@ -251,7 +267,15 @@ export function createCloudflareSandboxProvider(options = {}) {
 			const rawResult = stdout.startsWith("{")
 				? stdout
 				: await readFileContent(await sandbox.readFile(resultPath));
-			const parsed = JSON.parse(rawResult);
+			if (rawResult.trim() === "") {
+				throw new Error(`Cloudflare sandbox command "${command}" produced no result JSON for sandbox "${remoteSandboxId}": the workflow entry must write result JSON to ${resultPath} (via SMITHERS_SANDBOX_RESULT_PATH) or print it to stdout.`);
+			}
+			let parsed;
+			try {
+				parsed = JSON.parse(rawResult);
+			} catch (error) {
+				throw new Error(`Cloudflare sandbox command "${command}" produced invalid result JSON for sandbox "${remoteSandboxId}" at ${resultPath}: ${error instanceof Error ? error.message : String(error)}. Raw output: ${rawResult.slice(0, 500)}`);
+			}
 			if ("bundlePath" in parsed) {
 				return {
 					...parsed,

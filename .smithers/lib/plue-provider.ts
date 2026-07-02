@@ -257,56 +257,6 @@ export function parseUpStatus(upStdout: string): "finished" | "failed" {
 		: "failed";
 }
 
-/**
- * Map a `smithers inspect <runId> --format json` payload into the provider
- * result shape. The inspect envelope nests run state under `.run`
- * (`{ run: { id, status, workflow }, runState: { state, steps }, ... }`), so we
- * read status/id from there (falling back to top-level for older shapes). The
- * terminal run statuses are "finished"/"completed"/"succeeded".
- */
-export function mapRemoteRunResult(
-	inspectJson: unknown,
-	fallbackLogTail: string,
-	knownRunId?: string,
-): RemoteRunOutcome {
-	if (!inspectJson || typeof inspectJson !== "object") {
-		return {
-			status: "failed",
-			output: { error: "no run result", logTail: fallbackLogTail },
-			remoteRunId: knownRunId,
-		};
-	}
-	const record = inspectJson as Record<string, unknown>;
-	const run = (record.run && typeof record.run === "object" ? record.run : {}) as Record<
-		string,
-		unknown
-	>;
-	const runState = (record.runState && typeof record.runState === "object"
-		? record.runState
-		: {}) as Record<string, unknown>;
-	const status =
-		(typeof run.status === "string" && run.status) ||
-		(typeof runState.state === "string" && runState.state) ||
-		(typeof record.status === "string" && record.status) ||
-		"unknown";
-	const remoteRunId =
-		(typeof run.id === "string" && run.id) ||
-		(typeof record.runId === "string" && record.runId) ||
-		knownRunId;
-	if (
-		status === "completed" ||
-		status === "finished" ||
-		status === "succeeded"
-	) {
-		return { status: "finished", output: record, remoteRunId };
-	}
-	return {
-		status: "failed",
-		output: { error: `remote run status: ${status}`, logTail: fallbackLogTail, run: record },
-		remoteRunId,
-	};
-}
-
 function execFileAsync(
 	command: string,
 	args: string[],
@@ -376,7 +326,10 @@ function buildUnpackScript(remoteDir: string, archiveB64: string): string {
 	].join(" && ");
 }
 
-const DEFAULT_ORCHESTRATOR_VERSION = "0.26.1";
+// Exported so a unit test can assert it tracks the repo's root package.json
+// version — the release bump/publish flow edits package.json, not this literal,
+// so without the gate a bump would leave the remote VM on a stale orchestrator.
+export const DEFAULT_ORCHESTRATOR_VERSION = "0.26.1";
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
 const DEFAULT_BOOT_TIMEOUT_MS = 6 * 60_000;
 const REMOTE_DIR = "/home/developer/smithers-plue-run";
@@ -558,7 +511,12 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 				request.heartbeat({ stage: "creating-workspace", name });
 				workspaceId = await createWorkspace(name);
 			}
-			if (!reusing) {
+			// The map is only a crash-time safety net for deletion in cleanup().
+			// A reused workspace is never ours to delete; a kept workspace must
+			// survive the run, so neither is registered — otherwise the executor's
+			// unconditional cleanup() would delete a workspace the caller asked to
+			// keep.
+			if (!reusing && !keepWorkspace) {
 				workspaceIdByKey.set(`${request.runId}:${request.sandboxId}`, workspaceId);
 			}
 
@@ -660,6 +618,9 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 			}
 		},
 		async cleanup(request: SandboxProviderRequest): Promise<void> {
+			// Honor keepWorkspace even if a workspace was somehow registered: the
+			// caller explicitly asked to inspect the VM after the run.
+			if (keepWorkspace) return;
 			const key = `${request.runId}:${request.sandboxId}`;
 			const workspaceId = workspaceIdByKey.get(key);
 			if (!workspaceId) {

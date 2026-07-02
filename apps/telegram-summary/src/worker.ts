@@ -2,11 +2,33 @@ import type { ExecutionContextLike, ScheduledControllerLike, TelegramSummaryEnv 
 import { ingestTelegramUpdates, latestDigest, listDigests, runDailyDigest, status } from "./service.ts";
 import { digestPayload, json, notFound, renderDashboard } from "./ui.ts";
 
+/**
+ * Constant-time string equality for the admin bearer token. A plain `===`
+ * short-circuits on the first differing byte, leaking (via response timing) how
+ * many leading bytes an attacker guessed. This XORs every byte regardless. A
+ * length mismatch returns false up front (token length is not the secret).
+ *
+ * Pure JS so it behaves identically in workerd (production) and under
+ * `bun test` (CI); Cloudflare's `crypto.subtle.timingSafeEqual` is a runtime
+ * extension absent from the test runtime.
+ */
+function timingSafeEqual(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const aBytes = encoder.encode(a);
+  const bBytes = encoder.encode(b);
+  if (aBytes.length !== bBytes.length) return false;
+  let diff = 0;
+  for (let i = 0; i < aBytes.length; i += 1) {
+    diff |= aBytes[i] ^ bBytes[i];
+  }
+  return diff === 0;
+}
+
 function isAuthorized(request: Request, env: TelegramSummaryEnv): boolean {
   const expected = env.ADMIN_TOKEN?.trim();
   if (!expected) return false;
   const header = request.headers.get("authorization") ?? "";
-  return header === `Bearer ${expected}`;
+  return timingSafeEqual(header, `Bearer ${expected}`);
 }
 
 function requireAdmin(request: Request, env: TelegramSummaryEnv): Response | null {

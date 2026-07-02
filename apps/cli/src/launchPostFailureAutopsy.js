@@ -88,8 +88,15 @@ export function launchPostFailureAutopsy({
             env: { ...env, SMITHERS_POST_FAILURE: "0" },
         });
         child.unref();
+        // The spawn `error` event fires asynchronously (e.g. a bad execPath /
+        // ENOENT on the detached child), after the "launched" line below has
+        // already printed. Surface it on stderr so a consistently-broken launch
+        // is observable instead of a silent no-op. Best-effort: safeWrite never
+        // throws, preserving the non-throwing contract.
         if (typeof child.on === "function")
-            child.on("error", () => { });
+            child.on("error", (err) => {
+                safeWrite(write, `[smithers] Post-failure autopsy failed to start: ${err?.message ?? err}\n`);
+            });
     }
     catch {
         return { launched: false, reason: "spawn-failed" };

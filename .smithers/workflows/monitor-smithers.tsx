@@ -11,6 +11,7 @@ import path from "node:path";
 import { createSmithers, Ralph, Timer } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
+import { filterFleetHealth } from "../lib/fleet-health.ts";
 import ClassifyPrompt from "../prompts/monitor-smithers-classify.mdx";
 import TriagePrompt from "../prompts/monitor-smithers-triage.mdx";
 
@@ -41,6 +42,7 @@ const runSchema = z.looseObject({
   runId: z.string(),
   status: z.string(),
   ageMinutes: z.number().default(0),
+  finishedAgeMinutes: z.number().nullable().default(null),
   lastEvent: z.string().nullable().default(null),
 });
 
@@ -170,9 +172,15 @@ async function pollProject(dir: string) {
       const unit = ageMatch[2];
       ageMinutes = unit === "m" ? n : unit === "h" ? n * 60 : unit === "d" ? n * 1440 : Math.round(n / 60);
     }
+    // Time since the run FAILED, not since it started: `ps --format json`
+    // exposes `finishedAtMs` (raw epoch ms) on terminal runs. Absent on older
+    // installed CLIs → null, and the health filter falls back to ageMinutes.
+    const finishedAtMs = typeof r.finishedAtMs === "number" ? r.finishedAtMs : null;
+    const finishedAgeMinutes =
+      finishedAtMs != null ? Math.max(0, Math.round((Date.now() - finishedAtMs) / 60_000)) : null;
     const step = r.step ?? r.lastEvent;
     const lastEvent = step != null && String(step) !== "—" ? String(step) : null;
-    return { project: path.basename(dir), runId, status, ageMinutes, lastEvent };
+    return { project: path.basename(dir), runId, status, ageMinutes, finishedAgeMinutes, lastEvent };
   });
 }
 
@@ -180,14 +188,10 @@ async function pollProject(dir: string) {
 async function pollFleet(projects: string[] | null, staleMinutes: number) {
   const dirs = projects && projects.length > 0 ? projects : discoverProjects();
   const perProject = await Promise.all(dirs.map((dir) => pollProject(dir)));
-  // Live health only: keep non-terminal runs, plus failures fresh enough
-  // (<60m) to still be actionable. Old terminal runs are history, not health —
-  // without this the medic re-inspects months-dead runs on every sweep.
-  const runs = perProject.flat().filter((run) => {
-    if (run.status === "finished" || run.status === "cancelled") return false;
-    if (run.status === "failed") return run.ageMinutes < 60;
-    return true;
-  });
+  // Live health only: drop settled history and stale failures, keep everything
+  // still actionable. Freshness of a failure is judged from when it FAILED
+  // (finishedAgeMinutes), not when it started — see filterFleetHealth.
+  const runs = filterFleetHealth(perProject.flat());
   const active = runs.filter((run) => run.status === "running" || run.status === "continued");
   const staleCount = active.filter((run) => run.ageMinutes >= staleMinutes).length;
   return {

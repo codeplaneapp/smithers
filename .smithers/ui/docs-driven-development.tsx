@@ -214,6 +214,24 @@ export function createWorkflowPromptForApp(description: string): string {
   );
 }
 
+// Whether to keep polling the generate-docs run's kickoff-bug-scan node output.
+// Kickoff output is immutable once produced, so a single successful read is
+// final: stop as soon as the bug-scan run id is known, the kickoff row has
+// arrived (launched:false, gate-blocked, or a launch that never parsed a run
+// id), or the generate run itself reached a terminal status.
+export function shouldPollKickoffNode(params: {
+  generateRunId: string | null | undefined;
+  bugScanRunId: string;
+  kickoffReady: boolean;
+  generateRunStatus: string | undefined;
+}): boolean {
+  if (!params.generateRunId) return false;
+  if (params.bugScanRunId) return false;
+  if (params.kickoffReady) return false;
+  if (isTerminalRunStatus(params.generateRunStatus)) return false;
+  return true;
+}
+
 export type AppProps = {
   specFeatures?: Feature[];
   specDocs?: typeof docsContent;
@@ -302,14 +320,6 @@ export function App({
 
   const kickoffRow = rowOf(kickoffOut.data);
   const bugScanRunId = asString(kickoffRow?.bugScanRunId ?? kickoffRow?.bug_scan_run_id);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !generateRun.runId || bugScanRunId) return;
-    const id = window.setInterval(() => {
-      void kickoffOut.refetch();
-    }, 1_000);
-    return () => window.clearInterval(id);
-  }, [generateRun.runId, bugScanRunId, kickoffOut.refetch]);
 
   useEffect(() => {
     saveSpecDrafts(drafts);
@@ -403,6 +413,17 @@ export function App({
   }, [liveRunId, expectsDddNodeOutputs, bootstrapReady, roundSummaryReady, refetchDddNodeOutputs]);
   const createRunStatus = asString(createRunRow?.status) || (createRun.runId ? "running" : undefined);
   const generateRunStatus = asString(generateRunRow?.status) || (generateRun.runId ? "running" : undefined);
+  const kickoffReady = Boolean(kickoffRow);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!shouldPollKickoffNode({ generateRunId: generateRun.runId, bugScanRunId, kickoffReady, generateRunStatus })) {
+      return;
+    }
+    const id = window.setInterval(() => {
+      void kickoffOut.refetch();
+    }, 1_000);
+    return () => window.clearInterval(id);
+  }, [generateRun.runId, bugScanRunId, kickoffReady, generateRunStatus, kickoffOut.refetch]);
   const createRunLiveState: LaunchState = {
     ...createRun,
     status: createRunStatus,

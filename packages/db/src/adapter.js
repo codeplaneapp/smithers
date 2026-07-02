@@ -738,10 +738,13 @@ export class SmithersDb {
                 result = yield* readOperation;
             }
             else {
-                const releaseTurn = yield* self.acquireTransactionTurn();
-                result = yield* readOperation.pipe(Effect.ensuring(Effect.sync(() => {
-                    releaseTurn();
-                })));
+                // Acquire the turn and install its release atomically under
+                // interruption. A bare `acquire; op.pipe(ensuring(release))` leaves a
+                // window: once acquire resolves, Effect can deliver a queued interrupt
+                // before the ensuring finalizer is installed, so the turn leaks and
+                // every later DB op on this client deadlocks. acquireUseRelease runs
+                // acquire uninterruptibly and guarantees release whenever it succeeded.
+                result = yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => readOperation, (releaseTurn) => Effect.sync(() => releaseTurn()));
             }
             yield* Metric.update(dbQueryDuration, performance.now() - start);
             return result;
@@ -771,9 +774,9 @@ export class SmithersDb {
                 result = yield* writeOperation;
             }
             else {
-                const releaseTurn = yield* self.acquireTransactionTurn();
-                const captureTxidForWrite = yield* Effect.promise(() => shouldCapturePostgresTxid(self));
-	                result = yield* withSqliteWriteRetryEffect(() => captureTxidForWrite
+                result = yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => Effect.gen(function* () {
+                    const captureTxidForWrite = yield* Effect.promise(() => shouldCapturePostgresTxid(self));
+	                return yield* withSqliteWriteRetryEffect(() => captureTxidForWrite
 	                    ? Effect.gen(function* () {
 	                        yield* Effect.tryPromise({
 	                            try: () => self.internalStorage.execute(beginTransactionSql(self.internalStorage.dialect)),
@@ -803,9 +806,8 @@ export class SmithersDb {
 	                        yield* Effect.promise(() => self.internalStorage.execute("ROLLBACK").then(() => undefined, () => undefined));
 	                        return yield* Effect.fail(error);
 	                    })))
-	                    : writeOperation, { label }).pipe(Effect.ensuring(Effect.sync(() => {
-	                    releaseTurn();
-	                })));
+	                    : writeOperation, { label });
+                }), (releaseTurn) => Effect.sync(() => releaseTurn()));
             }
             yield* Metric.update(dbQueryDuration, performance.now() - start);
             return result;
@@ -839,12 +841,14 @@ export class SmithersDb {
                 const previous = state.tail.catch(() => undefined);
                 state.tail = previous.then(() => gate);
                 this.transactionTail = state.tail;
-                // The serialization chain is advanced synchronously above, but the
-                // `release` handle is only handed to the caller (which wires the
-                // `Effect.ensuring(releaseTurn)` finalizer) on success. If this fiber
-                // is interrupted while queued behind `previous`, the caller never
-                // receives `release`, so resolve `gate` on abort to keep the turn
-                // from leaking and deadlocking every later DB op on this client.
+                // Callers acquire this turn via Effect.acquireUseRelease, which runs
+                // acquire uninterruptibly and guarantees the release once it resolves,
+                // so a turn can no longer leak in the post-resume gap. This abort guard
+                // stays as defense-in-depth: the serialization chain is advanced
+                // synchronously above, but `release` is only returned to the caller on
+                // success, so if this fiber is interrupted while still queued behind
+                // `previous`, resolve `gate` on abort to keep the turn from leaking and
+                // deadlocking every later DB op on this client.
                 if (signal.aborted) {
                     release();
                 }
@@ -878,7 +882,12 @@ export class SmithersDb {
                     details: { writeGroup, nestedTransaction: true },
                 }));
             }
-            const releaseTurn = yield* self.acquireTransactionTurn();
+            // Acquire the turn and its release atomically under interruption
+            // (acquireUseRelease runs acquire uninterruptibly and guarantees the
+            // release), closing the post-resume gap where a queued interrupt would
+            // discard the finalizer install and leak the turn — deadlocking the
+            // client. Both branches below drop their own releaseTurn() call.
+            return yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => Effect.gen(function* () {
             const transactionState = getSqliteTransactionState(resolveSqliteClientKey(self.db));
             const start = performance.now();
             if (typeof self.internalStorage.transaction === "function" && !isBunSqliteStorage(self.internalStorage) && self.internalStorage.dialect !== POSTGRES) {
@@ -900,7 +909,6 @@ export class SmithersDb {
                             self.transactionDepth = transactionState.depth;
                             self.transactionOwnerThread = transactionState.ownerThread;
                             self.transactionTail = transactionState.tail;
-                            releaseTurn();
                             await Effect.runPromise(Metric.update(dbTransactionDuration, performance.now() - start));
                         }
                     },
@@ -995,9 +1003,8 @@ export class SmithersDb {
                 self.transactionOwnerThread = transactionState.ownerThread;
                 self.transactionTail = transactionState.tail;
                 yield* Metric.update(dbTransactionDuration, performance.now() - start);
-            }))).pipe(Effect.ensuring(Effect.sync(() => {
-                releaseTurn();
             })));
+            }), (releaseTurn) => Effect.sync(() => releaseTurn()));
         }), { label }).pipe(Effect.annotateLogs({ writeGroup }), Effect.withLogSpan("db:transaction")));
     }
     /**
@@ -2123,7 +2130,7 @@ export class SmithersDb {
 	                // concurrent allocations can't both read the same lastSeq and
 	                // collide on the (run_id, seq) primary key — insertIgnore would
 	                // otherwise silently drop the loser, losing a signal.
-	                const releaseTurn = yield* self.acquireTransactionTurn();
+	                return yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => Effect.gen(function* () {
 	                const captureTxidForWrite = yield* Effect.promise(() => shouldCapturePostgresTxid(self));
 	                return yield* Effect.gen(function* () {
 	                    if (captureTxidForWrite) {
@@ -2164,12 +2171,10 @@ export class SmithersDb {
 	                        yield* Effect.promise(() => self.internalStorage.execute("ROLLBACK").then(() => undefined, () => undefined));
 	                    }
 	                    return yield* Effect.fail(error);
-	                })), Effect.ensuring(Effect.sync(() => {
-	                    releaseTurn();
 	                })));
+	            }), (releaseTurn) => Effect.sync(() => releaseTurn()));
 	            }
-            const releaseTurn = yield* self.acquireTransactionTurn();
-            return yield* Effect.try({
+            return yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => Effect.try({
                 try: () => {
                     client.run("BEGIN IMMEDIATE");
                     try {
@@ -2194,9 +2199,7 @@ export class SmithersDb {
                     }
                 },
                 catch: (cause) => toSmithersError(cause, "insert signal transaction"),
-            }).pipe(Effect.ensuring(Effect.sync(() => {
-                releaseTurn();
-            })));
+            }), (releaseTurn) => Effect.sync(() => releaseTurn()));
         }), { label }).pipe(Effect.annotateLogs({
             runId: row.runId,
             signalName: row.signalName,
@@ -2415,7 +2418,7 @@ export class SmithersDb {
 	                // collide on the (run_id, seq) primary key. Without the turn,
 	                // insertIgnore would silently drop the loser, losing an event
 	                // from the durable log that replay/live-stream depend on.
-	                const releaseTurn = yield* self.acquireTransactionTurn();
+	                return yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => Effect.gen(function* () {
 	                const captureTxidForWrite = yield* Effect.promise(() => shouldCapturePostgresTxid(self));
 	                return yield* Effect.gen(function* () {
 	                    if (captureTxidForWrite) {
@@ -2452,12 +2455,10 @@ export class SmithersDb {
 	                        yield* Effect.promise(() => self.internalStorage.execute("ROLLBACK").then(() => undefined, () => undefined));
 	                    }
 	                    return yield* Effect.fail(error);
-	                })), Effect.ensuring(Effect.sync(() => {
-	                    releaseTurn();
 	                })));
+	            }), (releaseTurn) => Effect.sync(() => releaseTurn()));
 	            }
-            const releaseTurn = yield* self.acquireTransactionTurn();
-            return yield* Effect.try({
+            return yield* Effect.acquireUseRelease(self.acquireTransactionTurn(), () => Effect.try({
                 try: () => {
                     client.run("BEGIN IMMEDIATE");
                     try {
@@ -2482,9 +2483,7 @@ export class SmithersDb {
                     }
                 },
                 catch: (cause) => toSmithersError(cause, "insert event transaction"),
-            }).pipe(Effect.ensuring(Effect.sync(() => {
-                releaseTurn();
-            })));
+            }), (releaseTurn) => Effect.sync(() => releaseTurn()));
         }), { label }).pipe(Effect.annotateLogs({ dbOperation: label }), Effect.withLogSpan(`db:${label}`)));
     }
     /**

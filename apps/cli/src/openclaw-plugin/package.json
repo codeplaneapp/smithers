@@ -5,7 +5,7 @@
   "description": "Native OpenClaw plugin for driving and improving Smithers workflows.",
   "license": "MIT",
   "files": [
-    "dist",
+    "index.js",
     "skills",
     "site",
     "openclaw.plugin.json",
@@ -16,7 +16,7 @@
   },
   "openclaw": {
     "extensions": [
-      "./dist/index.js"
+      "./index.js"
     ]
   }
 }

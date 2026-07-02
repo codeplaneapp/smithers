@@ -103,10 +103,59 @@ async function recordHttpRequestMetricsSafely(method, pathname, statusCode, dura
     }
 }
 /**
+ * Whether an HTTP `Host` (or `Origin`) authority names a loopback interface.
+ * Mirrors the gateway's DNS-rebinding defense (`isLoopbackHost` in gateway.js): a
+ * page at evil.com rebound to 127.0.0.1 sends `Host: evil.com`, so requiring a
+ * loopback Host rejects it. Handles an optional :port and IPv6 brackets, and
+ * treats `*.localhost` and the whole 127/8 block as loopback.
+ * @param {string} hostHeader
+ * @returns {boolean}
+ */
+function isLoopbackHost(hostHeader) {
+    let host = hostHeader.trim().toLowerCase();
+    if (host.startsWith("[")) {
+        // Bracketed IPv6, e.g. "[::1]:7331" or "[::1]".
+        const end = host.indexOf("]");
+        host = end >= 0 ? host.slice(1, end) : host.slice(1);
+    }
+    else {
+        // Strip a trailing :port, but only from a single-colon host ("host:port"):
+        // an unbracketed IPv6 literal like "::1" has multiple colons, so leaving it
+        // intact lets the `host === "::1"` check below match it.
+        const colon = host.lastIndexOf(":");
+        if (colon >= 0 && colon === host.indexOf(":") && /^\d+$/.test(host.slice(colon + 1))) {
+            host = host.slice(0, colon);
+        }
+    }
+    return (host === "localhost"
+        || host === "::1"
+        || host === "::ffff:127.0.0.1"
+        || host.endsWith(".localhost")
+        || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host));
+}
+/**
+ * Whether a browser `Origin` header points at a loopback authority. A same-origin
+ * page served by this app carries a loopback Origin; a malicious cross-origin page
+ * carries its own (non-loopback) Origin. An opaque/`null` or unparseable Origin is
+ * treated as non-loopback (rejected).
+ * @param {string} origin
+ * @returns {boolean}
+ */
+function isLoopbackOrigin(origin) {
+    let parsed;
+    try {
+        parsed = new URL(origin);
+    }
+    catch {
+        return false;
+    }
+    return isLoopbackHost(parsed.host);
+}
+/**
  * @param {ServeOptions} opts
  */
 export function createServeApp(opts) {
-    const { adapter, runId, abort, authToken, metrics: metricsEnabled = true } = opts;
+    const { adapter, runId, abort, authToken, insecure, metrics: metricsEnabled = true } = opts;
     // Best-effort, non-blocking startup recovery of crash-interrupted rewinds.
     // Covers SDK callers of createServeApp (the CLI `up` path recovers earlier).
     void recoverRewindAuditsAtStartup(adapter, {
@@ -150,6 +199,30 @@ export function createServeApp(opts) {
             await recordHttpRequestMetricsSafely(c.req.method, c.req.path, statusCode, performance.now() - start);
         }
     });
+    // DNS-rebinding + cross-origin CSRF defense for the unauthenticated local
+    // bind, mirroring the gateway's isHostAllowed/isOriginAllowed. With no
+    // authToken every request is trusted, so a browser page rebound to 127.0.0.1
+    // (non-loopback Host), or a plain cross-origin "simple" POST to /cancel
+    // (loopback Host, non-loopback Origin), could drive the mutating run-control
+    // routes (/cancel, /approve, /deny). Only the unauthenticated path is gated:
+    // a configured token is the real gate, and a remote authenticated client
+    // legitimately sends a non-loopback Host. `--insecure` (opts.insecure) or
+    // SMITHERS_SERVE_TRUST_ANY_HOST opt out for a deliberate remote unauth bind.
+    const trustAnyHost = process.env.SMITHERS_SERVE_TRUST_ANY_HOST;
+    const trustAnyOrigin = insecure === true || trustAnyHost === "1" || trustAnyHost === "true";
+    if (!authToken && !trustAnyOrigin) {
+        app.use("*", async (c, next) => {
+            const host = c.req.header("host");
+            if (host && !isLoopbackHost(host)) {
+                return c.json({ error: { code: "FORBIDDEN", message: "Host is not allowed" } }, 403);
+            }
+            const origin = c.req.header("origin");
+            if (origin && !isLoopbackOrigin(origin)) {
+                return c.json({ error: { code: "FORBIDDEN", message: "Origin is not allowed" } }, 403);
+            }
+            return next();
+        });
+    }
     // GET / — run status
     app.get("/", async (c) => {
         const run = await adapter.getRun(runId);

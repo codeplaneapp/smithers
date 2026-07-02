@@ -3,7 +3,7 @@ import { intro, isCancel, log, multiselect } from "@clack/prompts";
 import pc from "picocolors";
 import { detectAvailableAgents } from "./agent-detection.js";
 import { applyWorkflowPackUpdates, initWorkflowPack } from "./workflow-pack.js";
-import { runInteractiveInitFlow, buildDefaultSelections, selectionsToPackOptions } from "./init/interactiveInit.js";
+import { runInteractiveInitFlow, buildDefaultSelections, selectionsToPackOptions, withRequiredWorkflows } from "./init/interactiveInit.js";
 
 /**
  * Render the human-facing `smithers init` flow: a clack ceremony that first
@@ -16,7 +16,7 @@ import { runInteractiveInitFlow, buildDefaultSelections, selectionsToPackOptions
  * Only call this in interactive TTY mode; piped/agent callers should use
  * {@link initWorkflowPack} directly so structured output is preserved.
  *
- * @param {{ force?: boolean; agentsOnly?: boolean; install?: boolean; global?: boolean; installSkill?: boolean; updatePrompt?: boolean; env?: NodeJS.ProcessEnv }} opts
+ * @param {{ force?: boolean; agentsOnly?: boolean; install?: boolean; global?: boolean; installSkill?: boolean; updatePrompt?: boolean; requiredWorkflows?: readonly string[]; env?: NodeJS.ProcessEnv; runWizard?: (opts: { env: NodeJS.ProcessEnv }) => Promise<import("./init/interactiveInit.js").InitSelections | null> }} opts
  * @returns {Promise<import("./workflow-pack.js").InitResult>}
  */
 export async function runInitCeremony(opts = {}) {
@@ -24,6 +24,8 @@ export async function runInitCeremony(opts = {}) {
     const agentsOnly = Boolean(opts.agentsOnly);
     const global = Boolean(opts.global);
     const installSkill = opts.installSkill !== false;
+    // Injectable so a CI test can exercise the cancel path without a real PTY.
+    const runWizard = opts.runWizard ?? runInteractiveInitFlow;
 
     // ------------------------------------------------------------------
     // Step 1: Interactive selection wizard (OpenTUI full-screen)
@@ -31,12 +33,20 @@ export async function runInitCeremony(opts = {}) {
     // Skipped when --agents-only: workflows and skills are irrelevant there.
     let selections = buildDefaultSelections(env);
     if (!agentsOnly) {
-        const chosen = await runInteractiveInitFlow({ env });
+        const chosen = await runWizard({ env });
         if (chosen === null) {
-            // User pressed Esc / Ctrl-C in the wizard — cancel init.
-            process.exit(0);
+            // User pressed Esc / Ctrl-C in the wizard. Print a visible notice
+            // (the renderer wiped the screen on shutdown, so a bare exit reads
+            // like a crash) and exit non-zero (130, the conventional Ctrl-C
+            // code) so wrapping scripts don't treat a cancelled run as success.
+            process.stderr.write(`${pc.yellow("✗")} init cancelled — nothing was installed\n`);
+            process.exit(130);
         }
-        selections = chosen;
+        // Force any required workflows back into the selection even if the wizard
+        // deselected them (e.g. `smithers init "<task>"` needs create-workflow so
+        // the post-init builder dispatch can find it). N/A for --agents-only,
+        // which installs no workflows.
+        selections = withRequiredWorkflows(chosen, opts.requiredWorkflows);
     }
 
     // ------------------------------------------------------------------

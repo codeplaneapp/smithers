@@ -138,6 +138,11 @@ async function autoStartGateway(candidate: GatewayCandidate): Promise<boolean> {
   // child so that exit fails THIS autostart right away instead of silently
   // burning the full 90s probe budget against a port nothing will ever bind.
   let childExited = false;
+  // Node reports a spawn failure (e.g. ENOENT on `bun`) ASYNCHRONOUSLY via the
+  // child's `error` event, not the synchronous try/catch. Capture it either way
+  // so the autostart-failure report names the real reason instead of the generic
+  // "timed out or the child failed".
+  let childError: Error | null = null;
   try {
     // Pass the resolved token through as --auth-token so the autostarted
     // gateway requires the SAME token the client sends. The env (SMITHERS_API_KEY)
@@ -150,13 +155,17 @@ async function autoStartGateway(candidate: GatewayCandidate): Promise<boolean> {
       detached: true,
     });
     child.unref();
-    child.on("error", () => {
+    child.on("error", (err) => {
+      childError = err instanceof Error ? err : new Error(String(err));
       childExited = true;
     });
     child.on("exit", () => {
       childExited = true;
     });
-  } catch {
+  } catch (err) {
+    process.stderr.write(
+      `[smithers-mon] gateway autostart spawn failed: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
     return false;
   }
   const deadline = Date.now() + AUTOSTART_TIMEOUT_MS;
@@ -164,7 +173,15 @@ async function autoStartGateway(candidate: GatewayCandidate): Promise<boolean> {
     await Bun.sleep(500);
     const remainingMs = Math.max(250, deadline - Date.now());
     if (await probeGateway(candidate, Math.min(AUTOSTART_PROBE_TIMEOUT_MS, remainingMs))) return true;
-    if (childExited) return false;
+    if (childExited) {
+      // A childError means the spawn itself failed (bad CLI entry / missing bun);
+      // a clean exit with no error is the singleton guard (GATEWAY_ALREADY_RUNNING)
+      // and is handled by the raced workspace-gateway re-check, so stay quiet there.
+      if (childError) {
+        process.stderr.write(`[smithers-mon] gateway autostart child failed: ${(childError as Error).message}\n`);
+      }
+      return false;
+    }
   }
   return false;
 }
@@ -176,6 +193,11 @@ async function autoStartGateway(candidate: GatewayCandidate): Promise<boolean> {
  * as its own state: a rejected token must stop the startup with a token error,
  * not masquerade as "different workspace" and trigger an autostart.
  */
+// gatewayServesRun is polled up to 10× in autoStartAndValidate's retry loop, so
+// dedupe identical thrown reasons per gateway base rather than emitting the same
+// stderr line ten times.
+const loggedServesRunErrors = new Set<string>();
+
 async function gatewayServesRun(candidate: GatewayCandidate, id: string): Promise<ServesRun> {
   try {
     const headers: Record<string, string> = { "content-type": "application/json" };
@@ -190,7 +212,18 @@ async function gatewayServesRun(candidate: GatewayCandidate, id: string): Promis
     if (!res.ok) return "no";
     const frame = (await res.json().catch(() => null)) as { type?: string; ok?: boolean; payload?: unknown } | null;
     return frame && frame.type === "res" && frame.ok && frame.payload ? "yes" : "no";
-  } catch {
+  } catch (err) {
+    // A thrown fetch error (DNS/TLS/abort/connection-refused) is NOT proof the
+    // gateway serves another workspace — it is a network-level miss. Log the real
+    // reason (deduped) before folding it into "no" so a misclassified network
+    // failure is diagnosable from the terminal instead of steering the user
+    // toward workspace-mismatch guidance.
+    const reason = err instanceof Error ? err.message : String(err);
+    const key = `${candidate.base}\n${reason}`;
+    if (!loggedServesRunErrors.has(key)) {
+      loggedServesRunErrors.add(key);
+      process.stderr.write(`[smithers-mon] gateway ${candidate.base} getRun probe failed (${reason}); treating as not-serving.\n`);
+    }
     return "no";
   }
 }
@@ -247,9 +280,15 @@ const startup = await resolveGatewayForRun({
       return null;
     }
     if (resolvedConfig.portExplicit && port !== resolvedConfig.port) {
+      // Branch-neutral wording: this closure runs from several branches of
+      // resolveGatewayForRun (configured port unreachable, reachable-but-wrong-
+      // workspace, and the autostart race), so it must not claim "no gateway
+      // answered on the configured port" — a gateway DID answer in the
+      // wrong-workspace branch. State only what is always true here: the
+      // workspace gateway sits on a different port than the configured one.
       process.stderr.write(
-        `[smithers-mon] Note: no gateway answered on the configured port ${resolvedConfig.port}; ` +
-          `checking the workspace gateway at ${state.url}…\n`,
+        `[smithers-mon] Note: the workspace gateway is on port ${port}, not the configured ${resolvedConfig.port}; ` +
+          `checking it at ${state.url}…\n`,
       );
     }
     return { base: state.url, port, token: state.token ?? resolvedConfig.token };

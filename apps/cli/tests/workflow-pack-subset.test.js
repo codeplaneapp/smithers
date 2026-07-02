@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { createExecutableDir, writeFakeCodexBinary } from "../../../packages/smithers/tests/e2e-helpers.js";
-import { initWorkflowPack } from "../src/workflow-pack.js";
+import { initWorkflowPack, workflowManifestIds } from "../src/workflow-pack.js";
 
 function seededAgentEnv() {
     const binDir = createExecutableDir();
@@ -65,7 +65,9 @@ test("selecting a workflow subset installs exactly that subset + transitive deps
     const workflowFiles = readdirSync(workflowDir)
         .filter((f) => f.endsWith(".tsx"))
         .map((f) => f.replace(/\.tsx$/, ""));
-    expect(workflowFiles.sort()).toEqual(selected.slice().sort());
+    // System workflows (durable init, post-failure autopsy) are ALWAYS installed
+    // regardless of the selection — the closure force-includes them.
+    expect(workflowFiles.sort()).toEqual([...selected, "init", "post-failure"].sort());
 
     // --- components ---
     const componentDir = join(smithersDir, "components");
@@ -119,7 +121,7 @@ test("selecting a workflow subset installs exactly that subset + transitive deps
     expect(writtenRelative).toContain("package.json");
     expect(writtenRelative).toContain(".gitignore");
     expect(writtenRelative).toContain("gateway.ts");
-});
+}, 30_000);
 
 test("default selectedWorkflows (undefined) emits the same set as all-workflow selection", () => {
     const tmpAll = mkdtempSync(join(tmpdir(), "smithers-all-"));
@@ -149,4 +151,45 @@ test("default selectedWorkflows (undefined) emits the same set as all-workflow s
     expect(normalize(resultAll.writtenFiles, tmpAll)).toEqual(
         normalize(resultDefault.writtenFiles, tmpDefault),
     );
-});
+}, 30_000);
+
+test("system workflows install even for a tiny explicit subset", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "smithers-system-"));
+    onTestFinished(() => rmSync(tmpDir, { recursive: true, force: true }));
+    initWorkflowPack({
+        rootDir: tmpDir,
+        installSkill: false,
+        skipInstall: true,
+        env: seededAgentEnv(),
+        selectedWorkflows: ["hello"],
+    });
+    const workflowDir = join(tmpDir, ".smithers", "workflows");
+    const files = new Set(readdirSync(workflowDir).filter((f) => f.endsWith(".tsx")));
+    expect(files.has("init.tsx")).toBe(true);
+    expect(files.has("post-failure.tsx")).toBe(true);
+    // And workflowManifestIds excludes them so the wizard never offers them.
+    expect(workflowManifestIds()).not.toContain("init");
+    expect(workflowManifestIds()).not.toContain("post-failure");
+    expect(workflowManifestIds({ includeSystem: true })).toContain("init");
+}, 30_000);
+
+test("à-la-carte workflow deselection persists across a non-interactive re-init", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "smithers-deselect-"));
+    onTestFinished(() => rmSync(tmpDir, { recursive: true, force: true }));
+    const env = seededAgentEnv();
+
+    // Interactive-style init: user keeps everything except "ralph".
+    const kept = workflowManifestIds().filter((id) => id !== "ralph");
+    initWorkflowPack({ rootDir: tmpDir, installSkill: false, skipInstall: true, env, selectedWorkflows: kept });
+    const workflowDir = join(tmpDir, ".smithers", "workflows");
+    expect(readdirSync(workflowDir)).not.toContain("ralph.tsx");
+
+    // A later NON-interactive re-init (no explicit selection, e.g. `init --yes`
+    // or the durable init workflow) must NOT silently re-add the deselected one.
+    initWorkflowPack({ rootDir: tmpDir, installSkill: false, skipInstall: true, env });
+    const after = readdirSync(workflowDir);
+    expect(after).not.toContain("ralph.tsx");
+    // System workflows are always present regardless of the marker.
+    expect(after).toContain("init.tsx");
+    expect(after).toContain("post-failure.tsx");
+}, 30_000);

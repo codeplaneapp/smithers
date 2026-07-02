@@ -179,7 +179,7 @@ export default smithers((ctx) => (
     }
     /**
    * @param {string} workflowPath
-   * @param {{ needsApproval?: boolean; slow?: boolean; authToken?: string; startRun?: boolean; metrics?: boolean; }} [opts]
+   * @param {{ needsApproval?: boolean; slow?: boolean; authToken?: string; startRun?: boolean; metrics?: boolean; insecure?: boolean; }} [opts]
    */
     async function startServeApp(workflowPath, opts = {}) {
         const workflow = await loadWorkflow(workflowPath);
@@ -211,6 +211,7 @@ export default smithers((ctx) => (
             abort,
             authToken: opts.authToken,
             metrics: opts.metrics,
+            insecure: opts.insecure,
         });
         server = Bun.serve({ port: 0, fetch: app.fetch });
         port = getPort(server);
@@ -331,6 +332,91 @@ export default smithers((ctx) => (
             expect(status).toBe(200);
             const { status: healthStatus } = await request("/health");
             expect(healthStatus).toBe(200);
+        });
+    });
+    // =========================================================================
+    // Host / Origin rebinding + CSRF defense (unauthenticated bind)
+    // =========================================================================
+    describe("Host / Origin defense", () => {
+        test("rejects a non-loopback Host on run-control routes (DNS rebinding)", async () => {
+            const dbPath = resolve(testDir, "host-defense.db");
+            const workflowPath = writeTestWorkflow("host-defense", dbPath, { slow: true });
+            await startServeApp(workflowPath, { slow: true });
+            for (const [path, method] of [["/", "GET"], ["/cancel", "POST"], ["/approve/task1", "POST"]]) {
+                const { status, data } = await request(path, { method, headers: { Host: "evil.com" } });
+                expect(status).toBe(403);
+                expect(data.error.code).toBe("FORBIDDEN");
+                expect(data.error.message).toBe("Host is not allowed");
+            }
+        });
+        test("rejects a cross-origin Origin even when the Host is loopback (simple-POST /cancel CSRF)", async () => {
+            const dbPath = resolve(testDir, "origin-defense.db");
+            const workflowPath = writeTestWorkflow("origin-defense", dbPath, { slow: true });
+            await startServeApp(workflowPath, { slow: true });
+            const { status, data } = await request("/cancel", {
+                method: "POST",
+                headers: { Origin: "http://evil.com" },
+            });
+            expect(status).toBe(403);
+            expect(data.error.code).toBe("FORBIDDEN");
+            expect(data.error.message).toBe("Origin is not allowed");
+        });
+        test("allows loopback Host variants and a same-origin (loopback) Origin", async () => {
+            const dbPath = resolve(testDir, "loopback-allowed.db");
+            const workflowPath = writeTestWorkflow("loopback-allowed", dbPath, { slow: true });
+            const { runId } = await startServeApp(workflowPath, { slow: true });
+            for (const host of ["127.0.0.1:9999", "localhost:1234", "[::1]:9999", "sub.localhost"]) {
+                const { status, data } = await request("/", { headers: { Host: host } });
+                expect(status).toBe(200);
+                expect(data.runId).toBe(runId);
+            }
+            const okOrigin = await request("/", { headers: { Origin: "http://127.0.0.1:9999" } });
+            expect(okOrigin.status).toBe(200);
+            expect(okOrigin.data.runId).toBe(runId);
+        });
+        test("health check is exempt from the host defense", async () => {
+            const dbPath = resolve(testDir, "host-health-exempt.db");
+            const workflowPath = writeTestWorkflow("host-health-exempt", dbPath, { slow: true });
+            await startServeApp(workflowPath, { slow: true });
+            const { status, data } = await request("/health", { headers: { Host: "evil.com" } });
+            expect(status).toBe(200);
+            expect(data.ok).toBe(true);
+        });
+        test("skips the host defense when a token is configured (token is the gate)", async () => {
+            const dbPath = resolve(testDir, "host-auth.db");
+            const workflowPath = writeTestWorkflow("host-auth", dbPath, { slow: true });
+            const { runId } = await startServeApp(workflowPath, { slow: true, authToken: "secret" });
+            const { status, data } = await request("/", {
+                headers: { Host: "evil.com", "x-smithers-key": "secret" },
+            });
+            expect(status).toBe(200);
+            expect(data.runId).toBe(runId);
+        });
+        test("opts.insecure opts out of the host defense", async () => {
+            const dbPath = resolve(testDir, "host-insecure.db");
+            const workflowPath = writeTestWorkflow("host-insecure", dbPath, { slow: true });
+            const { runId } = await startServeApp(workflowPath, { slow: true, insecure: true });
+            const { status, data } = await request("/", { headers: { Host: "evil.com" } });
+            expect(status).toBe(200);
+            expect(data.runId).toBe(runId);
+        });
+        test("SMITHERS_SERVE_TRUST_ANY_HOST=1 opts out of the host defense", async () => {
+            const saved = process.env.SMITHERS_SERVE_TRUST_ANY_HOST;
+            try {
+                process.env.SMITHERS_SERVE_TRUST_ANY_HOST = "1";
+                const dbPath = resolve(testDir, "host-trust-env.db");
+                const workflowPath = writeTestWorkflow("host-trust-env", dbPath, { slow: true });
+                const { runId } = await startServeApp(workflowPath, { slow: true });
+                const { status, data } = await request("/", { headers: { Host: "evil.com" } });
+                expect(status).toBe(200);
+                expect(data.runId).toBe(runId);
+            }
+            finally {
+                if (saved === undefined)
+                    delete process.env.SMITHERS_SERVE_TRUST_ANY_HOST;
+                else
+                    process.env.SMITHERS_SERVE_TRUST_ANY_HOST = saved;
+            }
         });
     });
     // =========================================================================

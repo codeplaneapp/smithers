@@ -284,3 +284,25 @@ test("smithers init survives a legacy unknown provider account (regression)", ()
     expect(agentsSource).not.toContain("my-gemini");
     expect(agentsSource).not.toContain("myGemini");
 });
+
+test("smithers init \"<task>\" --agents-only fails with a create-workflow hint, not a raw RUN_NOT_FOUND", () => {
+    // A prompt is an explicit request for the create-workflow builder, but
+    // --agents-only installs no workflows, so the post-init dispatch can't find
+    // it. The failure must guide the user (re-run without --agents-only / keep
+    // create-workflow selected) instead of surfacing the bare "Workflow not
+    // found: create-workflow". HOME === repo.dir here, so no global pack masks it.
+    const repo = createTempRepo();
+    const binDir = createExecutableDir();
+    writeFakeClaudeBinary(binDir);
+    repo.write(".claude/.credentials.json", "{}\n");
+    const result = runSmithers(["init", "build a docs-sync workflow", "--agents-only"], {
+        cwd: repo.dir,
+        format: "json",
+        env: buildEnv(repo.dir, binDir),
+    });
+    expect(result.exitCode).not.toBe(0);
+    const all = `${result.stdout}\n${result.stderr}`;
+    expect(all).toContain("create-workflow is not installed");
+    // The raw framework message must NOT be the whole story.
+    expect(all).not.toMatch(/^Workflow not found: create-workflow$/m);
+});

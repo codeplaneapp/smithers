@@ -161,14 +161,9 @@ function healthOk(): Promise<boolean> {
 
 async function loadChromium() {
   // `playwright` isn't a dependency of the workflow pack; resolve it dynamically
-  // (a non-literal specifier so tsc doesn't try to resolve it here), falling back
-  // to the studio-2 install where the browsers are downloaded.
+  // (a non-literal specifier so tsc doesn't try to resolve it here).
   const playwrightPkg = "playwright";
-  try {
-    return (await import(playwrightPkg)).chromium;
-  } catch {
-    return (await import(resolve(repoRoot, "apps/smithers-studio-2/node_modules/playwright/index.js"))).chromium;
-  }
+  return (await import(playwrightPkg)).chromium;
 }
 
 beforeAll(async () => {

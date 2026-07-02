@@ -101,7 +101,7 @@ function buildInitCta(templateResult) {
  * the workflow. Returns null when the durable path is unavailable so the
  * caller falls back to the imperative scaffold.
  *
- * @param {{ force?: boolean; skipInstall?: boolean }} options
+ * @param {{ force?: boolean; skipInstall?: boolean; refreshSkills?: boolean }} options
  * @returns {Promise<Record<string, unknown> | null>}
  */
 async function runDurableReinit(options) {
@@ -123,7 +123,14 @@ async function runDurableReinit(options) {
         let result;
         try {
             result = await Effect.runPromise(runWorkflow(workflow, {
-                input: { force: options.force ?? false, skipInstall: options.skipInstall ?? false },
+                input: {
+                    force: options.force ?? false,
+                    skipInstall: options.skipInstall ?? false,
+                    // Honor --no-skill: the seeded init workflow defaults
+                    // refreshSkills to true, so without this a `--no-skill`
+                    // re-init would still (re)install skills into $HOME.
+                    refreshSkills: options.refreshSkills ?? true,
+                },
                 runId,
                 workflowPath: entryFile,
             }));
@@ -170,7 +177,7 @@ export async function runInitCommand(c, fail) {
         // Non-interactive re-init on an existing pack runs as the durable `init`
         // system workflow instead of the one-shot imperative pass.
         if (!human && !c.options.agentsOnly && !c.options.global && !c.options.addAgents && !c.options.template) {
-            const durable = await runDurableReinit({ force: c.options.force, skipInstall: !c.options.install });
+            const durable = await runDurableReinit({ force: c.options.force, skipInstall: !c.options.install, refreshSkills: c.options.skill });
             if (durable) {
                 return c.ok(durable, { cta: { ...buildInitCta(undefined), description: "Next steps:" } });
             }
@@ -183,6 +190,10 @@ export async function runInitCommand(c, fail) {
                 global: c.options.global,
                 installSkill: c.options.skill,
                 updatePrompt: c.options.updatePrompt,
+                // `smithers init "<task>"` launches the create-workflow builder
+                // right after init, so keep it in the pack even if the wizard
+                // deselected it — otherwise the dispatch fails with RUN_NOT_FOUND.
+                requiredWorkflows: c.args?.prompt ? ["create-workflow"] : undefined,
             })
             : initWorkflowPack({
                 force: c.options.force,

@@ -110,11 +110,7 @@ function healthOk(): Promise<boolean> {
 
 async function loadChromium() {
   const playwrightPkg = "playwright";
-  try {
-    return (await import(playwrightPkg)).chromium;
-  } catch {
-    return (await import(resolve(repoRoot, "apps/smithers-studio-2/node_modules/playwright/index.js"))).chromium;
-  }
+  return (await import(playwrightPkg)).chromium;
 }
 
 beforeAll(async () => {

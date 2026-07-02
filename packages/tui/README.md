@@ -1,7 +1,7 @@
 # @smithers-orchestrator/tui
 
 Full-screen terminal monitor for a single Smithers run.  Built on
-[OpenTUI](https://github.com/nicholasgasior/opentui) + React; talks to the
+[OpenTUI](https://github.com/anomalyco/opentui) + React; talks to the
 local Gateway over HTTP/WebSocket.
 
 ## How it launches

@@ -120,7 +120,7 @@ const MISSING_CREDENTIAL_MESSAGE = [
   "Set ONE of these before running `smithers ui --app`:",
   "  • CEREBRAS_API_KEY   — https://cloud.cerebras.ai (fast, recommended)",
   "  • OPENAI_API_KEY     — https://platform.openai.com/api-keys",
-  "  • CODEX_ACCESS_TOKEN — your Codex/ChatGPT subscription token",
+  "  • CODEX_ACCESS_TOKEN / CODEX_REFRESH_TOKEN — your Codex/ChatGPT subscription token",
   "",
   "Example:  CEREBRAS_API_KEY=csk-... smithers ui --app",
 ].join("\n");

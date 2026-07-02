@@ -31,23 +31,39 @@ import { parseWorkflowFrontmatter } from "./frontmatter.js";
 const WORKFLOW_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs"]);
 
 /**
- * Read the source text for frontmatter parsing.
- * For executable files, checks for a companion `.md` first (pure `---` YAML),
- * then falls back to the file itself (block-comment frontmatter).
+ * Read the executable workflow file's own source text.
+ *
+ * This is what populates `WorkflowDefinition.source` — the raw text of the
+ * executable file itself, never a companion `.md`, so consumers that hash or
+ * re-parse `source` operate on the real workflow module.
  *
  * @param {string} filePath
  * @returns {Promise<string>}
  */
-async function readSourceForFrontmatter(filePath) {
+async function readExecutableSource(filePath) {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Read the source text used for frontmatter parsing.
+ * Prefers a companion `.md` (pure `---` YAML) when present, otherwise falls
+ * back to the executable file's own text (block-comment frontmatter). The
+ * already-read `execSource` is reused for the fallback to avoid a second read.
+ *
+ * @param {string} filePath
+ * @param {string} execSource - the executable file's own source, already read.
+ * @returns {Promise<string>}
+ */
+async function readSourceForFrontmatter(filePath, execSource) {
   const companionMd = filePath.replace(/\.(ts|tsx|js|jsx|mjs)$/, ".md");
   try {
     return await readFile(companionMd, "utf8");
   } catch {
-    try {
-      return await readFile(filePath, "utf8");
-    } catch {
-      return "";
-    }
+    return execSource;
   }
 }
 
@@ -114,6 +130,9 @@ function buildDefinition(filePath, baseDir, exported, source, frontmatter) {
       system:
         raw.system ??
         (typeof frontmatter.system === "boolean" ? frontmatter.system : undefined),
+      version:
+        raw.version ??
+        (typeof frontmatter.version === "string" ? frontmatter.version : undefined),
       filePath,
       baseDir,
       source,
@@ -136,6 +155,8 @@ function buildDefinition(filePath, baseDir, exported, source, frontmatter) {
           : undefined,
       system:
         typeof frontmatter.system === "boolean" ? frontmatter.system : undefined,
+      version:
+        typeof frontmatter.version === "string" ? frontmatter.version : undefined,
       filePath,
       baseDir,
       source,
@@ -173,9 +194,12 @@ export async function loadWorkflowsFromDir({ dir, source = "unknown" }) {
     if (!statSync(filePath).isFile()) continue;
     if (!WORKFLOW_EXTENSIONS.has(extname(entry))) continue;
 
-    // Read source text and parse frontmatter BEFORE dynamic import.
-    const sourceText = await readSourceForFrontmatter(filePath);
-    const { frontmatter } = parseWorkflowFrontmatter(sourceText);
+    // Read source text and parse frontmatter BEFORE dynamic import. The
+    // executable file's own text is the `source`; frontmatter may come from a
+    // companion `.md` instead.
+    const execSource = await readExecutableSource(filePath);
+    const frontmatterSource = await readSourceForFrontmatter(filePath, execSource);
+    const { frontmatter } = parseWorkflowFrontmatter(frontmatterSource);
 
     const exported = await importWorkflowFile(filePath);
     if (exported === null) {
@@ -187,7 +211,7 @@ export async function loadWorkflowsFromDir({ dir, source = "unknown" }) {
       continue;
     }
 
-    const def = buildDefinition(filePath, dir, exported, sourceText, frontmatter);
+    const def = buildDefinition(filePath, dir, exported, execSource, frontmatter);
     if (!def) {
       diagnostics.push({
         type: "error",
@@ -268,8 +292,9 @@ export async function loadWorkflows(options = {}) {
   for (const rawPath of workflowPaths) {
     const filePath = resolve(cwd, rawPath);
 
-    const sourceText = await readSourceForFrontmatter(filePath);
-    const { frontmatter } = parseWorkflowFrontmatter(sourceText);
+    const execSource = await readExecutableSource(filePath);
+    const frontmatterSource = await readSourceForFrontmatter(filePath, execSource);
+    const { frontmatter } = parseWorkflowFrontmatter(frontmatterSource);
 
     const exported = await importWorkflowFile(filePath);
     if (exported === null) {
@@ -280,7 +305,7 @@ export async function loadWorkflows(options = {}) {
       });
       continue;
     }
-    const def = buildDefinition(filePath, dirname(filePath), exported, sourceText, frontmatter);
+    const def = buildDefinition(filePath, dirname(filePath), exported, execSource, frontmatter);
     if (!def) {
       allDiagnostics.push({
         type: "error",

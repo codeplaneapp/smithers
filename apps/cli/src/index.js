@@ -1260,6 +1260,16 @@ async function buildPsRows(adapter, limit, status) {
             : [];
         const nextTimer = waitingTimers[0];
         const view = await computeRunStateFromRow(adapter, run);
+        // Surface pending approval gates so `ps --json` consumers (the OpenClaw /
+        // Claude plugins' before-prompt context) can relay gate node ids without
+        // a second `inspect` round-trip. Only query the runs that are actually
+        // parked on a gate to keep the hot path cheap.
+        const pendingApprovals = view.state === "waiting-approval"
+            ? (await adapter.listPendingApprovals(run.runId)).map((a) => ({
+                nodeId: a.nodeId,
+                status: a.status,
+            }))
+            : [];
         rows.push({
             id: run.runId,
             workflow: run.workflowName ?? (run.workflowPath ? basename(run.workflowPath) : "—"),
@@ -1291,6 +1301,12 @@ async function buildPsRows(adapter, limit, status) {
                 : run.createdAtMs
                     ? formatAge(run.createdAtMs)
                     : "—",
+            // Raw epoch ms of terminal time (present only on finished/failed/
+            // cancelled runs). The fleet watchdog (monitor-smithers) needs
+            // time-since-FAILURE, not time-since-start, to judge a failure fresh
+            // enough to escalate — `started` above only carries start age.
+            ...(run.finishedAtMs ? { finishedAtMs: run.finishedAtMs } : {}),
+            ...(pendingApprovals.length ? { pendingApprovals } : {}),
         });
     }
     return rows;
@@ -1622,7 +1638,6 @@ const bugOptions = z.object({
     run: z.string().optional().describe("Attach this run's workflow name, status, error, and recent events to the report"),
     title: z.string().optional().describe("Bug title (derived from the run's error when omitted)"),
     body: z.string().optional().describe("Bug description body"),
-    json: z.boolean().default(false).describe("Print the filed bug id, URL, and payload as JSON"),
     endpoint: z.string().optional().describe("Bug endpoint URL (default https://bug.smithers.sh/api/bugs; the SMITHERS_BUG_ENDPOINT env var takes precedence)"),
 });
 const monitorOptions = upOptions.extend({
@@ -2819,8 +2834,23 @@ async function runGatewayCommand(options) {
     if (!isLoopback && !authToken && !options.insecure) {
         throw new SmithersError("GATEWAY_INSECURE_BIND", `Refusing to bind the Gateway to non-loopback host "${options.host}" without authentication — this would expose a full-control, unauthenticated control plane to the network. Set --auth-token <token> (or SMITHERS_API_KEY), bind to 127.0.0.1, or pass --insecure to override.`, { host: options.host });
     }
+    // A durable operator token (--auth-token / SMITHERS_API_KEY) is a long-lived,
+    // possibly org-wide secret: never copy it to the on-disk state file. When one
+    // is supplied, mint a SEPARATE session-only bearer, record only that in the
+    // 0600 state file (so cross-shell clients — ui/status/delegated RPC — can
+    // still discover a working bearer), and register BOTH so the operator's own
+    // token keeps authenticating. A purely minted token (--mint-token) is already
+    // ephemeral, so it stays the state-file token.
+    const sessionToken = explicitToken ? mintGatewayToken() : undefined;
+    const stateToken = sessionToken ?? authToken ?? null;
     const auth = authToken
-        ? { mode: "token", tokens: { [authToken]: { role: "operator", scopes: ["*"] } } }
+        ? {
+            mode: "token",
+            tokens: {
+                [authToken]: { role: "operator", scopes: ["*"] },
+                ...(sessionToken ? { [sessionToken]: { role: "operator", scopes: ["*"] } } : {}),
+            },
+        }
         : undefined;
     const localPackDir = resolvePackDirs(process.cwd()).find((dir) => dir.scope === "local")?.packDir;
     const localWorkspace = localPackDir ? dirname(localPackDir) : undefined;
@@ -2958,7 +2988,7 @@ async function runGatewayCommand(options) {
         host: options.host,
         port,
         url,
-        token: authToken ?? null,
+        token: stateToken,
         workspaceRoot: canonicalWorkspacePath(workspace),
         backend: identityBackend,
         version: readPackageVersion(),
@@ -4529,7 +4559,13 @@ const cli = Cli.create({
             }
             catch (err) {
                 if (err instanceof SmithersError) {
-                    return fail({ code: err.code, message: err.message, exitCode: 4 });
+                    // A prompt needs the create-workflow builder; the generic
+                    // "Workflow not found" is unhelpful here (and re-running plain
+                    // init could keep it deselected). Point at the real fix.
+                    const message = err.code === "RUN_NOT_FOUND"
+                        ? "create-workflow is not installed in this pack, so `smithers init \"<task>\"` cannot launch the builder. Re-run `smithers init` and keep the create-workflow workflow selected (or run `smithers init` without --agents-only)."
+                        : err.message;
+                    return fail({ code: err.code, message, exitCode: 4 });
                 }
                 return fail({ code: "CREATE_WORKFLOW_FAILED", message: err?.message ?? String(err), exitCode: 1 });
             }
@@ -4558,7 +4594,15 @@ const cli = Cli.create({
                 if (!Boolean(process.stdin.isTTY && process.stdout.isTTY)) {
                     return fail({ code: "INTERACTIVE_REQUIRES_TTY", message: "--interactive needs an interactive terminal (TTY).", exitCode: 4 });
                 }
-                return runTuiCommand(c, fail, { preselect: workflow });
+                // Thread the positional task through as the builder's --prompt so
+                // the interactive prompts pre-fill it (a bare Enter keeps it)
+                // instead of silently dropping the typed description. Shallow-copy
+                // the context so the shared c.options is never mutated.
+                const interactiveContext = {
+                    ...c,
+                    options: { ...c.options, prompt: c.args.task ?? c.options.prompt },
+                };
+                return runTuiCommand(interactiveContext, fail, { preselect: workflow });
             }
             const prompt = c.args.task ?? c.options.prompt;
             return executeUpCommand(c, workflow.entryFile, normalizeWorkflowRunOptions({ ...c.options, prompt }), fail);
@@ -4740,6 +4784,10 @@ const cli = Cli.create({
     .command("bug", {
     description: "File a smithers bug report to bug.smithers.sh; with --run it attaches the run's status, error, and last ~50 events (secrets scrubbed).",
     options: bugOptions,
+    // The command narrates its own "Filed bug ..." line on stderr; suppress the
+    // raw result dump in a human TTY while keeping full structured output for
+    // piped/agent use.
+    outputPolicy: "agent-only",
     async run(c) {
         const fail = (opts) => {
             commandExitOverride = opts.exitCode ?? 1;

@@ -1,5 +1,6 @@
 import { buildGenerateResult } from "@smithers-orchestrator/agents/BaseCliAgent";
 import { extractPrompt } from "@smithers-orchestrator/agents/BaseCliAgent";
+import { truncate } from "@smithers-orchestrator/agents/BaseCliAgent";
 
 /** @typedef {import("./ElizaAgentOptions.ts").ElizaAgentOptions} ElizaAgentOptions */
 /** @typedef {import("./ElizaAgentOptions.ts").ElizaPlugin} ElizaPlugin */
@@ -25,16 +26,29 @@ import { extractPrompt } from "@smithers-orchestrator/agents/BaseCliAgent";
  * Default factory: dynamically imports @elizaos/core and builds an
  * AgentRuntime from the provided options.
  *
+ * `@elizaos/core` is a hard dependency this package owns, so a load failure is
+ * almost never a missing install — it is far more likely an ESM/CJS interop
+ * break, a native-build failure, or a version conflict. Preserve the underlying
+ * error as `cause` rather than masking it behind a fixed "install it" message.
+ *
  * @param {ElizaAgentOptions} opts
+ * @param {{ loadCore?: () => Promise<unknown> }} [seams]
+ *   Test seam — inject an alternate `@elizaos/core` loader. Defaults to a real
+ *   dynamic import of the bundled dependency.
  * @returns {Promise<ElizaRuntime>}
  */
-async function defaultRuntimeFactory(opts) {
+export async function defaultRuntimeFactory(
+    opts,
+    { loadCore = () => import("@elizaos/core") } = {}
+) {
+    /** @type {any} */
     let core;
     try {
-        core = await import("@elizaos/core");
-    } catch {
+        core = await loadCore();
+    } catch (err) {
         throw new Error(
-            "install @elizaos/core to use ElizaAgent: npm install @elizaos/core"
+            "ElizaAgent: failed to load @elizaos/core (install it with `npm install @elizaos/core` if missing)",
+            { cause: err }
         );
     }
 
@@ -66,6 +80,20 @@ async function defaultRuntimeFactory(opts) {
 }
 
 /**
+ * Build an abort error whose `name` is `"AbortError"`. The driver's abort
+ * classifier keys off the name (matching driver `withAbort` / `makeAbortError`),
+ * so setting it keeps aborts from being misread as retryable task failures if
+ * the message wording ever changes.
+ *
+ * @returns {Error}
+ */
+function makeAbortError() {
+    const error = new Error("ElizaAgent: generation aborted");
+    error.name = "AbortError";
+    return error;
+}
+
+/**
  * Race a promise against an AbortSignal, rejecting immediately if the signal
  * fires. Returns the original promise unchanged if abortSignal is absent.
  *
@@ -77,10 +105,10 @@ async function defaultRuntimeFactory(opts) {
 function raceAbort(promise, abortSignal) {
     if (!abortSignal) return promise;
     if (abortSignal.aborted) {
-        return Promise.reject(new Error("ElizaAgent: generation aborted"));
+        return Promise.reject(makeAbortError());
     }
     return new Promise((resolve, reject) => {
-        const onAbort = () => reject(new Error("ElizaAgent: generation aborted"));
+        const onAbort = () => reject(makeAbortError());
         abortSignal.addEventListener("abort", onAbort, { once: true });
         promise.then(resolve, reject).finally(() => {
             abortSignal.removeEventListener("abort", onAbort);
@@ -115,8 +143,10 @@ function isUnsupportedModelError(err) {
  * initializes the runtime on the first `generate` call and memoizes it
  * across subsequent calls.
  *
- * `@elizaos/core` is an **optional peer dependency** — it is resolved via
- * a dynamic import so the package builds and tests without it installed.
+ * `@elizaos/core` is a hard dependency this opt-in package owns and installs.
+ * It is resolved via a dynamic import (so this module carries no load-time
+ * dependency and the structural types keep the build self-contained), but
+ * consumers of `@smithers-orchestrator/agent-eliza` get it transitively.
  */
 export class ElizaAgent {
     /** @type {string | undefined} */
@@ -217,7 +247,7 @@ export class ElizaAgent {
             : extractedPrompt;
 
         if (abortSignal?.aborted) {
-            throw new Error("ElizaAgent: generation aborted");
+            throw makeAbortError();
         }
 
         const runtime = await raceAbort(this.#ensureRuntime(), abortSignal);
@@ -257,7 +287,16 @@ export class ElizaAgent {
         /** @type {unknown} */
         let output = undefined;
         if (outputSchema) {
-            const parsed = JSON.parse(text);
+            /** @type {unknown} */
+            let parsed;
+            try {
+                parsed = JSON.parse(text);
+            } catch (err) {
+                throw new Error(
+                    `ElizaAgent: expected JSON output for outputSchema but the model returned non-JSON text: ${truncate(text, 200)}`,
+                    { cause: err }
+                );
+            }
             output = outputSchema.parse(parsed);
         }
 

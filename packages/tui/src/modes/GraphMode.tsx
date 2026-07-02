@@ -110,9 +110,35 @@ export function GraphMode({
   onSelectNodeKey,
 }: {
   runId: string;
-  onSelectNodeKey?: (nodeId: string) => void;
+  onSelectNodeKey?: (nodeKey: string) => void;
 }) {
   const { nodes, root, isLoading, error } = useRunTree(runId);
+  return (
+    <GraphView
+      nodes={nodes}
+      root={root}
+      isLoading={isLoading}
+      error={error}
+      onSelectNodeKey={onSelectNodeKey}
+    />
+  );
+}
+
+/**
+ * Presentational graph view: the DAG layout + keyboard navigation over injected
+ * tree data. `GraphMode` is a thin wrapper that only reads `useRunTree` and
+ * forwards it here, so render tests can exercise the real view (cards, connector
+ * arrows, Enter→onSelectNodeKey) without a live gateway.
+ */
+export function GraphView({
+  nodes,
+  root,
+  isLoading,
+  error,
+  onSelectNodeKey,
+}: Pick<ReturnType<typeof useRunTree>, "nodes" | "root" | "isLoading" | "error"> & {
+  onSelectNodeKey?: (nodeKey: string) => void;
+}) {
   const { width } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
   const cardWidth = compact ? CARD_W_COMPACT : CARD_W_NORMAL;

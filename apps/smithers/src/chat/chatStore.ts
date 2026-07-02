@@ -57,19 +57,14 @@ type ChatState = {
   say: (text: string) => void;
   /** Append an assistant message that renders a card. */
   postCard: (card: Card, text?: string) => void;
-  /** Seed the signed-out public transcript once per page lifetime. */
-  seedPublicChat: () => void;
-  /** Move the inline sign-in card to the bottom and replay its entrance. */
-  revealSignInCard: () => void;
   /** Drop the whole conversation (e.g. replaying onboarding). */
   clear: () => void;
   registerConversation: (el: HTMLElement | null) => void;
   registerInput: (el: HTMLInputElement | null) => void;
   focusInput: () => void;
-  /** Stream a reply for `text`, appending deltas to a single assistant bubble.
-   *  `endpoint` lets signed-out chat target the free `/api/ask` path
-   *  instead of the authenticated `/api/chat` default. */
-  send: (text: string, system?: string, endpoint?: string) => Promise<void>;
+  /** Stream a reply for `text` from the local concierge (`/api/chat`),
+   *  appending deltas to a single assistant bubble. */
+  send: (text: string, system?: string) => Promise<void>;
 };
 
 /**
@@ -102,39 +97,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
     scrollToBottom(false);
   },
-  seedPublicChat: () => {
-    set((state) => {
-      if (state.messages.some((message) => message.card?.kind === "signIn")) {
-        return state;
-      }
-      return {
-        messages: [
-          ...state.messages,
-          {
-            id: nextId(),
-            role: "assistant",
-            text: "Hi, I'm Smithers, the durable control plane for long-running coding agents.\n\nYou can ask about the product here, or sign in to connect your agents, runs, and workspace.",
-          },
-          {
-            id: nextId(),
-            role: "assistant",
-            text: "",
-            card: { kind: "signIn" },
-          },
-        ],
-      };
-    });
-    scrollToBottom(false);
-  },
-  revealSignInCard: () => {
-    set((state) => ({
-      messages: [
-        ...state.messages.filter((message) => message.card?.kind !== "signIn"),
-        { id: nextId(), role: "assistant", text: "", card: { kind: "signIn" } },
-      ],
-    }));
-    scrollToBottom(false);
-  },
   clear: () => {
     // Abort any in-flight stream so a late delta can't repopulate the cleared log.
     abort?.abort();
@@ -151,7 +113,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   focusInput: () => {
     requestAnimationFrame(() => inputEl?.focus());
   },
-  send: async (text, system, endpoint) => {
+  send: async (text, system) => {
     // The wire history is the conversation so far plus this turn; `messages` in
     // state does not include it yet, so build it explicitly.
     const history: ApiChatMessage[] = [
@@ -181,7 +143,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       for await (const delta of streamReplyViaApi({
         messages: history,
         system,
-        endpoint,
         signal: controller.signal,
       })) {
         acc += delta;

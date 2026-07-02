@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDiagnosticStrategy, enrichReportWithErrorAnalysis, formatDiagnosticSummary, runDiagnostics, } from "../src/diagnostics/index.js";
@@ -242,6 +242,63 @@ describe("runDiagnostics", () => {
             const authCheck = report.checks.find((check) => check.id === "api_key_valid");
             expect(authCheck?.status).toBe("fail");
             expect(authCheck?.message).toContain("not logged in");
+        }
+        finally {
+            rmSync(binDir, { recursive: true, force: true });
+            rmSync(home, { recursive: true, force: true });
+        }
+    });
+
+    test("Claude subscription diagnostics pass from ~/.claude/.credentials.json without an API key", async () => {
+        // Common Linux/CI Claude Code subscription path: no ANTHROPIC_API_KEY,
+        // no `claude` on PATH, credentials live on disk.
+        const home = mkdtempSync(join(tmpdir(), "smithers-claude-cred-"));
+        try {
+            mkdirSync(join(home, ".claude"), { recursive: true });
+            writeFileSync(join(home, ".claude", ".credentials.json"), JSON.stringify({
+                claudeAiOauth: {
+                    accessToken: "sk-ant-oat-fixture-token",
+                    expiresAt: Date.now() + 3_600_000,
+                },
+            }) + "\n");
+
+            const report = await runDiagnostics(getDiagnosticStrategy("claude"), {
+                env: { HOME: home, PATH: "/usr/bin:/bin" },
+                cwd: home,
+            });
+
+            const authCheck = report.checks.find((check) => check.id === "api_key_valid");
+            expect(authCheck?.status).toBe("pass");
+            expect(authCheck?.message).toContain("OAuth credentials are present");
+        }
+        finally {
+            rmSync(home, { recursive: true, force: true });
+        }
+    });
+
+    test.skipIf(process.platform !== "darwin")("Claude subscription diagnostics pass from the macOS Keychain when no credentials file exists", async () => {
+        const binDir = mkdtempSync(join(tmpdir(), "smithers-claude-keychain-bin-"));
+        const home = mkdtempSync(join(tmpdir(), "smithers-claude-keychain-home-"));
+        try {
+            // Fake `security` prints Keychain-stored OAuth credentials; reached
+            // only because no ~/.claude/.credentials.json exists on disk.
+            const securityBin = join(binDir, "security");
+            writeFileSync(securityBin, [
+                `#!${process.execPath}`,
+                "process.stdout.write(JSON.stringify({ claudeAiOauth: { accessToken: 'sk-ant-oat-keychain-token', expiresAt: " + (Date.now() + 3_600_000) + " } }));",
+                "process.exit(0);",
+                "",
+            ].join("\n"));
+            chmodSync(securityBin, 0o755);
+
+            const report = await runDiagnostics(getDiagnosticStrategy("claude"), {
+                env: { HOME: home, PATH: `${binDir}:/usr/bin:/bin` },
+                cwd: home,
+            });
+
+            const authCheck = report.checks.find((check) => check.id === "api_key_valid");
+            expect(authCheck?.status).toBe("pass");
+            expect(authCheck?.message).toContain("OAuth credentials are present");
         }
         finally {
             rmSync(binDir, { recursive: true, force: true });

@@ -340,19 +340,6 @@ function createSmithersCollectionsWithClient(
         (row) => mapSmithersElectricRow("nodes", row),
         runId ? runWhere(runId) : undefined,
       ),
-    events: (runId: string, maxRows = RUN_EVENT_COLLECTION_MAX_ROWS) => {
-      const limit = runEventMaxRows(maxRows);
-      return getOrCreate<GatewayRunEventRow, string>(
-        smithersCollectionKeys.events(runId, limit),
-        "events",
-        resultKey,
-        async () => runId ? boundedRunEventRows(await client.api.listRunEvents({ runId, limit: RUN_EVENT_API_FETCH_LIMIT }), limit) : [],
-        (row) => mapSmithersElectricRow("events", row),
-        runId ? runWhere(runId) : undefined,
-        {},
-        limit,
-      );
-    },
     approvals: (params: ListApprovalsRequest = {}) =>
       getOrCreate<GatewayApprovalRow, string>(
         smithersCollectionKeys.approvals(params),

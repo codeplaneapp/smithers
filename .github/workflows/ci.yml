@@ -111,6 +111,11 @@ jobs:
         if: runner.os != 'Windows'
         run: pnpm -r --no-bail test
 
+      - name: Run docs-driven-development suite
+        if: runner.os == 'Linux'
+        timeout-minutes: 20
+        run: pnpm -C .smithers test:ddd
+
       - name: Run workspace package tests (Windows shard)
         if: runner.os == 'Windows'
         # Keep Windows coverage on packages whose tests are currently
