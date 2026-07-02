@@ -232,19 +232,73 @@ export function toProviderResult(
 	};
 }
 
-/** Map a `smithers inspect --format json` payload into the provider result shape. */
+/**
+ * Extract the child runId that `smithers up` prints (a line like
+ * `runId: run-1782960347605` OR a bare UUID `runId: 820007c0-65c8-...` — the
+ * id scheme differs by backend/env). Returns undefined if not found.
+ */
+export function extractRemoteRunId(upStdout: string): string | undefined {
+	const match = upStdout.match(/(?:^|\n)\s*runId:\s*([A-Za-z0-9-]+)/);
+	return match ? match[1] : undefined;
+}
+
+/**
+ * Determine the child run's terminal status from the FOREGROUND `smithers up`
+ * output, which prints a `status: <state>` line once the run completes. This is
+ * authoritative (up blocks until terminal), so we prefer it over a follow-up
+ * inspect that can race id-scheme quirks. Returns "finished" for
+ * finished/completed/succeeded, otherwise "failed".
+ */
+export function parseUpStatus(upStdout: string): "finished" | "failed" {
+	const match = upStdout.match(/(?:^|\n)\s*status:\s*([A-Za-z-]+)/);
+	const state = match ? match[1].toLowerCase() : "";
+	return state === "finished" || state === "completed" || state === "succeeded"
+		? "finished"
+		: "failed";
+}
+
+/**
+ * Map a `smithers inspect <runId> --format json` payload into the provider
+ * result shape. The inspect envelope nests run state under `.run`
+ * (`{ run: { id, status, workflow }, runState: { state, steps }, ... }`), so we
+ * read status/id from there (falling back to top-level for older shapes). The
+ * terminal run statuses are "finished"/"completed"/"succeeded".
+ */
 export function mapRemoteRunResult(
 	inspectJson: unknown,
 	fallbackLogTail: string,
+	knownRunId?: string,
 ): RemoteRunOutcome {
 	if (!inspectJson || typeof inspectJson !== "object") {
-		return { status: "failed", output: { error: "no run result", logTail: fallbackLogTail } };
+		return {
+			status: "failed",
+			output: { error: "no run result", logTail: fallbackLogTail },
+			remoteRunId: knownRunId,
+		};
 	}
 	const record = inspectJson as Record<string, unknown>;
-	const status = typeof record.status === "string" ? record.status : "unknown";
-	const remoteRunId = typeof record.runId === "string" ? record.runId : undefined;
-	if (status === "completed" || status === "finished" || status === "succeeded") {
-		return { status: "finished", output: record.output ?? record, remoteRunId };
+	const run = (record.run && typeof record.run === "object" ? record.run : {}) as Record<
+		string,
+		unknown
+	>;
+	const runState = (record.runState && typeof record.runState === "object"
+		? record.runState
+		: {}) as Record<string, unknown>;
+	const status =
+		(typeof run.status === "string" && run.status) ||
+		(typeof runState.state === "string" && runState.state) ||
+		(typeof record.status === "string" && record.status) ||
+		"unknown";
+	const remoteRunId =
+		(typeof run.id === "string" && run.id) ||
+		(typeof record.runId === "string" && record.runId) ||
+		knownRunId;
+	if (
+		status === "completed" ||
+		status === "finished" ||
+		status === "succeeded"
+	) {
+		return { status: "finished", output: record, remoteRunId };
 	}
 	return {
 		status: "failed",
@@ -537,17 +591,24 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 				request.heartbeat({ stage: "running-child", workspaceId });
 				let logTail = "";
 				let runFailed = false;
+				let upStdout = "";
 				try {
+					// Run in the FOREGROUND (no -d): `up` then blocks until the child
+					// run reaches a terminal state, so the runId it prints is real and
+					// the subsequent inspect sees a finished run. Detached (-d) returns
+					// immediately and the inspect races an unfinished run (→ null runId).
 					const { stdout, stderr } = await runSsh(
 						target,
-						`${REMOTE_AUTH_PREFIX}cd ${REMOTE_DIR} && set -a && . ${envPath} && set +a && bunx --bun smithers-orchestrator@${orchestratorVersion} up ${input.scriptName} --input "$(cat input.json)" -d`,
+						`${REMOTE_AUTH_PREFIX}cd ${REMOTE_DIR} && set -a && . ${envPath} && set +a && bunx --bun smithers-orchestrator@${orchestratorVersion} up ${input.scriptName} --input "$(cat input.json)"`,
 						{ timeout: request.toolTimeoutMs || 25 * 60_000 },
 					);
-					logTail = `${stdout}\n${stderr}`.slice(-8_000);
+					upStdout = `${stdout}\n${stderr}`;
+					logTail = upStdout.slice(-8_000);
 				} catch (error) {
 					runFailed = true;
 					const err = error as { stdout?: string; stderr?: string; message?: string };
-					logTail = `${err.stdout ?? ""}\n${err.stderr ?? ""}\n${err.message ?? ""}`.slice(-8_000);
+					upStdout = `${err.stdout ?? ""}\n${err.stderr ?? ""}\n${err.message ?? ""}`;
+					logTail = upStdout.slice(-8_000);
 				} finally {
 					await runSsh(target, `rm -f ${envPath}`).catch(() => {});
 				}
@@ -559,9 +620,16 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 					);
 				}
 
+				// `up` ran in the foreground and printed the child's terminal
+				// status + runId — that output is authoritative. Enrich with a
+				// per-run inspect when possible, but never let a flaky inspect
+				// override the status `up` already reported.
+				const remoteRunId = extractRemoteRunId(upStdout);
+				const upStatus = parseUpStatus(upStdout);
+
 				const { stdout: inspectStdout } = await runSsh(
 					target,
-					`${REMOTE_AUTH_PREFIX}cd ${REMOTE_DIR} && bunx --bun smithers-orchestrator@${orchestratorVersion} inspect --format json`,
+					`${REMOTE_AUTH_PREFIX}cd ${REMOTE_DIR} && bunx --bun smithers-orchestrator@${orchestratorVersion} inspect ${remoteRunId ?? ""} --format json`,
 					{ timeout: 60_000 },
 				).catch((error) => ({ stdout: "", stderr: (error as Error).message }));
 
@@ -572,7 +640,11 @@ export function createPlueSandboxProvider(options: PlueSandboxProviderOptions): 
 					inspectJson = null;
 				}
 
-				const outcome = mapRemoteRunResult(inspectJson, logTail);
+				const outcome: RemoteRunOutcome = {
+					status: upStatus,
+					output: inspectJson ?? { logTail },
+					remoteRunId,
+				};
 				return toProviderResult(outcome, workspaceId);
 			} finally {
 				if (!reusing && !keepWorkspace) {

@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
 	buildRemoteProjectFiles,
 	buildSeedAgentAuthArgs,
+	extractRemoteRunId,
 	mapRemoteRunResult,
 	parseSshCommand,
+	parseUpStatus,
 	REMOTE_AUTH_PREFIX,
 	sanitizeWorkspaceName,
 	toProviderResult,
@@ -117,22 +119,63 @@ describe("buildSeedAgentAuthArgs", () => {
 });
 
 describe("mapRemoteRunResult", () => {
-	test("maps a completed run to status finished", () => {
-		const outcome = mapRemoteRunResult({ status: "completed", output: { ok: true }, runId: "r1" }, "");
-		expect(outcome).toEqual({ status: "finished", output: { ok: true }, remoteRunId: "r1" });
+	test("maps a finished run (inspect .run shape) to status finished", () => {
+		const inspect = { run: { id: "run-1", status: "finished" }, runState: { state: "succeeded" } };
+		const outcome = mapRemoteRunResult(inspect, "");
+		expect(outcome.status).toBe("finished");
+		expect(outcome.remoteRunId).toBe("run-1");
+		expect(outcome.output).toBe(inspect);
 	});
 
-	test("maps a non-completed status to failed with log tail", () => {
-		const outcome = mapRemoteRunResult({ status: "errored", runId: "r2" }, "boom");
+	test("reads status from runState.state when run.status is absent", () => {
+		const outcome = mapRemoteRunResult({ run: { id: "run-2" }, runState: { state: "succeeded" } }, "");
+		expect(outcome.status).toBe("finished");
+		expect(outcome.remoteRunId).toBe("run-2");
+	});
+
+	test("maps a non-terminal status to failed with log tail", () => {
+		const outcome = mapRemoteRunResult({ run: { id: "run-3", status: "errored" } }, "boom");
 		expect(outcome.status).toBe("failed");
-		expect(outcome.remoteRunId).toBe("r2");
+		expect(outcome.remoteRunId).toBe("run-3");
 		expect((outcome.output as { logTail: string }).logTail).toBe("boom");
 	});
 
-	test("maps missing/invalid json to failed", () => {
-		const outcome = mapRemoteRunResult(null, "no output produced");
+	test("falls back to knownRunId when inspect omits the id", () => {
+		const outcome = mapRemoteRunResult(null, "no output produced", "run-known");
 		expect(outcome.status).toBe("failed");
+		expect(outcome.remoteRunId).toBe("run-known");
 		expect((outcome.output as { logTail: string }).logTail).toBe("no output produced");
+	});
+});
+
+describe("extractRemoteRunId", () => {
+	test("pulls a run-prefixed runId line printed by `smithers up`", () => {
+		expect(extractRemoteRunId("...\nrunId: run-1782960347605\nstatus: finished\n")).toBe(
+			"run-1782960347605",
+		);
+	});
+
+	test("pulls a bare-UUID runId (remote id scheme differs)", () => {
+		expect(
+			extractRemoteRunId("runId: 820007c0-65c8-4987-9d0c-746fc06e4b04\nstatus: finished\n"),
+		).toBe("820007c0-65c8-4987-9d0c-746fc06e4b04");
+	});
+
+	test("returns undefined when no runId line is present", () => {
+		expect(extractRemoteRunId("nothing here")).toBeUndefined();
+	});
+});
+
+describe("parseUpStatus", () => {
+	test("treats finished/completed/succeeded as finished", () => {
+		expect(parseUpStatus("runId: x\nstatus: finished\n")).toBe("finished");
+		expect(parseUpStatus("status: completed")).toBe("finished");
+		expect(parseUpStatus("status: succeeded")).toBe("finished");
+	});
+
+	test("treats anything else (or missing) as failed", () => {
+		expect(parseUpStatus("status: errored")).toBe("failed");
+		expect(parseUpStatus("no status line")).toBe("failed");
 	});
 });
 
