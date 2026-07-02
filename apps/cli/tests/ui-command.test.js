@@ -277,7 +277,8 @@ describe("smithers ui", () => {
         expect(envelope).toMatchObject({
             code: "GATEWAY_UNREACHABLE",
         });
-        expect(envelope.message).toContain(`http://127.0.0.1:${port}`);
+        expect(envelope.message).toContain("No Smithers Gateway reachable for this workspace");
+        expect(envelope.message).toContain("smithers gateway");
     }, 30_000);
 
     test("autostarts a local Gateway when no Gateway is already listening", async () => {
@@ -314,7 +315,8 @@ describe("smithers ui", () => {
                 waitFor(() => stdout.includes("/ui/basic")).then(() => 0),
             ]);
             expect(exitCode).toBe(0);
-            expect(stderr).toContain(`No Gateway at http://127.0.0.1:${port}; starting one`);
+            expect(stderr).toContain("No gateway for");
+            expect(stderr).toContain("starting one (smithers gateway)");
             expect(stdout).toContain(`http://127.0.0.1:${port}/workflows/basic`);
             const envelope = parseEnvelope(stdout);
             expect(envelope).toMatchObject({
