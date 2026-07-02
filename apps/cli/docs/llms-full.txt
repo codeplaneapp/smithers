@@ -2103,7 +2103,7 @@ commands[82]:
     purpose: Build a new Smithers workflow from a plain-English description. Dispatches to the create-workflow builder.
     args[1]{name,type,required,desc}:
       task,string,false,Plain-English description of the workflow to build (forwarded as the builder prompt)
-    flags[31]{name,short,type,default,desc}:
+    flags[32]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2134,6 +2134,7 @@ commands[82]:
       insecure,,boolean,false,Allow unauthenticated non-loopback HTTP binding; dangerous
       metrics,,boolean,true,Expose /metrics endpoint when --serve
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
+      post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
       prompt,p,string,,Prompt text mapped to input.prompt when --input is omitted
       interactive,,boolean,false,Pick inputs through interactive terminal prompts and live-render the run
   - name: starters
@@ -2151,7 +2152,7 @@ commands[82]:
     purpose: Start or resume a workflow execution from a .tsx workflow file path (use `workflow run` to start from a discovered workflow id instead)
     args[1]{name,type,required,desc}:
       workflow,string,false,Workflow file path (omit with --interactive to pick one)
-    flags[31]{name,short,type,default,desc}:
+    flags[32]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; print runId/pid/logFile and exit
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2183,6 +2184,7 @@ commands[82]:
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
       interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (falls back to inline streaming)
       backend,,enum,,Storage backend for workflows using openSmithersBackend (sqlite|pglite|postgres)
+      post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
   - name: migrate
     purpose: Copy the legacy bun:sqlite smithers.db into PGlite or Postgres and write the migrated.json marker
     flags[3]{name,short,type,default,desc}:
@@ -6307,7 +6309,7 @@ type AgentToolDescriptor = {
 
 type AgentCapabilityRegistry = {
   version: 1;
-  engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode" | "vibe";
+  engine: "claude-code" | "codex" | "antigravity" | "gemini" | "kimi" | "pi" | "amp" | "forge" | "opencode" | "openclaw" | "vibe";
   runtimeTools: Record<string, AgentToolDescriptor>;
   mcp: {
     bootstrap: "inline-config" | "project-config" | "allow-list" | "unsupported";
@@ -12085,12 +12087,7 @@ Smithers persists the native session or conversation id on each task event. On h
 | `ForgeAgent` | `forge --conversation-id` |
 | `AmpAgent` | `amp threads continue` |
 
-On clean exit the workflow resumes in detached mode. Vibe, OpenCode, and
-OpenClaw stream capture and headless session continuation are documented above,
-but native `bunx smithers-orchestrator hijack` support for Vibe, OpenCode, and
-OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack
-launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover.
-See How it works → Durability and resume.
+On clean exit the workflow resumes in detached mode. Vibe, OpenCode, and OpenClaw stream capture and headless session continuation are documented above, but native `bunx smithers-orchestrator hijack` support for Vibe, OpenCode, and OpenClaw is not shipped yet. The deprecated `GeminiAgent` has no native hijack launcher; use `AntigravityAgent` (`agy --conversation`) for Google CLI takeover. See How it works → Durability and resume.
 
 ## Notes
 
