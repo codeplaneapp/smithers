@@ -56,16 +56,16 @@ const SUB = KNOWN_SUBCOMMANDS.join("|");
 // A leading `/` means this is a slash command (e.g. Hermes's `/smithers run`),
 // not a CLI invocation, so never rewrite `/smithers <sub>`.
 const CMD_RE = new RegExp(
-  String.raw`(bunx\s+|npx\s+)?(?<![/\w])smithers(?!-orchestrator)(\s+(?:<[^>]+>|(?:${SUB})\b))`,
+  String.raw`(bunx\s+|npx\s+)?(?<![/\\\w@.-])smithers(?!-orchestrator)(\s+(?:<[^>]+>|(?:${SUB})\b))`,
   "g",
 );
 
-function normalizeCommands(text: string): string {
+export function normalizeCommands(text: string): string {
   return text.replace(CMD_RE, (_m, _runner, tail) => `bunx smithers-orchestrator${tail}`);
 }
 
 // Replace bare/bunx/npx smithers commands inside inline code spans only.
-function normalizeInline(line: string): string {
+export function normalizeInline(line: string): string {
   return line.replace(/`([^`]+)`/g, (whole, inner) => {
     const fixed = normalizeCommands(inner);
     return fixed === inner ? whole : `\`${fixed}\``;
@@ -84,7 +84,7 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-function rewrite(original: string): string {
+export function rewrite(original: string): string {
   const lines = original.split("\n");
   const out: string[] = [];
   let inCode = false;
@@ -121,35 +121,37 @@ function rewrite(original: string): string {
 
 // The root README mirrors the docs' house style, but lives outside docs/ so it
 // is appended explicitly (CI must enforce the same canonical CLI form there).
-const files = [...walk(DOCS_ROOT), join(REPO_ROOT, "README.md")];
-const offenders: string[] = [];
-let changed = 0;
+if (import.meta.main) {
+  const files = [...walk(DOCS_ROOT), join(REPO_ROOT, "README.md")];
+  const offenders: string[] = [];
+  let changed = 0;
 
-for (const f of files) {
-  const original = readFileSync(f, "utf8");
-  const next = rewrite(original);
-  if (next === original) continue;
-  const rel = relative(REPO_ROOT, f);
+  for (const f of files) {
+    const original = readFileSync(f, "utf8");
+    const next = rewrite(original);
+    if (next === original) continue;
+    const rel = relative(REPO_ROOT, f);
+    if (CHECK) {
+      offenders.push(rel);
+    } else {
+      writeFileSync(f, next);
+      changed++;
+      console.log(`  ✓ ${rel}`);
+    }
+  }
+
   if (CHECK) {
-    offenders.push(rel);
+    if (offenders.length) {
+      console.error(
+        `\n✗ ${offenders.length} doc file(s) use bare \`smithers\` or \`bunx smithers\` commands.\n` +
+          `  Every CLI invocation must be \`bunx smithers-orchestrator <command>\`.\n` +
+          `  Run \`bun scripts/normalize-bunx.ts\` to fix:\n` +
+          offenders.map((o) => `    ${o}`).join("\n"),
+      );
+      process.exit(1);
+    }
+    console.log("✓ all docs use bunx smithers-orchestrator");
   } else {
-    writeFileSync(f, next);
-    changed++;
-    console.log(`  ✓ ${rel}`);
+    console.log(`\nUpdated ${changed} file(s).`);
   }
-}
-
-if (CHECK) {
-  if (offenders.length) {
-    console.error(
-      `\n✗ ${offenders.length} doc file(s) use bare \`smithers\` or \`bunx smithers\` commands.\n` +
-        `  Every CLI invocation must be \`bunx smithers-orchestrator <command>\`.\n` +
-        `  Run \`bun scripts/normalize-bunx.ts\` to fix:\n` +
-        offenders.map((o) => `    ${o}`).join("\n"),
-    );
-    process.exit(1);
-  }
-  console.log("✓ all docs use bunx smithers-orchestrator");
-} else {
-  console.log(`\nUpdated ${changed} file(s).`);
 }
