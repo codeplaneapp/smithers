@@ -166,6 +166,26 @@ describe("SmithersDb adapter", () => {
         expect(runs.length).toBe(1);
         expect(runs[0].runId).toBe("r2");
     });
+    test("listRuns filters by workflow name or gateway workflow key", async () => {
+        const { adapter } = createTestDb();
+        await adapter.insertRun(runRow("direct", "running", {
+            workflowName: "target-workflow",
+            createdAtMs: now,
+        }));
+        await adapter.insertRun(runRow("gateway-ui", "running", {
+            workflowName: "gateway-ui",
+            configJson: JSON.stringify({ gatewayWorkflowKey: "target-workflow" }),
+            createdAtMs: now + 1,
+        }));
+        await adapter.insertRun(runRow("other", "running", {
+            workflowName: "other-workflow",
+            configJson: JSON.stringify({ gatewayWorkflowKey: "other-workflow" }),
+            createdAtMs: now + 2,
+        }));
+
+        const runs = await adapter.listRuns(50, undefined, "target-workflow");
+        expect(runs.map((run) => run.runId)).toEqual(["gateway-ui", "direct"]);
+    });
     test("listRuns leaves stale running rows as running (deriveRunState classifies them)", async () => {
         const { adapter } = createTestDb();
         await adapter.insertRun(runRow("stale", "running", {
