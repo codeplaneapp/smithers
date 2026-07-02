@@ -16,9 +16,9 @@ const LABEL: Record<string, string> = {
 };
 
 const COLOR: Record<string, string> = {
-  online: "#3fb950",
-  offline: "#f85149",
-  unauthorized: "#d29922",
+  online: theme.success,
+  offline: theme.danger,
+  unauthorized: theme.warning,
 };
 
 /**

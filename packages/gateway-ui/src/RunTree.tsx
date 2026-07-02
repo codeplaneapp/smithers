@@ -25,6 +25,7 @@ function NodeRow({
   depth: number;
   activeNodeId?: string;
   onSelectNode?: (node: GatewayRunNode) => void;
+  key?: string;
 }) {
   const active = node.id === activeNodeId;
   return (

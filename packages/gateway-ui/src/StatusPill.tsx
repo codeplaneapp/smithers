@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { statusColor } from "./theme";
+import { formatStatus, statusClass, statusColor } from "./theme";
 
 export type StatusPillProps = {
   /** A run/node status string, e.g. "running", "ok", "failed", "waiting". */
@@ -10,23 +10,17 @@ export type StatusPillProps = {
   style?: CSSProperties;
 };
 
-function titleCase(value: string): string {
-  return value
-    .replace(/[-_]/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 /**
  * A small colored status badge. Pure — pass any run/node status string. Colors
- * come from the shared {@link statusColor} map (running = blue, ok = green,
- * failed = red, waiting/pending = amber, everything else = neutral).
+ * come from the shared {@link statusColor} map (ok = green, active/waiting =
+ * amber, failed = red, everything else = neutral).
  */
 export function StatusPill({ status, label, className, style }: StatusPillProps) {
   const color = statusColor(status);
-  const text = label ?? (status ? titleCase(status) : "Unknown");
+  const text = label ?? formatStatus(status);
   return (
     <span
-      className={className}
+      className={className ?? `badge ${statusClass(status)}`}
       data-status={status}
       style={{
         display: "inline-flex",

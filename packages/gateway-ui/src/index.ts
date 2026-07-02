@@ -27,7 +27,29 @@
  * }
  * createGatewayReactRoot(<App />);
  */
-export { theme, statusColor, statusColors } from "./theme";
+export {
+  theme,
+  statusColor,
+  statusColors,
+  normalizeStatus,
+  statusClass,
+  formatStatus,
+} from "./theme";
+export {
+  WorkflowUiStyles,
+  WorkflowUiShell,
+  composeWorkflowUiStyles,
+  workflowUiThemeCss,
+  workflowUiLayoutCss,
+  workflowUiStyles,
+  type WorkflowUiStylesProps,
+  type WorkflowUiShellProps,
+} from "./styleguide";
+export {
+  SimpleWorkflowDashboard,
+  type SimpleWorkflowDashboardProps,
+  type SimpleWorkflowRun,
+} from "./SimpleWorkflowDashboard";
 export { StatusPill, type StatusPillProps } from "./StatusPill";
 export { ConnectionBadge, type ConnectionBadgeProps } from "./ConnectionBadge";
 export { RunList, type RunListProps } from "./RunList";

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StatusPill } from "../src/StatusPill";
-import { statusColor } from "../src/theme";
+import { statusClass, statusColor } from "../src/theme";
 
 /**
  * Pure-component + helper tests. These render with `renderToStaticMarkup` (no
@@ -12,23 +12,30 @@ import { statusColor } from "../src/theme";
  */
 describe("statusColor", () => {
   test("maps known statuses to accent colors", () => {
-    expect(statusColor("running")).toBe("#4a78ff");
-    expect(statusColor("ok")).toBe("#3fb950");
-    expect(statusColor("failed")).toBe("#f85149");
-    expect(statusColor("waiting")).toBe("#d29922");
+    expect(statusColor("running")).toBe("#bf7100");
+    expect(statusColor("ok")).toBe("#0f8f78");
+    expect(statusColor("failed")).toBe("#e5484d");
+    expect(statusColor("waiting")).toBe("#bf7100");
   });
 
   test("is case-insensitive and falls back to neutral", () => {
-    expect(statusColor("RUNNING")).toBe("#4a78ff");
-    expect(statusColor("something-unknown")).toBe("#9aa3b2");
-    expect(statusColor(undefined)).toBe("#9aa3b2");
+    expect(statusColor("RUNNING")).toBe("#bf7100");
+    expect(statusColor("something-unknown")).toBe("#525252");
+    expect(statusColor(undefined)).toBe("#525252");
+  });
+});
+
+describe("statusClass", () => {
+  test("treats terminal cancellation as neutral", () => {
+    expect(statusClass("cancelled")).toBe("muted");
+    expect(statusClass("skipped")).toBe("muted");
   });
 });
 
 describe("StatusPill", () => {
   test("renders the title-cased status and carries a data-status attr", () => {
     const html = renderToStaticMarkup(<StatusPill status="waiting-approval" />);
-    expect(html).toContain("Waiting Approval");
+    expect(html).toContain("Waiting for approval");
     expect(html).toContain('data-status="waiting-approval"');
   });
 
