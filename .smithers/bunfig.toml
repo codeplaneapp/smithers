@@ -1,1 +1,4 @@
 preload = ["./preload.ts"]
+
+[test]
+maxConcurrency = 1
