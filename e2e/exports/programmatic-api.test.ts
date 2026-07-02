@@ -20,3 +20,29 @@ test("public barrel exposes the programmatic run-control + output API", () => {
     expect(typeof surface[name]).toBe("function");
   }
 });
+
+test("documented smithers-orchestrator subpaths resolve", async () => {
+  const documentedSubpaths: string[] = [
+    "smithers-orchestrator/control-plane",
+    "smithers-orchestrator/dom/renderer",
+    "smithers-orchestrator/gateway",
+    "smithers-orchestrator/gateway-client",
+    "smithers-orchestrator/gateway-react",
+    "smithers-orchestrator/gateway-ui",
+    "smithers-orchestrator/jsx-dev-runtime",
+    "smithers-orchestrator/jsx-runtime",
+    "smithers-orchestrator/mdx-plugin",
+    "smithers-orchestrator/memory",
+    "smithers-orchestrator/observability",
+    "smithers-orchestrator/openapi",
+    "smithers-orchestrator/sandbox",
+    "smithers-orchestrator/scorers",
+    "smithers-orchestrator/serve",
+    "smithers-orchestrator/server",
+    "smithers-orchestrator/tools",
+  ];
+  for (const specifier of documentedSubpaths) {
+    const mod = await import(specifier);
+    expect(Object.keys(mod), specifier).not.toHaveLength(0);
+  }
+});
