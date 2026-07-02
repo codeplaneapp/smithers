@@ -77,7 +77,24 @@ const triageSchema = z.looseObject({
   digest: z.string(),
 });
 
-// 4. The concise, human-meaningful watchdog verdict per sweep.
+// 4. What the medic actually did about the escalations. Sonnet-led: applies
+//    only safe remediations, escalates the rest.
+const fixSchema = z.looseObject({
+  actionsTaken: z
+    .array(
+      z.object({
+        project: z.string().default(""),
+        runId: z.string(),
+        action: z.string(),
+        result: z.string(),
+      }),
+    )
+    .default([]),
+  escalatedToHuman: z.array(z.string()).default([]).describe("runIds needing a human decision"),
+  summary: z.string(),
+});
+
+// 5. The concise, human-meaningful watchdog verdict per sweep.
 const outputSchema = z.object({
   verdict: z.string().describe("healthy when nothing needs escalation, otherwise problems detected"),
   sweep: z.number().describe("1-based sweep number"),
@@ -87,6 +104,7 @@ const outputSchema = z.object({
   healthyRuns: z.number(),
   unhealthyRuns: z.number(),
   escalations: z.number().describe("count of concrete escalation actions produced by triage"),
+  fixesApplied: z.number().default(0),
   summary: z.string(),
 });
 
@@ -95,6 +113,7 @@ const { Workflow, Task, Sequence, Branch, smithers, outputs } = createSmithers({
   poll: pollSchema,
   classify: classifySchema,
   triage: triageSchema,
+  fix: fixSchema,
   output: outputSchema,
 });
 
@@ -187,6 +206,7 @@ export default smithers((ctx) => {
   const poll = ctx.latest(outputs.poll, "poll");
   const classify = ctx.latest(outputs.classify, "classify");
   const triage = ctx.latest(outputs.triage, "triage");
+  const fix = ctx.latest(outputs.fix, "fix");
   const sweepsDone = ctx.outputs.output.length;
 
   // Anything not in the `healthy` bucket needs escalation.
@@ -223,7 +243,26 @@ export default smithers((ctx) => {
             else={null}
           />
 
-          {/* 4 — Aggregate this sweep's verdict so `smithers output` prints
+          {/* 4 — The medic: Sonnet applies the smallest safe remediation for
+              each escalation, and never guesses on anything destructive. */}
+          {triage !== undefined && hasProblems && (triage.actions?.length ?? 0) > 0 ? (
+            <Task id="fix" output={outputs.fix} agent={agents.cheapFast} timeoutMs={20 * 60_000}>
+              {`You are the fleet medic for Smithers runs on this machine. Triage produced these escalations:
+
+${JSON.stringify(triage.actions, null, 2)}
+
+For each one, cd into the project directory (projects live under $HOME, e.g. /Users/williamcory/<project>; the 'project' field is the directory basename) and apply the SMALLEST safe remediation with the smithers CLI (use \`bunx smithers-orchestrator\` if \`smithers\` is missing):
+- Stuck task / heartbeat timeout → \`smithers why <runId>\`, then the retry-task command it suggests.
+- Orphaned run (no heartbeat) → resume it detached: \`smithers up <workflow file> --run-id <id> --resume true --force true --detach\`. If resume fails with RESUME_METADATA_MISMATCH, report it — do NOT delete or recreate anything.
+- Stale leftover probe/test runs (e2e-*-probe, *-smoke leftovers superseded by a newer run) → \`smithers cancel <runId>\`.
+- A run waiting on an approval or human question → do NOT decide it; list it in escalatedToHuman with the question.
+NEVER: cancel a run doing real work, push/publish anything, edit workflow source files, or approve/deny gates. When unsure, escalate instead of acting.
+
+Verify each remediation took effect (\`smithers ps\`) and report actionsTaken with results.`}
+            </Task>
+          ) : null}
+
+          {/* 5 — Aggregate this sweep's verdict so `smithers output` prints
               something useful and the UI has one stable row per sweep. */}
           {classify ? (
             <Task id="output" output={outputs.output}>
